@@ -21,8 +21,10 @@ struct SettingsView: View {
     private var remoteDiagnosticsEnabled = false
     @AppStorage(SettingsKey.claudeTrafficResearchEnabled)
     private var claudeTrafficResearchEnabled = false
-    @AppStorage(SettingsKey.aggregatedAppRoutingResearchEnabled)
-    private var aggregatedAppRoutingResearchEnabled = false
+    @AppStorage(
+        SettingsKey.aggregatedAppRoutingResearchEnabled,
+        store: AppProfile.defaults
+    ) private var aggregatedAppRoutingResearchEnabled = true
 
     // Proxy Engine. The field edits a local draft; only validated values are
     // committed to storage, so a half-typed "78" abandoned via focus loss can
@@ -166,7 +168,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Aggregated App Routing Research",
-                subtitle: "Optional and off by default. About every six hours, shares only fixed app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. Reports are linked to your account and device for abuse prevention, deleted after 90 days, and exposed to administrators only as cohort totals. No hostnames, IPs, ports, raw process names or paths, bundle IDs, file paths, content, or connection records leave this device.",
+                subtitle: "On by default; you can turn it off at any time. Only while signed in and Ready, about every six hours Tono shares fixed app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. For WeChat, QQ, Feishu, Lark and DingTalk, absolute process paths are reduced on-device to five fixed bundle-component categories (main, framework helper, XPC, plugin or other bundle helper); no executable name or path text is sent. Turning this off immediately stops collection and deletes pending local research data. Reports are linked to your account and device for abuse prevention, deleted within 90 days, and shown to administrators only as cohort totals. No hostnames, IPs, ports, usernames, absolute paths, bundle IDs, user file paths, content or connection records leave this device. Results create human-review candidates only and never add DIRECT rules automatically.",
                 isOn: $aggregatedAppRoutingResearchEnabled
             )
             .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in

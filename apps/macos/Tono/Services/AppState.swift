@@ -632,6 +632,10 @@ final class AppState {
         updateLiveStreamSubscriptions()
     }
 
+    func appRoutingResearchActivationChanged() {
+        updateLiveStreamSubscriptions()
+    }
+
     func setMainWindowVisible(_ visible: Bool) {
         guard isMainWindowVisible != visible else { return }
         isMainWindowVisible = visible
@@ -2038,7 +2042,7 @@ final class AppState {
         let localAuditEnabled = LocalTrafficAudit.isEnabled
         let claudeTrafficResearchEnabled =
             LocalTrafficAudit.isClaudeTrafficResearchEnabled
-        let appRoutingResearchEnabled = AppRoutingResearch.isEnabled
+        let appRoutingResearchEnabled = AppRoutingResearch.isCollectionActive
         if localAuditEnabled || claudeTrafficResearchEnabled
             || appRoutingResearchEnabled
             || (isMainWindowVisible && selectedPage == .activity) {

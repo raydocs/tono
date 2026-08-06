@@ -66,7 +66,12 @@ class ApiError extends Error {
 
 const now = () => Math.floor(Date.now() / 1000);
 const id = () => crypto.randomUUID();
+const sha256Hex = async (value: string) => Array.from(new Uint8Array(
+  await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
+)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 const routingResearchApps = ['wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge', 'safari', 'firefox', 'arc', 'brave', 'claude', 'other'] as const;
+const routingResearchComponentApps = ['wechat', 'qq', 'feishu', 'lark', 'dingtalk'] as const;
+const routingResearchBundleComponents = ['main_executable', 'framework_helper', 'xpc_service', 'plugin_helper', 'bundle_helper'] as const;
 const trafficBuckets = ['none', 'under_1_mib', '1_to_10_mib', '10_to_100_mib', '100_mib_to_1_gib', '1_to_10_gib', 'over_10_gib'] as const;
 const ROUTING_RESEARCH_WINDOW_SECONDS = 6 * 60 * 60;
 const ROUTING_RESEARCH_DAY_SECONDS = 24 * 60 * 60;
@@ -95,10 +100,13 @@ function rejectUnexpectedKeys(value: unknown, allowed: string[]): asserts value 
 }
 
 function canonicalRoutingResearch(value: unknown) {
-  const keys = ['schemaVersion', 'snapshotId', 'observedSince', 'observedUntil', 'appVersion', 'build', 'osVersion', 'architecture', 'observedConnectionCount', 'identifiedAppConnectionCount', 'connectionLimitReached', 'entries'];
-  rejectUnexpectedKeys(value, keys);
+  const commonKeys = ['schemaVersion', 'snapshotId', 'observedSince', 'observedUntil', 'appVersion', 'build', 'osVersion', 'architecture', 'observedConnectionCount', 'identifiedAppConnectionCount', 'connectionLimitReached', 'entries'];
+  const versionTwoKeys = [...commonKeys, 'bundleComponents'];
+  rejectUnexpectedKeys(value, versionTwoKeys);
+  const schemaVersion = value.schemaVersion;
   const timestamp = now();
-  if (!exactKeys(value, keys) || value.schemaVersion !== 1 ||
+  if ((schemaVersion !== 1 && schemaVersion !== 2) ||
+      !exactKeys(value, schemaVersion === 1 ? commonKeys : versionTwoKeys) ||
       typeof value.snapshotId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.snapshotId) ||
       !Number.isSafeInteger(value.observedSince) || !Number.isSafeInteger(value.observedUntil) ||
       value.observedSince < 0 || value.observedUntil > timestamp + 300 ||
@@ -136,9 +144,64 @@ function canonicalRoutingResearch(value: unknown) {
     return { app, connectionCount: raw.connectionCount, directConnectionCount: raw.directConnectionCount, proxiedConnectionCount: raw.proxiedConnectionCount, blockedConnectionCount: raw.blockedConnectionCount, trafficVolume: raw.trafficVolume };
   }).sort((a, b) => a.app.localeCompare(b.app));
   if (total !== value.observedConnectionCount || identified !== value.identifiedAppConnectionCount) throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent routing research totals');
-  const snapshot = { schemaVersion: 1, snapshotId: value.snapshotId.toLowerCase(), observedSince: value.observedSince, observedUntil: value.observedUntil, appVersion, build, osVersion, architecture, observedConnectionCount: total, identifiedAppConnectionCount: identified, connectionLimitReached: value.connectionLimitReached, entries };
+  const base = { schemaVersion, snapshotId: value.snapshotId.toLowerCase(), observedSince: value.observedSince, observedUntil: value.observedUntil, appVersion, build, osVersion, architecture, observedConnectionCount: total, identifiedAppConnectionCount: identified, connectionLimitReached: value.connectionLimitReached, entries };
+  let snapshot;
+  if (schemaVersion === 1) {
+    snapshot = base;
+  } else {
+    if (!Array.isArray(value.bundleComponents) || value.bundleComponents.length > 25) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid bundle components');
+    }
+    const appTotals = new Map(entries.map((entry) => [entry.app, entry]));
+    const componentTotals = new Map<string, { connectionCount: number; directConnectionCount: number; proxiedConnectionCount: number; blockedConnectionCount: number }>();
+    const componentSeen = new Set<string>();
+    const bundleComponents = value.bundleComponents.map((raw: unknown) => {
+      const componentKeys = ['app', 'bundleComponent', 'connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount', 'trafficVolume'];
+      rejectUnexpectedKeys(raw, componentKeys);
+      if (!exactKeys(raw, componentKeys)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid bundle component entry');
+      const app = str(raw.app, 'app', 2, 8);
+      const bundleComponent = str(raw.bundleComponent, 'bundleComponent', 11, 20);
+      const identity = `${app}:${bundleComponent}`;
+      if (!routingResearchComponentApps.includes(app as typeof routingResearchComponentApps[number]) ||
+          !routingResearchBundleComponents.includes(bundleComponent as typeof routingResearchBundleComponents[number]) ||
+          componentSeen.has(identity)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown or duplicate bundle component');
+      }
+      componentSeen.add(identity);
+      for (const key of ['connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount']) {
+        if (!Number.isSafeInteger(raw[key]) || raw[key] < 0 || raw[key] > 1_000_000) throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+      }
+      if (raw.connectionCount < 1 || raw.directConnectionCount + raw.proxiedConnectionCount + raw.blockedConnectionCount !== raw.connectionCount || !trafficBuckets.includes(raw.trafficVolume)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent bundle component entry');
+      }
+      const appTotal = appTotals.get(app);
+      if (!appTotal) throw new ApiError(400, 'VALIDATION_ERROR', 'Bundle component app is absent');
+      if (trafficBuckets.indexOf(raw.trafficVolume) >
+          trafficBuckets.indexOf(appTotal.trafficVolume)) {
+        throw new ApiError(
+          400,
+          'VALIDATION_ERROR',
+          'Bundle component volume exceeds app volume',
+        );
+      }
+      const aggregate = componentTotals.get(app) ?? { connectionCount: 0, directConnectionCount: 0, proxiedConnectionCount: 0, blockedConnectionCount: 0 };
+      aggregate.connectionCount += raw.connectionCount;
+      aggregate.directConnectionCount += raw.directConnectionCount;
+      aggregate.proxiedConnectionCount += raw.proxiedConnectionCount;
+      aggregate.blockedConnectionCount += raw.blockedConnectionCount;
+      if (aggregate.connectionCount > appTotal.connectionCount ||
+          aggregate.directConnectionCount > appTotal.directConnectionCount ||
+          aggregate.proxiedConnectionCount > appTotal.proxiedConnectionCount ||
+          aggregate.blockedConnectionCount > appTotal.blockedConnectionCount) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Bundle component exceeds app totals');
+      }
+      componentTotals.set(app, aggregate);
+      return { app, bundleComponent, connectionCount: raw.connectionCount, directConnectionCount: raw.directConnectionCount, proxiedConnectionCount: raw.proxiedConnectionCount, blockedConnectionCount: raw.blockedConnectionCount, trafficVolume: raw.trafficVolume };
+    }).sort((a, b) => a.app.localeCompare(b.app) || a.bundleComponent.localeCompare(b.bundleComponent));
+    snapshot = { ...base, bundleComponents };
+  }
   const json = JSON.stringify(snapshot);
-  if (new TextEncoder().encode(json).length > 4096) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Routing research payload is too large');
+  if (new TextEncoder().encode(json).length > 8192) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Routing research payload is too large');
   return { snapshot, json };
 }
 
@@ -2640,6 +2703,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/routing-research/snapshots' && m === 'POST') {
     const a = await auth(req, e);
+    const declaredOwner = req.headers.get('X-Tono-Routing-Owner');
+    if (declaredOwner === null || !/^[0-9a-f]{64}$/.test(declaredOwner) ||
+        declaredOwner !== await sha256Hex(a.userId)) {
+      // A conflict (rather than 401) prevents an old account's request from
+      // triggering token refresh and being replayed under a newer account.
+      throw new ApiError(
+        409,
+        'ROUTING_RESEARCH_OWNER_MISMATCH',
+        'Routing research owner does not match the authenticated account',
+      );
+    }
     // Request-level limits cover malformed bodies, replays, and conflicts. The
     // tighter limiter below applies only to distinct accepted snapshots.
     await consumeRateLimit(
@@ -2820,6 +2894,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          FROM routing_research_snapshots
          WHERE observed_until >= ? AND observed_until <= ?`,
       ).bind(since, timestamp).first<Row>();
+      const participantCount = Number(overall?.participant_count ?? 0);
+      if (participantCount < ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS) {
+        return Response.json({
+          days,
+          cohortMinimum: ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
+          suppressed: true,
+          byApp: [],
+          byBundleComponent: [],
+          byBuild: [],
+        });
+      }
       const appRows = await e.DB.prepare(
         `WITH filtered AS (
            SELECT user_id, device_id, aggregate_json
@@ -2851,7 +2936,46 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
                 SUM(CASE WHEN traffic_volume = 'over_10_gib' THEN 1 ELSE 0 END) volume_over_10_gib
          FROM entries
          GROUP BY app
+         HAVING COUNT(DISTINCT user_id) >= 3
          ORDER BY participant_count DESC, device_count DESC, app`,
+      ).bind(since, timestamp).all<Row>();
+      const componentRows = await e.DB.prepare(
+        `WITH filtered AS (
+           SELECT user_id, device_id, aggregate_json
+           FROM routing_research_snapshots
+           WHERE observed_until >= ? AND observed_until <= ?
+         ), components AS (
+           SELECT filtered.user_id, filtered.device_id,
+                  json_extract(item.value, '$.app') app,
+                  json_extract(item.value, '$.bundleComponent') bundle_component,
+                  json_extract(item.value, '$.connectionCount') connection_count,
+                  json_extract(item.value, '$.directConnectionCount') direct_count,
+                  json_extract(item.value, '$.proxiedConnectionCount') proxied_count,
+                  json_extract(item.value, '$.blockedConnectionCount') blocked_count,
+                  json_extract(item.value, '$.trafficVolume') traffic_volume
+           FROM filtered,
+                json_each(filtered.aggregate_json, '$.bundleComponents') item
+         )
+         SELECT app, bundle_component,
+                COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count,
+                COUNT(*) snapshot_count,
+                SUM(connection_count) connection_count,
+                SUM(direct_count) direct_count,
+                SUM(proxied_count) proxied_count,
+                SUM(blocked_count) blocked_count,
+                SUM(CASE WHEN traffic_volume = 'none' THEN 1 ELSE 0 END) volume_none,
+                SUM(CASE WHEN traffic_volume = 'under_1_mib' THEN 1 ELSE 0 END) volume_under_1_mib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_mib' THEN 1 ELSE 0 END) volume_1_to_10_mib,
+                SUM(CASE WHEN traffic_volume = '10_to_100_mib' THEN 1 ELSE 0 END) volume_10_to_100_mib,
+                SUM(CASE WHEN traffic_volume = '100_mib_to_1_gib' THEN 1 ELSE 0 END) volume_100_mib_to_1_gib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_gib' THEN 1 ELSE 0 END) volume_1_to_10_gib,
+                SUM(CASE WHEN traffic_volume = 'over_10_gib' THEN 1 ELSE 0 END) volume_over_10_gib
+         FROM components
+         GROUP BY app, bundle_component
+         HAVING COUNT(DISTINCT user_id) >= 3
+         ORDER BY participant_count DESC, device_count DESC, app,
+                  bundle_component`,
       ).bind(since, timestamp).all<Row>();
       const buildRows = await e.DB.prepare(
         `SELECT app_version, build,
@@ -2861,23 +2985,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          FROM routing_research_snapshots
          WHERE observed_until >= ? AND observed_until <= ?
          GROUP BY app_version, build
+         HAVING COUNT(DISTINCT user_id) >= 3
          ORDER BY participant_count DESC, app_version DESC, build DESC`,
       ).bind(since, timestamp).all<Row>();
-      const visibleApps = appRows.results.filter(
-        (row) => Number(row.participant_count) >= ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
-      );
-      const visibleBuilds = buildRows.results.filter(
-        (row) => Number(row.participant_count) >= ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
-      );
       return Response.json({
         days,
         cohortMinimum: ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
-        participantCount: Number(overall?.participant_count ?? 0),
+        participantCount,
         deviceCount: Number(overall?.device_count ?? 0),
         snapshotCount: Number(overall?.snapshot_count ?? 0),
-        suppressedAppCount: appRows.results.length - visibleApps.length,
-        suppressedBuildCount: buildRows.results.length - visibleBuilds.length,
-        byApp: visibleApps.map((row) => ({
+        byApp: appRows.results.map((row) => ({
           app: String(row.app),
           participantCount: Number(row.participant_count),
           deviceCount: Number(row.device_count),
@@ -2896,7 +3013,27 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             over_10_gib: Number(row.volume_over_10_gib),
           },
         })),
-        byBuild: visibleBuilds.map((row) => ({
+        byBundleComponent: componentRows.results.map((row) => ({
+          app: String(row.app),
+          bundleComponent: String(row.bundle_component),
+          participantCount: Number(row.participant_count),
+          deviceCount: Number(row.device_count),
+          snapshotCount: Number(row.snapshot_count),
+          connectionCount: Number(row.connection_count),
+          directConnectionCount: Number(row.direct_count),
+          proxiedConnectionCount: Number(row.proxied_count),
+          blockedConnectionCount: Number(row.blocked_count),
+          trafficVolumes: {
+            none: Number(row.volume_none),
+            under_1_mib: Number(row.volume_under_1_mib),
+            '1_to_10_mib': Number(row.volume_1_to_10_mib),
+            '10_to_100_mib': Number(row.volume_10_to_100_mib),
+            '100_mib_to_1_gib': Number(row.volume_100_mib_to_1_gib),
+            '1_to_10_gib': Number(row.volume_1_to_10_gib),
+            over_10_gib: Number(row.volume_over_10_gib),
+          },
+        })),
+        byBuild: buildRows.results.map((row) => ({
           appVersion: String(row.app_version),
           build: String(row.build),
           participantCount: Number(row.participant_count),

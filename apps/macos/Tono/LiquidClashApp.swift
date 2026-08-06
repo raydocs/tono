@@ -678,7 +678,10 @@ struct LiquidClashApp: App {
                 await appState.claudeTrafficResearchSnapshot()
             },
             protectionBlockedConsumer: { appState.isProtectionBlocked },
-            protectedRetryConsumer: { appState.retryProtectedConnectionNow() }
+            protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
+            appRoutingResearchActivationConsumer: {
+                appState.appRoutingResearchActivationChanged()
+            }
         ))
         // CRITICAL: Purge saved window frames BEFORE SwiftUI's scene management
         // reads them. SwiftUI reads NSWindow Frame / NSSplitView Subview Frames

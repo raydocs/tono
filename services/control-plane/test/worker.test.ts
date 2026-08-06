@@ -27,6 +27,24 @@ const json = (value: unknown, token?: string): RequestInit => ({
   headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
   body: JSON.stringify(value),
 });
+const routingResearchJson = async (
+  value: unknown,
+  token: string,
+  userId: string,
+): Promise<RequestInit> => {
+  const owner = Array.from(new Uint8Array(await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(userId),
+  ))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const init = json(value, token);
+  return {
+    ...init,
+    headers: {
+      ...init.headers as Record<string, string>,
+      'x-tono-routing-owner': owner,
+    },
+  };
+};
 const admin = (path: string, value?: unknown, method = 'POST') => api(`admin/${path}`, {
   ...(value === undefined ? {} : json(value)), method,
   headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
@@ -1632,14 +1650,71 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     };
   };
 
+  const routingResearchV2Payload = (overrides: Record<string, unknown> = {}) => ({
+    ...routingResearchPayload(),
+    schemaVersion: 2,
+    bundleComponents: [
+      {
+        app: 'wechat', bundleComponent: 'main_executable',
+        connectionCount: 1, directConnectionCount: 1,
+        proxiedConnectionCount: 0, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      },
+      {
+        app: 'wechat', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      },
+    ],
+    ...overrides,
+  });
+
+  it('upgrades the routing-research table from the 4 KiB v1 constraint', async () => {
+    const definition = await env.DB.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'routing_research_snapshots'",
+    ).first<any>();
+    expect(definition.sql).toContain('length(aggregate_json) <= 8192');
+
+    const account = await createAccount('routing-research-migration');
+    const observedUntil = Math.floor(Date.now() / 1000) - 60;
+    await expect(env.DB.prepare(
+      `INSERT INTO routing_research_snapshots(
+         id, snapshot_id, user_id, device_id, received_at, observed_since,
+         observed_until, app_version, build, os_version, architecture,
+         aggregate_json
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(
+      crypto.randomUUID(), crypto.randomUUID(), account.user.id,
+      account.device.id, observedUntil, observedUntil - 6 * 60 * 60,
+      observedUntil, '0.0.1', '40', '26.4', 'arm64', 'x'.repeat(5_000),
+    ).run()).resolves.toBeDefined();
+  });
+
   it('stores only a canonical authenticated routing-research aggregate and replays it idempotently', async () => {
     const account = await createAccount('routing-research-happy');
     const payload = routingResearchPayload();
     expect((await api('routing-research/snapshots', json(payload))).status).toBe(401);
+    expect((await api(
+      'routing-research/snapshots',
+      json(payload, account.accessToken),
+    )).status).toBe(409);
+    const mismatchedOwner = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, 'a-different-account',
+      ),
+    );
+    expect(mismatchedOwner.status).toBe(409);
+    expect((await mismatchedOwner.json() as any).error.code).toBe(
+      'ROUTING_RESEARCH_OWNER_MISMATCH',
+    );
 
     const accepted = await api(
       'routing-research/snapshots',
-      json(payload, account.accessToken),
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
     );
     expect(accepted.status).toBe(201);
     const receipt = await accepted.json() as any;
@@ -1661,7 +1736,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const replay = await api(
       'routing-research/snapshots',
-      json(payload, account.accessToken),
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(receipt);
@@ -1687,7 +1764,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     conflict.observedUntil = payload.observedUntil;
     const rejectedConflict = await api(
       'routing-research/snapshots',
-      json(conflict, account.accessToken),
+      await routingResearchJson(
+        conflict, account.accessToken, account.user.id,
+      ),
     );
     expect(rejectedConflict.status).toBe(409);
     expect((await rejectedConflict.json() as any).error.code).toBe('SNAPSHOT_ID_CONFLICT');
@@ -1699,16 +1778,100 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     );
   });
 
+  it('accepts only fixed schema-v2 native bundle component categories', async () => {
+    const account = await createAccount('routing-research-components');
+    const payload = routingResearchV2Payload({
+      bundleComponents: [
+        {
+          app: 'wechat', bundleComponent: 'main_executable',
+          connectionCount: 1, directConnectionCount: 1,
+          proxiedConnectionCount: 0, blockedConnectionCount: 0,
+          trafficVolume: 'under_1_mib',
+        },
+        {
+          app: 'wechat', bundleComponent: 'framework_helper',
+          connectionCount: 1, directConnectionCount: 0,
+          proxiedConnectionCount: 1, blockedConnectionCount: 0,
+          trafficVolume: '10_to_100_mib',
+        },
+      ],
+    });
+    const response = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect(response.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT aggregate_json FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    expect(JSON.parse(stored.aggregate_json).bundleComponents).toEqual([
+      payload.bundleComponents[1], payload.bundleComponents[0],
+    ]);
+  });
+
   it('rejects raw metadata, covert strings, malformed totals, timestamps, and oversized research bodies', async () => {
     const account = await createAccount('routing-research-validation');
-    const submit = (payload: unknown) => api(
+    const submit = async (payload: unknown) => api(
       'routing-research/snapshots',
-      json(payload, account.accessToken),
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
     );
     expect((await submit({
       ...routingResearchPayload(),
       processPath: '/Users/customer/Applications/Private.app',
     })).status).toBe(400);
+    expect((await submit({
+      ...routingResearchPayload(),
+      bundleComponents: [],
+    })).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        app: 'wechat', bundleComponent: '/Users/customer/WeChat.app',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'none',
+      }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        app: 'chrome', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'none',
+      }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        app: 'wechat', bundleComponent: 'customer_named_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'none',
+      }],
+    }))).status).toBe(400);
+    const duplicateComponent = routingResearchV2Payload().bundleComponents[0];
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [duplicateComponent, duplicateComponent],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        ...duplicateComponent,
+        connectionCount: 3, directConnectionCount: 1,
+        proxiedConnectionCount: 2,
+      }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{ ...duplicateComponent, executable: 'WeChat' }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      entries: [
+        routingResearchPayload().entries[0],
+        { ...routingResearchPayload().entries[1], trafficVolume: 'none' },
+      ],
+      bundleComponents: [duplicateComponent],
+    }))).status).toBe(400);
     const rawEntry = routingResearchPayload();
     rawEntry.entries = [{ ...rawEntry.entries[0], host: 'private.example.com' } as any];
     rawEntry.observedConnectionCount = 1;
@@ -1774,22 +1937,56 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       accepted.push(payload);
       expect((await api(
         'routing-research/snapshots',
-        json(payload, account.accessToken),
+        await routingResearchJson(
+          payload, account.accessToken, account.user.id,
+        ),
       )).status).toBe(201);
     }
     const limited = await api(
       'routing-research/snapshots',
-      json(routingResearchPayload(), account.accessToken),
+      await routingResearchJson(
+        routingResearchPayload(), account.accessToken, account.user.id,
+      ),
     );
     expect(limited.status).toBe(429);
     expect((await limited.json() as any).error.code).toBe('RATE_LIMITED');
     expect((await api(
       'routing-research/snapshots',
-      json(accepted[0], account.accessToken),
+      await routingResearchJson(
+        accepted[0], account.accessToken, account.user.id,
+      ),
     )).status).toBe(200);
     expect(Number((await env.DB.prepare(
       'SELECT COUNT(*) total FROM routing_research_snapshots',
     ).first<any>()).total)).toBe(4);
+  });
+
+  it('suppresses all routing-research metadata below the cohort minimum', async () => {
+    const accounts = await Promise.all([
+      createAccount('routing-suppressed-one'),
+      createAccount('routing-suppressed-two'),
+    ]);
+    for (const account of accounts) {
+      const payload = routingResearchV2Payload();
+      expect((await api(
+        'routing-research/snapshots',
+        await routingResearchJson(
+          payload, account.accessToken, account.user.id,
+        ),
+      )).status).toBe(201);
+    }
+    const response = await admin(
+      'routing-research/summary?days=30', undefined, 'GET',
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      days: 30,
+      cohortMinimum: 3,
+      suppressed: true,
+      byApp: [],
+      byBundleComponent: [],
+      byBuild: [],
+    });
   });
 
   it('returns only cohort-safe app, route, volume, and build research summaries', async () => {
@@ -1809,14 +2006,29 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         proxiedConnectionCount: 1, blockedConnectionCount: 0,
         trafficVolume: 'under_1_mib',
       });
-      const payload = routingResearchPayload({
+      const bundleComponents = [{
+        app: 'wechat', bundleComponent: 'main_executable',
+        connectionCount: 1, directConnectionCount: 1,
+        proxiedConnectionCount: 0, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      }];
+      if (index === 0) bundleComponents.push({
+        app: 'wechat', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      });
+      const payload = routingResearchV2Payload({
         observedConnectionCount: index === 0 ? 3 : 2,
         identifiedAppConnectionCount: index === 0 ? 3 : 2,
         entries,
+        bundleComponents,
       });
       expect((await api(
         'routing-research/snapshots',
-        json(payload, account.accessToken),
+        await routingResearchJson(
+          payload, account.accessToken, account.user.id,
+        ),
       )).status).toBe(201);
     }
 
@@ -1834,14 +2046,19 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       participantCount: 3,
       deviceCount: 3,
       snapshotCount: 3,
-      suppressedAppCount: 1,
-      suppressedBuildCount: 0,
       byApp: [{
         app: 'wechat', participantCount: 3, deviceCount: 3,
         snapshotCount: 3, connectionCount: 6,
         directConnectionCount: 3, proxiedConnectionCount: 3,
         blockedConnectionCount: 0,
         trafficVolumes: { '10_to_100_mib': 3 },
+      }],
+      byBundleComponent: [{
+        app: 'wechat', bundleComponent: 'main_executable',
+        participantCount: 3, deviceCount: 3, snapshotCount: 3,
+        connectionCount: 3, directConnectionCount: 3,
+        proxiedConnectionCount: 0, blockedConnectionCount: 0,
+        trafficVolumes: { under_1_mib: 3 },
       }],
       byBuild: [{
         appVersion: '0.0.1', build: '40', participantCount: 3,
@@ -1868,7 +2085,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const payload = routingResearchPayload();
     expect((await api(
       'routing-research/snapshots',
-      json(payload, account.accessToken),
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
     )).status).toBe(201);
     const row = await env.DB.prepare(
       'SELECT * FROM routing_research_snapshots WHERE snapshot_id = ?',
@@ -1899,7 +2118,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const fresh = routingResearchPayload();
     expect((await api(
       'routing-research/snapshots',
-      json(fresh, account.accessToken),
+      await routingResearchJson(
+        fresh, account.accessToken, account.user.id,
+      ),
     )).status).toBe(201);
     await env.DB.prepare('DELETE FROM users WHERE id = ?')
       .bind(account.user.id).run();

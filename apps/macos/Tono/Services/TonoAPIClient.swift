@@ -100,8 +100,22 @@ actor TonoAPIClient {
     func deviceActions() async throws -> TonoDeviceActionsResponse {
         try await authorizedRequest("device-actions", method: "GET")
     }
-    func submitAppRoutingResearch(_ snapshot: TonoAppRoutingResearchSnapshot) async throws -> TonoAppRoutingResearchResponse {
-        try await authorizedRequest("routing-research/snapshots", method: "POST", body: snapshot)
+    func submitAppRoutingResearch(
+        _ snapshot: TonoAppRoutingResearchSnapshot,
+        ownerHash: String,
+        isLeaseCurrent: @escaping @Sendable () -> Bool
+    ) async throws -> TonoAppRoutingResearchResponse {
+        guard ownerHash.range(
+            of: #"^[0-9a-f]{64}$"#,
+            options: .regularExpression
+        ) != nil else { throw APIError.invalidResponse }
+        return try await authorizedRequest(
+            "routing-research/snapshots",
+            method: "POST",
+            body: snapshot,
+            additionalHeaders: ["X-Tono-Routing-Owner": ownerHash],
+            requestIsCurrent: isLeaseCurrent
+        )
     }
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {
         let validID = try validatedDeviceID(id)
@@ -217,17 +231,60 @@ actor TonoAPIClient {
     private func authorizedRequest<Response: Decodable>(_ path: String, method: String) async throws -> Response {
         try await authorizedRequest(path, method: method, bodyData: nil)
     }
-    private func authorizedRequest<Response: Decodable, Body: Encodable>(_ path: String, method: String, body: Body) async throws -> Response {
-        try await authorizedRequest(path, method: method, bodyData: TonoCoding.encoder().encode(body))
+    private func authorizedRequest<Response: Decodable, Body: Encodable>(
+        _ path: String,
+        method: String,
+        body: Body,
+        additionalHeaders: [String: String] = [:],
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
+    ) async throws -> Response {
+        try await authorizedRequest(
+            path,
+            method: method,
+            bodyData: TonoCoding.encoder().encode(body),
+            additionalHeaders: additionalHeaders,
+            requestIsCurrent: requestIsCurrent
+        )
     }
-    private func authorizedRequest<Response: Decodable>(_ path: String, method: String, bodyData: Data?) async throws -> Response {
+    private func authorizedRequest<Response: Decodable>(
+        _ path: String,
+        method: String,
+        bodyData: Data?,
+        additionalHeaders: [String: String] = [:],
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
+    ) async throws -> Response {
+        try Self.requireCurrent(requestIsCurrent)
         let token: String
-        if let accessToken { token = accessToken } else { token = try await refreshAccessToken() }
-        do { return try await send(path, method: method, body: bodyData, bearer: token) }
+        if let accessToken {
+            token = accessToken
+        } else {
+            token = try await refreshAccessToken()
+            try Self.requireCurrent(requestIsCurrent)
+        }
+        do {
+            try Self.requireCurrent(requestIsCurrent)
+            return try await send(
+                path,
+                method: method,
+                body: bodyData,
+                bearer: token,
+                additionalHeaders: additionalHeaders,
+                requestIsCurrent: requestIsCurrent
+            )
+        }
         catch APIError.unauthorized {
+            try Self.requireCurrent(requestIsCurrent)
             accessToken = nil
             let renewed = try await refreshAccessToken()
-            return try await send(path, method: method, body: bodyData, bearer: renewed)
+            try Self.requireCurrent(requestIsCurrent)
+            return try await send(
+                path,
+                method: method,
+                body: bodyData,
+                bearer: renewed,
+                additionalHeaders: additionalHeaders,
+                requestIsCurrent: requestIsCurrent
+            )
         }
     }
     private func authorizedVoid(_ path: String, method: String) async throws {
@@ -252,12 +309,33 @@ actor TonoAPIClient {
         }
     }
 
-    private func send<Response: Decodable>(_ path: String, method: String, body: Data?, bearer: String?) async throws -> Response {
-        let data = try await sendData(path, method: method, body: body, bearer: bearer)
+    private func send<Response: Decodable>(
+        _ path: String,
+        method: String,
+        body: Data?,
+        bearer: String?,
+        additionalHeaders: [String: String] = [:],
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
+    ) async throws -> Response {
+        let data = try await sendData(
+            path,
+            method: method,
+            body: body,
+            bearer: bearer,
+            additionalHeaders: additionalHeaders,
+            requestIsCurrent: requestIsCurrent
+        )
         do { return try TonoCoding.decoder().decode(Response.self, from: data.isEmpty ? Data("{}".utf8) : data) }
         catch { throw APIError.invalidResponse }
     }
-    private func sendData(_ path: String, method: String, body: Data?, bearer: String?) async throws -> Data {
+    private func sendData(
+        _ path: String,
+        method: String,
+        body: Data?,
+        bearer: String?,
+        additionalHeaders: [String: String] = [:],
+        requestIsCurrent: (@Sendable () -> Bool)? = nil
+    ) async throws -> Data {
         let validOrigin: Bool
         #if DEBUG
         validOrigin = {
@@ -297,8 +375,12 @@ actor TonoAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
+        for (field, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         let maximumAttempts = 2
         for attempt in 1...maximumAttempts {
+            try Self.requireCurrent(requestIsCurrent)
             let bytes: URLSession.AsyncBytes
             let response: URLResponse
             do {
@@ -384,6 +466,14 @@ actor TonoAPIClient {
             return data
         }
         throw APIError.transport("Retry attempts exhausted.")
+    }
+
+    nonisolated private static func requireCurrent(
+        _ validator: (@Sendable () -> Bool)?
+    ) throws {
+        guard !Task.isCancelled, validator?() ?? true else {
+            throw CancellationError()
+        }
     }
 
     private func handleTransportFailure(
