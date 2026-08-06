@@ -76,6 +76,8 @@ OAuth client 只授予上述 scopes；tailnet policy 中声明标签所有者并
 
 - 远程诊断为设备本地明确 opt-in 的 15 秒 pull。管理员只能排队四个无参数固定动作：`diagnostic_snapshot`、`claude_traffic_snapshot`、`refresh_catalog`、`retry_protection`；服务端拒绝额外字段、代码和通用参数。`GET device-actions` 只返回当前 access session 设备的未过期 pending/delivered 动作并重复 delivered 直到终态；`POST device-actions/:id/result` 只接受固定、受限的 succeeded/failed 结果与已知紧凑状态字段。普通诊断快照不上传日志正文、原始错误、域名、IP、路径、进程、凭据或内部节点 ID，只用白名单错误类别标记失败阶段。Claude 流量研究需要设备用户第二次单独 opt-in，只从内存返回官方 `claude.ai` / `anthropic.com` endpoint 与可明确归因给 Claude App/Code 的非官方 destination host 前四组聚合，并报告全局代理/直连/阻断计数、进程识别覆盖率、Mihomo DIRECT 尝试、受控国内直连计数和 TUN/Kill Switch/DNS 状态。快照还执行两个无参数固定探针：比较普通系统 TUN 与 Mihomo 显式代理出口是否一致，以及在基准 HTTPS 目标确认可达后强制绑定物理网卡是否被 PF 阻断；云端只接收枚举判定，原始出口 IP 仅写入设备本地 mode-0600 audit。浏览器非官方请求、无法识别进程的非官方请求和相似第三方域名不会被猜测为 Claude 流量；客户端不读取 audit 文件，也不上传 URL、IP、进程名、路径或内容。所有结果上限 2 KiB。默认 TTL 5 分钟，最大 1 小时。
 
+- 应用路由研究是另一个独立、默认关闭的 opt-in，不依赖远程诊断，也不由 Sparkle 自动升级资格代替同意。macOS 每个六小时窗口只把进程本地归类为 14 个固定 family（含 `other`），向 `POST routing-research/snapshots` 发送每类代理/直连/阻断计数、粗粒度流量档位、build、macOS major.minor 与架构；域名、IP、端口、原始进程名/路径、bundle ID、文件路径、内容、连接 ID 和逐连接记录不会写入研究文件或上传。快照以 access session 认证，为防滥用在 D1 中关联 account/device，90 天内删除；管理员只能用 `GET admin/routing-research/summary?days=30` 读取至少三名参与者的 cohort 聚合（参与设备数、route totals、流量档位直方图和 build 覆盖），没有单用户读取 API。研究结果只生成待人工审核的候选，不能自动修改 traffic policy 或添加宽泛 DIRECT 规则。
+
 - `GET auth/methods` 返回 `{email,apple,google:{enabled,clientId?}}`；只有服务端配置完整的方法为 enabled。
 - `GET exit-catalog` 需要 access Bearer，返回
   `{revision,yaml,sha256,updatedAt?}`。revision 只递增；无目录时返回
@@ -101,6 +103,6 @@ npm run typecheck
 typecheck 通过。测试覆盖邮件验证码 hash/单次
 消费/并发/限流、OIDC 签名/audience/nonce/replay、Apple email linking，
 home inventory 最小披露、目录 AES-GCM 篡改检测/加密存储/并发 revision，
-以及原有 control-plane 状态机。迁移必须按 `0001` 到 `0012` 顺序应用。
+以及原有 control-plane 状态机。迁移必须按 `0001` 到 `0016` 顺序应用。
 `0010`、目录 secret、目录 API 已部署到 staging，初始美国/日本双节点
 目录为 revision 1；production 仍未部署。

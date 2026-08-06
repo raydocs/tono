@@ -383,7 +383,9 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     ) {
         let localAuditEnabled = Self.isEnabled
         let researchEnabled = Self.isClaudeTrafficResearchEnabled
-        guard localAuditEnabled || researchEnabled else { return }
+        let appResearchEnabled = AppRoutingResearch.isEnabled
+        guard localAuditEnabled || researchEnabled || appResearchEnabled else { return }
+        if appResearchEnabled { AppRoutingResearch.shared.record(connections) }
         queue.async { [self] in
             if researchEnabled && Self.isClaudeTrafficResearchEnabled {
                 recordResearchProtection(protection)

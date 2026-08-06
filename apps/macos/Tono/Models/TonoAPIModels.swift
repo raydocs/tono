@@ -145,6 +145,10 @@ nonisolated struct TonoTrafficPolicyMediaEndpoint: Codable, Sendable, Equatable 
     let ports: [Int]
 }
 nonisolated struct TonoEmptyResponse: Codable, Sendable {}
+nonisolated struct TonoAppRoutingResearchResponse: Codable, Sendable {
+    let snapshotId: String
+    let receivedAt: Int
+}
 
 nonisolated enum TonoDeviceActionName: String, Codable, Sendable {
     case diagnosticSnapshot = "diagnostic_snapshot"

@@ -19,6 +19,7 @@ beforeAll(async () => {
 // based on execution order.
 beforeEach(async () => {
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_activation').run();
+  await env.DB.prepare('DELETE FROM routing_research_snapshots').run();
   await env.DB.prepare('DELETE FROM device_actions').run();
   await env.DB.prepare('DELETE FROM diagnostics_reports').run();
   await env.DB.prepare('DELETE FROM sessions').run();

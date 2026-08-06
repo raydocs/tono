@@ -51,6 +51,9 @@ export interface Env {
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_DAY?: string;
   DIAGNOSTICS_RETENTION_SECONDS?: string;
+  RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY?: string;
+  RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY?: string;
+  ROUTING_RESEARCH_RETENTION_SECONDS?: string;
 }
 
 type Row = Record<string, any>;
@@ -63,6 +66,12 @@ class ApiError extends Error {
 
 const now = () => Math.floor(Date.now() / 1000);
 const id = () => crypto.randomUUID();
+const routingResearchApps = ['wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge', 'safari', 'firefox', 'arc', 'brave', 'claude', 'other'] as const;
+const trafficBuckets = ['none', 'under_1_mib', '1_to_10_mib', '10_to_100_mib', '100_mib_to_1_gib', '1_to_10_gib', 'over_10_gib'] as const;
+const ROUTING_RESEARCH_WINDOW_SECONDS = 6 * 60 * 60;
+const ROUTING_RESEARCH_DAY_SECONDS = 24 * 60 * 60;
+const ROUTING_RESEARCH_RETENTION_MAX_SECONDS = 90 * ROUTING_RESEARCH_DAY_SECONDS;
+const ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS = 3;
 const deviceActions = ['diagnostic_snapshot', 'claude_traffic_snapshot', 'refresh_catalog', 'retry_protection'] as const;
 /** Failure vocabulary for device-action snapshots. (Diagnostics uploads carry
  *  the client's own free-text `error`/`failedStage` instead; see
@@ -83,6 +92,54 @@ function rejectUnexpectedKeys(value: unknown, allowed: string[]): asserts value 
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Unexpected field');
   }
+}
+
+function canonicalRoutingResearch(value: unknown) {
+  const keys = ['schemaVersion', 'snapshotId', 'observedSince', 'observedUntil', 'appVersion', 'build', 'osVersion', 'architecture', 'observedConnectionCount', 'identifiedAppConnectionCount', 'connectionLimitReached', 'entries'];
+  rejectUnexpectedKeys(value, keys);
+  const timestamp = now();
+  if (!exactKeys(value, keys) || value.schemaVersion !== 1 ||
+      typeof value.snapshotId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.snapshotId) ||
+      !Number.isSafeInteger(value.observedSince) || !Number.isSafeInteger(value.observedUntil) ||
+      value.observedSince < 0 || value.observedUntil > timestamp + 300 ||
+      value.observedUntil < timestamp - ROUTING_RESEARCH_RETENTION_MAX_SECONDS ||
+      value.observedUntil - value.observedSince !== ROUTING_RESEARCH_WINDOW_SECONDS ||
+      !Number.isSafeInteger(value.observedConnectionCount) || value.observedConnectionCount < 1 || value.observedConnectionCount > 1_000_000 ||
+      !Number.isSafeInteger(value.identifiedAppConnectionCount) || value.identifiedAppConnectionCount < 0 || value.identifiedAppConnectionCount > 1_000_000 ||
+      typeof value.connectionLimitReached !== 'boolean' || !Array.isArray(value.entries) || value.entries.length < 1 || value.entries.length > 14) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid routing research snapshot');
+  }
+  const appVersion = str(value.appVersion, 'appVersion', 1, 40);
+  const build = str(value.build, 'build', 1, 20);
+  const osVersion = str(value.osVersion, 'osVersion', 3, 12);
+  const architecture = str(value.architecture, 'architecture', 5, 6);
+  if (!/^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[a-z0-9][a-z0-9.-]{0,19})?$/.test(appVersion) ||
+      !/^(?:0|[1-9]\d{0,9})$/.test(build) ||
+      !/^\d{1,3}\.\d{1,3}$/.test(osVersion) ||
+      !['arm64', 'x86_64'].includes(architecture)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid platform metadata');
+  }
+  const seen = new Set<string>();
+  let total = 0; let identified = 0;
+  const entries = value.entries.map((raw: unknown) => {
+    const entryKeys = ['app', 'connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount', 'trafficVolume'];
+    rejectUnexpectedKeys(raw, entryKeys);
+    if (!exactKeys(raw, entryKeys)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid routing research entry');
+    const app = str(raw.app, 'app', 2, 8);
+    if (!routingResearchApps.includes(app as typeof routingResearchApps[number]) || seen.has(app)) throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown or duplicate app');
+    seen.add(app);
+    for (const key of ['connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount']) {
+      if (!Number.isSafeInteger(raw[key]) || raw[key] < 0 || raw[key] > 1_000_000) throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+    }
+    if (raw.connectionCount < 1 || raw.directConnectionCount + raw.proxiedConnectionCount + raw.blockedConnectionCount !== raw.connectionCount || !trafficBuckets.includes(raw.trafficVolume)) throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent routing research entry');
+    total += raw.connectionCount; if (app !== 'other') identified += raw.connectionCount;
+    return { app, connectionCount: raw.connectionCount, directConnectionCount: raw.directConnectionCount, proxiedConnectionCount: raw.proxiedConnectionCount, blockedConnectionCount: raw.blockedConnectionCount, trafficVolume: raw.trafficVolume };
+  }).sort((a, b) => a.app.localeCompare(b.app));
+  if (total !== value.observedConnectionCount || identified !== value.identifiedAppConnectionCount) throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent routing research totals');
+  const snapshot = { schemaVersion: 1, snapshotId: value.snapshotId.toLowerCase(), observedSince: value.observedSince, observedUntil: value.observedUntil, appVersion, build, osVersion, architecture, observedConnectionCount: total, identifiedAppConnectionCount: identified, connectionLimitReached: value.connectionLimitReached, entries };
+  const json = JSON.stringify(snapshot);
+  if (new TextEncoder().encode(json).length > 4096) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Routing research payload is too large');
+  return { snapshot, json };
 }
 
 function canonicalClaudeTrafficResearch(value: unknown) {
@@ -1851,6 +1908,16 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
     .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
     .run();
+  const routingResearchRetention = Math.min(
+    envInt(
+      e,
+      'ROUTING_RESEARCH_RETENTION_SECONDS',
+      ROUTING_RESEARCH_RETENTION_MAX_SECONDS,
+    ),
+    ROUTING_RESEARCH_RETENTION_MAX_SECONDS,
+  );
+  await e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
+    .bind(t - routingResearchRetention).run();
   if (tailscaleEnrollmentEnabled(e)) {
     try {
       await cleanupOrphanPendingNodes(e);
@@ -2571,6 +2638,67 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     );
   }
 
+  if (p === '/api/v1/routing-research/snapshots' && m === 'POST') {
+    const a = await auth(req, e);
+    // Request-level limits cover malformed bodies, replays, and conflicts. The
+    // tighter limiter below applies only to distinct accepted snapshots.
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`routing-research:request-device:${a.deviceId}`)}`,
+      envInt(e, 'RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY', 100),
+      ROUTING_RESEARCH_DAY_SECONDS,
+    );
+    const b = await body(req, 8 * 1024);
+    const { snapshot, json } = canonicalRoutingResearch(b);
+    const existing = await e.DB.prepare(
+      `SELECT aggregate_json, received_at
+       FROM routing_research_snapshots
+       WHERE device_id = ? AND snapshot_id = ?`,
+    ).bind(a.deviceId, snapshot.snapshotId).first<Row>();
+    if (existing) {
+      if (existing.aggregate_json !== json) throw new ApiError(409, 'SNAPSHOT_ID_CONFLICT', 'Snapshot ID was already used');
+      return Response.json({ snapshotId: snapshot.snapshotId, receivedAt: Number(existing.received_at) });
+    }
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`routing-research:new-device:${a.deviceId}`)}`,
+      envInt(e, 'RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY', 4),
+      ROUTING_RESEARCH_DAY_SECONDS,
+    );
+    const receivedAt = now();
+    const inserted = await e.DB.prepare(
+      `INSERT INTO routing_research_snapshots(
+         id, snapshot_id, user_id, device_id, received_at, observed_since,
+         observed_until, app_version, build, os_version, architecture,
+         aggregate_json
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(device_id, snapshot_id) DO NOTHING`,
+    ).bind(
+      id(), snapshot.snapshotId, a.userId, a.deviceId, receivedAt,
+      snapshot.observedSince, snapshot.observedUntil, snapshot.appVersion,
+      snapshot.build, snapshot.osVersion, snapshot.architecture, json,
+    ).run();
+    if (!inserted.meta.changes) {
+      const replay = await e.DB.prepare(
+        `SELECT aggregate_json, received_at
+         FROM routing_research_snapshots
+         WHERE device_id = ? AND snapshot_id = ?`,
+      ).bind(a.deviceId, snapshot.snapshotId).first<Row>();
+      if (replay?.aggregate_json === json) {
+        return Response.json({
+          snapshotId: snapshot.snapshotId,
+          receivedAt: Number(replay.received_at),
+        });
+      }
+      throw new ApiError(
+        409,
+        'SNAPSHOT_ID_CONFLICT',
+        'Snapshot ID was already used',
+      );
+    }
+    return Response.json({ snapshotId: snapshot.snapshotId, receivedAt }, { status: 201 });
+  }
+
   if (p === '/api/v1/devices' && m === 'GET') {
     const a = await auth(req, e);
     await expirePending(e, a.userId);
@@ -2673,6 +2801,110 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p.startsWith('/api/v1/admin/')) {
     await privileged(req, e.ADMIN_API_TOKEN);
+    if (p === '/api/v1/admin/routing-research/summary' && m === 'GET') {
+      let unexpectedQuery = false;
+      url.searchParams.forEach((_value, key) => { if (key !== 'days') unexpectedQuery = true; });
+      if (unexpectedQuery) throw new ApiError(400, 'VALIDATION_ERROR', 'Unexpected query parameter');
+      const rawDays = url.searchParams.get('days');
+      const days = rawDays === null ? 30 : Number(rawDays);
+      if (!Number.isSafeInteger(days) || days < 1 || days > 90) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid days');
+      const timestamp = now();
+      const since = timestamp - days * ROUTING_RESEARCH_DAY_SECONDS;
+      // Filter by when traffic was observed rather than delayed receipt time.
+      // JSON1 expands only the canonical fixed-vocabulary entries; grouping is
+      // done in D1 so no per-user rows enter the API process or response.
+      const overall = await e.DB.prepare(
+        `SELECT COUNT(*) snapshot_count,
+                COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count
+         FROM routing_research_snapshots
+         WHERE observed_until >= ? AND observed_until <= ?`,
+      ).bind(since, timestamp).first<Row>();
+      const appRows = await e.DB.prepare(
+        `WITH filtered AS (
+           SELECT user_id, device_id, aggregate_json
+           FROM routing_research_snapshots
+           WHERE observed_until >= ? AND observed_until <= ?
+         ), entries AS (
+           SELECT filtered.user_id, filtered.device_id,
+                  json_extract(item.value, '$.app') app,
+                  json_extract(item.value, '$.connectionCount') connection_count,
+                  json_extract(item.value, '$.directConnectionCount') direct_count,
+                  json_extract(item.value, '$.proxiedConnectionCount') proxied_count,
+                  json_extract(item.value, '$.blockedConnectionCount') blocked_count,
+                  json_extract(item.value, '$.trafficVolume') traffic_volume
+           FROM filtered, json_each(filtered.aggregate_json, '$.entries') item
+         )
+         SELECT app, COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count,
+                COUNT(*) snapshot_count,
+                SUM(connection_count) connection_count,
+                SUM(direct_count) direct_count,
+                SUM(proxied_count) proxied_count,
+                SUM(blocked_count) blocked_count,
+                SUM(CASE WHEN traffic_volume = 'none' THEN 1 ELSE 0 END) volume_none,
+                SUM(CASE WHEN traffic_volume = 'under_1_mib' THEN 1 ELSE 0 END) volume_under_1_mib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_mib' THEN 1 ELSE 0 END) volume_1_to_10_mib,
+                SUM(CASE WHEN traffic_volume = '10_to_100_mib' THEN 1 ELSE 0 END) volume_10_to_100_mib,
+                SUM(CASE WHEN traffic_volume = '100_mib_to_1_gib' THEN 1 ELSE 0 END) volume_100_mib_to_1_gib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_gib' THEN 1 ELSE 0 END) volume_1_to_10_gib,
+                SUM(CASE WHEN traffic_volume = 'over_10_gib' THEN 1 ELSE 0 END) volume_over_10_gib
+         FROM entries
+         GROUP BY app
+         ORDER BY participant_count DESC, device_count DESC, app`,
+      ).bind(since, timestamp).all<Row>();
+      const buildRows = await e.DB.prepare(
+        `SELECT app_version, build,
+                COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count,
+                COUNT(*) snapshot_count
+         FROM routing_research_snapshots
+         WHERE observed_until >= ? AND observed_until <= ?
+         GROUP BY app_version, build
+         ORDER BY participant_count DESC, app_version DESC, build DESC`,
+      ).bind(since, timestamp).all<Row>();
+      const visibleApps = appRows.results.filter(
+        (row) => Number(row.participant_count) >= ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
+      );
+      const visibleBuilds = buildRows.results.filter(
+        (row) => Number(row.participant_count) >= ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
+      );
+      return Response.json({
+        days,
+        cohortMinimum: ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
+        participantCount: Number(overall?.participant_count ?? 0),
+        deviceCount: Number(overall?.device_count ?? 0),
+        snapshotCount: Number(overall?.snapshot_count ?? 0),
+        suppressedAppCount: appRows.results.length - visibleApps.length,
+        suppressedBuildCount: buildRows.results.length - visibleBuilds.length,
+        byApp: visibleApps.map((row) => ({
+          app: String(row.app),
+          participantCount: Number(row.participant_count),
+          deviceCount: Number(row.device_count),
+          snapshotCount: Number(row.snapshot_count),
+          connectionCount: Number(row.connection_count),
+          directConnectionCount: Number(row.direct_count),
+          proxiedConnectionCount: Number(row.proxied_count),
+          blockedConnectionCount: Number(row.blocked_count),
+          trafficVolumes: {
+            none: Number(row.volume_none),
+            under_1_mib: Number(row.volume_under_1_mib),
+            '1_to_10_mib': Number(row.volume_1_to_10_mib),
+            '10_to_100_mib': Number(row.volume_10_to_100_mib),
+            '100_mib_to_1_gib': Number(row.volume_100_mib_to_1_gib),
+            '1_to_10_gib': Number(row.volume_1_to_10_gib),
+            over_10_gib: Number(row.volume_over_10_gib),
+          },
+        })),
+        byBuild: visibleBuilds.map((row) => ({
+          appVersion: String(row.app_version),
+          build: String(row.build),
+          participantCount: Number(row.participant_count),
+          deviceCount: Number(row.device_count),
+          snapshotCount: Number(row.snapshot_count),
+        })),
+      });
+    }
     if (p === '/api/v1/admin/device-actions' && m === 'POST') {
       const b = await body(req, 8 * 1024);
       rejectUnexpectedKeys(b, ['deviceId', 'action', 'ttlSeconds']);

@@ -100,6 +100,9 @@ actor TonoAPIClient {
     func deviceActions() async throws -> TonoDeviceActionsResponse {
         try await authorizedRequest("device-actions", method: "GET")
     }
+    func submitAppRoutingResearch(_ snapshot: TonoAppRoutingResearchSnapshot) async throws -> TonoAppRoutingResearchResponse {
+        try await authorizedRequest("routing-research/snapshots", method: "POST", body: snapshot)
+    }
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {
         let validID = try validatedDeviceID(id)
         let _: TonoDeviceActionResultResponse = try await authorizedRequest(

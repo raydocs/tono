@@ -627,6 +627,11 @@ final class AppState {
         updateLiveStreamSubscriptions()
     }
 
+    func setAggregatedAppRoutingResearchEnabled(_ enabled: Bool) {
+        AppRoutingResearch.shared.setEnabled(enabled)
+        updateLiveStreamSubscriptions()
+    }
+
     func setMainWindowVisible(_ visible: Bool) {
         guard isMainWindowVisible != visible else { return }
         isMainWindowVisible = visible
@@ -2031,9 +2036,11 @@ final class AppState {
         }
 
         let localAuditEnabled = LocalTrafficAudit.isEnabled
-        let trafficResearchEnabled =
+        let claudeTrafficResearchEnabled =
             LocalTrafficAudit.isClaudeTrafficResearchEnabled
-        if localAuditEnabled || trafficResearchEnabled
+        let appRoutingResearchEnabled = AppRoutingResearch.isEnabled
+        if localAuditEnabled || claudeTrafficResearchEnabled
+            || appRoutingResearchEnabled
             || (isMainWindowVisible && selectedPage == .activity) {
             webSocket.startConnectionsStream(intervalMilliseconds: 2_500)
         } else {
@@ -2043,7 +2050,7 @@ final class AppState {
         let logsEnabled =
             AppProfile.defaults.object(forKey: SettingsKey.logsEnabled) as? Bool
                 ?? true
-        if localAuditEnabled || trafficResearchEnabled
+        if localAuditEnabled || claudeTrafficResearchEnabled
             || (isMainWindowVisible && selectedPage == .logs && logsEnabled) {
             webSocket.startLogsStream(level: logLevel)
         } else {

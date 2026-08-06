@@ -21,6 +21,8 @@ struct SettingsView: View {
     private var remoteDiagnosticsEnabled = false
     @AppStorage(SettingsKey.claudeTrafficResearchEnabled)
     private var claudeTrafficResearchEnabled = false
+    @AppStorage(SettingsKey.aggregatedAppRoutingResearchEnabled)
+    private var aggregatedAppRoutingResearchEnabled = false
 
     // Proxy Engine. The field edits a local draft; only validated values are
     // committed to storage, so a half-typed "78" abandoned via focus loss can
@@ -159,6 +161,18 @@ struct SettingsView: View {
                 appState.setClaudeTrafficResearchEnabled(enabled)
             }
             .disabled(!remoteDiagnosticsEnabled)
+
+            settingDivider
+
+            SettingToggleRow(
+                label: "Aggregated App Routing Research",
+                subtitle: "Optional and off by default. About every six hours, shares only fixed app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. Reports are linked to your account and device for abuse prevention, deleted after 90 days, and exposed to administrators only as cohort totals. No hostnames, IPs, ports, raw process names or paths, bundle IDs, file paths, content, or connection records leave this device.",
+                isOn: $aggregatedAppRoutingResearchEnabled
+            )
+            .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
+                appState.setAggregatedAppRoutingResearchEnabled(enabled)
+                accountSession.appRoutingResearchSettingChanged()
+            }
 
             SettingRow(
                 label: "Audit Log",

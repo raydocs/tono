@@ -32,6 +32,7 @@ final class AccountSession {
     private var catalogSyncTask: Task<Void, Never>?
     private var deviceRefreshTask: Task<Void, Never>?
     private var deviceActionTask: Task<Void, Never>?
+    private var appRoutingResearchTask: Task<Void, Never>?
     private var systemSleeping = false
     private var lastCatalogFailureMessage: String?
     private var lastTrafficPolicyFailureMessage: String?
@@ -126,6 +127,9 @@ final class AccountSession {
             shouldResumeProtection =
                 try await RuntimeCleanup.cleanupStaleRuntime()
             guard try keychain.string(for: .refreshToken) != nil else {
+                // Research consent is bound to the signed-in account. A new
+                // account on this installation must opt in independently.
+                AppRoutingResearch.shared.disableAndPurge()
                 // Signed out: never leave a previous session's kill switch armed.
                 if !AppProfile.homeExitEnabled {
                     // A force-quit of an older Home-US build may have left its
@@ -310,6 +314,9 @@ final class AccountSession {
     #endif
 
     func logout() async {
+        // Purge before any suspension point so no pending aggregate can cross
+        // into a later account even when server logout is slow or unavailable.
+        AppRoutingResearch.shared.disableAndPurge()
         await stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
         await api.logout(); clearAccount(); state = .signedOut
     }
@@ -471,6 +478,8 @@ final class AccountSession {
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
         deviceActionTask = nil
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
         // Clear descriptor first so Mihomo stops, while kill switch may remain armed.
         await descriptorConsumer(nil)
         if AppProfile.homeExitEnabled {
@@ -684,16 +693,22 @@ final class AccountSession {
             }
         }
         updateRemoteDiagnosticsPolling()
+        updateAppRoutingResearchUploading()
     }
 
     func remoteDiagnosticsSettingChanged() {
         updateRemoteDiagnosticsPolling()
     }
 
+    func appRoutingResearchSettingChanged() {
+        updateAppRoutingResearchUploading()
+    }
+
     func prepareForSystemSleep() {
         systemSleeping = true
         catalogSyncTask?.cancel(); catalogSyncTask = nil
         deviceActionTask?.cancel(); deviceActionTask = nil
+        appRoutingResearchTask?.cancel(); appRoutingResearchTask = nil
     }
 
     func resumeAfterSystemWake() {
@@ -714,6 +729,29 @@ final class AccountSession {
                 guard let self, state == .ready, !systemSleeping else { return }
                 await pollDeviceActions()
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            }
+        }
+    }
+
+    private func updateAppRoutingResearchUploading() {
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
+        guard state == .ready, !systemSleeping,
+              AppRoutingResearch.isEnabled, user != nil else { return }
+        appRoutingResearchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, state == .ready, !systemSleeping,
+                      AppRoutingResearch.isEnabled else { return }
+                if let snapshot = await AppRoutingResearch.shared.readySnapshot() {
+                    do {
+                        let response = try await api.submitAppRoutingResearch(snapshot)
+                        AppRoutingResearch.shared.acknowledge(snapshotId: response.snapshotId)
+                    } catch {
+                        // The single persisted idempotent pending snapshot is
+                        // retried on the next low-frequency check.
+                    }
+                }
+                do { try await Task.sleep(for: .seconds(3_600)) } catch { return }
             }
         }
     }
@@ -835,9 +873,12 @@ final class AccountSession {
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
         deviceActionTask = nil
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
         await descriptorConsumer(nil)
         // Health / runtime failures keep kill switch; only auth sign-out disarms.
         if signsOutOnUnauthorized, error as? TonoAPIClient.APIError == .unauthorized {
+            AppRoutingResearch.shared.disableAndPurge()
             await sidecar.stop()
             await releaseNetworkProtection()
             await api.logout(); clearAccount(); state = .signedOut

@@ -368,10 +368,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         windows: {
           current: {
             version: '2.5.4',
-            build: 'test5',
+            build: 'test6',
             trafficPolicySchemas: [1, 2],
             artifact: {
-              sha256: '0cfd68444aefded4ed9bc2d687f4ce9d481e980f08940b5e65249e0fd393bb88',
+              sha256: 'ef92f8bce4c4fdea9db4e44dcfd68d570f5bacb179892bcc6bf4b46eb97a4ece',
             },
           },
         },
@@ -1600,6 +1600,312 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await api('device-actions', {
       headers: { authorization: `Bearer ${owner.accessToken}` },
     })).status).toBe(401);
+  });
+
+  const routingResearchPayload = (overrides: Record<string, unknown> = {}) => {
+    const observedUntil = Math.floor(Date.now() / 1000) - 60;
+    return {
+      schemaVersion: 1,
+      snapshotId: crypto.randomUUID(),
+      observedSince: observedUntil - 6 * 60 * 60,
+      observedUntil,
+      appVersion: '0.0.1',
+      build: '40',
+      osVersion: '26.4',
+      architecture: 'arm64',
+      observedConnectionCount: 3,
+      identifiedAppConnectionCount: 2,
+      connectionLimitReached: false,
+      entries: [
+        {
+          app: 'other', connectionCount: 1, directConnectionCount: 0,
+          proxiedConnectionCount: 1, blockedConnectionCount: 0,
+          trafficVolume: 'under_1_mib',
+        },
+        {
+          app: 'wechat', connectionCount: 2, directConnectionCount: 1,
+          proxiedConnectionCount: 1, blockedConnectionCount: 0,
+          trafficVolume: '10_to_100_mib',
+        },
+      ],
+      ...overrides,
+    };
+  };
+
+  it('stores only a canonical authenticated routing-research aggregate and replays it idempotently', async () => {
+    const account = await createAccount('routing-research-happy');
+    const payload = routingResearchPayload();
+    expect((await api('routing-research/snapshots', json(payload))).status).toBe(401);
+
+    const accepted = await api(
+      'routing-research/snapshots',
+      json(payload, account.accessToken),
+    );
+    expect(accepted.status).toBe(201);
+    const receipt = await accepted.json() as any;
+    expect(Object.keys(receipt).sort()).toEqual(['receivedAt', 'snapshotId']);
+    expect(receipt.snapshotId).toBe(payload.snapshotId);
+
+    const stored = await env.DB.prepare(
+      'SELECT * FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    expect(stored.user_id).toBe(account.user.id);
+    expect(stored.device_id).toBe(account.device.id);
+    expect(stored.app_version).toBe('0.0.1');
+    expect(stored.build).toBe('40');
+    expect(JSON.parse(stored.aggregate_json)).toEqual({
+      ...payload,
+      snapshotId: payload.snapshotId.toLowerCase(),
+      entries: [...payload.entries].sort((left, right) => left.app.localeCompare(right.app)),
+    });
+
+    const replay = await api(
+      'routing-research/snapshots',
+      json(payload, account.accessToken),
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(receipt);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(1);
+
+    const conflict = routingResearchPayload({
+      snapshotId: payload.snapshotId,
+      observedConnectionCount: 4,
+      identifiedAppConnectionCount: 3,
+      entries: [
+        payload.entries[0],
+        {
+          ...payload.entries[1], connectionCount: 3,
+          proxiedConnectionCount: 2,
+        },
+      ],
+    });
+    // Keep the immutable window fields identical so this tests ID reuse rather
+    // than an unrelated timestamp difference.
+    conflict.observedSince = payload.observedSince;
+    conflict.observedUntil = payload.observedUntil;
+    const rejectedConflict = await api(
+      'routing-research/snapshots',
+      json(conflict, account.accessToken),
+    );
+    expect(rejectedConflict.status).toBe(409);
+    expect((await rejectedConflict.json() as any).error.code).toBe('SNAPSHOT_ID_CONFLICT');
+
+    await expect(env.DB.prepare(
+      'UPDATE routing_research_snapshots SET build = ? WHERE snapshot_id = ?',
+    ).bind('41', payload.snapshotId).run()).rejects.toThrow(
+      /ROUTING_RESEARCH_SNAPSHOT_IMMUTABLE/,
+    );
+  });
+
+  it('rejects raw metadata, covert strings, malformed totals, timestamps, and oversized research bodies', async () => {
+    const account = await createAccount('routing-research-validation');
+    const submit = (payload: unknown) => api(
+      'routing-research/snapshots',
+      json(payload, account.accessToken),
+    );
+    expect((await submit({
+      ...routingResearchPayload(),
+      processPath: '/Users/customer/Applications/Private.app',
+    })).status).toBe(400);
+    const rawEntry = routingResearchPayload();
+    rawEntry.entries = [{ ...rawEntry.entries[0], host: 'private.example.com' } as any];
+    rawEntry.observedConnectionCount = 1;
+    rawEntry.identifiedAppConnectionCount = 0;
+    expect((await submit(rawEntry)).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      entries: [{
+        app: 'private-editor', connectionCount: 3, directConnectionCount: 0,
+        proxiedConnectionCount: 3, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      }],
+      identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      appVersion: '/Users/customer/Documents',
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      build: 'private.example.com',
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      observedConnectionCount: 4,
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      entries: [{
+        app: 'wechat', connectionCount: 3, directConnectionCount: 1,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      }],
+      identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      entries: [{
+        app: 'wechat', connectionCount: 3, directConnectionCount: 1,
+        proxiedConnectionCount: 2, blockedConnectionCount: 0,
+        trafficVolume: 'exactly_123_bytes',
+      }],
+      identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    const fiveHourUntil = Math.floor(Date.now() / 1000) - 60;
+    expect((await submit(routingResearchPayload({
+      observedSince: fiveHourUntil - 5 * 60 * 60,
+      observedUntil: fiveHourUntil,
+    }))).status).toBe(400);
+    const staleUntil = Math.floor(Date.now() / 1000) - 91 * 24 * 60 * 60;
+    expect((await submit(routingResearchPayload({
+      observedSince: staleUntil - 6 * 60 * 60,
+      observedUntil: staleUntil,
+    }))).status).toBe(400);
+    expect((await submit({
+      ...routingResearchPayload(),
+      padding: 'x'.repeat(9 * 1024),
+    })).status).toBe(413);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(0);
+  });
+
+  it('caps distinct routing-research snapshots per device without blocking an exact retry', async () => {
+    const account = await createAccount('routing-research-rate');
+    const accepted: Record<string, unknown>[] = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const payload = routingResearchPayload();
+      accepted.push(payload);
+      expect((await api(
+        'routing-research/snapshots',
+        json(payload, account.accessToken),
+      )).status).toBe(201);
+    }
+    const limited = await api(
+      'routing-research/snapshots',
+      json(routingResearchPayload(), account.accessToken),
+    );
+    expect(limited.status).toBe(429);
+    expect((await limited.json() as any).error.code).toBe('RATE_LIMITED');
+    expect((await api(
+      'routing-research/snapshots',
+      json(accepted[0], account.accessToken),
+    )).status).toBe(200);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(4);
+  });
+
+  it('returns only cohort-safe app, route, volume, and build research summaries', async () => {
+    const accounts = await Promise.all([
+      createAccount('routing-summary-one'),
+      createAccount('routing-summary-two'),
+      createAccount('routing-summary-three'),
+    ]);
+    for (const [index, account] of accounts.entries()) {
+      const entries = [{
+        app: 'wechat', connectionCount: 2, directConnectionCount: 1,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      }];
+      if (index === 0) entries.push({
+        app: 'safari', connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      });
+      const payload = routingResearchPayload({
+        observedConnectionCount: index === 0 ? 3 : 2,
+        identifiedAppConnectionCount: index === 0 ? 3 : 2,
+        entries,
+      });
+      expect((await api(
+        'routing-research/snapshots',
+        json(payload, account.accessToken),
+      )).status).toBe(201);
+    }
+
+    expect((await api('admin/routing-research/summary?days=30')).status).toBe(401);
+    const response = await admin(
+      'routing-research/summary?days=30',
+      undefined,
+      'GET',
+    );
+    expect(response.status).toBe(200);
+    const summary = await response.json() as any;
+    expect(summary).toMatchObject({
+      days: 30,
+      cohortMinimum: 3,
+      participantCount: 3,
+      deviceCount: 3,
+      snapshotCount: 3,
+      suppressedAppCount: 1,
+      suppressedBuildCount: 0,
+      byApp: [{
+        app: 'wechat', participantCount: 3, deviceCount: 3,
+        snapshotCount: 3, connectionCount: 6,
+        directConnectionCount: 3, proxiedConnectionCount: 3,
+        blockedConnectionCount: 0,
+        trafficVolumes: { '10_to_100_mib': 3 },
+      }],
+      byBuild: [{
+        appVersion: '0.0.1', build: '40', participantCount: 3,
+        deviceCount: 3, snapshotCount: 3,
+      }],
+    });
+    const encoded = JSON.stringify(summary);
+    for (const account of accounts) {
+      expect(encoded).not.toContain(account.user.id);
+      expect(encoded).not.toContain(account.device.id);
+    }
+    expect(encoded).not.toContain('snapshotId');
+    expect(encoded).not.toContain('aggregate_json');
+    expect((await admin(
+      'routing-research/summary?days=91', undefined, 'GET',
+    )).status).toBe(400);
+    expect((await admin(
+      'routing-research/summary?days=30&deviceId=secret', undefined, 'GET',
+    )).status).toBe(400);
+  });
+
+  it('deletes routing research at retention and with its account', async () => {
+    const account = await createAccount('routing-research-retention');
+    const payload = routingResearchPayload();
+    expect((await api(
+      'routing-research/snapshots',
+      json(payload, account.accessToken),
+    )).status).toBe(201);
+    const row = await env.DB.prepare(
+      'SELECT * FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    await env.DB.prepare(
+      'DELETE FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).run();
+    const oldUntil = Math.floor(Date.now() / 1000) - 91 * 24 * 60 * 60;
+    await env.DB.prepare(
+      `INSERT INTO routing_research_snapshots(
+         id, snapshot_id, user_id, device_id, received_at, observed_since,
+         observed_until, app_version, build, os_version, architecture,
+         aggregate_json
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(
+      crypto.randomUUID(), crypto.randomUUID(), account.user.id,
+      account.device.id, oldUntil, oldUntil - 6 * 60 * 60, oldUntil,
+      row.app_version, row.build, row.os_version, row.architecture,
+      row.aggregate_json,
+    ).run();
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(0);
+
+    const fresh = routingResearchPayload();
+    expect((await api(
+      'routing-research/snapshots',
+      json(fresh, account.accessToken),
+    )).status).toBe(201);
+    await env.DB.prepare('DELETE FROM users WHERE id = ?')
+      .bind(account.user.id).run();
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(0);
   });
 
   // Pinned verbatim from the client's single definition of the wire contract
