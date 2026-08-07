@@ -15,7 +15,7 @@
       <nav>
         <a class="button primary" href="/manifest.json">机器可读 Manifest</a>
         <a class="button" href="/macos/appcast.xml">macOS Appcast</a>
-        <a class="button" href="https://github.com/raydocs/liquidclash/releases">GitHub 安装包</a>
+        <a class="button" href="https://github.com/raydocs/tono/releases">GitHub 安装包</a>
       </nav>
     </header>
 
@@ -27,14 +27,15 @@
       <div class="grid">
         <article class="card current">
           <div class="card-title"><span class="platform">macOS</span><span class="status good">可测试</span></div>
-          <h3>0.0.1 · Build 37</h3>
+          <h3>0.0.1 · Build 42</h3>
           <p>Apple Silicon、macOS 26.3+。支持策略 v1–v2，已发布 Sparkle 签名自动更新。</p>
           <ul>
-            <li>微信与 16 个视频 hostname 精确直连试验</li>
-            <li>Claude / Anthropic 官方流量优先代理</li>
-            <li>自适应 gVisor TCP buffer</li>
+            <li>修复 Helper Forbidden、Kill Switch 卡死与紧急解除状态回弹</li>
+            <li>微信精确 domain/port 直连，失败安全回退 Tono-Exit</li>
+            <li>默认开启、可关闭的隐私受限应用路由聚合研究</li>
+            <li>未知应用只进入 other；不上传路径、Bundle ID 或 destination</li>
           </ul>
-          <a class="text-link" href="https://github.com/raydocs/liquidclash/releases/download/tono-0.0.1-build37/Tono-0.0.1-build37-arm64.dmg">下载 Build 37 DMG →</a>
+          <a class="text-link" href="https://github.com/raydocs/tono/releases/download/tono-0.0.1-build42/Tono-0.0.1-build42-arm64.zip">下载 Build 42 ZIP →</a>
         </article>
 
         <article class="card">
@@ -59,7 +60,7 @@
       </div>
       <div class="contract">
         <div><strong>控制面</strong><span>策略 revision 2 · schema v2</span></div>
-        <div><strong>macOS</strong><span>Build 37 · 支持 v1–v2</span></div>
+        <div><strong>macOS</strong><span>Build 42 · 支持 v1–v2</span></div>
         <div><strong>Windows 已发布包</strong><span>Test 2–5 停用 · Test 6 小范围验收</span></div>
         <div><strong>Windows 验证</strong><span>真机 UI 响应与网络安全验收中</span></div>
       </div>
@@ -72,6 +73,7 @@
         <h2>版本改动备份</h2>
       </div>
       <div class="timeline">
+        <article><time>2026-08-07</time><h3>macOS Build 42</h3><p>延续 Build 39 的 Forbidden / Kill Switch 恢复、微信精确直连与 Claude 代理优先；新增默认开启但可随时关闭的应用路由聚合研究。只上传固定 app family、固定 bundle-component 类别、路由计数与粗粒度流量档位，未知应用统一进入 other，不上传原始应用名、路径、Bundle ID、域名、IP、端口、内容或逐连接记录。</p></article>
         <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 6（小范围验收）</h3><p>修复 13 个经对抗性验证的缺陷：连接超时不再中止自身任务（UI 永久“连接中”）、释放失败保留 armed 显示、连接成功重置监控种子（终结重连死循环）、DNS 启用后刷新解析缓存、WFP 开机先装后扫等；连接路径并发化提速。首个通过 7zz 载荷提取门与完整 preflight 的构建。真机 S6 故障注入仍待完成。</p></article>
         <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 5（已由 Test 6 取代）</h3><p>把 Windows Service IPC 放到独立 Tokio runtime，避免同步 named-pipe / SCM 工作饿死 Tauri runtime；调用方取消后请求仍可完成安全对账。连接中的阶段耗时现在会持续增长。安装包曾混入 alpha Mihomo 与 Unix 辅助文件，已由 Test 6 修正。</p></article>
         <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 4（已暂停）</h3><p>虽然修复了 TUN 接口别名 error 123，但 Windows 真机在进入“启动 Kill Switch”后原生窗口立即无响应。正在修复长生命周期连接任务与 UI 的隔离，当前不得继续测试。</p></article>

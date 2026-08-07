@@ -76,7 +76,7 @@ OAuth client 只授予上述 scopes；tailnet policy 中声明标签所有者并
 
 - 远程诊断为设备本地明确 opt-in 的 15 秒 pull。管理员只能排队四个无参数固定动作：`diagnostic_snapshot`、`claude_traffic_snapshot`、`refresh_catalog`、`retry_protection`；服务端拒绝额外字段、代码和通用参数。`GET device-actions` 只返回当前 access session 设备的未过期 pending/delivered 动作并重复 delivered 直到终态；`POST device-actions/:id/result` 只接受固定、受限的 succeeded/failed 结果与已知紧凑状态字段。普通诊断快照不上传日志正文、原始错误、域名、IP、路径、进程、凭据或内部节点 ID，只用白名单错误类别标记失败阶段。Claude 流量研究需要设备用户第二次单独 opt-in，只从内存返回官方 `claude.ai` / `anthropic.com` endpoint 与可明确归因给 Claude App/Code 的非官方 destination host 前四组聚合，并报告全局代理/直连/阻断计数、进程识别覆盖率、Mihomo DIRECT 尝试、受控国内直连计数和 TUN/Kill Switch/DNS 状态。快照还执行两个无参数固定探针：比较普通系统 TUN 与 Mihomo 显式代理出口是否一致，以及在基准 HTTPS 目标确认可达后强制绑定物理网卡是否被 PF 阻断；云端只接收枚举判定，原始出口 IP 仅写入设备本地 mode-0600 audit。浏览器非官方请求、无法识别进程的非官方请求和相似第三方域名不会被猜测为 Claude 流量；客户端不读取 audit 文件，也不上传 URL、IP、进程名、路径或内容。所有结果上限 2 KiB。默认 TTL 5 分钟，最大 1 小时。
 
-- 应用路由研究独立于远程诊断，升级后的缺省值为开启，但设置页明确允许用户随时关闭；关闭会同步停止采集并删除本地待上传数据。只有已登录且账户运行态为 Ready 时才采集或上传；暂停后恢复时先重建连接字节基线，不会把暂停期间流量补算进去。macOS 每个六小时窗口只把进程本地归类为 14 个固定 family（含 `other`），向 `POST routing-research/snapshots` 发送每类代理/直连/阻断计数、粗粒度流量档位、build、macOS major.minor 与架构。schema v2 还会为 WeChat、QQ、飞书、Lark、钉钉把标准 `/Applications` app bundle 内路径在本机缩减成五个固定 component category（主程序、framework helper、XPC、plugin、其他 bundle helper）；不会发送可执行文件名或任何路径字符串。域名、IP、端口、用户名、原始进程名/路径、bundle ID、用户文件路径、内容、连接 ID 和逐连接记录不会写入研究 payload。每次上传还携带本地 lease 的 64 字符十六进制 account digest，Worker 会与认证账户重新计算的 digest 对照，防止已取消的旧账户请求在 token 切换后写到新账户。快照以 access session 认证，为防滥用在 D1 中关联 account/device，90 天内删除；管理员只能用 `GET admin/routing-research/summary?days=30` 读取至少三名参与者的 cohort 聚合（参与设备数、route totals、bundle component totals、流量档位直方图和 build 覆盖），整体不足三人时不返回任何 count，低于门槛的 category 也不返回或暴露数量。没有单用户读取 API。研究结果只生成待人工审核的候选，不能自动修改 traffic policy 或添加宽泛 DIRECT 规则。
+- 应用路由研究独立于远程诊断，升级后的缺省值为开启，但设置页明确允许用户随时关闭；关闭会同步停止采集并删除本地待上传数据。只有已登录且账户运行态为 Ready 时才采集或上传；暂停后恢复时先重建连接字节基线，不会把暂停期间流量补算进去。macOS 每个六小时窗口只把进程本地归类为 27 个固定 family（含 `other`），向 `POST routing-research/snapshots` 发送每类代理/直连/阻断计数、粗粒度流量档位、build、macOS major.minor 与架构。schema v2 会为 18 个经过审核的原生应用 family 把标准 `/Applications` app bundle 内路径在本机缩减成五个固定 component category（主程序、framework helper、XPC、plugin、其他 bundle helper）；不会发送可执行文件名或任何路径字符串。未知应用只进入 `other`。域名、IP、端口、用户名、原始进程名/路径、bundle ID、用户文件路径、内容、连接 ID 和逐连接记录不会写入研究 payload。每次上传还携带本地 lease 的 64 字符十六进制 account digest，Worker 会与认证账户重新计算的 digest 对照，防止已取消的旧账户请求在 token 切换后写到新账户。快照以 access session 认证，为防滥用在 D1 中关联 account/device，90 天内删除；管理员只能用 `GET admin/routing-research/summary?days=30` 读取至少三名参与者的 cohort 聚合（参与设备数、route totals、bundle component totals、流量档位直方图和 build 覆盖），整体不足三人时不返回任何 count，低于门槛的 category 也不返回或暴露数量。没有单用户读取 API。研究结果只生成待人工审核的候选，不能自动修改 traffic policy 或添加宽泛 DIRECT 规则。
 
 - `GET auth/methods` 返回 `{email,apple,google:{enabled,clientId?}}`；只有服务端配置完整的方法为 enabled。
 - `GET exit-catalog` 需要 access Bearer，返回
@@ -103,6 +103,6 @@ npm run typecheck
 typecheck 通过。测试覆盖邮件验证码 hash/单次
 消费/并发/限流、OIDC 签名/audience/nonce/replay、Apple email linking，
 home inventory 最小披露、目录 AES-GCM 篡改检测/加密存储/并发 revision，
-以及原有 control-plane 状态机。迁移必须按 `0001` 到 `0016` 顺序应用。
-`0010`、目录 secret、目录 API 已部署到 staging，初始美国/日本双节点
-目录为 revision 1；production 仍未部署。
+以及原有 control-plane 状态机。仓库迁移必须按 `0001` 到 `0017` 顺序应用。
+当前 live staging D1 已应用 routing research 的 `0016`–`0017`，Worker
+版本 `70ade2fa-e3a4-4eaa-9c34-7f70547ff226` 已部署；production 仍需独立受控发布。

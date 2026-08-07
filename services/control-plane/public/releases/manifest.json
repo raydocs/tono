@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-03T02:13:49Z",
+ "generatedAt": "2026-08-07T05:47:51Z",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
   "baseURL": "https://api.afk.ccwu.cc",
@@ -16,16 +16,16 @@
   }
  },
  "releaseSet": {
-  "id": "2026-08-02-windows-test6",
-  "status": "windows-real-machine-validation",
-  "reason": "Windows 2.5.4 Test 6 closes the residual connect-availability P1s (timeout self-abort, failed-release latch, reconnect flapping), speeds up the connect path, and is the first build whose NSIS payload passed the full extraction gate. Limited Windows real-machine acceptance only; not for broad customer rollout until the S6 fault-injection checklist passes."
+  "id": "2026-08-07-macos-build42",
+  "status": "limited-cross-platform-validation",
+  "reason": "macOS Build 42 adds privacy-bounded aggregated app-routing research while preserving exact WeChat direct fallback and Forbidden/Kill Switch recovery. It is notarized and Sparkle-signed for limited tester rollout. Windows remains on its existing limited real-machine validation track."
  },
  "platforms": {
   "macos": {
    "current": {
-    "releaseId": "macos-0.0.1-build37",
+    "releaseId": "macos-0.0.1-build42",
     "version": "0.0.1",
-    "build": 37,
+    "build": 42,
     "architecture": "arm64",
     "minimumOS": "26.3",
     "trafficPolicySchemas": [
@@ -40,13 +40,13 @@
      "silentInstall": false
     },
     "artifact": {
-     "name": "Tono-0.0.1-build37-arm64.dmg",
-     "url": "https://github.com/raydocs/liquidclash/releases/download/tono-0.0.1-build37/Tono-0.0.1-build37-arm64.dmg",
-     "size": 20523223,
-     "sha256": "2026bae06f681a127a21ce5df4e20dea5d3df8bea3ef8666b38d3dd0a191be8d",
-     "sparkleEdSignature": "WP0cbCcxEA07pPJi8I63nefPIYu/+u+f+W1cIMXvF83q9+uy/reJArQ8Ki+wtL1owFcKvmP2BdrCSKrpYT63Dg=="
+     "name": "Tono-0.0.1-build42-arm64.zip",
+     "url": "https://github.com/raydocs/tono/releases/download/tono-0.0.1-build42/Tono-0.0.1-build42-arm64.zip",
+     "size": 19862862,
+     "sha256": "cb7769c46dce759c50f1c24620b3c96fffba231ec1a259fe1d4b00e17155491c",
+     "sparkleEdSignature": "hem2MI+cAfLkGABNUj+3v0eWI0SoI1AUM6RTpwUYWVnRcrmNBsb1ZyeEUH2IaVnzO1W0oAb6UJt011hBki0SBg=="
     },
-    "releaseURL": "https://github.com/raydocs/liquidclash/releases/tag/tono-0.0.1-build37"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-0.0.1-build42"
    }
   },
   "windows": {
