@@ -382,7 +382,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       schemaVersion: 1,
       channel: 'test',
       platforms: {
-        macos: { current: { build: 37 } },
+        macos: { current: { build: 42 } },
         windows: {
           current: {
             version: '2.5.4',
@@ -398,7 +398,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const appcast = await fetchRelease('/macos/appcast.xml');
     expect(appcast.status).toBe(200);
-    expect(await appcast.text()).toContain('<sparkle:version>37</sparkle:version>');
+    expect(await appcast.text()).toContain('<sparkle:version>42</sparkle:version>');
 
     expect((await fetchRelease('/api/v1/health')).status).toBe(404);
     const rejected = await fetchRelease('/manifest.json', { method: 'POST' });

@@ -105,4 +105,4 @@ typecheck 通过。测试覆盖邮件验证码 hash/单次
 home inventory 最小披露、目录 AES-GCM 篡改检测/加密存储/并发 revision，
 以及原有 control-plane 状态机。仓库迁移必须按 `0001` 到 `0017` 顺序应用。
 当前 live staging D1 已应用 routing research 的 `0016`–`0017`，Worker
-版本 `70ade2fa-e3a4-4eaa-9c34-7f70547ff226` 已部署；production 仍需独立受控发布。
+和 Build 42 release assets 已部署；production 仍需独立受控发布。

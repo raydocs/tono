@@ -86,6 +86,10 @@ const ROUTING_RESEARCH_WINDOW_SECONDS = 6 * 60 * 60;
 const ROUTING_RESEARCH_DAY_SECONDS = 24 * 60 * 60;
 const ROUTING_RESEARCH_RETENTION_MAX_SECONDS = 90 * ROUTING_RESEARCH_DAY_SECONDS;
 const ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS = 3;
+// Release-host aliases rewrite to the same static asset path. Include an
+// explicit revision in the inner asset request so a previously cached alias
+// cannot keep serving an older Sparkle feed after an asset-only deployment.
+const RELEASE_ASSET_REVISION = 'macos-build42-20260807';
 const deviceActions = ['diagnostic_snapshot', 'claude_traffic_snapshot', 'refresh_catalog', 'retry_protection'] as const;
 /** Failure vocabulary for device-action snapshots. (Diagnostics uploads carry
  *  the client's own free-text `error`/`failedStage` instead; see
@@ -3530,6 +3534,7 @@ export default {
       }
       const assetURL = new URL(req.url);
       assetURL.pathname = assetPath;
+      assetURL.searchParams.set('tono-release-revision', RELEASE_ASSET_REVISION);
       return secure(await e.ASSETS.fetch(new Request(assetURL, req)), false);
     }
     if (origin && origin !== e.ALLOWED_ORIGIN) {
