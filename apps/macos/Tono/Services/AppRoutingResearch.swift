@@ -157,17 +157,20 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
     private static let maximumConnections = 20_000
     private static let maximumCount = 1_000_000
     private static let maximumBytes: Int64 = 100_000_000_000_000
-    private static let families = Set([
-        "wechat", "qq", "feishu", "lark", "dingtalk", "trae", "chrome",
-        "edge", "safari", "firefox", "arc", "brave", "claude", "other",
-    ])
-    private static let componentFamilies = Set([
-        "wechat", "qq", "feishu", "lark", "dingtalk",
-    ])
-    private static let bundleComponents = Set([
-        "main_executable", "framework_helper", "xpc_service",
-        "plugin_helper", "bundle_helper",
-    ])
+    /// Keep every wire payload below the control plane's 8 KiB canonical JSON
+    /// limit even when every count and platform field has its maximum width.
+    private static let maximumSnapshotEntries = 20
+    private static let maximumSnapshotComponentEntries = 16
+    /// A build-41 pending snapshot can contain up to 25 component entries. Keep
+    /// accepting it across the update even though new snapshots use a tighter
+    /// cap after the recognized-app vocabulary expands.
+    private static let maximumAcceptedComponentEntries = 25
+    private static let maximumStoredBytes = 32 * 1_024
+    private static let families = AppRoutingResearchClassifier.families
+    private static let componentFamilies =
+        AppRoutingResearchClassifier.componentFamilies
+    private static let bundleComponents =
+        AppRoutingResearchClassifier.bundleComponents
     private static let trafficVolumes = Set([
         "none", "under_1_mib", "1_to_10_mib", "10_to_100_mib",
         "100_mib_to_1_gib", "1_to_10_gib", "over_10_gib",
@@ -190,7 +193,8 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
         guard let attributes = try? FileManager.default.attributesOfItem(
             atPath: fileURL.path
         ),
-              (attributes[.size] as? NSNumber)?.intValue ?? 0 <= 16 * 1_024,
+              (attributes[.size] as? NSNumber)?.intValue ?? 0
+                <= Self.maximumStoredBytes,
               let data = try? Data(contentsOf: fileURL),
               let decoded = try? JSONDecoder().decode(Stored.self, from: data),
               Self.isValid(decoded, now: timestamp) else {
@@ -521,7 +525,42 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
               ) as? String,
               Self.isNumericBuild(build) else { return nil }
 
-        let entries = stored.totals.compactMap {
+        let populatedRecognized = stored.totals.compactMap {
+            app, total -> (app: String, total: Total)? in
+            guard app != "other", total.connections > 0 else { return nil }
+            return (app, total)
+        }.sorted {
+            if $0.total.connections != $1.total.connections {
+                return $0.total.connections > $1.total.connections
+            }
+            if $0.total.bytes != $1.total.bytes {
+                return $0.total.bytes > $1.total.bytes
+            }
+            return $0.app < $1.app
+        }
+        var otherTotal = stored.totals["other"] ?? Total()
+        let initialRecognizedCapacity = Self.maximumSnapshotEntries
+            - (otherTotal.connections > 0 ? 1 : 0)
+        let recognizedCapacity: Int
+        if populatedRecognized.count > initialRecognizedCapacity {
+            // Reserve one entry for the omitted aggregates so all connections
+            // remain represented without revealing another app identity.
+            recognizedCapacity = Self.maximumSnapshotEntries - 1
+        } else {
+            recognizedCapacity = initialRecognizedCapacity
+        }
+        let selectedRecognized = populatedRecognized.prefix(recognizedCapacity)
+        for omitted in populatedRecognized.dropFirst(recognizedCapacity) {
+            Self.merge(omitted.total, into: &otherTotal)
+        }
+        var snapshotTotals = Dictionary(uniqueKeysWithValues:
+            selectedRecognized.map { ($0.app, $0.total) }
+        )
+        if otherTotal.connections > 0 {
+            snapshotTotals["other"] = otherTotal
+        }
+
+        let entries = snapshotTotals.compactMap {
             app, total -> TonoAppRoutingResearchEntry? in
             guard total.connections > 0 else { return nil }
             return TonoAppRoutingResearchEntry(
@@ -536,18 +575,35 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
         let observed = entries.reduce(0) { $0 + $1.connectionCount }
         let identified = entries.filter { $0.app != "other" }
             .reduce(0) { $0 + $1.connectionCount }
-        let componentEntries = stored.componentTotals.compactMap {
-            key, total -> TonoAppRoutingResearchComponentEntry? in
+        let selectedApps = Set(snapshotTotals.keys)
+        let populatedComponents = stored.componentTotals.compactMap {
+            key, total -> (identity: (app: String, component: String),
+                           total: Total)? in
             guard total.connections > 0,
-                  let identity = Self.componentIdentity(key) else { return nil }
+                  let identity = Self.componentIdentity(key),
+                  selectedApps.contains(identity.app) else { return nil }
+            return (identity, total)
+        }.sorted {
+            if $0.total.connections != $1.total.connections {
+                return $0.total.connections > $1.total.connections
+            }
+            if $0.total.bytes != $1.total.bytes {
+                return $0.total.bytes > $1.total.bytes
+            }
+            return ($0.identity.app, $0.identity.component)
+                < ($1.identity.app, $1.identity.component)
+        }
+        let componentEntries = populatedComponents
+            .prefix(Self.maximumSnapshotComponentEntries).map {
+                value -> TonoAppRoutingResearchComponentEntry in
             return TonoAppRoutingResearchComponentEntry(
-                app: identity.app,
-                bundleComponent: identity.component,
-                connectionCount: total.connections,
-                directConnectionCount: total.direct,
-                proxiedConnectionCount: total.proxied,
-                blockedConnectionCount: total.blocked,
-                trafficVolume: Self.bucket(total.bytes)
+                app: value.identity.app,
+                bundleComponent: value.identity.component,
+                connectionCount: value.total.connections,
+                directConnectionCount: value.total.direct,
+                proxiedConnectionCount: value.total.proxied,
+                blockedConnectionCount: value.total.blocked,
+                trafficVolume: Self.bucket(value.total.bytes)
             )
         }.sorted {
             ($0.app, $0.bundleComponent) < ($1.app, $1.bundleComponent)
@@ -571,7 +627,10 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
             architecture: architecture,
             observedConnectionCount: observed,
             identifiedAppConnectionCount: identified,
-            connectionLimitReached: stored.limitReached,
+            connectionLimitReached: stored.limitReached
+                || populatedRecognized.count > recognizedCapacity
+                || populatedComponents.count
+                    > Self.maximumSnapshotComponentEntries,
             entries: entries,
             bundleComponents: componentEntries
         )
@@ -592,7 +651,8 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
         guard Self.isEnabled, stored.ownerHash != nil else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(stored), data.count <= 16 * 1_024 else {
+        guard let data = try? encoder.encode(stored),
+              data.count <= Self.maximumStoredBytes else {
             return
         }
         try? ConfigStorage.shared.writeSensitive(data, to: fileURL)
@@ -645,6 +705,23 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
         default: total.proxied += 1
         }
         total.bytes = boundedSum(total.bytes, bytes)
+    }
+
+    private static func merge(_ source: Total, into destination: inout Total) {
+        destination.connections = min(
+            destination.connections + source.connections,
+            maximumCount
+        )
+        destination.direct = min(destination.direct + source.direct, maximumCount)
+        destination.proxied = min(
+            destination.proxied + source.proxied,
+            maximumCount
+        )
+        destination.blocked = min(
+            destination.blocked + source.blocked,
+            maximumCount
+        )
+        destination.bytes = boundedSum(destination.bytes, source.bytes)
     }
 
     private static func totalConnections(_ totals: [String: Total]) -> Int {
@@ -700,101 +777,18 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
         return (app, component)
     }
 
-    /// Converts only reviewed native-app paths under the standard system-wide
-    /// Applications directory into a fixed, low-cardinality category. Raw or
-    /// relative path text, executable names, usernames and custom install roots
-    /// are never returned from this function and can never reach the wire type.
     private static func bundleComponent(
         for app: String,
         processPath: String?
     ) -> String? {
-        guard componentFamilies.contains(app), let path = processPath,
-              path.utf8.count >= 20, path.utf8.count <= 1_024,
-              path.hasPrefix("/"), !path.contains("\\"),
-              !path.contains("//"),
-              path.unicodeScalars.allSatisfy({
-                  $0.isASCII && $0.value >= 0x20 && $0.value < 0x7F
-              }) else { return nil }
-        let pathComponents = path.split(
-            separator: "/",
-            omittingEmptySubsequences: false
+        AppRoutingResearchClassifier.bundleComponent(
+            for: app,
+            processPath: processPath
         )
-        guard pathComponents.first?.isEmpty == true,
-              pathComponents.dropFirst().allSatisfy({
-                  !$0.isEmpty && $0 != "." && $0 != ".."
-              }) else { return nil }
-
-        let roots: [String: [String]] = [
-            "wechat": ["wechat", "weixin"],
-            "qq": ["qq"],
-            "feishu": ["feishu"],
-            "lark": ["lark"],
-            "dingtalk": ["dingtalk"],
-        ]
-        let lower = path.lowercased()
-        for root in roots[app] ?? [] {
-            let prefix = "/applications/\(root).app/contents/"
-            guard lower.hasPrefix(prefix) else { continue }
-            let relative = String(lower.dropFirst(prefix.count))
-            guard !relative.isEmpty else { return nil }
-            if relative.hasPrefix("frameworks/") {
-                return "framework_helper"
-            }
-            if relative.hasPrefix("xpcservices/") {
-                return "xpc_service"
-            }
-            if relative.hasPrefix("plugins/") {
-                return "plugin_helper"
-            }
-            if relative.hasPrefix("helpers/")
-                || relative.hasPrefix("library/loginitems/") {
-                return "bundle_helper"
-            }
-            if relative.hasPrefix("macos/") {
-                let executable = relative.dropFirst("macos/".count)
-                return executable == root ? "main_executable" : "bundle_helper"
-            }
-            return nil
-        }
-        return nil
     }
 
     private static func family(process: String?, path: String?) -> String {
-        let name = (process ?? "").lowercased()
-        let bundlePath = (path ?? "").lowercased()
-        func inBundle(_ bundle: String) -> Bool {
-            bundlePath.contains("/\(bundle.lowercased()).app/")
-        }
-        if inBundle("WeChat") || inBundle("Weixin")
-            || name.hasPrefix("wechat") || name.hasPrefix("weixin") {
-            return "wechat"
-        }
-        if inBundle("QQ") || name == "qq" || name.hasPrefix("qq helper") {
-            return "qq"
-        }
-        if inBundle("Feishu") || name.hasPrefix("feishu") { return "feishu" }
-        if inBundle("Lark") || name.hasPrefix("lark") { return "lark" }
-        if inBundle("DingTalk") || name.hasPrefix("dingtalk") { return "dingtalk" }
-        if inBundle("Trae") || name.hasPrefix("trae") { return "trae" }
-        if inBundle("Google Chrome") || name.hasPrefix("google chrome") {
-            return "chrome"
-        }
-        if inBundle("Microsoft Edge") || name.hasPrefix("microsoft edge") {
-            return "edge"
-        }
-        if inBundle("Safari") || name.hasPrefix("safari") { return "safari" }
-        if inBundle("Firefox") || name.hasPrefix("firefox") { return "firefox" }
-        if inBundle("Arc") || name == "arc" || name.hasPrefix("arc helper") {
-            return "arc"
-        }
-        if inBundle("Brave Browser") || name.hasPrefix("brave browser") {
-            return "brave"
-        }
-        if inBundle("Claude") || name == "claude"
-            || bundlePath.hasSuffix("/claude") {
-            return "claude"
-        }
-        return "other"
+        AppRoutingResearchClassifier.family(process: process, path: path)
     }
 
     private static func isReleaseVersion(_ value: String) -> Bool {
@@ -878,7 +872,7 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
               ) != nil,
               ["arm64", "x86_64"].contains(snapshot.architecture),
               snapshot.entries.count >= 1,
-              snapshot.entries.count <= families.count else { return false }
+              snapshot.entries.count <= maximumSnapshotEntries else { return false }
         var apps = Set<String>()
         var observed = 0
         var identified = 0
@@ -909,8 +903,7 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
             return snapshot.bundleComponents == nil
         }
         guard let components = snapshot.bundleComponents,
-              components.count
-                <= componentFamilies.count * bundleComponents.count else {
+              components.count <= maximumAcceptedComponentEntries else {
             return false
         }
         let appTotals = Dictionary(uniqueKeysWithValues: snapshot.entries.map {

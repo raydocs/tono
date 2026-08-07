@@ -1811,6 +1811,46 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ]);
   });
 
+  it('accepts the expanded reviewed app families and keeps snapshots bounded', async () => {
+    const account = await createAccount('routing-research-expanded-apps');
+    const apps = [
+      'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge',
+      'safari', 'firefox', 'arc', 'brave', 'claude', 'wecom',
+      'tencent_meeting', 'wps', 'baidu_netdisk', 'alipan', 'douyin',
+      'bilibili',
+    ];
+    const entries = apps.map((app) => ({
+      app, connectionCount: 1, directConnectionCount: 0,
+      proxiedConnectionCount: 1, blockedConnectionCount: 0,
+      trafficVolume: 'under_1_mib',
+    }));
+    const payload = routingResearchV2Payload({
+      observedConnectionCount: entries.length,
+      identifiedAppConnectionCount: entries.length,
+      connectionLimitReached: true,
+      entries,
+      bundleComponents: [{
+        app: 'tencent_meeting', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      }],
+    });
+    const accepted = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect(accepted.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT aggregate_json FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    const canonical = JSON.parse(stored.aggregate_json);
+    expect(canonical.entries).toHaveLength(20);
+    expect(canonical.bundleComponents).toEqual(payload.bundleComponents);
+  });
+
   it('rejects raw metadata, covert strings, malformed totals, timestamps, and oversized research bodies', async () => {
     const account = await createAccount('routing-research-validation');
     const submit = async (payload: unknown) => api(
@@ -1884,6 +1924,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         trafficVolume: 'under_1_mib',
       }],
       identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    const tooManyFixedApps = [
+      'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge',
+      'safari', 'firefox', 'arc', 'brave', 'claude', 'wecom',
+      'tencent_meeting', 'wps', 'baidu_netdisk', 'alipan', 'douyin',
+      'bilibili', 'netease_music',
+    ].map((app) => ({
+      app, connectionCount: 1, directConnectionCount: 0,
+      proxiedConnectionCount: 1, blockedConnectionCount: 0,
+      trafficVolume: 'under_1_mib',
+    }));
+    expect((await submit(routingResearchPayload({
+      observedConnectionCount: tooManyFixedApps.length,
+      identifiedAppConnectionCount: tooManyFixedApps.length,
+      connectionLimitReached: true,
+      entries: tooManyFixedApps,
     }))).status).toBe(400);
     expect((await submit(routingResearchPayload({
       appVersion: '/Users/customer/Documents',

@@ -35,7 +35,7 @@ proxies:
       short-id: 0011223344556677
 YAML
 
-echo "[1/2] Building the macOS app without signing"
+echo "[1/3] Building the macOS app without signing"
 DEVELOPER_DIR=$developer_dir /usr/bin/xcodebuild \
   -project "$repo_root/apps/macos/LiquidClash.xcodeproj" \
   -scheme LiquidClash \
@@ -44,7 +44,15 @@ DEVELOPER_DIR=$developer_dir /usr/bin/xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 
-echo "[2/2] Validating owned routing, Claude precedence, and Mihomo syntax"
+echo "[2/3] Validating privacy-bounded app-routing classification"
+DEVELOPER_DIR=$developer_dir /usr/bin/xcrun swiftc \
+  -module-cache-path "$test_dir/classifier-module-cache" \
+  "$repo_root/apps/macos/Tono/Services/AppRoutingResearchClassifier.swift" \
+  "$repo_root/tooling/scripts/tests/AppRoutingResearchClassifierTests.swift" \
+  -o "$test_dir/test-app-routing-classifier"
+"$test_dir/test-app-routing-classifier"
+
+echo "[3/3] Validating owned routing, Claude precedence, and Mihomo syntax"
 DEVELOPER_DIR=$developer_dir \
   "$repo_root/tooling/scripts/test-multi-exit-policy.sh" "$fixture"
 

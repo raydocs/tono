@@ -69,8 +69,17 @@ const id = () => crypto.randomUUID();
 const sha256Hex = async (value: string) => Array.from(new Uint8Array(
   await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
 )).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-const routingResearchApps = ['wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge', 'safari', 'firefox', 'arc', 'brave', 'claude', 'other'] as const;
-const routingResearchComponentApps = ['wechat', 'qq', 'feishu', 'lark', 'dingtalk'] as const;
+const routingResearchApps = [
+  'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge',
+  'safari', 'firefox', 'arc', 'brave', 'claude', 'wecom', 'tencent_meeting',
+  'wps', 'baidu_netdisk', 'alipan', 'douyin', 'bilibili', 'netease_music',
+  'qq_music', 'xunlei', 'jianying', 'youdao', 'awesun', 'other',
+] as const;
+const routingResearchComponentApps = [
+  'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'wecom', 'tencent_meeting',
+  'wps', 'baidu_netdisk', 'alipan', 'douyin', 'bilibili', 'netease_music',
+  'qq_music', 'xunlei', 'jianying', 'youdao', 'awesun',
+] as const;
 const routingResearchBundleComponents = ['main_executable', 'framework_helper', 'xpc_service', 'plugin_helper', 'bundle_helper'] as const;
 const trafficBuckets = ['none', 'under_1_mib', '1_to_10_mib', '10_to_100_mib', '100_mib_to_1_gib', '1_to_10_gib', 'over_10_gib'] as const;
 const ROUTING_RESEARCH_WINDOW_SECONDS = 6 * 60 * 60;
@@ -114,7 +123,7 @@ function canonicalRoutingResearch(value: unknown) {
       value.observedUntil - value.observedSince !== ROUTING_RESEARCH_WINDOW_SECONDS ||
       !Number.isSafeInteger(value.observedConnectionCount) || value.observedConnectionCount < 1 || value.observedConnectionCount > 1_000_000 ||
       !Number.isSafeInteger(value.identifiedAppConnectionCount) || value.identifiedAppConnectionCount < 0 || value.identifiedAppConnectionCount > 1_000_000 ||
-      typeof value.connectionLimitReached !== 'boolean' || !Array.isArray(value.entries) || value.entries.length < 1 || value.entries.length > 14) {
+      typeof value.connectionLimitReached !== 'boolean' || !Array.isArray(value.entries) || value.entries.length < 1 || value.entries.length > 20) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid routing research snapshot');
   }
   const appVersion = str(value.appVersion, 'appVersion', 1, 40);
@@ -133,7 +142,7 @@ function canonicalRoutingResearch(value: unknown) {
     const entryKeys = ['app', 'connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount', 'trafficVolume'];
     rejectUnexpectedKeys(raw, entryKeys);
     if (!exactKeys(raw, entryKeys)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid routing research entry');
-    const app = str(raw.app, 'app', 2, 8);
+    const app = str(raw.app, 'app', 2, 15);
     if (!routingResearchApps.includes(app as typeof routingResearchApps[number]) || seen.has(app)) throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown or duplicate app');
     seen.add(app);
     for (const key of ['connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount']) {
@@ -159,7 +168,7 @@ function canonicalRoutingResearch(value: unknown) {
       const componentKeys = ['app', 'bundleComponent', 'connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount', 'trafficVolume'];
       rejectUnexpectedKeys(raw, componentKeys);
       if (!exactKeys(raw, componentKeys)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid bundle component entry');
-      const app = str(raw.app, 'app', 2, 8);
+      const app = str(raw.app, 'app', 2, 15);
       const bundleComponent = str(raw.bundleComponent, 'bundleComponent', 11, 20);
       const identity = `${app}:${bundleComponent}`;
       if (!routingResearchComponentApps.includes(app as typeof routingResearchComponentApps[number]) ||
