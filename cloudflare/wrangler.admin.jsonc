@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tono-admin-production",
+  "main": "src/admin-worker.ts",
+  "compatibility_date": "2025-09-02",
+  "workers_dev": false,
+  "routes": [{
+    "pattern": "admin.afk.ccwu.cc",
+    "custom_domain": true
+  }],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "secrets": {
+    "required": [
+      "ACCESS_TEAM_DOMAIN",
+      "ACCESS_AUD",
+      "ACCESS_ADMIN_EMAILS"
+    ]
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "tono-control-plane",
+    "database_id": "caf9b9fb-b4d5-498d-a1ad-7d5cdbb4237c"
+  }],
+  "vars": {
+    "ALLOWED_ORIGIN": "https://admin.afk.ccwu.cc"
+  }
+}

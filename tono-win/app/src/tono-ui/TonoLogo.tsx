@@ -1,4 +1,4 @@
-import brandIcon from '@/assets/image/logo.ico'
+import brandIcon from '@/assets/image/logo-mask.png'
 
 import { TONO_COLORS, TONO_EASE } from './theme'
 
@@ -34,11 +34,12 @@ export const TonoLogo = ({
         width: size,
         height: size,
         objectFit: 'contain',
+        borderRadius: Math.round(size * 0.22),
         filter: compact
-          ? 'drop-shadow(0 1px 2px rgba(14,24,54,0.2))'
+          ? 'drop-shadow(0 1px 2px rgba(14,24,54,0.18))'
           : connected
-            ? `drop-shadow(0 6px 12px ${TONO_COLORS.connected}52)`
-            : `drop-shadow(0 5px 10px ${TONO_COLORS.accent}38)`,
+            ? `drop-shadow(0 6px 14px ${TONO_COLORS.connected}55)`
+            : `drop-shadow(0 6px 14px ${TONO_COLORS.accent}40)`,
         transition: compact ? undefined : `filter 0.22s ${TONO_EASE}`,
       }}
     />

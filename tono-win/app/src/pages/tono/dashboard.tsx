@@ -7,6 +7,7 @@ import { useTonoStatus } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
 import { useThemeMode } from '@/services/states'
 import {
+  connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   formatTonoActionError,
   tonoConnect,
@@ -247,9 +248,14 @@ const DashboardPage = () => {
   const navigate = useNavigate()
   const { status, mutateTonoStatus } = useTonoStatus()
   const [actionError, setActionError] = useState<string | null>(null)
+  const [errorSuggestsSwitch, setErrorSuggestsSwitch] = useState(false)
 
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
+  const busy =
+    uiState === 'connecting' ||
+    uiState === 'disconnecting' ||
+    uiState === 'protectedOffline'
 
   const {
     response: { data: traffic },
@@ -257,6 +263,7 @@ const DashboardPage = () => {
 
   const handleConnect = useLockFn(async () => {
     setActionError(null)
+    setErrorSuggestsSwitch(false)
     try {
       await tonoConnect()
       await mutateTonoStatus()
@@ -270,16 +277,19 @@ const DashboardPage = () => {
         return
       }
       setActionError(formatTonoActionError(error, t))
+      setErrorSuggestsSwitch(connectErrorSuggestsServerSwitch(error))
     }
   })
 
   const handleDisconnect = useLockFn(async () => {
     setActionError(null)
+    setErrorSuggestsSwitch(false)
     try {
       await tonoDisconnect()
       await mutateTonoStatus()
     } catch (error) {
       setActionError(formatTonoActionError(error, t))
+      setErrorSuggestsSwitch(false)
     }
   })
 
@@ -337,7 +347,7 @@ const DashboardPage = () => {
           </span>
         </div>
       )}
-      {/* Center stack */}
+      {/* Center stack — status chip → connect → node → (progress only when busy) */}
       <div
         className="tono-dashboard__content"
         style={{
@@ -349,10 +359,27 @@ const DashboardPage = () => {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 18,
+          gap: 16,
           padding: '24px 0',
         }}
       >
+        {!busy && !actionError && (
+          <p
+            style={{
+              margin: 0,
+              maxWidth: 420,
+              textAlign: 'center',
+              fontSize: 13,
+              lineHeight: 1.45,
+              fontWeight: 500,
+              color: text.tertiary,
+            }}
+          >
+            {connected
+              ? t('tono.dashboard.taglineConnected')
+              : t('tono.dashboard.taglineIdle')}
+          </p>
+        )}
         <div
           style={{
             display: 'flex',
@@ -360,37 +387,45 @@ const DashboardPage = () => {
             justifyContent: 'center',
             gap: 7,
             minHeight: 30,
-            padding: '5px 11px',
+            padding: '5px 12px',
             borderRadius: 999,
             fontSize: 12,
             fontWeight: 600,
-            color: connected ? TONO_COLORS.connected : text.secondary,
-            background: connected
-              ? hex(TONO_COLORS.connected, dark ? 0.12 : 0.09)
-              : dark
-                ? 'rgba(255,255,255,0.06)'
-                : 'rgba(255,255,255,0.58)',
+            color:
+              uiState === 'protectedOffline'
+                ? TONO_COLORS.protectedOffline
+                : connected
+                  ? TONO_COLORS.connected
+                  : text.secondary,
+            background:
+              uiState === 'protectedOffline'
+                ? hex(TONO_COLORS.protectedOffline, dark ? 0.14 : 0.1)
+                : connected
+                  ? hex(TONO_COLORS.connected, dark ? 0.12 : 0.09)
+                  : dark
+                    ? 'rgba(255,255,255,0.06)'
+                    : 'rgba(255,255,255,0.58)',
             border: `1px solid ${
-              connected
-                ? hex(TONO_COLORS.connected, 0.18)
-                : dark
-                  ? 'rgba(255,255,255,0.08)'
-                  : 'rgba(40,54,86,0.08)'
+              uiState === 'protectedOffline'
+                ? hex(TONO_COLORS.protectedOffline, 0.22)
+                : connected
+                  ? hex(TONO_COLORS.connected, 0.18)
+                  : dark
+                    ? 'rgba(255,255,255,0.08)'
+                    : 'rgba(40,54,86,0.08)'
             }`,
           }}
         >
-          <LockIcon locked={connected} />
+          <LockIcon locked={connected || uiState === 'protectedOffline'} />
           <span>
-            {connected
-              ? t('tono.pill.statusProtected')
-              : t('tono.pill.statusReality')}
+            {uiState === 'protectedOffline'
+              ? t('tono.pill.statusProtectedOffline')
+              : connected
+                ? t('tono.pill.statusProtected')
+                : t('tono.pill.statusReality')}
           </span>
         </div>
-        <div
-          style={{
-            transition: `all 0.5s ${TONO_SPRING}`,
-          }}
-        >
+        <div style={{ transition: `all 0.5s ${TONO_SPRING}` }}>
           <ConnectPill
             uiState={uiState}
             stageLabel={status?.stageLabel}
@@ -398,25 +433,78 @@ const DashboardPage = () => {
             onDisconnect={handleDisconnect}
           />
         </div>
-        {/* Right where the user is looking after clicking Connect — a strip at
-            the top of the window was easy to miss (and off-screen in zoomed
-            real-machine sessions). */}
+        {/* Actionable error under the primary control — includes a switch-server
+            path when the exit itself is the likely problem. */}
         {actionError && (
-          <span
+          <div
+            role="alert"
             style={{
-              fontSize: 13,
-              fontWeight: 500,
-              color: TONO_COLORS.error,
-              borderRadius: 10,
-              padding: '8px 12px',
-              background: hex(TONO_COLORS.error, 0.12),
-              maxWidth: 520,
-              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 10,
+              maxWidth: 480,
+              width: '100%',
+              borderRadius: 14,
+              padding: '12px 14px',
+              background: hex(TONO_COLORS.error, dark ? 0.14 : 0.1),
+              border: `1px solid ${hex(TONO_COLORS.error, 0.22)}`,
             }}
           >
-            {actionError}
-          </span>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                lineHeight: 1.45,
+                color: dark ? '#FF8A84' : TONO_COLORS.error,
+                textAlign: 'center',
+              }}
+            >
+              {actionError}
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <button
+                type="button"
+                className="tono-button"
+                onClick={() => void handleConnect()}
+                style={{
+                  minHeight: 32,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 9,
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#fff',
+                  background: TONO_COLORS.accent,
+                }}
+              >
+                {t('tono.dashboard.errorRetry')}
+              </button>
+              {(errorSuggestsSwitch || Boolean(status?.selectedServer)) && (
+                <button
+                  type="button"
+                  className="tono-button"
+                  onClick={() => navigate('/servers')}
+                  style={{
+                    minHeight: 32,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 9,
+                    border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+                    cursor: 'pointer',
+                    color: dark ? '#A9B7FF' : '#3453D5',
+                    background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+                  }}
+                >
+                  {t('tono.dashboard.errorSwitchServer')}
+                </button>
+              )}
+            </div>
+          </div>
         )}
+        {/* Progress card self-hides when idle and no uncleared failure record. */}
         <ConnectProgressCard
           uiState={uiState}
           onRefreshStatus={mutateTonoStatus}
@@ -426,6 +514,26 @@ const DashboardPage = () => {
             serverName={status.selectedServer}
             connected={connected}
           />
+        )}
+        {!status?.selectedServer && !busy && (
+          <button
+            type="button"
+            className="tono-link"
+            onClick={() => navigate('/servers')}
+            style={{
+              minHeight: 36,
+              padding: '8px 14px',
+              fontSize: 13,
+              fontWeight: 600,
+              borderRadius: 11,
+              border: 'none',
+              cursor: 'pointer',
+              color: dark ? '#A9B7FF' : '#3453D5',
+              background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.1),
+            }}
+          >
+            {t('tono.dashboard.pickServer')}
+          </button>
         )}
       </div>
 

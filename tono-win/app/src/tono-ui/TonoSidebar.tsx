@@ -91,7 +91,7 @@ export const TonoSidebar = () => {
       }}
     >
       <div className="tono-brand">
-        <TonoLogo connected={false} compact size={22} />
+        <TonoLogo connected={false} compact size={26} />
         <span className="tono-brand-name" style={{ color: text.primary }}>
           Tono
         </span>

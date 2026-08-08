@@ -8,7 +8,7 @@
     "title": "登录 Tono",
     "subtitle": "输入邮箱以接收登录验证码。",
     "welcome": "欢迎使用 Tono",
-    "intro": "使用已验证的邮箱登录即可继续，无需密码。",
+    "intro": "安静可靠的云端通道。用邮箱登录即可 — 无需密码。",
     "emailLabel": "邮箱地址",
     "emailPlaceholder": "you@example.com",
     "sendCode": "将登录码发送到我的邮箱",
@@ -56,7 +56,8 @@
       "starting": "正在启动…"
     },
     "statusProtected": "受保护的云端路由",
-    "statusReality": "Reality 云端保护"
+    "statusReality": "云端通道就绪",
+    "statusProtectedOffline": "网络已阻断 · 不会泄漏"
   },
   "dashboard": {
     "title": "仪表盘",
@@ -66,6 +67,11 @@
     "disconnecting": "断开中…",
     "protectedOffline": "离线保护中",
     "protectedOfflineDescription": "为防止流量泄漏，您的网络已被阻断。点击恢复连接。",
+    "taglineIdle": "选择节点后一键连接 — 断线也不会裸奔。",
+    "taglineConnected": "已处于受保护的云端通道，流量不会回落公网。",
+    "pickServer": "选择服务器",
+    "errorRetry": "重试",
+    "errorSwitchServer": "更换节点",
     "server": "节点",
     "noServer": "未选择节点",
     "killSwitchMode": "Kill switch：{{mode}}",
@@ -80,7 +86,8 @@
     "errors": {
       "serviceBusy": "Tono 服务正在安装或修复。请批准待处理的管理员提示，或重启 Tono。",
       "releaseReconciling": "网络保护仍在释放中。请稍候再连接，避免拆掉新连接。",
-      "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。"
+      "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。",
+      "nodeUnreachable": "当前节点无法连通（多为线路被干扰）。请更换其他出口再试。"
     },
     "info": {
       "protection": "流量保护",

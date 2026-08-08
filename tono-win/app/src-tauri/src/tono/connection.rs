@@ -568,7 +568,7 @@ fn attempt<'a>(state: &'a Arc<TonoState>, app: &'a AppHandle) -> BoxedAttempt<'a
 }
 
 async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
-    let (node, nodes, generation, cancellation) = match guard_snapshot(state).await {
+    let (node, nodes, routing, generation, cancellation) = match guard_snapshot(state).await {
         Ok(snapshot) => snapshot,
         Err(err) => return Attempt::GuardRejected(err),
     };
@@ -613,7 +613,7 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
     }
 
-    match run_stages(state, app, &node, &nodes, generation, started, &transaction).await {
+    match run_stages(state, app, &node, &nodes, routing.as_ref(), generation, started, &transaction).await {
         Ok(()) => Attempt::Connected,
         Err(StageFailure::Stale) => Attempt::Stale,
         Err(StageFailure::TimedOut(err)) => {
@@ -655,7 +655,7 @@ async fn retire_timed_out_generation(state: &Arc<TonoState>, generation: u64) {
 /// transaction is in flight. Pure read — no state changes.
 async fn guard_snapshot(
     state: &Arc<TonoState>,
-) -> Result<(ValidatedNode, Vec<ValidatedNode>, u64, CancellationToken), String> {
+) -> Result<(ValidatedNode, Vec<ValidatedNode>, Option<tono_core::CatalogRouting>, u64, CancellationToken), String> {
     if state.release_in_progress().await {
         return Err(format!(
             "{RELEASE_RECONCILING_PREFIX}: network protection release is still reconciling; wait before reconnecting"
@@ -690,6 +690,7 @@ async fn guard_snapshot(
     Ok((
         node,
         inner.nodes.clone(),
+        inner.routing.clone(),
         inner.connect_generation,
         inner.connect_cancellation.clone(),
     ))
@@ -802,13 +803,25 @@ async fn run_stages(
     app: &AppHandle,
     node: &ValidatedNode,
     nodes: &[ValidatedNode],
+    routing: Option<&tono_core::CatalogRouting>,
     generation: u64,
     started: std::time::Instant,
     transaction: &ConnectTransaction,
 ) -> Result<(), StageFailure> {
     // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
     // the bootstrap API hosts are the only control-plane recovery channel.
-    let proxy_endpoints = vec![proxy_endpoint_of(node)];
+    // When the catalog binds a home-broadband exit, its endpoint joins the
+    // WFP permit set — otherwise the kill switch would block Mihomo's dial
+    // to the very node the Claude split-routing rules point at.
+    let home_node = routing
+        .and_then(|routing| routing.home_proxy.as_deref())
+        .and_then(|name| nodes.iter().find(|entry| entry.name == name));
+    let mut proxy_endpoints = vec![proxy_endpoint_of(node)];
+    if let Some(home) = home_node
+        && (home.server != node.server || home.port != node.port)
+    {
+        proxy_endpoints.push(proxy_endpoint_of(home));
+    }
 
     transaction.check("preparing service")?;
     set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
@@ -872,7 +885,7 @@ async fn run_stages(
     // the redacted copy may touch disk.
     let secret = generate_controller_secret();
     let runtime =
-        build_owned_runtime_with_ports(nodes, &node.name, &secret, None, runtime_ports).map_err(StageFailure::error)?;
+        build_owned_runtime_with_ports(nodes, &node.name, &secret, None, home_node.map(|home| home.name.as_str()), runtime_ports).map_err(StageFailure::error)?;
     // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
     // already covered because that whole stage runs inside a `wait`; this one was the only
     // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
@@ -955,6 +968,7 @@ async fn run_stages(
                 app,
                 &node,
                 nodes,
+                home_node,
                 generation,
                 &secret,
                 controller_port,
@@ -2717,6 +2731,7 @@ async fn apply_cloud_policy(
     app: &AppHandle,
     node: &ValidatedNode,
     nodes: &[ValidatedNode],
+    home_node: Option<&ValidatedNode>,
     generation: u64,
     original_secret: &str,
     controller_port: u16,
@@ -2792,6 +2807,7 @@ async fn apply_cloud_policy(
         &node.name,
         &secret,
         Some(&plan),
+        home_node.map(|home| home.name.as_str()),
         RuntimePorts {
             mixed_port,
             controller_port,

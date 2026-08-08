@@ -6,7 +6,12 @@ import { useSyncExternalStore } from 'react'
  */
 
 export const TONO_COLORS = {
+  /** Primary brand blue — matches TO monogram deep end. */
   accent: '#4B6EFF',
+  /** Soft violet used for secondary brand glows (TO mid gradient). */
+  accentSoft: '#7B5CFF',
+  /** Warm peach highlight from the TO monogram sunset end. */
+  accentWarm: '#FFB07A',
   connected: '#2ED573',
   latencyGood: '#30D158',
   connecting: '#FFD60A',

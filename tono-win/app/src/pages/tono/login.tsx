@@ -12,6 +12,7 @@ import {
   tonoSignInVerify,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { TONO_COLORS, TONO_PAGE_LAYOUT, tonoText } from '@/tono-ui/theme'
 
 const RESEND_COUNTDOWN = 60
@@ -20,27 +21,6 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
-
-const ShieldIcon = ({
-  size = 42,
-  color = TONO_COLORS.accent,
-}: {
-  size?: number
-  color?: string
-}) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-    <path
-      d="M12 2L4 5.5v5.6c0 4.9 3.4 9.5 8 10.4 4.6-.9 8-5.5 8-10.4V5.5L12 2z"
-      stroke={color}
-      strokeWidth="1.6"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M12 8.5a3 3 0 0 1 3 3c0 1.2-.7 2.2-1.6 2.7L14 17h-4l.6-2.8A3 3 0 0 1 12 8.5z"
-      fill={color}
-    />
-  </svg>
-)
 
 const LoginPage = () => {
   const { t } = useTranslation()
@@ -246,7 +226,7 @@ const LoginPage = () => {
           }}
         >
           {internetRecovery}
-          <ShieldIcon color={TONO_COLORS.error} />
+          <TonoLogo connected={false} size={56} />
           <h1 className="tono-page-title" style={{ color: text.primary }}>
             {t('tono.login.suspended.title')}
           </h1>
@@ -336,7 +316,7 @@ const LoginPage = () => {
             textAlign: 'center',
           }}
         >
-          <ShieldIcon />
+          <TonoLogo connected={false} size={64} />
           <h1
             style={{
               margin: 0,
@@ -347,7 +327,7 @@ const LoginPage = () => {
           >
             {t('tono.login.welcome')}
           </h1>
-          <p style={{ margin: 0, fontSize: 13, color: text.secondary }}>
+          <p style={{ margin: 0, fontSize: 13, color: text.secondary, maxWidth: 340, lineHeight: 1.5 }}>
             {t('tono.login.intro')}
           </p>
         </div>

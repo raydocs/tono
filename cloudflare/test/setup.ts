@@ -19,6 +19,10 @@ beforeAll(async () => {
 // based on execution order.
 beforeEach(async () => {
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_activation').run();
+  await env.DB.prepare('DELETE FROM operations_catalog_revision_metadata').run();
+  await env.DB.prepare('DELETE FROM operations_deployments').run();
+  await env.DB.prepare('DELETE FROM operations_logical_nodes').run();
+  await env.DB.prepare('DELETE FROM operations_servers').run();
   await env.DB.prepare('DELETE FROM device_actions').run();
   await env.DB.prepare('DELETE FROM diagnostics_reports').run();
   await env.DB.prepare('DELETE FROM sessions').run();
@@ -28,6 +32,9 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM auth_challenges').run();
   await env.DB.prepare('DELETE FROM auth_identities').run();
   await env.DB.prepare('DELETE FROM invitations').run();
+  await env.DB.prepare('DELETE FROM user_home_bindings').run();
+  await env.DB.prepare('DELETE FROM home_exits').run();
+  await env.DB.prepare('DELETE FROM signup_allowlist').run();
   await env.DB.prepare('DELETE FROM managed_exit_catalog').run();
   await env.DB.prepare('DELETE FROM managed_traffic_policy').run();
   await env.DB.prepare('DELETE FROM users').run();

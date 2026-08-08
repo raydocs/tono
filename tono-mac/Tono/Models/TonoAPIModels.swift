@@ -89,11 +89,21 @@ nonisolated struct TonoMeResponse: Codable, Sendable { let user: TonoUser }
 nonisolated struct TonoDevicesResponse: Codable, Sendable { let devices: [TonoDevice] }
 nonisolated struct TonoEnrollmentResponse: Codable, Sendable { let enrollment: TonoEnrollment }
 nonisolated struct TonoConfirmResponse: Codable, Sendable { let device: TonoDevice }
+/// Optional control-plane routing pins attached to the exit catalog.
+/// `homeProxy` names the subscriber's bound home-broadband exit (Claude
+/// traffic is split onto it); `defaultProxy` names the administrator-pinned
+/// default VPS exit. Both refer to ordinary validated catalog node names.
+/// Absent for subscribers without a home binding.
+nonisolated struct TonoExitCatalogRouting: Codable, Sendable, Equatable {
+    let homeProxy: String?
+    let defaultProxy: String?
+}
 nonisolated struct TonoExitCatalogResponse: Codable, Sendable, Equatable {
     let revision: Int
     let yaml: String
     let sha256: String
     let updatedAt: Int?
+    let routing: TonoExitCatalogRouting?
 }
 nonisolated struct TonoTrafficPolicyResponse: Codable, Sendable, Equatable {
     let revision: Int

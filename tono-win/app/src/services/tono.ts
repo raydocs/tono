@@ -101,6 +101,10 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     key: 'tono.dashboard.errors.releaseReconciling',
   },
   { prefix: 'TONO_SERVICE_TOO_OLD', key: 'tono.dashboard.errors.serviceTooOld' },
+  {
+    prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
+    key: 'tono.dashboard.errors.nodeUnreachable',
+  },
   // Diagnostics upload (`diagnostics_upload_error` in tono/commands.rs).
   {
     prefix: 'TONO_DIAG_SIGNED_OUT',
@@ -159,6 +163,16 @@ export const connectRejectionNeedsServerChoice = (error: unknown): boolean => {
     raw.includes('pick a server') ||
     raw.includes('not in the catalog') ||
     raw.includes('catalog is not available')
+  )
+}
+
+/** True when the failure is likely a blocked/dead exit the user should switch. */
+export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  return (
+    raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
+    raw.toLowerCase().includes('node or core unreachable') ||
+    raw.toLowerCase().includes('network blocked')
   )
 }
 

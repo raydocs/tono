@@ -14,6 +14,7 @@ import {
   verifyOidcIdToken,
   type OidcProvider,
 } from './oidc';
+import { AccessVerificationError, verifyAccessRequest } from './access';
 
 export interface Env {
   DB: D1Database;
@@ -51,6 +52,9 @@ export interface Env {
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_DAY?: string;
   DIAGNOSTICS_RETENTION_SECONDS?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+  ACCESS_ADMIN_EMAILS?: string;
 }
 
 type Row = Record<string, any>;
@@ -376,7 +380,189 @@ function managedCatalogYAML(value: unknown): string {
   return yaml;
 }
 
-async function publicManagedCatalog(e: Env) {
+/** Extract the Clash proxy `name` from one list-item block under `proxies:`. */
+function catalogProxyName(block: string): string | null {
+  for (const line of block.split(/\r?\n/)) {
+    const match = line.match(
+      /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#]+))\s*(?:#.*)?$/,
+    );
+    if (!match) continue;
+    const raw = match[1] ?? match[2] ?? match[3] ?? '';
+    return raw.replace(/\\(["'\\])/g, '$1');
+  }
+  return null;
+}
+
+/**
+ * Split a managed catalog into `proxies:` list items without a full YAML parser.
+ * Only top-level dash items under `proxies:` are treated as nodes; other document
+ * keys after the list are preserved in the suffix.
+ */
+function splitManagedCatalogProxies(yaml: string): {
+  prefix: string;
+  items: Array<{ name: string; block: string }>;
+  suffix: string;
+} {
+  const normalized = yaml.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let proxiesIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^proxies\s*:\s*(?:#.*)?$/.test(lines[i]) || /^proxies\s*:\s*\[\s*\]\s*(?:#.*)?$/.test(lines[i])) {
+      proxiesIdx = i;
+      break;
+    }
+  }
+  if (proxiesIdx < 0) {
+    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog is missing a proxies list');
+  }
+  if (/^proxies\s*:\s*\[\s*\]\s*(?:#.*)?$/.test(lines[proxiesIdx])) {
+    return {
+      prefix: `${lines.slice(0, proxiesIdx + 1).join('\n')}\n`,
+      items: [],
+      suffix: lines.slice(proxiesIdx + 1).join('\n'),
+    };
+  }
+
+  let itemIndent: number | null = null;
+  const itemStarts: number[] = [];
+  let listEnd = lines.length;
+  for (let i = proxiesIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '' || /^\s*#/.test(line)) continue;
+    const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+    if (indent === 0 && !line.trimStart().startsWith('-')) {
+      listEnd = i;
+      break;
+    }
+    if (/^\s*-\s+/.test(line)) {
+      if (itemIndent === null) itemIndent = indent;
+      if (indent === itemIndent) itemStarts.push(i);
+    }
+  }
+
+  if (itemStarts.length === 0) {
+    return {
+      prefix: lines.slice(0, proxiesIdx + 1).join('\n') + '\n',
+      items: [],
+      suffix: lines.slice(listEnd).join('\n'),
+    };
+  }
+
+  const items: Array<{ name: string; block: string }> = [];
+  for (let n = 0; n < itemStarts.length; n++) {
+    const start = itemStarts[n];
+    const end = n + 1 < itemStarts.length ? itemStarts[n + 1] : listEnd;
+    const block = lines.slice(start, end).join('\n');
+    const name = catalogProxyName(block);
+    if (!name) {
+      throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog has an unnamed proxy entry');
+    }
+    items.push({ name, block });
+  }
+
+  return {
+    prefix: lines.slice(0, proxiesIdx + 1).join('\n') + '\n',
+    items,
+    suffix: lines.slice(listEnd).join('\n'),
+  };
+}
+
+/**
+ * Shared proxies stay for every authenticated user. Active home-exit proxy names
+ * are withheld unless the user is bound to that exact home exit.
+ */
+function filterCatalogYamlForUser(
+  yaml: string,
+  restrictedHomeNames: Set<string>,
+  allowedHomeNames: Set<string>,
+): string {
+  if (restrictedHomeNames.size === 0) return yaml;
+  const { prefix, items, suffix } = splitManagedCatalogProxies(yaml);
+  if (items.length === 0) return yaml;
+  const kept = items.filter(
+    (item) => !restrictedHomeNames.has(item.name) || allowedHomeNames.has(item.name),
+  );
+  if (kept.length === items.length) return yaml;
+  if (kept.length === 0) {
+    const empty = 'proxies: []\n';
+    return suffix.trim() ? `${empty}${suffix.startsWith('\n') ? suffix.slice(1) : suffix}` : empty;
+  }
+  const body = kept.map((item) => item.block.replace(/\s+$/, '')).join('\n') + '\n';
+  const joined = `${prefix}${body}${suffix}`;
+  return joined.endsWith('\n') ? joined : `${joined}\n`;
+}
+
+function optionalIpv4(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const address = str(value, field, 7, 45).trim();
+  const parts = address.split('.');
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => {
+      if (!/^\d{1,3}$/.test(part)) return true;
+      const n = Number(part);
+      return n > 255 || (part.length > 1 && part.startsWith('0'));
+    })
+  ) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${field}`);
+  }
+  return address;
+}
+
+function proxyNameField(value: unknown): string {
+  const name = str(value, 'proxyName', 1, 200).trim();
+  if (!name || /[\r\n\0]/.test(name)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid proxyName');
+  }
+  return name;
+}
+
+async function defaultProxyNameField(e: Env, value: unknown): Promise<string | null> {
+  if (value === undefined || value === null || value === '') return null;
+  const name = str(value, 'defaultProxyName', 1, 200);
+  const clash = await e.DB.prepare(
+    'SELECT 1 FROM home_exits WHERE proxy_name = ?',
+  ).bind(name).first<Row>();
+  if (clash) {
+    throw new ApiError(400, 'INVALID_DEFAULT_PROXY', 'defaultProxyName must not match any home exit proxyName');
+  }
+  return name;
+}
+
+function publicHomeExit(row: Row) {
+  return {
+    id: String(row.id),
+    proxyName: String(row.proxy_name),
+    displayName: String(row.display_name),
+    egressIpv4: row.egress_ipv4 == null ? undefined : String(row.egress_ipv4),
+    status: String(row.status),
+    notes: row.notes == null || row.notes === '' ? undefined : String(row.notes),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function publicHomeBinding(row: Row) {
+  return {
+    userId: String(row.user_id),
+    email: row.email == null ? undefined : String(row.email),
+    homeExitId: String(row.home_exit_id),
+    proxyName: String(row.proxy_name),
+    displayName: String(row.display_name),
+    egressIpv4: row.egress_ipv4 == null ? undefined : String(row.egress_ipv4),
+    defaultProxyName: row.default_proxy_name == null || row.default_proxy_name === ''
+      ? undefined
+      : String(row.default_proxy_name),
+    homeStatus: String(row.home_status ?? row.status),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+async function publicManagedCatalog(
+  e: Env,
+  options?: { userId?: string; filterHomeExits?: boolean },
+) {
   const row = await e.DB.prepare(
     'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
   ).first<Row>();
@@ -403,11 +589,40 @@ async function publicManagedCatalog(e: Env) {
   if (digest !== row.content_sha256) {
     throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog failed integrity validation');
   }
+
+  let served = yaml;
+  let routing: { homeProxy: string; defaultProxy?: string } | undefined;
+  if (options?.filterHomeExits && options.userId) {
+    const homes = await e.DB.prepare(
+      "SELECT proxy_name FROM home_exits WHERE status = 'active'",
+    ).all<Row>();
+    const restricted = new Set(homes.results.map((item) => String(item.proxy_name)));
+    if (restricted.size > 0) {
+      const binding = await e.DB.prepare(
+        `SELECT home_exits.proxy_name, user_home_bindings.default_proxy_name
+         FROM user_home_bindings
+         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+         WHERE user_home_bindings.user_id = ?
+           AND home_exits.status = 'active'`,
+      ).bind(options.userId).first<Row>();
+      const allowed = new Set<string>();
+      if (binding) {
+        allowed.add(String(binding.proxy_name));
+        routing = { homeProxy: String(binding.proxy_name) };
+        if (binding.default_proxy_name != null && binding.default_proxy_name !== '') {
+          routing.defaultProxy = String(binding.default_proxy_name);
+        }
+      }
+      served = filterCatalogYamlForUser(yaml, restricted, allowed);
+    }
+  }
+
   return {
     revision: Number(row.revision),
-    yaml,
-    sha256: digest,
+    yaml: served,
+    sha256: served === yaml ? digest : await sha256(served),
     updatedAt: Number(row.updated_at),
+    ...(routing ? { routing } : {}),
   };
 }
 
@@ -587,6 +802,198 @@ async function privileged(req: Request, expected: string) {
   if (difference !== 0) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Invalid token');
   }
+}
+
+async function operationsAdmin(req: Request, e: Env) {
+  try {
+    return await verifyAccessRequest(req, {
+      teamDomain: e.ACCESS_TEAM_DOMAIN,
+      audience: e.ACCESS_AUD,
+      adminEmails: e.ACCESS_ADMIN_EMAILS,
+    });
+  } catch (verificationError) {
+    if (verificationError instanceof AccessVerificationError) {
+      if (verificationError.failure === 'misconfigured') {
+        throw new ApiError(503, 'ACCESS_MISCONFIGURED', 'Operations access is not configured');
+      }
+      if (verificationError.failure === 'unavailable') {
+        throw new ApiError(503, 'ACCESS_UNAVAILABLE', 'Operations access verification is unavailable');
+      }
+      if (verificationError.failure === 'forbidden') {
+        throw new ApiError(403, 'ACCESS_FORBIDDEN', 'Administrator access is required');
+      }
+    }
+    throw new ApiError(401, 'ACCESS_UNAUTHORIZED', 'Cloudflare Access authentication is required');
+  }
+}
+
+const optionalText = (value: unknown) => value === null || value === undefined ? null : String(value);
+const optionalNumber = (value: unknown) => value === null || value === undefined ? null : Number(value);
+
+async function operationsDashboard(e: Env) {
+  const [users, devices, servers, nodes, deployments, catalog] = await Promise.all([
+    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM users").first<Row>(),
+    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM devices").first<Row>(),
+    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_servers").first<Row>(),
+    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_logical_nodes").first<Row>(),
+    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_deployments").first<Row>(),
+    e.DB.prepare('SELECT revision, updated_at FROM managed_exit_catalog WHERE singleton_id = 1').first<Row>(),
+  ]);
+  const counts = (row: Row | null) => ({ total: Number(row?.total ?? 0), active: Number(row?.active ?? 0) });
+  return {
+    users: counts(users),
+    devices: counts(devices),
+    servers: counts(servers),
+    logicalNodes: counts(nodes),
+    deployments: counts(deployments),
+    catalog: catalog
+      ? { revision: Number(catalog.revision), updatedAt: Number(catalog.updated_at) }
+      : { revision: 0, updatedAt: null },
+  };
+}
+
+async function operationsServers(e: Env) {
+  const rows = await e.DB.prepare(
+    `SELECT s.id, s.display_name, s.region_code, s.provider, s.status, s.created_at, s.updated_at,
+            d.release_version latest_release_version, d.status latest_deployment_status,
+            d.deployed_at latest_deployed_at
+     FROM operations_servers s
+     LEFT JOIN operations_deployments d ON d.id = (
+       SELECT latest.id FROM operations_deployments latest
+       WHERE latest.server_id = s.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
+     )
+     ORDER BY s.display_name, s.id`,
+  ).all<Row>();
+  return rows.results.map((row) => ({
+    id: String(row.id),
+    displayName: String(row.display_name),
+    regionCode: String(row.region_code),
+    provider: optionalText(row.provider),
+    status: String(row.status),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    latestDeployment: row.latest_release_version === null || row.latest_release_version === undefined
+      ? null
+      : {
+        releaseVersion: String(row.latest_release_version),
+        status: String(row.latest_deployment_status),
+        deployedAt: optionalNumber(row.latest_deployed_at),
+      },
+  }));
+}
+
+async function operationsNodes(e: Env) {
+  const rows = await e.DB.prepare(
+    `SELECT n.id, n.server_id, n.display_name, n.region_code, n.status, n.created_at, n.updated_at,
+            s.display_name server_display_name
+     FROM operations_logical_nodes n
+     JOIN operations_servers s ON s.id = n.server_id
+     ORDER BY n.display_name, n.id`,
+  ).all<Row>();
+  return rows.results.map((row) => ({
+    id: String(row.id),
+    serverId: String(row.server_id),
+    serverDisplayName: String(row.server_display_name),
+    displayName: String(row.display_name),
+    regionCode: String(row.region_code),
+    status: String(row.status),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  }));
+}
+
+async function operationsDeployments(e: Env) {
+  const rows = await e.DB.prepare(
+    `SELECT d.id, d.server_id, d.logical_node_id, d.environment, d.release_version, d.status,
+            d.deployed_at, d.created_at, s.display_name server_display_name,
+            n.display_name logical_node_display_name
+     FROM operations_deployments d
+     JOIN operations_servers s ON s.id = d.server_id
+     LEFT JOIN operations_logical_nodes n ON n.id = d.logical_node_id
+     ORDER BY d.created_at DESC, d.id DESC LIMIT 250`,
+  ).all<Row>();
+  return rows.results.map((row) => ({
+    id: String(row.id),
+    serverId: String(row.server_id),
+    serverDisplayName: String(row.server_display_name),
+    logicalNodeId: optionalText(row.logical_node_id),
+    logicalNodeDisplayName: optionalText(row.logical_node_display_name),
+    environment: String(row.environment),
+    releaseVersion: String(row.release_version),
+    status: String(row.status),
+    deployedAt: optionalNumber(row.deployed_at),
+    createdAt: Number(row.created_at),
+  }));
+}
+
+async function operationsUsers(e: Env) {
+  const rows = await e.DB.prepare(
+    `SELECT
+       users.*,
+       home_exits.id AS home_exit_id,
+       home_exits.proxy_name AS home_proxy_name,
+       home_exits.display_name AS home_display_name,
+       home_exits.egress_ipv4 AS home_egress_ipv4,
+       home_exits.status AS home_status,
+       user_home_bindings.default_proxy_name AS home_default_proxy_name
+     FROM users
+     LEFT JOIN user_home_bindings ON user_home_bindings.user_id = users.id
+     LEFT JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+     ORDER BY users.created_at DESC
+     LIMIT 2000`,
+  ).all<Row>();
+  return rows.results.map((row) => ({
+    ...publicUser(row),
+    homeBinding: row.home_exit_id
+      ? {
+        homeExitId: String(row.home_exit_id),
+        proxyName: String(row.home_proxy_name),
+        displayName: String(row.home_display_name),
+        egressIpv4: row.home_egress_ipv4 == null ? undefined : String(row.home_egress_ipv4),
+        defaultProxyName: row.home_default_proxy_name == null || row.home_default_proxy_name === ''
+          ? undefined
+          : String(row.home_default_proxy_name),
+        status: String(row.home_status),
+      }
+      : null,
+  }));
+}
+
+async function operationsCatalogRevisions(e: Env) {
+  const [metadata, current] = await Promise.all([
+    e.DB.prepare(
+      `SELECT revision, content_sha256, published_at, server_count, logical_node_count, deployment_count
+       FROM operations_catalog_revision_metadata ORDER BY revision DESC LIMIT 250`,
+    ).all<Row>(),
+    e.DB.prepare(
+      'SELECT revision, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
+    ).first<Row>(),
+  ]);
+  const revisions = metadata.results.map((row) => ({
+    revision: Number(row.revision),
+    sha256: Number(row.revision) === Number(current?.revision ?? 0)
+      ? String(current!.content_sha256)
+      : String(row.content_sha256),
+    publishedAt: Number(row.revision) === Number(current?.revision ?? 0)
+      ? Number(current!.updated_at)
+      : Number(row.published_at),
+    serverCount: Number(row.server_count),
+    logicalNodeCount: Number(row.logical_node_count),
+    deploymentCount: Number(row.deployment_count),
+    current: Number(row.revision) === Number(current?.revision ?? 0),
+  }));
+  if (current && !revisions.some((row) => row.revision === Number(current.revision))) {
+    revisions.unshift({
+      revision: Number(current.revision),
+      sha256: String(current.content_sha256),
+      publishedAt: Number(current.updated_at),
+      serverCount: 0,
+      logicalNodeCount: 0,
+      deploymentCount: 0,
+      current: true,
+    });
+  }
+  return revisions;
 }
 
 const publicUser = (u: Row) => ({
@@ -2497,8 +2904,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   }
 
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
-    await auth(req, e);
-    return Response.json(await publicManagedCatalog(e));
+    const a = await auth(req, e);
+    return Response.json(await publicManagedCatalog(e, { userId: a.userId, filterHomeExits: true }));
   }
 
   if (p === '/api/v1/traffic-policy' && m === 'GET') {
@@ -2671,6 +3078,301 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json({ device });
   }
 
+  if (p.startsWith('/api/v1/ops/')) {
+    await operationsAdmin(req, e);
+
+    // --- Product ops reads (Cloudflare Access) ---
+    if (m === 'GET') {
+      if (p === '/api/v1/ops/dashboard') {
+        return Response.json({ dashboard: await operationsDashboard(e) });
+      }
+      if (p === '/api/v1/ops/servers') {
+        return Response.json({ servers: await operationsServers(e) });
+      }
+      if (p === '/api/v1/ops/nodes') {
+        return Response.json({ nodes: await operationsNodes(e) });
+      }
+      if (p === '/api/v1/ops/deployments') {
+        return Response.json({ deployments: await operationsDeployments(e) });
+      }
+      if (p === '/api/v1/ops/catalog-revisions') {
+        return Response.json({ revisions: await operationsCatalogRevisions(e) });
+      }
+      if (p === '/api/v1/ops/users') {
+        return Response.json({ users: await operationsUsers(e) });
+      }
+      if (p === '/api/v1/ops/signup-allowlist') {
+        const q = await e.DB.prepare(
+          'SELECT email, created_at FROM signup_allowlist ORDER BY created_at DESC, email ASC',
+        ).all<Row>();
+        return Response.json({
+          entries: q.results.map((entry) => ({
+            email: String(entry.email),
+            createdAt: Number(entry.created_at),
+          })),
+        });
+      }
+      if (p === '/api/v1/ops/home-exits') {
+        const q = await e.DB.prepare(
+          'SELECT * FROM home_exits ORDER BY status ASC, display_name ASC, created_at ASC',
+        ).all<Row>();
+        return Response.json({ homeExits: q.results.map(publicHomeExit) });
+      }
+      if (p === '/api/v1/ops/home-bindings') {
+        const q = await e.DB.prepare(
+          `SELECT
+             user_home_bindings.user_id,
+             users.email,
+             user_home_bindings.home_exit_id,
+             user_home_bindings.default_proxy_name,
+             home_exits.proxy_name,
+             home_exits.display_name,
+             home_exits.egress_ipv4,
+             home_exits.status AS home_status,
+             user_home_bindings.created_at,
+             user_home_bindings.updated_at
+           FROM user_home_bindings
+           JOIN users ON users.id = user_home_bindings.user_id
+           JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+           ORDER BY users.email ASC`,
+        ).all<Row>();
+        return Response.json({ bindings: q.results.map(publicHomeBinding) });
+      }
+      if (p === '/api/v1/ops/exit-catalog') {
+        // Ops console receives the full plaintext catalog, unfiltered.
+        return Response.json(await publicManagedCatalog(e));
+      }
+      mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
+      if (mt) {
+        const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+        if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+        const row = await e.DB.prepare(
+          `SELECT
+             user_home_bindings.user_id,
+             users.email,
+             user_home_bindings.home_exit_id,
+             user_home_bindings.default_proxy_name,
+             home_exits.proxy_name,
+             home_exits.display_name,
+             home_exits.egress_ipv4,
+             home_exits.status AS home_status,
+             user_home_bindings.created_at,
+             user_home_bindings.updated_at
+           FROM user_home_bindings
+           JOIN users ON users.id = user_home_bindings.user_id
+           JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+           WHERE user_home_bindings.user_id = ?`,
+        ).bind(mt[1]).first<Row>();
+        return Response.json({ binding: row ? publicHomeBinding(row) : null });
+      }
+      throw new ApiError(404, 'NOT_FOUND', 'Route not found');
+    }
+
+    // --- Product ops writes (same Access boundary; no ADMIN_API_TOKEN in browser) ---
+    if (p === '/api/v1/ops/signup-allowlist' && m === 'POST') {
+      const b = await body(req, 4 * 1024);
+      const address = email(b.email);
+      const createdAt = now();
+      const inserted = await e.DB.prepare(
+        'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+      ).bind(address, createdAt).run();
+      const entry = await e.DB.prepare(
+        'SELECT created_at FROM signup_allowlist WHERE email = ?',
+      ).bind(address).first<Row>();
+      return Response.json(
+        {
+          email: address,
+          createdAt: Number(entry?.created_at ?? createdAt),
+          created: inserted.meta.changes === 1,
+        },
+        { status: inserted.meta.changes === 1 ? 201 : 200 },
+      );
+    }
+    if (p === '/api/v1/ops/signup-allowlist' && m === 'DELETE') {
+      const b = await body(req, 4 * 1024);
+      await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(email(b.email)).run();
+      return new Response(null, { status: 204 });
+    }
+    if (p === '/api/v1/ops/home-exits' && m === 'POST') {
+      const b = await body(req, 8 * 1024);
+      const proxyName = proxyNameField(b.proxyName);
+      const displayName = str(b.displayName, 'displayName', 1, 200).trim();
+      const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
+      const notes = b.notes === undefined || b.notes === null || b.notes === ''
+        ? null
+        : str(b.notes, 'notes', 1, 1000);
+      const status = b.status === undefined ? 'active' : str(b.status, 'status', 1, 20);
+      if (!['active', 'disabled', 'retired'].includes(status)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+      }
+      const homeId = id();
+      const t = now();
+      try {
+        await e.DB.prepare(
+          `INSERT INTO home_exits(
+             id, proxy_name, display_name, egress_ipv4, status, notes, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(homeId, proxyName, displayName, egressIpv4, status, notes, t, t).run();
+      } catch {
+        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+      }
+      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
+      return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
+    }
+    mt = p.match(/^\/api\/v1\/ops\/home-exits\/([^/]+)$/);
+    if (mt && m === 'PATCH') {
+      const b = await body(req, 8 * 1024);
+      const existing = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+      if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      const proxyName = b.proxyName === undefined ? String(existing.proxy_name) : proxyNameField(b.proxyName);
+      const displayName = b.displayName === undefined
+        ? String(existing.display_name)
+        : str(b.displayName, 'displayName', 1, 200).trim();
+      const egressIpv4 = b.egressIpv4 === undefined
+        ? (existing.egress_ipv4 == null ? null : String(existing.egress_ipv4))
+        : optionalIpv4(b.egressIpv4, 'egressIpv4');
+      const notes = b.notes === undefined
+        ? (existing.notes == null ? null : String(existing.notes))
+        : (b.notes === null || b.notes === '' ? null : str(b.notes, 'notes', 1, 1000));
+      const status = b.status === undefined ? String(existing.status) : str(b.status, 'status', 1, 20);
+      if (!['active', 'disabled', 'retired'].includes(status)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+      }
+      const t = now();
+      try {
+        const updated = await e.DB.prepare(
+          `UPDATE home_exits
+           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, status = ?, notes = ?, updated_at = ?
+           WHERE id = ?`,
+        ).bind(proxyName, displayName, egressIpv4, status, notes, t, mt[1]).run();
+        if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+      }
+      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+      return Response.json({ homeExit: publicHomeExit(row!) });
+    }
+    if (mt && m === 'DELETE') {
+      const bound = await e.DB.prepare(
+        'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
+      ).bind(mt[1]).first<Row>();
+      if (bound) {
+        throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
+      }
+      const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
+      if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      return new Response(null, { status: 204 });
+    }
+    mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
+    if (mt && m === 'PUT') {
+      const b = await body(req, 8 * 1024);
+      const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      let homeExitId: string | undefined;
+      if (b.homeExitId !== undefined) {
+        homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
+      } else if (b.proxyName !== undefined) {
+        const byName = await e.DB.prepare(
+          'SELECT id FROM home_exits WHERE proxy_name = ?',
+        ).bind(proxyNameField(b.proxyName)).first<Row>();
+        if (!byName) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+        homeExitId = String(byName.id);
+      } else {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'homeExitId or proxyName is required');
+      }
+      const home = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeExitId).first<Row>();
+      if (!home) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      if (String(home.status) !== 'active') {
+        throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
+      }
+      const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
+      const t = now();
+      const existing = await e.DB.prepare(
+        'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
+      ).bind(mt[1]).first<Row>();
+      if (existing) {
+        await e.DB.prepare(
+          `UPDATE user_home_bindings SET home_exit_id = ?, default_proxy_name = ?, updated_at = ? WHERE user_id = ?`,
+        ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
+      } else {
+        await e.DB.prepare(
+          `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
+           VALUES(?, ?, ?, ?, ?)`,
+        ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
+      }
+      const row = await e.DB.prepare(
+        `SELECT
+           user_home_bindings.user_id,
+           users.email,
+           user_home_bindings.home_exit_id,
+           user_home_bindings.default_proxy_name,
+           home_exits.proxy_name,
+           home_exits.display_name,
+           home_exits.egress_ipv4,
+           home_exits.status AS home_status,
+           user_home_bindings.created_at,
+           user_home_bindings.updated_at
+         FROM user_home_bindings
+         JOIN users ON users.id = user_home_bindings.user_id
+         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+         WHERE user_home_bindings.user_id = ?`,
+      ).bind(mt[1]).first<Row>();
+      return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
+    }
+    if (mt && m === 'DELETE') {
+      const deleted = await e.DB.prepare(
+        'DELETE FROM user_home_bindings WHERE user_id = ?',
+      ).bind(mt[1]).run();
+      if (!deleted.meta.changes) {
+        const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+        if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      }
+      return new Response(null, { status: 204 });
+    }
+    mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)$/);
+    if (mt && m === 'PATCH') {
+      const b = await body(req, 16 * 1024);
+      const status = b.status;
+      if (status !== undefined && !['active', 'disabled'].includes(status)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+      }
+      if (status === undefined) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'status is required');
+      }
+      if (status === 'active') {
+        const residual = await e.DB.prepare(
+          `SELECT
+             users.status current_status,
+             (SELECT COUNT(*) FROM devices
+              WHERE user_id = ? AND status IN ('active', 'pending')) live_devices,
+             (SELECT COUNT(*) FROM revocation_jobs
+              JOIN devices ON devices.id = revocation_jobs.device_id
+              WHERE devices.user_id = ? AND revocation_jobs.completed_at IS NULL) pending_jobs
+           FROM users WHERE users.id = ?`,
+        ).bind(mt[1], mt[1], mt[1]).first<Row>();
+        if (!residual) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+        if (
+          residual.current_status !== 'active' &&
+          ((residual.live_devices ?? 0) > 0 || (residual.pending_jobs ?? 0) > 0)
+        ) {
+          throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
+        }
+      }
+      const updated = await e.DB.prepare(
+        `UPDATE users SET status = ?, updated_at = ? WHERE id = ?`,
+      ).bind(status, now(), mt[1]).run();
+      if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      await enforceUser(e, mt[1]);
+      return Response.json({ ok: true });
+    }
+
+    return new Response(null, {
+      status: 405,
+      headers: { allow: 'GET, POST, PUT, PATCH, DELETE' },
+    });
+  }
+
   if (p.startsWith('/api/v1/admin/')) {
     await privileged(req, e.ADMIN_API_TOKEN);
     if (p === '/api/v1/admin/device-actions' && m === 'POST') {
@@ -2747,7 +3449,195 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       return Response.json({ revision, json, sha256: digest, updatedAt: t });
     }
     if (p === '/api/v1/admin/exit-catalog' && m === 'GET') {
+      // Admin always receives the full encrypted catalog authority, unfiltered.
       return Response.json(await publicManagedCatalog(e));
+    }
+    if (p === '/api/v1/admin/home-exits' && m === 'GET') {
+      const q = await e.DB.prepare(
+        'SELECT * FROM home_exits ORDER BY status ASC, display_name ASC, created_at ASC',
+      ).all<Row>();
+      return Response.json({ homeExits: q.results.map(publicHomeExit) });
+    }
+    if (p === '/api/v1/admin/home-exits' && m === 'POST') {
+      const b = await body(req, 8 * 1024);
+      const proxyName = proxyNameField(b.proxyName);
+      const displayName = str(b.displayName, 'displayName', 1, 200).trim();
+      const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
+      const notes = b.notes === undefined || b.notes === null || b.notes === ''
+        ? null
+        : str(b.notes, 'notes', 1, 1000);
+      const status = b.status === undefined ? 'active' : str(b.status, 'status', 1, 20);
+      if (!['active', 'disabled', 'retired'].includes(status)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+      }
+      const homeId = id();
+      const t = now();
+      try {
+        await e.DB.prepare(
+          `INSERT INTO home_exits(
+             id, proxy_name, display_name, egress_ipv4, status, notes, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(homeId, proxyName, displayName, egressIpv4, status, notes, t, t).run();
+      } catch {
+        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+      }
+      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
+      return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
+    }
+    mt = p.match(/^\/api\/v1\/admin\/home-exits\/([^/]+)$/);
+    if (mt && m === 'PATCH') {
+      const b = await body(req, 8 * 1024);
+      const existing = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+      if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      const proxyName = b.proxyName === undefined ? String(existing.proxy_name) : proxyNameField(b.proxyName);
+      const displayName = b.displayName === undefined
+        ? String(existing.display_name)
+        : str(b.displayName, 'displayName', 1, 200).trim();
+      const egressIpv4 = b.egressIpv4 === undefined
+        ? (existing.egress_ipv4 == null ? null : String(existing.egress_ipv4))
+        : optionalIpv4(b.egressIpv4, 'egressIpv4');
+      const notes = b.notes === undefined
+        ? (existing.notes == null ? null : String(existing.notes))
+        : (b.notes === null || b.notes === '' ? null : str(b.notes, 'notes', 1, 1000));
+      const status = b.status === undefined ? String(existing.status) : str(b.status, 'status', 1, 20);
+      if (!['active', 'disabled', 'retired'].includes(status)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+      }
+      const t = now();
+      try {
+        const updated = await e.DB.prepare(
+          `UPDATE home_exits
+           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, status = ?, notes = ?, updated_at = ?
+           WHERE id = ?`,
+        ).bind(proxyName, displayName, egressIpv4, status, notes, t, mt[1]).run();
+        if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+      }
+      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+      return Response.json({ homeExit: publicHomeExit(row!) });
+    }
+    if (mt && m === 'DELETE') {
+      const bound = await e.DB.prepare(
+        'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
+      ).bind(mt[1]).first<Row>();
+      if (bound) {
+        throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
+      }
+      const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
+      if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      return new Response(null, { status: 204 });
+    }
+    if (p === '/api/v1/admin/home-bindings' && m === 'GET') {
+      const q = await e.DB.prepare(
+        `SELECT
+           user_home_bindings.user_id,
+           users.email,
+           user_home_bindings.home_exit_id,
+           user_home_bindings.default_proxy_name,
+           home_exits.proxy_name,
+           home_exits.display_name,
+           home_exits.egress_ipv4,
+           home_exits.status AS home_status,
+           user_home_bindings.created_at,
+           user_home_bindings.updated_at
+         FROM user_home_bindings
+         JOIN users ON users.id = user_home_bindings.user_id
+         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+         ORDER BY users.email ASC`,
+      ).all<Row>();
+      return Response.json({ bindings: q.results.map(publicHomeBinding) });
+    }
+    mt = p.match(/^\/api\/v1\/admin\/users\/([^/]+)\/home-binding$/);
+    if (mt && m === 'GET') {
+      const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      const row = await e.DB.prepare(
+        `SELECT
+           user_home_bindings.user_id,
+           users.email,
+           user_home_bindings.home_exit_id,
+           user_home_bindings.default_proxy_name,
+           home_exits.proxy_name,
+           home_exits.display_name,
+           home_exits.egress_ipv4,
+           home_exits.status AS home_status,
+           user_home_bindings.created_at,
+           user_home_bindings.updated_at
+         FROM user_home_bindings
+         JOIN users ON users.id = user_home_bindings.user_id
+         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+         WHERE user_home_bindings.user_id = ?`,
+      ).bind(mt[1]).first<Row>();
+      return Response.json({ binding: row ? publicHomeBinding(row) : null });
+    }
+    if (mt && m === 'PUT') {
+      const b = await body(req, 8 * 1024);
+      const user = await e.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      let homeExitId: string | undefined;
+      if (b.homeExitId !== undefined) {
+        homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
+      } else if (b.proxyName !== undefined) {
+        const byName = await e.DB.prepare(
+          'SELECT id FROM home_exits WHERE proxy_name = ?',
+        ).bind(proxyNameField(b.proxyName)).first<Row>();
+        if (!byName) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+        homeExitId = String(byName.id);
+      } else {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'homeExitId or proxyName is required');
+      }
+      const home = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeExitId).first<Row>();
+      if (!home) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      if (String(home.status) !== 'active') {
+        throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
+      }
+      const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
+      const t = now();
+      const existing = await e.DB.prepare(
+        'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
+      ).bind(mt[1]).first<Row>();
+      if (existing) {
+        await e.DB.prepare(
+          `UPDATE user_home_bindings
+           SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
+           WHERE user_id = ?`,
+        ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
+      } else {
+        await e.DB.prepare(
+          `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
+           VALUES(?, ?, ?, ?, ?)`,
+        ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
+      }
+      const row = await e.DB.prepare(
+        `SELECT
+           user_home_bindings.user_id,
+           users.email,
+           user_home_bindings.home_exit_id,
+           user_home_bindings.default_proxy_name,
+           home_exits.proxy_name,
+           home_exits.display_name,
+           home_exits.egress_ipv4,
+           home_exits.status AS home_status,
+           user_home_bindings.created_at,
+           user_home_bindings.updated_at
+         FROM user_home_bindings
+         JOIN users ON users.id = user_home_bindings.user_id
+         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+         WHERE user_home_bindings.user_id = ?`,
+      ).bind(mt[1]).first<Row>();
+      return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
+    }
+    if (mt && m === 'DELETE') {
+      const deleted = await e.DB.prepare(
+        'DELETE FROM user_home_bindings WHERE user_id = ?',
+      ).bind(mt[1]).run();
+      if (!deleted.meta.changes) {
+        const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+        if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      }
+      return new Response(null, { status: 204 });
     }
     if (p === '/api/v1/admin/exit-catalog' && m === 'PUT') {
       const b = await body(req, 2 * 1024 * 1024);
@@ -3116,12 +4006,19 @@ export default {
     const isReleaseHost = url.hostname.toLowerCase() === 'releases.afk.ccwu.cc';
     const secure = (r: Response, includeCors = true) => {
       const h = new Headers(r.headers);
-      h.set('content-security-policy', "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'none'; object-src 'none'; script-src 'self'; style-src 'self'");
+      const isOpsUi = path === '/ops' || path.startsWith('/ops/');
+      // Ops admin UI may load Inter from Google Fonts (shadcn-admin look).
+      h.set(
+        'content-security-policy',
+        isOpsUi
+          ? "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:"
+          : "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'none'; object-src 'none'; script-src 'self'; style-src 'self'",
+      );
       h.set('permissions-policy', 'camera=(), geolocation=(), microphone=()');
       h.set('referrer-policy', 'no-referrer');
       h.set('x-content-type-options', 'nosniff');
       h.set('x-frame-options', 'DENY');
-      if (path.startsWith('/api/') || path === '/' || path.endsWith('.html')) {
+      if (path.startsWith('/api/') || path === '/' || path === '/ops' || path === '/ops/' || path.endsWith('.html')) {
         h.set('cache-control', 'no-store');
       }
       if (includeCors && origin) {
@@ -3157,7 +4054,8 @@ export default {
     if (origin && origin !== e.ALLOWED_ORIGIN) {
       return secure(error(new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')), false);
     }
-    if (req.method === 'OPTIONS') {
+    const isOperationsPath = path === '/ops' || path.startsWith('/ops/') || path.startsWith('/api/v1/ops/');
+    if (req.method === 'OPTIONS' && !isOperationsPath) {
       return secure(new Response(null, {
         status: 204,
         headers: {
@@ -3168,6 +4066,16 @@ export default {
       }));
     }
     try {
+      if (path === '/ops' || path.startsWith('/ops/')) {
+        await operationsAdmin(req, e);
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          return secure(new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } }));
+        }
+        const assetRequest = path === '/ops'
+          ? new Request(new URL('/ops/', req.url), req)
+          : req;
+        return secure(await e.ASSETS.fetch(assetRequest));
+      }
       return secure(
         path.startsWith('/api/')
           ? await route(req, e, ctx)

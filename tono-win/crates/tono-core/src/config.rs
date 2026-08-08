@@ -21,6 +21,17 @@ pub const DNS_LISTEN: &str = "127.0.0.1:53";
 /// the corresponding DirectPlan rules exist).
 pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
+/// Name of the Claude→home-broadband select group, present only when the
+/// catalog carries a verified `homeProxy` routing directive.
+pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
+/// Claude/Anthropic domains pinned to the home-broadband exit alongside the
+/// two Claude process names when `homeProxy` routing is in force.
+pub const CLAUDE_HOME_DOMAINS: [&str; 4] = [
+    "claude.ai",
+    "claude.com",
+    "anthropic.com",
+    "claudeusercontent.com",
+];
 /// DoH resolvers pinned through the exit group; the `#Tono-Exit` fragment
 /// routes the lookups through the tunnel.
 pub const DOH_NAMESERVERS: [&str; 2] = [
@@ -126,16 +137,23 @@ pub fn build_owned_runtime(
     secret: &str,
     direct: Option<&DirectPlan>,
 ) -> Result<OwnedRuntime, ConfigError> {
-    build_owned_runtime_with_ports(nodes, selected, secret, direct, RuntimePorts::default())
+    build_owned_runtime_with_ports(nodes, selected, secret, direct, None, RuntimePorts::default())
 }
 
 /// Build the owned runtime with listeners chosen for this connection generation. This removes
 /// the fixed 7890/9090 collision without allowing cloud/user configuration to choose a bind.
+///
+/// `home_proxy` is the catalog's verified `homeProxy` routing directive: when it names one of
+/// `nodes`, Claude processes and the Claude/Anthropic domains exit through a dedicated
+/// `Tono-Claude-Home` group holding that node alone, and the node's address joins the TUN
+/// route exclusions so Mihomo's second Reality socket stays out of the tunnel. A name not in
+/// `nodes` (stale caller) degrades to the unsplit runtime instead of failing the connect.
 pub fn build_owned_runtime_with_ports(
     nodes: &[ValidatedNode],
     selected: &str,
     secret: &str,
     direct: Option<&DirectPlan>,
+    home_proxy: Option<&str>,
     ports: RuntimePorts,
 ) -> Result<OwnedRuntime, ConfigError> {
     if ports.controller_port == 0 {
@@ -154,7 +172,13 @@ pub fn build_owned_runtime_with_ports(
         .iter()
         .find(|node| node.name == selected)
         .ok_or_else(|| ConfigError::MissingSelection(selected.to_string()))?;
-    let route_exclusion = format!("{}/32", selected_node.server);
+    let home_node = home_proxy.and_then(|name| nodes.iter().find(|node| node.name == name));
+    let mut route_exclusions = vec![format!("{}/32", selected_node.server)];
+    if let Some(home) = home_node
+        && home.server != selected_node.server
+    {
+        route_exclusions.push(format!("{}/32", home.server));
+    }
 
     if let Some(plan) = direct {
         DirectPlan::validate_physical_interface(&plan.physical_interface)?;
@@ -181,8 +205,9 @@ pub fn build_owned_runtime_with_ports(
         nodes,
         selected,
         secret,
-        &route_exclusion,
+        &route_exclusions,
         direct,
+        home_node,
         ports,
     ))
     .map_err(|err| ConfigError::Node(NodeRejection::Malformed(err.to_string())))?;
@@ -250,8 +275,9 @@ fn runtime_value(
     nodes: &[ValidatedNode],
     selected: &str,
     secret: &str,
-    route_exclusion: &str,
+    route_exclusions: &[String],
     direct: Option<&DirectPlan>,
+    home: Option<&ValidatedNode>,
     ports: RuntimePorts,
 ) -> Value {
     let mut root = Mapping::new();
@@ -334,11 +360,12 @@ fn runtime_value(
     // parity; honored where the core build supports it).
     put(&mut tun, "disable-icmp-forwarding", Value::Bool(true));
     put(&mut tun, "dns-hijack", strings(&["any:53", "tcp://any:53"]));
-    // Keeps Mihomo's own Reality socket out of the tunnel.
+    // Keeps Mihomo's own Reality sockets out of the tunnel: the selected
+    // node's address, plus the home node's when split routing is in force.
     put(
         &mut tun,
         "route-exclude-address",
-        strings(&[route_exclusion]),
+        Value::Sequence(route_exclusions.iter().map(|ip| string(ip)).collect()),
     );
     put(&mut root, "tun", Value::Mapping(tun));
 
@@ -379,6 +406,20 @@ fn runtime_value(
         Value::Sequence(ordered.iter().map(|name| string(name)).collect()),
     );
     groups.push(Value::Mapping(group));
+    if let Some(home) = home {
+        // Claude split routing: a dedicated group holding exactly the bound
+        // home-broadband node, so the Claude rules below cannot follow the
+        // user's Tono-Exit selection.
+        let mut home_group = Mapping::new();
+        put(&mut home_group, "name", string(CLAUDE_HOME_GROUP_NAME));
+        put(&mut home_group, "type", string("select"));
+        put(
+            &mut home_group,
+            "proxies",
+            Value::Sequence(vec![string(&home.name)]),
+        );
+        groups.push(Value::Mapping(home_group));
+    }
     put(&mut root, "proxy-groups", Value::Sequence(groups));
 
     // Loopback, protected Claude processes, exact DIRECT pins, then MATCH.
@@ -386,7 +427,15 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
-    if let Some(plan) = direct {
+    if home.is_some() {
+        // Same slot the bare PROCESS-NAME pins occupy below: ahead of every
+        // DIRECT pin so Claude traffic can never match a WeChat/web rule first.
+        rules.push(format!("PROCESS-NAME,Claude.exe,{CLAUDE_HOME_GROUP_NAME}"));
+        rules.push(format!("PROCESS-NAME,claude.exe,{CLAUDE_HOME_GROUP_NAME}"));
+        for domain in CLAUDE_HOME_DOMAINS {
+            rules.push(format!("DOMAIN-SUFFIX,{domain},{CLAUDE_HOME_GROUP_NAME}"));
+        }
+    } else if let Some(plan) = direct {
         if !plan.tcp_wechat_rules.is_empty()
             || !plan.tcp_web_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
@@ -394,6 +443,8 @@ fn runtime_value(
             rules.push("PROCESS-NAME,Claude.exe,Tono-Exit".to_string());
             rules.push("PROCESS-NAME,claude.exe,Tono-Exit".to_string());
         }
+    }
+    if let Some(plan) = direct {
         for (host, address, port) in &plan.tcp_wechat_rules {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve),(PROCESS-NAME,WeChat.exe)),{DIRECT_GROUP_NAME}"
@@ -505,6 +556,7 @@ reality-opts:
             "JP Reality 02",
             "test-secret",
             None,
+            None,
             RuntimePorts {
                 mixed_port: 0,
                 controller_port: 41_237,
@@ -536,6 +588,7 @@ reality-opts:
                     &three_nodes(),
                     "JP Reality 02",
                     "test-secret",
+                    None,
                     None,
                     ports,
                 ),
@@ -681,6 +734,15 @@ reality-opts:
             build_owned_runtime(&reserved, "Tono-Exit", "s", None).unwrap_err(),
             ConfigError::Node(NodeRejection::DuplicateOrReservedName(
                 "Tono-Exit".to_string()
+            ))
+        );
+        // A forged node named after the Claude home group must be refused
+        // before it can capture the split-routing rules.
+        let reserved = vec![node("Tono-Claude-Home", "1.1.1.1")];
+        assert_eq!(
+            build_owned_runtime(&reserved, "Tono-Claude-Home", "s", None).unwrap_err(),
+            ConfigError::Node(NodeRejection::DuplicateOrReservedName(
+                "Tono-Claude-Home".to_string()
             ))
         );
     }
@@ -981,5 +1043,140 @@ reality-opts:
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert_eq!(rules, RULES);
+    }
+
+    // ---- Claude→home-exit split routing ----
+
+    fn build_with_home(home: Option<&str>) -> OwnedRuntime {
+        build_owned_runtime_with_ports(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            None,
+            home,
+            RuntimePorts::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn no_home_build_is_byte_identical_to_the_plain_build() {
+        assert_eq!(build_with_home(None).yaml(), build().yaml());
+    }
+
+    #[test]
+    fn unknown_home_name_degrades_to_the_unsplit_runtime() {
+        // A stale caller must never produce a group pointing nowhere, and a
+        // control-plane hiccup must not block the whole connect.
+        assert_eq!(build_with_home(Some("No Such Node")).yaml(), build().yaml());
+    }
+
+    #[test]
+    fn home_build_adds_the_dedicated_group_rules_and_route_exclusion() {
+        let value = parsed(&build_with_home(Some("US Reality 01")));
+
+        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0][string("name")].as_str(), Some("Tono-Exit"));
+        let exit_choices: Vec<&str> = groups[0][string("proxies")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap())
+            .collect();
+        assert_eq!(exit_choices, ["JP Reality 02", "US Reality 01", "SG Reality 03"]);
+        assert_eq!(groups[1][string("name")].as_str(), Some("Tono-Claude-Home"));
+        assert_eq!(groups[1][string("type")].as_str(), Some("select"));
+        let home_choices: Vec<&str> = groups[1][string("proxies")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap())
+            .collect();
+        assert_eq!(home_choices, ["US Reality 01"]);
+
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            rules,
+            [
+                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+                "IP-CIDR6,::1/128,DIRECT,no-resolve",
+                "PROCESS-NAME,Claude.exe,Tono-Claude-Home",
+                "PROCESS-NAME,claude.exe,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,claude.ai,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,claude.com,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,anthropic.com,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,claudeusercontent.com,Tono-Claude-Home",
+                "MATCH,Tono-Exit",
+            ]
+        );
+
+        // Both Reality sockets stay out of the tunnel: selected (1.1.1.1)
+        // first, then the home node (8.8.8.8).
+        assert_eq!(
+            get(&value, &["tun", "route-exclude-address"])
+                .as_sequence()
+                .unwrap(),
+            &vec![string("1.1.1.1/32"), string("8.8.8.8/32")]
+        );
+    }
+
+    #[test]
+    fn home_equal_to_the_selected_node_adds_no_second_route_exclusion() {
+        let value = parsed(&build_with_home(Some("JP Reality 02")));
+        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
+        assert_eq!(groups.len(), 2, "the dedicated group still exists");
+        assert_eq!(
+            get(&value, &["tun", "route-exclude-address"])
+                .as_sequence()
+                .unwrap(),
+            &vec![string("1.1.1.1/32")]
+        );
+    }
+
+    #[test]
+    fn home_build_with_direct_plan_replaces_the_bare_process_pins() {
+        let runtime = build_owned_runtime_with_ports(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&direct_plan()),
+            Some("US Reality 01"),
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        // The home pins take the bare PROCESS-NAME slot, ahead of the DIRECT
+        // pins; no Claude rule may keep targeting Tono-Exit.
+        assert_eq!(
+            rules,
+            [
+                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+                "IP-CIDR6,::1/128,DIRECT,no-resolve",
+                "PROCESS-NAME,Claude.exe,Tono-Claude-Home",
+                "PROCESS-NAME,claude.exe,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,claude.ai,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,claude.com,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,anthropic.com,Tono-Claude-Home",
+                "DOMAIN-SUFFIX,claudeusercontent.com,Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,qpic.cn),(IP-CIDR,9.0.0.12/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
+                "MATCH,Tono-Exit",
+            ]
+        );
     }
 }

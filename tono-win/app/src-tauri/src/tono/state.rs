@@ -179,6 +179,10 @@ pub struct TonoInner {
     /// Nodes of the currently installed, fully validated catalog.
     pub nodes: Vec<ValidatedNode>,
     pub selected_node: Option<String>,
+    /// Split-routing directives of the installed catalog, already sanitized
+    /// against `nodes` (`homeProxy` = Claude→home exit, `defaultProxy` =
+    /// admin fallback exit). `None` for unbound users.
+    pub routing: Option<tono_core::CatalogRouting>,
     /// The selected node vanished from a newer catalog: auto-reconnect stays
     /// blocked until the user picks a surviving node (§3).
     pub catalog_requires_choice: bool,
@@ -359,6 +363,7 @@ impl TonoState {
                 catalog_dir,
                 nodes: Vec::new(),
                 selected_node: None,
+                routing: None,
                 catalog_requires_choice: false,
                 fsm: ConnectionFsm::new(),
                 kill_switch: None,

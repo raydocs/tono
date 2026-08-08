@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Tono · 节点质量</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --background: 240 10% 3.9%;
+      --foreground: 0 0% 98%;
+      --card: 240 10% 3.9%;
+      --muted: 240 3.7% 15.9%;
+      --muted-foreground: 240 5% 64.9%;
+      --border: 240 3.7% 15.9%;
+      --input: 240 3.7% 15.9%;
+      --secondary: 240 3.7% 15.9%;
+      --primary: 0 0% 98%;
+      --primary-foreground: 240 5.9% 10%;
+      --ok: 142 71% 45%;
+      --warn: 38 92% 50%;
+      --bad: 0 72% 55%;
+      --ring: 240 4.9% 83.9%;
+      --radius: 0.5rem;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: hsl(var(--foreground));
+      background: hsl(var(--background));
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: hsl(var(--background)); }
+    a { color: inherit; text-decoration: none; }
+    button, input, select { font: inherit; color: inherit; }
+
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar {
+      height: 3.5rem; display: flex; align-items: center; justify-content: space-between;
+      gap: 1rem; padding: 0 1.5rem; border-bottom: 1px solid hsl(var(--border));
+      position: sticky; top: 0; z-index: 10;
+      background: hsl(var(--background) / 0.92); backdrop-filter: blur(8px);
+    }
+    .brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+    .logo {
+      width: 1.75rem; height: 1.75rem; border-radius: calc(var(--radius) - 2px);
+      display: grid; place-items: center;
+      background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
+      font-size: 0.75rem; font-weight: 700;
+    }
+    .brand h1 { margin: 0; font-size: 0.9rem; font-weight: 600; }
+    .brand p { margin: 0; color: hsl(var(--muted-foreground)); font-size: 0.75rem; }
+    .actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 2rem; padding: 0 0.75rem; border-radius: calc(var(--radius) - 2px);
+      border: 1px solid transparent; font-size: 0.8125rem; font-weight: 500; cursor: pointer;
+      background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-outline { background: transparent; color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
+    .btn-outline:hover, .btn-ghost:hover { background: hsl(var(--muted)); }
+    .btn-ghost { background: transparent; border-color: transparent; color: hsl(var(--muted-foreground)); }
+
+    .main { flex: 1; width: 100%; max-width: 1080px; margin: 0 auto; padding: 1.5rem; }
+    .page-head { margin-bottom: 1.1rem; }
+    .page-head h2 { margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; }
+    .page-head p { margin: 0.35rem 0 0; color: hsl(var(--muted-foreground)); font-size: 0.875rem; }
+
+    .metrics {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 1rem;
+    }
+    .metric {
+      border: 1px solid hsl(var(--border)); border-radius: var(--radius);
+      background: hsl(var(--card)); padding: 1rem 1.1rem;
+    }
+    .metric .k { color: hsl(var(--muted-foreground)); font-size: 0.8125rem; font-weight: 500; }
+    .metric .v { margin-top: 0.35rem; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+    .metric .h { margin-top: 0.3rem; color: hsl(var(--muted-foreground)); font-size: 0.72rem; }
+    .v-ok { color: hsl(var(--ok)); }
+    .v-bad { color: hsl(var(--bad)); }
+    .v-warn { color: hsl(var(--warn)); }
+
+    .panel {
+      border: 1px solid hsl(var(--border)); border-radius: var(--radius);
+      background: hsl(var(--card)); overflow: hidden;
+    }
+    .panel-bar {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid hsl(var(--border));
+    }
+    .panel-bar .meta { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+    .input, select.input {
+      height: 2rem; border-radius: calc(var(--radius) - 2px);
+      border: 1px solid hsl(var(--input)); background: transparent;
+      padding: 0 0.65rem; font-size: 0.8125rem; outline: none; min-width: 9rem;
+    }
+    .input:focus {
+      border-color: hsl(var(--ring));
+      box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.25);
+    }
+    input.input { min-width: 12rem; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 680px; }
+    th, td {
+      text-align: left; padding: 0.7rem 1rem;
+      border-bottom: 1px solid hsl(var(--border)); vertical-align: middle;
+    }
+    th {
+      color: hsl(var(--muted-foreground)); font-size: 0.72rem; font-weight: 500;
+      background: hsl(var(--muted) / 0.35); height: 2.4rem;
+    }
+    tbody tr { cursor: pointer; transition: background 100ms ease; }
+    tbody tr:hover { background: hsl(var(--muted) / 0.3); }
+    tbody tr.open { background: hsl(var(--muted) / 0.45); }
+    tbody tr:last-child td { border-bottom: 0; }
+    .name { font-weight: 500; }
+    .ip {
+      color: hsl(var(--muted-foreground));
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.75rem; margin-top: 0.1rem;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem; color: hsl(var(--muted-foreground));
+    }
+    .dash { color: hsl(var(--muted-foreground)); }
+
+    .badge {
+      display: inline-flex; align-items: center;
+      border-radius: 999px; border: 1px solid hsl(var(--border));
+      background: hsl(var(--secondary)); color: hsl(var(--muted-foreground));
+      padding: 0.1rem 0.55rem; font-size: 0.7rem; font-weight: 500; white-space: nowrap;
+    }
+    .badge-ok { color: hsl(142 70% 70%); border-color: hsl(142 40% 24%); background: hsl(142 40% 12% / 0.55); }
+    .badge-warn { color: hsl(38 90% 70%); border-color: hsl(38 40% 28%); background: hsl(38 50% 12% / 0.5); }
+    .badge-bad { color: hsl(0 90% 75%); border-color: hsl(0 40% 28%); background: hsl(0 50% 14% / 0.5); }
+    .badge-mute { color: hsl(var(--muted-foreground)); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+    .chip {
+      border: 1px solid hsl(var(--border)); border-radius: 6px;
+      padding: 0.05rem 0.4rem; font-size: 0.7rem; color: hsl(var(--muted-foreground));
+      background: hsl(var(--muted) / 0.5);
+    }
+    .chip-hot { color: hsl(142 60% 70%); border-color: hsl(142 30% 28%); }
+
+    .detail-row td { background: hsl(var(--muted) / 0.2); padding: 0; }
+    .detail {
+      padding: 0.85rem 1rem 1rem;
+      display: grid; gap: 0.75rem; grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .detail-block {
+      border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 2px);
+      padding: 0.75rem; background: hsl(var(--background));
+    }
+    .detail-block h4 {
+      margin: 0 0 0.4rem; font-size: 0.72rem; font-weight: 600;
+      color: hsl(var(--muted-foreground)); text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .detail-block p { margin: 0; font-size: 0.8125rem; }
+    .detail-block pre {
+      margin: 0.5rem 0 0; max-height: 150px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.68rem; color: hsl(var(--muted-foreground)); line-height: 1.4;
+    }
+    .detail-block summary {
+      cursor: pointer; color: hsl(var(--muted-foreground)); font-size: 0.75rem; font-weight: 500;
+    }
+
+    .empty, .state {
+      padding: 3rem 1rem; text-align: center; color: hsl(var(--muted-foreground)); font-size: 0.875rem;
+    }
+    .state strong { display: block; color: hsl(var(--foreground)); margin-bottom: 0.25rem; }
+    .spinner {
+      width: 1.1rem; height: 1.1rem; margin: 0 auto 0.5rem;
+      border: 2px solid hsl(var(--border)); border-top-color: hsl(var(--foreground));
+      border-radius: 999px; animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .footer {
+      margin-top: 1rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem;
+      color: hsl(var(--muted-foreground)); font-size: 0.75rem;
+    }
+    .footer a { text-decoration: underline; text-underline-offset: 2px; }
+
+    .hint {
+      margin-bottom: 1rem; padding: 0.65rem 0.85rem; border-radius: var(--radius);
+      border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); font-size: 0.8rem;
+      background: hsl(var(--muted) / 0.25);
+    }
+    .hint strong { color: hsl(var(--foreground)); font-weight: 600; }
+
+    @media (max-width: 900px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .detail { grid-template-columns: 1fr; }
+      .main { padding: 1rem; }
+      .topbar { padding: 0 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">T</div>
+        <div>
+          <h1>节点质量</h1>
+          <p>被墙 · 回程 · 边缘可达</p>
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn btn-ghost" href="https://admin.afk.ccwu.cc/" target="_blank" rel="noreferrer">Admin</a>
+        <a class="btn btn-ghost" href="https://ops.afk.ccwu.cc/" target="_blank" rel="noreferrer">Komari</a>
+        <button class="btn btn-outline" id="refreshBtn" type="button">刷新</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="page-head">
+        <h2>节点一览</h2>
+        <p>默认只看状态与回程。质量差才标红；「一般」已不再显示。</p>
+      </div>
+
+      <div class="hint" id="sourceHint" hidden></div>
+      <div class="metrics" id="metrics"></div>
+
+      <section class="panel">
+        <div class="panel-bar">
+          <div class="meta" id="updatedLabel">—</div>
+          <div class="toolbar">
+            <input class="input" id="search" type="search" placeholder="搜索名称 / IP" />
+            <select class="input" id="filter">
+              <option value="all">全部状态</option>
+              <option value="LIKELY_BLOCKED">疑似被墙</option>
+              <option value="OK">大陆正常</option>
+              <option value="EDGE_OK">边缘可达</option>
+              <option value="EDGE_FAIL">边缘不通</option>
+              <option value="DOWN">不通</option>
+            </select>
+          </div>
+        </div>
+        <div id="content">
+          <div class="state"><div class="spinner"></div><strong>加载中</strong></div>
+        </div>
+      </section>
+
+      <div class="footer">
+        <span>权威被墙：大陆 agent TCP :443 · 未配置时显示边缘可达（HK/JP/SG）</span>
+        <a href="/report.json" target="_blank" rel="noreferrer">JSON</a>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const state = { data: null, q: '', filter: 'all', open: null };
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+    ));
+    const stripAnsi = (s) => String(s ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+
+    function routeTags(keywords) {
+      const list = (keywords || []).filter((k) => !['联通', '电信', '移动'].includes(k));
+      return list.slice(0, 4);
+    }
+
+    function blockView(block) {
+      const s = block?.status || 'unknown';
+      const label = block?.label || ({
+        OK: '大陆正常',
+        LIKELY_BLOCKED: '疑似被墙',
+        DEGRADED: '部分不通',
+        EDGE_OK: '边缘可达',
+        EDGE_FAIL: '边缘不通',
+        DOWN: '不通',
+        UNPROBED: '未测大陆',
+        PROBE_PARTIAL: '未测大陆',
+        CHECK_FAILED: '基线失败',
+      })[s] || s;
+      let cls = 'badge-mute';
+      let rank = 5;
+      if (s === 'LIKELY_BLOCKED') { cls = 'badge-bad'; rank = 0; }
+      else if (s === 'DOWN' || s === 'EDGE_FAIL') { cls = 'badge-warn'; rank = 1; }
+      else if (s === 'DEGRADED') { cls = 'badge-warn'; rank = 2; }
+      else if (s === 'OK') { cls = 'badge-ok'; rank = 3; }
+      else if (s === 'EDGE_OK') { cls = 'badge-ok'; rank = 4; }
+      return { label, cls, rank, status: s };
+    }
+
+    /** Only show quality when poor — hide ok/mixed noise. */
+    function qualityCell(q) {
+      if (q === 'poor') return '<span class="badge badge-bad">质量差</span>';
+      return '<span class="dash">—</span>';
+    }
+
+    function edgeText(block) {
+      const a = block?.asia_edge;
+      if (!a || !a.ok) return '—';
+      if (a.total) return `${a.success}/${a.total}`;
+      return '—';
+    }
+
+    function filtered() {
+      const nodes = [...(state.data?.nodes || [])];
+      nodes.sort((a, b) => {
+        const ra = blockView(a.block).rank;
+        const rb = blockView(b.block).rank;
+        if (ra !== rb) return ra - rb;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+      });
+      const q = state.q.trim().toLowerCase();
+      return nodes.filter((n) => {
+        const st = n.block?.status || 'unknown';
+        if (state.filter !== 'all' && st !== state.filter) {
+          // map old PROBE_PARTIAL into UNPROBED filter
+          if (!(state.filter === 'EDGE_OK' && st === 'PROBE_PARTIAL')) return false;
+        }
+        if (!q) return true;
+        return `${n.name || ''} ${n.host || ''} ${n.public_ip || ''}`.toLowerCase().includes(q);
+      });
+    }
+
+    function renderMetrics() {
+      const nodes = state.data?.nodes || [];
+      const blocked = nodes.filter((n) => n.block?.status === 'LIKELY_BLOCKED').length;
+      const okish = nodes.filter((n) => ['OK', 'EDGE_OK'].includes(n.block?.status)).length;
+      const poor = nodes.filter((n) => n.quality === 'poor').length;
+      const edge = nodes.filter((n) => n.block?.status === 'EDGE_OK').length;
+      $('metrics').innerHTML = `
+        <div class="metric"><div class="k">节点</div><div class="v">${nodes.length}</div><div class="h">最近采集</div></div>
+        <div class="metric"><div class="k">可达</div><div class="v v-ok">${okish}</div><div class="h">大陆正常或边缘可达</div></div>
+        <div class="metric"><div class="k">疑似被墙</div><div class="v ${blocked ? 'v-bad' : ''}">${blocked}</div><div class="h">需大陆 agent 判定</div></div>
+        <div class="metric"><div class="k">质量差</div><div class="v ${poor ? 'v-warn' : ''}">${poor}</div><div class="h">仅严重风险才标</div></div>
+      `;
+      const iso = state.data?.updated_at_iso || '—';
+      const when = iso === '—' ? '—' : new Date(iso).toLocaleString();
+      const agents = state.data?.cn_agents_configured;
+      $('updatedLabel').textContent = `更新 ${when}`;
+      const hint = $('sourceHint');
+      if (agents === 0 || agents === undefined) {
+        hint.hidden = false;
+        hint.innerHTML = '<strong>大陆三网 agent 未配置</strong> — 当前用 HK/JP/SG 边缘 TCP 表示「边缘可达」，不把海外探测误判为被墙。若要权威被墙，在 secrets 加 <code>mainland_probes</code>（电信/联通/移动各一台可 SSH 的大陆机）。';
+      } else {
+        hint.hidden = false;
+        hint.innerHTML = `<strong>已配置 ${agents} 个大陆 agent</strong> — 被墙以 agent TCP :443 ≥2/3 失败为准。边缘节点：${edge}`;
+      }
+    }
+
+    function detailHtml(n) {
+      const b = n.block || {};
+      const risks = n.risk_keywords || [];
+      return `
+        <tr class="detail-row">
+          <td colspan="5">
+            <div class="detail">
+              <div class="detail-block">
+                <h4>结论</h4>
+                <p>状态：${esc(blockView(b).label)}</p>
+                <p style="margin-top:6px">质量：${n.quality === 'poor' ? '差' : '正常（不展示一般）'}</p>
+                <p style="margin-top:6px;color:hsl(var(--muted-foreground))">${esc(b.rule || '')}</p>
+                ${risks.length ? `<p style="margin-top:6px">风险：${esc(risks.join(', '))}</p>` : ''}
+              </div>
+              <div class="detail-block">
+                <h4>探测</h4>
+                <p>边缘 HK/JP/SG：${esc(edgeText(b))}</p>
+                <p style="margin-top:6px">海外基线：${esc(b.overseas?.total != null ? `${b.overseas.success}/${b.overseas.total}` : '—')}</p>
+                <p style="margin-top:6px">大陆：${esc(b.mainland?.source || b.mainland?.note || '—')}</p>
+              </div>
+              <div class="detail-block">
+                <h4>原文</h4>
+                <details><summary>回程</summary><pre>${esc(stripAnsi(n.backtrace || '无'))}</pre></details>
+                <details style="margin-top:6px"><summary>IP 质量</summary><pre>${esc(stripAnsi(n.security_check || n.error || '无'))}</pre></details>
+              </div>
+            </div>
+          </td>
+        </tr>`;
+    }
+
+    function render() {
+      if (!state.data) return;
+      renderMetrics();
+      const nodes = filtered();
+      if (!nodes.length) {
+        $('content').innerHTML = `<div class="empty">没有匹配的节点</div>`;
+        return;
+      }
+      const keyOf = (n) => n.public_ip || n.host || n.name;
+      const rows = nodes.map((n) => {
+        const b = blockView(n.block);
+        const tags = routeTags(n.route_keywords);
+        const open = state.open === keyOf(n);
+        return `
+          <tr class="${open ? 'open' : ''}" data-key="${esc(keyOf(n))}">
+            <td>
+              <div class="name">${esc(n.name)}</div>
+              <div class="ip">${esc(n.public_ip || n.host || '')}</div>
+            </td>
+            <td><span class="badge ${b.cls}">${esc(b.label)}</span></td>
+            <td>${qualityCell(n.quality)}</td>
+            <td><div class="chips">${tags.map((t) => {
+              const hot = /9929|CMIN2|CN2|GIA/.test(t);
+              return `<span class="chip${hot ? ' chip-hot' : ''}">${esc(t)}</span>`;
+            }).join('') || '<span class="dash">—</span>'}</div></td>
+            <td class="mono">${esc(edgeText(n.block))}</td>
+          </tr>
+          ${open ? detailHtml(n) : ''}
+        `;
+      }).join('');
+
+      $('content').innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>节点</th>
+                <th>状态</th>
+                <th>质量</th>
+                <th>回程</th>
+                <th>边缘</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+
+      $('content').querySelectorAll('tbody tr[data-key]').forEach((tr) => {
+        tr.addEventListener('click', () => {
+          const key = tr.getAttribute('data-key');
+          state.open = state.open === key ? null : key;
+          render();
+        });
+      });
+    }
+
+    async function load() {
+      $('refreshBtn').disabled = true;
+      try {
+        const res = await fetch('/report.json?t=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        state.data = await res.json();
+        if (!(state.data.nodes || []).length) {
+          $('content').innerHTML = `<div class="state"><strong>暂无数据</strong>等待采集</div>`;
+          renderMetrics();
+        } else {
+          render();
+        }
+      } catch (e) {
+        $('content').innerHTML = `<div class="state"><strong>加载失败</strong>${esc(e.message || e)}</div>`;
+      } finally {
+        $('refreshBtn').disabled = false;
+      }
+    }
+
+    $('refreshBtn').addEventListener('click', load);
+    $('search').addEventListener('input', (e) => { state.q = e.target.value; render(); });
+    $('filter').addEventListener('change', (e) => { state.filter = e.target.value; render(); });
+    load();
+    setInterval(load, 180000);
+  </script>
+</body>
+</html>

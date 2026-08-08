@@ -8,7 +8,7 @@
     "title": "Sign in to Tono",
     "subtitle": "Enter your email to receive a sign-in code.",
     "welcome": "Welcome to Tono",
-    "intro": "Sign in with a verified email to continue. No password is required.",
+    "intro": "A calm cloud path to the open internet. Sign in with email — no password.",
     "emailLabel": "Email address",
     "emailPlaceholder": "you@example.com",
     "sendCode": "Email me a sign-in code",
@@ -56,7 +56,8 @@
       "starting": "Starting…"
     },
     "statusProtected": "Protected cloud route",
-    "statusReality": "Reality cloud protection"
+    "statusReality": "Cloud path ready",
+    "statusProtectedOffline": "Internet blocked — no leak"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -66,6 +67,11 @@
     "disconnecting": "Disconnecting…",
     "protectedOffline": "Protected Offline",
     "protectedOfflineDescription": "Your internet is blocked to prevent leaks. Click to restore.",
+    "taglineIdle": "Pick a server, then connect — Tono keeps the path fail-closed.",
+    "taglineConnected": "You're on a protected cloud path. Traffic won't fall back to the open internet.",
+    "pickServer": "Choose a server",
+    "errorRetry": "Try again",
+    "errorSwitchServer": "Switch server",
     "server": "Server",
     "noServer": "No server selected",
     "killSwitchMode": "Kill switch: {{mode}}",
@@ -80,7 +86,8 @@
     "errors": {
       "serviceBusy": "Tono Service is installing or repairing. Approve any pending admin prompt, or restart Tono.",
       "releaseReconciling": "Network protection is still releasing. Wait a moment, then connect again.",
-      "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced."
+      "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced.",
+      "nodeUnreachable": "This server couldn't be reached (often network interference). Try another exit."
     },
     "info": {
       "protection": "Traffic protection",
