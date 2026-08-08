@@ -51,6 +51,10 @@ export interface Env {
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_DAY?: string;
   DIAGNOSTICS_RETENTION_SECONDS?: string;
+  RATE_LIMIT_TELEMETRY_IP_HOUR?: string;
+  RATE_LIMIT_TELEMETRY_USER_HOUR?: string;
+  RATE_LIMIT_TELEMETRY_USER_DAY?: string;
+  TELEMETRY_RETENTION_SECONDS?: string;
 }
 
 type Row = Record<string, any>;
@@ -932,6 +936,209 @@ const publicDiagnosticsReport = (r: Row) => ({
   clientVersion: r.client_version,
   osVersion: r.os_version,
   report: JSON.parse(r.report_json),
+});
+
+// --- Periodic telemetry windows (testing default-on timeline) ----------------
+//
+// Separate from diagnostics_reports: no support reference code, higher cadence
+// (≈ every 20 minutes), and a short event slice for ban/network forensics.
+// Emails and secrets must never appear; the client already scrubs, and the
+// Worker still rejects unknown keys and free-text email-like fields.
+
+const TELEMETRY_BODY_MAX_BYTES = 72 * 1024;
+const TELEMETRY_PAYLOAD_MAX_BYTES = 64 * 1024;
+const TELEMETRY_MAX_EVENTS = 200;
+const TELEMETRY_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
+const TELEMETRY_MAX_REPORTED_AT_MS = DIAGNOSTICS_MAX_REPORTED_AT_MS;
+
+const telemetryWindowKeys = [
+  'schemaVersion', 'kind', 'windowStartMs', 'windowEndMs',
+  'appVersion', 'osVersion', 'osArch',
+  'uiState', 'accountState', 'selectedServer', 'catalogRevision',
+  'killSwitchMode', 'killSwitchWanted', 'killSwitchLive',
+  'dnsEnabled', 'eventCount', 'eventsDropped', 'events',
+];
+
+const telemetryEventStringKeys = [
+  'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
+  'from', 'to', 'mode', 'reference',
+];
+const telemetryEventNumberKeys = [
+  'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
+  'revision', 'domains', 'media', 'webDomains', 'wechatTcp', 'webTcp', 'udp',
+  'endpoints', 'eventCount', 'bytes',
+];
+const telemetryEventBoolKeys = ['wanted', 'live'];
+const telemetryEventKeys = [
+  ...telemetryEventStringKeys,
+  ...telemetryEventNumberKeys,
+  ...telemetryEventBoolKeys,
+];
+
+function canonicalTelemetryWindow(value: unknown) {
+  rejectUnexpectedKeys(value, telemetryWindowKeys);
+  const source = value as Row;
+  const kind = str(source.kind, 'kind', 1, 40);
+  if (kind !== 'periodic_window') {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid telemetry kind');
+  }
+  const schemaVersion = diagnosticsInt(source, 'schemaVersion', 1, 1_000, false)!;
+  const windowStartMs = diagnosticsInt(source, 'windowStartMs', 0, TELEMETRY_MAX_REPORTED_AT_MS, false)!;
+  const windowEndMs = diagnosticsInt(source, 'windowEndMs', 0, TELEMETRY_MAX_REPORTED_AT_MS, false)!;
+  if (windowEndMs < windowStartMs) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid telemetry window range');
+  }
+  if (windowEndMs - windowStartMs > 6 * 60 * 60 * 1000) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Telemetry window too wide');
+  }
+  const appVersion = str(source.appVersion, 'appVersion', 1, 40);
+  const osVersion = str(source.osVersion, 'osVersion', 1, 80);
+  const osArch = str(source.osArch ?? '', 'osArch', 0, 32);
+  const uiState = str(source.uiState ?? '', 'uiState', 0, 40);
+  const accountState = str(source.accountState ?? '', 'accountState', 0, 40);
+  if (typeof source.eventCount !== 'number' || !Number.isSafeInteger(source.eventCount)
+      || source.eventCount < 0 || source.eventCount > TELEMETRY_MAX_EVENTS) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid eventCount');
+  }
+  if (typeof source.eventsDropped !== 'number' || !Number.isSafeInteger(source.eventsDropped)
+      || source.eventsDropped < 0 || source.eventsDropped > 1_000_000) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid eventsDropped');
+  }
+  if (!Array.isArray(source.events) || source.events.length > TELEMETRY_MAX_EVENTS) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid events');
+  }
+  if (source.events.length !== source.eventCount) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'eventCount mismatch');
+  }
+
+  const events = source.events.map((raw: unknown) => {
+    rejectUnexpectedKeys(raw, telemetryEventKeys);
+    const entry = raw as Row;
+    if (typeof entry.ts !== 'number' || !Number.isSafeInteger(entry.ts)
+        || entry.ts < 0 || entry.ts > TELEMETRY_MAX_REPORTED_AT_MS) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid event ts');
+    }
+    const eventKind = str(entry.kind, 'event kind', 1, 40);
+    // Never accept account identity fields on the wire.
+    if (eventKind === 'signInStart' || eventKind === 'signInOk' || 'email' in entry) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Telemetry must not include account identity events');
+    }
+    const event: Row = { ts: entry.ts, kind: eventKind };
+    for (const key of telemetryEventStringKeys) {
+      if (key === 'kind') continue;
+      if (entry[key] === undefined || entry[key] === null) continue;
+      event[key] = str(entry[key], key, 0, 500);
+    }
+    for (const key of telemetryEventNumberKeys) {
+      if (key === 'ts') continue;
+      if (entry[key] === undefined || entry[key] === null) continue;
+      if (typeof entry[key] !== 'number' || !Number.isSafeInteger(entry[key])) {
+        throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+      }
+      event[key] = entry[key];
+    }
+    for (const key of telemetryEventBoolKeys) {
+      if (entry[key] === undefined || entry[key] === null) continue;
+      if (typeof entry[key] !== 'boolean') {
+        throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+      }
+      event[key] = entry[key];
+    }
+    return event;
+  });
+
+  const window: Row = {
+    schemaVersion,
+    kind,
+    windowStartMs,
+    windowEndMs,
+    appVersion,
+    osVersion,
+    osArch,
+    uiState,
+    accountState,
+    eventCount: source.eventCount,
+    eventsDropped: source.eventsDropped,
+    events,
+  };
+  if (source.selectedServer !== undefined && source.selectedServer !== null) {
+    window.selectedServer = str(source.selectedServer, 'selectedServer', 0, 100);
+  }
+  const catalogRevision = diagnosticsInt(source, 'catalogRevision', 0, 1_000_000_000_000, true);
+  if (catalogRevision !== undefined) window.catalogRevision = catalogRevision;
+  if (source.killSwitchMode !== undefined && source.killSwitchMode !== null) {
+    window.killSwitchMode = str(source.killSwitchMode, 'killSwitchMode', 0, 40);
+  }
+  for (const key of ['killSwitchWanted', 'killSwitchLive', 'dnsEnabled'] as const) {
+    if (source[key] === undefined || source[key] === null) continue;
+    if (typeof source[key] !== 'boolean') {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+    }
+    window[key] = source[key];
+  }
+
+  const json = JSON.stringify(window);
+  if (new TextEncoder().encode(json).byteLength > TELEMETRY_PAYLOAD_MAX_BYTES) {
+    throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Telemetry window is too large');
+  }
+  return {
+    json,
+    appVersion,
+    osVersion,
+    windowStartMs,
+    windowEndMs,
+  };
+}
+
+async function rateLimitTelemetry(e: Env, req: Request, uid: string) {
+  await consumeRateLimit(
+    e,
+    `rl:${await sha256(`telemetry:ip:${clientIp(req)}`)}`,
+    envInt(e, 'RATE_LIMIT_TELEMETRY_IP_HOUR', 30),
+    DIAGNOSTICS_HOUR_SECONDS,
+  );
+  await consumeRateLimit(
+    e,
+    `rl:${await sha256(`telemetry:user-hour:${uid}`)}`,
+    envInt(e, 'RATE_LIMIT_TELEMETRY_USER_HOUR', 6),
+    DIAGNOSTICS_HOUR_SECONDS,
+  );
+  await consumeRateLimit(
+    e,
+    `rl:${await sha256(`telemetry:user-day:${uid}`)}`,
+    envInt(e, 'RATE_LIMIT_TELEMETRY_USER_DAY', 80),
+    DIAGNOSTICS_DAY_SECONDS,
+  );
+}
+
+async function storeTelemetryWindow(
+  e: Env,
+  uid: string,
+  clientVersion: string,
+  osVersion: string,
+  windowStartMs: number,
+  windowEndMs: number,
+  payloadJson: string,
+) {
+  const receivedAt = now();
+  const rowId = id();
+  await e.DB.prepare(
+    `INSERT INTO telemetry_windows(
+       id, user_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(rowId, uid, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson).run();
+  return { id: rowId, receivedAt };
+}
+
+const publicTelemetryWindow = (r: Row) => ({
+  id: r.id,
+  userId: r.user_id,
+  receivedAt: Number(r.received_at),
+  windowStartMs: Number(r.window_start_ms),
+  windowEndMs: Number(r.window_end_ms),
+  clientVersion: r.client_version,
+  osVersion: r.os_version,
+  window: JSON.parse(r.payload_json),
 });
 
 // --- Passwordless authentication ---------------------------------------------
@@ -1851,6 +2058,9 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
     .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
     .run();
+  await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
+    .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
+    .run();
   if (tailscaleEnrollmentEnabled(e)) {
     try {
       await cleanupOrphanPendingNodes(e);
@@ -2571,6 +2781,29 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     );
   }
 
+  // Periodic testing timeline: signed-in clients may upload a short event
+  // window (~20 minutes). Users can disable the client toggle; this endpoint
+  // still requires a valid access token and never accepts account emails.
+  if (p === '/api/v1/telemetry/windows' && m === 'POST') {
+    const a = await auth(req, e);
+    const b = await body(req, TELEMETRY_BODY_MAX_BYTES);
+    rejectUnexpectedKeys(b, ['window']);
+    const parsed = canonicalTelemetryWindow(b.window);
+    await rateLimitTelemetry(e, req, a.userId);
+    return Response.json(
+      await storeTelemetryWindow(
+        e,
+        a.userId,
+        parsed.appVersion,
+        parsed.osVersion,
+        parsed.windowStartMs,
+        parsed.windowEndMs,
+        parsed.json,
+      ),
+      { status: 201 },
+    );
+  }
+
   if (p === '/api/v1/devices' && m === 'GET') {
     const a = await auth(req, e);
     await expirePending(e, a.userId);
@@ -2707,6 +2940,20 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       ).bind(normalizedReferenceCode(mt[1])).first<Row>();
       if (!row) throw new ApiError(404, 'NOT_FOUND', 'Diagnostics report not found');
       return Response.json({ report: publicDiagnosticsReport(row) });
+    }
+    if (p === '/api/v1/admin/telemetry/windows' && m === 'GET') {
+      const userId = url.searchParams.get('userId');
+      if (userId !== null && (userId.length < 1 || userId.length > 200)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid userId');
+      }
+      const q = userId
+        ? await e.DB.prepare(
+          'SELECT * FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 100',
+        ).bind(userId).all<Row>()
+        : await e.DB.prepare(
+          'SELECT * FROM telemetry_windows ORDER BY received_at DESC LIMIT 100',
+        ).all<Row>();
+      return Response.json({ windows: q.results.map(publicTelemetryWindow) });
     }
     if (p === '/api/v1/admin/traffic-policy' && m === 'GET') {
       return Response.json(await publicTrafficPolicy(e));

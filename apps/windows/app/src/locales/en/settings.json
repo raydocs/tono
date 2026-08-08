@@ -19,6 +19,10 @@
         "copied": "Path copied",
         "copyFailed": "Failed to copy path",
         "dropped": "{{count}} events dropped (log busy)"
+      },
+      "periodicTelemetry": {
+        "label": "Share diagnostic timeline (testing)",
+        "description": "About every 20 minutes while signed in, Tono uploads a short protection and network event summary so we can improve Claude stability in China. No chat content, passwords, or node secrets. You can turn this off anytime."
       }
     },
     "system": {

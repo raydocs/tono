@@ -1,0 +1,405 @@
+//! Periodic diagnostic timeline upload (testing default-on).
+//!
+//! Every ~20 minutes while signed in, ship a short redacted audit window to
+//! the control plane so operators can reconstruct network anomalies before
+//! Claude bans. Users can disable this in Settings. Failures never touch the
+//! connect / kill-switch path.
+
+use std::{path::Path, sync::Arc, time::Duration};
+
+use serde_json::Value;
+use tauri::AppHandle;
+use tono_core::auth::{
+    TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport,
+};
+
+use tono_core::connection::UiState;
+
+use crate::{
+    process::AsyncHandler,
+    tono::{
+        audit::{AuditEvent, redact},
+        state::TonoState,
+    },
+};
+
+fn ui_state_key(ui_state: UiState) -> &'static str {
+    match ui_state {
+        UiState::NotConnected => "notConnected",
+        UiState::Connecting(_) => "connecting",
+        UiState::Connected => "connected",
+        UiState::ProtectedOffline => "protectedOffline",
+        UiState::Disconnecting => "disconnecting",
+    }
+}
+
+/// Cadence for automatic timeline uploads while testing.
+pub const PERIODIC_TELEMETRY_INTERVAL: Duration = Duration::from_secs(20 * 60);
+/// First upload sooner so early connect failures still reach the server.
+pub const PERIODIC_TELEMETRY_FIRST_DELAY: Duration = Duration::from_secs(5 * 60);
+/// How much history to include in each window (slightly wider than the interval).
+pub const PERIODIC_TELEMETRY_LOOKBACK: Duration = Duration::from_secs(22 * 60);
+const MAX_EVENTS: usize = 200;
+/// Hard cap on serialized body size (Worker limit is 64 KiB payload).
+const MAX_PAYLOAD_BYTES: usize = 48 * 1024;
+
+const INCLUDE_KINDS: &[&str] = &[
+    "connectBegin",
+    "stage",
+    "connectFail",
+    "connectOk",
+    "disconnectBegin",
+    "disconnectOk",
+    "releaseFail",
+    "reconnectScheduled",
+    "nodeSwitch",
+    "protectedOffline",
+    "killSwitchSnapshot",
+    "networkChange",
+    "coreRestart",
+    "healthProbeFail",
+    "syncFail",
+    "policySyncOk",
+    "policyActivated",
+    "policyActivationSkipped",
+    "policySyncFail",
+    "diagnosticsUploaded",
+    "diagnosticsUploadFail",
+    "periodicTelemetryUploaded",
+    "periodicTelemetryUploadFail",
+];
+
+/// Start the periodic uploader for one authenticated session.
+pub(crate) async fn spawn_periodic_for_auth_generation(
+    state: &Arc<TonoState>,
+    _app: &AppHandle,
+    generation: u64,
+) {
+    let task_state = state.clone();
+    let handle = AsyncHandler::spawn(move || async move {
+        tokio::time::sleep(PERIODIC_TELEMETRY_FIRST_DELAY).await;
+        loop {
+            {
+                let inner = task_state.lock().await;
+                if inner.sign_in_generation != generation {
+                    return;
+                }
+                if matches!(
+                    inner.account_state,
+                    crate::tono::state::AccountState::SignedOut
+                        | crate::tono::state::AccountState::Restoring
+                ) {
+                    return;
+                }
+            }
+            let _ = upload_once(&task_state, generation).await;
+            let jitter_ms = (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+                % 120_001) as i64
+                - 60_000;
+            let wait = PERIODIC_TELEMETRY_INTERVAL
+                .saturating_add(Duration::from_millis(jitter_ms.unsigned_abs()));
+            tokio::time::sleep(wait).await;
+        }
+    });
+    let inner = state.lock().await;
+    if inner.sign_in_generation != generation {
+        handle.abort();
+    }
+}
+
+async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), String> {
+    if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
+        return Ok(());
+    }
+    let client = {
+        let inner = state.lock().await;
+        if inner.sign_in_generation != generation {
+            return Ok(());
+        }
+        inner.client.clone()
+    };
+
+    let report = build_window_report(state).await?;
+    let bytes = serde_json::to_vec(&report).map(|v| v.len()).unwrap_or(0) as u32;
+    let event_count = report.event_count;
+    match client.upload_telemetry_window(&report).await {
+        Ok(_receipt) => {
+            state.audit().log(AuditEvent::PeriodicTelemetryUploaded {
+                event_count,
+                bytes,
+            });
+            Ok(())
+        }
+        Err(err) => {
+            state.audit().log(AuditEvent::PeriodicTelemetryUploadFail {
+                error: err.to_string(),
+            });
+            Err(err.to_string())
+        }
+    }
+}
+
+async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowReport, String> {
+    let now_ms = epoch_ms();
+    let start_ms = now_ms.saturating_sub(PERIODIC_TELEMETRY_LOOKBACK.as_millis() as i64);
+    let log_path = state.audit().log_path().to_path_buf();
+    let (mut events, dropped) =
+        tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
+            .await
+            .map_err(|err| err.to_string())??;
+
+    let app_version = env!("CARGO_PKG_VERSION").to_string();
+    let os_version = AsyncHandler::spawn_blocking(|| {
+        tauri_plugin_clash_verge_sysinfo::os_long_version()
+    })
+    .await
+    .unwrap_or_else(|_| "Unknown".to_string());
+
+    let (
+        ui_state,
+        account_state,
+        selected_server,
+        catalog_revision,
+        kill_switch_mode,
+        kill_switch_wanted,
+        kill_switch_live,
+    ) = {
+        let inner = state.lock().await;
+        let status = inner.fsm.status();
+        let revision = inner.catalog_tracker.current_revision();
+        (
+            ui_state_key(status.ui_state()).to_string(),
+            inner.account_state.key().to_string(),
+            inner.selected_node.clone(),
+            (revision >= 0).then_some(revision),
+            inner
+                .kill_switch
+                .as_ref()
+                .map(|status| format!("{:?}", status.mode).to_lowercase()),
+            inner.kill_switch.as_ref().map(|status| status.wanted),
+            inner.kill_switch.as_ref().map(|status| status.live),
+        )
+    };
+
+    while !events.is_empty() {
+        let candidate = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: start_ms,
+            window_end_ms: now_ms,
+            app_version: app_version.clone(),
+            os_version: os_version.clone(),
+            os_arch: std::env::consts::ARCH.to_string(),
+            ui_state: ui_state.clone(),
+            account_state: account_state.clone(),
+            selected_server: selected_server.clone(),
+            catalog_revision,
+            kill_switch_mode: kill_switch_mode.clone(),
+            kill_switch_wanted,
+            kill_switch_live,
+            dns_enabled: None,
+            event_count: events.len() as u32,
+            events_dropped: dropped,
+            events: events.clone(),
+        };
+        let size = serde_json::to_vec(&candidate)
+            .map(|v| v.len())
+            .unwrap_or(usize::MAX);
+        if size <= MAX_PAYLOAD_BYTES {
+            return Ok(candidate);
+        }
+        events.remove(0);
+    }
+
+    Ok(TelemetryWindowReport {
+        schema_version: TELEMETRY_SCHEMA_VERSION,
+        kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+        window_start_ms: start_ms,
+        window_end_ms: now_ms,
+        app_version,
+        os_version,
+        os_arch: std::env::consts::ARCH.to_string(),
+        ui_state,
+        account_state,
+        selected_server,
+        catalog_revision,
+        kill_switch_mode,
+        kill_switch_wanted,
+        kill_switch_live,
+        dns_enabled: None,
+        event_count: 0,
+        events_dropped: dropped,
+        events: Vec::new(),
+    })
+}
+
+fn epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn collect_events(
+    path: &Path,
+    start_ms: i64,
+    end_ms: i64,
+) -> Result<(Vec<TelemetryEvent>, u32), String> {
+    if !path.exists() {
+        return Ok((Vec::new(), 0));
+    }
+    let body = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
+    let mut selected: Vec<TelemetryEvent> = Vec::new();
+    let mut dropped = 0u32;
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(ts) = value.get("ts").and_then(Value::as_i64) else {
+            continue;
+        };
+        if ts < start_ms || ts > end_ms {
+            continue;
+        }
+        let Some(kind) = value.get("kind").and_then(Value::as_str) else {
+            continue;
+        };
+        if kind == "signInStart" || kind == "signInOk" {
+            dropped = dropped.saturating_add(1);
+            continue;
+        }
+        if !INCLUDE_KINDS.iter().any(|k| *k == kind) {
+            dropped = dropped.saturating_add(1);
+            continue;
+        }
+        if let Some(event) = map_event(&value, ts, kind) {
+            selected.push(event);
+        } else {
+            dropped = dropped.saturating_add(1);
+        }
+    }
+    if selected.len() > MAX_EVENTS {
+        let overflow = selected.len() - MAX_EVENTS;
+        dropped = dropped.saturating_add(overflow as u32);
+        selected = selected.split_off(overflow);
+    }
+    Ok((selected, dropped))
+}
+
+fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
+    let str_field = |key: &str| -> Option<String> {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .map(redact)
+            .filter(|s| !s.is_empty())
+    };
+    let i64_field = |key: &str| -> Option<i64> {
+        value.get(key).and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_u64().map(|n| n as i64))
+                .or_else(|| v.as_f64().map(|n| n as i64))
+        })
+    };
+    let bool_field = |key: &str| -> Option<bool> { value.get(key).and_then(Value::as_bool) };
+
+    Some(TelemetryEvent {
+        ts,
+        kind: kind.to_string(),
+        stage: str_field("stage"),
+        error: str_field("error"),
+        node: str_field("node"),
+        action: str_field("action"),
+        reason: str_field("reason"),
+        probe: str_field("probe"),
+        from: str_field("from"),
+        to: str_field("to"),
+        mode: str_field("mode"),
+        reference: str_field("reference"),
+        elapsed_ms: i64_field("elapsedMs"),
+        delay_ms: i64_field("delayMs"),
+        counter: i64_field("counter"),
+        restart_count: i64_field("restartCount"),
+        old_pid: i64_field("oldPid"),
+        new_pid: i64_field("newPid"),
+        revision: i64_field("revision"),
+        domains: i64_field("domains"),
+        media: i64_field("media"),
+        web_domains: i64_field("webDomains"),
+        wechat_tcp: i64_field("wechatTcp"),
+        web_tcp: i64_field("webTcp"),
+        udp: i64_field("udp"),
+        endpoints: i64_field("endpoints"),
+        event_count: i64_field("eventCount"),
+        bytes: i64_field("bytes"),
+        wanted: bool_field("wanted"),
+        live: bool_field("live"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "tono-telemetry-{}-{}",
+                tag,
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn collect_events_skips_sign_in_and_keeps_network() {
+        let dir = TempDir::new("events");
+        let path = dir.path().join("traffic-audit.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let now = epoch_ms();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"signInOk","email":"a@b.com"}}"#,
+            now - 1000
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"networkChange","counter":3}}"#,
+            now - 500
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"connectOk","node":"US","elapsedMs":1200}}"#,
+            now - 100
+        )
+        .unwrap();
+        let (events, dropped) = collect_events(&path, now - 60_000, now).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(dropped >= 1);
+        assert!(events.iter().all(|e| e.kind != "signInOk"));
+        assert_eq!(events[0].kind, "networkChange");
+        assert_eq!(events[0].counter, Some(3));
+    }
+}
