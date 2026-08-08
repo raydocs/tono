@@ -33,6 +33,61 @@ pub struct ExitCatalogResponse {
     pub sha256: String,
     #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+    /// Optional split-routing directives; absent for unbound users. Rides the
+    /// same cache file and revision monotonicity as the rest of the verified
+    /// response, but is NOT covered by the YAML digest — every name is
+    /// re-checked against the admitted node set before use
+    /// ([`sanitize_routing`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing: Option<CatalogRouting>,
+}
+
+/// Split-routing directives from `GET exit-catalog`: `homeProxy` names the
+/// user's bound home-broadband node (Claude traffic exits there),
+/// `defaultProxy` the admin-designated fallback exit.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogRouting {
+    #[serde(rename = "homeProxy", default, skip_serializing_if = "Option::is_none")]
+    pub home_proxy: Option<String>,
+    #[serde(rename = "defaultProxy", default, skip_serializing_if = "Option::is_none")]
+    pub default_proxy: Option<String>,
+}
+
+/// Maximum accepted length (in chars) of a routing proxy name.
+pub const MAX_ROUTING_NAME_CHARS: usize = 200;
+
+/// Keep only the routing fields that name an admitted node. A field that is
+/// empty, over [`MAX_ROUTING_NAME_CHARS`] chars, or matches no node is
+/// dropped and reported in the second return value so the caller can log a
+/// warning; a bad directive never fails the catalog itself. Returns `None`
+/// when nothing survives.
+pub fn sanitize_routing(
+    routing: &CatalogRouting,
+    nodes: &[ValidatedNode],
+) -> (Option<CatalogRouting>, Vec<String>) {
+    fn keep(name: &Option<String>, nodes: &[ValidatedNode], dropped: &mut Vec<String>) -> Option<String> {
+        let name = name.as_ref()?;
+        // Node names are trimmed at admission, so an exact match against the
+        // admitted set is the whole safety check; anything else is dropped
+        // rather than silently normalized into a match.
+        if name.is_empty()
+            || name.chars().count() > MAX_ROUTING_NAME_CHARS
+            || !nodes.iter().any(|node| &node.name == name)
+        {
+            dropped.push(name.clone());
+            return None;
+        }
+        Some(name.clone())
+    }
+    let mut dropped = Vec::new();
+    let home_proxy = keep(&routing.home_proxy, nodes, &mut dropped);
+    let default_proxy = keep(&routing.default_proxy, nodes, &mut dropped);
+    let sanitized = (home_proxy.is_some() || default_proxy.is_some())
+        .then_some(CatalogRouting {
+            home_proxy,
+            default_proxy,
+        });
+    (sanitized, dropped)
 }
 
 /// SHA-256 of the YAML's UTF-8 bytes, base64url **without padding** (§3).
@@ -378,6 +433,7 @@ mod tests {
             yaml: yaml.to_string(),
             sha256: catalog_digest(yaml),
             updated_at: None,
+            routing: None,
         }
     }
 
@@ -545,6 +601,103 @@ mod tests {
         let without: ExitCatalogResponse =
             serde_json::from_str(r#"{"revision":3,"yaml":"proxies: []","sha256":"x"}"#).unwrap();
         assert_eq!(without.updated_at, None);
+    }
+
+    // ---- routing directives ----
+
+    #[test]
+    fn routing_roundtrips_and_defaults_to_absent() {
+        let with: ExitCatalogResponse = serde_json::from_str(
+            r#"{"revision":3,"yaml":"proxies: []","sha256":"x","routing":{"homeProxy":"Home 01","defaultProxy":"US Reality 01"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            with.routing,
+            Some(CatalogRouting {
+                home_proxy: Some("Home 01".to_string()),
+                default_proxy: Some("US Reality 01".to_string()),
+            })
+        );
+        // Absent for unbound users; partial objects keep the other field None.
+        let without: ExitCatalogResponse =
+            serde_json::from_str(r#"{"revision":3,"yaml":"proxies: []","sha256":"x"}"#).unwrap();
+        assert_eq!(without.routing, None);
+        let partial: ExitCatalogResponse = serde_json::from_str(
+            r#"{"revision":3,"yaml":"proxies: []","sha256":"x","routing":{"homeProxy":"Home 01"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            partial.routing,
+            Some(CatalogRouting {
+                home_proxy: Some("Home 01".to_string()),
+                default_proxy: None,
+            })
+        );
+        // The cached JSON keeps the directives verbatim.
+        let body = serde_json::to_string(&with).unwrap();
+        assert!(body.contains("\"homeProxy\":\"Home 01\""));
+        let bare = serde_json::to_string(&without).unwrap();
+        assert!(!bare.contains("routing"), "no routing key may be serialized");
+    }
+
+    #[test]
+    fn sanitize_keeps_names_present_in_the_admitted_set() {
+        let nodes = validate_catalog(&valid_catalog(0)).unwrap();
+        let routing = CatalogRouting {
+            home_proxy: Some("US Reality 01".to_string()),
+            default_proxy: Some("US Reality 01".to_string()),
+        };
+        let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+        assert_eq!(sanitized, Some(routing));
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn sanitize_drops_unknown_empty_and_overlong_names_without_failing() {
+        let nodes = validate_catalog(&valid_catalog(0)).unwrap();
+        let routing = CatalogRouting {
+            home_proxy: Some("No Such Node".to_string()),
+            default_proxy: Some("US Reality 01".to_string()),
+        };
+        let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+        assert_eq!(
+            sanitized,
+            Some(CatalogRouting {
+                home_proxy: None,
+                default_proxy: Some("US Reality 01".to_string()),
+            })
+        );
+        assert_eq!(dropped, ["No Such Node".to_string()]);
+
+        for bad in [String::new(), "  ".to_string(), "x".repeat(201)] {
+            let routing = CatalogRouting {
+                home_proxy: Some(bad.clone()),
+                default_proxy: None,
+            };
+            let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+            assert_eq!(sanitized, None, "{bad:?}");
+            assert_eq!(dropped, [bad]);
+        }
+        // A name padded with whitespace matches nothing (names are trimmed at
+        // admission), so it is dropped rather than silently trimmed into one.
+        let routing = CatalogRouting {
+            home_proxy: Some(" US Reality 01 ".to_string()),
+            default_proxy: None,
+        };
+        let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+        assert_eq!(sanitized, None);
+        assert_eq!(dropped, [" US Reality 01 ".to_string()]);
+    }
+
+    #[test]
+    fn catalog_with_bogus_routing_still_validates() {
+        let mut catalog = valid_catalog(0);
+        catalog.routing = Some(CatalogRouting {
+            home_proxy: Some("No Such Node".to_string()),
+            default_proxy: None,
+        });
+        let nodes = validate_catalog(&catalog).unwrap();
+        assert_eq!(nodes.len(), 1, "a bad directive never fails the catalog");
     }
 
     // ---- CatalogTracker ----

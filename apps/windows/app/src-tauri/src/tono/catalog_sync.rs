@@ -35,8 +35,30 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     inner.catalog_tracker =
         tono_core::CatalogTracker::from_installed(cached.response.revision, cached.response.sha256.clone());
     inner.nodes = cached.nodes;
+    inner.routing = sanitized_routing(cached.response.routing.as_ref(), &inner.nodes);
     enforce_selection_survival(inner);
     let _ = ensure_usable_selection(inner);
+}
+
+/// Sanitize the catalog's split-routing directives against the admitted
+/// nodes, warning on every dropped name. A bad directive never fails the
+/// sync — the catalog itself was already fully verified.
+fn sanitized_routing(
+    routing: Option<&tono_core::CatalogRouting>,
+    nodes: &[ValidatedNode],
+) -> Option<tono_core::CatalogRouting> {
+    let routing = routing?;
+    let (sanitized, dropped) = tono_core::sanitize_routing(routing, nodes);
+    for name in dropped {
+        // The dropped name is unbounded server input; log only a prefix.
+        let shown: String = name.chars().take(64).collect();
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: exit-catalog routing directive names no admitted node and is ignored: {shown}"
+        );
+    }
+    sanitized
 }
 
 /// If the selected node is not in the current catalog, flag that the user
@@ -105,6 +127,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
                 inner.cancel_server_tests();
                 inner.catalog_tracker = effect.tracker;
                 inner.nodes = effect.nodes;
+                inner.routing = sanitized_routing(response.routing.as_ref(), &inner.nodes);
                 enforce_selection_survival(&mut inner);
                 let _ = ensure_usable_selection(&mut inner);
                 state.audit().log(crate::tono::audit::AuditEvent::SyncOk {
@@ -266,8 +289,15 @@ pub fn is_exit_blocked(name: &str) -> bool {
         .any(|blocked| name.eq_ignore_ascii_case(blocked))
 }
 
-/// Pick the best usable exit: preferred list first, then first unblocked name in sort order.
-pub fn default_usable_exit(nodes: &[ValidatedNode]) -> Option<String> {
+/// Pick the best usable exit: the admin-designated `defaultProxy` routing
+/// directive first (when it names a catalog node), then the preferred list,
+/// then the first unblocked name in sort order.
+pub fn default_usable_exit(nodes: &[ValidatedNode], default_proxy: Option<&str>) -> Option<String> {
+    if let Some(default) = default_proxy
+        && let Some(node) = nodes.iter().find(|node| node.name == default)
+    {
+        return Some(node.name.clone());
+    }
     for preferred in PREFERRED_DEFAULT_EXIT_NAMES {
         if let Some(node) = nodes.iter().find(|node| {
             !is_exit_blocked(&node.name)
@@ -292,7 +322,11 @@ pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
     if !needs_replacement {
         return None;
     }
-    let Some(replacement) = default_usable_exit(&inner.nodes) else {
+    let default_proxy = inner
+        .routing
+        .as_ref()
+        .and_then(|routing| routing.default_proxy.as_deref());
+    let Some(replacement) = default_usable_exit(&inner.nodes, default_proxy) else {
         return None;
     };
     inner.selected_node = Some(replacement.clone());
@@ -419,9 +453,31 @@ mod tests {
             ]
         );
         // Preferred default still picks Salt Lake even though sort rank is "other".
-        assert_eq!(default_usable_exit(&nodes).as_deref(), Some("Salt Lake City · Summit"));
+        assert_eq!(
+            default_usable_exit(&nodes, None).as_deref(),
+            Some("Salt Lake City · Summit")
+        );
         // With only the blocked node, no usable default.
-        assert_eq!(default_usable_exit(&[node("US-VLESS-Reality")]), None);
+        assert_eq!(default_usable_exit(&[node("US-VLESS-Reality")], None), None);
+    }
+
+    #[test]
+    fn routing_default_proxy_wins_when_present_in_the_catalog() {
+        let nodes = vec![
+            node("Salt Lake City · Summit"),
+            node("Home VPS 01"),
+            node("US West 01"),
+        ];
+        // The admin default beats the preferred list.
+        assert_eq!(
+            default_usable_exit(&nodes, Some("Home VPS 01")).as_deref(),
+            Some("Home VPS 01")
+        );
+        // A default naming no catalog node falls through to the old logic.
+        assert_eq!(
+            default_usable_exit(&nodes, Some("No Such Node")).as_deref(),
+            Some("Salt Lake City · Summit")
+        );
     }
 
     #[test]
@@ -453,6 +509,7 @@ mod tests {
             sha256: catalog_digest(&yaml),
             yaml,
             updated_at: None,
+            routing: None,
         }
     }
 

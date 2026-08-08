@@ -29,11 +29,15 @@ pub const REQUIRED_NETWORK: &str = "tcp";
 /// policy in force they are emitted as physical-interface-bound `proxies`
 /// entries and as rule targets. Mihomo has a single proxy namespace, so a
 /// catalog node sharing one of those names could steer DIRECT rules at the
-/// crafted node instead of the owned outbound.
-const RESERVED_NODE_NAMES: [&str; 7] = [
+/// crafted node instead of the owned outbound. `Tono-Claude-Home` is the
+/// Claude→home-exit group emitted when the catalog carries a verified
+/// `homeProxy` directive; a crafted node with that name would capture the
+/// Claude rules instead.
+const RESERVED_NODE_NAMES: [&str; 8] = [
     "Tono-Exit",
     crate::config::DIRECT_GROUP_NAME,
     crate::config::WEB_DIRECT_GROUP_NAME,
+    crate::config::CLAUDE_HOME_GROUP_NAME,
     "DIRECT",
     "GLOBAL",
     "REJECT",
@@ -881,6 +885,7 @@ ws-opts: { path: /ignored }
             "Tono-Exit",
             crate::config::DIRECT_GROUP_NAME,
             crate::config::WEB_DIRECT_GROUP_NAME,
+            crate::config::CLAUDE_HOME_GROUP_NAME,
             "DIRECT",
             "GLOBAL",
             "REJECT",
