@@ -1634,11 +1634,14 @@ export interface TranslationResources {
         connected: string
         connecting: string
         disconnecting: string
+        errorRetry: string
         errors: {
+          nodeUnreachable: string
           releaseReconciling: string
           serviceBusy: string
           serviceTooOld: string
         }
+        errorSwitchServer: string
         info: {
           dns: string
           download: string
@@ -1654,9 +1657,12 @@ export interface TranslationResources {
           locked: string
         }
         noServer: string
+        pickServer: string
         protectedOffline: string
         protectedOfflineDescription: string
         server: string
+        taglineConnected: string
+        taglineIdle: string
         title: string
       }
       login: {
@@ -1740,6 +1746,7 @@ export interface TranslationResources {
       }
       pill: {
         statusProtected: string
+        statusProtectedOffline: string
         statusReality: string
         subtitle: {
           restoringAccess: string

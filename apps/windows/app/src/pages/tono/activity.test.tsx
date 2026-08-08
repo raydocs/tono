@@ -171,6 +171,14 @@ describe('ActivityPage', () => {
       screen.getByText('Connect Tono to view live activity.'),
     ).toBeDefined()
     expect(screen.queryByText('proxy.example.com:443')).toBeNull()
+
+    const search = screen.getByRole('textbox', {
+      name: 'Filter by app, domain, target, protocol, or rule',
+    })
+    const searchIcon = search.closest('label')?.querySelector('svg')
+    expect(searchIcon).not.toBeNull()
+    expect(searchIcon?.style.width).toBe('18px')
+    expect(searchIcon?.style.height).toBe('18px')
   })
 
   it('filters route results and closes one or all live connections', async () => {

@@ -164,9 +164,10 @@ beforeEach(() => {
   tonoRetryNowMock.mockReset().mockResolvedValue(undefined)
   tonoDisconnectMock.mockReset().mockResolvedValue(undefined)
   tonoDiagnosticsReportMock.mockReset().mockResolvedValue(makeReport())
-  tonoUploadDiagnosticsMock
-    .mockReset()
-    .mockResolvedValue({ referenceCode: 'TON-4F2K-9QX1', receivedAt: 1712345678 })
+  tonoUploadDiagnosticsMock.mockReset().mockResolvedValue({
+    referenceCode: 'TON-4F2K-9QX1',
+    receivedAt: 1712345678,
+  })
   subscribeTonoStatusMock.mockReset()
   subscribeTonoStatusMock.mockImplementation(() => () => {})
   noticeSuccess.mockReset()
@@ -179,6 +180,73 @@ afterEach(async () => {
 })
 
 describe('ConnectProgressCard', () => {
+  it('does not fabricate a Preparing transaction for idle protected-offline startup', async () => {
+    tonoConnectProgressMock.mockResolvedValue(
+      makeProgress({
+        steps: [
+          step('preparing', 'pending'),
+          step('startingTunnel', 'pending'),
+          step('lockingTraffic', 'pending'),
+        ],
+        totalElapsedMs: null,
+        error: null,
+        retryAttempt: 0,
+        nextRetryAtMs: null,
+      }),
+    )
+
+    renderCard({ uiState: 'protectedOffline' })
+
+    await waitFor(() => expect(tonoConnectProgressMock).toHaveBeenCalled())
+    expect(screen.queryByText('Preparing protection…')).toBeNull()
+    expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Upload diagnostics' }),
+    ).toBeDefined()
+  })
+
+  it('keeps the protected-offline escape hatch while progress is still loading', async () => {
+    tonoConnectProgressMock.mockReturnValue(
+      new Promise<TonoConnectProgress>(() => {}),
+    )
+
+    renderCard({ uiState: 'protectedOffline' })
+
+    await waitFor(() => expect(tonoConnectProgressMock).toHaveBeenCalled())
+    expect(screen.queryByText(/TOTAL/)).toBeNull()
+    expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Upload diagnostics' }),
+    ).toBeDefined()
+  })
+
+  it('keeps the protected-offline escape hatch when progress telemetry fails', async () => {
+    tonoConnectProgressMock.mockRejectedValue(
+      new Error('progress telemetry unavailable'),
+    )
+
+    renderCard({ uiState: 'protectedOffline' })
+
+    await waitFor(() => expect(tonoConnectProgressMock).toHaveBeenCalled())
+    expect(screen.queryByText(/TOTAL/)).toBeNull()
+    expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Copy details' })).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'Upload diagnostics' }),
+    ).toBeDefined()
+  })
+
   it('renders completed/current/pending step states with elapsed on the current step', async () => {
     tonoConnectProgressMock.mockResolvedValue(makeProgress())
 
@@ -241,10 +309,9 @@ describe('ConnectProgressCard', () => {
     const countdown = await screen.findByTestId('tono-retry-countdown')
     expect(countdown.textContent).toBe('Retry 2 in 3s')
 
-    await waitFor(
-      () => expect(countdown.textContent).toBe('Retry 2 in 2s'),
-      { timeout: 2500 },
-    )
+    await waitFor(() => expect(countdown.textContent).toBe('Retry 2 in 2s'), {
+      timeout: 2500,
+    })
     await waitFor(() => expect(countdown.textContent).toBe('Retrying…'), {
       timeout: 4000,
     })
@@ -377,7 +444,9 @@ describe('ConnectProgressCard', () => {
       // Nothing has left the machine yet.
       expect(tonoUploadDiagnosticsMock).not.toHaveBeenCalled()
 
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Send report' }))
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Send report' }),
+      )
       await waitFor(() =>
         expect(tonoUploadDiagnosticsMock).toHaveBeenCalledTimes(1),
       )
@@ -404,7 +473,9 @@ describe('ConnectProgressCard', () => {
       renderCard()
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
-      fireEvent.click(await screen.findByRole('button', { name: 'Send report' }))
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Send report' }),
+      )
 
       const receipt = await screen.findByTestId('tono-upload-reference')
       expect(receipt.textContent).toContain('TON-4F2K-9QX1')
@@ -412,7 +483,9 @@ describe('ConnectProgressCard', () => {
         'Give this reference code to Tono support',
       )
 
-      fireEvent.click(within(receipt).getByRole('button', { name: 'Copy code' }))
+      fireEvent.click(
+        within(receipt).getByRole('button', { name: 'Copy code' }),
+      )
       await waitFor(() =>
         expect(writeText).toHaveBeenCalledWith('TON-4F2K-9QX1'),
       )
@@ -424,7 +497,9 @@ describe('ConnectProgressCard', () => {
       renderCard()
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
-      fireEvent.click(await screen.findByRole('button', { name: 'Send report' }))
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Send report' }),
+      )
 
       await screen.findByTestId('tono-upload-reference')
       expect(screen.queryByTestId('tono-upload-diagnostics')).toBeNull()
@@ -432,8 +507,10 @@ describe('ConnectProgressCard', () => {
     })
 
     it('disables the action while a request is in flight', async () => {
-      let release: (value: { referenceCode: string; receivedAt: null }) => void =
-        () => {}
+      let release: (value: {
+        referenceCode: string
+        receivedAt: null
+      }) => void = () => {}
       tonoUploadDiagnosticsMock.mockImplementation(
         () =>
           new Promise((resolve) => {
@@ -458,9 +535,10 @@ describe('ConnectProgressCard', () => {
       fireEvent.click(uploading)
       expect(tonoUploadDiagnosticsMock).toHaveBeenCalledTimes(1)
       // …and the card's own action is disabled underneath it.
-      expect(
-        screen.getByTestId('tono-upload-diagnostics'),
-      ).toHaveProperty('disabled', true)
+      expect(screen.getByTestId('tono-upload-diagnostics')).toHaveProperty(
+        'disabled',
+        true,
+      )
 
       release({ referenceCode: 'TON-AAAA-1111', receivedAt: null })
       await screen.findByTestId('tono-upload-reference')
@@ -480,23 +558,25 @@ describe('ConnectProgressCard', () => {
         'TONO_DIAG_UNREACHABLE: could not reach Tono: connection refused',
         'Could not reach Tono. Check that you are online — if the kill switch is blocking everything, Restore Normal Internet first, then retry.',
       ],
-    ])('explains %s actionably and keeps the action available', async (
-      raw,
-      expected,
-    ) => {
-      tonoUploadDiagnosticsMock.mockRejectedValue(new Error(raw))
-      tonoConnectProgressMock.mockResolvedValue(makeProgress())
-      renderCard()
+    ])(
+      'explains %s actionably and keeps the action available',
+      async (raw, expected) => {
+        tonoUploadDiagnosticsMock.mockRejectedValue(new Error(raw))
+        tonoConnectProgressMock.mockResolvedValue(makeProgress())
+        renderCard()
 
-      fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
-      fireEvent.click(await screen.findByRole('button', { name: 'Send report' }))
+        fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
+        fireEvent.click(
+          await screen.findByRole('button', { name: 'Send report' }),
+        )
 
-      await screen.findByText(expected)
-      // A failure is retryable: the dialog stays open, no code is shown.
-      expect(screen.queryByTestId('tono-upload-reference')).toBeNull()
-      expect(
-        screen.getByRole('button', { name: 'Send report' }),
-      ).toBeDefined()
-    })
+        await screen.findByText(expected)
+        // A failure is retryable: the dialog stays open, no code is shown.
+        expect(screen.queryByTestId('tono-upload-reference')).toBeNull()
+        expect(
+          screen.getByRole('button', { name: 'Send report' }),
+        ).toBeDefined()
+      },
+    )
   })
 })

@@ -96,6 +96,12 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_KILL_SWITCH_VERIFICATION
     }
+
+    /// Whether the Service provides the fail-closed DIRECT hot-reload bracket.
+    pub const fn supports_direct_runtime_reload(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,6 +230,117 @@ pub struct ProxyEndpoint {
     pub protocol: ProxyProtocol,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplaceDirectEndpointsRequest {
+    pub reload_id: u64,
+    #[serde(default)]
+    pub direct_endpoints: Vec<ProxyEndpoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FinalizeDirectRuntimeReloadRequest {
+    pub reload_id: u64,
+    /// Lower-case SHA-256 of the exact endpoint set whose post-install proofs the App completed.
+    pub endpoint_digest: String,
+}
+
+/// Authenticated heartbeat for an already committed DIRECT lease. Keeping this separate from
+/// finalize makes the one operation allowed to extend the deadline explicit on the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewDirectRuntimeReloadRequest {
+    pub reload_id: u64,
+    pub endpoint_digest: String,
+}
+
+/// Commit proof returned by both halves of the DIRECT runtime-reload bracket.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectRuntimeReloadResult {
+    pub owner_generation: u64,
+    /// Volatile Service bracket identity. Every begin, including a replay after an ambiguous
+    /// response, invalidates older replace/finalize requests from the same owner session.
+    pub reload_id: u64,
+    /// Lower-case SHA-256 of the canonical public endpoint tuples (never configuration secrets).
+    pub endpoint_digest: String,
+}
+
+fn direct_protocol_order(protocol: ProxyProtocol) -> u8 {
+    match protocol {
+        ProxyProtocol::Tcp => 0,
+        ProxyProtocol::Udp => 1,
+    }
+}
+
+/// Normalize, sort, and deduplicate an exact DIRECT endpoint set before either side hashes it.
+///
+/// Admission policy (public-only addresses and the narrow WeChat port table) remains the
+/// Service's responsibility. This shared wire helper only makes the commit proof impossible for
+/// the App and Service to calculate differently.
+pub fn canonical_direct_endpoints(
+    endpoints: &[ProxyEndpoint],
+) -> Result<Vec<ProxyEndpoint>, String> {
+    let mut canonical = endpoints
+        .iter()
+        .map(|endpoint| {
+            let ip = endpoint
+                .ip
+                .trim()
+                .parse::<std::net::IpAddr>()
+                .map_err(|_| format!("invalid DIRECT endpoint address {:?}", endpoint.ip))?;
+            if endpoint.port == 0 {
+                return Err(format!("invalid DIRECT endpoint port for {ip}"));
+            }
+            Ok(ProxyEndpoint {
+                ip: ip.to_string(),
+                port: endpoint.port,
+                protocol: endpoint.protocol,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    canonical.sort_by(|left, right| {
+        (
+            left.ip.as_str(),
+            left.port,
+            direct_protocol_order(left.protocol),
+        )
+            .cmp(&(
+                right.ip.as_str(),
+                right.port,
+                direct_protocol_order(right.protocol),
+            ))
+    });
+    canonical.dedup();
+    Ok(canonical)
+}
+
+/// SHA-256 commit proof for a canonical exact DIRECT endpoint set.
+pub fn direct_endpoint_digest(endpoints: &[ProxyEndpoint]) -> Result<String, String> {
+    let canonical = canonical_direct_endpoints(endpoints)?;
+    let mut hash = Sha256::new();
+    for endpoint in canonical {
+        let ip = endpoint
+            .ip
+            .parse::<std::net::IpAddr>()
+            .map_err(|_| "canonical DIRECT endpoint became invalid".to_owned())?;
+        match ip {
+            std::net::IpAddr::V4(address) => {
+                hash.update([4]);
+                hash.update(address.octets());
+            }
+            std::net::IpAddr::V6(address) => {
+                hash.update([6]);
+                hash.update(address.octets());
+            }
+        }
+        hash.update([direct_protocol_order(endpoint.protocol)]);
+        hash.update(endpoint.port.to_be_bytes());
+    }
+    Ok(hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 /// The cross-platform (Windows) kill switch configuration, generalized from the macOS-only
 /// [`MacosKillSwitchConfig`]. Accepted on Windows in [`StartClashRequest::windows_kill_switch`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,6 +397,10 @@ pub struct KillSwitchStatus {
     pub tunnel_permit_rendered: bool,
     #[serde(default)]
     pub endpoints: Vec<ProxyEndpoint>,
+    /// Digest of the volatile physical-interface DIRECT set. This is deliberately separate from
+    /// `endpoints`, which names the selected proxy node permits.
+    #[serde(default)]
+    pub direct_endpoint_digest: String,
     #[serde(default)]
     pub last_error: Option<String>,
 }
@@ -494,6 +615,10 @@ pub enum ServiceOperationKind {
     StopCore,
     StageRuntime,
     LockKillSwitch,
+    BeginDirectRuntimeReload,
+    ReplaceDirectEndpoints,
+    FinalizeDirectRuntimeReload,
+    RenewDirectRuntimeReload,
     VerifyKillSwitch,
     RestrictKillSwitch,
     ReleaseKillSwitch,
@@ -527,6 +652,11 @@ pub struct ServiceStatusSnapshot {
     pub active_generation: Option<u64>,
     pub service_state: ServiceLifecycleState,
     pub core_pid: Option<u32>,
+    /// Monotonic Core process-instance identity within one Service process. Unlike
+    /// `restart_count`, this changes for every publication, including an ordinary app-driven
+    /// replacement, and is sampled atomically with `core_pid` by the Service.
+    #[serde(default)]
+    pub core_generation: u32,
     pub core_started_at: Option<u64>,
     pub last_core_exit_reason: Option<String>,
     pub restart_count: u32,
@@ -869,6 +999,7 @@ mod tests {
             mode: KillSwitchStatusMode::Bootstrap,
             tunnel_permit_rendered: true,
             endpoints: config.proxy_endpoints.clone(),
+            direct_endpoint_digest: super::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
         };
         let encoded = serde_json::to_vec(&status).expect("status should serialize");
@@ -915,6 +1046,17 @@ mod tests {
             },
             crate::MIN_REQUIRED_SERVICE_REVISION,
         ));
+    }
+
+    #[test]
+    fn direct_runtime_reload_requires_revision_ten_in_the_current_epoch() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 9;
+        assert!(!info.supports_direct_runtime_reload());
+        info.protocol.revision = 10;
+        assert!(info.supports_direct_runtime_reload());
+        info.protocol.epoch = info.protocol.epoch.saturating_add(1);
+        assert!(!info.supports_direct_runtime_reload());
     }
 
     #[test]

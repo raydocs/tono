@@ -65,6 +65,11 @@ impl TonoTransport {
             .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
             .collect();
         let client = reqwest::Client::builder()
+            // The control-plane recovery channel is DNS-pinned and must not
+            // silently inherit HTTP(S)_PROXY, ALL_PROXY, or WinINET proxy
+            // settings. The OS TUN still carries this socket when connected;
+            // this only disables application-layer proxy discovery.
+            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .cookie_store(false)
             .connect_timeout(CONNECT_TIMEOUT)

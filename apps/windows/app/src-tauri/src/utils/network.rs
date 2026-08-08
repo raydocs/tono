@@ -69,6 +69,9 @@ impl NetworkManager {
         timeout_secs: Option<u64>,
         tls_root_mode: TlsRootMode,
     ) -> Result<Client> {
+        if accept_invalid_certs {
+            anyhow::bail!("disabling TLS certificate verification is not supported by Tono");
+        }
         let mut builder = Client::builder()
             .tls_backend_rustls()
             .redirect(reqwest::redirect::Policy::limited(10))
@@ -89,13 +92,6 @@ impl NetworkManager {
         }
 
         builder = builder.default_headers(default_headers);
-
-        // SSL/TLS
-        if accept_invalid_certs {
-            builder = builder
-                .danger_accept_invalid_certs(true)
-                .danger_accept_invalid_hostnames(true);
-        }
 
         // 超时设置
         if let Some(secs) = timeout_secs {
@@ -315,5 +311,19 @@ impl NetworkManager {
                 }),
             Err(err) => Err(err),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NetworkManager, TlsRootMode};
+    use reqwest::header::HeaderMap;
+
+    #[test]
+    fn invalid_certificate_bypass_is_rejected() {
+        let result =
+            NetworkManager::new().build_client(None, HeaderMap::new(), true, Some(1), TlsRootMode::PlatformVerifier);
+        let error = result.expect_err("Tono must not construct an unsafe TLS client");
+        assert!(error.to_string().contains("not supported by Tono"));
     }
 }

@@ -408,6 +408,7 @@ mod tests {
                         },
                     ],
                     tunnel_permit_rendered: false,
+                    direct_endpoint_digest: "0".repeat(64),
                     last_error: Some(format!(
                         "WFP permit for {NODE_IP}:443 rejected; Authorization: Bearer {ACCESS_TOKEN}"
                     )),

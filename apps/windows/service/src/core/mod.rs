@@ -4,14 +4,16 @@ pub use command::IpcCommand;
 pub mod structure;
 pub use structure::{
     AuthenticatedRequest, AuthenticatedSessionRequest, ClashConfig, CoreConfig,
-    DnsProtectionStatus, KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus,
-    KillSwitchStatusMode, MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig,
-    OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof,
-    ProtocolInfo, ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
-    RuntimeAsset, RuntimeBundle, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode,
-    ServiceLifecycleState, ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot,
-    StageRejection, StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions,
-    StopClashPayload, WriterConfig, owner_key,
+    DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest,
+    KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
+    MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME,
+    OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
+    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeAsset, RuntimeBundle,
+    SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
+    ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
+    StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
+    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest, owner_key,
 };
 
 pub mod paths;

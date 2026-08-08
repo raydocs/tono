@@ -91,14 +91,16 @@ fn ensure_private_directory_with_recovery(
                     if retry_err == ERROR_INVALID_OWNER || err == ERROR_INVALID_OWNER {
                         // Directory may exist from a partial prior attempt; open path below.
                         if !path.is_dir() {
-                            return Err(std::io::Error::from_raw_os_error(ERROR_INVALID_OWNER as i32))
-                                .with_context(|| {
-                                    format!(
-                                        "failed to create private service directory {path:?} \
+                            return Err(std::io::Error::from_raw_os_error(
+                                ERROR_INVALID_OWNER as i32,
+                            ))
+                            .with_context(|| {
+                                format!(
+                                    "failed to create private service directory {path:?} \
                                          (cannot assign LocalSystem as owner from this token; \
                                          create without owner and apply DACL failed)"
-                                    )
-                                });
+                                )
+                            });
                         }
                     } else {
                         return Err(std::io::Error::from_raw_os_error(retry_err as i32))

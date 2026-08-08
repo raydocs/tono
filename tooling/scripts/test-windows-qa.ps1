@@ -44,6 +44,21 @@ $script:adapterDisabledByHarness = $false
 $script:adapterRecoveryTask = $null
 $script:baselineDiagnosis = $null
 $script:crashedServicePid = $null
+$script:ownerSid = $null
+$script:ownerAppDataRoot = $null
+
+class QaDriverCleanupException : System.Exception {
+    QaDriverCleanupException([string]$message) : base($message) {}
+}
+
+function Test-QaDriverCleanupException {
+    param([System.Exception]$Exception)
+    while ($null -ne $Exception) {
+        if ($Exception -is [QaDriverCleanupException]) { return $true }
+        $Exception = $Exception.InnerException
+    }
+    return $false
+}
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 foreach ($evidencePath in @($eventsPath, $summaryPath, $captureEtlPath, $capturePcapPath, $egressPath)) {
@@ -84,7 +99,10 @@ function Get-ServiceSnapshot {
 function Get-DnsSnapshot {
     $physicalIndexes = @(
         Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
-            Where-Object Status -ne 'Disabled' |
+            # Match the Service's IP Helper invariant: only an operational uplink with a bound
+            # IP stack can currently resolve or leak DNS. `Disconnected` secondary adapters are
+            # intentionally outside the live protected set until a network-change reconnect.
+            Where-Object Status -eq 'Up' |
             ForEach-Object ifIndex
     )
     @(
@@ -95,7 +113,14 @@ function Get-DnsSnapshot {
                 [ordered]@{
                     alias = $_.InterfaceAlias
                     index = $_.InterfaceIndex
-                    family = [string]$_.AddressFamily
+                    # CIM exposes UInt16 2/23 on some Windows builds and IPv4/IPv6 enum text on
+                    # others. Normalize the evidence so host PowerShell formatting cannot change
+                    # the QA result.
+                    family = switch ([uint16]$_.AddressFamily) {
+                        2 { 'IPv4' }
+                        23 { 'IPv6' }
+                        default { [string]$_.AddressFamily }
+                    }
                     servers = @($_.ServerAddresses)
                 }
             }
@@ -103,10 +128,50 @@ function Get-DnsSnapshot {
 }
 
 function Get-DriverPath {
-    @(
-        (Join-Path $repositoryRoot 'apps\windows\service\target\release\tono-service-integration-driver.exe'),
-        (Join-Path $repositoryRoot 'apps\windows\service\target\debug\tono-service-integration-driver.exe')
-    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    $path = Join-Path $repositoryRoot 'apps\windows\service\target\release\tono-service-integration-driver.exe'
+    if (Test-Path -LiteralPath $path -PathType Leaf) { $path }
+}
+
+function Invoke-IsolatedDriver {
+    param(
+        [Parameter(Mandatory)] [string]$Command,
+        [hashtable]$Environment = @{},
+        [int]$TimeoutMilliseconds = 45000
+    )
+    $driver = Get-DriverPath
+    if (-not $driver) { throw 'integration driver is not built' }
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $driver
+    $start.ArgumentList.Add($Command)
+    $start.WorkingDirectory = Split-Path -Parent $driver
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    [void]$start.Environment.Remove('CLASH_VERGE_TEST_OWNER_TOKEN')
+    [void]$start.Environment.Remove('CLASH_VERGE_TEST_OWNER_SID')
+    [void]$start.Environment.Remove('CLASH_VERGE_TEST_OWNER_APP_DATA_DIR')
+    foreach ($entry in $Environment.GetEnumerator()) { $start.Environment[$entry.Key] = $entry.Value }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    try {
+        if (-not $process.Start()) { throw 'integration driver did not start' }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            try { $process.Kill($true) } catch { try { $process.Kill() } catch {} }
+            $exited = $process.WaitForExit(10000)
+            $drained = [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 10000)
+            if (-not $exited -or -not $drained) {
+                throw [QaDriverCleanupException]::new('fatal integration driver cleanup failure: process exit or output drain could not be confirmed')
+            }
+            throw "integration driver timed out after $TimeoutMilliseconds milliseconds"
+        }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 10000)) {
+            throw [QaDriverCleanupException]::new('fatal integration driver cleanup failure: output drain could not be confirmed')
+        }
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Stdout = $stdout.Result.Trim(); Stderr = $stderr.Result.Trim() }
+    }
+    finally { $process.Dispose() }
 }
 
 function Get-TonoDiagnosis {
@@ -115,13 +180,15 @@ function Get-TonoDiagnosis {
         return [ordered]@{ available = $false; error = 'integration driver is not built' }
     }
     try {
-        $text = (& $driver diagnose 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0) {
-            return [ordered]@{ available = $true; error = $text }
+        $result = Invoke-IsolatedDriver -Command diagnose -Environment @{
+            CLASH_VERGE_TEST_OWNER_SID = $script:ownerSid
+            CLASH_VERGE_TEST_OWNER_APP_DATA_DIR = $script:ownerAppDataRoot
         }
-        [ordered]@{ available = $true; report = ($text | ConvertFrom-Json -Depth 20) }
+        if ($result.ExitCode -ne 0) { return [ordered]@{ available = $true; error = $result.Stderr } }
+        [ordered]@{ available = $true; report = ($result.Stdout | ConvertFrom-Json -Depth 20) }
     }
     catch {
+        if (Test-QaDriverCleanupException $_.Exception) { throw }
         [ordered]@{ available = $true; error = $_.Exception.GetBaseException().Message }
     }
 }
@@ -403,6 +470,65 @@ function Assert-Preconditions {
     if (-not (Get-Service TonoService -ErrorAction SilentlyContinue)) {
         throw 'TonoService is not installed'
     }
+    $driver = Get-DriverPath
+    if (-not $driver) {
+        throw 'integration driver is not built; run cargo build --locked --manifest-path apps/windows/service/Cargo.toml --release --no-default-features --features client --bin tono-service-integration-driver'
+    }
+    foreach ($source in @(
+        (Join-Path $repositoryRoot 'apps\windows\service\src\bin\service_integration_driver.rs'),
+        (Join-Path $repositoryRoot 'apps\windows\service\Cargo.toml'),
+        (Join-Path $repositoryRoot 'apps\windows\service\Cargo.lock')
+    )) {
+        if ((Get-Item -LiteralPath $driver).LastWriteTimeUtc -lt (Get-Item -LiteralPath $source).LastWriteTimeUtc) {
+            throw "integration driver is stale (older than $source); rebuild the production release driver"
+        }
+    }
+    $buildInfoResult = Invoke-IsolatedDriver -Command qa-build-info -TimeoutMilliseconds 10000
+    if ($buildInfoResult.ExitCode -ne 0) { throw 'integration driver does not support qa-build-info' }
+    try { $buildInfo = $buildInfoResult.Stdout | ConvertFrom-Json -ErrorAction Stop } catch {
+        throw 'integration driver returned invalid qa-build-info JSON'
+    }
+    if (($buildInfo.qa_protocol_version -isnot [int] -and $buildInfo.qa_protocol_version -isnot [long]) -or
+        $buildInfo.qa_protocol_version -ne 1) {
+        throw 'integration driver QA protocol version is unsupported'
+    }
+    if ($buildInfo.credential_source -ne 'installed-token-file') {
+        throw 'integration driver credential source is not installed-token-file'
+    }
+    $script:ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $script:ownerAppDataRoot = Join-Path $env:APPDATA 'com.raydocs.tono'
+    if (-not (Test-Path -LiteralPath $script:ownerAppDataRoot -PathType Container)) {
+        throw 'installed Tono app-data directory is missing; this QA harness supports installed mode only'
+    }
+    $rootItem = Get-Item -LiteralPath $script:ownerAppDataRoot -Force
+    if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'installed Tono app-data directory must not be a reparse point'
+    }
+    $tokenPath = Join-Path $script:ownerAppDataRoot '.clash-verge-service-owner-token'
+    if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
+        throw 'installed Tono owner token is missing'
+    }
+    $tokenItem = Get-Item -LiteralPath $tokenPath -Force
+    if (($tokenItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $tokenItem.Length -ne 32) {
+        throw 'installed Tono owner token must be a non-reparse 32-byte file'
+    }
+    $sessionId = (Get-Process -Id $PID).SessionId
+    $tonoProcesses = @(Get-CimInstance Win32_Process -Filter "Name='Tono.exe'" -ErrorAction Stop)
+    if ($tonoProcesses.Count -ne 1) {
+        throw 'exactly one running Tono.exe is required for unambiguous installed-owner authentication'
+    }
+    $tono = $tonoProcesses[0]
+    $tonoSid = (Invoke-CimMethod -InputObject $tono -MethodName GetOwnerSid -ErrorAction Stop).Sid
+    if ($tono.SessionId -ne $sessionId -or $tonoSid -ne $script:ownerSid) {
+        throw 'Tono.exe must run in this harness session under the same account (launch the elevated shell with that account)'
+    }
+    if ([string]::IsNullOrWhiteSpace($tono.ExecutablePath)) {
+        throw 'could not determine the running Tono.exe path'
+    }
+    $portableMarker = Join-Path (Split-Path -Parent $tono.ExecutablePath) '.config\PORTABLE'
+    if (Test-Path -LiteralPath $portableMarker) {
+        throw 'portable Tono is running; close it and run the installed, nonportable Tono build'
+    }
     if ($Faults -contains 'AdapterFlap') {
         if ([string]::IsNullOrWhiteSpace($AdapterName)) {
             throw '-AdapterName is required for AdapterFlap'
@@ -424,10 +550,6 @@ function Assert-Preconditions {
             throw "AdapterFlap requires the reviewed IPv4 default-route uplink; '$AdapterName' is not one"
         }
         $script:selectedAdapter = $matches[0]
-    }
-    if (-not (Get-DriverPath)) {
-        $message = 'integration driver is not built; run cargo build --manifest-path apps/windows/service/Cargo.toml --release --features client --bin tono-service-integration-driver'
-        throw $message
     }
     if ($AllowedProtectedEgressIp.Count -eq 0) {
         throw 'supply at least one -AllowedProtectedEgressIp; evidence-only runs cannot produce PASS'
@@ -484,6 +606,7 @@ try {
             }
         }
         catch {
+            if (Test-QaDriverCleanupException $_.Exception) { throw }
             $message = "${fault}: $($_.Exception.GetBaseException().Message)"
             $script:failures.Add($message)
             Write-QaEvent -Kind 'error' -Stage $fault -Data @{ message = $message }

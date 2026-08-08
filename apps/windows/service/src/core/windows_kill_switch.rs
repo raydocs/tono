@@ -1,7 +1,8 @@
 //! Cross-platform facade for the Windows WFP kill switch.
 //!
 //! Layering mirrors `macos_kill_switch.rs`: this module owns the state machine, the persisted
-//! intent record (`kill-switch.json`, written atomically *before* any WFP mutation), the
+//! intent record (`kill-switch.json`, normally written atomically before widening WFP; the
+//! DIRECT retraction narrows live WFP first), the
 //! verify-after-write watchdog, startup recovery ("corrupt intent = armed"), and the emergency
 //! disarm. The rule set itself comes from the pure model (`wfp_model.rs`); the `Fwpm*` FFI is
 //! confined to `wfp.rs` and compiled only on Windows, so everything here builds and is
@@ -15,10 +16,10 @@ use crate::core::wfp_model::{self, RuleConfig};
 use anyhow::{Context as _, Result, bail};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Whether the live WFP engine is behind this build (real Windows service binary).
 const ENGINE_LIVE: bool = cfg!(all(windows, not(feature = "test")));
@@ -57,23 +58,34 @@ impl IntentRecord {
 
 /// The core process instance a tunnel permit was granted for.
 ///
-/// A pid is not an identity — Windows recycles them — so the watchdog's monotonic restart
-/// counter rides along: a respawn changes at least one of the two, always.
+/// A pid is not an identity — Windows recycles them — so the manager's monotonic publication
+/// generation rides along: every ordinary start and watchdog respawn changes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CoreInstance {
     pid: u32,
-    restarts: u32,
+    generation: u32,
 }
 
-/// The core running right now, or `None` when none is. Read from the manager's non-blocking
-/// snapshot: this is on the WFP writer path (including the once-a-second watchdog tick), which
-/// must never queue behind a core start or stop.
+/// The core running right now, or `None` when none is. The manager publishes PID + generation in
+/// one atomic word, so this never queues behind lifecycle work and never combines two instances.
 async fn current_core_instance() -> Option<CoreInstance> {
-    let snapshot = crate::core::manager::status_snapshot_nonblocking().await;
-    snapshot.core_pid.map(|pid| CoreInstance {
-        pid,
-        restarts: snapshot.restart_count,
+    current_core_instance_for_direct_security()
+}
+
+/// A coherent, non-cached Core identity for DIRECT-permit decisions. A stop clears it before
+/// teardown and a start publishes it only after commit; manager contention alone is therefore not
+/// treated as process replacement.
+fn current_core_instance_for_direct_security() -> Option<CoreInstance> {
+    crate::core::manager::security_core_instance_snapshot().map(|instance| CoreInstance {
+        pid: instance.pid,
+        generation: instance.generation,
     })
+}
+
+/// Authoritative core identity for a WFP mutation. Kept async to avoid churn at its call sites;
+/// the coherent atomic publication itself never waits for the manager.
+async fn current_core_instance_authoritative() -> Option<CoreInstance> {
+    current_core_instance_for_direct_security()
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +102,29 @@ struct Armed {
     /// re-lock re-render them without another round trip. Every restore path rebuilds with an
     /// empty set (fail-closed until the app's next connect transaction re-issues them).
     direct_endpoints: Vec<ProxyEndpoint>,
+    /// Volatile Service-owned reload bracket. Pending physical permits expire without relying on
+    /// the GUI process to remain alive; committed permits keep only an idempotency receipt.
+    direct_reload: Option<DirectReloadLease>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectReloadPhase {
+    Bracket,
+    Pending,
+    Committed,
+}
+
+#[derive(Debug, Clone)]
+struct DirectReloadLease {
+    owner_generation: u64,
+    reload_id: u64,
+    phase: DirectReloadPhase,
+    endpoint_digest: String,
+    core_instance: Option<CoreInstance>,
+    /// The exact TUN adapter identity proved when the physical endpoint set was installed.
+    /// `None` is valid only for the pre-install Bracket phase.
+    tunnel_luid: Option<u64>,
+    expires_at: Option<std::time::Instant>,
 }
 
 /// The LUID the tunnel permit may name this tick, or `None` for the pre-lock policy (no tunnel
@@ -119,6 +154,27 @@ fn tunnel_permit_luid(armed: &Armed, current_core: Option<CoreInstance>) -> Opti
 static ARMED: Lazy<Mutex<Option<Armed>>> = Lazy::new(|| Mutex::new(None));
 static LAST_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 static WFP_OPERATION: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
+#[cfg(test)]
+static TEST_INSTALL_FAILURE: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static TEST_AMBIGUOUS_INSTALL_FAILURE: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static TEST_PERSIST_FAILURE: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static TEST_INSTALL_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static TEST_PERSIST_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static NEXT_DIRECT_RELOAD_ID: AtomicU64 = AtomicU64::new(1);
+/// Longer than the App's absolute connect transaction: while this bracket expires the physical
+/// DIRECT set is empty, but a stale request must still be invalidated eventually.
+const DIRECT_BRACKET_LEASE: std::time::Duration = std::time::Duration::from_secs(7 * 60);
+/// Once physical permits exist, the App has only controller/WFP/data-plane read-back plus the
+/// finalize IPC left. Expiry transitions the Service to exact Blocked without GUI cooperation.
+const DIRECT_PENDING_LEASE: std::time::Duration = std::time::Duration::from_secs(90);
+/// A committed physical escape set is not permanent Service state. The owning App must renew it
+/// through its authenticated owner session; process death, a hung UI runtime, or session
+/// retirement therefore retracts the set without relying on App cleanup.
+const DIRECT_COMMITTED_LEASE: std::time::Duration = std::time::Duration::from_secs(60);
 /// Startup recovery downgraded a `locked` intent to `blocked`; set so a successful core
 /// restore can re-lock the tunnel instead of leaving the machine fail-closed until the GUI
 /// returns (`relock_restored_tunnel`).
@@ -265,6 +321,13 @@ fn intent_path() -> PathBuf {
 }
 
 async fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(test)]
+    {
+        TEST_PERSIST_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+        if TEST_PERSIST_FAILURE.load(Ordering::Relaxed) {
+            bail!("simulated persistent-state write failure");
+        }
+    }
     crate::core::paths::ensure_persistent_state_layout()?;
     crate::core::platform_security::secure_private_service_file_if_exists(path)?;
     let temporary = path.with_extension("tmp");
@@ -375,6 +438,12 @@ fn validate_direct_endpoints(config: &KillSwitchConfig) -> Result<()> {
         if !port_ok {
             bail!("direct endpoint {ip}:{port}/{protocol:?} is not an approved WeChat port");
         }
+        let IpAddr::V4(ipv4) = ip else {
+            bail!("direct endpoint {ip} must be an IPv4 public-unicast address");
+        };
+        if !is_public_direct_ipv4(ipv4) {
+            bail!("direct endpoint {ip} is not a public-unicast address");
+        }
         if ip == IpAddr::from([1, 1, 1, 1]) || ip == IpAddr::from([8, 8, 8, 8]) {
             bail!("direct endpoint {ip} is a permanently protected resolver");
         }
@@ -383,6 +452,32 @@ fn validate_direct_endpoints(config: &KillSwitchConfig) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// A conservative IPv4-only public-unicast gate for physical-interface DIRECT grants.
+///
+/// The generated outbound is explicitly `ip-version: ipv4`; rejecting every special-use range here
+/// keeps loopback, LAN, link-local, carrier-NAT, benchmark, documentation, multicast, and
+/// reserved destinations out of WFP even if a malformed cloud document reaches the Service.
+fn is_public_direct_ipv4(address: Ipv4Addr) -> bool {
+    let [a, b, c, _] = address.octets();
+    !matches!(
+        (a, b, c),
+        (0, _, _)
+            | (10, _, _)
+            | (100, 64..=127, _)
+            | (127, _, _)
+            | (169, 254, _)
+            | (172, 16..=31, _)
+            | (192, 0, 0)
+            | (192, 0, 2)
+            | (192, 88, 99)
+            | (192, 168, _)
+            | (198, 18..=19, _)
+            | (198, 51, 100)
+            | (203, 0, 113)
+            | (224..=255, _, _)
+    )
 }
 
 fn intent_is_valid(intent: &IntentRecord) -> bool {
@@ -403,6 +498,7 @@ fn intent_is_valid(intent: &IntentRecord) -> bool {
 /// The rule model's view of an armed session, given who the running core is. Pure, so the
 /// tunnel-permit lifetime rule is testable without a core.
 fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleConfig {
+    let tun_luid = tunnel_permit_luid(armed, current_core);
     RuleConfig {
         mode: armed.intent.mode,
         endpoints: armed.intent.endpoints.clone(),
@@ -412,9 +508,16 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
             .iter()
             .filter_map(|ip| ip.parse::<IpAddr>().ok())
             .collect(),
-        tun_luid: tunnel_permit_luid(armed, current_core),
+        tun_luid,
         app_path: armed.intent.app_path.clone(),
-        direct_endpoints: armed.direct_endpoints.clone(),
+        // DIRECT is a bypass of a live tunnel, never an independent escape hatch. A missing or
+        // changed core identity retracts both grants in the same expected-set transaction.
+        direct_endpoints: if armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some()
+        {
+            armed.direct_endpoints.clone()
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -423,7 +526,7 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
 /// outcome of this rule that needs evidence in the service log.
 static TUNNEL_PERMIT_ORPHANED: AtomicBool = AtomicBool::new(false);
 
-/// Whether the **last render** actually put the tunnel permit in the expected set.
+/// Whether the **last successful exact install/verify** proved the tunnel permit in the live set.
 ///
 /// Reported as `KillSwitchStatus::tunnel_permit_rendered`. `mode: Locked` alone cannot say
 /// this: a locked session whose permit was retracted (a core respawn, or a `core_instance` that
@@ -446,7 +549,6 @@ static TUNNEL_PERMIT_RENDERED: AtomicBool = AtomicBool::new(false);
 /// passed. One read, threaded through, cannot disagree with itself.
 fn rule_config_rendering(armed: &Armed, current_core: Option<CoreInstance>) -> RuleConfig {
     let config = rule_config_for(armed, current_core);
-    TUNNEL_PERMIT_RENDERED.store(config.tun_luid.is_some(), Ordering::Relaxed);
     let orphaned = armed.tun_luid.is_some() && config.tun_luid.is_none();
     if orphaned != TUNNEL_PERMIT_ORPHANED.swap(orphaned, Ordering::Relaxed) {
         if orphaned {
@@ -744,7 +846,9 @@ async fn install_unlocked(armed: &Armed) -> Result<()> {
 /// from *that* read — see [`rule_config_rendering`]. `lock` is the only such caller, and it is
 /// the one where a second, disagreeing read is terminal.
 async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>) -> Result<()> {
-    let expected = wfp_model::expected_filters(&rule_config_rendering(armed, current_core));
+    let config = rule_config_rendering(armed, current_core);
+    let tunnel_permit_expected = config.tun_luid.is_some();
+    let expected = wfp_model::expected_filters(&config);
     #[cfg(all(windows, not(feature = "test")))]
     {
         let app_path = armed.intent.app_path.clone();
@@ -752,27 +856,51 @@ async fn install_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>)
             crate::core::wfp::install(&expected, &app_path)
         })
         .await;
-        // `install` ends with verify-by-key, so its outcome doubles as a verify result.
+        // `install` ends with exact provider-set verification, so only a successful transaction
+        // may publish that a tunnel permit was actually rendered.
+        TUNNEL_PERMIT_RENDERED.store(result.is_ok() && tunnel_permit_expected, Ordering::Relaxed);
         note_verify(result.is_ok());
         result
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         let _ = expected;
+        #[cfg(test)]
+        {
+            TEST_INSTALL_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
+            if TEST_INSTALL_FAILURE.load(Ordering::Relaxed) {
+                TUNNEL_PERMIT_RENDERED.store(false, Ordering::Relaxed);
+                note_verify(false);
+                bail!("simulated WFP install failure");
+            }
+            if TEST_AMBIGUOUS_INSTALL_FAILURE.load(Ordering::Relaxed) {
+                // Model `wfp::install` committing before exact verification fails, or a bounded
+                // caller timing out while its kernel worker remains in flight. The caller must
+                // treat the candidate as possibly live despite this `Err`.
+                TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
+                note_verify(false);
+                bail!("simulated ambiguous WFP install failure after possible commit");
+            }
+        }
+        TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
         Ok(())
     }
 }
 
-async fn verify_live_unlocked(armed: &Armed) -> Result<()> {
-    let expected =
-        wfp_model::expected_filters(&rule_config_rendering(armed, current_core_instance().await));
+async fn verify_live_unlocked_for(armed: &Armed, current_core: Option<CoreInstance>) -> Result<()> {
+    let config = rule_config_rendering(armed, current_core);
+    let tunnel_permit_expected = config.tun_luid.is_some();
+    let expected = wfp_model::expected_filters(&config);
     #[cfg(all(windows, not(feature = "test")))]
     {
-        engine_call("verify", move || crate::core::wfp::verify(&expected)).await
+        let result = engine_call("verify", move || crate::core::wfp::verify(&expected)).await;
+        TUNNEL_PERMIT_RENDERED.store(result.is_ok() && tunnel_permit_expected, Ordering::Relaxed);
+        result
     }
     #[cfg(not(all(windows, not(feature = "test"))))]
     {
         let _ = expected;
+        TUNNEL_PERMIT_RENDERED.store(tunnel_permit_expected, Ordering::Relaxed);
         Ok(())
     }
 }
@@ -814,6 +942,39 @@ fn record_outcome(result: Result<()>) -> Result<()> {
         Err(error) => {
             *last_error_guard() = Some(format!("{error:#}"));
             Err(error)
+        }
+    }
+}
+
+/// Join startup's durable and live fail-closed proofs without allowing either failure to skip the
+/// other attempt. `ARMED` is published before both calls, so any error still leaves the watchdog a
+/// conservative model to reconcile.
+fn record_startup_reconciliation(persist: Result<()>, install: Result<()>) -> Result<()> {
+    match (persist, install) {
+        (Ok(()), Ok(())) => {
+            *last_error_guard() = None;
+            Ok(())
+        }
+        (Err(error), Ok(())) => {
+            let message = format!(
+                "startup installed exact Blocked WFP but could not persist the conservative intent: {error:#}"
+            );
+            *last_error_guard() = Some(message.clone());
+            Err(error.context(message))
+        }
+        (Ok(()), Err(error)) => {
+            let message = format!(
+                "startup persisted the conservative intent but could not install exact Blocked WFP: {error:#}"
+            );
+            *last_error_guard() = Some(message.clone());
+            Err(error.context(message))
+        }
+        (Err(persist), Err(install)) => {
+            let message = format!(
+                "startup could neither persist the conservative intent ({persist:#}) nor install exact Blocked WFP ({install:#})"
+            );
+            *last_error_guard() = Some(message.clone());
+            bail!(message)
         }
     }
 }
@@ -866,6 +1027,11 @@ pub(crate) async fn arm_bootstrap(
     if owner_key.is_empty() {
         bail!("enabled kill switch requires the authenticated owner key");
     }
+    if !config.direct_endpoints.is_empty() {
+        bail!(
+            "initial arm cannot grant DIRECT endpoints; use the authenticated runtime-reload transaction"
+        );
+    }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
     let _operation = WFP_OPERATION.lock().await;
     let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
@@ -885,8 +1051,9 @@ pub(crate) async fn arm_bootstrap(
         },
         tun_luid: None,
         core_instance: None,
-        // In memory only — the intent file deliberately never carries these (omission = clear).
-        direct_endpoints: config.direct_endpoints.clone(),
+        // In memory only — populated exclusively by the lease-backed reload transaction.
+        direct_endpoints: Vec::new(),
+        direct_reload: None,
     };
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
     // floor if this process dies during the following transaction.
@@ -958,6 +1125,24 @@ async fn resolve_luid(name: &str) -> Result<u64> {
     }
 }
 
+/// Re-resolve the recorded tunnel alias and prove that Windows still maps it to the LUID locked
+/// for this Core. Same-PID Mihomo hot reload can recreate WinTUN without changing Core identity;
+/// a cached LUID must never keep either the tunnel grant or physical DIRECT grants alive then.
+async fn prove_current_tunnel_luid(armed: &Armed) -> Result<()> {
+    let recorded = armed
+        .tun_luid
+        .context("DIRECT transaction has no recorded tunnel LUID")?;
+    let current = resolve_luid(&armed.intent.tunnel_interface)
+        .await
+        .context("cannot re-resolve the DIRECT transaction tunnel interface")?;
+    if current != recorded {
+        bail!(
+            "DIRECT transaction tunnel LUID changed from {recorded} to {current}; a fresh lock is required"
+        );
+    }
+    Ok(())
+}
+
 /// Second phase: permit the tunnel interface (by LUID) and retract the bootstrap API
 /// channel. Runs only once the WinTUN adapter exists — until then tunnel traffic is blocked
 /// too (fail-closed).
@@ -973,6 +1158,55 @@ async fn resolve_luid(name: &str) -> Result<u64> {
 pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
     ensure_supported()?;
     let _operation = WFP_OPERATION.lock().await;
+    let result = lock_unlocked(tunnel_interface).await;
+    let Err(error) = result else {
+        return Ok(());
+    };
+
+    // A failed lock must never leave a previously committed physical escape set behind. `ARMED`
+    // always tracks the last WFP set that may be live: `lock_unlocked` publishes its candidate
+    // immediately after a successful transaction, while a failed transaction leaves the prior
+    // state untouched. This therefore retracts the right endpoint set for validation, Core/TUN
+    // races, install, persistence, and publication failures alike.
+    let Some(possibly_live) = armed_guard().clone() else {
+        return Err(error);
+    };
+    if !direct_state_may_be_live(&possibly_live) {
+        return Err(error);
+    }
+    let current_core = current_core_instance_for_direct_security();
+    match transition_direct_to_blocked_unlocked(possibly_live, current_core, None).await {
+        Ok(()) => {
+            let error = error.context(
+                "tunnel lock failed; exact DIRECT permits were retracted and traffic is Blocked",
+            );
+            *last_error_guard() = Some(format!("{error:#}"));
+            Err(error)
+        }
+        Err(retraction) => {
+            let endpoints_may_remain_live =
+                armed_guard().as_ref().is_some_and(direct_state_may_be_live);
+            let message = if endpoints_may_remain_live {
+                format!(
+                    "tunnel lock failed ({error:#}); exact DIRECT Blocked reconciliation also \
+                     failed ({retraction:#}); the possibly-live endpoint set remains published \
+                     with an expired lease for watchdog retry"
+                )
+            } else {
+                format!(
+                    "tunnel lock failed ({error:#}); live WFP was narrowed and Blocked was \
+                     published, but durable Blocked persistence failed ({retraction:#})"
+                )
+            };
+            *last_error_guard() = Some(message.clone());
+            bail!(message)
+        }
+    }
+}
+
+/// Perform the tunnel lock while [`WFP_OPERATION`] is held. Once an install succeeds, publish its
+/// candidate immediately so every later error can reconcile the set that may actually be live.
+async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
     let mut armed = ARMED
         .lock()
         .unwrap()
@@ -991,7 +1225,7 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
             "lock interface {supplied:?} does not match the interface recorded at arm time {recorded:?}"
         );
     }
-    // Read the core identity *before* resolving the LUID: a core replaced in between makes the
+    // Read the authoritative core identity *before* resolving the LUID: a core replaced in between makes the
     // recorded instance stale rather than falsely current, so the next render retracts the
     // permit instead of handing it to an adapter the new core did not create.
     //
@@ -999,48 +1233,600 @@ pub(crate) async fn lock(tunnel_interface: Option<&str>) -> Result<()> {
     // handed to the render below; a second read for the render could disagree with it (the
     // snapshot behind `current_core_instance` falls back to a cache while the core manager is
     // busy), and a disagreement here is terminal — see `rule_config_rendering`.
-    let core_instance = current_core_instance().await;
+    let core_instance = current_core_instance_authoritative()
+        .await
+        .context("cannot lock a tunnel without a running core")?;
     let luid = resolve_luid(&recorded).await?;
     armed.tun_luid = Some(luid);
-    armed.core_instance = core_instance;
-    if core_instance.is_none() {
-        // Not fatal — the permit is simply not rendered and the tunnel stays blocked until the
-        // app locks again — but it is invisible in `mode` alone, so it has to be in the log as
-        // well as in `tunnel_permit_rendered`.
-        tracing::warn!(
-            "wfp: locking without an identifiable core instance; the tunnel permit will not be \
-             rendered and tunnel traffic stays blocked until the app locks again"
-        );
-    }
+    armed.core_instance = Some(core_instance);
     armed.intent.mode = KillSwitchStatusMode::Locked;
     armed.intent.updated_at = now_unix();
+
+    // Retain a same-Core reload bracket or endpoint set only if its complete Service-owned proof
+    // is still valid for the newly resolved adapter. A recycled PID, expired heartbeat, missing
+    // lease, or same-PID WinTUN recreation becomes full-tunnel-only before any render.
+    if direct_reload_invalidation_reason(
+        &armed,
+        Some(core_instance),
+        Some(luid),
+        std::time::Instant::now(),
+    )
+    .is_some()
+    {
+        armed.direct_endpoints.clear();
+        armed.direct_reload = None;
+    }
+
+    if current_core_instance_authoritative().await != Some(core_instance) {
+        bail!("core changed before tunnel lock install; a fresh lock is required");
+    }
+    let encoded = serde_json::to_vec_pretty(&armed.intent)?;
     // Update live WFP first (the macOS helper's add_tunnel ordering): if this fails, the
     // previous bootstrap rules remain effective and the persisted intent restores them after
     // a crash. Rendered from the same `core_instance` that was just recorded, never a re-read.
-    install_unlocked_for(&armed, core_instance).await?;
-    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
-    *armed_guard() = Some(armed);
+    install_unlocked_for(&armed, Some(core_instance)).await?;
+    // The transaction succeeded, so this is now the conservative description of what may be
+    // live. Publishing before the post-install proofs closes the old memory/live divergence on
+    // persistence and Core/TUN race failures.
+    *armed_guard() = Some(armed.clone());
+
+    let core_after = current_core_instance_authoritative().await;
+    let luid_after = if core_after == Some(core_instance) {
+        resolve_luid(&recorded).await
+    } else {
+        Err(anyhow::anyhow!("Core identity changed during tunnel lock"))
+    };
+    let post_install_failure = match luid_after {
+        Ok(current_luid) if current_luid != luid => Some(format!(
+            "tunnel LUID changed from {luid} to {current_luid} during tunnel lock"
+        )),
+        Err(error) => Some(format!(
+            "cannot prove the tunnel LUID after tunnel lock install: {error:#}"
+        )),
+        Ok(current_luid) => direct_reload_invalidation_reason(
+            &armed,
+            core_after,
+            Some(current_luid),
+            std::time::Instant::now(),
+        )
+        .map(str::to_owned),
+    };
+    if let Some(reason) = post_install_failure {
+        transition_direct_to_blocked_unlocked(armed, core_after, None)
+            .await
+            .with_context(|| {
+                format!("{reason}; exact Blocked reconciliation after tunnel lock install failed")
+            })?;
+        bail!("{reason}; traffic remains blocked until a fresh lock");
+    }
+    atomic_write(&intent_path(), &encoded)
+        .await
+        .context("locked tunnel intent could not be persisted")?;
     *last_error_guard() = None;
     Ok(())
+}
+
+fn canonical_direct_endpoints(
+    armed: &Armed,
+    endpoints: &[ProxyEndpoint],
+) -> Result<Vec<ProxyEndpoint>> {
+    let validation = KillSwitchConfig {
+        tunnel_interface: armed.intent.tunnel_interface.clone(),
+        proxy_endpoints: armed.intent.endpoints.clone(),
+        bootstrap_api_hosts: Vec::new(),
+        direct_endpoints: endpoints.to_vec(),
+    };
+    validate_direct_endpoints(&validation)?;
+    crate::canonical_direct_endpoints(endpoints).map_err(anyhow::Error::msg)
+}
+
+fn reload_result(
+    owner_generation: u64,
+    reload_id: u64,
+    endpoints: &[ProxyEndpoint],
+) -> Result<crate::DirectRuntimeReloadResult> {
+    Ok(crate::DirectRuntimeReloadResult {
+        owner_generation,
+        reload_id,
+        endpoint_digest: crate::direct_endpoint_digest(endpoints).map_err(anyhow::Error::msg)?,
+    })
+}
+
+fn next_direct_reload_id() -> u64 {
+    loop {
+        let id = NEXT_DIRECT_RELOAD_ID.fetch_add(1, Ordering::Relaxed);
+        if id != 0 {
+            return id;
+        }
+    }
+}
+
+fn direct_reload_matches(
+    armed: &Armed,
+    owner_generation: u64,
+    reload_id: u64,
+) -> Result<DirectReloadLease> {
+    let lease = armed
+        .direct_reload
+        .clone()
+        .context("no DIRECT runtime reload bracket is active")?;
+    if lease.owner_generation != owner_generation || lease.reload_id != reload_id {
+        bail!("DIRECT runtime reload bracket is stale");
+    }
+    Ok(lease)
+}
+
+/// Reconcile to exact Blocked without publishing a state stricter than live WFP proved.
+///
+/// The Blocked intent is attempted first so a Service restart cannot revive volatile DIRECT
+/// grants. The in-memory state is committed only after the WFP transaction succeeds. If BFE is
+/// unavailable, the prior endpoint set remains published (because it may still be live), `live`
+/// is false, and its invalid/expired lease makes the watchdog retry this exact narrowing on every
+/// tick. This avoids the dangerous split-brain state "memory says empty while WFP still permits".
+async fn transition_direct_to_blocked_unlocked(
+    armed: Armed,
+    current_core: Option<CoreInstance>,
+    next_lease: Option<DirectReloadLease>,
+) -> Result<()> {
+    let mut retry_state = armed.clone();
+    let mut blocked = armed;
+    blocked.direct_endpoints.clear();
+    blocked.direct_reload = next_lease;
+    blocked.tun_luid = None;
+    blocked.core_instance = None;
+    blocked.intent.mode = KillSwitchStatusMode::Blocked;
+    blocked.intent.updated_at = now_unix();
+
+    // DIRECT grants are volatile and never restored from the intent file, so narrowing live WFP
+    // first is crash-safe: an older Locked intent also restores as exact Blocked. More
+    // importantly, a damaged state directory must not delay the attempt to retract physical
+    // permits. Serialization is captured separately for the same reason — both proofs are always
+    // attempted.
+    let encoded = serde_json::to_vec_pretty(&blocked.intent);
+    let install = install_unlocked_for(&blocked, current_core).await;
+    let persist = match encoded {
+        Ok(encoded) => atomic_write(&intent_path(), &encoded).await,
+        Err(error) => Err(error.into()),
+    };
+    if install.is_ok() {
+        *armed_guard() = Some(blocked);
+    } else {
+        // Keep publishing the endpoint set that may still be live, but poison its lease so the
+        // watchdog cannot treat the old committed deadline as authorization to retain it.
+        if let Some(lease) = retry_state.direct_reload.as_mut() {
+            lease.expires_at = Some(std::time::Instant::now());
+        }
+        *armed_guard() = Some(retry_state);
+        note_verify(false);
+    }
+    match (install, persist) {
+        (Ok(()), Ok(())) => {
+            *last_error_guard() = None;
+            Ok(())
+        }
+        (Err(error), Ok(())) => {
+            *last_error_guard() = Some(format!("{error:#}"));
+            Err(error
+                .context("DIRECT Blocked intent was persisted but live WFP narrowing failed; prior permits remain published until retry"))
+        }
+        (Ok(()), Err(error)) => {
+            *last_error_guard() = Some(format!("{error:#}"));
+            Err(error.context("live WFP is Blocked but the DIRECT intent could not be persisted"))
+        }
+        (Err(install), Err(persist)) => {
+            let message = format!(
+                "DIRECT transition could not prove live Blocked WFP ({install:#}) or persist Blocked intent ({persist:#})"
+            );
+            *last_error_guard() = Some(message.clone());
+            bail!(message)
+        }
+    }
+}
+
+fn direct_state_may_be_live(armed: &Armed) -> bool {
+    !armed.direct_endpoints.is_empty() || armed.direct_reload.is_some()
+}
+
+/// Retract every tunnel/DIRECT grant before a TUN-affecting core reload. Every invocation creates
+/// a fresh volatile id, so an ambiguous replay invalidates delayed endpoint requests from the
+/// previous invocation rather than accidentally authorizing them in the new bracket.
+pub(crate) async fn begin_direct_runtime_reload(
+    owner_generation: u64,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    ensure_supported()?;
+    let _operation = WFP_OPERATION.lock().await;
+    let previous = armed_guard().clone().context("kill switch is not armed")?;
+    if !matches!(
+        previous.intent.mode,
+        KillSwitchStatusMode::Locked | KillSwitchStatusMode::Blocked
+    ) {
+        bail!("DIRECT runtime reload requires a locked kill switch");
+    }
+    let current_core = current_core_instance_authoritative().await;
+    let reload_id = next_direct_reload_id();
+    let empty_digest = crate::direct_endpoint_digest(&[]).map_err(anyhow::Error::msg)?;
+    let lease = DirectReloadLease {
+        owner_generation,
+        reload_id,
+        phase: DirectReloadPhase::Bracket,
+        endpoint_digest: empty_digest,
+        core_instance: current_core,
+        tunnel_luid: None,
+        expires_at: Some(std::time::Instant::now() + DIRECT_BRACKET_LEASE),
+    };
+    transition_direct_to_blocked_unlocked(previous, current_core, Some(lease)).await?;
+    reload_result(owner_generation, reload_id, &[])
+}
+
+/// Install the complete volatile DIRECT set as a short Service-owned pending lease. The caller
+/// must finalize after its post-install proofs; App death, Core change, or lease expiry retracts
+/// the permits and moves the machine to exact Blocked.
+pub(crate) async fn replace_direct_endpoints(
+    endpoints: &[ProxyEndpoint],
+    owner_generation: u64,
+    reload_id: u64,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    ensure_supported()?;
+    let _operation = WFP_OPERATION.lock().await;
+    let previous = armed_guard().clone().context("kill switch is not armed")?;
+    let current_core = current_core_instance_authoritative().await;
+    let lease = match direct_reload_matches(&previous, owner_generation, reload_id) {
+        Ok(lease) => lease,
+        Err(error) => {
+            transition_direct_to_blocked_unlocked(previous, current_core, None)
+                .await
+                .context("stale DIRECT replacement could not be reconciled to Blocked")?;
+            return Err(error.context("DIRECT replacement was rejected; traffic is Blocked"));
+        }
+    };
+    let canonical = match canonical_direct_endpoints(&previous, endpoints) {
+        Ok(canonical) => canonical,
+        Err(error) => {
+            transition_direct_to_blocked_unlocked(previous, current_core, None)
+                .await
+                .context("invalid DIRECT endpoint set could not be reconciled to Blocked")?;
+            return Err(error.context("DIRECT endpoint validation failed; traffic is Blocked"));
+        }
+    };
+    let endpoint_digest = crate::direct_endpoint_digest(&canonical).map_err(anyhow::Error::msg)?;
+    if previous.intent.mode != KillSwitchStatusMode::Locked
+        || tunnel_permit_luid(&previous, current_core).is_none()
+    {
+        transition_direct_to_blocked_unlocked(previous, current_core, None)
+            .await
+            .context("invalid DIRECT replacement state could not be reconciled to Blocked")?;
+        bail!(
+            "replacing DIRECT endpoints requires a locked tunnel grant owned by the current core"
+        );
+    }
+    let core = current_core.context("DIRECT endpoint replacement has no running Core")?;
+    if lease.core_instance != Some(core) {
+        transition_direct_to_blocked_unlocked(previous, Some(core), None)
+            .await
+            .context("stale DIRECT Core bracket could not be reconciled to Blocked")?;
+        bail!("Core identity changed after the DIRECT reload bracket opened");
+    }
+
+    if lease
+        .expires_at
+        .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+    {
+        let reconcile = transition_direct_to_blocked_unlocked(previous, Some(core), None).await;
+        reconcile.context("expired DIRECT bracket could not be reconciled to Blocked")?;
+        bail!("DIRECT runtime reload bracket expired");
+    }
+    if let Err(error) = prove_current_tunnel_luid(&previous).await {
+        transition_direct_to_blocked_unlocked(previous, Some(core), None)
+            .await
+            .context("stale DIRECT tunnel LUID could not be reconciled to Blocked")?;
+        return Err(error.context("DIRECT endpoint replacement lost its locked tunnel identity"));
+    }
+    if lease.phase != DirectReloadPhase::Bracket {
+        let actual_digest = crate::direct_endpoint_digest(&previous.direct_endpoints)
+            .map_err(anyhow::Error::msg)?;
+        if lease.endpoint_digest != endpoint_digest || actual_digest != endpoint_digest {
+            let reconcile = transition_direct_to_blocked_unlocked(previous, Some(core), None).await;
+            reconcile.context("conflicting DIRECT replay could not be reconciled to Blocked")?;
+            bail!("DIRECT endpoint replay did not match the pending/committed set");
+        }
+        // Lost-response replay after either pending install or finalization. Re-run exact install
+        // and identity proof, but never extend the pending lease.
+        if let Err(error) = install_unlocked_for(&previous, Some(core)).await {
+            transition_direct_to_blocked_unlocked(previous, Some(core), None)
+                .await
+                .context("DIRECT replay failed and exact-permit retraction also failed")?;
+            return Err(error.context("DIRECT replay failed; traffic is Blocked"));
+        }
+        let core_after = current_core_instance_authoritative().await;
+        if core_after != Some(core) {
+            transition_direct_to_blocked_unlocked(previous, core_after, None)
+                .await
+                .context("Core changed during DIRECT replay and Blocked reconciliation failed")?;
+            bail!("Core changed during DIRECT endpoint replay");
+        }
+        if let Err(error) = prove_current_tunnel_luid(&previous).await {
+            transition_direct_to_blocked_unlocked(previous, Some(core), None)
+                .await
+                .context("tunnel changed during DIRECT replay and Blocked reconciliation failed")?;
+            return Err(error.context("tunnel identity changed during DIRECT endpoint replay"));
+        }
+        return reload_result(owner_generation, reload_id, &previous.direct_endpoints);
+    }
+    if !previous.direct_endpoints.is_empty()
+        || lease.endpoint_digest
+            != crate::direct_endpoint_digest(&[]).map_err(anyhow::Error::msg)?
+    {
+        transition_direct_to_blocked_unlocked(previous, Some(core), None)
+            .await
+            .context("non-empty DIRECT bracket could not be reconciled to Blocked")?;
+        bail!("DIRECT bracket was not empty before endpoint installation");
+    }
+
+    let mut candidate = previous.clone();
+    candidate.direct_endpoints = canonical.clone();
+    let tunnel_luid = previous
+        .tun_luid
+        .context("locked DIRECT replacement lost its tunnel LUID")?;
+    candidate.direct_reload = Some(DirectReloadLease {
+        owner_generation,
+        reload_id,
+        phase: DirectReloadPhase::Pending,
+        endpoint_digest: endpoint_digest.clone(),
+        core_instance: Some(core),
+        tunnel_luid: Some(tunnel_luid),
+        expires_at: Some(std::time::Instant::now() + DIRECT_PENDING_LEASE),
+    });
+    if let Err(error) = install_unlocked_for(&candidate, Some(core)).await {
+        // `install` may have committed before its exact verification failed, and a timed-out WFP
+        // worker continues running after this caller receives an error. The candidate is therefore
+        // the conservative possibly-live set, not the empty Bracket snapshot. If Blocked cannot be
+        // proved immediately, publishing candidate with its poisoned Pending lease makes the
+        // watchdog retry without ever claiming the physical permits are absent.
+        transition_direct_to_blocked_unlocked(candidate, Some(core), None)
+            .await
+            .context("DIRECT install failed and exact-permit retraction also failed")?;
+        return Err(error.context("DIRECT endpoint set was not installed; traffic is Blocked"));
+    }
+    let core_after = current_core_instance_authoritative().await;
+    if core_after != Some(core) {
+        transition_direct_to_blocked_unlocked(candidate, core_after, None)
+            .await
+            .context("Core changed during DIRECT install and exact-permit retraction failed")?;
+        bail!("Core changed during DIRECT endpoint installation; traffic is Blocked");
+    }
+    if let Err(error) = prove_current_tunnel_luid(&candidate).await {
+        transition_direct_to_blocked_unlocked(candidate, Some(core), None)
+            .await
+            .context("tunnel changed during DIRECT install and exact-permit retraction failed")?;
+        return Err(error.context("tunnel identity changed during DIRECT endpoint installation"));
+    }
+    *armed_guard() = Some(candidate);
+    *last_error_guard() = None;
+    reload_result(owner_generation, reload_id, &canonical)
+}
+
+/// Commit a pending DIRECT lease only after the App proves the reloaded controller, WFP snapshot,
+/// DNS, and ordinary tunnel data plane. Idempotent for a lost response from the same bracket.
+pub(crate) async fn finalize_direct_runtime_reload(
+    expected_digest: &str,
+    owner_generation: u64,
+    reload_id: u64,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    ensure_supported()?;
+    let _operation = WFP_OPERATION.lock().await;
+    let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    let lease = match direct_reload_matches(&armed, owner_generation, reload_id) {
+        Ok(lease) => lease,
+        Err(error) => {
+            let current_core = current_core_instance_authoritative().await;
+            transition_direct_to_blocked_unlocked(armed, current_core, None)
+                .await
+                .context("stale DIRECT finalize could not be reconciled to Blocked")?;
+            return Err(error.context("DIRECT finalize was rejected; traffic is Blocked"));
+        }
+    };
+    if lease.endpoint_digest != expected_digest {
+        let current_core = current_core_instance_authoritative().await;
+        transition_direct_to_blocked_unlocked(armed, current_core, None)
+            .await
+            .context("DIRECT finalize digest mismatch could not be reconciled to Blocked")?;
+        bail!("DIRECT finalize digest did not match the Service pending set");
+    }
+    if lease.phase == DirectReloadPhase::Bracket {
+        let current_core = current_core_instance_authoritative().await;
+        transition_direct_to_blocked_unlocked(armed, current_core, None)
+            .await
+            .context("premature DIRECT finalize could not be reconciled to Blocked")?;
+        bail!("DIRECT endpoints have not been installed for this bracket");
+    }
+    if lease
+        .expires_at
+        .is_none_or(|deadline| std::time::Instant::now() >= deadline)
+    {
+        let current_core = current_core_instance_authoritative().await;
+        transition_direct_to_blocked_unlocked(armed, current_core, None)
+            .await
+            .context("expired pending DIRECT set could not be reconciled to Blocked")?;
+        bail!("pending DIRECT endpoint lease expired");
+    }
+
+    let current_core = current_core_instance_authoritative().await;
+    let Some(core) = current_core else {
+        transition_direct_to_blocked_unlocked(armed, None, None)
+            .await
+            .context("missing finalize Core could not be reconciled to Blocked")?;
+        bail!("DIRECT finalize has no running Core");
+    };
+    if armed.intent.mode != KillSwitchStatusMode::Locked
+        || tunnel_permit_luid(&armed, Some(core)).is_none()
+        || lease.core_instance != Some(core)
+        || lease.tunnel_luid != armed.tun_luid
+    {
+        transition_direct_to_blocked_unlocked(armed, Some(core), None)
+            .await
+            .context("invalid DIRECT finalize state could not be reconciled to Blocked")?;
+        bail!("DIRECT finalize lost its locked Core/TUN identity");
+    }
+    if let Err(error) = prove_current_tunnel_luid(&armed).await {
+        transition_direct_to_blocked_unlocked(armed, Some(core), None)
+            .await
+            .context("stale finalize tunnel LUID could not be reconciled to Blocked")?;
+        return Err(error.context("DIRECT finalize lost its current tunnel identity"));
+    }
+    let actual_digest =
+        crate::direct_endpoint_digest(&armed.direct_endpoints).map_err(anyhow::Error::msg)?;
+    if actual_digest != expected_digest {
+        transition_direct_to_blocked_unlocked(armed, Some(core), None)
+            .await
+            .context("DIRECT finalize set mismatch could not be reconciled to Blocked")?;
+        bail!("DIRECT finalize endpoint set did not match its receipt");
+    }
+
+    if let Err(error) = install_unlocked_for(&armed, Some(core)).await {
+        transition_direct_to_blocked_unlocked(armed, Some(core), None)
+            .await
+            .context("DIRECT finalize proof failed and exact-permit retraction also failed")?;
+        return Err(error.context("DIRECT finalize WFP proof failed; traffic is Blocked"));
+    }
+    let core_after = current_core_instance_authoritative().await;
+    if core_after != Some(core) {
+        transition_direct_to_blocked_unlocked(armed, core_after, None)
+            .await
+            .context("Core changed during DIRECT finalize and exact-permit retraction failed")?;
+        bail!("Core changed during DIRECT finalize; traffic is Blocked");
+    }
+    if let Err(error) = prove_current_tunnel_luid(&armed).await {
+        transition_direct_to_blocked_unlocked(armed, Some(core), None)
+            .await
+            .context("tunnel changed during DIRECT finalize and exact-permit retraction failed")?;
+        return Err(error.context("tunnel identity changed during DIRECT finalize"));
+    }
+    if lease
+        .expires_at
+        .is_none_or(|deadline| std::time::Instant::now() >= deadline)
+    {
+        transition_direct_to_blocked_unlocked(armed, Some(core), None)
+            .await
+            .context(
+                "DIRECT lease expired during finalize and could not be reconciled to Blocked",
+            )?;
+        bail!("DIRECT endpoint lease expired during finalize; traffic is Blocked");
+    }
+    if lease.phase == DirectReloadPhase::Pending {
+        armed.direct_reload = Some(DirectReloadLease {
+            phase: DirectReloadPhase::Committed,
+            expires_at: Some(std::time::Instant::now() + DIRECT_COMMITTED_LEASE),
+            ..lease
+        });
+        *armed_guard() = Some(armed.clone());
+    }
+    *last_error_guard() = None;
+    reload_result(owner_generation, reload_id, &armed.direct_endpoints)
+}
+
+/// Extend a committed DIRECT lease only for the authenticated owner session and the exact
+/// Core/TUN/endpoint proof finalized by that session. This performs no widening WFP mutation: it
+/// merely moves the Service-owned deadline after every identity check passes. Any malformed,
+/// stale, expired, or mismatched heartbeat first reconciles live policy to exact Blocked.
+pub(crate) async fn renew_direct_runtime_reload(
+    expected_digest: &str,
+    owner_generation: u64,
+    reload_id: u64,
+) -> Result<crate::DirectRuntimeReloadResult> {
+    ensure_supported()?;
+    let _operation = WFP_OPERATION.lock().await;
+    let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    let current_core = current_core_instance_authoritative().await;
+    let lease = match direct_reload_matches(&armed, owner_generation, reload_id) {
+        Ok(lease) => lease,
+        Err(error) => {
+            transition_direct_to_blocked_unlocked(armed, current_core, None)
+                .await
+                .context("stale DIRECT renewal could not be reconciled to Blocked")?;
+            return Err(error.context("DIRECT renewal was rejected; traffic is Blocked"));
+        }
+    };
+
+    let now = std::time::Instant::now();
+    let actual_digest =
+        crate::direct_endpoint_digest(&armed.direct_endpoints).map_err(anyhow::Error::msg)?;
+    let identity_valid = lease.phase == DirectReloadPhase::Committed
+        && lease.endpoint_digest == expected_digest
+        && actual_digest == expected_digest
+        && lease.expires_at.is_some_and(|deadline| now < deadline)
+        && armed.intent.mode == KillSwitchStatusMode::Locked
+        && tunnel_permit_luid(&armed, current_core).is_some()
+        && lease.core_instance == current_core
+        && lease.tunnel_luid.is_some()
+        && lease.tunnel_luid == armed.tun_luid;
+    if !identity_valid {
+        transition_direct_to_blocked_unlocked(armed, current_core, None)
+            .await
+            .context("invalid DIRECT renewal could not be reconciled to Blocked")?;
+        bail!("DIRECT renewal proof was stale, expired, or mismatched; traffic is Blocked");
+    }
+    if let Err(error) = prove_current_tunnel_luid(&armed).await {
+        transition_direct_to_blocked_unlocked(armed, current_core, None)
+            .await
+            .context("DIRECT renewal tunnel mismatch could not be reconciled to Blocked")?;
+        return Err(error.context("DIRECT renewal lost its tunnel identity; traffic is Blocked"));
+    }
+
+    let core_after = current_core_instance_authoritative().await;
+    let final_now = std::time::Instant::now();
+    if core_after != current_core
+        || lease
+            .expires_at
+            .is_none_or(|deadline| final_now >= deadline)
+    {
+        transition_direct_to_blocked_unlocked(armed, core_after, None)
+            .await
+            .context(
+                "DIRECT identity changed during renewal and could not be reconciled to Blocked",
+            )?;
+        bail!(
+            "DIRECT renewal expired or changed Core identity while being proven; traffic is Blocked"
+        );
+    }
+
+    let mut renewed = lease;
+    renewed.expires_at = Some(final_now + DIRECT_COMMITTED_LEASE);
+    armed.direct_reload = Some(renewed);
+    *armed_guard() = Some(armed.clone());
+    *last_error_guard() = None;
+    reload_result(owner_generation, reload_id, &armed.direct_endpoints)
+}
+
+/// Synchronous security barrier for every Core stop or replacement. An ALE App-ID permit names a
+/// binary path, not a PID/generation, so a newly spawned Mihomo at that same path could inherit an
+/// old DIRECT tuple. Packed identity revocation happens *inside* the WFP writer lock: a widening
+/// that entered first must finish before this exact Blocked transaction, while one queued behind
+/// it observes `None` and cannot authorize anything. The manager calls this before terminating an
+/// ordinary Core and, after a crash, before every respawn attempt. Failure must prevent launch.
+pub(crate) async fn retract_direct_before_core_replacement() -> Result<()> {
+    if !SUPPORTED {
+        crate::core::manager::revoke_core_security_identity_under_wfp_barrier();
+        return Ok(());
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    crate::core::manager::revoke_core_security_identity_under_wfp_barrier();
+    let Some(armed) = armed_guard().clone() else {
+        return Ok(());
+    };
+    // Even an empty volatile receipt is not proof that live WFP is empty: session filters survive
+    // a Service-process restart while BFE remains running, and startup's first exact install may
+    // have failed. Always overwrite the provider set before allowing the same App-ID path to run.
+    transition_direct_to_blocked_unlocked(armed, None, None)
+        .await
+        .context("could not prove exact Blocked WFP before replacing Core; replacement is refused")
 }
 
 /// Disconnected-but-armed ("Protected Offline"): floor + endpoint/DNS rules stay, the API
 /// recovery channel re-opens, the tunnel permit is gone.
 async fn restrict_bootstrap_unlocked() -> Result<()> {
-    let mut armed = ARMED
-        .lock()
-        .unwrap()
-        .clone()
-        .context("kill switch is not armed")?;
-    armed.intent.mode = KillSwitchStatusMode::Blocked;
-    armed.tun_luid = None;
-    // The grant goes with the LUID: a later lock must re-establish both.
-    armed.core_instance = None;
-    armed.intent.updated_at = now_unix();
-    // Persist first so a crash at any later point restores the stricter block (macOS parity).
-    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
-    *armed_guard() = Some(armed.clone());
-    record_outcome(install_unlocked(&armed).await)
+    let armed = armed_guard().clone().context("kill switch is not armed")?;
+    let current_core = current_core_instance().await;
+    transition_direct_to_blocked_unlocked(armed, current_core, None).await
 }
 
 pub(crate) async fn restrict_bootstrap() -> Result<()> {
@@ -1212,6 +1998,7 @@ fn emergency_armed() -> Armed {
         tun_luid: None,
         core_instance: None,
         direct_endpoints: Vec::new(),
+        direct_reload: None,
     }
 }
 
@@ -1245,17 +2032,22 @@ pub async fn restore_on_service_start() -> Result<()> {
                         tun_luid: None,
                         core_instance: None,
                         direct_endpoints: Vec::new(),
+                        direct_reload: None,
                     };
                     armed.intent.mode = KillSwitchStatusMode::Blocked;
                     armed.intent.updated_at = now_unix();
-                    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?)
-                        .await?;
                     *armed_guard() = Some(armed.clone());
-                    let installed = record_outcome(install_unlocked(&armed).await);
-                    if installed.is_ok() {
+                    let persist = match serde_json::to_vec_pretty(&armed.intent) {
+                        Ok(encoded) => atomic_write(&intent_path(), &encoded).await,
+                        Err(error) => Err(error.into()),
+                    };
+                    let install = install_unlocked(&armed).await;
+                    let wfp_live = install.is_ok();
+                    let reconciled = record_startup_reconciliation(persist, install);
+                    if wfp_live {
                         sweep_legacy_sublayers_unlocked().await;
                     }
-                    return installed;
+                    return reconciled;
                 }
                 let mut armed = Armed {
                     intent,
@@ -1267,27 +2059,37 @@ pub async fn restore_on_service_start() -> Result<()> {
                     // recovered session stays fail-closed for them until the app's next
                     // connect transaction re-issues the approved tuples.
                     direct_endpoints: Vec::new(),
+                    direct_reload: None,
                 };
                 // A persisted Locked mode is not proof this boot's tunnel exists: downgrade to
                 // Blocked (fail-closed, API recovery channel open) until the tunnel is
                 // re-locked — by `relock_restored_tunnel` after a core restore, or by the GUI.
-                if armed.intent.mode == KillSwitchStatusMode::Locked {
+                let restored_was_locked = armed.intent.mode == KillSwitchStatusMode::Locked;
+                if restored_was_locked {
                     // Materialize the legacy Locked => verified migration before changing mode.
                     // Otherwise a second service restart would reinterpret the now-Blocked
                     // field-less record as stale and incorrectly open an established session.
                     armed.intent.verified = Some(true);
                     armed.intent.mode = KillSwitchStatusMode::Blocked;
                     armed.intent.updated_at = now_unix();
-                    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?)
-                        .await?;
                     RESTORE_WAS_LOCKED.store(true, Ordering::Release);
                 }
                 *armed_guard() = Some(armed.clone());
-                let installed = record_outcome(install_unlocked(&armed).await);
-                if installed.is_ok() {
+                let persist = if restored_was_locked {
+                    match serde_json::to_vec_pretty(&armed.intent) {
+                        Ok(encoded) => atomic_write(&intent_path(), &encoded).await,
+                        Err(error) => Err(error.into()),
+                    }
+                } else {
+                    Ok(())
+                };
+                let install = install_unlocked(&armed).await;
+                let wfp_live = install.is_ok();
+                let reconciled = record_startup_reconciliation(persist, install);
+                if wfp_live {
                     sweep_legacy_sublayers_unlocked().await;
                 }
-                installed
+                reconciled
             }
             // `wanted == false` is the *only* parseable record that may disarm the machine. The
             // guard above rejects a record for several reasons besides that one — an empty
@@ -1430,9 +2232,7 @@ pub async fn residual_filters_present() -> Result<bool> {
     .await
     {
         Ok(present) => Ok(present),
-        Err(error)
-            if crate::core::wfp::error_text_means_provider_absent(&format!("{error:#}")) =>
-        {
+        Err(error) if crate::core::wfp::error_text_means_provider_absent(&format!("{error:#}")) => {
             Ok(false)
         }
         Err(error) => Err(error),
@@ -1581,6 +2381,40 @@ pub async fn relock_restored_tunnel() -> Result<()> {
     })
 }
 
+fn direct_reload_invalidation_reason(
+    armed: &Armed,
+    current_core: Option<CoreInstance>,
+    current_tunnel_luid: Option<u64>,
+    now: std::time::Instant,
+) -> Option<&'static str> {
+    let Some(lease) = armed.direct_reload.as_ref() else {
+        return (!armed.direct_endpoints.is_empty())
+            .then_some("DIRECT endpoints exist without a Service-owned lease");
+    };
+    if lease.expires_at.is_none_or(|deadline| now >= deadline) {
+        return Some(match lease.phase {
+            DirectReloadPhase::Bracket => "DIRECT runtime reload bracket expired before install",
+            DirectReloadPhase::Pending => {
+                "pending DIRECT endpoints expired before App finalization"
+            }
+            DirectReloadPhase::Committed => {
+                "committed DIRECT heartbeat lease expired after App/session liveness was lost"
+            }
+        });
+    }
+    if lease.phase != DirectReloadPhase::Bracket
+        && (armed.intent.mode != KillSwitchStatusMode::Locked
+            || tunnel_permit_luid(armed, current_core).is_none()
+            || lease.core_instance != current_core
+            || armed.tun_luid.is_none()
+            || armed.tun_luid != current_tunnel_luid
+            || lease.tunnel_luid != armed.tun_luid)
+    {
+        return Some("DIRECT endpoint Core/TUN/LUID ownership changed");
+    }
+    None
+}
+
 /// One-second verify-after-write watchdog (the macOS helper does the same for PF): any
 /// mismatch reinstalls the full expected set transactionally. Persistent failures are
 /// log-throttled — one error per minute, the rest at debug — so a broken engine cannot
@@ -1601,14 +2435,62 @@ pub fn spawn_windows_kill_switch_watchdog() {
             let _operation = WFP_OPERATION.lock().await;
             let armed = { armed_guard().clone() };
             if let Some(armed) = armed {
+                let direct_transaction_active = armed.direct_reload.is_some();
+                let current_core = if direct_transaction_active {
+                    current_core_instance_for_direct_security()
+                } else {
+                    current_core_instance().await
+                };
+                let current_tunnel_luid = if armed
+                    .direct_reload
+                    .as_ref()
+                    .is_some_and(|lease| lease.phase != DirectReloadPhase::Bracket)
+                {
+                    resolve_luid(&armed.intent.tunnel_interface).await.ok()
+                } else {
+                    None
+                };
+                if let Some(reason) = direct_reload_invalidation_reason(
+                    &armed,
+                    current_core,
+                    current_tunnel_luid,
+                    std::time::Instant::now(),
+                ) {
+                    let transition =
+                        transition_direct_to_blocked_unlocked(armed, current_core, None).await;
+                    let healthy = transition.is_ok();
+                    note_verify(healthy);
+                    match transition {
+                        Ok(()) => {
+                            let message = format!(
+                                "{reason}; exact DIRECT permits were retracted and traffic is Blocked"
+                            );
+                            *last_error_guard() = Some(message.clone());
+                            tracing::warn!("{message}");
+                        }
+                        Err(error) => {
+                            if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
+                                tracing::error!(
+                                    "{reason}; fail-closed DIRECT reconciliation failed: {error:#}"
+                                );
+                                last_error_log = Some(std::time::Instant::now());
+                            } else {
+                                tracing::debug!(
+                                    "{reason}; fail-closed DIRECT reconciliation still failing: {error:#}"
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
                 let healthy = if ENGINE_LIVE {
-                    let healthy = verify_live_unlocked(&armed).await.is_ok();
+                    let healthy = verify_live_unlocked_for(&armed, current_core).await.is_ok();
                     note_verify(healthy);
                     healthy
                 } else {
                     true
                 };
-                if !healthy && let Err(error) = install_unlocked(&armed).await {
+                if !healthy && let Err(error) = install_unlocked_for(&armed, current_core).await {
                     *last_error_guard() = Some(format!("{error:#}"));
                     if last_error_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_INTERVAL) {
                         tracing::error!("Windows kill-switch reconciliation failed: {error:#}");
@@ -1698,19 +2580,18 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
     });
     tombstone.wanted = false;
     tombstone.updated_at = now_unix();
-    let tombstone_error = match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?)
-        .await
-    {
-        Ok(()) => None,
-        Err(error) if uninstall_ladder_requested() => {
-            tracing::error!(
-                "uninstall disarm: kill-switch tombstone could not be written ({error:#}); \
+    let tombstone_error =
+        match atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await {
+            Ok(()) => None,
+            Err(error) if uninstall_ladder_requested() => {
+                tracing::error!(
+                    "uninstall disarm: kill-switch tombstone could not be written ({error:#}); \
                  still removing WFP so install/uninstall cannot dead-end as result 3"
-            );
-            Some(error)
-        }
-        Err(error) => return Err(error),
-    };
+                );
+                Some(error)
+            }
+            Err(error) => return Err(error),
+        };
 
     // Bounded like every other engine call: an uninstaller that hangs forever on a wedged BFE
     // is worse than one that reports why it could not finish. When the tombstone is on disk the
@@ -1733,9 +2614,7 @@ pub async fn emergency_disarm_windows_kill_switch() -> Result<()> {
         if let Err(error) =
             atomic_write(&intent_path(), &serde_json::to_vec_pretty(&tombstone)?).await
         {
-            tracing::warn!(
-                "uninstall disarm: post-WFP tombstone write still failed: {error:#}"
-            );
+            tracing::warn!("uninstall disarm: post-WFP tombstone write still failed: {error:#}");
         }
     }
     // Intent deletion is best-effort once WFP is gone. The tombstone (wanted:false) is already
@@ -1812,6 +2691,7 @@ pub(crate) async fn status() -> KillSwitchStatus {
             mode: KillSwitchStatusMode::Blocked,
             tunnel_permit_rendered: false,
             endpoints: Vec::new(),
+            direct_endpoint_digest: crate::direct_endpoint_digest(&[]).unwrap_or_default(),
             last_error: last_error_guard().clone(),
         };
     };
@@ -1831,6 +2711,8 @@ pub(crate) async fn status() -> KillSwitchStatus {
         // on the status path.
         tunnel_permit_rendered: TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed),
         endpoints: armed.intent.endpoints.clone(),
+        direct_endpoint_digest: crate::direct_endpoint_digest(&armed.direct_endpoints)
+            .unwrap_or_default(),
         last_error: last_error_guard().clone(),
     }
 }
@@ -1851,6 +2733,38 @@ mod tests {
     use crate::core::structure::{KillSwitchConfig, ProxyEndpoint, ProxyProtocol};
     use serial_test::serial;
 
+    /// Scoped failure seams: reset even when an assertion panics so the serial suite cannot be
+    /// poisoned for every later WFP/persistence test.
+    struct SimulatedStateFailures;
+
+    impl SimulatedStateFailures {
+        fn arm(persist: bool, install: bool) -> Self {
+            TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
+            TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+            TEST_PERSIST_FAILURE.store(persist, Ordering::Relaxed);
+            TEST_INSTALL_FAILURE.store(install, Ordering::Relaxed);
+            TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+            Self
+        }
+
+        fn arm_ambiguous_install() -> Self {
+            TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
+            TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+            TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
+            TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+            TEST_AMBIGUOUS_INSTALL_FAILURE.store(true, Ordering::Relaxed);
+            Self
+        }
+    }
+
+    impl Drop for SimulatedStateFailures {
+        fn drop(&mut self) {
+            TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
+            TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+            TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+        }
+    }
+
     fn test_config() -> KillSwitchConfig {
         KillSwitchConfig {
             tunnel_interface: "Tono".to_owned(),
@@ -1868,12 +2782,12 @@ mod tests {
         KillSwitchConfig {
             direct_endpoints: vec![
                 ProxyEndpoint {
-                    ip: "203.0.113.9".to_owned(),
+                    ip: "9.0.0.9".to_owned(),
                     port: 443,
                     protocol: ProxyProtocol::Tcp,
                 },
                 ProxyEndpoint {
-                    ip: "203.0.113.10".to_owned(),
+                    ip: "9.0.0.10".to_owned(),
                     port: 8000,
                     protocol: ProxyProtocol::Udp,
                 },
@@ -1928,13 +2842,13 @@ mod tests {
     #[serial]
     async fn arm_inherits_verification_only_for_same_owner() -> Result<()> {
         cleanup().await;
-        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
-        lock(None).await?;
+        locked_direct_test_session().await?;
         mark_verified("owner-alice").await?;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
         assert!(ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-bob").await?;
         assert!(!ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        cleanup().await;
         Ok(())
     }
 
@@ -1944,11 +2858,14 @@ mod tests {
         cleanup().await;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
         assert!(mark_verified("owner-alice").await.is_err());
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
         lock(None).await?;
         assert!(mark_verified("owner-bob").await.is_err());
         mark_verified("owner-alice").await?;
         mark_verified("owner-alice").await?;
         assert!(ARMED.lock().unwrap().as_ref().unwrap().intent.is_verified());
+        cleanup().await;
         Ok(())
     }
 
@@ -1971,9 +2888,16 @@ mod tests {
     }
 
     async fn cleanup() {
+        TEST_PERSIST_FAILURE.store(false, Ordering::Relaxed);
+        TEST_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+        TEST_AMBIGUOUS_INSTALL_FAILURE.store(false, Ordering::Relaxed);
+        TEST_PERSIST_ATTEMPTS.store(0, Ordering::Relaxed);
+        TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
         crate::core::dns::test_hooks::set_live_dns_on_loopback(false);
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(None).await;
         *ARMED.lock().unwrap() = None;
         *LAST_ERROR.lock().unwrap() = None;
+        *LAST_VERIFY.lock().unwrap() = None;
         RESTORE_WAS_LOCKED.store(false, Ordering::Release);
         for path in [
             intent_path(),
@@ -2009,6 +2933,121 @@ mod tests {
         assert_eq!(on_disk.mode, KillSwitchStatusMode::Blocked);
         assert_eq!(on_disk.verified, Some(true));
         assert!(status().await.wanted);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn startup_persist_failure_still_installs_and_publishes_blocked() -> Result<()> {
+        cleanup().await;
+        let intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        let failures = SimulatedStateFailures::arm(true, false);
+        let error = restore_on_service_start()
+            .await
+            .expect_err("the caller must still learn that durable reconciliation failed");
+        assert!(
+            format!("{error:#}").contains("persistent-state write failure"),
+            "{error:#}"
+        );
+        assert_eq!(TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
+            1,
+            "a persistence failure must not skip the live Blocked install"
+        );
+        let blocked = armed_guard()
+            .clone()
+            .expect("watchdog must retain conservative startup state");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+
+        drop(failures);
+        // The same published snapshot is sufficient for the watchdog's next healthy repair.
+        install_unlocked(&blocked).await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn startup_install_failure_still_persists_and_arms_watchdog_state() -> Result<()> {
+        cleanup().await;
+        let intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        let failures = SimulatedStateFailures::arm(false, true);
+        let error = restore_on_service_start()
+            .await
+            .expect_err("an unproved live Blocked set must be reported");
+        assert!(
+            format!("{error:#}").contains("WFP install failure"),
+            "{error:#}"
+        );
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed),
+            1,
+            "a live install failure must not skip durable Blocked persistence"
+        );
+        let blocked = armed_guard()
+            .clone()
+            .expect("failed startup install must leave watchdog state armed");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        let on_disk: IntentRecord = serde_json::from_slice(&tokio::fs::read(intent_path()).await?)?;
+        assert_eq!(on_disk.mode, KillSwitchStatusMode::Blocked);
+
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 99)))
+            .await;
+        retract_direct_before_core_replacement()
+            .await
+            .expect_err("replacement spawn must remain refused until exact Blocked succeeds");
+        assert_eq!(
+            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
+            2,
+            "the pre-spawn barrier must retry despite an empty restored DIRECT receipt"
+        );
+        assert!(
+            crate::core::manager::security_core_instance_snapshot().is_none(),
+            "failed narrowing still freezes Core identity before returning"
+        );
+
+        drop(failures);
+        install_unlocked(&blocked).await?;
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn startup_double_failure_reports_both_and_keeps_conservative_state() -> Result<()> {
+        cleanup().await;
+        let intent = valid_intent(KillSwitchStatusMode::Locked, true);
+        atomic_write(&intent_path(), &serde_json::to_vec_pretty(&intent)?).await?;
+
+        let failures = SimulatedStateFailures::arm(true, true);
+        let error = restore_on_service_start()
+            .await
+            .expect_err("neither failed proof may be hidden");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("persistent-state write failure"),
+            "{message}"
+        );
+        assert!(message.contains("WFP install failure"), "{message}");
+        assert_eq!(TEST_PERSIST_ATTEMPTS.load(Ordering::Relaxed), 1);
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 1);
+        let blocked = armed_guard()
+            .clone()
+            .expect("even a double failure must arm watchdog reconciliation");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+
+        drop(failures);
+        install_unlocked(&blocked).await?;
         cleanup().await;
         Ok(())
     }
@@ -2861,6 +3900,7 @@ mod tests {
             tun_luid: None,
             core_instance: None,
             direct_endpoints: Vec::new(),
+            direct_reload: None,
         });
         authorize_write_for("owner-bob")?;
         cleanup().await;
@@ -2882,6 +3922,8 @@ mod tests {
         assert_eq!(armed.intent.mode, KillSwitchStatusMode::Bootstrap);
         assert!(armed.tun_luid.is_none());
 
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
         lock(Some("Tono")).await?;
         let armed = ARMED.lock().unwrap().clone().expect("still armed");
         assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
@@ -2899,13 +3941,18 @@ mod tests {
     fn a_tunnel_permit_expires_with_the_core_instance_it_was_granted_for() {
         let granted = CoreInstance {
             pid: 4242,
-            restarts: 0,
+            generation: 0,
         };
         let mut armed = Armed {
             intent: valid_intent(KillSwitchStatusMode::Locked, true),
             tun_luid: Some(0x1234_5678),
             core_instance: Some(granted),
-            direct_endpoints: Vec::new(),
+            direct_endpoints: vec![ProxyEndpoint {
+                ip: "203.0.113.9".to_owned(),
+                port: 443,
+                protocol: ProxyProtocol::Tcp,
+            }],
+            direct_reload: None,
         };
 
         assert_eq!(
@@ -2919,27 +3966,31 @@ mod tests {
                 "watchdog respawn onto a recycled pid",
                 Some(CoreInstance {
                     pid: 4242,
-                    restarts: 1,
+                    generation: 1,
                 }),
             ),
             (
                 "watchdog respawn onto a new pid",
                 Some(CoreInstance {
                     pid: 5150,
-                    restarts: 1,
+                    generation: 1,
                 }),
             ),
             (
                 "the core was replaced without the watchdog",
                 Some(CoreInstance {
                     pid: 5150,
-                    restarts: 0,
+                    generation: 0,
                 }),
             ),
             ("no core at all", None),
         ] {
             let config = rule_config_for(&armed, current);
             assert_eq!(config.tun_luid, None, "{label}");
+            assert!(
+                config.direct_endpoints.is_empty(),
+                "{label}: DIRECT must expire with tunnel ownership"
+            );
             // Closed, not open: the fallback is exactly the pre-lock policy. The mode, the
             // app-scoped endpoint permit and the DNS block are untouched — only the tunnel
             // permit is gone — so losing the grant widens nothing.
@@ -2962,7 +4013,671 @@ mod tests {
 
         // An unidentified grant is never revived by a tick that also cannot identify a core.
         armed.core_instance = None;
-        assert_eq!(rule_config_for(&armed, None).tun_luid, None);
+        let config = rule_config_for(&armed, None);
+        assert_eq!(config.tun_luid, None);
+        assert!(config.direct_endpoints.is_empty());
+    }
+
+    #[test]
+    fn direct_endpoint_canonicalization_deduplicates_and_has_order_independent_digest() {
+        let armed = Armed {
+            intent: valid_intent(KillSwitchStatusMode::Locked, true),
+            tun_luid: Some(7),
+            core_instance: Some(CoreInstance {
+                pid: 1,
+                generation: 0,
+            }),
+            direct_endpoints: Vec::new(),
+            direct_reload: None,
+        };
+        let a = ProxyEndpoint {
+            ip: "9.0.0.9".into(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        };
+        let b = ProxyEndpoint {
+            ip: "9.0.0.10".into(),
+            port: 8000,
+            protocol: ProxyProtocol::Udp,
+        };
+        let first = canonical_direct_endpoints(&armed, &[a.clone(), b.clone(), a.clone()]).unwrap();
+        let second = canonical_direct_endpoints(&armed, &[b, a]).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 2);
+        assert_eq!(
+            crate::direct_endpoint_digest(&first).unwrap(),
+            crate::direct_endpoint_digest(&second).unwrap()
+        );
+        assert_eq!(crate::direct_endpoint_digest(&first).unwrap().len(), 64);
+    }
+
+    #[test]
+    fn direct_public_gate_rejects_special_use_and_accepts_public_unicast() {
+        for blocked in [
+            Ipv4Addr::new(0, 0, 0, 0),
+            Ipv4Addr::new(10, 1, 2, 3),
+            Ipv4Addr::new(100, 64, 0, 1),
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(169, 254, 1, 1),
+            Ipv4Addr::new(172, 31, 1, 1),
+            Ipv4Addr::new(192, 168, 1, 1),
+            Ipv4Addr::new(198, 18, 0, 1),
+            Ipv4Addr::new(203, 0, 113, 9),
+            Ipv4Addr::new(224, 0, 0, 1),
+            Ipv4Addr::BROADCAST,
+        ] {
+            assert!(!is_public_direct_ipv4(blocked), "accepted {blocked}");
+        }
+        for public in [Ipv4Addr::new(9, 0, 0, 9), Ipv4Addr::new(101, 32, 0, 1)] {
+            assert!(is_public_direct_ipv4(public), "rejected {public}");
+        }
+    }
+
+    async fn locked_direct_test_session() -> Result<CoreInstance> {
+        let core = CoreInstance {
+            pid: 4242,
+            generation: 7,
+        };
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((
+            core.pid,
+            core.generation,
+        )))
+        .await;
+        arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
+        lock(None).await?;
+        Ok(core)
+    }
+
+    async fn committed_direct_test_session(
+        owner_generation: u64,
+    ) -> Result<(CoreInstance, String)> {
+        let core = locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(owner_generation).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).map_err(anyhow::Error::msg)?;
+        replace_direct_endpoints(&endpoints, owner_generation, begin.reload_id).await?;
+        finalize_direct_runtime_reload(&digest, owner_generation, begin.reload_id).await?;
+        Ok((core, digest))
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn a_proven_same_core_relock_retains_committed_direct() -> Result<()> {
+        cleanup().await;
+        let (_, digest) = committed_direct_test_session(70).await?;
+
+        lock(None).await?;
+
+        let armed = armed_guard().clone().expect("still locked");
+        assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
+        assert_eq!(
+            crate::direct_endpoint_digest(&armed.direct_endpoints).map_err(anyhow::Error::msg)?,
+            digest
+        );
+        assert_eq!(
+            armed.direct_reload.as_ref().map(|lease| lease.phase),
+            Some(DirectReloadPhase::Committed)
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn lock_validation_failure_retracts_committed_direct() -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(71).await?;
+
+        let error = lock(Some("Ethernet"))
+            .await
+            .expect_err("a physical interface name must never be accepted as the tunnel");
+        assert!(format!("{error:#}").contains("does not match"), "{error:#}");
+        let blocked = armed_guard()
+            .clone()
+            .expect("fail-closed state remains armed");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn lock_without_current_core_retracts_committed_direct() -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(72).await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(None).await;
+
+        let error = lock(None)
+            .await
+            .expect_err("a vanished Core cannot retain or receive DIRECT permits");
+        assert!(format!("{error:#}").contains("running core"), "{error:#}");
+        let blocked = armed_guard()
+            .clone()
+            .expect("fail-closed state remains armed");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn lock_persist_failure_narrows_live_direct_before_returning() -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(73).await?;
+
+        let failures = SimulatedStateFailures::arm(true, false);
+        let error = lock(None)
+            .await
+            .expect_err("a failed locked-intent write must still remove physical permits");
+        let message = format!("{error:#}");
+        assert!(message.contains("could not be persisted"), "{message}");
+        assert!(message.contains("live WFP was narrowed"), "{message}");
+        assert_eq!(
+            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
+            2,
+            "the candidate install must be followed by an exact Blocked install"
+        );
+        let blocked = armed_guard()
+            .clone()
+            .expect("live Blocked state is published");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+
+        drop(failures);
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn lock_install_failure_keeps_possible_direct_published_and_poisoned() -> Result<()> {
+        cleanup().await;
+        let (core, digest) = committed_direct_test_session(74).await?;
+
+        let failures = SimulatedStateFailures::arm(false, true);
+        let error = lock(None)
+            .await
+            .expect_err("an unavailable WFP engine cannot prove a narrowing");
+        assert!(
+            format!("{error:#}").contains("WFP install failure"),
+            "{error:#}"
+        );
+        let retry = armed_guard()
+            .clone()
+            .expect("the possibly-live set must remain visible for retry");
+        assert_eq!(retry.intent.mode, KillSwitchStatusMode::Locked);
+        assert_eq!(
+            crate::direct_endpoint_digest(&retry.direct_endpoints).map_err(anyhow::Error::msg)?,
+            digest
+        );
+        assert!(
+            retry
+                .direct_reload
+                .as_ref()
+                .and_then(|lease| lease.expires_at)
+                .is_some_and(|deadline| deadline <= std::time::Instant::now()),
+            "a retained endpoint receipt must force watchdog retraction, never renewal"
+        );
+
+        drop(failures);
+        transition_direct_to_blocked_unlocked(retry, Some(core), None).await?;
+        assert!(armed_guard().as_ref().unwrap().direct_endpoints.is_empty());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn core_replacement_barrier_revokes_identity_and_always_revalidates_armed_wfp()
+    -> Result<()> {
+        cleanup().await;
+        committed_direct_test_session(75).await?;
+        TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+
+        retract_direct_before_core_replacement().await?;
+
+        assert_eq!(TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed), 1);
+        let blocked = armed_guard()
+            .clone()
+            .expect("replacement remains protected");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        assert!(
+            crate::core::manager::security_core_instance_snapshot().is_none(),
+            "packed Core identity must be revoked inside the WFP writer barrier"
+        );
+
+        TEST_INSTALL_ATTEMPTS.store(0, Ordering::Relaxed);
+        retract_direct_before_core_replacement().await?;
+        assert_eq!(
+            TEST_INSTALL_ATTEMPTS.load(Ordering::Relaxed),
+            1,
+            "empty memory is not proof after a Service restart; ARMED must overwrite live WFP"
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn ambiguous_first_direct_install_publishes_candidate_for_retry() -> Result<()> {
+        cleanup().await;
+        let core = locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(76).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).map_err(anyhow::Error::msg)?;
+
+        let failures = SimulatedStateFailures::arm_ambiguous_install();
+        let error = replace_direct_endpoints(&endpoints, 76, begin.reload_id)
+            .await
+            .expect_err("commit-before-verify must be treated as a possibly-live candidate");
+        assert!(
+            format!("{error:#}").contains("ambiguous WFP install failure"),
+            "{error:#}"
+        );
+        let retry = armed_guard()
+            .clone()
+            .expect("candidate must remain published after ambiguous install");
+        assert_eq!(retry.intent.mode, KillSwitchStatusMode::Locked);
+        assert_eq!(
+            crate::direct_endpoint_digest(&retry.direct_endpoints).map_err(anyhow::Error::msg)?,
+            digest
+        );
+        assert_eq!(
+            retry.direct_reload.as_ref().map(|lease| lease.phase),
+            Some(DirectReloadPhase::Pending)
+        );
+        assert!(
+            retry
+                .direct_reload
+                .as_ref()
+                .and_then(|lease| lease.expires_at)
+                .is_some_and(|deadline| deadline <= std::time::Instant::now()),
+            "the ambiguous candidate must be poisoned for watchdog retraction"
+        );
+
+        drop(failures);
+        transition_direct_to_blocked_unlocked(retry, Some(core), None).await?;
+        assert!(armed_guard().as_ref().unwrap().direct_endpoints.is_empty());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn every_direct_begin_invalidates_the_previous_reload_identity() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let first = begin_direct_runtime_reload(77).await?;
+        let second = begin_direct_runtime_reload(77).await?;
+        assert_ne!(first.reload_id, second.reload_id);
+        assert_ne!(first.reload_id, 0);
+        assert_ne!(second.reload_id, 0);
+
+        let error = replace_direct_endpoints(
+            &test_config_with_direct().direct_endpoints,
+            77,
+            first.reload_id,
+        )
+        .await
+        .expect_err("a delayed request from the old bracket must be rejected");
+        assert!(format!("{error:#}").contains("stale"));
+        let armed = armed_guard().clone().expect("still armed");
+        assert_eq!(armed.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(armed.direct_reload.is_none());
+        assert!(armed.direct_endpoints.is_empty());
+
+        // Selected proxy endpoints are deliberately non-empty. The status proof must hash the
+        // volatile DIRECT set instead, or an empty DIRECT bracket is reported as non-empty.
+        let status = status().await;
+        assert!(!status.endpoints.is_empty());
+        assert_eq!(
+            status.direct_endpoint_digest,
+            crate::direct_endpoint_digest(&[]).unwrap()
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn direct_replace_is_pending_replayable_and_finalize_is_idempotent() -> Result<()> {
+        cleanup().await;
+        let core = locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(91).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let expected_digest = crate::direct_endpoint_digest(&endpoints).unwrap();
+        let replaced = replace_direct_endpoints(&endpoints, 91, begin.reload_id).await?;
+        assert_eq!(replaced.reload_id, begin.reload_id);
+        assert_eq!(replaced.endpoint_digest, expected_digest);
+
+        let first_deadline = armed_guard()
+            .as_ref()
+            .and_then(|armed| armed.direct_reload.as_ref())
+            .and_then(|lease| lease.expires_at)
+            .expect("pending lease has a deadline");
+        let replay = replace_direct_endpoints(&endpoints, 91, begin.reload_id).await?;
+        assert_eq!(replay, replaced);
+        let replayed_lease = armed_guard()
+            .as_ref()
+            .and_then(|armed| armed.direct_reload.clone())
+            .expect("pending lease remains present");
+        assert_eq!(replayed_lease.phase, DirectReloadPhase::Pending);
+        assert_eq!(replayed_lease.expires_at, Some(first_deadline));
+
+        let finalized =
+            finalize_direct_runtime_reload(&expected_digest, 91, begin.reload_id).await?;
+        assert_eq!(finalized, replaced);
+        let finalized_replay =
+            finalize_direct_runtime_reload(&expected_digest, 91, begin.reload_id).await?;
+        assert_eq!(finalized_replay, finalized);
+        let armed = armed_guard().clone().expect("still armed");
+        let lease = armed
+            .direct_reload
+            .as_ref()
+            .expect("committed lease retained");
+        assert_eq!(lease.phase, DirectReloadPhase::Committed);
+        let committed_deadline = lease
+            .expires_at
+            .expect("committed lease must expire without heartbeats");
+        assert!(
+            direct_reload_invalidation_reason(
+                &armed,
+                Some(core),
+                armed.tun_luid,
+                std::time::Instant::now(),
+            )
+            .is_none()
+        );
+        assert!(
+            direct_reload_invalidation_reason(
+                &armed,
+                Some(core),
+                armed.tun_luid,
+                committed_deadline + WATCHDOG_PERIOD,
+            )
+            .is_some_and(|reason| reason.contains("heartbeat lease expired"))
+        );
+        assert_eq!(status().await.direct_endpoint_digest, expected_digest);
+
+        restrict_bootstrap().await?;
+        let blocked = armed_guard().clone().expect("still armed and blocked");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn pending_direct_lease_expiry_reconciles_to_exact_blocked() -> Result<()> {
+        cleanup().await;
+        let core = locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(123).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        replace_direct_endpoints(&endpoints, 123, begin.reload_id).await?;
+
+        {
+            let mut guard = armed_guard();
+            let lease = guard
+                .as_mut()
+                .and_then(|armed| armed.direct_reload.as_mut())
+                .expect("pending lease");
+            lease.expires_at = Some(std::time::Instant::now());
+        }
+        let pending = armed_guard().clone().expect("pending state");
+        let reason = direct_reload_invalidation_reason(
+            &pending,
+            Some(core),
+            pending.tun_luid,
+            std::time::Instant::now(),
+        )
+        .expect("watchdog must recognize the expired pending set");
+        assert!(reason.contains("expired"));
+        transition_direct_to_blocked_unlocked(pending, Some(core), None).await?;
+
+        let blocked = armed_guard().clone().expect("blocked state");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        let rendered = rule_config_for(&blocked, Some(core));
+        assert!(rendered.direct_endpoints.is_empty());
+        assert!(rendered.tun_luid.is_none());
+        assert_eq!(
+            status().await.direct_endpoint_digest,
+            crate::direct_endpoint_digest(&[]).unwrap()
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn finalize_mismatch_revokes_the_pending_direct_set() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(144).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        replace_direct_endpoints(&endpoints, 144, begin.reload_id).await?;
+
+        let error = finalize_direct_runtime_reload(&"0".repeat(64), 144, begin.reload_id)
+            .await
+            .expect_err("a digest mismatch cannot commit physical permits");
+        assert!(format!("{error:#}").contains("digest"));
+        let blocked = armed_guard().clone().expect("blocked state");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn authenticated_renewal_extends_only_the_exact_committed_lease() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(145).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
+        replace_direct_endpoints(&endpoints, 145, begin.reload_id).await?;
+        finalize_direct_runtime_reload(&digest, 145, begin.reload_id).await?;
+        let first_deadline = armed_guard()
+            .as_ref()
+            .and_then(|armed| armed.direct_reload.as_ref())
+            .and_then(|lease| lease.expires_at)
+            .expect("committed deadline");
+
+        let renewed = renew_direct_runtime_reload(&digest, 145, begin.reload_id).await?;
+        assert_eq!(renewed.endpoint_digest, digest);
+        let second_deadline = armed_guard()
+            .as_ref()
+            .and_then(|armed| armed.direct_reload.as_ref())
+            .and_then(|lease| lease.expires_at)
+            .expect("renewed deadline");
+        assert!(second_deadline > first_deadline);
+        assert_eq!(
+            armed_guard()
+                .as_ref()
+                .and_then(|armed| armed.direct_reload.as_ref())
+                .map(|lease| lease.phase),
+            Some(DirectReloadPhase::Committed)
+        );
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn mismatched_renewal_revokes_committed_direct_permits() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(146).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
+        replace_direct_endpoints(&endpoints, 146, begin.reload_id).await?;
+        finalize_direct_runtime_reload(&digest, 146, begin.reload_id).await?;
+
+        renew_direct_runtime_reload(&"0".repeat(64), 146, begin.reload_id)
+            .await
+            .expect_err("a heartbeat for another endpoint set must revoke, not renew");
+        let blocked = armed_guard().clone().expect("blocked state");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn failed_blocked_render_never_publishes_an_empty_direct_set() -> Result<()> {
+        cleanup().await;
+        let core = locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(147).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
+        replace_direct_endpoints(&endpoints, 147, begin.reload_id).await?;
+        finalize_direct_runtime_reload(&digest, 147, begin.reload_id).await?;
+
+        let committed = armed_guard().clone().expect("committed state");
+        let failures = SimulatedStateFailures::arm(false, true);
+        let result = transition_direct_to_blocked_unlocked(committed, Some(core), None).await;
+        result.expect_err("the simulated WFP narrowing must fail");
+
+        let retry = armed_guard()
+            .clone()
+            .expect("prior live state remains published");
+        assert_eq!(retry.intent.mode, KillSwitchStatusMode::Locked);
+        assert_eq!(
+            crate::direct_endpoint_digest(&retry.direct_endpoints).unwrap(),
+            digest
+        );
+        assert!(
+            retry
+                .direct_reload
+                .as_ref()
+                .and_then(|lease| lease.expires_at)
+                .is_some_and(|deadline| deadline <= std::time::Instant::now()),
+            "the retained receipt must be poisoned so the watchdog retries Blocked"
+        );
+        assert_eq!(status().await.direct_endpoint_digest, digest);
+
+        drop(failures);
+        transition_direct_to_blocked_unlocked(retry, Some(core), None).await?;
+        let blocked = armed_guard().clone().expect("retry committed Blocked");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn core_replacement_during_pending_direct_commit_fails_closed() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(155).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        replace_direct_endpoints(&endpoints, 155, begin.reload_id).await?;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 8)))
+            .await;
+
+        let error = replace_direct_endpoints(&endpoints, 155, begin.reload_id)
+            .await
+            .expect_err("a recycled PID with a new restart count is a different Core");
+        assert!(format!("{error:#}").contains("locked tunnel grant"));
+        let blocked = armed_guard().clone().expect("blocked state");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn same_pid_tunnel_luid_recreation_revokes_the_pending_direct_set() -> Result<()> {
+        cleanup().await;
+        locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(166).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
+        replace_direct_endpoints(&endpoints, 166, begin.reload_id).await?;
+
+        // The test engine resolves the live alias to LUID 0. Changing only the recorded LUID
+        // models same-PID Mihomo recreating WinTUN between replacement and finalize.
+        armed_guard().as_mut().expect("pending state").tun_luid = Some(77);
+        let error = finalize_direct_runtime_reload(&digest, 166, begin.reload_id)
+            .await
+            .expect_err("a same-PID tunnel replacement must invalidate physical permits");
+        assert!(format!("{error:#}").contains("TUN"));
+        let blocked = armed_guard().clone().expect("blocked state");
+        assert_eq!(blocked.intent.mode, KillSwitchStatusMode::Blocked);
+        assert!(blocked.direct_endpoints.is_empty());
+        assert!(blocked.direct_reload.is_none());
+        cleanup().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn direct_security_identity_stays_coherent_during_harmless_manager_contention() {
+        cleanup().await;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((5151, 4)))
+            .await;
+        assert_eq!(
+            current_core_instance_for_direct_security(),
+            Some(CoreInstance {
+                pid: 5151,
+                generation: 4,
+            })
+        );
+
+        let manager = crate::core::manager::CORE_MANAGER.lock().await;
+        assert_eq!(
+            current_core_instance_for_direct_security(),
+            Some(CoreInstance {
+                pid: 5151,
+                generation: 4,
+            }),
+            "one packed atomic read must not convert harmless lock contention into owner loss"
+        );
+        drop(manager);
+        cleanup().await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn initial_arm_refuses_direct_endpoints_outside_a_reload_lease() {
+        cleanup().await;
+        let error = arm_bootstrap(
+            &test_config_with_direct(),
+            "/opt/tono/mihomo",
+            "owner-alice",
+        )
+        .await
+        .expect_err("StartClash must not bypass the lease-backed DIRECT transaction");
+        assert!(format!("{error:#}").contains("runtime-reload transaction"));
+        assert!(armed_guard().is_none());
+        cleanup().await;
     }
 
     /// P2: `lock` records the core instance and renders the permit from it. Reading the core
@@ -2973,14 +4688,14 @@ mod tests {
     fn locking_renders_the_permit_from_the_very_instance_it_recorded() {
         let running = CoreInstance {
             pid: 4242,
-            restarts: 3,
+            generation: 3,
         };
         for recorded in [
             None,
             Some(running),
             Some(CoreInstance {
                 pid: 1,
-                restarts: 0,
+                generation: 0,
             }),
         ] {
             let armed = Armed {
@@ -2988,6 +4703,7 @@ mod tests {
                 tun_luid: Some(0x7777),
                 core_instance: recorded,
                 direct_endpoints: Vec::new(),
+                direct_reload: None,
             };
             // This is exactly what `lock` now does: `armed.core_instance` and the render's
             // `current_core` are the same value.
@@ -3007,6 +4723,7 @@ mod tests {
             tun_luid: Some(0x7777),
             core_instance: None,
             direct_endpoints: Vec::new(),
+            direct_reload: None,
         };
         assert_eq!(rule_config_for(&stale, Some(running)).tun_luid, None);
         assert_eq!(
@@ -3017,29 +4734,27 @@ mod tests {
     }
 
     /// The observability half: `mode` alone cannot tell "Locked and carrying traffic" from
-    /// "Locked with the permit retracted". `tunnel_permit_rendered` reports what the last
-    /// render actually installed.
-    #[test]
-    fn the_status_flag_tracks_what_the_last_render_installed() {
+    /// "Locked with the permit retracted". `tunnel_permit_rendered` changes only after the exact
+    /// install/verify operation succeeds, never while merely constructing an expected model.
+    #[tokio::test]
+    async fn the_status_flag_tracks_what_the_last_exact_install_proved() {
         let running = CoreInstance {
             pid: 90,
-            restarts: 0,
+            generation: 0,
         };
         let armed = Armed {
             intent: valid_intent(KillSwitchStatusMode::Locked, true),
             tun_luid: Some(0x99),
             core_instance: Some(running),
             direct_endpoints: Vec::new(),
+            direct_reload: None,
         };
 
-        let config = rule_config_rendering(&armed, Some(running));
-        assert!(config.tun_luid.is_some());
+        install_unlocked_for(&armed, Some(running)).await.unwrap();
         assert!(TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
 
         // Same mode, same `wanted`/`verified`/`live` — only this flag changes.
-        let config = rule_config_rendering(&armed, None);
-        assert_eq!(config.mode, KillSwitchStatusMode::Locked);
-        assert!(config.tun_luid.is_none());
+        install_unlocked_for(&armed, None).await.unwrap();
         assert!(!TUNNEL_PERMIT_RENDERED.load(Ordering::Relaxed));
     }
 
@@ -3086,6 +4801,8 @@ mod tests {
     async fn lock_grants_the_tunnel_permit_against_the_running_core_and_restrict_revokes_it()
     -> Result<()> {
         cleanup().await;
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
         arm_bootstrap(&test_config(), "/opt/tono/mihomo", "owner-alice").await?;
         assert!(armed_guard().as_ref().unwrap().core_instance.is_none());
 
@@ -3097,10 +4814,8 @@ mod tests {
             current_core_instance().await,
             "the grant names the core that was running when lock ran"
         );
-        // No core runs behind a test build, so the grant is unidentified — and an unidentified
-        // grant renders no tunnel permit, which is the fail-closed direction.
-        assert!(armed.core_instance.is_none());
-        assert!(render(&armed).await.tun_luid.is_none());
+        assert!(armed.core_instance.is_some());
+        assert_eq!(render(&armed).await.tun_luid, Some(0));
 
         restrict_bootstrap().await?;
         let armed = armed_guard().clone().expect("still armed");
@@ -3152,6 +4867,8 @@ mod tests {
             KillSwitchStatusMode::Blocked
         );
 
+        crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 1)))
+            .await;
         relock_restored_tunnel().await?;
         let armed = ARMED.lock().unwrap().clone().expect("still armed");
         assert_eq!(armed.intent.mode, KillSwitchStatusMode::Locked);
@@ -3184,27 +4901,31 @@ mod tests {
                 protocol,
             }];
             assert!(
-                arm_bootstrap(&config, "/opt/tono/mihomo", "owner-alice")
-                    .await
-                    .is_err(),
+                validate_direct_endpoints(&config).is_err(),
                 "accepted port {port}/{protocol:?}"
             );
         }
         // Permanently protected resolvers, private space, and the selected node address
         // itself must never go DIRECT.
-        for ip in ["1.1.1.1", "8.8.8.8", "10.0.0.9"] {
+        for ip in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "10.0.0.9",
+            "127.0.0.1",
+            "169.254.1.1",
+            "100.64.0.1",
+            "198.18.0.1",
+            "203.0.113.9",
+            "224.0.0.1",
+            "2001:4860:4860::8888",
+        ] {
             let mut config = base.clone();
             config.direct_endpoints = vec![ProxyEndpoint {
                 ip: ip.to_owned(),
                 port: 443,
                 protocol: ProxyProtocol::Tcp,
             }];
-            assert!(
-                arm_bootstrap(&config, "/opt/tono/mihomo", "owner-alice")
-                    .await
-                    .is_err(),
-                "accepted {ip}"
-            );
+            assert!(validate_direct_endpoints(&config).is_err(), "accepted {ip}");
         }
         let mut config = base.clone();
         config.proxy_endpoints = vec![ProxyEndpoint {
@@ -3218,11 +4939,18 @@ mod tests {
             protocol: ProxyProtocol::Tcp,
         }];
         assert!(
-            arm_bootstrap(&config, "/opt/tono/mihomo", "owner-alice")
-                .await
-                .is_err(),
+            validate_direct_endpoints(&config).is_err(),
             "accepted the selected node address as DIRECT"
         );
+
+        let mut config = base.clone();
+        config.direct_endpoints = vec![ProxyEndpoint {
+            ip: "9.0.0.9".to_owned(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        }];
+        validate_direct_endpoints(&config)
+            .expect("a public exact WeChat endpoint should be accepted");
 
         // The 256-entry bound.
         let mut config = base.clone();
@@ -3234,9 +4962,7 @@ mod tests {
             })
             .collect();
         assert!(
-            arm_bootstrap(&config, "/opt/tono/mihomo", "owner-alice")
-                .await
-                .is_err(),
+            validate_direct_endpoints(&config).is_err(),
             "accepted more than 256 direct endpoints"
         );
         cleanup().await;
@@ -3315,12 +5041,13 @@ mod tests {
     #[serial]
     async fn direct_endpoints_live_only_in_the_armed_session_memory() -> Result<()> {
         cleanup().await;
-        arm_bootstrap(
-            &test_config_with_direct(),
-            "/opt/tono/mihomo",
-            "owner-alice",
-        )
-        .await?;
+        locked_direct_test_session().await?;
+        let begin = begin_direct_runtime_reload(199).await?;
+        lock(None).await?;
+        let endpoints = test_config_with_direct().direct_endpoints;
+        let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
+        replace_direct_endpoints(&endpoints, 199, begin.reload_id).await?;
+        finalize_direct_runtime_reload(&digest, 199, begin.reload_id).await?;
         assert_eq!(
             ARMED
                 .lock()
@@ -3332,25 +5059,25 @@ mod tests {
             2
         );
 
-        // Establish the logical session. The approved set survives a mode change in memory so
-        // a re-lock can re-render it, but the *permits* exist only while locked: dropping back
-        // to Blocked renders none, so the mode change removes them by key rather than leaving
-        // un-app-scoped holes open on a machine with no tunnel (see rule G).
-        lock(None).await?;
-        mark_verified("owner-alice").await?;
         let armed = armed_guard().clone().expect("still armed");
         assert_eq!(
             wfp_model::expected_filters(&render(&armed).await)
                 .iter()
                 .filter(|filter| filter.name.contains("DIRECT"))
                 .count(),
-            4,
-            "each approved tuple must exist at ALE and outbound transport"
+            2,
+            "each approved tuple must be one ALE permit carrying both Mihomo identity and the exact tuple"
+        );
+        let persisted = tokio::fs::read_to_string(intent_path()).await?;
+        assert!(
+            !persisted.contains("direct_endpoints") && !persisted.contains("reload_id"),
+            "volatile DIRECT endpoints and leases must never enter startup intent"
         );
 
         restrict_bootstrap().await?;
         let armed = armed_guard().clone().expect("still armed");
-        assert_eq!(armed.direct_endpoints.len(), 2);
+        assert!(armed.direct_endpoints.is_empty());
+        assert!(armed.direct_reload.is_none());
         assert!(
             !wfp_model::expected_filters(&render(&armed).await)
                 .iter()
@@ -3358,8 +5085,8 @@ mod tests {
             "Protected Offline must not keep DIRECT permits installed"
         );
 
-        // omission = clear: the intent file never carries them, so a service-start restore
-        // rebuilds with an empty set (fail-closed until the app's next connect transaction).
+        // Startup recovery also rebuilds with an empty set (fail-closed until the App's next
+        // authenticated lease transaction).
         restore_on_service_start().await?;
         assert!(
             ARMED

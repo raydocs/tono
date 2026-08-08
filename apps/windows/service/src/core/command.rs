@@ -13,6 +13,14 @@ pub enum IpcCommand {
     GetKillSwitchStatus,
     #[strum(serialize = "/kill-switch/lock")]
     LockKillSwitch,
+    #[strum(serialize = "/kill-switch/direct-runtime-reload/begin")]
+    BeginDirectRuntimeReload,
+    #[strum(serialize = "/kill-switch/direct-runtime-reload/endpoints")]
+    ReplaceDirectEndpoints,
+    #[strum(serialize = "/kill-switch/direct-runtime-reload/finalize")]
+    FinalizeDirectRuntimeReload,
+    #[strum(serialize = "/kill-switch/direct-runtime-reload/renew")]
+    RenewDirectRuntimeReload,
     #[strum(serialize = "/kill-switch/mark-verified")]
     MarkKillSwitchVerified,
     #[strum(serialize = "/kill-switch/restrict-bootstrap")]

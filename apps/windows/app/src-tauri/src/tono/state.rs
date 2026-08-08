@@ -115,6 +115,9 @@ pub struct TaskRegistry {
     pub catalog_sync: Option<JoinHandle<()>>,
     pub reconnect: Option<JoinHandle<()>>,
     pub network_monitor: Option<JoinHandle<()>>,
+    /// Authenticated renewal for the Service-owned committed DIRECT lease. It is deliberately
+    /// separate from the health monitor so a slow data-plane probe cannot starve liveness.
+    pub direct_lease_heartbeat: Option<JoinHandle<()>>,
     pub switch: Option<JoinHandle<()>>,
 }
 
@@ -137,6 +140,10 @@ impl TaskRegistry {
         Self::abort(&mut self.network_monitor);
     }
 
+    pub fn abort_direct_lease_heartbeat(&mut self) {
+        Self::abort(&mut self.direct_lease_heartbeat);
+    }
+
     pub fn abort_switch(&mut self) {
         Self::abort(&mut self.switch);
     }
@@ -147,6 +154,7 @@ impl TaskRegistry {
     pub fn abort_connection_tasks(&mut self) {
         self.abort_reconnect();
         self.abort_network_monitor();
+        self.abort_direct_lease_heartbeat();
         self.abort_switch();
     }
 }
@@ -337,6 +345,10 @@ pub struct TonoState {
     /// Service. Connect mutations hold a read guard inside their detached reconciliation task;
     /// the one release worker holds the write guard through the atomic Service release.
     privileged_transition: Arc<tokio::sync::RwLock<()>>,
+    /// Prevent a validated cloud policy from being revoked/replaced between DIRECT runtime
+    /// staging and the final exact WFP endpoint commit. Sync commits take the writer; one
+    /// activation transaction retains an owned reader through its final proof.
+    policy_activation: Arc<tokio::sync::RwLock<()>>,
     next_release_id: AtomicU64,
 }
 
@@ -396,7 +408,9 @@ impl TonoState {
                 last_core_pid: None,
                 last_restart_count: None,
                 last_network_event_at: None,
-                connect_steps: crate::tono::steps::initial_steps(),
+                // No transaction exists at process start. In particular, restoring a durable
+                // fail-closed Service session must not fabricate a current Preparing step.
+                connect_steps: crate::tono::steps::pending_steps(),
                 step_started_at: None,
                 failed_stage: None,
                 connect_error: None,
@@ -411,6 +425,7 @@ impl TonoState {
             catalog_sync_operation: tokio::sync::Mutex::new(()),
             release_operation: tokio::sync::Mutex::new(None),
             privileged_transition: Arc::new(tokio::sync::RwLock::new(())),
+            policy_activation: Arc::new(tokio::sync::RwLock::new(())),
             next_release_id: AtomicU64::new(1),
         })
     }
@@ -457,6 +472,14 @@ impl TonoState {
 
     pub async fn begin_privileged_release(&self) -> tokio::sync::OwnedRwLockWriteGuard<()> {
         Arc::clone(&self.privileged_transition).write_owned().await
+    }
+
+    pub async fn begin_policy_activation(&self) -> tokio::sync::OwnedRwLockReadGuard<()> {
+        Arc::clone(&self.policy_activation).read_owned().await
+    }
+
+    pub async fn begin_policy_update(&self) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+        Arc::clone(&self.policy_activation).write_owned().await
     }
 }
 

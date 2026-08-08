@@ -91,6 +91,7 @@
       "starting": "正在启动…"
     },
     "statusProtected": "受保护的云端路由",
+    "statusProtectedOffline": "离线保护中 — 流量已阻断",
     "statusReality": "Reality 云端保护"
   },
   "dashboard": {
@@ -109,13 +110,19 @@
       "locked": "锁定",
       "blocked": "阻断"
     },
+    "taglineIdle": "一键让所有应用通过你选择的 Tono 云节点。",
+    "taglineConnected": "所有流量均受保护；线路中断时 Tono 会阻止泄漏。",
+    "pickServer": "选择节点以开始使用",
+    "errorRetry": "重试",
+    "errorSwitchServer": "切换节点",
     "catalogRequiresChoice": "您选择的节点已下线 — 请重新选择",
     "killSwitchError": "Kill switch：{{message}}",
     "killSwitchErrorNote": "最近一次错误，可能已恢复。",
     "errors": {
       "serviceBusy": "Tono 服务正在安装或修复。请批准待处理的管理员提示，或重启 Tono。",
       "releaseReconciling": "网络保护仍在释放中。请稍候再连接，避免拆掉新连接。",
-      "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。"
+      "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。",
+      "nodeUnreachable": "无法连接此节点。请重试，或切换到其他节点。"
     },
     "info": {
       "protection": "流量保护",

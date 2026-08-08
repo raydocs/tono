@@ -73,8 +73,15 @@ ${StrLoc}
 Var PassiveMode
 Var UpdateMode
 Var NoShortcutMode
-Var WixMode
+Var ExistingVersion
+Var ExistingUninstallCommand
+; Unlike `/UPDATE`, this is set only after a complete installed-product record passes version
+; validation. It prevents failure cleanup from disarming a Service owned by the previous install.
+Var ConfirmedExistingInstall
 Var OldMainBinaryName
+; The single GUI launcher consumes this value. Empty for Finish-page/repair launches; `/ARGS`
+; populates it only for an explicit fresh passive `/R` request.
+Var MainBinaryArgs
 Var VC_REDIST_URL
 Var VC_REDIST_EXE
 Var VC_RUNTIME_READY
@@ -176,207 +183,104 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
   !insertmacro MULTIUSER_PAGE_INSTALLMODE
 !endif
 
-; 4. Custom page to ask user if he wants to reinstall/uninstall
-;    only if a previous installation was detected
-Var ReinstallPageCheck
-Page custom PageReinstall PageLeaveReinstall
-Function PageReinstall
-  ; Uninstall previous WiX installation if exists.
-  ;
-  ; A WiX installer stores the installation info in registry
-  ; using a UUID and so we have to loop through all keys under
-  ; `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
-  ; and check if `DisplayName` and `Publisher` keys match ${PRODUCTNAME} and ${MANUFACTURER}
-  ;
-  ; This has a potential issue that there maybe another installation that matches
-  ; our ${PRODUCTNAME} and ${MANUFACTURER} but wasn't installed by our WiX installer,
-  ; however, this should be fine since the user will have to confirm the uninstallation
-  ; and they can chose to abort it if doesn't make sense.
+; Existing-install detector called from .onInit for interactive, passive and silent installs. A
+; supported NSIS install is always upgraded/repaired in place: there is no ambiguous "uninstall
+; first / do not uninstall" page. Update mode preserves AppData, shortcuts and the running
+; fail-closed Service; passive mode closes the old GUI without another prompt.
+Function DetectExistingInstall
+  ; Prefer Tono's authoritative NSIS registry key. A stale legacy MSI record must never override
+  ; a supported current install and trigger an unrelated migration path.
+  ReadRegStr $R0 SHCTX "${UNINSTKEY}" "DisplayName"
+  ReadRegStr $ExistingUninstallCommand SHCTX "${UNINSTKEY}" "UninstallString"
+  ReadRegStr $ExistingVersion SHCTX "${UNINSTKEY}" "DisplayVersion"
+  ${If} "$R0$ExistingUninstallCommand$ExistingVersion" != ""
+    ; Any evidence of this product-specific key must form one complete Tono record. Accepting a
+    ; version-only or foreign partial key as an upgrade could overwrite files we did not identify.
+    ${If} $R0 != "${PRODUCTNAME}"
+    ${OrIf} $ExistingUninstallCommand == ""
+    ${OrIf} $ExistingVersion == ""
+      Goto invalid_existing_version
+    ${EndIf}
+
+    ; SemverCompare orders a parsed operand above an unparseable one, so comparing the new valid
+    ; version directly with malformed existing text would look like an ordinary upgrade. Every
+    ; valid SemVer is >= the minimum valid pre-release below; -1 therefore means parse failure.
+    nsis_tauri_utils::SemverCompare $ExistingVersion "0.0.0-0"
+    Pop $R0
+    ${If} $R0 = -1
+      Goto invalid_existing_version
+    ${EndIf}
+
+    nsis_tauri_utils::SemverCompare "${VERSION}" $ExistingVersion
+    Pop $R0
+    ${If} $R0 = 0
+      Goto automatic_update
+    ${ElseIf} $R0 = 1
+      Goto automatic_update
+    ${ElseIf} $R0 = -1
+      !if "${ALLOWDOWNGRADES}" == "true"
+        Goto automatic_update
+      !else
+        Goto downgrade_blocked
+      !endif
+    ${Else}
+      Goto invalid_existing_version
+    ${EndIf}
+  ${EndIf}
+
+  check_legacy_wix:
+  ; Old WiX/MSI entries are UUID-keyed and the historical name/publisher heuristic is not strong
+  ; enough to uninstall one unattended. Block with one instruction instead of deleting whichever
+  ; product happened to match. No supported Tono NSIS install was found above.
   StrCpy $0 0
   wix_loop:
     EnumRegKey $1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" $0
-    StrCmp $1 "" wix_loop_done ; Exit loop if there is no more keys to loop on
+    StrCmp $1 "" no_existing_install
     IntOp $0 $0 + 1
     ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "DisplayName"
     ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "Publisher"
     StrCmp "$R0$R1" "${PRODUCTNAME}${MANUFACTURER}" 0 wix_loop
-    ReadRegStr $R0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "UninstallString"
-    ${StrCase} $R1 $R0 "L"
+    ReadRegStr $ExistingUninstallCommand HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1" "UninstallString"
+    ${StrCase} $R1 $ExistingUninstallCommand "L"
     ${StrLoc} $R0 $R1 "msiexec" ">"
-    StrCmp $R0 0 0 wix_loop_done
-    StrCpy $WixMode 1
-    StrCpy $R6 "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$1"
-    Goto compare_version
-  wix_loop_done:
+    StrCmp $R0 0 legacy_wix_blocked wix_loop
 
-  ; Check if there is an existing installation, if not, abort the reinstall page
-  ReadRegStr $R0 SHCTX "${UNINSTKEY}" ""
-  ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
-  ${IfThen} "$R0$R1" == "" ${|} Abort ${|}
+  automatic_update:
+    StrCpy $UpdateMode 1
+    StrCpy $PassiveMode 1
+    StrCpy $ConfirmedExistingInstall 1
+    DetailPrint "Automatically upgrading ${PRODUCTNAME} $ExistingVersion to ${VERSION}; preserving application data and Service state."
+    Return
 
-  ; Compare this installar version with the existing installation
-  ; and modify the messages presented to the user accordingly
-  compare_version:
-  StrCpy $R4 "$(older)"
-  ${If} $WixMode = 1
-    ReadRegStr $R0 HKLM "$R6" "DisplayVersion"
-  ${Else}
-    ReadRegStr $R0 SHCTX "${UNINSTKEY}" "DisplayVersion"
-  ${EndIf}
-  ${IfThen} $R0 == "" ${|} StrCpy $R4 "$(unknown)" ${|}
-
-  nsis_tauri_utils::SemverCompare "${VERSION}" $R0
-  Pop $R0
-  ; Reinstalling the same version
-  ${If} $R0 = 0
-    StrCpy $R1 "$(alreadyInstalledLong)"
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
-  ; Upgrading
-  ${ElseIf} $R0 = 1
-    StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
-  ; Downgrading
-  ${ElseIf} $R0 = -1
-    StrCpy $R1 "$(newerVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    !if "${ALLOWDOWNGRADES}" == "true"
-      StrCpy $R3 "$(dontUninstall)"
-    !else
-      StrCpy $R3 "$(dontUninstallDowngrade)"
-    !endif
-    !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
-  ${Else}
-    Abort
-  ${EndIf}
-
-  ; Skip showing the page if passive
-  ;
-  ; Note that we don't call this earlier at the begining
-  ; of this function because we need to populate some variables
-  ; related to current installed version if detected and whether
-  ; we are downgrading or not.
-  ${If} $PassiveMode = 1
-    Call PageLeaveReinstall
-  ${Else}
-    nsDialogs::Create 1018
-    Pop $R4
-    ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
-
-    ${NSD_CreateLabel} 0 0 100% 24u $R1
-    Pop $R1
-
-    ${NSD_CreateRadioButton} 30u 50u -30u 8u $R2
-    Pop $R2
-    ${NSD_OnClick} $R2 PageReinstallUpdateSelection
-
-    ${NSD_CreateRadioButton} 30u 70u -30u 8u $R3
-    Pop $R3
-    ; Disable this radio button if downgrading and downgrades are disabled
-    !if "${ALLOWDOWNGRADES}" == "false"
-      ${IfThen} $R0 = -1 ${|} EnableWindow $R3 0 ${|}
-    !endif
-    ${NSD_OnClick} $R3 PageReinstallUpdateSelection
-
-    ; Check the first radio button if this the first time
-    ; we enter this page or if the second button wasn't
-    ; selected the last time we were on this page
-    ${If} $ReinstallPageCheck <> 2
-      SendMessage $R2 ${BM_SETCHECK} ${BST_CHECKED} 0
-    ${Else}
-      SendMessage $R3 ${BM_SETCHECK} ${BST_CHECKED} 0
+  downgrade_blocked:
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "$(downgradeBlocked)"
     ${EndIf}
+    SetErrorLevel 1638
+    Quit
 
-    ${NSD_SetFocus} $R2
-    nsDialogs::Show
-  ${EndIf}
-FunctionEnd
-Function PageReinstallUpdateSelection
-  ${NSD_GetState} $R2 $R1
-  ${If} $R1 == ${BST_CHECKED}
-    StrCpy $ReinstallPageCheck 1
-  ${Else}
-    StrCpy $ReinstallPageCheck 2
-  ${EndIf}
-FunctionEnd
-Function PageLeaveReinstall
-  ${NSD_GetState} $R2 $R1
-
-  ; If migrating from Wix, always uninstall
-  ${If} $WixMode = 1
-    Goto reinst_uninstall
-  ${EndIf}
-
-  ; In update mode, always proceeds without uninstalling
-  ${If} $UpdateMode = 1
-    Goto reinst_done
-  ${EndIf}
-
-  ; $R0 holds whether same(0)/upgrading(1)/downgrading(-1) version
-  ; $R1 holds the radio buttons state:
-  ;   1 => first choice was selected
-  ;   0 => second choice was selected
-  ${If} $R0 = 0 ; Same version, proceed
-    ${If} $R1 = 1              ; User chose to add/reinstall
-      Goto reinst_done
-    ${Else}                    ; User chose to uninstall
-      Goto reinst_uninstall
+  invalid_existing_version:
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "$(invalidExistingVersion)"
     ${EndIf}
-  ${ElseIf} $R0 = 1 ; Upgrading
-    ${If} $R1 = 1              ; User chose to uninstall
-      Goto reinst_uninstall
-    ${Else}
-      Goto reinst_done         ; User chose NOT to uninstall
+    SetErrorLevel 1638
+    Quit
+
+  legacy_wix_blocked:
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "$(legacyWixManualMigration)"
     ${EndIf}
-  ${ElseIf} $R0 = -1 ; Downgrading
-    ${If} $R1 = 1              ; User chose to uninstall
-      Goto reinst_uninstall
-    ${Else}
-      Goto reinst_done         ; User chose NOT to uninstall
+    SetErrorLevel 1638
+    Quit
+
+  no_existing_install:
+    ; A program file without a valid installer record is an ambiguous partial/foreign install.
+    ; Never overwrite it as though this were a clean machine.
+    ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${OrIf} ${FileExists} "$INSTDIR\verge-mihomo.exe"
+      Goto invalid_existing_version
     ${EndIf}
-  ${EndIf}
-
-  reinst_uninstall:
-    HideWindow
-    ClearErrors
-
-    ${If} $WixMode = 1
-      ReadRegStr $R1 HKLM "$R6" "UninstallString"
-      ExecWait '$R1' $0
-    ${Else}
-      ReadRegStr $4 SHCTX "${MANUPRODUCTKEY}" ""
-      ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
-      ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
-      ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
-      StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
-      ExecWait '$R1' $0
-    ${EndIf}
-
-    BringToFront
-
-    ${IfThen} ${Errors} ${|} StrCpy $0 2 ${|} ; ExecWait failed, set fake exit code
-
-    ${If} $0 <> 0
-    ${OrIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
-      ; User cancelled wix uninstaller? return to select un/reinstall page
-      ${If} $WixMode = 1
-      ${AndIf} $0 = 1602
-        Abort
-      ${EndIf}
-
-      ; User cancelled NSIS uninstaller? return to select un/reinstall page
-      ${If} $0 = 1
-        Abort
-      ${EndIf}
-
-      ; Other erros? show generic error message and return to select un/reinstall page
-      MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
-      Abort
-    ${EndIf}
-  reinst_done:
+    Return
 FunctionEnd
 
 ; 5. Start menu shortcut page. Tono's privileged core allowlist requires the per-machine
@@ -414,7 +318,8 @@ Function RunMainBinary
     DetailPrint "A reboot is required before ${PRODUCTNAME} can start with the updated Service."
     Return
   runMainBinaryNow:
-  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
+  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$MainBinaryArgs"
+  StrCpy $MainBinaryArgs ""
 FunctionEnd
 
 ; Uninstaller Pages
@@ -474,6 +379,18 @@ FunctionEnd
 LangString legacyLocationAbort ${LANG_SIMPCHINESE} "检测到 ${PRODUCTNAME} 安装在不受支持的位置：$4$\r$\n$\r$\n此版本必须安装在 Program Files 中。请先卸载现有版本（不要勾选删除应用数据），然后重新运行此安装程序。"
 LangString legacyLocationAbort ${LANG_ENGLISH} "${PRODUCTNAME} is installed in an unsupported location: $4$\r$\n$\r$\nThis version must be installed under Program Files. Uninstall the existing version first (do not select Delete application data), then run this installer again."
 LangString legacyLocationAbort ${LANG_RUSSIAN} "${PRODUCTNAME} установлен в неподдерживаемой папке: $4$\r$\n$\r$\nЭта версия должна быть установлена в Program Files. Сначала удалите текущую версию (не выбирайте удаление данных приложения), затем снова запустите этот установщик."
+
+LangString downgradeBlocked ${LANG_SIMPCHINESE} "检测到较新的 ${PRODUCTNAME} 版本（$ExistingVersion）。为了保护应用数据和系统服务，安装已停止。请使用较新版本的安装程序。"
+LangString downgradeBlocked ${LANG_ENGLISH} "A newer ${PRODUCTNAME} version ($ExistingVersion) is installed. Setup stopped to protect application data and the system Service. Use an installer for that version or newer."
+LangString downgradeBlocked ${LANG_RUSSIAN} "Установлена более новая версия ${PRODUCTNAME} ($ExistingVersion). Установка остановлена для защиты данных приложения и системной службы. Используйте установщик этой или более новой версии."
+
+LangString invalidExistingVersion ${LANG_SIMPCHINESE} "检测到现有 ${PRODUCTNAME} 安装，但无法安全确认其版本。安装已停止，未删除应用数据。请先修复或卸载现有版本（不要选择删除应用数据），再重试。"
+LangString invalidExistingVersion ${LANG_ENGLISH} "An existing ${PRODUCTNAME} installation was found, but its version could not be verified safely. Setup stopped without deleting application data. Repair or uninstall the existing version (do not select Delete application data), then retry."
+LangString invalidExistingVersion ${LANG_RUSSIAN} "Обнаружена существующая установка ${PRODUCTNAME}, но её версию не удалось безопасно проверить. Установка остановлена без удаления данных приложения. Восстановите или удалите текущую версию (не выбирая удаление данных приложения), затем повторите попытку."
+
+LangString legacyWixManualMigration ${LANG_SIMPCHINESE} "检测到旧版 MSI/WiX ${PRODUCTNAME}。为了避免误删应用数据，此安装程序不会自动卸载它。请从 Windows“已安装的应用”中卸载旧版（不要删除应用数据），然后重新运行此安装程序。"
+LangString legacyWixManualMigration ${LANG_ENGLISH} "A legacy MSI/WiX ${PRODUCTNAME} installation was found. To avoid deleting application data accidentally, this installer will not remove it automatically. Uninstall the legacy version from Windows Installed apps without deleting application data, then run this installer again."
+LangString legacyWixManualMigration ${LANG_RUSSIAN} "Обнаружена устаревшая MSI/WiX-установка ${PRODUCTNAME}. Во избежание случайного удаления данных этот установщик не будет удалять её автоматически. Удалите старую версию через список установленных приложений Windows без удаления данных приложения, затем снова запустите этот установщик."
 
 LangString restoreNetworkTooltip ${LANG_SIMPCHINESE} "当 ${PRODUCTNAME} 无法恢复网络时，解除网络保护（需要管理员权限）。"
 LangString restoreNetworkTooltip ${LANG_ENGLISH} "Restores your network if ${PRODUCTNAME} cannot. Requires administrator approval."
@@ -555,6 +472,10 @@ Function .onInit
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_INIT
   !endif
+
+  ; Classify an existing installation here rather than in a page callback so silent installs and
+  ; updater launches follow exactly the same fail-closed version checks as interactive installs.
+  Call DetectExistingInstall
 FunctionEnd
 
 
@@ -598,9 +519,17 @@ FunctionEnd
   StrCpy $ServiceInstallAttempted 1
   StrCpy $ServiceInstallRetries 0
   serviceInstallAttempt:
-  ; Bound output inactivity as well as the helper's own SCM/IPC waits. Without this, a wedged
-  ; helper freezes the whole NSIS installer forever. "timeout" is handled as a failure below.
-  nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-install.exe"'
+  ${If} $ConfirmedExistingInstall = 1
+    ; The helper owns a short three-executable transaction: it stops the Service only after Mihomo
+    ; and the GUI are staged, verifies the new Service + core before publishing the GUI, and restores
+    ; all three before returning any failure. Never give nsExec a TerminateProcess timeout here—killing Rust during
+    ; rollback would strand the stopped Service. Every SCM and IPC wait inside the helper is bounded.
+    nsExec::ExecToLog '"$INSTDIR\resources\tono-service-install.exe" --replace-runtime'
+  ${Else}
+    ; Fresh-install Service repair does not own a live runtime transaction, so retain the outer
+    ; inactivity bound in addition to the helper's own SCM/IPC waits.
+    nsExec::ExecToLog /TIMEOUT=180000 '"$INSTDIR\resources\tono-service-install.exe"'
+  ${EndIf}
   Pop $0
   ; nsExec returns a string: "error" and "timeout" must not be coerced to integer zero.
   ${If} $0 == "3010"
@@ -629,7 +558,7 @@ FunctionEnd
   ; Service until the new install helper replaces it. The helper itself distinguishes a durable
   ; active/wanted session (preserve fail-closed) from a disconnected old build (write a one-start
   ; wanted:false tombstone so late-visible orphan filters are cleaned by the replacement).
-  ${If} $UpdateMode == 1
+  ${If} $ConfirmedExistingInstall == 1
     DetailPrint "Update mode: preserving ${PRODUCTNAME} Service until replacement."
   ${Else}
     ; The dedicated helper restores protected DNS, removes persistent WFP objects, then deletes
@@ -696,6 +625,17 @@ FunctionEnd
 ; mapped without broadening the target beyond Tono's own install directory.
 !macro RemoveKnownLegacyPayload
   Delete /REBOOTOK "$INSTDIR\verge-mihomo-alpha.exe"
+  ; A completed transaction removes these itself. Exact cleanup here covers a pre-publication
+  ; installer abort and uninstall; a failed helper never reaches this macro, so recovery evidence
+  ; from an unsuccessful rollback is deliberately preserved.
+  Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe.next"
+  Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe.rollback"
+  Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe.restore"
+  Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe.publish"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.next"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.rollback"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.restore"
+  Delete /REBOOTOK "$INSTDIR\${MAINBINARYNAME}.exe.publish"
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service"
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service-install"
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service-uninstall"
@@ -705,25 +645,6 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\resources\set_dns.sh"
   Delete /REBOOTOK "$INSTDIR\resources\unset_dns.sh"
 !macroend
-
-Section EarlyChecks
-  ; Abort silent installer if downgrades is disabled
-  !if "${ALLOWDOWNGRADES}" == "false"
-  ${If} ${Silent}
-    ; If downgrading
-    ${If} $R0 = -1
-      System::Call 'kernel32::AttachConsole(i -1)i.r0'
-      ${If} $0 <> 0
-        System::Call 'kernel32::GetStdHandle(i -11)i.r0'
-        System::call 'kernel32::SetConsoleTextAttribute(i r0, i 0x0004)' ; set red color
-        FileWrite $0 "$(silentDowngrades)"
-      ${EndIf}
-      Abort
-    ${EndIf}
-  ${EndIf}
-  !endif
-
-SectionEnd
 
 Section CheckAndInstallVSRuntime
   StrCpy $VC_RUNTIME_NEEDED "0"
@@ -938,17 +859,24 @@ Section Install
   CreateDirectory "$0"
   DetailPrint "Ensured user startup folder exists: $0"
 
-  ; Remove stale window-state files
-  DetailPrint "Removing window-state.json / .window-state.json"
-  Delete "$APPDATA\com.raydocs.tono\window-state.json"
-  Delete "$APPDATA\com.raydocs.tono\.window-state.json"
-
   !insertmacro SetContext
 
-  ; Copy main executable
-  File "${MAINBINARYSRCPATH}"
+  ; A confirmed upgrade must not expose the new GUI until its matching Service and Mihomo are
+  ; protocol-ready. The elevated helper owns all three replacements and restores all three on any
+  ; failure. A clean install has no predecessor, so publish the staged GUI
+  ; immediately before creating its recovery/uninstall path.
+  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"
+  ${If} $ConfirmedExistingInstall <> 1
+    ClearErrors
+    Rename "$INSTDIR\${MAINBINARYNAME}.exe.next" "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${If} ${Errors}
+      Abort "Could not publish the staged Tono application. Installation stopped before creating the Service."
+    ${EndIf}
+  ${EndIf}
 
-  ; Copy resources
+  ; Copy packaged repair payloads. These are sources for later elevated Service repair, not the
+  ; live Service/core/App targets coordinated below; DisplayVersion still remains uncommitted until
+  ; the live generation passes IPC readiness.
   {{#each resources_dirs}}
     CreateDirectory "$INSTDIR\\{{this}}"
   {{/each}}
@@ -956,16 +884,27 @@ Section Install
     File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
 
-  ; Copy external binaries
+  ; Stage external binaries under a non-live name. A connected Service owns verge-mihomo.exe and
+  ; Windows correctly refuses to overwrite that mapped image. Confirmed repairs leave `.next` for
+  ; the Service helper's fail-closed three-executable transaction; a clean install has no live
+  ; target and publishes it immediately with one same-volume rename. Packaging gates keep this
+  ; loop to the single stable Mihomo binary until the helper explicitly supports another member.
   {{#each binaries}}
-    File /a "/oname={{this}}" "{{no-escape @key}}"
+    File /a "/oname={{this}}.next" "{{no-escape @key}}"
+    ${If} $ConfirmedExistingInstall <> 1
+      ClearErrors
+      Rename "$INSTDIR\\{{this}}.next" "$INSTDIR\\{{this}}"
+      ${If} ${Errors}
+        Abort "Could not publish the staged Tono runtime. Installation stopped before creating the Service."
+      ${EndIf}
+    ${EndIf}
   {{/each}}
 
   ; Register the removal path BEFORE the Service is created and started. NSIS rolls back neither
   ; `File` nor an SCM registration, and StartVergeService can Abort after create/start succeeded
   ; (a failed readiness wait). Writing uninstall.exe and the Add/Remove entry first is what keeps
   ; that failure from leaving an AutoStart Service arming the WFP floor with no way to remove it
-  ; — on upgrades the old uninstaller has already deleted the previous uninstall.exe and UNINSTKEY.
+  ; — on upgrades this refreshes the existing recovery path before the Service helper is replaced.
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
@@ -991,7 +930,12 @@ Section Install
   ; Registry information for add/remove programs
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayName" "${PRODUCTNAME}"
   WriteRegStr SHCTX "${UNINSTKEY}" "DisplayIcon" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\""
-  WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
+  ; A failed upgrade can restore the old Service/core pair. Do not claim the new version in ARP
+  ; until that transaction has committed; fresh installs still need their recovery entry before
+  ; Service creation because NSIS does not roll SCM registrations back automatically.
+  ${If} $ConfirmedExistingInstall <> 1
+    WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
+  ${EndIf}
   WriteRegStr SHCTX "${UNINSTKEY}" "Publisher" "${MANUFACTURER}"
   WriteRegStr SHCTX "${UNINSTKEY}" "InstallLocation" "$\"$INSTDIR$\""
   WriteRegStr SHCTX "${UNINSTKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
@@ -1017,6 +961,10 @@ Section Install
   ; helper preserves active protection or marks a proven-disconnected legacy state for cleanup.
   !insertmacro RemoveVergeService
   !insertmacro StartVergeService
+
+  ${If} $ConfirmedExistingInstall = 1
+    WriteRegStr SHCTX "${UNINSTKEY}" "DisplayVersion" "${VERSION}"
+  ${EndIf}
 
   ; The replacement Service is verified and no legacy core can still own these files.
   !insertmacro RemoveKnownLegacyPayload
@@ -1071,6 +1019,14 @@ Function .onInstFailed
   ${If} $ServiceInstallAttempted <> 1
     Return
   ${EndIf}
+  ; The replacement helper has its own fail-closed restart guard for an existing Service. Running
+  ; the uninstall helper here would instead delete that pre-existing Service and deliberately
+  ; disarm WFP—the opposite of safe upgrade rollback. `/UPDATE` alone is not authoritative because
+  ; callers can pass it on a fresh install; only the validated registry detector sets this flag.
+  ${If} $ConfirmedExistingInstall = 1
+    DetailPrint "Upgrade failed while replacing ${PRODUCTNAME} Service; preserving the existing Service and network-protection state. Reboot Windows if needed, then run this installer again."
+    Return
+  ${EndIf}
   ${IfNot} ${FileExists} "$INSTDIR\resources\tono-service-uninstall.exe"
     DetailPrint "Installation failed and the Service uninstaller is missing; run uninstall.exe from Add/Remove Programs to remove the ${PRODUCTNAME} Service."
     Return
@@ -1099,14 +1055,29 @@ Function .onInstSuccess
   skipPostInstallRun:
     Return
   checkPostInstallRun:
-  ; Check for `/R` flag only in silent and passive installers because
-  ; GUI installer has a toggle for the user to (re)start the app
+  ; A validated same-version repair/upgrade is passive and therefore has no Finish-page Run
+  ; checkbox. After every install section (including Service/runtime readiness) has succeeded,
+  ; reopen its GUI exactly once as the unelevated user. `/S` always retains no-launch semantics.
+  ${If} $ConfirmedExistingInstall = 1
+    ${IfNot} ${Silent}
+      StrCpy $MainBinaryArgs ""
+      Call RunMainBinary
+    ${EndIf}
+    Return
+  ${EndIf}
+
+  ; Silent deployment never launches, even when `/R` was supplied. A fresh passive install may
+  ; still explicitly opt in with `/R`; an ordinary fresh interactive install keeps the Finish-page
+  ; checkbox and never reaches this branch.
+  ${If} ${Silent}
+    Return
+  ${EndIf}
   ${If} $PassiveMode = 1
-  ${OrIf} ${Silent}
     ${GetOptions} $CMDLINE "/R" $R0
     ${IfNot} ${Errors}
-      ${GetOptions} $CMDLINE "/ARGS" $R0
-      nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$R0"
+      StrCpy $MainBinaryArgs ""
+      ${GetOptions} $CMDLINE "/ARGS" $MainBinaryArgs
+      Call RunMainBinary
     ${EndIf}
   ${EndIf}
 FunctionEnd
@@ -1313,13 +1284,10 @@ Function CreateOrUpdateStartMenuShortcut
     Return
   ${EndIf}
 
-  ; Skip creating shortcut if in update mode or no shortcut mode
-  ; but always create if migrating from wix
-  ${If} $WixMode = 0
-    ${If} $UpdateMode = 1
-    ${OrIf} $NoShortcutMode = 1
-      Return
-    ${EndIf}
+  ; Preserve the user's shortcut choice during automatic upgrades.
+  ${If} $UpdateMode = 1
+  ${OrIf} $NoShortcutMode = 1
+    Return
   ${EndIf}
 
   !if "${STARTMENUFOLDER}" != ""
@@ -1372,13 +1340,10 @@ Function CreateOrUpdateDesktopShortcut
     Return
   ${EndIf}
 
-  ; Skip creating shortcut if in update mode or no shortcut mode
-  ; but always create if migrating from wix
-  ${If} $WixMode = 0
-    ${If} $UpdateMode = 1
-    ${OrIf} $NoShortcutMode = 1
-      Return
-    ${EndIf}
+  ; Preserve the user's shortcut choice during automatic upgrades.
+  ${If} $UpdateMode = 1
+  ${OrIf} $NoShortcutMode = 1
+    Return
   ${EndIf}
 
   CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"

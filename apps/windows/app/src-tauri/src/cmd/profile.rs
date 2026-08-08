@@ -1,20 +1,10 @@
-use super::{CmdResult, WithErrorCode as _, coded_error};
+use super::CmdResult;
 use crate::{
-    config::{Config, IProfiles, PrfItem, PrfOption},
+    config::{IProfiles, PrfItem, PrfOption},
     core::{timer::Timer, validate::ValidationOutcome},
-    utils::{dirs, help},
 };
-use clash_verge_draft::{Draft, SharedDraft};
-use clash_verge_logging::{Type, logging};
+use clash_verge_draft::Draft;
 use smartstring::alias::String;
-
-#[tauri::command]
-pub async fn get_profiles() -> CmdResult<SharedDraft<IProfiles>> {
-    logging!(debug, Type::Cmd, "获取配置文件列表");
-    let draft = Config::profiles().await;
-    let data = draft.data_arc();
-    Ok(data)
-}
 
 /// 增强配置文件
 #[tauri::command]
@@ -106,67 +96,6 @@ pub async fn patch_profiles_config_by_profile_index(profile_index: String) -> Cm
 pub async fn patch_profile(index: String, profile: PrfItem) -> CmdResult {
     let _ = (index, profile);
     Err("disabled by Tono".into())
-}
-
-/// 查看配置文件
-#[tauri::command]
-pub async fn view_profile(index: String) -> CmdResult {
-    let profiles = Config::profiles().await;
-    let profiles_ref = profiles.latest_arc();
-    let file = profiles_ref
-        .get_item(&index)
-        .with_error_code("PROFILE_OPEN_FAILED")?
-        .file
-        .as_ref()
-        .ok_or_else(|| coded_error("PROFILE_OPEN_FAILED", "the file field is null"))?;
-
-    let path = dirs::app_profiles_dir()
-        .with_error_code("PROFILE_OPEN_FAILED")?
-        .join(file.as_str());
-    if !path.exists() {
-        return CmdResult::Err(coded_error(
-            "PROFILE_OPEN_FAILED",
-            format!("file not found \"{}\"", path.display()),
-        ));
-    }
-
-    help::open_file(path).with_error_code("PROFILE_OPEN_FAILED")
-}
-
-/// 读取配置文件内容
-#[tauri::command]
-pub async fn read_profile_file(index: String) -> CmdResult<String> {
-    let item = {
-        let profiles = Config::profiles().await;
-        let profiles_ref = profiles.latest_arc();
-        PrfItem {
-            file: profiles_ref
-                .get_item(&index)
-                .with_error_code("PROFILE_READ_FAILED")?
-                .file
-                .to_owned(),
-            ..Default::default()
-        }
-    };
-
-    if let Some(file) = item.file.as_ref() {
-        let path = dirs::app_profiles_dir()
-            .with_error_code("PROFILE_READ_FAILED")?
-            .join(file.as_str());
-        match tokio::fs::try_exists(&path).await {
-            Ok(true) => {}
-            Ok(false) => return Ok(String::new()),
-            Err(err) => {
-                return Err(coded_error(
-                    "PROFILE_READ_FAILED",
-                    format!("failed to check profile file \"{}\": {err}", path.display()),
-                ));
-            }
-        }
-    }
-
-    let data = item.read_file().await.with_error_code("PROFILE_READ_FAILED")?;
-    Ok(data)
 }
 
 /// 获取下一次更新时间

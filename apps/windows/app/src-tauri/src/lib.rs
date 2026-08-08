@@ -32,16 +32,43 @@ use tauri::{AppHandle, Manager as _};
 use tauri_plugin_autostart::MacosLauncher;
 
 pub static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
+
+/// A failure before Tauri's setup hook has no logger and no window. Do not make an installed
+/// desktop launch disappear silently: stderr helps managed launchers, while Windows users get one
+/// fatal-error message with a retry/reboot instruction. A normal second-instance launch
+/// is represented separately and never reaches this function.
+fn report_pre_ui_startup_failure(stage: &str, error: &dyn std::fmt::Display) {
+    let detail = format!("Tono startup failed during {stage}: {error}");
+    eprintln!("[clash-verge] {detail}");
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW};
+        use windows::core::HSTRING;
+
+        let message = HSTRING::from(format!(
+            "Tono 无法启动。请等待几秒后重试；如果问题持续，请重启 Windows。\r\n\r\n\
+             Tono could not start. Try again in a few seconds; if the problem continues, restart Windows.\r\n\r\n\
+             {detail}"
+        ));
+        let title = HSTRING::from("Tono — Startup error");
+        // SAFETY: MessageBoxW copies the two valid HSTRING buffers for the duration of the call;
+        // no owner window exists yet, so a null HWND is intentional.
+        unsafe {
+            MessageBoxW(None, &message, &title, MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        }
+    }
+}
+
 /// Application initialization helper functions
 mod app_init {
     use super::*;
 
     /// Initialize singleton monitoring for other instances
-    pub fn init_singleton_check() -> Result<()> {
+    pub fn init_singleton_check() -> Result<server::SingletonDisposition> {
         AsyncHandler::block_on(async move {
             logging!(info, Type::Setup, "开始检查单例实例...");
-            server::check_singleton().await?;
-            Ok(())
+            server::check_singleton().await
         })
     }
 
@@ -127,7 +154,6 @@ mod app_init {
             cmd::restart_core,
             cmd::get_runtime_state,
             cmd::get_auto_launch_status,
-            cmd::entry_lightweight_mode,
             cmd::exit_lightweight_mode,
             cmd::install_service,
             cmd::uninstall_service,
@@ -140,12 +166,8 @@ mod app_init {
             cmd::patch_clash_mode,
             cmd::get_clash_mode,
             cmd::change_clash_core,
-            cmd::get_runtime_config,
             cmd::get_proxy_view,
-            cmd::get_runtime_yaml,
             cmd::get_runtime_exists,
-            cmd::get_runtime_logs,
-            cmd::get_runtime_proxy_chain_config,
             cmd::update_proxy_chain_config_in_runtime,
             cmd::invoke_uwp_tool,
             cmd::copy_clash_env,
@@ -159,24 +181,20 @@ mod app_init {
             cmd::get_clash_logs,
             cmd::get_verge_config,
             cmd::patch_verge_config,
-            cmd::test_delay,
             cmd::get_app_dir,
             cmd::copy_icon_file,
             cmd::download_icon_cache,
             cmd::open_devtools,
             cmd::exit_app,
             cmd::get_network_interfaces_info,
-            cmd::get_profiles,
             cmd::enhance_profiles,
             cmd::patch_profiles_config,
-            cmd::view_profile,
             cmd::patch_profile,
             cmd::create_profile,
             cmd::import_profile,
             cmd::reorder_profile,
             cmd::update_profile,
             cmd::delete_profile,
-            cmd::read_profile_file,
             cmd::save_profile_file,
             cmd::get_next_update_time,
             cmd::script_validate_notice,
@@ -448,8 +466,13 @@ pub fn run() {
 
     let _ = utils::dirs::init_portable_flag();
 
-    if app_init::init_singleton_check().is_err() {
-        return;
+    match app_init::init_singleton_check() {
+        Ok(server::SingletonDisposition::Primary) => {}
+        Ok(server::SingletonDisposition::ExistingInstanceNotified) => return,
+        Err(error) => {
+            report_pre_ui_startup_failure("single-instance coordination", &error);
+            return;
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -667,6 +690,9 @@ pub fn run() {
 
     #[cfg(not(feature = "clippy"))]
     let app = builder.build(tauri::generate_context!()).unwrap_or_else(|e| {
+        // The file logger is initialized by the setup hook, which only runs after `build`
+        // succeeds. Report this earliest fatal failure through the pre-UI channel as well.
+        report_pre_ui_startup_failure("Tauri initialization", &e);
         logging!(error, Type::Setup, "Failed to build Tauri application: {}", e);
         std::process::exit(1);
     });

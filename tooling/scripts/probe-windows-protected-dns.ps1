@@ -14,7 +14,10 @@ $protectedDnsV4 = '198.18.0.2'
 function Get-PhysicalDnsState {
     $physicalIndexes = @(
         Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
-            Where-Object Status -ne 'Disabled' |
+            # Match the Service's IP Helper invariant: only an operational uplink with a bound
+            # IP stack can currently resolve or leak DNS. `Disconnected` secondary adapters are
+            # intentionally outside the live protected set until a network-change reconnect.
+            Where-Object Status -eq 'Up' |
             ForEach-Object ifIndex
     )
 
@@ -26,7 +29,13 @@ function Get-PhysicalDnsState {
                 [ordered]@{
                     alias = $_.InterfaceAlias
                     index = $_.InterfaceIndex
-                    family = [string]$_.AddressFamily
+                    # CIM exposes UInt16 2/23 on some Windows builds and IPv4/IPv6 enum text on
+                    # others. Normalize before the proof below compares address-family names.
+                    family = switch ([uint16]$_.AddressFamily) {
+                        2 { 'IPv4' }
+                        23 { 'IPv6' }
+                        default { [string]$_.AddressFamily }
+                    }
                     servers = @($_.ServerAddresses)
                 }
             }

@@ -355,6 +355,10 @@ pub async fn sanitize_verge_config_for_tono() {
             || data.webdav_url.is_some()
             || data.webdav_username.is_some()
             || data.webdav_password.is_some()
+            // Legacy Clash settings can otherwise make an ordinary user/installer launch keep
+            // running invisibly. Tono exposes neither hidden start nor lightweight mode.
+            || data.enable_silent_start == Some(true)
+            || data.enable_auto_light_weight_mode == Some(true)
             || data.tray_event.as_deref() != Some("dashboard")
             // Windows (and Tono product) ships one audited stable core. A hand-edited
             // verge.yaml that still names alpha would demand a second ~47 MB binary.
@@ -376,6 +380,8 @@ pub async fn sanitize_verge_config_for_tono() {
         d.webdav_url = None;
         d.webdav_username = None;
         d.webdav_password = None;
+        d.enable_silent_start = Some(false);
+        d.enable_auto_light_weight_mode = Some(false);
         d.tray_event = Some("dashboard".into());
         d.clash_core = Some("verge-mihomo".into());
     });

@@ -45,23 +45,29 @@ pub const fn state_key(state: StepState) -> &'static str {
     }
 }
 
-/// The 8 §6 stages as fresh steps: all pending except the first, which is
-/// current at attempt start (FSM `begin_connect` lands on `Preparing`).
-pub fn initial_steps() -> Vec<StepRecord> {
+/// The §6 stages before any connection attempt has begun. Keeping every step pending is
+/// important on process restart: a durable Service may still hold fail-closed protection, but a
+/// fresh GUI has not started a transaction and must not manufacture a live `Preparing` spinner.
+pub fn pending_steps() -> Vec<StepRecord> {
     ConnectStage::ALL
         .iter()
-        .enumerate()
-        .map(|(index, stage)| StepRecord {
+        .map(|stage| StepRecord {
             key: commands::stage_key(*stage),
             label: stage.label(),
-            state: if index == 0 {
-                StepState::Current
-            } else {
-                StepState::Pending
-            },
+            state: StepState::Pending,
             elapsed_ms: None,
         })
         .collect()
+}
+
+/// A fresh in-flight attempt. `ConnectionFsm::begin_connect` lands on `Preparing`, so the first
+/// step becomes current only at the same point where the FSM actually enters Connecting.
+pub fn initial_steps() -> Vec<StepRecord> {
+    let mut steps = pending_steps();
+    if let Some(first) = steps.first_mut() {
+        first.state = StepState::Current;
+    }
+    steps
 }
 
 /// Advance the record to `stage`: the step currently marked current is
@@ -135,8 +141,8 @@ pub fn snapshot_with_current_elapsed(steps: &[StepRecord], current_elapsed_ms: O
 #[cfg(test)]
 mod tests {
     use super::{
-        StepRecord, StepState, advance, complete_all, fail_current, initial_steps, snapshot_with_current_elapsed,
-        state_key, total_elapsed_ms,
+        StepRecord, StepState, advance, complete_all, fail_current, initial_steps, pending_steps,
+        snapshot_with_current_elapsed, state_key, total_elapsed_ms,
     };
     use tono_core::connection::ConnectStage;
 
@@ -168,6 +174,14 @@ mod tests {
         assert!(steps[1..].iter().all(|step| step.state == StepState::Pending));
         // The cloud-policy stage is part of the record (Build 28).
         assert!(steps.iter().any(|step| step.key == "applyingCloudPolicy"));
+    }
+
+    #[test]
+    fn before_the_first_attempt_every_step_is_pending() {
+        let steps = pending_steps();
+        assert_eq!(steps.len(), ConnectStage::ALL.len());
+        assert!(steps.iter().all(|step| step.state == StepState::Pending));
+        assert_eq!(total_elapsed_ms(&steps), None);
     }
 
     #[test]

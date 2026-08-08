@@ -21,6 +21,9 @@ pub const DNS_LISTEN: &str = "127.0.0.1:53";
 /// the corresponding DirectPlan rules exist).
 pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
+/// Reviewed WeChat product executables. Keep this list narrow: WFP remains
+/// the exact IP:port security boundary for each generated DIRECT rule.
+pub const WECHAT_PROCESS_NAMES: [&str; 3] = ["WeChat.exe", "Weixin.exe", "WeChatAppEx.exe"];
 /// DoH resolvers pinned through the exit group; the `#Tono-Exit` fragment
 /// routes the lookups through the tunnel.
 pub const DOH_NAMESERVERS: [&str; 2] = [
@@ -240,6 +243,10 @@ fn direct_outbound(name: &str, physical_interface: &str) -> Value {
     put(&mut outbound, "name", string(name));
     put(&mut outbound, "type", string("direct"));
     put(&mut outbound, "udp", Value::Bool(true));
+    // Mihomo v1.19.29 accepts `ipv4`, not `ipv4-only`. Unknown values silently fall back to
+    // dual-stack, which would make this security boundary weaker than the IPv4-only rule/WFP
+    // plan around it.
+    put(&mut outbound, "ip-version", string("ipv4"));
     // Current Mihomo releases remove proxy groups carrying interface-name.
     // The supported form binds the concrete DIRECT outbound instead.
     put(&mut outbound, "interface-name", string(physical_interface));
@@ -291,13 +298,13 @@ fn runtime_value(
     if let Some(plan) = direct
         && !plan.hosts.is_empty()
     {
-        let mut grouped: std::collections::BTreeMap<&str, Vec<&str>> =
+        let mut grouped: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
             std::collections::BTreeMap::new();
         for (domain, address) in &plan.hosts {
             grouped
                 .entry(domain.as_str())
                 .or_default()
-                .push(address.as_str());
+                .insert(address.as_str());
         }
         let mut hosts = Mapping::new();
         for (domain, addresses) in grouped {
@@ -307,6 +314,32 @@ fn runtime_value(
             );
         }
         put(&mut root, "hosts", Value::Mapping(hosts));
+
+        // WeChat helpers may dial HTTPDNS results as raw IPs. Recover TLS SNI
+        // only for reviewed pinned hosts, without globally replacing destinations.
+        let force_domains: Vec<Value> = plan
+            .hosts
+            .iter()
+            .map(|(host, _)| host.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(string)
+            .collect();
+        let mut tls = Mapping::new();
+        put(
+            &mut tls,
+            "ports",
+            Value::Sequence(vec![Value::Number(443.into())]),
+        );
+        let mut sniff = Mapping::new();
+        put(&mut sniff, "TLS", Value::Mapping(tls));
+        let mut sniffer = Mapping::new();
+        put(&mut sniffer, "enable", Value::Bool(true));
+        put(&mut sniffer, "parse-pure-ip", Value::Bool(true));
+        put(&mut sniffer, "override-destination", Value::Bool(false));
+        put(&mut sniffer, "sniff", Value::Mapping(sniff));
+        put(&mut sniffer, "force-domain", Value::Sequence(force_domains));
+        put(&mut root, "sniffer", Value::Mapping(sniffer));
     }
 
     let mut dns = Mapping::new();
@@ -315,6 +348,7 @@ fn runtime_value(
     put(&mut dns, "enhanced-mode", string("fake-ip"));
     put(&mut dns, "fake-ip-range", string(FAKE_IP_RANGE));
     put(&mut dns, "respect-rules", Value::Bool(true));
+    put(&mut dns, "use-hosts", Value::Bool(true));
     put(&mut dns, "nameserver", strings(&DOH_NAMESERVERS));
     put(
         &mut dns,
@@ -394,15 +428,21 @@ fn runtime_value(
             rules.push("PROCESS-NAME,Claude.exe,Tono-Exit".to_string());
             rules.push("PROCESS-NAME,claude.exe,Tono-Exit".to_string());
         }
-        for (host, address, port) in &plan.tcp_wechat_rules {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve),(PROCESS-NAME,WeChat.exe)),{DIRECT_GROUP_NAME}"
-            ));
+        // Avoid depending on Mihomo's subtle DOMAIN/IP metadata interaction.
+        // hosts pins and WFP's exact endpoint permits enforce the reviewed IP set.
+        for (host, _address, port) in &plan.tcp_wechat_rules {
+            for process in WECHAT_PROCESS_NAMES {
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
+                ));
+            }
         }
         for (address, port) in &plan.udp_wechat_rules {
-            rules.push(format!(
-                "AND,((NETWORK,UDP),(DST-PORT,{port}),(IP-CIDR,{address}/32),(PROCESS-NAME,WeChat.exe)),{DIRECT_GROUP_NAME}"
-            ));
+            for process in WECHAT_PROCESS_NAMES {
+                rules.push(format!(
+                    "AND,((NETWORK,UDP),(DST-PORT,{port}),(IP-CIDR,{address}/32,no-resolve),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
+                ));
+            }
         }
         for (host, address, port) in &plan.tcp_web_rules {
             rules.push(format!(
@@ -561,6 +601,7 @@ reality-opts:
             Some("198.18.0.1/16")
         );
         assert_eq!(get(&value, &["dns", "respect-rules"]).as_bool(), Some(true));
+        assert_eq!(get(&value, &["dns", "use-hosts"]).as_bool(), Some(true));
         let expected: Vec<Value> = DOH_NAMESERVERS
             .iter()
             .map(|server| string(server))
@@ -764,9 +805,10 @@ reality-opts:
         DirectPlan {
             physical_interface: "Ethernet 2".to_string(),
             hosts: vec![
-                ("wxs.qq.com".to_string(), "9.0.0.10".to_string()),
                 ("wxs.qq.com".to_string(), "9.0.0.11".to_string()),
                 ("qpic.cn".to_string(), "9.0.0.12".to_string()),
+                ("wxs.qq.com".to_string(), "9.0.0.10".to_string()),
+                ("wxs.qq.com".to_string(), "9.0.0.10".to_string()),
             ],
             tcp_wechat_rules: vec![
                 (
@@ -801,6 +843,7 @@ reality-opts:
         let value = parsed(&without);
         // No direct artifacts at all.
         assert!(value.as_mapping().unwrap().get(string("hosts")).is_none());
+        assert!(value.as_mapping().unwrap().get(string("sniffer")).is_none());
         let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 1);
         let rules: Vec<&str> = get(&value, &["rules"])
@@ -810,6 +853,13 @@ reality-opts:
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert_eq!(rules, RULES);
+        let proxies = get(&value, &["proxies"]).as_sequence().unwrap();
+        assert_eq!(proxies.len(), 3);
+        assert!(
+            proxies
+                .iter()
+                .all(|proxy| proxy[string("type")].as_str() != Some("direct"))
+        );
     }
 
     #[test]
@@ -833,6 +883,7 @@ reality-opts:
             .as_sequence()
             .unwrap();
         assert_eq!(wxs.len(), 2);
+        assert_eq!(wxs, &vec![string("9.0.0.10"), string("9.0.0.11")]);
         let qpic = hosts
             .as_mapping()
             .unwrap()
@@ -842,6 +893,24 @@ reality-opts:
             .unwrap();
         assert_eq!(qpic.len(), 1);
 
+        let sniffer = get(&value, &["sniffer"]);
+        assert_eq!(sniffer[string("enable")].as_bool(), Some(true));
+        assert_eq!(sniffer[string("parse-pure-ip")].as_bool(), Some(true));
+        assert_eq!(
+            sniffer[string("override-destination")].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            sniffer[string("sniff")][string("TLS")][string("ports")]
+                .as_sequence()
+                .unwrap(),
+            &vec![Value::Number(443.into())]
+        );
+        assert_eq!(
+            sniffer[string("force-domain")].as_sequence().unwrap(),
+            &vec![string("qpic.cn"), string("wxs.qq.com")]
+        );
+
         // Current Mihomo accepts interface binding on concrete proxies, not
         // on proxy groups. Both DIRECT rule targets are concrete outbounds.
         let proxies = get(&value, &["proxies"]).as_sequence().unwrap();
@@ -850,6 +919,7 @@ reality-opts:
         assert_eq!(direct[string("name")].as_str(), Some("Tono-China-Direct"));
         assert_eq!(direct[string("type")].as_str(), Some("direct"));
         assert_eq!(direct[string("udp")].as_bool(), Some(true));
+        assert_eq!(direct[string("ip-version")].as_str(), Some("ipv4"));
         assert_eq!(
             direct[string("interface-name")].as_str(),
             Some("Ethernet 2")
@@ -860,6 +930,7 @@ reality-opts:
             Some("Tono-China-Web-Direct")
         );
         assert_eq!(web_direct[string("type")].as_str(), Some("direct"));
+        assert_eq!(web_direct[string("ip-version")].as_str(), Some("ipv4"));
         assert_eq!(
             web_direct[string("interface-name")].as_str(),
             Some("Ethernet 2")
@@ -879,23 +950,46 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
+        let mut expected = vec![
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
+            "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
+            "PROCESS-NAME,Claude.exe,Tono-Exit".to_string(),
+            "PROCESS-NAME,claude.exe,Tono-Exit".to_string(),
+        ];
+        for (host, port) in [("wxs.qq.com", 443), ("wxs.qq.com", 80), ("qpic.cn", 443)] {
+            for process in WECHAT_PROCESS_NAMES {
+                expected.push(format!("AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(PROCESS-NAME,{process})),Tono-China-Direct"));
+            }
+        }
+        for process in WECHAT_PROCESS_NAMES {
+            expected.push(format!("AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"));
+        }
+        expected.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
+        expected.push("MATCH,Tono-Exit".to_string());
         assert_eq!(
             rules,
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            &rules[2..4],
             [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
                 "PROCESS-NAME,Claude.exe,Tono-Exit",
-                "PROCESS-NAME,claude.exe,Tono-Exit",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,qpic.cn),(IP-CIDR,9.0.0.12/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
-                "MATCH,Tono-Exit",
+                "PROCESS-NAME,claude.exe,Tono-Exit"
             ]
         );
         // MATCH remains the only fallback.
         assert_eq!(rules.last(), Some(&"MATCH,Tono-Exit"));
+
+        let mut reordered = direct_plan();
+        reordered.hosts.reverse();
+        let reordered_runtime = build_owned_runtime(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&reordered),
+        )
+        .unwrap();
+        assert_eq!(runtime.yaml(), reordered_runtime.yaml());
     }
 
     #[test]
@@ -966,6 +1060,7 @@ reality-opts:
             build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)).unwrap();
         let value = parsed(&runtime);
         assert!(value.as_mapping().unwrap().get(string("hosts")).is_none());
+        assert!(value.as_mapping().unwrap().get(string("sniffer")).is_none());
         let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 1, "an empty plan declares no DIRECT group");
         let proxies = get(&value, &["proxies"]).as_sequence().unwrap();

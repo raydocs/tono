@@ -16,8 +16,8 @@ use std::{error::Error as _, future::Future, net::IpAddr, sync::Arc, time::Durat
 
 use clash_verge_logging::{Type, logging};
 use clash_verge_service_ipc::{
-    DnsProtectionStatus, KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, ProxyEndpoint, ProxyProtocol,
-    RuntimeBundle,
+    DnsProtectionStatus, KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint,
+    ProxyProtocol, RuntimeBundle, ServiceLifecycleState, ServiceStatusSnapshot, StageRuntimeOutcome,
 };
 use futures::{StreamExt as _, stream::FuturesUnordered};
 use tauri::AppHandle;
@@ -38,7 +38,7 @@ use crate::{
     tono::{
         audit::{self, AuditEvent},
         bootstrap, commands,
-        state::{AccountState, TonoState},
+        state::{AccountState, TonoInner, TonoState},
     },
 };
 
@@ -160,8 +160,8 @@ const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_secs(1);
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
 /// lookup so a broken adapter/resolver cannot strand Connecting forever.
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
-/// One absolute budget covers service readiness, both possible Core starts (cold WinTUN + WFP),
-/// controller/DNS verification, cloud-policy re-arm, locking, and the post-lock verification
+/// One absolute budget covers service readiness, the cold Core start, controller/DNS
+/// verification, fail-closed cloud-policy hot reload, locking, and the post-lock verification
 /// group. Per-stage retries never reset this clock.
 ///
 /// C4 — 120 s did not cover a real cold first connect. It was sized while the DNS stage still
@@ -175,7 +175,7 @@ const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// | StartClash #1 — cold WinTUN install + WFP arm             |  60 s | Service handler budget
 /// | controller readiness (`CONTROLLER_READY_TIMEOUT`)         |  15 s |
 /// | lock ladder (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL`)     |  10 s |
-/// | cloud policy — DNS 35 s + StartClash #2 60 s + ready/lock| 120 s |
+/// | cloud policy — DNS + stage/reload + read-back + relock     | 120 s |
 /// | securingDNS — PowerShell batches + read-back              |  30 s |
 /// | fake-ip verification (3 × (5 s + 0.5 s), cancellable)     |  16 s |
 /// | checkingExit (one advisory controller delay request)      |  16 s |
@@ -195,7 +195,7 @@ const CONNECT_BUDGET_LEGS: [(&str, u64); 11] = [
     ("StartClash #1 (cold WinTUN + WFP arm)", 60),
     ("controller readiness", 15),
     ("lock ladder", 10),
-    ("cloud policy (DNS + StartClash #2 + ready/relock)", 120),
+    ("cloud policy (DNS + fail-closed hot reload + read-back/relock)", 120),
     ("securingDNS", 30),
     ("fake-ip verification", 16),
     ("checkingExit", 16),
@@ -440,6 +440,68 @@ pub fn protected_dns_unhealthy(status: Option<&DnsProtectionStatus>) -> bool {
         }
         None => true,
     }
+}
+
+/// A fresh GUI may find a Core that the same authenticated owner left running across an
+/// installer repair or process restart. This is deliberately stronger than the Connected health
+/// predicate: it authorizes only a fail-closed *replacement attempt*, never a direct transition to
+/// Connected. The new process still has to create a fresh Service session/controller secret and
+/// pass every ordinary DNS, WFP, exit, and real-data-plane verification stage.
+pub fn startup_runtime_is_resume_candidate(snapshot: &ServiceStatusSnapshot, dns: &DnsProtectionStatus) -> bool {
+    let protected_runtime = snapshot.kill_switch.as_ref().is_some_and(|status| {
+        status.wanted
+            && status.live
+            && status.verified
+            && status.mode == KillSwitchStatusMode::Locked
+            && status.tunnel_permit_rendered
+            && status.last_error.is_none()
+    });
+    snapshot.active_operation.is_none()
+        && snapshot.is_active
+        && snapshot.active_generation.is_some()
+        && snapshot.service_state == ServiceLifecycleState::Running
+        && snapshot.core_pid.is_some()
+        && snapshot.desired_core_should_be_running
+        && !snapshot.desired_state_unknown
+        && protected_runtime
+        && dns.enabled
+        && dns.snapshot_present
+        && dns.adapters > 0
+        && dns.last_error.is_none()
+}
+
+/// Re-prove the complete current-owner runtime immediately before either scheduling or admitting
+/// the DNS-listener exception. No cached installer hint or old UI snapshot is authority here.
+async fn active_runtime_resume_status() -> Option<KillSwitchStatus> {
+    let (snapshot, dns) = tokio::join!(
+        service::tono_service_status_snapshot(),
+        service::tono_protected_dns_status(),
+    );
+    let (Ok(snapshot), Ok(dns)) = (snapshot, dns) else {
+        return None;
+    };
+    startup_runtime_is_resume_candidate(&snapshot, &dns)
+        .then(|| snapshot.kill_switch)
+        .flatten()
+}
+
+/// Pure final-admission gate for a startup replacement. Keeping both generations explicit is a
+/// regression guard: auth replacement and connection release are independent cancellation axes,
+/// and either one must make an asynchronously obtained Service proof unusable.
+const fn startup_resume_guards_hold(
+    auth_generation_current: bool,
+    connection_generation_current: bool,
+    account_ready: bool,
+    selected_is_valid: bool,
+    session_verified: bool,
+    reconnectable: bool,
+) -> bool {
+    auth_generation_current
+        && connection_generation_current
+        && account_ready
+        && selected_is_valid
+        && session_verified
+        && reconnectable
 }
 
 /// F2: threshold test shared by the kill-switch and exit-probe legs.
@@ -820,13 +882,22 @@ async fn run_stages(
     // Capture both the policy and its physical egress before WinTUN changes the default route.
     // Re-reading either after the first Core start can select the Tono adapter itself and makes
     // the runtime plan disagree with the WFP preflight that was actually performed.
-    let traffic_policy = { state.lock().await.traffic_policy.clone() };
+    let traffic_policy = {
+        let inner = state.lock().await;
+        inner.traffic_policy.clone().map(|document| CapturedTrafficPolicy {
+            revision: inner.policy_tracker.current_revision(),
+            digest: inner.policy_tracker.current_digest().unwrap_or_default().to_owned(),
+            document,
+        })
+    };
     let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
         && traffic_policy.as_ref().is_some_and(|policy| {
-            !policy.domains.is_empty() || !policy.media_endpoints.is_empty() || !policy.web_domains.is_empty()
+            !policy.document.domains.is_empty()
+                || !policy.document.media_endpoints.is_empty()
+                || !policy.document.web_domains.is_empty()
         });
 
-    // The five preparation probes are independent of each other and all read-only /
+    // The preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
     // read IPC), so they run concurrently under one transaction wait instead of paying their
     // worst cases back to back (the bootstrap DNS lookup alone budgets 2 s):
@@ -842,27 +913,42 @@ async fn run_stages(
     //    TUN endpoint at 198.18.0.2. Prove both listener sockets are available before installing
     //    WFP rather than timing out after the arm.
     //  - The Service-side core binary path validation.
-    let (bootstrap_api_hosts, physical_interface_probe, runtime_ports, dns_preflight, core_path) = transaction
-        .wait("preparing service", async {
-            tokio::join!(
-                bootstrap_hosts(),
-                async {
-                    if needs_physical_interface {
-                        Some(detect_physical_interface().await)
-                    } else {
-                        None
-                    }
-                },
-                allocate_runtime_ports(),
-                preflight_dns_listener(),
-                service::tono_core_binary_path(),
-            )
-        })
-        .await?;
+    let (bootstrap_api_hosts, physical_interface_probe, runtime_ports, dns_preflight, active_runtime_resume, core_path) =
+        transaction
+            .wait("preparing service", async {
+                tokio::join!(
+                    bootstrap_hosts(),
+                    async {
+                        if needs_physical_interface {
+                            Some(detect_physical_interface().await)
+                        } else {
+                            None
+                        }
+                    },
+                    allocate_runtime_ports(),
+                    preflight_dns_listener(),
+                    active_runtime_resume_status(),
+                    service::tono_core_binary_path(),
+                )
+            })
+            .await?;
     let runtime_ports = runtime_ports.map_err(StageFailure::error)?;
     let controller_port = runtime_ports.controller_port;
     let mixed_port = runtime_ports.mixed_port;
-    dns_preflight.map_err(StageFailure::error)?;
+    if let Err(error) = dns_preflight {
+        if active_runtime_resume.is_some() {
+            // The old, strongly proven same-owner Core is expected to own TCP/UDP loopback:53.
+            // StartClash first re-arms WFP and then replaces that Core under the Service lifecycle
+            // gate, so bypassing this one availability probe creates no direct-traffic window.
+            logging!(
+                info,
+                Type::Service,
+                "Tono: authenticated active runtime owns protected DNS; admitting fail-closed startup replacement ({error})"
+            );
+        } else {
+            return Err(StageFailure::error(error));
+        }
+    }
     let core_path = core_path.map_err(StageFailure::error)?;
     let physical_interface = match physical_interface_probe {
         Some(interface) => {
@@ -930,6 +1016,10 @@ async fn run_stages(
         inner.controller_port = Some(controller_port);
         commands::emit_status(app, &commands::status_of(&inner));
     }
+    // Pin every later session-gated mutation to the owner generation created by this StartClash.
+    // A stale detached operation must never consult the mutable global and accidentally adopt a
+    // node switch's replacement session.
+    let service_session = service::active_service_session().map_err(StageFailure::error)?;
 
     // §6.4: startingTunnel — poll the controller (≤ 40 × 250 ms).
     set_stage(state, app, ConnectStage::StartingTunnel, generation, true, started).await?;
@@ -942,31 +1032,29 @@ async fn run_stages(
     // existence check and is idempotent on the Service side (≤ 20 × 100 ms).
     set_stage(state, app, ConnectStage::LockingTraffic, generation, true, started).await?;
     transaction
-        .wait("locking traffic", lock_kill_switch_with_retries())
+        .wait("locking traffic", lock_kill_switch_with_retries(&service_session))
         .await?
         .map_err(StageFailure::error)?;
 
     // Build 28: applyingCloudPolicy — resolve the cloud WeChat-DIRECT
-    // policy through the now-running controller and, when a plan exists,
-    // re-arm with its endpoint permits before the DIRECT-capable runtime
-    // starts (permit strictly before selector, via a second StartClash).
+    // policy through the now-running controller and, when a plan exists, enter the rev-10
+    // fail-closed hot-reload bracket. Exact physical endpoint permits remain absent until the
+    // reloaded selector, DNS, and ordinary tunnel data plane all pass their proofs below.
     set_stage(state, app, ConnectStage::ApplyingCloudPolicy, generation, true, started).await?;
-    let secret = transaction
+    let pending_direct = transaction
         .wait(
             "cloud traffic policy",
             apply_cloud_policy(
                 state,
-                app,
                 &node,
                 nodes,
                 generation,
                 &secret,
                 controller_port,
                 mixed_port,
-                &proxy_endpoints,
-                &bootstrap_api_hosts,
                 traffic_policy,
                 physical_interface,
+                &service_session,
             ),
         )
         .await??;
@@ -977,7 +1065,7 @@ async fn run_stages(
     transaction
         .wait(
             "enabling protected DNS",
-            enable_dns_cancellation_safe(state, generation),
+            enable_dns_cancellation_safe(state, generation, service_session.clone()),
         )
         .await??;
     if state.lock().await.connect_generation != generation {
@@ -1000,12 +1088,30 @@ async fn run_stages(
         transaction,
     )
     .await?;
+    let mut direct_lease_heartbeat = None;
+
+    // The direct-enabled selector has been active behind a zero-DIRECT WFP set throughout DNS
+    // and the full existing verification barrier. Only now install the exact endpoint permits,
+    // then re-prove the ordinary tunnel before the durable verified-session latch can commit.
+    if let Some(pending) = pending_direct {
+        let (committed_status, heartbeat) = transaction
+            .wait(
+                "committing exact DIRECT endpoints",
+                commit_direct_policy_cancellation_safe(state, generation, pending),
+            )
+            .await??;
+        kill_status = committed_status;
+        direct_lease_heartbeat = Some(heartbeat);
+    }
 
     // The durable logical-session latch is committed only after every existing check and a
     // final generation guard. A failure remains an ordinary connect failure.
     ensure_fresh(state, generation).await?;
     transaction
-        .wait("committing verified session", service::tono_mark_kill_switch_verified())
+        .wait(
+            "committing verified session",
+            service::tono_mark_kill_switch_verified_for_session(&service_session),
+        )
         .await?
         .map_err(StageFailure::error)?;
     kill_status.verified = true;
@@ -1055,6 +1161,9 @@ async fn run_stages(
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
     });
+    if let Some(heartbeat) = direct_lease_heartbeat {
+        spawn_direct_lease_heartbeat(state, generation, heartbeat).await;
+    }
     spawn_network_monitor(state, app).await;
     Ok(())
 }
@@ -1265,7 +1374,11 @@ async fn start_core_cancellation_safe(
 
 /// Cancellation-safe counterpart for DNS enable. A disconnect may restore and release while an
 /// old enable is still in flight; the detached child restores again after that late commit.
-async fn enable_dns_cancellation_safe(state: &Arc<TonoState>, generation: u64) -> Result<(), StageFailure> {
+async fn enable_dns_cancellation_safe(
+    state: &Arc<TonoState>,
+    generation: u64,
+    service_session: OwnerSessionProof,
+) -> Result<(), StageFailure> {
     let mutation_guard = state.begin_connect_mutation().await;
     if state.lock().await.connect_generation != generation {
         drop(mutation_guard);
@@ -1274,7 +1387,7 @@ async fn enable_dns_cancellation_safe(state: &Arc<TonoState>, generation: u64) -
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let _mutation_guard = mutation_guard;
-        service::tono_enable_protected_dns()
+        service::tono_enable_protected_dns_for_session(&service_session)
             .await
             .map_err(StageFailure::error)?;
         if task_state.lock().await.connect_generation != generation {
@@ -1598,6 +1711,13 @@ async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &AppHandle) 
 /// catalog is waiting for a fresh user choice.
 pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
     let mut inner = state.lock().await;
+    schedule_reconnect_locked(&mut inner, state, app);
+}
+
+/// Lock-held half of [`schedule_reconnect`]. Spawning and registering are one critical section:
+/// Disconnect/sign-out must never observe an empty task slot and then be followed by a reconnect
+/// handle that escaped their abort.
+fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoState>, app: &AppHandle) {
     if !reconnect_allowed(
         inner.catalog_requires_choice,
         inner.fsm.status(),
@@ -1627,6 +1747,58 @@ pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
     state.audit().log(AuditEvent::ReconnectScheduled {
         delay_ms: delay.as_millis() as u64,
     });
+}
+
+/// After account/catalog restore, take control of a strongly proven same-owner active runtime by
+/// scheduling the normal protected reconnect. This never marks Connected directly. If any proof
+/// disappeared, the GUI remains truthfully Protected Offline and waits for an explicit action.
+pub async fn schedule_startup_resume_if_proven(state: &Arc<TonoState>, app: &AppHandle, restore_generation: u64) {
+    // Capture both cancellation authorities before the IPC proof. Disconnect, sign-out, node
+    // replacement, or a newer restore can then retire this probe while it is awaiting the
+    // Service rather than letting a stale result resurrect protection afterwards.
+    let (connect_generation, cancellation) = {
+        let inner = state.lock().await;
+        if inner.sign_in_generation != restore_generation {
+            return;
+        }
+        (inner.connect_generation, inner.connect_cancellation.clone())
+    };
+    let proven = tokio::select! {
+        biased;
+        _ = cancellation.cancelled() => false,
+        status = active_runtime_resume_status() => status.is_some(),
+    };
+    if !proven {
+        return;
+    }
+
+    let mut inner = state.lock().await;
+    let selected_is_valid = inner
+        .selected_node
+        .as_ref()
+        .is_some_and(|selected| inner.nodes.iter().any(|node| node.name == *selected));
+    // The Service proof authorizes only scheduling. It must not write its now-stale snapshot back
+    // into local state or manufacture FSM latches: the startup restore already recorded the
+    // durable protection it observed. Requiring those latches to remain current is what makes an
+    // intervening Disconnect/release win.
+    let reconnectable = reconnect_allowed(
+        inner.catalog_requires_choice,
+        inner.fsm.status(),
+        inner.fsm.kill_switch_armed(),
+    );
+    if !startup_resume_guards_hold(
+        inner.sign_in_generation == restore_generation,
+        inner.connect_generation == connect_generation,
+        matches!(inner.account_state, AccountState::Ready),
+        selected_is_valid,
+        inner.fsm.session_verified(),
+        reconnectable,
+    ) {
+        return;
+    }
+    // Register under this same generation/admission lock. A later Disconnect/sign-out either
+    // sees this handle and aborts it, or ran first and failed one of the checks above.
+    schedule_reconnect_locked(&mut inner, state, app);
 }
 
 /// Whether a protected reconnect may run: the barrier is up, the machine is
@@ -1963,6 +2135,75 @@ async fn spawn_network_monitor(state: &Arc<TonoState>, app: &AppHandle) {
     let mut inner = state.lock().await;
     inner.tasks.abort_network_monitor();
     inner.tasks.network_monitor = Some(handle);
+}
+
+async fn spawn_direct_lease_heartbeat(state: &Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
+    let task_state = Arc::clone(state);
+    let handle = AsyncHandler::spawn(move || {
+        Box::pin(direct_lease_heartbeat_loop(task_state, generation, heartbeat)) as BoxedTask
+    });
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+        handle.abort();
+        return;
+    }
+    inner.tasks.abort_direct_lease_heartbeat();
+    inner.tasks.direct_lease_heartbeat = Some(handle);
+}
+
+async fn direct_lease_heartbeat_loop(state: Arc<TonoState>, generation: u64, heartbeat: DirectLeaseHeartbeat) {
+    let mut interval = tokio::time::interval(DIRECT_LEASE_HEARTBEAT_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        // Tokio's first tick is immediate, closing the finalize-to-monitor handoff window.
+        interval.tick().await;
+        {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                return;
+            }
+        }
+        let renewal = match service::tono_renew_direct_runtime_reload(
+            &heartbeat.session,
+            heartbeat.reload_id,
+            &heartbeat.endpoint_digest,
+        )
+        .await
+        {
+            Ok(result) => validate_direct_reload_result(
+                &result,
+                &heartbeat.session,
+                Some(heartbeat.reload_id),
+                &heartbeat.endpoint_digest,
+            )
+            .map(|_| ()),
+            Err(error) => Err(format!("{error:#}")),
+        };
+        if let Err(error) = renewal {
+            let redacted = audit::redact(&error);
+            logging!(
+                error,
+                Type::Service,
+                "Tono: authenticated DIRECT lease renewal failed; restricting traffic to fail-closed Blocked: {redacted}"
+            );
+            state.audit().log(AuditEvent::HealthProbeFail {
+                probe: "directLeaseHeartbeat",
+                error: redacted,
+            });
+            // Do not reconnect from inside the heartbeat task: a successful fresh attempt would
+            // replace this task and abort its own caller mid-commit. Restrict immediately; the
+            // independent health monitor observes Blocked and owns the normal reconnect path.
+            if let Err(restrict_error) = service::tono_restrict_bootstrap().await {
+                logging!(
+                    error,
+                    Type::Service,
+                    "Tono: DIRECT renewal failure could not immediately restrict WFP; the Service lease watchdog remains authoritative: {}",
+                    audit::redact(&format!("{restrict_error:#}"))
+                );
+            }
+            return;
+        }
+    }
 }
 
 /// F2 leg 2: periodically repeat the same authoritative multi-origin real App request used at
@@ -2465,10 +2706,10 @@ async fn wait_controller(secret: &str, controller_port: u16) -> Result<(), Strin
 /// §6.5+§6.6: lock, retrying only while the TUN adapter comes up (≤ 50 × 200 ms between
 /// retryable failures). Permanent lock errors fail immediately so a bad owner/WFP state does
 /// not burn the connect transaction budget on 50 full lifecycle IPCs.
-async fn lock_kill_switch_with_retries() -> Result<(), String> {
+async fn lock_kill_switch_with_retries(session: &OwnerSessionProof) -> Result<(), String> {
     let mut last = String::from("no response");
     for attempt in 0..LOCK_ATTEMPTS {
-        match service::tono_lock_kill_switch().await {
+        match service::tono_lock_kill_switch_for_session(session).await {
             Ok(()) => return Ok(()),
             Err(err) => {
                 last = err.to_string();
@@ -2732,12 +2973,8 @@ fn format_tun_probe_failures(failures: &[String]) -> String {
 
 // ---- WeChat-DIRECT cloud policy (Build 28) ----
 
-/// Optional physical-interface DIRECT acceleration currently requires a destructive second Core
-/// start. Mainland reports proved the first full-tunnel runtime could resolve the policy through
-/// the selected node, then the replacement runtime lost controller, TUN, and loopback-proxy
-/// egress together. Retain the already-working full-tunnel runtime until policy activation can be
-/// made transactional with a proven rollback. This removes physical DIRECT permits and therefore
-/// narrows, rather than weakens, the fail-closed policy.
+/// Release gate for the rev-10 fail-closed hot-reload path below. It remains false until the App,
+/// Service, Mihomo-rule readback, and on-device packet-capture suite all pass together.
 const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = false;
 /// Maximum resolved addresses kept per policy domain (Mac parity).
 const MAX_ADDRESSES_PER_DOMAIN: usize = 8;
@@ -2753,55 +2990,148 @@ const CLOUD_DNS_QUERY_RETRY_DELAY: Duration = Duration::from_millis(350);
 /// connect transaction remains the final fail-closed ceiling.
 const CLOUD_POLICY_RESOLUTION_TIMEOUT: Duration = Duration::from_secs(35);
 
-/// The applyingCloudPolicy stage: when a validated cloud policy exists,
-/// resolve its domains through the now-running controller, build the
-/// DIRECT plan, and re-arm with the endpoint permits + the direct-enabled
-/// runtime. Returns the controller secret the remaining stages must use
-/// (a second start rotates it). `Ok(original)` when there is no policy or
-/// the policy is empty. DIRECT is optional acceleration: if its interface
-/// snapshot or DNS discovery is unavailable, no DIRECT permits are added
-/// and the byte-identical plan-less tunnel continues instead.
+const DIRECT_CONFIG_RELOAD_ATTEMPTS: u32 = 2;
+const DIRECT_CONFIG_RELOAD_RETRY_DELAY: Duration = Duration::from_millis(350);
+const DIRECT_CONFIG_RELOAD_TIMEOUT: Duration = Duration::from_secs(60);
+/// Must stay comfortably below the Service's 60-second committed lease. A dedicated task keeps
+/// renewal independent of the health monitor's potentially slow public data-plane probes.
+const DIRECT_LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+
+#[derive(Clone)]
+struct CapturedTrafficPolicy {
+    revision: i64,
+    digest: String,
+    document: tono_core::policy::TonoTrafficPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ServiceCoreIdentity {
+    pid: u32,
+    generation: u32,
+}
+
+/// Exact proof retained only for the Connected lifetime. The owner-session token is memory-only,
+/// and this type deliberately has no `Debug` implementation.
+#[derive(Clone)]
+struct DirectLeaseHeartbeat {
+    session: OwnerSessionProof,
+    reload_id: u64,
+    endpoint_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControllerDirectRuleProof {
+    proxy: String,
+    payload: String,
+}
+
+/// Exact v1.19.29 `/rules` serialization for the trusted `DirectPlan` handed to the runtime
+/// builder. Mihomo preserves top-level rule order and one API row per AND rule; `no-resolve` is an
+/// internal child option and intentionally does not appear in `Payload()`.
+fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec<ControllerDirectRuleProof> {
+    let mut expected = Vec::new();
+    for (host, _address, port) in &plan.tcp_wechat_rules {
+        for process in tono_core::config::WECHAT_PROCESS_NAMES {
+            expected.push(ControllerDirectRuleProof {
+                proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                payload: format!(
+                    "((Network,tcp) && (DstPort,{port}) && (Domain,{}) && (ProcessName,{process}))",
+                    host.to_ascii_lowercase()
+                ),
+            });
+        }
+    }
+    for (address, port) in &plan.udp_wechat_rules {
+        for process in tono_core::config::WECHAT_PROCESS_NAMES {
+            expected.push(ControllerDirectRuleProof {
+                proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                payload: format!(
+                    "((Network,udp) && (DstPort,{port}) && (IPCIDR,{address}/32) && (ProcessName,{process}))"
+                ),
+            });
+        }
+    }
+    for (host, address, port) in &plan.tcp_web_rules {
+        expected.push(ControllerDirectRuleProof {
+            proxy: config::WEB_DIRECT_GROUP_NAME.to_owned(),
+            payload: format!(
+                "((Network,tcp) && (DstPort,{port}) && (Domain,{}) && (IPCIDR,{address}/32))",
+                host.to_ascii_lowercase()
+            ),
+        });
+    }
+    expected
+}
+
+struct PendingDirectCommit {
+    /// Held from the final policy snapshot check through exact endpoint commit, preventing a
+    /// policy sync from revoking/replacing the set underneath this transaction.
+    _policy_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    policy: CapturedTrafficPolicy,
+    selected_node: String,
+    session: OwnerSessionProof,
+    reload_id: u64,
+    endpoints: Vec<ProxyEndpoint>,
+    endpoint_digest: String,
+    core_identity: ServiceCoreIdentity,
+    controller_secret: String,
+    controller_port: u16,
+    expected_controller_rules: Vec<ControllerDirectRuleProof>,
+    direct_interface: String,
+    require_wechat_direct: bool,
+    require_web_direct: bool,
+    wechat_tcp: usize,
+    web_tcp: usize,
+    udp: usize,
+}
+
+/// The applyingCloudPolicy stage. Discovery is optional and occurs while the proven full-tunnel
+/// runtime remains untouched. Once the Service's begin operation retracts the TUN/DIRECT grants,
+/// every later failure is fail-closed: no second StartClash and no fallback-to-restart path exist.
+/// The returned commit keeps the policy read guard and exact endpoints until DNS plus the existing
+/// post-lock barrier pass; only then may WFP install the physical-interface permits.
 async fn apply_cloud_policy(
     state: &Arc<TonoState>,
-    app: &AppHandle,
     node: &ValidatedNode,
     nodes: &[ValidatedNode],
     generation: u64,
     original_secret: &str,
     controller_port: u16,
     mixed_port: u16,
-    proxy_endpoints: &[ProxyEndpoint],
-    bootstrap_api_hosts: &[String],
-    policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    policy: Option<CapturedTrafficPolicy>,
     physical_interface: Option<String>,
-) -> Result<String, StageFailure> {
+    service_session: &OwnerSessionProof,
+) -> Result<Option<PendingDirectCommit>, StageFailure> {
     let Some(policy) = policy else {
-        return Ok(original_secret.to_string());
+        return Ok(None);
     };
-    if policy.domains.is_empty() && policy.media_endpoints.is_empty() && policy.web_domains.is_empty() {
-        return Ok(original_secret.to_string());
+    if policy.document.domains.is_empty()
+        && policy.document.media_endpoints.is_empty()
+        && policy.document.web_domains.is_empty()
+    {
+        return Ok(None);
     }
     if !WINDOWS_OPTIONAL_DIRECT_ENABLED {
-        return Ok(skip_optional_direct_policy(
+        skip_optional_direct_policy(
             state,
-            original_secret,
             "optional Windows DIRECT policy is disabled; retaining the proven full-tunnel runtime".to_string(),
-        ));
+        );
+        return Ok(None);
     }
 
     let Some(interface) = physical_interface else {
-        return Ok(skip_optional_direct_policy(
+        skip_optional_direct_policy(
             state,
-            original_secret,
             "cloud DIRECT policy has no pre-TUN physical interface snapshot".to_string(),
-        ));
+        );
+        return Ok(None);
     };
 
     // Resolve through a small bounded pool. WeChat and web sets run in
     // sequence so their separate batches cannot double the global cap.
     let resolution = tokio::time::timeout(CLOUD_POLICY_RESOLUTION_TIMEOUT, async {
-        let wechat = resolve_direct_domains(original_secret, controller_port, &policy.domains, node).await?;
-        let web = resolve_direct_domains(original_secret, controller_port, &policy.web_domains, node).await?;
+        let wechat = resolve_direct_domains(original_secret, controller_port, &policy.document.domains, node).await?;
+        let web = resolve_direct_domains(original_secret, controller_port, &policy.document.web_domains, node).await?;
         Ok::<_, String>((wechat, web))
     })
     .await
@@ -2815,31 +3145,40 @@ async fn apply_cloud_policy(
     let (wechat_pins, web_pins) = match classify_optional_direct_resolution(resolution) {
         OptionalDirectResolution::Ready(pins) => pins,
         OptionalDirectResolution::Skip(reason) => {
-            return Ok(skip_optional_direct_policy(state, original_secret, reason));
+            skip_optional_direct_policy(state, reason);
+            return Ok(None);
         }
     };
-    let (plan, direct_endpoints) = build_direct_plan(interface, &wechat_pins, &web_pins, &policy.media_endpoints, node)
-        .map_err(StageFailure::error)?;
+    let (plan, direct_endpoints) = match build_direct_plan(
+        interface,
+        &wechat_pins,
+        &web_pins,
+        &policy.document.media_endpoints,
+        node,
+    ) {
+        Ok(plan) => plan,
+        Err(reason) => {
+            skip_optional_direct_policy(state, reason);
+            return Ok(None);
+        }
+    };
     if plan.hosts.is_empty()
         && plan.tcp_wechat_rules.is_empty()
         && plan.tcp_web_rules.is_empty()
         && plan.udp_wechat_rules.is_empty()
     {
-        return Ok(original_secret.to_string());
+        return Ok(None);
     }
+    let expected_controller_rules = expected_controller_direct_rules(&plan);
+    let direct_interface = plan.physical_interface.clone();
 
-    // Domain/interface discovery can take seconds. Do not let an invalidated transaction rotate
-    // the runtime or widen WFP permits after Disconnect or a node switch has taken ownership.
+    // Build the staged bundle before the irreversible bracket. The controller secret and ports
+    // stay byte-identical: this is an in-place reload, not a replacement Core generation.
     ensure_fresh(state, generation).await?;
-
-    // Permit before selector: a second StartClash carries the same barrier
-    // plus the exact DIRECT endpoint tuples and the direct-enabled runtime
-    // (fresh controller secret per start, §5).
-    let secret = generate_controller_secret();
     let runtime = build_owned_runtime_with_ports(
         nodes,
         &node.name,
-        &secret,
+        original_secret,
         Some(&plan),
         RuntimePorts {
             mixed_port,
@@ -2856,43 +3195,712 @@ async fn apply_cloud_policy(
         remote_providers: Vec::new(),
         core_path: core_path.to_string_lossy().into_owned(),
     };
-    let kill_switch = KillSwitchConfig {
-        tunnel_interface: config::TUN_DEVICE_NAME.to_string(),
-        proxy_endpoints: proxy_endpoints.to_vec(),
-        bootstrap_api_hosts: bootstrap_api_hosts.to_vec(),
+    let endpoint_digest =
+        clash_verge_service_ipc::direct_endpoint_digest(&direct_endpoints).map_err(StageFailure::error)?;
+
+    // Serialize the final snapshot check against policy sync, then retain the owned read guard in
+    // `PendingDirectCommit` until exact endpoint commit finishes.
+    let policy_guard = state.begin_policy_activation().await;
+    if !direct_context_is_current(state, generation, &node.name, &policy).await {
+        drop(policy_guard);
+        skip_optional_direct_policy(
+            state,
+            "cloud DIRECT policy changed before activation; retaining the full-tunnel runtime".to_owned(),
+        );
+        return Ok(None);
+    }
+    let active_session = service::active_direct_runtime_reload_session().map_err(StageFailure::error)?;
+    if active_session != *service_session {
+        return Err(StageFailure::error(
+            "service owner session changed before DIRECT runtime reload",
+        ));
+    }
+
+    activate_direct_runtime_cancellation_safe(
+        state,
+        generation,
+        node.name.clone(),
+        policy,
+        policy_guard,
+        service_session.clone(),
+        bundle,
         direct_endpoints,
-    };
-    start_core_cancellation_safe(state, bundle, kill_switch, generation).await?;
+        endpoint_digest,
+        original_secret.to_owned(),
+        controller_port,
+        expected_controller_rules,
+        direct_interface,
+        !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
+        !plan.tcp_web_rules.is_empty(),
+        plan.tcp_wechat_rules.len(),
+        plan.tcp_web_rules.len(),
+        plan.udp_wechat_rules.len(),
+    )
+    .await
+}
 
+async fn direct_context_is_current(
+    state: &Arc<TonoState>,
+    generation: u64,
+    selected_node: &str,
+    policy: &CapturedTrafficPolicy,
+) -> bool {
+    let inner = state.lock().await;
+    inner.connect_generation == generation
+        && inner.selected_node.as_deref() == Some(selected_node)
+        && inner.policy_tracker.current_revision() == policy.revision
+        && inner.policy_tracker.current_digest() == Some(policy.digest.as_str())
+        && inner.traffic_policy.as_ref() == Some(&policy.document)
+}
+
+fn validate_direct_reload_result(
+    result: &clash_verge_service_ipc::DirectRuntimeReloadResult,
+    session: &OwnerSessionProof,
+    expected_reload_id: Option<u64>,
+    expected_digest: &str,
+) -> Result<u64, String> {
+    if result.owner_generation != session.generation {
+        return Err(format!(
+            "DIRECT commit proof belongs to Service generation {}, expected {}",
+            result.owner_generation, session.generation
+        ));
+    }
+    if result.reload_id == 0 {
+        return Err("DIRECT commit proof omitted its Service reload identity".to_owned());
+    }
+    if let Some(expected) = expected_reload_id
+        && result.reload_id != expected
     {
-        let mut inner = state.lock().await;
-        if inner.connect_generation != generation {
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
-        }
-        inner.controller_secret = Some(secret.clone());
-        inner.controller_port = Some(controller_port);
+        return Err(format!(
+            "DIRECT commit proof belongs to reload {}, expected {}",
+            result.reload_id, expected
+        ));
     }
-    // The restarted core re-creates the TUN adapter: wait for the new
-    // controller, then re-lock (idempotent, re-asserts the adapter).
-    wait_controller(&secret, controller_port)
+    if result.endpoint_digest != expected_digest {
+        return Err("DIRECT commit proof endpoint digest did not match the requested set".to_owned());
+    }
+    Ok(result.reload_id)
+}
+
+fn prove_service_reload_mode(
+    snapshot: &ServiceStatusSnapshot,
+    session: &OwnerSessionProof,
+    expected_mode: KillSwitchStatusMode,
+) -> Result<(ServiceCoreIdentity, KillSwitchStatus), String> {
+    if snapshot.active_operation.is_some() {
+        return Err("Tono Service still reports an active lifecycle mutation".to_owned());
+    }
+    if !snapshot.is_active || snapshot.active_generation != Some(session.generation) {
+        return Err(format!(
+            "Tono Service active generation {:?} did not match the captured DIRECT session {}",
+            snapshot.active_generation, session.generation
+        ));
+    }
+    if snapshot.service_state != ServiceLifecycleState::Running
+        || !snapshot.desired_core_should_be_running
+        || snapshot.desired_generation != session.generation
+        || snapshot.desired_state_unknown
+    {
+        return Err(format!(
+            "Tono Service/Core lifecycle is not settled (state={:?}, desired={}, desired_generation={}, unknown={})",
+            snapshot.service_state,
+            snapshot.desired_core_should_be_running,
+            snapshot.desired_generation,
+            snapshot.desired_state_unknown
+        ));
+    }
+    let pid = snapshot
+        .core_pid
+        .ok_or_else(|| "Tono Service has no running Core for DIRECT reload".to_owned())?;
+    let kill_switch = snapshot
+        .kill_switch
+        .clone()
+        .ok_or_else(|| "Tono Service omitted the Windows kill-switch snapshot".to_owned())?;
+    let tunnel_expected = expected_mode == KillSwitchStatusMode::Locked;
+    if !kill_switch.wanted
+        || !kill_switch.live
+        || kill_switch.mode != expected_mode
+        || kill_switch.tunnel_permit_rendered != tunnel_expected
+        || kill_switch.last_error.is_some()
+    {
+        return Err(format!(
+            "DIRECT reload WFP proof failed (wanted={}, live={}, mode={:?}, tunnel={}, error={})",
+            kill_switch.wanted,
+            kill_switch.live,
+            kill_switch.mode,
+            kill_switch.tunnel_permit_rendered,
+            kill_switch.last_error.is_some()
+        ));
+    }
+    Ok((
+        ServiceCoreIdentity {
+            pid,
+            generation: snapshot.core_generation,
+        },
+        kill_switch,
+    ))
+}
+
+fn prove_service_endpoint_digest(status: &KillSwitchStatus, expected_digest: &str) -> Result<(), String> {
+    let observed = &status.direct_endpoint_digest;
+    if observed.len() != 64
+        || !observed
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("Service returned an invalid DIRECT endpoint digest".to_owned());
+    }
+    if observed != expected_digest {
+        return Err("Service WFP snapshot did not contain the expected exact DIRECT set".to_owned());
+    }
+    Ok(())
+}
+
+async fn controller_json(
+    client: &reqwest::Client,
+    secret: &str,
+    controller_port: u16,
+    path: &str,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .get(controller_url(controller_port, path))
+        .bearer_auth(secret)
+        .send()
         .await
-        .map_err(StageFailure::error)?;
-    if state.lock().await.connect_generation != generation {
-        return Err(stale_after_arm(state, generation).await);
+        .map_err(|error| format!("controller {path} request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = response
+            .text()
+            .await
+            .ok()
+            .and_then(|body| controller_error_detail(&body));
+        return Err(match detail {
+            Some(detail) => format!("controller {path} answered {status}: {detail}"),
+            None => format!("controller {path} answered {status}"),
+        });
     }
-    lock_kill_switch_with_retries().await.map_err(StageFailure::error)?;
-    if state.lock().await.connect_generation != generation {
-        return Err(stale_after_arm(state, generation).await);
+    response
+        .json()
+        .await
+        .map_err(|error| format!("controller {path} returned invalid JSON: {error}"))
+}
+
+async fn reload_controller_config(secret: &str, controller_port: u16, config_path: &str) -> Result<(), String> {
+    let client = controller_client(DIRECT_CONFIG_RELOAD_TIMEOUT)?;
+    let mut last = String::from("no response");
+    for attempt in 1..=DIRECT_CONFIG_RELOAD_ATTEMPTS {
+        match client
+            .put(controller_url(controller_port, "/configs"))
+            .bearer_auth(secret)
+            .query(&[("force", true)])
+            .json(&serde_json::json!({ "path": config_path }))
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(response) => {
+                let status = response.status();
+                let detail = response
+                    .text()
+                    .await
+                    .ok()
+                    .and_then(|body| controller_error_detail(&body));
+                last = match detail {
+                    Some(detail) => format!("config reload answered {status}: {detail}"),
+                    None => format!("config reload answered {status}"),
+                };
+                if !status.is_server_error() && status != reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    return Err(last);
+                }
+            }
+            Err(error) => last = format!("config reload request failed: {error}"),
+        }
+        if attempt < DIRECT_CONFIG_RELOAD_ATTEMPTS {
+            tokio::time::sleep(DIRECT_CONFIG_RELOAD_RETRY_DELAY).await;
+        }
+    }
+    Err(format!("mihomo config reload remained ambiguous after replay: {last}"))
+}
+
+fn controller_direct_graph_is_active(
+    rules: &serde_json::Value,
+    proxies: &serde_json::Value,
+    expected_direct_rules: &[ControllerDirectRuleProof],
+    direct_interface: &str,
+    require_wechat_direct: bool,
+    require_web_direct: bool,
+) -> Result<(), String> {
+    if expected_direct_rules.is_empty() {
+        return Err("controller proof was asked to accept an empty DIRECT graph".to_owned());
+    }
+    let expected_wechat = expected_direct_rules
+        .iter()
+        .any(|rule| rule.proxy == config::DIRECT_GROUP_NAME);
+    let expected_web = expected_direct_rules
+        .iter()
+        .any(|rule| rule.proxy == config::WEB_DIRECT_GROUP_NAME);
+    if expected_wechat != require_wechat_direct || expected_web != require_web_direct {
+        return Err("controller proof inputs disagree about the expected DIRECT graph".to_owned());
     }
 
-    state.audit().log(AuditEvent::PolicyActivated {
-        wechat_tcp: plan.tcp_wechat_rules.len(),
-        web_tcp: plan.tcp_web_rules.len(),
-        udp: plan.udp_wechat_rules.len(),
+    let proxy_map = proxies
+        .get("proxies")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "controller /proxies omitted its proxy map".to_owned())?;
+    if !proxy_map.contains_key(EXIT_GROUP_NAME) {
+        return Err(format!("controller runtime omitted proxy {EXIT_GROUP_NAME}"));
+    }
+    fn prove_direct_outbound(
+        proxy_map: &serde_json::Map<String, serde_json::Value>,
+        name: &str,
+        expected_interface: &str,
+        required: bool,
+    ) -> Result<(), String> {
+        let proxy = proxy_map.get(name);
+        if proxy.is_some() != required {
+            return Err(format!(
+                "controller DIRECT proxy {name} presence was {}, expected {required}",
+                proxy.is_some()
+            ));
+        }
+        let Some(proxy) = proxy else { return Ok(()) };
+        if proxy.get("type").and_then(serde_json::Value::as_str) != Some("Direct")
+            || proxy.get("interface").and_then(serde_json::Value::as_str) != Some(expected_interface)
+        {
+            return Err(format!(
+                "controller DIRECT proxy {name} was not the exact staged physical-interface outbound"
+            ));
+        }
+        Ok(())
+    }
+
+    let has_wechat_proxy = proxy_map.contains_key(config::DIRECT_GROUP_NAME);
+    if has_wechat_proxy != require_wechat_direct {
+        return Err(format!(
+            "controller WeChat DIRECT proxy presence was {has_wechat_proxy}, expected {require_wechat_direct}"
+        ));
+    }
+    let has_web_proxy = proxy_map.contains_key(config::WEB_DIRECT_GROUP_NAME);
+    if has_web_proxy != require_web_direct {
+        return Err(format!(
+            "controller web DIRECT proxy presence was {has_web_proxy}, expected {require_web_direct}"
+        ));
+    }
+    prove_direct_outbound(
+        proxy_map,
+        config::DIRECT_GROUP_NAME,
+        direct_interface,
+        require_wechat_direct,
+    )?;
+    prove_direct_outbound(
+        proxy_map,
+        config::WEB_DIRECT_GROUP_NAME,
+        direct_interface,
+        require_web_direct,
+    )?;
+
+    let rules = rules
+        .get("rules")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "controller /rules omitted its ordered rule list".to_owned())?;
+
+    fn expect_rule(
+        rule: Option<&serde_json::Value>,
+        index: usize,
+        expected_type: &str,
+        expected_payload: &str,
+        expected_proxy: &str,
+    ) -> Result<(), String> {
+        let rule = rule.ok_or_else(|| format!("controller runtime omitted rule {index}"))?;
+        let observed_type = rule.get("type").and_then(serde_json::Value::as_str);
+        let observed_payload = rule.get("payload").and_then(serde_json::Value::as_str);
+        let observed_proxy = rule.get("proxy").and_then(serde_json::Value::as_str);
+        if observed_type != Some(expected_type)
+            || observed_payload != Some(expected_payload)
+            || observed_proxy != Some(expected_proxy)
+        {
+            return Err(format!(
+                "controller rule {index} did not match the exact staged runtime graph"
+            ));
+        }
+        Ok(())
+    }
+
+    // The owned runtime has no user-supplied rules: two loopback exceptions, two exact Claude
+    // process exits, one row per staged AND selector, and a single final MATCH. Requiring the
+    // complete cardinality/order rejects broad, missing, duplicated, or stale DIRECT selectors.
+    let expected_len = expected_direct_rules.len() + 5;
+    if rules.len() != expected_len {
+        return Err(format!(
+            "controller runtime returned {} rules, expected the exact {expected_len}-rule graph",
+            rules.len()
+        ));
+    }
+    expect_rule(rules.first(), 0, "IPCIDR", "127.0.0.0/8", "DIRECT")?;
+    expect_rule(rules.get(1), 1, "IPCIDR", "::1/128", "DIRECT")?;
+    expect_rule(rules.get(2), 2, "ProcessName", "Claude.exe", EXIT_GROUP_NAME)?;
+    expect_rule(rules.get(3), 3, "ProcessName", "claude.exe", EXIT_GROUP_NAME)?;
+    for (offset, expected) in expected_direct_rules.iter().enumerate() {
+        let index = 4 + offset;
+        expect_rule(rules.get(index), index, "AND", &expected.payload, &expected.proxy)?;
+    }
+    let fallback = expected_len - 1;
+    expect_rule(rules.get(fallback), fallback, "Match", "", EXIT_GROUP_NAME)?;
+    Ok(())
+}
+
+async fn verify_controller_direct_runtime(
+    secret: &str,
+    controller_port: u16,
+    expected_controller_rules: &[ControllerDirectRuleProof],
+    direct_interface: &str,
+    require_wechat_direct: bool,
+    require_web_direct: bool,
+) -> Result<(), String> {
+    let client = controller_client(CONTROLLER_HTTP_TIMEOUT)?;
+    // `/configs` must remain readable from the same authenticated controller after reload. TUN
+    // identity itself is proven by the Service lock/WFP snapshot below.
+    let _ = controller_json(&client, secret, controller_port, "/configs").await?;
+    let (rules, proxies) = tokio::join!(
+        controller_json(&client, secret, controller_port, "/rules"),
+        controller_json(&client, secret, controller_port, "/proxies"),
+    );
+    controller_direct_graph_is_active(
+        &rules?,
+        &proxies?,
+        expected_controller_rules,
+        direct_interface,
+        require_wechat_direct,
+        require_web_direct,
+    )
+}
+
+async fn reconcile_direct_reload_failure(session: &OwnerSessionProof) -> Result<(), String> {
+    let snapshot_before = service::tono_service_status_snapshot()
+        .await
+        .map_err(|error| format!("cannot inspect DIRECT reload ownership: {error:#}"))?;
+    if snapshot_before.active_generation != Some(session.generation) {
+        // A replacement StartClash owns the machine and its arm operation clears the volatile
+        // DIRECT set. Never present a stale transaction's token to the new generation.
+        return Ok(());
+    }
+    let result = service::tono_begin_direct_runtime_reload(session)
+        .await
+        .map_err(|error| format!("cannot restore the fail-closed DIRECT bracket: {error:#}"))?;
+    let empty_digest = clash_verge_service_ipc::direct_endpoint_digest(&[])
+        .map_err(|error| format!("cannot calculate empty DIRECT digest: {error}"))?;
+    validate_direct_reload_result(&result, session, None, &empty_digest)?;
+    let snapshot = service::tono_service_status_snapshot()
+        .await
+        .map_err(|error| format!("cannot verify fail-closed DIRECT reconciliation: {error:#}"))?;
+    let (_, status) = prove_service_reload_mode(&snapshot, session, KillSwitchStatusMode::Blocked)?;
+    prove_service_endpoint_digest(&status, &empty_digest)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments, reason = "captures one immutable reload transaction")]
+async fn activate_direct_runtime_cancellation_safe(
+    state: &Arc<TonoState>,
+    generation: u64,
+    selected_node: String,
+    policy: CapturedTrafficPolicy,
+    policy_guard: tokio::sync::OwnedRwLockReadGuard<()>,
+    session: OwnerSessionProof,
+    bundle: RuntimeBundle,
+    endpoints: Vec<ProxyEndpoint>,
+    endpoint_digest: String,
+    controller_secret: String,
+    controller_port: u16,
+    expected_controller_rules: Vec<ControllerDirectRuleProof>,
+    direct_interface: String,
+    require_wechat_direct: bool,
+    require_web_direct: bool,
+    wechat_tcp: usize,
+    web_tcp: usize,
+    udp: usize,
+) -> Result<Option<PendingDirectCommit>, StageFailure> {
+    let mutation_guard = state.begin_connect_mutation().await;
+    if !direct_context_is_current(state, generation, &selected_node, &policy).await {
+        drop(mutation_guard);
+        return Err(StageFailure::Stale);
+    }
+    let task_state = Arc::clone(state);
+    let task = tokio::spawn(async move {
+        let _mutation_guard = mutation_guard;
+        let empty_digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
+        let reconcile_session = session.clone();
+        let mut begin_attempted = false;
+        let activation = async {
+            let initial = service::tono_service_status_snapshot()
+                .await
+                .map_err(StageFailure::error)?;
+            let (initial_identity, initial_kill_switch) = prove_service_reload_mode(
+                &initial,
+                &session,
+                KillSwitchStatusMode::Locked,
+            )
+            .map_err(StageFailure::error)?;
+            prove_service_endpoint_digest(&initial_kill_switch, &empty_digest)
+                .map_err(StageFailure::error)?;
+
+            // From the moment this request is sent its response may be the only thing lost. Every
+            // later exit must therefore reconcile to an exact Blocked set; failures above this
+            // line have not touched the proven full-tunnel runtime and must not tear it down here.
+            begin_attempted = true;
+            let begin = service::tono_begin_direct_runtime_reload(&session)
+                .await
+                .map_err(StageFailure::error)?;
+            let reload_id = validate_direct_reload_result(&begin, &session, None, &empty_digest)
+                .map_err(StageFailure::error)?;
+            ensure_fresh(&task_state, generation).await?;
+
+            let blocked = service::tono_service_status_snapshot()
+                .await
+                .map_err(StageFailure::error)?;
+            let (blocked_identity, blocked_kill_switch) = prove_service_reload_mode(
+                &blocked,
+                &session,
+                KillSwitchStatusMode::Blocked,
+            )
+            .map_err(StageFailure::error)?;
+            if blocked_identity != initial_identity {
+                return Err(StageFailure::error(
+                    "Core identity changed while the DIRECT fail-closed bracket was opened",
+                ));
+            }
+            prove_service_endpoint_digest(&blocked_kill_switch, &empty_digest)
+                .map_err(StageFailure::error)?;
+
+            let config_path = match service::tono_stage_runtime_for_direct_reload(&session, &bundle)
+                .await
+                .map_err(StageFailure::error)?
+            {
+                StageRuntimeOutcome::Staged { config_path } if !config_path.trim().is_empty() => {
+                    config_path
+                }
+                StageRuntimeOutcome::Staged { .. } => {
+                    return Err(StageFailure::error(
+                        "Tono Service staged DIRECT runtime without a config path",
+                    ));
+                }
+                StageRuntimeOutcome::RestartRequired { reason } => {
+                    return Err(StageFailure::error(format!(
+                        "Tono Service declined in-place DIRECT staging ({reason:?}); unsafe restart fallback is disabled"
+                    )));
+                }
+            };
+            ensure_fresh(&task_state, generation).await?;
+            reload_controller_config(&controller_secret, controller_port, &config_path)
+                .await
+                .map_err(StageFailure::error)?;
+            wait_controller(&controller_secret, controller_port)
+                .await
+                .map_err(StageFailure::error)?;
+            verify_controller_direct_runtime(
+                &controller_secret,
+                controller_port,
+                &expected_controller_rules,
+                &direct_interface,
+                require_wechat_direct,
+                require_web_direct,
+            )
+            .await
+            .map_err(StageFailure::error)?;
+            ensure_fresh(&task_state, generation).await?;
+
+            lock_kill_switch_with_retries(&session)
+                .await
+                .map_err(StageFailure::error)?;
+            wait_controller(&controller_secret, controller_port)
+                .await
+                .map_err(StageFailure::error)?;
+            let locked = service::tono_service_status_snapshot()
+                .await
+                .map_err(StageFailure::error)?;
+            let (core_identity, locked_kill_switch) =
+                prove_service_reload_mode(&locked, &session, KillSwitchStatusMode::Locked)
+                    .map_err(StageFailure::error)?;
+            if core_identity != initial_identity {
+                return Err(StageFailure::error(
+                    "Core identity changed during in-place DIRECT runtime reload",
+                ));
+            }
+            prove_service_endpoint_digest(&locked_kill_switch, &empty_digest)
+                .map_err(StageFailure::error)?;
+            verify_tun_data_plane().await.map_err(StageFailure::error)?;
+            ensure_fresh(&task_state, generation).await?;
+
+            Ok(PendingDirectCommit {
+                _policy_guard: policy_guard,
+                policy,
+                selected_node,
+                session,
+                reload_id,
+                endpoints,
+                endpoint_digest,
+                core_identity,
+                controller_secret,
+                controller_port,
+                expected_controller_rules,
+                direct_interface,
+                require_wechat_direct,
+                require_web_direct,
+                wechat_tcp,
+                web_tcp,
+                udp,
+            })
+        }
+        .await;
+
+        if activation.is_err() && begin_attempted {
+            if let Err(reconcile) = reconcile_direct_reload_failure(&reconcile_session).await {
+                logging!(
+                    error,
+                    Type::Service,
+                    "Tono: DIRECT reload failed and fail-closed reconciliation also failed: {reconcile}"
+                );
+            }
+        }
+        activation.map(Some)
     });
-    let _ = app;
-    Ok(secret)
+    task.await
+        .map_err(|error| StageFailure::error(format!("DIRECT reload reconciliation task failed: {error}")))?
+}
+
+async fn commit_direct_policy_cancellation_safe(
+    state: &Arc<TonoState>,
+    generation: u64,
+    pending: PendingDirectCommit,
+) -> Result<(KillSwitchStatus, DirectLeaseHeartbeat), StageFailure> {
+    let mutation_guard = state.begin_connect_mutation().await;
+    if !direct_context_is_current(state, generation, &pending.selected_node, &pending.policy).await {
+        drop(mutation_guard);
+        return Err(StageFailure::Stale);
+    }
+    let task_state = Arc::clone(state);
+    let task = tokio::spawn(async move {
+        let _mutation_guard = mutation_guard;
+        let reconcile_session = pending.session.clone();
+        let result = async {
+            let empty_digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
+            let before = service::tono_service_status_snapshot()
+                .await
+                .map_err(StageFailure::error)?;
+            let (identity_before, kill_before) =
+                prove_service_reload_mode(&before, &pending.session, KillSwitchStatusMode::Locked)
+                    .map_err(StageFailure::error)?;
+            if identity_before != pending.core_identity {
+                return Err(StageFailure::error(
+                    "Core identity changed between DIRECT reload verification and endpoint commit",
+                ));
+            }
+            prove_service_endpoint_digest(&kill_before, &empty_digest).map_err(StageFailure::error)?;
+
+            let committed =
+                service::tono_replace_direct_endpoints(&pending.session, pending.reload_id, pending.endpoints.clone())
+                    .await
+                    .map_err(StageFailure::error)?;
+            validate_direct_reload_result(
+                &committed,
+                &pending.session,
+                Some(pending.reload_id),
+                &pending.endpoint_digest,
+            )
+            .map_err(StageFailure::error)?;
+            ensure_fresh(&task_state, generation).await?;
+            if !direct_context_is_current(&task_state, generation, &pending.selected_node, &pending.policy).await {
+                return Err(StageFailure::Stale);
+            }
+
+            let after = service::tono_service_status_snapshot()
+                .await
+                .map_err(StageFailure::error)?;
+            let (identity_after, kill_status) =
+                prove_service_reload_mode(&after, &pending.session, KillSwitchStatusMode::Locked)
+                    .map_err(StageFailure::error)?;
+            if identity_after != pending.core_identity {
+                return Err(StageFailure::error(
+                    "Core identity changed while exact DIRECT endpoints were committed",
+                ));
+            }
+            prove_service_endpoint_digest(&kill_status, &pending.endpoint_digest).map_err(StageFailure::error)?;
+            wait_controller(&pending.controller_secret, pending.controller_port)
+                .await
+                .map_err(StageFailure::error)?;
+            verify_controller_direct_runtime(
+                &pending.controller_secret,
+                pending.controller_port,
+                &pending.expected_controller_rules,
+                &pending.direct_interface,
+                pending.require_wechat_direct,
+                pending.require_web_direct,
+            )
+            .await
+            .map_err(StageFailure::error)?;
+            verify_tun_data_plane().await.map_err(StageFailure::error)?;
+            ensure_fresh(&task_state, generation).await?;
+
+            let finalized = service::tono_finalize_direct_runtime_reload(
+                &pending.session,
+                pending.reload_id,
+                &pending.endpoint_digest,
+            )
+            .await
+            .map_err(StageFailure::error)?;
+            validate_direct_reload_result(
+                &finalized,
+                &pending.session,
+                Some(pending.reload_id),
+                &pending.endpoint_digest,
+            )
+            .map_err(StageFailure::error)?;
+            ensure_fresh(&task_state, generation).await?;
+            if !direct_context_is_current(&task_state, generation, &pending.selected_node, &pending.policy).await {
+                return Err(StageFailure::Stale);
+            }
+            let finalized_snapshot = service::tono_service_status_snapshot()
+                .await
+                .map_err(StageFailure::error)?;
+            let (finalized_identity, finalized_status) =
+                prove_service_reload_mode(&finalized_snapshot, &pending.session, KillSwitchStatusMode::Locked)
+                    .map_err(StageFailure::error)?;
+            if finalized_identity != pending.core_identity {
+                return Err(StageFailure::error(
+                    "Core identity changed while the DIRECT lease was finalized",
+                ));
+            }
+            prove_service_endpoint_digest(&finalized_status, &pending.endpoint_digest).map_err(StageFailure::error)?;
+
+            task_state.audit().log(AuditEvent::PolicyActivated {
+                wechat_tcp: pending.wechat_tcp,
+                web_tcp: pending.web_tcp,
+                udp: pending.udp,
+            });
+            Ok((
+                finalized_status,
+                DirectLeaseHeartbeat {
+                    session: pending.session.clone(),
+                    reload_id: pending.reload_id,
+                    endpoint_digest: pending.endpoint_digest.clone(),
+                },
+            ))
+        }
+        .await;
+
+        if result.is_err() {
+            if let Err(reconcile) = reconcile_direct_reload_failure(&reconcile_session).await {
+                logging!(
+                    error,
+                    Type::Service,
+                    "Tono: DIRECT endpoint commit failed and exact-permit retraction also failed: {reconcile}"
+                );
+            }
+        }
+        result
+    });
+    task.await
+        .map_err(|error| StageFailure::error(format!("DIRECT endpoint reconciliation task failed: {error}")))?
 }
 
 /// Resolution failures only disable the optional DIRECT optimization. Keeping
@@ -2911,7 +3919,7 @@ fn classify_optional_direct_resolution<T>(result: Result<T, String>) -> Optional
     }
 }
 
-fn skip_optional_direct_policy(state: &Arc<TonoState>, original_secret: &str, reason: String) -> String {
+fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: String) {
     let reason = audit::redact(&reason);
     logging!(
         warn,
@@ -2919,7 +3927,6 @@ fn skip_optional_direct_policy(state: &Arc<TonoState>, original_secret: &str, re
         "Tono: optional cloud DIRECT policy skipped; all traffic remains tunneled: {reason}"
     );
     state.audit().log(AuditEvent::PolicyActivationSkipped { reason });
-    original_secret.to_string()
 }
 
 /// One (host, usable addresses, ports) pin per policy domain, resolved via
@@ -3364,21 +4371,27 @@ async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
 mod tests {
     use super::{
         BFE_NOT_RUNNING_PREFIX, CATALOG_NOT_READY_REJECTION, CLOUD_POLICY_RESOLUTION_TIMEOUT, CONNECT_BUDGET_LEGS,
-        CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES, CoreSample,
-        EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT, EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT,
-        FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs, LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS,
-        NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL, POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS,
-        RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX, SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX,
-        SelectAction, TRANSITION_IN_FLIGHT_REJECTION, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES,
-        TUN_DATA_PLANE_TIMEOUT, VERIFY_LOCK_ATTEMPTS, WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED,
-        build_direct_plan, classify_core_sample, collect_ipv4_literals, controller_error_detail, core_change_fires,
-        format_tun_probe_failures, guard_rejection_is_transient, health_threshold_reached, is_fake_ip,
-        is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error, map_wfp_engine_error,
-        monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure, protected_dns_unhealthy,
-        proxy_endpoint_of, reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release,
-        single_flight_begin, stale_exit_needs_release, stop_core_before_release, verify_lock_retry_window,
+        CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
+        ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
+        EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
+        LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL,
+        POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
+        SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction, TRANSITION_IN_FLIGHT_REJECTION,
+        TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT, VERIFY_LOCK_ATTEMPTS,
+        WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan, classify_core_sample,
+        collect_ipv4_literals, controller_direct_graph_is_active, controller_error_detail, core_change_fires,
+        expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
+        health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
+        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
+        protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
+        reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
+        stale_exit_needs_release, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
+        stop_core_before_release, validate_direct_reload_result, verify_lock_retry_window,
     };
-    use clash_verge_service_ipc::DnsProtectionStatus;
+    use clash_verge_service_ipc::{
+        DirectRuntimeReloadResult, DnsProtectionStatus, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof,
+        ServiceLifecycleState, ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot,
+    };
     use std::time::Duration;
     use std::{
         collections::BTreeSet,
@@ -3777,12 +4790,12 @@ mod tests {
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
         assert!(
-            leg("cloud policy (DNS + StartClash #2 + ready/relock)")
+            leg("cloud policy (DNS + fail-closed hot reload + read-back/relock)")
                 >= CLOUD_POLICY_RESOLUTION_TIMEOUT
                     + Duration::from_secs(60)
                     + CONTROLLER_READY_TIMEOUT
                     + LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS,
-            "the cloud-policy leg must cover its DNS deadline, second Service start, controller readiness, and relock"
+            "the cloud-policy leg must cover DNS, in-place stage/reload, controller read-back, and relock"
         );
         assert!(leg("checkingExit") >= EXIT_PROBE_ADVISORY_BUDGET);
         assert!(
@@ -3890,6 +4903,161 @@ mod tests {
             ..healthy
         };
         assert!(protected_dns_unhealthy(Some(&off)));
+    }
+
+    fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
+        (
+            ServiceStatusSnapshot {
+                snapshot_generation: 17,
+                active_operation: None,
+                is_active: true,
+                active_generation: Some(9),
+                service_state: ServiceLifecycleState::Running,
+                core_pid: Some(1234),
+                core_generation: 1,
+                core_started_at: Some(1_700_000_000),
+                last_core_exit_reason: None,
+                restart_count: 0,
+                last_recovery_at: None,
+                desired_core_should_be_running: true,
+                desired_generation: 9,
+                desired_updated_at: 1_700_000_000,
+                desired_state_unknown: false,
+                macos_kill_switch_wanted: false,
+                macos_kill_switch_live: false,
+                macos_kill_switch_mode: Default::default(),
+                kill_switch: Some(KillSwitchStatus {
+                    wanted: true,
+                    verified: true,
+                    live: true,
+                    mode: KillSwitchStatusMode::Locked,
+                    endpoints: Vec::new(),
+                    tunnel_permit_rendered: true,
+                    direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
+                    last_error: None,
+                }),
+                network_events: Default::default(),
+            },
+            DnsProtectionStatus {
+                enabled: true,
+                snapshot_present: true,
+                adapters: 1,
+                last_error: None,
+            },
+        )
+    }
+
+    #[test]
+    fn startup_resume_requires_a_quiescent_fully_proven_runtime() {
+        let (snapshot, dns) = resumable_startup_runtime();
+        assert!(startup_runtime_is_resume_candidate(&snapshot, &dns));
+
+        let mut inactive = snapshot.clone();
+        inactive.is_active = false;
+        assert!(!startup_runtime_is_resume_candidate(&inactive, &dns));
+
+        let mut no_generation = snapshot.clone();
+        no_generation.active_generation = None;
+        assert!(!startup_runtime_is_resume_candidate(&no_generation, &dns));
+
+        let mut no_core = snapshot.clone();
+        no_core.core_pid = None;
+        assert!(!startup_runtime_is_resume_candidate(&no_core, &dns));
+
+        let mut undesired = snapshot.clone();
+        undesired.desired_core_should_be_running = false;
+        assert!(!startup_runtime_is_resume_candidate(&undesired, &dns));
+
+        let mut desired_unknown = snapshot.clone();
+        desired_unknown.desired_state_unknown = true;
+        assert!(!startup_runtime_is_resume_candidate(&desired_unknown, &dns));
+
+        let mut mutating = snapshot.clone();
+        mutating.active_operation = Some(ServiceOperationSnapshot {
+            id: 3,
+            kind: ServiceOperationKind::StartCore,
+            started_at_ms: 10,
+            deadline_at_ms: 20,
+        });
+        assert!(!startup_runtime_is_resume_candidate(&mutating, &dns));
+
+        let mut recovering = snapshot.clone();
+        recovering.service_state = ServiceLifecycleState::RecoveringCore;
+        assert!(!startup_runtime_is_resume_candidate(&recovering, &dns));
+    }
+
+    #[test]
+    fn startup_resume_rejects_weakened_wfp_or_dns_proof() {
+        let (snapshot, dns) = resumable_startup_runtime();
+
+        let mut no_wfp = snapshot.clone();
+        no_wfp.kill_switch = None;
+        assert!(!startup_runtime_is_resume_candidate(&no_wfp, &dns));
+
+        for weakened in [
+            KillSwitchStatus {
+                verified: false,
+                ..snapshot.kill_switch.clone().unwrap()
+            },
+            KillSwitchStatus {
+                live: false,
+                ..snapshot.kill_switch.clone().unwrap()
+            },
+            KillSwitchStatus {
+                mode: KillSwitchStatusMode::Bootstrap,
+                ..snapshot.kill_switch.clone().unwrap()
+            },
+            KillSwitchStatus {
+                tunnel_permit_rendered: false,
+                ..snapshot.kill_switch.clone().unwrap()
+            },
+            KillSwitchStatus {
+                last_error: Some("WFP read-back failed".to_string()),
+                ..snapshot.kill_switch.clone().unwrap()
+            },
+        ] {
+            let mut weakened_snapshot = snapshot.clone();
+            weakened_snapshot.kill_switch = Some(weakened);
+            assert!(!startup_runtime_is_resume_candidate(&weakened_snapshot, &dns));
+        }
+
+        for weakened_dns in [
+            DnsProtectionStatus {
+                enabled: false,
+                ..dns.clone()
+            },
+            DnsProtectionStatus {
+                snapshot_present: false,
+                ..dns.clone()
+            },
+            DnsProtectionStatus {
+                adapters: 0,
+                ..dns.clone()
+            },
+            DnsProtectionStatus {
+                last_error: Some("DNS ownership unknown".to_string()),
+                ..dns.clone()
+            },
+        ] {
+            assert!(!startup_runtime_is_resume_candidate(&snapshot, &weakened_dns));
+        }
+    }
+
+    #[test]
+    fn startup_resume_final_admission_rejects_every_stale_or_unready_axis() {
+        let ready = [true; 6];
+        assert!(startup_resume_guards_hold(
+            ready[0], ready[1], ready[2], ready[3], ready[4], ready[5]
+        ));
+
+        for rejected in 0..ready.len() {
+            let mut guards = ready;
+            guards[rejected] = false;
+            assert!(
+                !startup_resume_guards_hold(guards[0], guards[1], guards[2], guards[3], guards[4], guards[5]),
+                "guard axis {rejected} must independently reject the stale startup proof"
+            );
+        }
     }
 
     #[test]
@@ -4226,6 +5394,7 @@ mod tests {
             mode: KillSwitchStatusMode::Locked,
             endpoints: vec![endpoint.clone()],
             tunnel_permit_rendered: true,
+            direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
         };
         assert!(!kill_switch_unhealthy(Some(&healthy)));
@@ -4243,6 +5412,7 @@ mod tests {
                 mode,
                 endpoints: vec![endpoint.clone()],
                 tunnel_permit_rendered: true,
+                direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
                 last_error: None,
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
@@ -4437,7 +5607,239 @@ mod tests {
     fn windows_direct_policy_does_not_replace_the_proven_full_tunnel_runtime() {
         assert!(
             !WINDOWS_OPTIONAL_DIRECT_ENABLED,
-            "re-enable only with transactional rollback and a mainland second-start regression test"
+            "re-enable only after rev-10 integration tests and real packet capture prove exact physical egress"
+        );
+    }
+
+    #[test]
+    fn direct_reload_receipts_bind_generation_reload_identity_and_exact_digest() {
+        let session = OwnerSessionProof {
+            generation: 42,
+            token: "test-session-token".to_owned(),
+        };
+        let digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap();
+        let valid = DirectRuntimeReloadResult {
+            owner_generation: 42,
+            reload_id: 7,
+            endpoint_digest: digest.clone(),
+        };
+        assert_eq!(
+            validate_direct_reload_result(&valid, &session, None, &digest).unwrap(),
+            7,
+            "begin accepts a fresh nonzero Service reload identity"
+        );
+        assert_eq!(
+            validate_direct_reload_result(&valid, &session, Some(7), &digest).unwrap(),
+            7,
+            "replace/finalize accept only the captured reload identity"
+        );
+
+        let mut wrong_generation = valid.clone();
+        wrong_generation.owner_generation += 1;
+        assert!(
+            validate_direct_reload_result(&wrong_generation, &session, None, &digest).is_err(),
+            "a receipt from a replacement Service owner must fail"
+        );
+
+        let mut missing_reload = valid.clone();
+        missing_reload.reload_id = 0;
+        assert!(
+            validate_direct_reload_result(&missing_reload, &session, None, &digest).is_err(),
+            "begin cannot omit the Service-generated reload identity"
+        );
+
+        let mut stale_reload = valid.clone();
+        stale_reload.reload_id += 1;
+        assert!(
+            validate_direct_reload_result(&stale_reload, &session, Some(7), &digest).is_err(),
+            "a delayed replace/finalize receipt from another bracket must fail"
+        );
+
+        let mut wrong_digest = valid;
+        wrong_digest.endpoint_digest = "0".repeat(64);
+        assert!(
+            validate_direct_reload_result(&wrong_digest, &session, Some(7), &digest).is_err(),
+            "begin, replace, and finalize all require the exact requested endpoint digest"
+        );
+    }
+
+    #[test]
+    fn service_direct_proof_rejects_malformed_or_different_endpoint_digests() {
+        let digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap();
+        let mut status = KillSwitchStatus {
+            wanted: true,
+            verified: true,
+            live: true,
+            mode: KillSwitchStatusMode::Locked,
+            endpoints: Vec::new(),
+            tunnel_permit_rendered: true,
+            direct_endpoint_digest: digest.clone(),
+            last_error: None,
+        };
+        prove_service_endpoint_digest(&status, &digest).unwrap();
+
+        for malformed in ["f".repeat(63), "F".repeat(64), "g".repeat(64)] {
+            status.direct_endpoint_digest = malformed;
+            assert!(prove_service_endpoint_digest(&status, &digest).is_err());
+        }
+        status.direct_endpoint_digest = "0".repeat(64);
+        assert!(
+            prove_service_endpoint_digest(&status, &digest).is_err(),
+            "a well-formed digest for a different live WFP set must fail"
+        );
+    }
+
+    #[test]
+    fn service_reload_identity_uses_security_generation_even_when_pid_is_reused() {
+        let session = OwnerSessionProof {
+            generation: 9,
+            token: "test-session-token".to_owned(),
+        };
+        let (snapshot, _) = resumable_startup_runtime();
+        let (first, _) = prove_service_reload_mode(&snapshot, &session, KillSwitchStatusMode::Locked).unwrap();
+
+        let mut diagnostics_only = snapshot.clone();
+        diagnostics_only.restart_count += 1;
+        let (same_security_identity, _) =
+            prove_service_reload_mode(&diagnostics_only, &session, KillSwitchStatusMode::Locked).unwrap();
+        assert_eq!(
+            first, same_security_identity,
+            "restart_count is diagnostics, not the atomically published security identity"
+        );
+
+        let mut restarted = snapshot.clone();
+        restarted.core_generation += 1;
+        let (second, _) = prove_service_reload_mode(&restarted, &session, KillSwitchStatusMode::Locked).unwrap();
+        assert_eq!(first.pid, second.pid);
+        assert_ne!(
+            first, second,
+            "a recycled PID with a new packed publication generation is a different Core instance"
+        );
+
+        let mut changed_generation = snapshot;
+        changed_generation.active_generation = Some(session.generation + 1);
+        assert!(
+            prove_service_reload_mode(&changed_generation, &session, KillSwitchStatusMode::Locked).is_err(),
+            "a snapshot from another owner generation must fail before endpoint commit"
+        );
+    }
+
+    #[test]
+    fn controller_readback_requires_the_exact_direct_graph_and_exit_order() {
+        // Captured from the packaged Mihomo Meta v1.19.29 `/rules` and `/proxies` APIs. In
+        // particular, Network payload values are lowercase and `no-resolve` is not returned by
+        // IPCIDR.Payload(). Keep this fixture independent from the YAML formatter above.
+        let expected = vec![
+            ControllerDirectRuleProof {
+                proxy: "Tono-China-Direct".to_owned(),
+                payload: "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))"
+                    .to_owned(),
+            },
+            ControllerDirectRuleProof {
+                proxy: "Tono-China-Direct".to_owned(),
+                payload: "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))"
+                    .to_owned(),
+            },
+            ControllerDirectRuleProof {
+                proxy: "Tono-China-Web-Direct".to_owned(),
+                payload: "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))"
+                    .to_owned(),
+            },
+        ];
+        let proxies = serde_json::json!({
+            "proxies": {
+                "Tono-Exit": {},
+                "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"},
+                "Tono-China-Web-Direct": {"type": "Direct", "interface": "Ethernet 2"}
+            }
+        });
+        let rules = serde_json::json!({
+            "rules": [
+                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
+                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
+                {"type": "ProcessName", "payload": "Claude.exe", "proxy": "Tono-Exit"},
+                {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Exit"},
+                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"},
+                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
+            ]
+        });
+        controller_direct_graph_is_active(&rules, &proxies, &expected, "Ethernet 2", true, true).unwrap();
+
+        let wechat_only_proxies = serde_json::json!({
+            "proxies": {
+                "Tono-Exit": {},
+                "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
+            }
+        });
+        let wechat_only_rules = serde_json::json!({
+            "rules": [
+                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
+                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
+                {"type": "ProcessName", "payload": "Claude.exe", "proxy": "Tono-Exit"},
+                {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Exit"},
+                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
+            ]
+        });
+        controller_direct_graph_is_active(
+            &wechat_only_rules,
+            &wechat_only_proxies,
+            &expected[..2],
+            "Ethernet 2",
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(
+            controller_direct_graph_is_active(&rules, &proxies, &expected[..2], "Ethernet 2", true, false,).is_err(),
+            "a stale web DIRECT proxy/rule must make read-back fail"
+        );
+
+        let mut wrong_order = rules.clone();
+        wrong_order["rules"].as_array_mut().unwrap().swap(3, 4);
+        assert!(
+            controller_direct_graph_is_active(&wrong_order, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            "Claude must remain exit-first"
+        );
+
+        let mut broad_selector = rules.clone();
+        broad_selector["rules"][4]["payload"] =
+            serde_json::json!("((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com))");
+        assert!(
+            controller_direct_graph_is_active(&broad_selector, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            "a DIRECT selector without the exact process condition must fail read-back"
+        );
+
+        let mut wrong_interface = proxies.clone();
+        wrong_interface["proxies"]["Tono-China-Direct"]["interface"] = serde_json::json!("Wi-Fi");
+        assert!(
+            controller_direct_graph_is_active(&rules, &wrong_interface, &expected, "Ethernet 2", true, true,).is_err(),
+            "a same-named DIRECT outbound bound to another interface must fail"
+        );
+
+        let mut wrong_type = proxies.clone();
+        wrong_type["proxies"]["Tono-China-Direct"]["type"] = serde_json::json!("Selector");
+        assert!(
+            controller_direct_graph_is_active(&rules, &wrong_type, &expected, "Ethernet 2", true, true,).is_err(),
+            "a same-named non-Direct outbound must fail"
+        );
+
+        let mut stale_rule = rules.clone();
+        let duplicate = stale_rule["rules"][4].clone();
+        stale_rule["rules"].as_array_mut().unwrap().insert(7, duplicate);
+        assert!(
+            controller_direct_graph_is_active(&stale_rule, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            "an extra stale or duplicated DIRECT rule must fail exact cardinality"
+        );
+
+        let mut wrong_fallback = rules.clone();
+        wrong_fallback["rules"][7]["proxy"] = serde_json::json!("DIRECT");
+        assert!(
+            controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            "the final fallback must remain exact Tono-Exit"
         );
     }
 
@@ -4534,6 +5936,19 @@ mod tests {
             plan.udp_wechat_rules
                 .iter()
                 .all(|(_ip, port)| [443, 8000].contains(port))
+        );
+        let controller_rules = expected_controller_direct_rules(&plan);
+        assert_eq!(
+            controller_rules.len(),
+            plan.tcp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
+                + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
+                + plan.tcp_web_rules.len(),
+            "controller read-back must require one canonical Mihomo row per generated rule"
+        );
+        assert!(
+            controller_rules
+                .iter()
+                .all(|rule| { !rule.payload.contains("Network,TCP") && !rule.payload.contains("Network,UDP") })
         );
     }
 

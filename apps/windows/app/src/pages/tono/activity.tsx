@@ -276,10 +276,16 @@ const ActivityPage = () => {
               aria-hidden
               fontSize="small"
               style={{
+                // Do not rely solely on Emotion's MuiSvgIcon rule for structural dimensions.
+                // A CSP regression once blocked that runtime stylesheet and expanded this SVG
+                // across the Activity card, obscuring the disconnected-state message.
+                width: 18,
+                height: 18,
                 position: 'absolute',
                 left: 11,
                 top: 9,
                 color: text.tertiary,
+                pointerEvents: 'none',
               }}
             />
             <input

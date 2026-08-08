@@ -20,10 +20,12 @@ use crate::core::structure::{OwnerSessionProof, Response, ServiceLifecycleState}
 use crate::core::windows_kill_switch;
 use crate::core::{apply_proxy, apply_proxy_or_direct, clear_proxy, dns, validate_proxy_config};
 use crate::{
-    AuthenticatedRequest, AuthenticatedSessionRequest, IpcCommand, KillSwitchLockRequest,
-    MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig, OwnerSessionHandle, ProtocolInfo,
-    ProtocolVersion, ProxyApplyOutcome, RuntimeBundle, SERVICE_PROTOCOL_HEADER,
-    ServiceOperationKind, StartClashRequest, StartClashResult, StopClashPayload, WriterConfig,
+    AuthenticatedRequest, AuthenticatedSessionRequest, FinalizeDirectRuntimeReloadRequest,
+    IpcCommand, KillSwitchLockRequest, MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig,
+    OwnerSessionHandle, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeBundle,
+    SERVICE_PROTOCOL_HEADER, ServiceOperationKind, StartClashRequest, StartClashResult,
+    StopClashPayload, WriterConfig,
 };
 use anyhow::{Context as _, Result as AnyResult, anyhow};
 use http::StatusCode;
@@ -813,6 +815,153 @@ fn create_ipc_router() -> Result<Router> {
                 Err(error) => service_unavailable(format!("Failed to lock kill switch: {error:#}")),
             }
         })
+        .post(IpcCommand::BeginDirectRuntimeReload.as_ref(), |ctx| async move {
+            let (request, owner) =
+                match authenticate_request::<AuthenticatedSessionRequest<()>>(&ctx).await {
+                    ControlFlow::Continue(authenticated) => authenticated,
+                    ControlFlow::Break(response) => return response,
+                };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::BeginDirectRuntimeReload,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::begin_direct_runtime_reload(active.generation).await {
+                Ok(result) => ok_json(result),
+                Err(error) => service_unavailable(format!(
+                    "Failed to begin DIRECT runtime reload: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::ReplaceDirectEndpoints.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<ReplaceDirectEndpointsRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::ReplaceDirectEndpoints,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::replace_direct_endpoints(
+                &request.payload.direct_endpoints,
+                active.generation,
+                request.payload.reload_id,
+            )
+            .await
+            {
+                Ok(result) => ok_json(result),
+                Err(error) => service_unavailable(format!(
+                    "Failed to replace DIRECT endpoints: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::FinalizeDirectRuntimeReload.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<FinalizeDirectRuntimeReloadRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::FinalizeDirectRuntimeReload,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::finalize_direct_runtime_reload(
+                &request.payload.endpoint_digest,
+                active.generation,
+                request.payload.reload_id,
+            )
+            .await
+            {
+                Ok(result) => ok_json(result),
+                Err(error) => service_unavailable(format!(
+                    "Failed to finalize DIRECT runtime reload: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::RenewDirectRuntimeReload.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<RenewDirectRuntimeReloadRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::RenewDirectRuntimeReload,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::renew_direct_runtime_reload(
+                &request.payload.endpoint_digest,
+                active.generation,
+                request.payload.reload_id,
+            )
+            .await
+            {
+                Ok(result) => ok_json(result),
+                Err(error) => service_unavailable(format!(
+                    "Failed to renew DIRECT runtime reload: {error:#}"
+                )),
+            }
+        })
         .post(IpcCommand::MarkKillSwitchVerified.as_ref(), |ctx| async move {
             trace!("Received MarkKillSwitchVerified command");
             let (request, owner) =
@@ -1379,6 +1528,7 @@ async fn release_kill_switch_for_platform() -> Result<HttpResponse> {
                 // No WFP tunnel permit exists on macOS, and this is a *release* besides.
                 tunnel_permit_rendered: false,
                 endpoints: Vec::new(),
+                direct_endpoint_digest: String::new(),
                 last_error: None,
             })
         }

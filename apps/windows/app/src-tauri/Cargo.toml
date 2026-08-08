@@ -105,7 +105,7 @@ tauri-plugin-devtools = { version = "2.1.0", optional = true }
 tauri-plugin-mihomo = { git = "https://github.com/clash-verge-rev/tauri-plugin-mihomo", branch = "refactor-use-reqwest-ipc" }
 clash_verge_logger = { git = "https://github.com/clash-verge-rev/clash-verge-logger" }
 async-trait = "0.1.91"
-clash_verge_service_ipc = { path = "../../service", version = "2.6.3", features = [
+clash_verge_service_ipc = { path = "../../service", version = "2.6.4", features = [
   "client",
 ] }
 arc-swap = "1.9.2"
@@ -154,7 +154,10 @@ deelevate = { workspace = true }
 runas = "=1.2.0"
 winreg = "0.56.0"
 windows-service = "0.8.1"
-windows = { version = "0.62.2", features = ["Win32_Globalization"] }
+windows = { version = "0.62.2", features = [
+  "Win32_Globalization",
+  "Win32_UI_WindowsAndMessaging",
+] }
 windows-sys.workspace = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

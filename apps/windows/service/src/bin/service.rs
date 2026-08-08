@@ -554,8 +554,15 @@ async fn run_standalone() -> Result<()> {
     // PF intent is restored before IPC exists, so no client can race a fail-open startup.
     restore_kill_switch().await?;
     spawn_kill_switch_watchdog();
-    // WFP intent gets the same fail-closed-before-IPC treatment; a no-op off Windows.
-    restore_windows_kill_switch().await?;
+    // WFP intent gets the same fail-closed-before-IPC treatment; a no-op off Windows. Keep the
+    // standalone process alive on a restore error exactly like SCM mode does: restoration has
+    // already published a conservative in-memory state, and the watchdog below is what retries a
+    // failed live install. Propagating here used to skip both the watchdog and recovery IPC.
+    if let Err(error) = restore_windows_kill_switch().await {
+        warn!(
+            "Windows kill-switch restore failed; keeping standalone IPC and watchdog available for recovery: {error:#}"
+        );
+    }
     initialize_protected_dns_status().await;
     spawn_protected_dns_watchdog();
     spawn_windows_kill_switch_watchdog();

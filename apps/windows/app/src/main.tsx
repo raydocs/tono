@@ -1,5 +1,7 @@
 import './assets/styles/index.scss'
 
+import createCache from '@emotion/cache'
+import { CacheProvider } from '@emotion/react'
 import { ResizeObserver } from '@juggle/resize-observer'
 import { ComposeContextProvider } from 'foxact/compose-context-provider'
 import React from 'react'
@@ -23,6 +25,7 @@ import {
   ThemeModeProvider,
   UpdateStateProvider,
 } from './services/states'
+import { getTauriStyleNonce } from './utils/csp-style-nonce'
 import { disableWebViewShortcuts } from './utils/disable-webview-shortcuts'
 
 if (!window.ResizeObserver) {
@@ -39,6 +42,15 @@ if (!container) {
   throw new Error(`No container '${mainElementId}' found to render application`)
 }
 
+// Tauri rewrites the marked static style in index.html with the nonce allowed by the packaged
+// app's CSP. Emotion otherwise creates an unnonced stylesheet that WebView2 rejects, leaving all
+// MUI components without their structural CSS (an SVG icon can then expand to the whole card).
+// In ordinary Vite development there is no nonce and Emotion behaves normally.
+const emotionCache = createCache({
+  key: 'css',
+  nonce: getTauriStyleNonce(),
+})
+
 disableWebViewShortcuts()
 
 let appInitialized = false
@@ -54,17 +66,19 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
 
   const root = createRoot(container)
   root.render(
-    <React.StrictMode>
-      <ComposeContextProvider contexts={contexts}>
-        <BaseErrorBoundary>
-          <SWRConfig value={swrConfig}>
-            <WindowProvider>
-              <RouterProvider router={router} />
-            </WindowProvider>
-          </SWRConfig>
-        </BaseErrorBoundary>
-      </ComposeContextProvider>
-    </React.StrictMode>,
+    <CacheProvider value={emotionCache}>
+      <React.StrictMode>
+        <ComposeContextProvider contexts={contexts}>
+          <BaseErrorBoundary>
+            <SWRConfig value={swrConfig}>
+              <WindowProvider>
+                <RouterProvider router={router} />
+              </WindowProvider>
+            </SWRConfig>
+          </BaseErrorBoundary>
+        </ComposeContextProvider>
+      </React.StrictMode>
+    </CacheProvider>,
   )
 }
 

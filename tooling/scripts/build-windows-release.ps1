@@ -85,12 +85,14 @@ foreach ($serviceBin in $serviceBins) {
     Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
-# `option_env!("TONO_CORE_SHA256")` must survive into the production Service. A missing pin is
-# deliberately fatal at runtime, so prove the exact digest is embedded before packaging it.
+# `option_env!("TONO_CORE_SHA256")` must survive into both executables that trust or publish the
+# core. A missing pin is deliberately fatal, so prove the exact digest is embedded before packaging.
 $servicePath = Join-Path $resourceRoot 'tono-service.exe'
-$serviceAscii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($servicePath))
-if (-not $serviceAscii.Contains($coreSha256)) {
-    throw 'The built Tono Service does not contain the injected Mihomo SHA-256 pin.'
+foreach ($pinnedBinary in @($servicePath, (Join-Path $resourceRoot 'tono-service-install.exe'))) {
+    $binaryAscii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pinnedBinary))
+    if (-not $binaryAscii.Contains($coreSha256)) {
+        throw "The built $(Split-Path -Leaf $pinnedBinary) does not contain the injected Mihomo SHA-256 pin."
+    }
 }
 
 Invoke-Checked -FilePath 'pnpm' -ArgumentList @('build') -WorkingDirectory $appRoot

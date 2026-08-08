@@ -242,8 +242,17 @@ export const ConnectProgressCard = ({
     }
   })
 
-  const visible = active || progress?.error != null
-  if (!visible || !progress) {
+  // Protected Offline by itself is not an in-flight transaction. On process restart the Service
+  // can still hold a durable barrier while this GUI has neither begun an attempt nor recorded a
+  // failure. Keep the card's release/diagnostics actions visible in that state, but do not render
+  // the all-pending step record as a fabricated permanent "Preparing…" transaction.
+  const showProgress =
+    progress != null &&
+    (uiState === 'connecting' ||
+      progress.error != null ||
+      progress.nextRetryAtMs != null)
+  const visible = uiState === 'protectedOffline' || showProgress
+  if (!visible) {
     return null
   }
 
@@ -258,7 +267,7 @@ export const ConnectProgressCard = ({
     nextRetryAtMs != null
       ? Math.max(0, Math.ceil((nextRetryAtMs - nowMs) / 1000))
       : null
-  const failedStepLabel = progress.failedStage
+  const failedStepLabel = progress?.failedStage
     ? t(STEP_LABEL_KEYS[progress.failedStage] ?? 'tono.progress.unknownStage')
     : null
 
@@ -271,106 +280,112 @@ export const ConnectProgressCard = ({
         maxWidth: '100%',
       }}
     >
-      {/* Header: total elapsed + retry badge */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 14,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: 0.2,
-            fontFamily: TONO_MONO_STACK,
-            color: text.tertiary,
-          }}
-        >
-          {t('tono.progress.total', {
-            elapsed:
-              progress.totalElapsedMs != null
-                ? formatElapsed(progress.totalElapsedMs)
-                : '—',
-          })}
-        </span>
-        {progress.retryAttempt > 0 && (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              fontFamily: TONO_MONO_STACK,
-              borderRadius: 6,
-              padding: '3px 8px',
-              color: TONO_COLORS.protectedOffline,
-              background: hex(TONO_COLORS.protectedOffline, 0.15),
-            }}
-          >
-            {t('tono.progress.tryBadge', { count: progress.retryAttempt + 1 })}
-          </span>
-        )}
-      </div>
-
-      {/* Steps */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '10px 18px',
-        }}
-      >
-        {progress.steps.map((step) => (
+      {showProgress && progress != null && (
+        <>
+          {/* Header: total elapsed + retry badge */}
           <div
-            key={step.key}
-            data-testid={`tono-step-${step.key}`}
-            data-state={step.state}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 7,
-              minWidth: 0,
+              justifyContent: 'space-between',
+              marginBottom: 14,
             }}
           >
-            <StepIcon state={step.state} />
             <span
               style={{
-                flex: 1,
-                fontSize: 12,
-                fontWeight: step.state === 'current' ? 600 : 400,
-                color:
-                  step.state === 'pending'
-                    ? text.tertiary
-                    : step.state === 'failed'
-                      ? TONO_COLORS.protectedOffline
-                      : text.primary,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                fontFamily: TONO_MONO_STACK,
+                color: text.tertiary,
               }}
             >
-              {t(STEP_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage')}
+              {t('tono.progress.total', {
+                elapsed:
+                  progress.totalElapsedMs != null
+                    ? formatElapsed(progress.totalElapsedMs)
+                    : '—',
+              })}
             </span>
-            {(step.state === 'current' || step.state === 'failed') &&
-              step.elapsedMs != null && (
+            {progress.retryAttempt > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: TONO_MONO_STACK,
+                  borderRadius: 6,
+                  padding: '3px 8px',
+                  color: TONO_COLORS.protectedOffline,
+                  background: hex(TONO_COLORS.protectedOffline, 0.15),
+                }}
+              >
+                {t('tono.progress.tryBadge', {
+                  count: progress.retryAttempt + 1,
+                })}
+              </span>
+            )}
+          </div>
+
+          {/* Steps */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '10px 18px',
+            }}
+          >
+            {progress.steps.map((step) => (
+              <div
+                key={step.key}
+                data-testid={`tono-step-${step.key}`}
+                data-state={step.state}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  minWidth: 0,
+                }}
+              >
+                <StepIcon state={step.state} />
                 <span
                   style={{
-                    fontSize: 11,
-                    fontFamily: TONO_MONO_STACK,
-                    color: text.secondary,
-                    flexShrink: 0,
+                    flex: 1,
+                    fontSize: 12,
+                    fontWeight: step.state === 'current' ? 600 : 400,
+                    color:
+                      step.state === 'pending'
+                        ? text.tertiary
+                        : step.state === 'failed'
+                          ? TONO_COLORS.protectedOffline
+                          : text.primary,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  {formatElapsed(step.elapsedMs)}
+                  {t(STEP_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage')}
                 </span>
-              )}
+                {(step.state === 'current' || step.state === 'failed') &&
+                  step.elapsedMs != null && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: TONO_MONO_STACK,
+                        color: text.secondary,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {formatElapsed(step.elapsedMs)}
+                    </span>
+                  )}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
 
       {/* Failure block */}
-      {progress.error != null && (
+      {progress?.error != null && (
         <div style={{ marginTop: 14 }}>
           {failedStepLabel && (
             <div
@@ -406,42 +421,44 @@ export const ConnectProgressCard = ({
       )}
 
       {/* Retry countdown + actions */}
-      {uiState === 'protectedOffline' && nextRetryAtMs != null && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            marginTop: 14,
-          }}
-        >
-          <span
-            data-testid="tono-retry-countdown"
-            style={{ flex: 1, fontSize: 11, color: text.secondary }}
-          >
-            {remainSec != null && remainSec > 0
-              ? t('tono.progress.retryIn', {
-                  n: progress.retryAttempt + 1,
-                  seconds: remainSec,
-                })
-              : t('tono.progress.retrying')}
-          </span>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={handleRetryNow}
-            disabled={retrying}
+      {uiState === 'protectedOffline' &&
+        progress != null &&
+        nextRetryAtMs != null && (
+          <div
             style={{
-              padding: '7px 13px',
-              fontSize: 12,
-              color: '#fff',
-              background: TONO_COLORS.accent,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 14,
             }}
           >
-            {retrying ? '…' : t('tono.progress.retryNow')}
-          </button>
-        </div>
-      )}
+            <span
+              data-testid="tono-retry-countdown"
+              style={{ flex: 1, fontSize: 11, color: text.secondary }}
+            >
+              {remainSec != null && remainSec > 0
+                ? t('tono.progress.retryIn', {
+                    n: progress.retryAttempt + 1,
+                    seconds: remainSec,
+                  })
+                : t('tono.progress.retrying')}
+            </span>
+            <button
+              type="button"
+              className="tono-button"
+              onClick={handleRetryNow}
+              disabled={retrying}
+              style={{
+                padding: '7px 13px',
+                fontSize: 12,
+                color: '#fff',
+                background: TONO_COLORS.accent,
+              }}
+            >
+              {retrying ? '…' : t('tono.progress.retryNow')}
+            </button>
+          </div>
+        )}
       {retryError && (
         <div
           role="alert"

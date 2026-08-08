@@ -270,20 +270,6 @@ const Layout = () => {
       {/* 左侧底部窗口控制按钮 */}
       <NoticeManager position={verge?.notice_position} />
       <ServiceMigrationDialog />
-      <div
-        style={{
-          animation: 'fadeIn 0.5s',
-          WebkitAnimation: 'fadeIn 0.5s',
-        }}
-      />
-      <style>
-        {`
-            @keyframes fadeIn {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-          `}
-      </style>
       <TonoAuthGuard>
       <Paper
         square
@@ -292,6 +278,8 @@ const Layout = () => {
         style={{
           borderTopLeftRadius: '0px',
           borderTopRightRadius: '0px',
+          animation: 'tono-layout-fade-in 0.5s',
+          WebkitAnimation: 'tono-layout-fade-in 0.5s',
         }}
         onContextMenu={(e) => {
           if (

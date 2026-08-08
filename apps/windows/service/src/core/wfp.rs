@@ -32,8 +32,7 @@ use windows_sys::Win32::NetworkManagement::WindowsFilteringPlatform::{
     FWPM_CONDITION_IP_REMOTE_ADDRESS, FWPM_CONDITION_IP_REMOTE_PORT, FWPM_DISPLAY_DATA0,
     FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
     FWPM_FILTER0, FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
-    FWPM_LAYER_OUTBOUND_TRANSPORT_V6, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
+    FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_PROVIDER0,
     FWPM_SUBLAYER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FwpmEngineClose0, FwpmEngineOpen0,
     FwpmFilterAdd0, FwpmFilterCreateEnumHandle0, FwpmFilterDeleteByKey0,
     FwpmFilterDestroyEnumHandle0, FwpmFilterEnum0, FwpmFilterGetByKey0, FwpmFreeMemory0,
@@ -404,8 +403,6 @@ fn layer_key(layer: LayerKind) -> GUID {
         LayerKind::AleAuthConnectV4 => FWPM_LAYER_ALE_AUTH_CONNECT_V4,
         LayerKind::AleAuthConnectV6 => FWPM_LAYER_ALE_AUTH_CONNECT_V6,
         LayerKind::AleAuthRecvAcceptV6 => FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
-        LayerKind::OutboundTransportV4 => FWPM_LAYER_OUTBOUND_TRANSPORT_V4,
-        LayerKind::OutboundTransportV6 => FWPM_LAYER_OUTBOUND_TRANSPORT_V6,
     }
 }
 
@@ -671,6 +668,25 @@ fn enumerate_our_filter_keys(engine: &Engine) -> Result<Vec<Guid>> {
         .collect())
 }
 
+fn require_exact_filter_keys(current: &[Guid], expected: &[Guid]) -> Result<()> {
+    let current = current
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = expected
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    if current == expected {
+        return Ok(());
+    }
+    let missing = expected.difference(&current).count();
+    let unexpected = current.difference(&expected).count();
+    bail!(
+        "kill-switch provider filter set is not exact ({missing} missing, {unexpected} unexpected)"
+    )
+}
+
 /// Every Tono-provider sublayer key, current or left by an older build.
 fn enumerate_our_sublayer_keys(engine: &Engine) -> Result<Vec<Guid>> {
     let mut keys = Vec::new();
@@ -835,6 +851,13 @@ fn verify_by_key(engine: &Engine, expected: &[FilterSpec]) -> Result<()> {
         // SAFETY: engine-allocated on success.
         unsafe { free_block(filter) };
     }
+    // Presence-only verification is not enough for a fail-closed mode transition: if the new
+    // Blocked set exists beside one stale DIRECT or tunnel permit, every expected-key lookup
+    // succeeds while the physical escape path remains live. Enumerate all objects carrying the
+    // Tono provider key and require exact set equality before publishing `live`.
+    let current = enumerate_our_filter_keys(engine)?;
+    let expected_keys = expected.iter().map(|spec| spec.key).collect::<Vec<_>>();
+    require_exact_filter_keys(&current, &expected_keys)?;
     Ok(())
 }
 
@@ -887,13 +910,31 @@ pub(crate) fn install(expected: &[FilterSpec], app_path: &str) -> Result<()> {
     verify_by_key(&engine, expected)
 }
 
-/// Verify the provider, the sublayer, and every expected filter by key.
+/// Verify the provider, sublayer, every expected filter, and the absence of any unexpected
+/// provider-scoped filter.
 pub(crate) fn verify(expected: &[FilterSpec]) -> Result<()> {
     let engine = Engine::open()?;
     if !provider_exists(&engine)? {
         bail!("kill-switch provider is not installed");
     }
     verify_by_key(&engine, expected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Guid, require_exact_filter_keys};
+
+    #[test]
+    fn exact_filter_verification_rejects_a_stale_direct_key() {
+        let floor = Guid::from_u128(1);
+        let locked = Guid::from_u128(2);
+        let stale_direct = Guid::from_u128(3);
+
+        require_exact_filter_keys(&[locked, floor], &[floor, locked]).unwrap();
+        let error = require_exact_filter_keys(&[floor, locked, stale_direct], &[floor, locked])
+            .expect_err("a stale DIRECT permit must make the live proof fail");
+        assert!(error.to_string().contains("1 unexpected"));
+    }
 }
 
 /// Remove every Tono filter; provider and sublayer stay, inert — the counterpart of the macOS

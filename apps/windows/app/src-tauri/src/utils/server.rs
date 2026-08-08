@@ -42,7 +42,13 @@ static COMMANDS_READY: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "verge-dev")]
 static DEV_QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub async fn check_singleton() -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingletonDisposition {
+    Primary,
+    ExistingInstanceNotified,
+}
+
+pub async fn check_singleton() -> Result<SingletonDisposition> {
     let record_path = instance_record_path()?;
     let lock = open_instance_lock(&record_path.with_file_name(INSTANCE_LOCK_FILE))?;
     if !try_lock_instance(&lock)? {
@@ -51,7 +57,7 @@ pub async fn check_singleton() -> Result<()> {
             if let Ok(record) = read_instance_record(&record_path)
                 && notify_existing_instance(&record).await
             {
-                bail!("app exists");
+                return Ok(SingletonDisposition::ExistingInstanceNotified);
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
@@ -71,7 +77,7 @@ pub async fn check_singleton() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("singleton lock is already initialized"))?;
     let _ = EMBEDDED_PORT.set(port);
     start_embedded_server(listener, record.token);
-    Ok(())
+    Ok(SingletonDisposition::Primary)
 }
 
 async fn bind_primary_listener(preferred: Option<u16>) -> Result<tokio::net::TcpListener> {

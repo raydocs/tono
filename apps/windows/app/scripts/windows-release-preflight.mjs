@@ -12,10 +12,14 @@ import {
   WINDOWS_RESOURCE_BUNDLE_ENTRIES,
   parseNsisListing,
   validateExternalBin,
+  validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
   validateReleaseFeatureTree,
   validateResourcesWhitelist,
+  validateTauriRendererCommandSurface,
+  validateTlsPolicySources,
+  validateWindowsReplacementHelperSource,
 } from './windows-packaging.mjs'
 
 /**
@@ -46,6 +50,27 @@ const nsisTemplatePath = path.resolve(
 )
 const resourcesDir = path.resolve(appRoot, 'src-tauri/resources')
 const sidecarDir = path.resolve(appRoot, 'src-tauri/sidecar')
+const tonoTransportPath = path.resolve(
+  appRoot,
+  'src-tauri/src/tono/transport.rs',
+)
+const webdavClientPath = path.resolve(
+  appRoot,
+  'src-tauri/src/core/backup.rs',
+)
+const mediaUnlockPath = path.resolve(
+  appRoot,
+  'src-tauri/src/cmd/media_unlock_checker/mod.rs',
+)
+const legacyNetworkPath = path.resolve(
+  appRoot,
+  'src-tauri/src/utils/network.rs',
+)
+const tauriLibPath = path.resolve(appRoot, 'src-tauri/src/lib.rs')
+const windowsServiceInstallerPath = path.resolve(
+  windowsRoot,
+  'service/src/bin/install_service.rs',
+)
 
 const fail = (message) => {
   console.error(`[release-preflight] ${message}`)
@@ -85,10 +110,22 @@ export const assertPackagingConfig = () => {
   const resourcesError = validateResourcesWhitelist(tauriConfig.bundle?.resources)
   if (resourcesError) fail(resourcesError)
 
-  const legacyCleanupError = validateNsisLegacyCleanup(
-    readFileSync(nsisTemplatePath, 'utf8'),
-  )
+  const nsisSource = readFileSync(nsisTemplatePath, 'utf8')
+  const legacyCleanupError = validateNsisLegacyCleanup(nsisSource)
   if (legacyCleanupError) fail(legacyCleanupError)
+
+  const automaticUpgradeError = validateNsisAutomaticUpgradeFlow(nsisSource)
+  if (automaticUpgradeError) fail(automaticUpgradeError)
+
+  const replacementHelperError = validateWindowsReplacementHelperSource(
+    readFileSync(windowsServiceInstallerPath, 'utf8'),
+  )
+  if (replacementHelperError) fail(replacementHelperError)
+
+  const commandSurfaceError = validateTauriRendererCommandSurface(
+    readFileSync(tauriLibPath, 'utf8'),
+  )
+  if (commandSurfaceError) fail(commandSurfaceError)
 
   for (const name of WINDOWS_RESOURCE_ALLOWLIST) {
     requireFile(`resource ${name}`, path.join(resourcesDir, name))
@@ -147,6 +184,16 @@ const assertReleaseFeatureIsolation = () => {
   }
   const featureError = validateReleaseFeatureTree(featureTree)
   if (featureError) fail(featureError)
+}
+
+const assertTlsPolicy = () => {
+  const tlsPolicyError = validateTlsPolicySources({
+    transport: readFileSync(tonoTransportPath, 'utf8'),
+    webdav: readFileSync(webdavClientPath, 'utf8'),
+    mediaUnlock: readFileSync(mediaUnlockPath, 'utf8'),
+    legacyNetwork: readFileSync(legacyNetworkPath, 'utf8'),
+  })
+  if (tlsPolicyError) fail(tlsPolicyError)
 }
 
 const findSevenZip = () => {
@@ -241,9 +288,10 @@ if (configOnly && payloadOnly) {
 // the runtime P0–P4 work: Test 5 shipped dual Mihomo + Unix helpers because the bundle map
 // was a whole directory and externalBin historically listed alpha.
 const packaging = assertPackagingConfig()
+assertTlsPolicy()
 assertReleaseFeatureIsolation()
 console.error(
-  `[release-preflight] packaging config OK (stable-only ${STABLE_EXTERNAL_BIN} + Windows resource whitelist + async release WebView dispatch)`,
+  `[release-preflight] packaging config OK (stable-only ${STABLE_EXTERNAL_BIN} + Windows resource whitelist + strict TLS policy + async release WebView dispatch)`,
 )
 
 if (configOnly) {

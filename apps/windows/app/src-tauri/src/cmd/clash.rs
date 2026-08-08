@@ -10,7 +10,6 @@ use crate::{
         validate::{CoreConfigValidator, ValidationOutcome},
     },
 };
-use clash_verge_logging::{Type, logging};
 use compact_str::CompactString;
 use serde_yaml_ng::Mapping;
 use smartstring::alias::String;
@@ -74,19 +73,6 @@ pub async fn stop_core() -> CmdResult {
 #[tauri::command]
 pub async fn restart_core() -> CmdResult {
     Err("disabled by Tono".into())
-}
-
-/// 测试URL延迟
-#[tauri::command]
-pub async fn test_delay(url: String) -> CmdResult<u32> {
-    let result = match feat::test_delay(url).await {
-        Ok(delay) => delay,
-        Err(e) => {
-            logging!(error, Type::Cmd, "{}", e);
-            10000u32
-        }
-    };
-    Ok(result)
 }
 
 /// 保存DNS配置到单独文件

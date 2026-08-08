@@ -356,10 +356,6 @@ fn unix_timestamp_secs() -> u64 {
         .unwrap_or_default()
 }
 
-fn non_zero_u32(value: u32) -> Option<u32> {
-    (value != 0).then_some(value)
-}
-
 fn non_zero_u64(value: u64) -> Option<u64> {
     (value != 0).then_some(value)
 }
@@ -398,23 +394,82 @@ pub struct CoreManager {
 /// them.
 ///
 /// The pid alone is not an identity. Windows hands pids out of a free list, so a core that died
-/// and was restarted inside one staging window can come back wearing the pid its caller sampled,
-/// and a check keyed on the pid alone would confirm an instance that no longer exists. `restarts`
-/// only ever grows for the life of the manager, so the pair differs across every watchdog restart
-/// even when the pid does not.
+/// and was replaced inside one staging window can come back wearing the pid its caller sampled.
+/// `generation` changes for every publication, including ordinary starts and watchdog recovery,
+/// so the pair still differs when Windows recycles the pid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CoreInstanceId {
     pub(super) pid: u32,
-    pub(super) restarts: u32,
+    pub(super) generation: u32,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct CoreStatusSnapshot {
     pub(super) core_pid: Option<u32>,
+    pub(super) core_generation: u32,
     pub(super) core_started_at: Option<u64>,
     pub(super) last_core_exit_reason: Option<String>,
     pub(super) restart_count: u32,
     pub(super) last_recovery_at: Option<u64>,
+}
+
+/// One coherent security identity for the currently published Core. The upper half is a
+/// monotonically changing instance generation and the lower half is the PID. A single Acquire
+/// load can therefore never combine a recycled PID with another process generation.
+///
+/// This is intentionally independent of `CORE_MANAGER`'s mutex. Holding that mutex is not, by
+/// itself, evidence that the child is changing: status collection and harmless lifecycle work
+/// also hold it. Stop/replacement paths clear this value *before* terminating the child, while
+/// start/recovery paths publish it only after the child, runtime record, IPC ACL, and running
+/// configuration are committed. WFP may consequently trust one atomic read without either a
+/// stale cache or a contention-triggered false revocation.
+static CORE_SECURITY_IDENTITY: AtomicU64 = AtomicU64::new(0);
+static NEXT_CORE_INSTANCE_GENERATION: AtomicU32 = AtomicU32::new(1);
+
+fn next_core_instance_generation() -> u32 {
+    loop {
+        let generation = NEXT_CORE_INSTANCE_GENERATION.fetch_add(1, Ordering::Relaxed);
+        if generation != 0 {
+            return generation;
+        }
+    }
+}
+
+const fn pack_core_identity(pid: u32, generation: u32) -> u64 {
+    ((generation as u64) << 32) | pid as u64
+}
+
+fn unpack_core_identity(identity: u64) -> Option<CoreInstanceId> {
+    let pid = identity as u32;
+    let generation = (identity >> 32) as u32;
+    (pid != 0).then_some(CoreInstanceId { pid, generation })
+}
+
+fn publish_core_identity(running_pid: &AtomicU32, pid: u32) -> CoreInstanceId {
+    debug_assert_ne!(pid, 0);
+    let generation = next_core_instance_generation();
+    // `running_pid` remains for process-reconciliation code. Security readers gate exclusively
+    // on the packed Release publication below, so they cannot see this preparatory write alone.
+    running_pid.store(pid, Ordering::Relaxed);
+    CORE_SECURITY_IDENTITY.store(pack_core_identity(pid, generation), Ordering::Release);
+    CoreInstanceId { pid, generation }
+}
+
+fn clear_core_identity(running_pid: &AtomicU32) {
+    // Revoke the security identity first. A child that takes time to terminate is conservatively
+    // treated as untrusted by WFP for that entire interval.
+    CORE_SECURITY_IDENTITY.store(0, Ordering::Release);
+    running_pid.store(0, Ordering::Relaxed);
+}
+
+/// Revoke the packed identity while the Windows kill-switch owns `WFP_OPERATION`.
+///
+/// This is atomic-only by design: it must never acquire `CORE_MANAGER` or any child/config lock,
+/// because stop/start callers already own lifecycle state while the kill-switch serializes this
+/// store against every DIRECT widening. Keep `running_pid` available for watchdog timeout and
+/// PID-based termination fallback; process bookkeeping is cleared only after teardown.
+pub(crate) fn revoke_core_security_identity_under_wfp_barrier() {
+    CORE_SECURITY_IDENTITY.store(0, Ordering::Release);
 }
 
 /// Last fully collected core state. `/status` uses this when a Start/Stop handler currently owns
@@ -424,11 +479,21 @@ static LAST_CORE_STATUS: Lazy<RwLock<CoreStatusSnapshot>> =
 
 pub(super) async fn status_snapshot_nonblocking() -> CoreStatusSnapshot {
     let Ok(manager) = CORE_MANAGER.try_lock() else {
-        return LAST_CORE_STATUS.read().unwrap().clone();
+        let mut snapshot = LAST_CORE_STATUS.read().unwrap().clone();
+        let identity = security_core_instance_snapshot();
+        snapshot.core_pid = identity.map(|instance| instance.pid);
+        snapshot.core_generation = identity.map_or(0, |instance| instance.generation);
+        return snapshot;
     };
     let snapshot = manager.status().await;
     *LAST_CORE_STATUS.write().unwrap() = snapshot.clone();
     snapshot
+}
+
+/// Current Core identity for security decisions. One Acquire load is coherent and never waits for
+/// the manager; see [`CORE_SECURITY_IDENTITY`] for the publication contract.
+pub(super) fn security_core_instance_snapshot() -> Option<CoreInstanceId> {
+    unpack_core_identity(CORE_SECURITY_IDENTITY.load(Ordering::Acquire))
 }
 
 impl CoreManager {
@@ -460,17 +525,8 @@ impl CoreManager {
     /// replaced underneath it later on.
     pub(super) async fn running_core_config(&self) -> Option<(CoreInstanceId, ClashConfig)> {
         let config = self.running_config.lock().await;
-        // Acquire pairs with the watchdog's Release store of the pid. The watchdog publishes the
-        // pid last, so a reader that sees a pid is guaranteed to see the restart count belonging
-        // to the same instance rather than the previous one's.
-        let pid = self.running_pid.load(Ordering::Acquire);
-        if pid == 0 {
-            return None;
-        }
-        let restarts = self.restart_count.load(Ordering::Relaxed);
-        config
-            .clone()
-            .map(|config| (CoreInstanceId { pid, restarts }, config))
+        let identity = security_core_instance_snapshot()?;
+        config.clone().map(|config| (identity, config))
     }
 
     pub async fn start_core(&self, config: ClashConfig, owner: OwnerIdentity) -> Result<()> {
@@ -490,6 +546,19 @@ impl CoreManager {
         }
 
         info!("Starting core with config: {:?}", config);
+
+        // This is the final gate in front of every ordinary spawn, including a start racing a
+        // watchdog that just observed the previous process exit. ALE App-ID filters match the
+        // executable path rather than PID/generation, so no new process may exist at that path
+        // until live WFP has synchronously retracted every volatile DIRECT tuple. A failure rolls
+        // the lifecycle back and, crucially, returns before `Command::spawn`.
+        #[cfg(windows)]
+        if let Err(error) =
+            crate::core::windows_kill_switch::retract_direct_before_core_replacement().await
+        {
+            set_core_lifecycle_state(ServiceLifecycleState::Running);
+            return Err(error.context("refusing to spawn Core while DIRECT retraction is unproven"));
+        }
 
         // Failures below that leave no live core roll the lifecycle back to Running, the same
         // settled state a stop reports: a start that has already failed must not keep
@@ -525,8 +594,6 @@ impl CoreManager {
         {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
-                self.running_pid
-                    .store(child_pid.unwrap_or_default(), Ordering::Release);
                 *self.running_config.lock().await = Some(config.clone());
                 *self.core_start_time.lock().await = Some(Instant::now());
                 self.core_started_at.store(now_secs, Ordering::Relaxed);
@@ -538,6 +605,9 @@ impl CoreManager {
                 .await
                 {
                     warn!("Failed to record unconfirmed core cleanup: {record_error:#}");
+                }
+                if let Some(pid) = child_pid {
+                    publish_core_identity(&self.running_pid, pid);
                 }
                 *self.failed_child.lock().await = Some(child_guard);
                 set_core_lifecycle_state(ServiceLifecycleState::Fatal);
@@ -554,11 +624,12 @@ impl CoreManager {
         {
             if let Err(kill_error) = child_guard.kill_now().await {
                 let now_secs = unix_timestamp_secs();
-                self.running_pid
-                    .store(child_pid.unwrap_or_default(), Ordering::Release);
                 *self.running_config.lock().await = Some(config.clone());
                 *self.core_start_time.lock().await = Some(Instant::now());
                 self.core_started_at.store(now_secs, Ordering::Relaxed);
+                if let Some(pid) = child_pid {
+                    publish_core_identity(&self.running_pid, pid);
+                }
                 *self.failed_child.lock().await = Some(child_guard);
                 set_core_lifecycle_state(ServiceLifecycleState::Fatal);
                 return Err(anyhow!(
@@ -572,9 +643,9 @@ impl CoreManager {
         *self.core_start_time.lock().await = Some(Instant::now());
         self.core_started_at
             .store(unix_timestamp_secs(), Ordering::Relaxed);
-        self.running_pid
-            .store(child_pid.unwrap_or_default(), Ordering::Release);
         *self.running_config.lock().await = Some(config.clone());
+        let pid = child_pid.context("spawned core did not expose a process ID after start")?;
+        publish_core_identity(&self.running_pid, pid);
 
         self.start_watchdog(child_guard, config, owner).await;
         set_core_lifecycle_state(ServiceLifecycleState::Running);
@@ -585,6 +656,14 @@ impl CoreManager {
     pub async fn stop_core(&self) -> Result<()> {
         info!("Stopping core");
         LOGGER_MANAGER.clear_logs().await;
+
+        // ALE App-ID filters identify the executable path, so another Mihomo generation at that
+        // path would inherit any live DIRECT tuples. This one barrier serializes packed identity
+        // revocation with exact Blocked WFP, so no App request can re-grant in between. On failure
+        // leave the current process supervised (but security-revoked) and refuse replacement.
+        crate::core::windows_kill_switch::retract_direct_before_core_replacement()
+            .await
+            .context("failed to retract DIRECT permits before stopping Core")?;
 
         let watchdog_result = self.stop_watchdog().await;
         let mut recovered_failed_child = false;
@@ -619,7 +698,7 @@ impl CoreManager {
             watchdog_result?;
         }
 
-        self.running_pid.store(0, Ordering::Release);
+        clear_core_identity(&self.running_pid);
         *self.core_start_time.lock().await = None;
         self.core_started_at.store(0, Ordering::Relaxed);
 
@@ -708,7 +787,17 @@ impl CoreManager {
                 set_core_lifecycle_state(ServiceLifecycleState::RecoveringCore);
 
                 let _ = current_guard.take();
-                running_pid_arc.store(0, Ordering::Release);
+                if let Err(error) =
+                    crate::core::windows_kill_switch::retract_direct_before_core_replacement().await
+                {
+                    // No replacement may start while a same-path ALE permit may still exist. The
+                    // kill-switch watchdog independently retries the poisoned lease; the recovery
+                    // loop below also proves this barrier again before every spawn attempt.
+                    error!("DIRECT permits could not be retracted after Core exit: {error:#}");
+                }
+                // The barrier revoked packed identity while holding WFP_OPERATION. Clear process
+                // tracking only afterwards; re-storing zero cannot open a widening window.
+                clear_core_identity(&running_pid_arc);
                 started_at_arc.store(0, Ordering::Relaxed);
                 remove_core_runtime_record().await;
 
@@ -743,6 +832,22 @@ impl CoreManager {
                             _ = &mut shutdown_rx => break 'watchdog,
                             _ = tokio::time::sleep(delay) => {}
                         }
+                    }
+
+                    if let Err(error) =
+                        crate::core::windows_kill_switch::retract_direct_before_core_replacement()
+                            .await
+                    {
+                        error!(
+                            "Refusing Core respawn until DIRECT permits are proven retracted: {error:#}"
+                        );
+                        consecutive_attempt += 1;
+                        let now = Instant::now();
+                        restart_timestamps.retain(|timestamp| {
+                            now.duration_since(*timestamp) < watchdog_config.restart_window
+                        });
+                        restart_timestamps.push(now);
+                        continue;
                     }
 
                     if let Err(error) =
@@ -781,8 +886,6 @@ impl CoreManager {
                                         "Failed to terminate core after IPC hardening failure: {kill_error:#}"
                                     );
                                     let now_secs = unix_timestamp_secs();
-                                    running_pid_arc
-                                        .store(new_pid.unwrap_or_default(), Ordering::Release);
                                     *start_time_arc.lock().await = Some(Instant::now());
                                     started_at_arc.store(now_secs, Ordering::Relaxed);
                                     if let Err(record_error) = write_runtime_record_for_config(
@@ -795,6 +898,9 @@ impl CoreManager {
                                         warn!(
                                             "Failed to record unconfirmed restarted core cleanup: {record_error:#}"
                                         );
+                                    }
+                                    if let Some(pid) = new_pid {
+                                        publish_core_identity(&running_pid_arc, pid);
                                     }
                                     *failed_child_arc.lock().await = Some(new_guard);
                                     set_core_lifecycle_state(ServiceLifecycleState::Fatal);
@@ -817,10 +923,11 @@ impl CoreManager {
                                 error!("Failed to commit restarted core runtime: {record_error:#}");
                                 if let Err(kill_error) = new_guard.kill_now().await {
                                     let now_secs = unix_timestamp_secs();
-                                    running_pid_arc
-                                        .store(new_pid.unwrap_or_default(), Ordering::Release);
                                     *start_time_arc.lock().await = Some(Instant::now());
                                     started_at_arc.store(now_secs, Ordering::Relaxed);
+                                    if let Some(pid) = new_pid {
+                                        publish_core_identity(&running_pid_arc, pid);
+                                    }
                                     *failed_child_arc.lock().await = Some(new_guard);
                                     set_core_lifecycle_state(ServiceLifecycleState::Fatal);
                                     return Err(anyhow!(
@@ -842,7 +949,11 @@ impl CoreManager {
                             started_at_arc.store(now_secs, Ordering::Relaxed);
                             restart_count_arc.fetch_add(1, Ordering::Relaxed);
                             last_recovery_at_arc.store(now_secs, Ordering::Relaxed);
-                            running_pid_arc.store(new_pid.unwrap_or_default(), Ordering::Release);
+                            let Some(pid) = new_pid else {
+                                recovery_exhausted = true;
+                                break 'watchdog;
+                            };
+                            publish_core_identity(&running_pid_arc, pid);
                             consecutive_attempt += 1;
                             info!(
                                 "Core restarted successfully (attempt #{})",
@@ -865,7 +976,15 @@ impl CoreManager {
                 }
             }
 
-            running_pid_arc.store(0, Ordering::Release);
+            if let Err(error) =
+                crate::core::windows_kill_switch::retract_direct_before_core_replacement().await
+            {
+                // Covers wait/teardown failures that leave the loop without passing through the
+                // observed-exit branch above. There is no successor spawn here, but identity must
+                // still be revoked under the same writer barrier before final bookkeeping clears.
+                error!("Final Core watchdog DIRECT retraction failed: {error:#}");
+            }
+            clear_core_identity(&running_pid_arc);
             *start_time_arc.lock().await = None;
             started_at_arc.store(0, Ordering::Relaxed);
             remove_core_runtime_record().await;
@@ -918,8 +1037,10 @@ impl CoreManager {
     }
 
     pub(super) async fn status(&self) -> CoreStatusSnapshot {
+        let identity = security_core_instance_snapshot();
         CoreStatusSnapshot {
-            core_pid: non_zero_u32(self.running_pid.load(Ordering::Relaxed)),
+            core_pid: identity.map(|instance| instance.pid),
+            core_generation: identity.map_or(0, |instance| instance.generation),
             core_started_at: non_zero_u64(self.core_started_at.load(Ordering::Relaxed)),
             last_core_exit_reason: self.last_core_exit_reason.lock().await.clone(),
             restart_count: self.restart_count.load(Ordering::Relaxed),
@@ -1362,6 +1483,39 @@ fn windows_owner_pipe_sddl(sid: &str) -> String {
 
 pub static CORE_MANAGER: Lazy<Arc<Mutex<CoreManager>>> =
     Lazy::new(|| Arc::new(Mutex::new(CoreManager::new())));
+
+/// Seed only the identity/config fields read by kill-switch unit tests. No child or watchdog is
+/// created, and clearing publishes PID zero before dropping the synthetic config just like the
+/// real watchdog teardown path.
+#[cfg(test)]
+pub(super) async fn set_running_core_identity_for_kill_switch_tests(identity: Option<(u32, u32)>) {
+    let manager = CORE_MANAGER.lock().await;
+    match identity {
+        Some((pid, generation)) => {
+            *manager.running_config.lock().await = Some(ClashConfig {
+                core_config: crate::CoreConfig {
+                    core_path: "test-mihomo".to_owned(),
+                    core_ipc_path: "test-controller".to_owned(),
+                    config_path: "test-config".to_owned(),
+                    config_dir: "test-runtime".to_owned(),
+                },
+                log_config: WriterConfig {
+                    directory: "test-logs".to_owned(),
+                    max_log_size: 1,
+                    max_log_files: 1,
+                },
+            });
+            manager.restart_count.store(generation, Ordering::Relaxed);
+            manager.running_pid.store(pid, Ordering::Relaxed);
+            CORE_SECURITY_IDENTITY.store(pack_core_identity(pid, generation), Ordering::Release);
+        }
+        None => {
+            clear_core_identity(&manager.running_pid);
+            *manager.running_config.lock().await = None;
+            manager.restart_count.store(0, Ordering::Relaxed);
+        }
+    }
+}
 
 pub static LOGGER_MANAGER: Lazy<Arc<AsyncLogger>> = Lazy::new(|| Arc::new(AsyncLogger::new()));
 

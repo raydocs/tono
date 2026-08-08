@@ -10,14 +10,16 @@ pub use channel::{
 };
 pub use core::{
     AuthenticatedRequest, AuthenticatedSessionRequest, ClashConfig, CoreConfig,
-    DnsProtectionStatus, IpcCommand, KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus,
-    KillSwitchStatusMode, MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig,
-    OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof,
-    ProtocolInfo, ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
-    RuntimeAsset, RuntimeBundle, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode,
-    ServiceLifecycleState, ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot,
-    StageRejection, StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions,
-    StopClashPayload, WriterConfig, mihomo_ipc_path, owner_key,
+    DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IpcCommand,
+    KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
+    MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME,
+    OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
+    ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeAsset, RuntimeBundle,
+    SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
+    ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
+    StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
+    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest, mihomo_ipc_path, owner_key,
 };
 pub use core::{OwnerPaths, ServicePaths, service_paths};
 
@@ -99,11 +101,13 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// and the bounded Windows Service runtime ship as one inseparable App/Service contract.
 /// Requiring it prevents a failed installer replacement from silently pairing the new App with
 /// the older Test 5 Service that still has the original freeze/recovery semantics.
-pub const PROTOCOL_REVISION: u16 = 9;
-/// Revisions 7 through 9 are wire/behaviour incompatible with older peers. Reject a mismatch at
+/// Revision 10 adds the mandatory fail-closed DIRECT runtime-reload bracket.
+pub const PROTOCOL_REVISION: u16 = 10;
+/// Revisions 7 through 10 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation.
-pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 9;
-pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 9;
+pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 10;
+pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 10;
+pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;
 /// Revision that introduced `/clash/stage-runtime`.
 pub const MIN_SERVICE_REVISION_FOR_RUNTIME_STAGING: u16 = 2;
 /// Revision that introduced the service-owned macOS PF kill switch.

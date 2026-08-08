@@ -22,9 +22,11 @@ use clash_verge_logging::{Type, logging};
 #[cfg(target_os = "macos")]
 use clash_verge_service_ipc::MacosKillSwitchMode;
 use clash_verge_service_ipc::{
-    DnsProtectionStatus, KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
-    MacosKillSwitchConfig, MacosProxyConfig, OwnerCredentials, OwnerSessionProof, ProxyApplyOutcome, RuntimeBundle,
-    ServiceErrorCode, ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StopClashOptions, WriterConfig,
+    DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
+    KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosKillSwitchConfig, MacosProxyConfig,
+    OwnerCredentials, OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest,
+    ReplaceDirectEndpointsRequest, RuntimeBundle, ServiceErrorCode, ServiceStatusSnapshot, StageRuntimeOutcome,
+    StartClashRequest, StopClashOptions, WriterConfig,
 };
 use compact_str::CompactString;
 use once_cell::sync::Lazy;
@@ -47,6 +49,10 @@ static ACTIVE_SERVICE_SESSION: Lazy<Mutex<Option<ActiveServiceSession>>> = Lazy:
 /// this one mutation explicitly instead of destroying an otherwise fully verified tunnel.
 const MARK_VERIFIED_ATTEMPTS: u32 = 3;
 const MARK_VERIFIED_RETRY_DELAY: Duration = Duration::from_millis(500);
+/// Rev-10 DIRECT bracket mutations are idempotent. Replay once only when the transport response
+/// is ambiguous; a Service refusal is authoritative and is never retried.
+const DIRECT_MUTATION_ATTEMPTS: u32 = 2;
+const DIRECT_MUTATION_RETRY_DELAY: Duration = Duration::from_millis(350);
 
 /// The Service session that owns the running Core, and what that Service can do.
 ///
@@ -59,6 +65,7 @@ struct ActiveServiceSession {
     proof: OwnerSessionProof,
     supports_runtime_staging: bool,
     supports_macos_kill_switch: bool,
+    supports_direct_runtime_reload: bool,
 }
 
 fn generate_service_session_token() -> Result<String> {
@@ -84,6 +91,17 @@ pub(crate) fn active_service_supports_runtime_staging() -> bool {
         .lock()
         .as_ref()
         .is_some_and(|session| session.supports_runtime_staging)
+}
+
+/// Capture the exact owner session that will own every operation in the rev-10 reload bracket.
+/// Callers retain this proof rather than consulting the mutable global again after a node switch.
+pub(crate) fn active_direct_runtime_reload_session() -> Result<OwnerSessionProof> {
+    let sessions = ACTIVE_SERVICE_SESSION.lock();
+    let session = sessions.as_ref().context("service owner session is not active")?;
+    if !session.supports_direct_runtime_reload {
+        bail!("active Tono Service session does not support fail-closed DIRECT runtime reload");
+    }
+    Ok(session.proof.clone())
 }
 
 fn active_service_supports_macos_kill_switch() -> bool {
@@ -126,6 +144,18 @@ async fn probe_runtime_staging_support() -> bool {
             false
         }
     }
+}
+
+async fn probe_direct_runtime_reload_support() -> bool {
+    matches!(
+        clash_verge_service_ipc::get_version().await,
+        Ok(response)
+            if response.code == 0
+                && response
+                    .data
+                    .as_ref()
+                    .is_some_and(clash_verge_service_ipc::ProtocolInfo::supports_direct_runtime_reload)
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -1020,6 +1050,40 @@ pub(super) async fn stage_runtime_by_service(config_file: &Path) -> Result<Stage
         .context("Tono Service 未返回运行时暂存结果")
 }
 
+/// Stage the exact in-memory Tono runtime for a rev-10 DIRECT hot reload. Unlike the generic
+/// configuration path, this function never interprets `RestartRequired` as permission to replace
+/// the Core. The connection transaction owns that fail-closed decision.
+pub(crate) async fn tono_stage_runtime_for_direct_reload(
+    session: &OwnerSessionProof,
+    runtime: &RuntimeBundle,
+) -> Result<StageRuntimeOutcome> {
+    let credentials = current_owner_credentials()?;
+    let mut last_ambiguous = None;
+    for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
+        match clash_verge_service_ipc::stage_runtime(&credentials, session, runtime).await {
+            Ok(response) => {
+                if response.code > 0 {
+                    bail!(response.message);
+                }
+                if let Some(outcome) = response.data {
+                    return Ok(outcome);
+                }
+                last_ambiguous = Some("Tono Service omitted the runtime staging result".to_owned());
+            }
+            Err(error) => {
+                last_ambiguous = Some(format!("无法连接到Tono Service: {error:#}"));
+            }
+        }
+        if attempt < DIRECT_MUTATION_ATTEMPTS {
+            tokio::time::sleep(DIRECT_MUTATION_RETRY_DELAY).await;
+        }
+    }
+    bail!(
+        "DIRECT runtime staging remained ambiguous after replay: {}",
+        last_ambiguous.unwrap_or_else(|| "no response".to_owned())
+    )
+}
+
 /// 尝试使用服务启动core
 pub(super) async fn start_with_existing_service(config_file: &Path) -> Result<()> {
     logging!(info, Type::Service, "尝试使用现有服务启动核心");
@@ -1056,6 +1120,7 @@ pub(super) async fn start_with_existing_service(config_file: &Path) -> Result<()
 
     let result = response.data.context("Tono Service 未返回会话信息")?;
     let supports_runtime_staging = probe_runtime_staging_support().await;
+    let supports_direct_runtime_reload = probe_direct_runtime_reload_support().await;
     *ACTIVE_SERVICE_SESSION.lock() = Some(ActiveServiceSession {
         proof: OwnerSessionProof {
             generation: result.session.generation,
@@ -1063,6 +1128,7 @@ pub(super) async fn start_with_existing_service(config_file: &Path) -> Result<()
         },
         supports_runtime_staging,
         supports_macos_kill_switch,
+        supports_direct_runtime_reload,
     });
 
     // PAC follows the Running Mode; the caller opens it via `core_started(Service)`.
@@ -1248,6 +1314,7 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
             ) && clash_verge_service_ipc::ProtocolInfo::supports_windows_kill_switch(info)
                 && clash_verge_service_ipc::ProtocolInfo::supports_kill_switch_release(info)
                 && clash_verge_service_ipc::ProtocolInfo::supports_kill_switch_verification(info)
+                && clash_verge_service_ipc::ProtocolInfo::supports_direct_runtime_reload(info)
         });
     if supported {
         return Ok(None);
@@ -1263,7 +1330,8 @@ pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<St
         // The version handshake is acceptable, so what failed is one of the kill-switch
         // capability bits: an in-epoch Service that predates them.
         crate::core::runstate::ServiceVersionCheck::Ready => {
-            "Service does not expose the Windows kill-switch arm/lock/release/verify operations".to_owned()
+            "Service does not expose the Windows kill-switch arm/lock/release/verify/DIRECT-reload operations"
+                .to_owned()
         }
     };
     Ok(Some(detail))
@@ -1375,6 +1443,7 @@ fn advanced_tono_generation(generation_before: Option<Option<u64>>, generation_a
 
 async fn adopt_tono_service_session(generation: u64, proposed_session_token: String) {
     let supports_runtime_staging = probe_runtime_staging_support().await;
+    let supports_direct_runtime_reload = probe_direct_runtime_reload_support().await;
     *ACTIVE_SERVICE_SESSION.lock() = Some(ActiveServiceSession {
         proof: OwnerSessionProof {
             generation,
@@ -1382,6 +1451,7 @@ async fn adopt_tono_service_session(generation: u64, proposed_session_token: Str
         },
         supports_runtime_staging,
         supports_macos_kill_switch: false,
+        supports_direct_runtime_reload,
     });
 
     start_owner_monitor();
@@ -1443,14 +1513,156 @@ pub(crate) async fn tono_kill_switch_status() -> Result<KillSwitchStatus> {
     response.data.context("Tono Service 未返回 Kill Switch 状态")
 }
 
+/// Enter the fail-closed half of the rev-10 reload bracket with one captured owner session.
+pub(crate) async fn tono_begin_direct_runtime_reload(session: &OwnerSessionProof) -> Result<DirectRuntimeReloadResult> {
+    let credentials = current_owner_credentials()?;
+    let mut last_ambiguous = None;
+    for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
+        match clash_verge_service_ipc::begin_direct_runtime_reload(&credentials, session).await {
+            Ok(response) => {
+                if response.code > 0 {
+                    bail!(response.message);
+                }
+                if let Some(result) = response.data {
+                    return Ok(result);
+                }
+                last_ambiguous = Some("Tono Service omitted the DIRECT begin proof".to_owned());
+            }
+            Err(error) => {
+                last_ambiguous = Some(format!("无法连接到Tono Service: {error:#}"));
+            }
+        }
+        if attempt < DIRECT_MUTATION_ATTEMPTS {
+            tokio::time::sleep(DIRECT_MUTATION_RETRY_DELAY).await;
+        }
+    }
+    bail!(
+        "DIRECT begin remained ambiguous after replay: {}",
+        last_ambiguous.unwrap_or_else(|| "no response".to_owned())
+    )
+}
+
+/// Atomically commit the complete exact DIRECT endpoint set with one captured owner session.
+pub(crate) async fn tono_replace_direct_endpoints(
+    session: &OwnerSessionProof,
+    reload_id: u64,
+    direct_endpoints: Vec<clash_verge_service_ipc::ProxyEndpoint>,
+) -> Result<DirectRuntimeReloadResult> {
+    let credentials = current_owner_credentials()?;
+    let request = ReplaceDirectEndpointsRequest {
+        reload_id,
+        direct_endpoints,
+    };
+    let mut last_ambiguous = None;
+    for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
+        match clash_verge_service_ipc::replace_direct_endpoints(&credentials, session, request.clone()).await {
+            Ok(response) => {
+                if response.code > 0 {
+                    bail!(response.message);
+                }
+                if let Some(result) = response.data {
+                    return Ok(result);
+                }
+                last_ambiguous = Some("Tono Service omitted the DIRECT endpoint commit proof".to_owned());
+            }
+            Err(error) => {
+                last_ambiguous = Some(format!("无法连接到Tono Service: {error:#}"));
+            }
+        }
+        if attempt < DIRECT_MUTATION_ATTEMPTS {
+            tokio::time::sleep(DIRECT_MUTATION_RETRY_DELAY).await;
+        }
+    }
+    bail!(
+        "DIRECT endpoint commit remained ambiguous after replay: {}",
+        last_ambiguous.unwrap_or_else(|| "no response".to_owned())
+    )
+}
+
+/// Finalize the Service-owned pending DIRECT lease after all post-install proofs. Replaying the
+/// same bracket/digest is idempotent, which closes the lost-response window without authorizing a
+/// stale App transaction to modify a newer bracket.
+pub(crate) async fn tono_finalize_direct_runtime_reload(
+    session: &OwnerSessionProof,
+    reload_id: u64,
+    endpoint_digest: &str,
+) -> Result<DirectRuntimeReloadResult> {
+    let credentials = current_owner_credentials()?;
+    let request = FinalizeDirectRuntimeReloadRequest {
+        reload_id,
+        endpoint_digest: endpoint_digest.to_owned(),
+    };
+    let mut last_ambiguous = None;
+    for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
+        match clash_verge_service_ipc::finalize_direct_runtime_reload(&credentials, session, request.clone()).await {
+            Ok(response) => {
+                if response.code > 0 {
+                    bail!(response.message);
+                }
+                if let Some(result) = response.data {
+                    return Ok(result);
+                }
+                last_ambiguous = Some("Tono Service omitted the DIRECT finalize proof".to_owned());
+            }
+            Err(error) => {
+                last_ambiguous = Some(format!("无法连接到Tono Service: {error:#}"));
+            }
+        }
+        if attempt < DIRECT_MUTATION_ATTEMPTS {
+            tokio::time::sleep(DIRECT_MUTATION_RETRY_DELAY).await;
+        }
+    }
+    bail!(
+        "DIRECT finalize remained ambiguous after replay: {}",
+        last_ambiguous.unwrap_or_else(|| "no response".to_owned())
+    )
+}
+
+/// Renew an already-finalized DIRECT lease. The Service accepts only the captured owner session,
+/// reload id, and endpoint digest; replay is idempotent and no endpoint set is widened here.
+pub(crate) async fn tono_renew_direct_runtime_reload(
+    session: &OwnerSessionProof,
+    reload_id: u64,
+    endpoint_digest: &str,
+) -> Result<DirectRuntimeReloadResult> {
+    let credentials = current_owner_credentials()?;
+    let request = RenewDirectRuntimeReloadRequest {
+        reload_id,
+        endpoint_digest: endpoint_digest.to_owned(),
+    };
+    let mut last_ambiguous = None;
+    for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
+        match clash_verge_service_ipc::renew_direct_runtime_reload(&credentials, session, request.clone()).await {
+            Ok(response) => {
+                if response.code > 0 {
+                    bail!(response.message);
+                }
+                if let Some(result) = response.data {
+                    return Ok(result);
+                }
+                last_ambiguous = Some("Tono Service omitted the DIRECT renewal proof".to_owned());
+            }
+            Err(error) => {
+                last_ambiguous = Some(format!("无法连接到Tono Service: {error:#}"));
+            }
+        }
+        if attempt < DIRECT_MUTATION_ATTEMPTS {
+            tokio::time::sleep(DIRECT_MUTATION_RETRY_DELAY).await;
+        }
+    }
+    bail!(
+        "DIRECT renewal remained ambiguous after replay: {}",
+        last_ambiguous.unwrap_or_else(|| "no response".to_owned())
+    )
+}
+
 /// `POST /kill-switch/lock`: permit the tunnel interface and retract the API bootstrap channel.
 /// Idempotent on the Service side; doubles as the TUN adapter existence check.
-pub(crate) async fn tono_lock_kill_switch() -> Result<()> {
+pub(crate) async fn tono_lock_kill_switch_for_session(session: &OwnerSessionProof) -> Result<()> {
     let credentials = current_owner_credentials()?;
-    let session = active_service_session()?;
     let response = clash_verge_service_ipc::lock_kill_switch(
         &credentials,
-        &session,
+        session,
         KillSwitchLockRequest { tunnel_interface: None },
     )
     .await
@@ -1461,12 +1673,11 @@ pub(crate) async fn tono_lock_kill_switch() -> Result<()> {
     Ok(())
 }
 
-pub(crate) async fn tono_mark_kill_switch_verified() -> Result<()> {
+pub(crate) async fn tono_mark_kill_switch_verified_for_session(session: &OwnerSessionProof) -> Result<()> {
     let credentials = current_owner_credentials()?;
-    let session = active_service_session()?;
     let mut last_transport_error = None;
     for attempt in 1..=MARK_VERIFIED_ATTEMPTS {
-        match clash_verge_service_ipc::mark_kill_switch_verified(&credentials, &session).await {
+        match clash_verge_service_ipc::mark_kill_switch_verified(&credentials, session).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -1525,10 +1736,9 @@ pub(crate) async fn tono_restrict_bootstrap() -> Result<()> {
 }
 
 /// `POST /dns/enable`: snapshot adapter DNS and point resolvers at loopback.
-pub(crate) async fn tono_enable_protected_dns() -> Result<DnsProtectionStatus> {
+pub(crate) async fn tono_enable_protected_dns_for_session(session: &OwnerSessionProof) -> Result<DnsProtectionStatus> {
     let credentials = current_owner_credentials()?;
-    let session = active_service_session()?;
-    let response = match clash_verge_service_ipc::enable_protected_dns(&credentials, &session).await {
+    let response = match clash_verge_service_ipc::enable_protected_dns(&credentials, session).await {
         Ok(response) => response,
         Err(error) => {
             // A write can commit even when its response is lost. This operation is idempotent,
@@ -2164,6 +2374,7 @@ mod tests {
                 protocol: ProxyProtocol::Tcp,
             }],
             tunnel_permit_rendered: true,
+            direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
         };
         assert!(mark_verified_committed(&status));

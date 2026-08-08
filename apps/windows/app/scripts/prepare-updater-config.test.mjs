@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -16,6 +17,18 @@ RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7b
 trusted comment: timestamp:1556193335\tfile:test
 y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==`
 const TEST_SIGNATURE = Buffer.from(TEST_SIGNATURE_TEXT).toString('base64')
+
+test('keeps the updater plugin startup-safe without a release config overlay', async () => {
+  const baseConfig = JSON.parse(
+    await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+  )
+  const updater = baseConfig.plugins?.updater
+
+  assert.equal(typeof updater, 'object')
+  assert.notEqual(updater, null)
+  assert.deepEqual(updater.endpoints, [])
+  assert.equal(updater.pubkey, '')
+})
 
 test('creates a Tono-only signed Windows updater configuration', () => {
   const config = createUpdaterConfig(TEST_PUBLIC_KEY)

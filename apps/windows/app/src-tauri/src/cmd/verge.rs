@@ -38,6 +38,14 @@ fn forbidden_field_present(patch: &IVerge) -> Option<&'static str> {
         ("hotkeys", patch.hotkeys.is_some()),
         ("startup_script", patch.startup_script.is_some()),
         ("clash_core", patch.clash_core.is_some()),
+        // Tono has no hidden-start or lightweight-mode controls. Letting a migrated legacy
+        // component persist either flag makes a normal desktop/installer launch appear to do
+        // nothing because the process starts without a window.
+        ("enable_silent_start", patch.enable_silent_start.is_some()),
+        (
+            "enable_auto_light_weight_mode",
+            patch.enable_auto_light_weight_mode.is_some(),
+        ),
         (
             "enable_auto_backup_schedule",
             patch.enable_auto_backup_schedule.is_some(),
@@ -88,14 +96,28 @@ mod tests {
             language: Some("en".into()),
             theme_mode: Some("dark".into()),
             enable_auto_launch: Some(true),
-            enable_silent_start: Some(true),
-            enable_auto_light_weight_mode: Some(true),
             home_cards: None,
             test_list: None,
             tray_event: Some("dashboard".into()),
             ..IVerge::default()
         };
         assert_eq!(forbidden_field_present(&patch), None);
+    }
+
+    #[test]
+    fn hidden_start_fields_are_rejected() {
+        for patch in [
+            IVerge {
+                enable_silent_start: Some(true),
+                ..IVerge::default()
+            },
+            IVerge {
+                enable_auto_light_weight_mode: Some(true),
+                ..IVerge::default()
+            },
+        ] {
+            assert!(forbidden_field_present(&patch).is_some());
+        }
     }
 
     #[test]

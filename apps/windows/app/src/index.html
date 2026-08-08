@@ -9,7 +9,9 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tono</title>
-    <style>
+    <!-- Tauri adds its runtime CSP nonce to bundled style elements. Runtime CSS-in-JS reads
+         this marked element's DOM `nonce` property and reuses it for styles created later. -->
+    <style data-tauri-csp-nonce-source>
       :root {
         --bg-color: #f5f5f5;
         --text-color: #333;

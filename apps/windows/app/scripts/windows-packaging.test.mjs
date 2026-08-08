@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
@@ -7,19 +8,370 @@ import {
   STABLE_EXTERNAL_BIN,
   WINDOWS_RESOURCE_ALLOWLIST,
   WINDOWS_RESOURCE_BUNDLE_ENTRIES,
+  WINDOWS_RUNTIME_REPAIR_ARTIFACTS,
   partitionReleaseResources,
   validateExternalBin,
+  validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
   validateReleaseFeatureTree,
   validateResourcesWhitelist,
+  validateTauriRendererCommandSurface,
+  validateTlsPolicySources,
+  validateWindowsReplacementHelperSource,
 } from './windows-packaging.mjs'
 
+const installerSource = readFileSync(
+  new URL('../src-tauri/packages/windows/installer.nsi', import.meta.url),
+  'utf8',
+)
+const tauriLibSource = readFileSync(
+  new URL('../src-tauri/src/lib.rs', import.meta.url),
+  'utf8',
+)
+const windowsServiceInstallerSource = readFileSync(
+  new URL('../../service/src/bin/install_service.rs', import.meta.url),
+  'utf8',
+)
+const canonicalGuiLaunchLine =
+  '  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$MainBinaryArgs"'
+
+test('NSIS automatically upgrades without reinstall/uninstall choices', () => {
+  assert.equal(validateNsisAutomaticUpgradeFlow(installerSource), null)
+
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Call DetectExistingInstall',
+        '; detector omitted',
+      ),
+    ),
+    /must run from \.onInit/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(/SetErrorLevel 1638\r?\n    Quit/, 'Abort'),
+    ),
+    /downgrade_blocked must set a nonzero exit code and terminate/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      `${installerSource}\nFunction PageReinstall\nFunctionEnd`,
+    ),
+    /old reinstall\/uninstall choice flow/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'DetailPrint "Automatically upgrading',
+        "ExecWait '$R1' $0\n    DetailPrint \"Automatically upgrading",
+      ),
+    ),
+    /must not launch an old uninstaller/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'ReadRegStr $R0 SHCTX "${UNINSTKEY}" "DisplayName"',
+        'StrCpy $R0 "Tono"',
+      ),
+    ),
+    /must read the authoritative NSIS DisplayName/,
+  )
+  for (const field of ['UninstallString', 'DisplayVersion']) {
+    assert.match(
+      validateNsisAutomaticUpgradeFlow(
+        installerSource.replace(
+          new RegExp(`^  ReadRegStr[^\\r\\n]*"${field}"`, 'm'),
+          `  ; ${field} read omitted`,
+        ),
+      ),
+      new RegExp(`must read the authoritative NSIS ${field}`),
+    )
+  }
+  for (const predicate of [
+    '"$R0$ExistingUninstallCommand$ExistingVersion" != ""',
+    '$R0 != "${PRODUCTNAME}"',
+    '$ExistingUninstallCommand == ""',
+    '$ExistingVersion == ""',
+  ]) {
+    assert.match(
+      validateNsisAutomaticUpgradeFlow(
+        installerSource.replace(predicate, '; completeness check omitted'),
+      ),
+      /must reject every incomplete or foreign NSIS registry record/,
+    )
+  }
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'nsis_tauri_utils::SemverCompare $ExistingVersion "0.0.0-0"',
+        '; malformed-version validation omitted',
+      ),
+    ),
+    /must reject malformed SemVer/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        '  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
+        '  Delete "$APPDATA\\com.raydocs.tono\\owner-token"\n  File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
+      ),
+    ),
+    /must not delete Tono application data/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        '!macro StartVergeService',
+        '!macro StartVergeService\n  Delete "$APPDATA\\com.raydocs.tono\\owner-token"',
+      ),
+    ),
+    /install macro StartVergeService must not mutate Tono application data/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        /(!macro RemoveVergeService[\s\S]*?)\$\{If\} \$ConfirmedExistingInstall == 1/,
+        '$1${If} $UpdateMode == 1',
+      ),
+    ),
+    /confirmed existing install|raw \/UPDATE/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Function .onInstFailed',
+        'Function SneakyOldUninstaller\n  ReadRegStr $ExistingUninstallCommand SHCTX "${UNINSTKEY}" "UninstallString"\nFunctionEnd\n\nFunction .onInstFailed',
+      ),
+    ),
+    /UninstallString must not be read outside/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Function .onInstFailed',
+        "Function SneakyOldUninstaller\n  ExecWait '$ExistingUninstallCommand' $0\nFunctionEnd\n\nFunction .onInstFailed",
+      ),
+    ),
+    /must not execute a registry-derived old uninstaller/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        /(Function \.onInstFailed[\s\S]*?)\$\{If\} \$ConfirmedExistingInstall = 1/,
+        '$1${If} $ConfirmedExistingInstall = 0',
+      ),
+    ),
+    /failed confirmed upgrades must preserve/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'File /a "/oname=${MAINBINARYNAME}.exe.next" "${MAINBINARYSRCPATH}"',
+        'File "${MAINBINARYSRCPATH}"',
+      ),
+    ),
+    /main GUI payload.*non-live \.exe\.next/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Delete /REBOOTOK "$INSTDIR\\${MAINBINARYNAME}.exe.rollback"',
+        '; GUI rollback cleanup omitted',
+      ),
+    ),
+    /does not clean the GUI replacement artifact: rollback/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'File /a "/oname={{this}}.next"',
+        'File /a "/oname={{this}}"',
+      ),
+    ),
+    /non-live \.next|must never overwrite a live external binary/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'nsExec::ExecToLog \'"$INSTDIR\\resources\\tono-service-install.exe" --replace-runtime\'',
+        'nsExec::ExecToLog /TIMEOUT=180000 \'"$INSTDIR\\resources\\tono-service-install.exe" --replace-runtime\'',
+      ),
+    ),
+    /must not terminate.*timeout/i,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(/ --replace-runtime'\r?\n/, "'\n"),
+    ),
+    /must delegate.*--replace-runtime/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Call RunMainBinary',
+        '; passive relaunch omitted',
+      ),
+    ),
+    /two guarded \.onInstSuccess branches/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        /(Function \.onInstSuccess[\s\S]*?)\$\{If\} \$ConfirmedExistingInstall = 1/,
+        '$1${If} $PassiveMode = 1',
+      ),
+    ),
+    /confirmed upgrades must relaunch/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        '  ; Auto close this page for passive mode',
+        '  Call RunMainBinary\n\n  ; Auto close this page for passive mode',
+      ),
+    ),
+    /must not force-launch fresh \/P/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        /(Function \.onInstSuccess[\s\S]*?)\$\{If\} \$\{Silent\}\r?\n    Return\r?\n  \$\{EndIf\}/,
+        '$1; silent return omitted',
+      ),
+    ),
+    /silent \/S installs, including \/S \/R/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Section Install',
+        'Section Install\n  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""',
+      ),
+    ),
+    /single canonical RunMainBinary launcher/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        /(Function \.onInstSuccess\r?\n)/,
+        '$1  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" ""\n',
+      ),
+    ),
+    /single canonical RunMainBinary launcher/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Function .onInstFailed',
+        'Function AlternateGuiLauncher\n  Call RunMainBinary\nFunctionEnd\n\nFunction .onInstFailed',
+      ),
+    ),
+    /only in the two guarded \.onInstSuccess branches/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource.replace(
+        'Function .onInstFailed',
+        'Function AlternateGuiLauncher\n  Exec \'"$INSTDIR\\${MAINBINARYNAME}.exe"\'\nFunctionEnd\n\nFunction .onInstFailed',
+      ),
+    ),
+    /single canonical RunMainBinary launcher/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource
+        .replace(
+          canonicalGuiLaunchLine,
+          `  ;${canonicalGuiLaunchLine.trimStart()}`,
+        )
+        .replace(
+          'Section Install',
+          `Section Install\n${canonicalGuiLaunchLine}`,
+        ),
+    ),
+    /RunMainBinary must be reboot-gated/,
+  )
+  assert.match(
+    validateNsisAutomaticUpgradeFlow(
+      installerSource
+        .replace(
+          canonicalGuiLaunchLine,
+          `  ;${canonicalGuiLaunchLine.trimStart()}`,
+        )
+        .replace(
+          'Function .onInstSuccess',
+          `Function .onInstSuccess\n${canonicalGuiLaunchLine}`,
+        ),
+    ),
+    /RunMainBinary must be reboot-gated/,
+  )
+})
+
+test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication', () => {
+  assert.equal(
+    validateWindowsReplacementHelperSource(windowsServiceInstallerSource),
+    null,
+  )
+  assert.match(
+    validateWindowsReplacementHelperSource(
+      windowsServiceInstallerSource.replace(
+        'let app = app_replacement_candidate(&runtime)?;',
+        'let app = runtime;',
+      ),
+    ),
+    /validate the staged GUI before entering.*repair gate/,
+  )
+  assert.match(
+    validateWindowsReplacementHelperSource(
+      windowsServiceInstallerSource.replace(
+        /runtime_candidate,\r?\n\s+app_candidate,/,
+        'runtime_candidate,',
+      ),
+    ),
+    /pass both Mihomo and GUI candidates/,
+  )
+  assert.match(
+    validateWindowsReplacementHelperSource(
+      windowsServiceInstallerSource.replace(
+        'app_replacement.publish()?;',
+        '// GUI publication omitted',
+      ),
+    ),
+    /omits GUI transaction step: app_replacement\.publish/,
+  )
+  assert.match(
+    validateWindowsReplacementHelperSource(
+      windowsServiceInstallerSource
+        .replace('app_replacement.publish()?;', '// final GUI publication omitted')
+        .replace(
+          'runtime_replacement.publish()?;',
+          'app_replacement.publish()?;\n        runtime_replacement.publish()?;',
+        ),
+    ),
+    /only then publish the GUI/,
+  )
+  assert.match(
+    validateWindowsReplacementHelperSource(
+      windowsServiceInstallerSource.replace(
+        'suppress_windows_service_recovery(service)?;',
+        '// SCM recovery suppression omitted',
+      ),
+    ),
+    /recovery suppressed/,
+  )
+})
+
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
-  const cleanup = KNOWN_LEGACY_WINDOWS_PAYLOAD.map(
-    (entry) =>
-      `Delete /REBOOTOK "$INSTDIR\\${entry.replaceAll('/', '\\')}"`,
-  ).join('\n')
+  const cleanup = [
+    ...KNOWN_LEGACY_WINDOWS_PAYLOAD,
+    ...WINDOWS_RUNTIME_REPAIR_ARTIFACTS,
+  ]
+    .map(
+      (entry) => `Delete /REBOOTOK "$INSTDIR\\${entry.replaceAll('/', '\\')}"`,
+    )
+    .join('\n')
   const install = `Section Install\n!insertmacro RemoveVergeService\n!insertmacro StartVergeService\nSectionEnd`
   const template = `${cleanup}\n!insertmacro RemoveKnownLegacyPayload\n!insertmacro RemoveKnownLegacyPayload\nRMDir /REBOOTOK "$INSTDIR"\n${install}`
   assert.equal(validateNsisLegacyCleanup(template), null)
@@ -39,7 +391,9 @@ test('NSIS removes every known old payload on upgrade and uninstall', () => {
     /both upgrade\/install and uninstall/,
   )
   assert.match(
-    validateNsisLegacyCleanup(template.replace('RMDir /REBOOTOK "$INSTDIR"', 'RMDir "$INSTDIR"')),
+    validateNsisLegacyCleanup(
+      template.replace('RMDir /REBOOTOK "$INSTDIR"', 'RMDir "$INSTDIR"'),
+    ),
     /product root/,
   )
   assert.match(
@@ -66,6 +420,57 @@ test('release feature gate rejects synchronous traced WebView dispatch', () => {
     validateReleaseFeatureTree(`${safe}\n└── tauri-plugin-devtools v2.1.0`),
     /devtools/,
   )
+})
+
+test('release TLS gate requires proxy-free pinning and rejects verification bypasses', () => {
+  const safe = {
+    transport:
+      'reqwest::Client::builder()\n.no_proxy()\n.resolve_to_addrs(bootstrap::API_HOST, &pinned)',
+    webdav: 'reqwest::Client::builder().use_rustls_tls().build()',
+    mediaUnlock: 'Client::builder().use_rustls_tls().build()',
+    legacyNetwork: 'Client::builder().tls_backend_rustls().build()',
+  }
+  assert.equal(validateTlsPolicySources(safe), null)
+  assert.match(
+    validateTlsPolicySources({
+      ...safe,
+      transport:
+        'reqwest::Client::builder()\n.resolve_to_addrs(bootstrap::API_HOST, &pinned)',
+    }),
+    /disable application-level proxy discovery/,
+  )
+  for (const [field, bypass] of [
+    ['webdav', '.danger_accept_invalid_certs(true)'],
+    ['mediaUnlock', '.danger_accept_invalid_hostnames( true )'],
+    ['legacyNetwork', '.danger_accept_invalid_certs( true )'],
+  ]) {
+    assert.match(
+      validateTlsPolicySources({ ...safe, [field]: bypass }),
+      /disables TLS certificate or hostname verification/,
+    )
+  }
+})
+
+test('release Tauri handler excludes unused native probes and secret-bearing reads', () => {
+  assert.equal(validateTauriRendererCommandSurface(tauriLibSource), null)
+  for (const command of [
+    'test_delay',
+    'get_runtime_yaml',
+    'get_runtime_proxy_chain_config',
+    'get_profiles',
+    'read_profile_file',
+    'entry_lightweight_mode',
+  ]) {
+    assert.match(
+      validateTauriRendererCommandSurface(
+        tauriLibSource.replace(
+          '            cmd::get_runtime_exists,',
+          `            cmd::get_runtime_exists,\n            cmd::${command},`,
+        ),
+      ),
+      new RegExp(command),
+    )
+  }
 })
 
 test('externalBin accepts only the stable sidecar', () => {
@@ -97,10 +502,10 @@ test('resources whitelist rejects whole-directory packaging', () => {
   )
 })
 
-test('payload validator rejects alpha and Unix helpers', () => {
+test('payload validator requires staged executables and rejects legacy junk', () => {
   const good = [
-    { name: 'Tono.exe' },
-    { name: 'verge-mihomo.exe' },
+    { name: 'Tono.exe.next' },
+    { name: 'verge-mihomo.exe.next' },
     { name: 'resources/tono-service.exe' },
     { name: 'resources/tono-service-install.exe' },
     { name: 'resources/tono-service-uninstall.exe' },
@@ -109,10 +514,7 @@ test('payload validator rejects alpha and Unix helpers', () => {
   assert.equal(validatePayloadEntries(good), null)
 
   assert.match(
-    validatePayloadEntries([
-      ...good,
-      { name: 'verge-mihomo-alpha.exe' },
-    ]),
+    validatePayloadEntries([...good, { name: 'verge-mihomo-alpha.exe' }]),
     /alpha Mihomo/,
   )
   assert.match(
@@ -123,19 +525,33 @@ test('payload validator rejects alpha and Unix helpers', () => {
     /forbidden Windows junk/,
   )
   assert.match(
-    validatePayloadEntries([
-      ...good,
-      { name: 'resources/set_dns.sh' },
-    ]),
+    validatePayloadEntries([...good, { name: 'resources/set_dns.sh' }]),
     /forbidden Windows junk/,
   )
   assert.match(
-    validatePayloadEntries(good.filter((entry) => entry.name !== 'verge-mihomo.exe')),
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'verge-mihomo.exe.next'),
+    ),
     /missing stable Mihomo/,
   )
   assert.match(
-    validatePayloadEntries(good.filter((entry) => entry.name !== 'Tono.exe')),
-    /missing required file basename: Tono\.exe/,
+    validatePayloadEntries(good.filter((entry) => entry.name !== 'Tono.exe.next')),
+    /exactly one staged GUI basename Tono\.exe\.next/,
+  )
+  assert.match(
+    validatePayloadEntries([...good, { name: 'Tono.exe' }]),
+    /must not contain a live or repair GUI basename/,
+  )
+  assert.match(
+    validatePayloadEntries([...good, { name: 'verge-mihomo.exe' }]),
+    /must not contain a live, repair, or alternate stable Mihomo basename/,
+  )
+  assert.match(
+    validatePayloadEntries([
+      ...good,
+      { name: 'verge-mihomo-x86_64-pc-windows-msvc.exe' },
+    ]),
+    /must not contain a live, repair, or alternate stable Mihomo basename/,
   )
 })
 

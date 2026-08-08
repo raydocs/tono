@@ -9,7 +9,9 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
 import {
+  connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
+  formatTonoActionError,
   subscribeTonoStatus,
   tonoAuditEnabled,
   tonoAuditLogPath,
@@ -161,5 +163,36 @@ describe('connectRejectionNeedsServerChoice', () => {
       expect(connectRejectionNeedsServerChoice(new Error(message))).toBe(false)
     }
     expect(connectRejectionNeedsServerChoice(undefined)).toBe(false)
+  })
+})
+
+describe('connectErrorSuggestsServerSwitch', () => {
+  it('recognizes blocked or unreachable exit failures', () => {
+    for (const error of [
+      new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
+      'node or core unreachable after timeout',
+      new Error('this server is currently unavailable (network blocked)'),
+    ]) {
+      expect(connectErrorSuggestsServerSwitch(error)).toBe(true)
+    }
+  })
+
+  it('does not suggest switching for service or account failures', () => {
+    for (const error of [
+      new Error('TONO_SERVICE_BUSY: repair pending'),
+      new Error('not signed in'),
+      undefined,
+    ]) {
+      expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+    }
+  })
+
+  it('maps the stable unreachable prefix to the actionable locale key', () => {
+    expect(
+      formatTonoActionError(
+        new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
   })
 })

@@ -9,6 +9,7 @@ import { useEffect, useMemo } from 'react'
 import { useVerge } from '@/hooks/use-verge'
 import { defaultDarkTheme, defaultTheme } from '@/pages/_theme'
 import { useSetThemeMode, useThemeMode } from '@/services/states'
+import { createTauriNoncedStyleElement } from '@/utils/csp-style-nonce'
 
 const CSS_INJECTION_SCOPE_ROOT = '[data-css-injection-root]'
 const CSS_INJECTION_SCOPE_LIMIT =
@@ -32,11 +33,14 @@ const canUseCssScope = () => {
     return cssScopeSupport
   }
   try {
-    const testStyle = document.createElement('style')
-    testStyle.textContent = '@scope (:root) { }'
-    document.head.appendChild(testStyle)
-    cssScopeSupport = !!testStyle.sheet?.cssRules?.length
-    document.head.removeChild(testStyle)
+    const testStyle = createTauriNoncedStyleElement()
+    try {
+      testStyle.textContent = '@scope (:root) { }'
+      document.head.appendChild(testStyle)
+      cssScopeSupport = !!testStyle.sheet?.cssRules?.length
+    } finally {
+      testStyle.remove()
+    }
   } catch {
     cssScopeSupport = false
   }
@@ -244,11 +248,13 @@ export const useCustomTheme = () => {
       rootEle.setAttribute('data-css-injection-root', 'true')
     }
 
-    let styleElement = document.querySelector('style#verge-theme')
+    let styleElement = document.querySelector<HTMLStyleElement>(
+      'style#verge-theme',
+    )
     if (!styleElement) {
-      styleElement = document.createElement('style')
+      styleElement = createTauriNoncedStyleElement()
       styleElement.id = 'verge-theme'
-      document.head.appendChild(styleElement!)
+      document.head.appendChild(styleElement)
     }
 
     if (styleElement) {
@@ -306,7 +312,7 @@ export const useCustomTheme = () => {
         }
       `
 
-      styleElement.innerHTML = effectiveInjectedCss + globalStyles
+      styleElement.textContent = effectiveInjectedCss + globalStyles
     }
 
     return muiTheme

@@ -91,6 +91,7 @@
       "starting": "Starting…"
     },
     "statusProtected": "Protected cloud route",
+    "statusProtectedOffline": "Protected offline — traffic blocked",
     "statusReality": "Reality cloud protection"
   },
   "dashboard": {
@@ -109,13 +110,19 @@
       "locked": "Locked",
       "blocked": "Blocked"
     },
+    "taglineIdle": "One click routes every app through your selected Tono cloud.",
+    "taglineConnected": "All traffic is protected. Tono will block leaks if the route drops.",
+    "pickServer": "Choose a server to get started",
+    "errorRetry": "Try again",
+    "errorSwitchServer": "Switch server",
     "catalogRequiresChoice": "Your server is no longer available — please reselect",
     "killSwitchError": "Kill switch: {{message}}",
     "killSwitchErrorNote": "Most recent error — it may already be resolved.",
     "errors": {
       "serviceBusy": "Tono Service is installing or repairing. Approve any pending admin prompt, or restart Tono.",
       "releaseReconciling": "Network protection is still releasing. Wait a moment, then connect again.",
-      "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced."
+      "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced.",
+      "nodeUnreachable": "This server could not be reached. Try again, or switch to another server."
     },
     "info": {
       "protection": "Traffic protection",

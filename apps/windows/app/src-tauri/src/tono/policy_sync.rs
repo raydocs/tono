@@ -70,6 +70,10 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
     let client = { state.lock().await.client.clone() };
     let response = client.traffic_policy().await.map_err(|err| err.to_string())?;
 
+    // DIRECT activation keeps a read guard from its final snapshot check through exact WFP
+    // commit. Taking the writer before the product-state mutex makes the policy document,
+    // revision, and digest one indivisible replacement relative to that transaction.
+    let policy_update = state.begin_policy_update().await;
     let behavior_changed = {
         let mut inner = state.lock().await;
         if inner.sign_in_generation != auth_generation {
@@ -98,6 +102,7 @@ async fn sync_once_inner(state: &Arc<TonoState>, app: &AppHandle, auth_generatio
             Err(err) => return Err(err.to_string()),
         }
     };
+    drop(policy_update);
 
     if behavior_changed && state.lock().await.sign_in_generation == auth_generation {
         connection::handle_network_change(state, app).await;

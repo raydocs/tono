@@ -14,11 +14,12 @@ use tokio::sync::RwLock;
 mod windows_identity;
 
 use crate::{
-    AuthenticatedRequest, AuthenticatedSessionRequest, DnsProtectionStatus, IPC_AUTH_EXPECT,
-    IPC_PATH, IpcCommand, KillSwitchLockRequest, KillSwitchStatus, MIN_REQUIRED_SERVICE_REVISION,
-    MacosProxyConfig, OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion,
-    ProxyApplyOutcome, RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome,
-    StartClashRequest, StartClashResult, WriterConfig,
+    AuthenticatedRequest, AuthenticatedSessionRequest, DirectRuntimeReloadResult,
+    DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
+    KillSwitchLockRequest, KillSwitchStatus, MIN_REQUIRED_SERVICE_REVISION, MacosProxyConfig,
+    OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeBundle,
+    ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StartClashResult, WriterConfig,
     core::structure::{JsonConvert, Response},
 };
 
@@ -454,6 +455,69 @@ pub async fn lock_kill_switch(
     protected_call(
         Verb::Post,
         IpcCommand::LockKillSwitch,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn begin_direct_runtime_reload(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+) -> Result<Response<DirectRuntimeReloadResult>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::BeginDirectRuntimeReload,
+        credentials,
+        Some(session),
+        (),
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn replace_direct_endpoints(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: ReplaceDirectEndpointsRequest,
+) -> Result<Response<DirectRuntimeReloadResult>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::ReplaceDirectEndpoints,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn finalize_direct_runtime_reload(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: FinalizeDirectRuntimeReloadRequest,
+) -> Result<Response<DirectRuntimeReloadResult>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::FinalizeDirectRuntimeReload,
+        credentials,
+        Some(session),
+        body,
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn renew_direct_runtime_reload(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: RenewDirectRuntimeReloadRequest,
+) -> Result<Response<DirectRuntimeReloadResult>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::RenewDirectRuntimeReload,
         credentials,
         Some(session),
         body,

@@ -19,6 +19,7 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  animation: tono-layout-fade-in 0.5s;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -73,12 +74,12 @@
   gap: 10px;
   padding: 0 10px;
   margin-bottom: 22px;
-  height: 30px;
+  min-height: 32px;
 }
 .tono-brand-name {
   font-size: 17px;
   font-weight: 650;
-  letter-spacing: -0.25px;
+  letter-spacing: -0.35px;
   flex: 1;
 }
 .tono-nav {
@@ -101,7 +102,10 @@
   line-height: 1.2;
   text-align: left;
   cursor: pointer;
-  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .tono-nav__item:not([aria-current="page"]):hover {
   background: rgba(128, 140, 170, 0.11) !important;
@@ -173,7 +177,9 @@
   font-family: inherit;
   font-size: 14px;
   outline: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 .tono-button {
   display: inline-flex;
@@ -186,7 +192,11 @@
   font-weight: 600;
   cursor: pointer;
   min-height: 36px;
-  transition: filter 0.15s ease, transform 0.1s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    filter 0.15s ease,
+    transform 0.1s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .tono-button:disabled {
   cursor: default;
@@ -205,7 +215,9 @@
   font-family: inherit;
   cursor: pointer;
   border-radius: 7px;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 /* Dashboard */
@@ -237,7 +249,11 @@
   gap: 12px;
 }
 .tono-server-card {
-  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .tono-server-card:not(:disabled):hover {
   transform: translateY(-1px);

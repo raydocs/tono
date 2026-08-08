@@ -991,8 +991,10 @@ fn unknown_protection_message(reason: &str) -> String {
 /// the catalog from the verified cache, then refresh + `me()`. A 401 means
 /// the session is dead (logout, disarm, clear); other errors keep the kill
 /// switch armed and enter the error state. If the Service still wants the
-/// kill switch, surface Protected Offline and wait for the user — never
-/// auto-reconnect here.
+/// kill switch, first surface Protected Offline. Once account/catalog restore finishes, a fresh
+/// strongly proven same-owner active runtime is replaced behind the still-armed barrier so this
+/// process obtains a new Service session/controller; weaker evidence continues to wait for the
+/// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     let generation = {
@@ -1182,6 +1184,11 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                     return;
                 }
                 catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
+                // A repair/restart deliberately preserves active intent, but this process no
+                // longer has the old session token or controller secret. Re-prove the live
+                // current-owner runtime, then schedule the ordinary fully verified replacement;
+                // the restore task does not await that potentially long connection transaction.
+                connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
             }
         }
         Err(ApiError::Unauthorized) => {

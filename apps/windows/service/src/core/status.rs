@@ -62,6 +62,7 @@ pub async fn service_status_snapshot(owner: &AuthenticatedOwner) -> Result<Servi
         active_generation,
         service_state,
         core_pid,
+        core_generation: core.as_ref().map_or(0, |core| core.core_generation),
         core_started_at: core.as_ref().and_then(|core| core.core_started_at),
         last_core_exit_reason: core
             .as_ref()
