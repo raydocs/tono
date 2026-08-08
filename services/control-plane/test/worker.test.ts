@@ -1897,4 +1897,61 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     await waitOnExecutionContext(later);
     expect((await admin(`diagnostics/reports/${referenceCode}`, undefined, 'GET')).status).toBe(404);
   });
+
+  const telemetryWindowPayload = (overrides: Record<string, unknown> = {}) => {
+    const nowMs = Date.now();
+    const base = {
+      schemaVersion: 1,
+      kind: 'periodic_window',
+      windowStartMs: nowMs - 20 * 60 * 1000,
+      windowEndMs: nowMs,
+      appVersion: '0.0.19',
+      osVersion: 'Windows 11 Pro 23H2',
+      osArch: 'x86_64',
+      uiState: 'connected',
+      accountState: 'ready',
+      selectedServer: 'Salt Lake City · Summit',
+      catalogRevision: 7,
+      killSwitchMode: 'locked',
+      killSwitchWanted: true,
+      killSwitchLive: true,
+      dnsEnabled: true,
+      eventCount: 2,
+      eventsDropped: 0,
+      events: [
+        { ts: nowMs - 60_000, kind: 'networkChange', counter: 1 },
+        { ts: nowMs - 30_000, kind: 'connectOk', node: 'Salt Lake City · Summit', elapsedMs: 2100 },
+      ],
+    };
+    return { window: { ...base, ...overrides } };
+  };
+
+  it('accepts periodic telemetry windows and lists them for admin forensics', async () => {
+    const account = await createAccount('telemetry-window');
+    const response = await api('telemetry/windows', json(telemetryWindowPayload(), account.accessToken));
+    expect(response.status).toBe(201);
+    const body = await response.json() as any;
+    expect(typeof body.id).toBe('string');
+    expect(typeof body.receivedAt).toBe('number');
+
+    const stored = await env.DB.prepare(
+      'SELECT * FROM telemetry_windows WHERE id = ?',
+    ).bind(body.id).first<any>();
+    expect(stored.user_id).toBe(account.user.id);
+    expect(JSON.parse(stored.payload_json).events).toHaveLength(2);
+
+    expect((await api('telemetry/windows', json(telemetryWindowPayload()))).status).toBe(401);
+
+    const withEmail = await api('telemetry/windows', json(telemetryWindowPayload({
+      eventCount: 1,
+      events: [{ ts: Date.now(), kind: 'signInOk', email: 'user@example.com' }],
+    }), account.accessToken));
+    expect(withEmail.status).toBe(400);
+
+    const listed = await admin(`telemetry/windows?userId=${account.user.id}`, undefined, 'GET');
+    expect(listed.status).toBe(200);
+    const listBody = await listed.json() as any;
+    expect(listBody.windows.length).toBeGreaterThanOrEqual(1);
+    expect(listBody.windows[0].userId).toBe(account.user.id);
+  });
 });

@@ -821,10 +821,8 @@ async fn run_stages(
     // Re-reading either after the first Core start can select the Tono adapter itself and makes
     // the runtime plan disagree with the WFP preflight that was actually performed.
     let traffic_policy = { state.lock().await.traffic_policy.clone() };
-    let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| {
-            !policy.domains.is_empty() || !policy.media_endpoints.is_empty() || !policy.web_domains.is_empty()
-        });
+    let needs_physical_interface = windows_optional_direct_active()
+        && traffic_policy.as_ref().is_some_and(policy_requests_optional_direct);
 
     // The five preparation probes are independent of each other and all read-only /
     // cancellation-safe (the two port binds are released immediately; the core-path query is a
@@ -2732,13 +2730,39 @@ fn format_tun_probe_failures(failures: &[String]) -> String {
 
 // ---- WeChat-DIRECT cloud policy (Build 28) ----
 
-/// Optional physical-interface DIRECT acceleration currently requires a destructive second Core
-/// start. Mainland reports proved the first full-tunnel runtime could resolve the policy through
-/// the selected node, then the replacement runtime lost controller, TUN, and loopback-proxy
-/// egress together. Retain the already-working full-tunnel runtime until policy activation can be
-/// made transactional with a proven rollback. This removes physical DIRECT permits and therefore
-/// narrows, rather than weakens, the fail-closed policy.
-const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = false;
+/// Product priority: **Claude first**.
+///
+/// Hard invariants that any optional DIRECT pilot must preserve:
+/// 1. Claude / Anthropic traffic always egresses via `Tono-Exit` (US/JP node),
+///    never via `Tono-China-Direct` / physical China path.
+/// 2. System DNS / DoH for non-pinned names always uses `#Tono-Exit`
+///    (`1.1.1.1` / `8.8.8.8` through the tunnel) — Claude must never resolve
+///    or appear to resolve on a mainland recursive resolver.
+/// 3. Health failure (WFP / protected DNS / core / data-plane) stays fail-closed:
+///    block and reconnect; never fall open to the real NIC for Claude.
+///
+/// WeChat-only DIRECT pilot (exact process + reviewed domain/media pins).
+/// Default **false**: this build path still does a destructive second Core
+/// start, which has destabilized the tunnel on mainland links and would hurt
+/// Claude more than WeChat lag helps. Flip to true only on an explicit pilot
+/// build after Claude egress/DNS/fail-closed regression is green.
+/// Scope excludes browser `webDomains`. Failures keep full-tunnel
+/// (`skip_optional_direct_policy`).
+const WINDOWS_WECHAT_DIRECT_PILOT: bool = false;
+/// When true together with the pilot, also accelerate reviewed web video hosts.
+/// Keep false; never open this for Claude-primary builds.
+const WINDOWS_WEB_DIRECT_ENABLED: bool = false;
+
+const fn windows_optional_direct_active() -> bool {
+    WINDOWS_WECHAT_DIRECT_PILOT
+}
+
+fn policy_requests_optional_direct(policy: &tono_core::policy::TonoTrafficPolicy) -> bool {
+    !policy.domains.is_empty()
+        || !policy.media_endpoints.is_empty()
+        || (WINDOWS_WEB_DIRECT_ENABLED && !policy.web_domains.is_empty())
+}
+
 /// Maximum resolved addresses kept per policy domain (Mac parity).
 const MAX_ADDRESSES_PER_DOMAIN: usize = 8;
 /// A cloud policy can currently carry dozens of names. Launching all DoH
@@ -2778,10 +2802,10 @@ async fn apply_cloud_policy(
     let Some(policy) = policy else {
         return Ok(original_secret.to_string());
     };
-    if policy.domains.is_empty() && policy.media_endpoints.is_empty() && policy.web_domains.is_empty() {
+    if !policy_requests_optional_direct(&policy) {
         return Ok(original_secret.to_string());
     }
-    if !WINDOWS_OPTIONAL_DIRECT_ENABLED {
+    if !windows_optional_direct_active() {
         return Ok(skip_optional_direct_policy(
             state,
             original_secret,
@@ -2797,11 +2821,19 @@ async fn apply_cloud_policy(
         ));
     };
 
-    // Resolve through a small bounded pool. WeChat and web sets run in
-    // sequence so their separate batches cannot double the global cap.
+    // Resolve through a small bounded pool. WeChat (and optional web) sets run
+    // in sequence so their separate batches cannot double the global cap.
+    // The pilot resolves only WeChat domains + media; web stays empty unless
+    // WINDOWS_WEB_DIRECT_ENABLED is on.
     let resolution = tokio::time::timeout(CLOUD_POLICY_RESOLUTION_TIMEOUT, async {
-        let wechat = resolve_direct_domains(original_secret, controller_port, &policy.domains, node).await?;
-        let web = resolve_direct_domains(original_secret, controller_port, &policy.web_domains, node).await?;
+        let wechat =
+            resolve_direct_domains(original_secret, controller_port, &policy.domains, node).await?;
+        let web = if WINDOWS_WEB_DIRECT_ENABLED {
+            resolve_direct_domains(original_secret, controller_port, &policy.web_domains, node)
+                .await?
+        } else {
+            Vec::new()
+        };
         Ok::<_, String>((wechat, web))
     })
     .await
@@ -2818,8 +2850,14 @@ async fn apply_cloud_policy(
             return Ok(skip_optional_direct_policy(state, original_secret, reason));
         }
     };
-    let (plan, direct_endpoints) = build_direct_plan(interface, &wechat_pins, &web_pins, &policy.media_endpoints, node)
-        .map_err(StageFailure::error)?;
+    let (plan, direct_endpoints) = build_direct_plan(
+        interface,
+        &wechat_pins,
+        &web_pins,
+        &policy.media_endpoints,
+        node,
+    )
+    .map_err(StageFailure::error)?;
     if plan.hosts.is_empty()
         && plan.tcp_wechat_rules.is_empty()
         && plan.tcp_web_rules.is_empty()
@@ -3370,8 +3408,10 @@ mod tests {
         NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL, POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS,
         RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX, SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX,
         SelectAction, TRANSITION_IN_FLIGHT_REJECTION, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES,
-        TUN_DATA_PLANE_TIMEOUT, VERIFY_LOCK_ATTEMPTS, WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED,
-        build_direct_plan, classify_core_sample, collect_ipv4_literals, controller_error_detail, core_change_fires,
+        TUN_DATA_PLANE_TIMEOUT, VERIFY_LOCK_ATTEMPTS, WFP_ENGINE_WEDGED_PREFIX, WINDOWS_WECHAT_DIRECT_PILOT,
+        WINDOWS_WEB_DIRECT_ENABLED, build_direct_plan, classify_core_sample, collect_ipv4_literals,
+        controller_error_detail, core_change_fires, policy_requests_optional_direct,
+        windows_optional_direct_active,
         format_tun_probe_failures, guard_rejection_is_transient, health_threshold_reached, is_fake_ip,
         is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error, map_wfp_engine_error,
         monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure, protected_dns_unhealthy,
@@ -4434,10 +4474,45 @@ mod tests {
     }
 
     #[test]
-    fn windows_direct_policy_does_not_replace_the_proven_full_tunnel_runtime() {
+    fn windows_wechat_direct_pilot_defaults_off_for_claude_primary() {
+        // Claude-primary product: keep the proven full-tunnel path until a
+        // pilot build explicitly flips WINDOWS_WECHAT_DIRECT_PILOT.
         assert!(
-            !WINDOWS_OPTIONAL_DIRECT_ENABLED,
-            "re-enable only with transactional rollback and a mainland second-start regression test"
+            !WINDOWS_WECHAT_DIRECT_PILOT,
+            "default builds must not second-start Core for WeChat DIRECT"
+        );
+        assert!(!WINDOWS_WEB_DIRECT_ENABLED);
+        assert!(!windows_optional_direct_active());
+
+        let wechat_only = tono_core::policy::TonoTrafficPolicy {
+            version: 2,
+            domains: vec![tono_core::policy::PolicyDomain {
+                host: "res.wx.qq.com".to_string(),
+                ports: vec![443],
+            }],
+            media_endpoints: Vec::new(),
+            web_domains: vec![tono_core::policy::PolicyDomain {
+                host: "www.bilibili.com".to_string(),
+                ports: vec![443],
+            }],
+        };
+        assert!(
+            policy_requests_optional_direct(&wechat_only),
+            "WeChat policy shape is still recognized when a pilot build enables it"
+        );
+
+        let web_only = tono_core::policy::TonoTrafficPolicy {
+            version: 2,
+            domains: Vec::new(),
+            media_endpoints: Vec::new(),
+            web_domains: vec![tono_core::policy::PolicyDomain {
+                host: "www.bilibili.com".to_string(),
+                ports: vec![443],
+            }],
+        };
+        assert!(
+            !policy_requests_optional_direct(&web_only),
+            "web-only policy must never drive the WeChat pilot path"
         );
     }
 

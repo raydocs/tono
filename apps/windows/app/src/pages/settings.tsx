@@ -15,7 +15,9 @@ import { useThemeMode } from '@/services/states'
 import {
   tonoAuditEnabled,
   tonoAuditLogPath,
+  tonoPeriodicTelemetryEnabled,
   tonoSetAuditEnabled,
+  tonoSetPeriodicTelemetryEnabled,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import {
@@ -32,6 +34,9 @@ import { version } from '@root/package.json'
 
 const tonoAuditEnabledQueryKey = ['tonoAuditEnabled'] as const
 const tonoAuditLogPathQueryKey = ['tonoAuditLogPath'] as const
+const tonoPeriodicTelemetryEnabledQueryKey = [
+  'tonoPeriodicTelemetryEnabled',
+] as const
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
@@ -142,6 +147,10 @@ const GeneralCard = () => {
     queryKey: tonoAuditLogPathQueryKey,
     queryFn: tonoAuditLogPath,
   })
+  const { data: periodicTelemetryEnabled } = useQuery({
+    queryKey: tonoPeriodicTelemetryEnabledQueryKey,
+    queryFn: tonoPeriodicTelemetryEnabled,
+  })
   const logPath = auditLogInfo?.path
 
   const handleAutostart = useLockFn(async (value: boolean) => {
@@ -175,6 +184,17 @@ const GeneralCard = () => {
       await tonoSetAuditEnabled(value)
     } catch (error) {
       setCacheData(tonoAuditEnabledQueryKey, previous)
+      showNotice.error(error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  const handlePeriodicTelemetry = useLockFn(async (value: boolean) => {
+    const previous = periodicTelemetryEnabled ?? true
+    setCacheData(tonoPeriodicTelemetryEnabledQueryKey, value)
+    try {
+      await tonoSetPeriodicTelemetryEnabled(value)
+    } catch (error) {
+      setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
       showNotice.error(error instanceof Error ? error.message : String(error))
     }
   })
@@ -235,6 +255,16 @@ const GeneralCard = () => {
           checked={auditEnabled ?? true}
           onChange={(value) => void handleAudit(value)}
           label={t('settings.sections.tono.auditLog.label')}
+        />
+      </Row>
+      <Row
+        label={t('settings.sections.tono.periodicTelemetry.label')}
+        subtitle={t('settings.sections.tono.periodicTelemetry.description')}
+      >
+        <TonoToggle
+          checked={periodicTelemetryEnabled ?? true}
+          onChange={(value) => void handlePeriodicTelemetry(value)}
+          label={t('settings.sections.tono.periodicTelemetry.label')}
         />
       </Row>
       <Row label={t('settings.sections.tono.auditLog.pathLabel')}>
