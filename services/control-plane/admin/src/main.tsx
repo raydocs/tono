@@ -2,11 +2,13 @@ import { Fragment, StrictMode, useEffect, useMemo, useState, type FormEvent, typ
 import { createRoot } from 'react-dom/client';
 import {
   operationsApi,
+  type ActivityDto,
   type AllowlistEntry,
   type CatalogRevisionDto,
   type DashboardDto,
   type HomeExitDto,
   type LiveDto,
+  type LiveQualityNodeDto,
   type NodeDto,
   type ServerDto,
   type UserDetailDto,
@@ -101,6 +103,17 @@ function formatBytes(value: number | null | undefined) {
   return `${size >= 100 ? Math.round(size) : size.toFixed(1)} ${unit}`;
 }
 
+function timeAgo(value: number | null | undefined) {
+  if (value === null || value === undefined) return '—';
+  const seconds = Math.max(0, Math.floor(Date.now() / 1_000) - value);
+  if (seconds < 90) return '刚刚';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
+
 /**
  * Line-level extraction of every proxy `name` under the `proxies:` list of a
  * plaintext Clash catalog. Mirrors the worker's catalogProxyName parsing;
@@ -165,64 +178,363 @@ function Banner({ message, tone = 'info' }: { message: string | null; tone?: 'in
   return <div className={`banner banner-${tone}`}>{message}</div>;
 }
 
+function UsageLeaderboard({ users }: { users: UserDto[] }) {
+  const top = useMemo(
+    () => [...users].sort((a, b) => b.usageBytes - a.usageBytes).slice(0, 5),
+    [users],
+  );
+  if (!top.some((user) => user.usageBytes > 0)) {
+    return <div className="state"><strong>暂无流量数据</strong><span>家庭出口上报用量后自动生成。</span></div>;
+  }
+  const max = top[0]?.usageBytes || 1;
+  return (
+    <div className="lb">
+      {top.map((user, index) => (
+        <div className="lb-row" key={user.id}>
+          <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
+          <span className="lb-email">{user.email}</span>
+          <div className="lb-track">
+            <div className="lb-fill" style={{ width: `${Math.max(2, (user.usageBytes / max) * 100)}%` }} />
+          </div>
+          <span className="lb-value mono">{formatBytes(user.usageBytes)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Dashboard() {
   const resource = useResource(operationsApi.dashboard);
   const live = useResource(operationsApi.live);
-  return <StateBoundary resource={resource}>{(data: DashboardDto) => <>
-    <div className="metrics">
-      {([
-        ['用户', data.users, '已注册账号'],
-        ['设备', data.devices, '客户端设备'],
-        ['服务器', data.servers, '物理机清单'],
-        ['逻辑节点', data.logicalNodes, 'catalog 节点'],
-      ] as const).map(([label, value, hint]) => (
-        <article className="metric" key={label}>
-          <div className="metric-label"><span>{label}</span></div>
-          <div className="metric-value">{value.active}</div>
-          <div className="metric-hint">{value.total} 总计 · {hint}</div>
+  const usersRes = useResource(operationsApi.users);
+  const activityRes = useResource<ActivityDto>(operationsApi.activity);
+  return <StateBoundary resource={resource}>{(data: DashboardDto) => {
+    const liveData = live.state === 'ready' ? live.data : null;
+    const qualityNodes = liveData?.quality?.nodes ?? [];
+    const agents = liveData?.agents ?? [];
+    const agentNames = new Set(agents.map((agent) => agent.name));
+    const offline = qualityNodes.filter((node) => !node.ok);
+    const blocked = qualityNodes.filter((node) => node.block && node.block.status !== 'OK');
+    const degraded = qualityNodes.filter((node) => node.quality && node.quality !== 'ok');
+
+    const nowSec = Math.floor(Date.now() / 1_000);
+    const activityUsers = activityRes.state === 'ready' ? activityRes.data.users : [];
+    const onlineUsers = activityUsers.filter((user) => user.online);
+
+    const occupancy = new Map<string, number>();
+    for (const user of onlineUsers) {
+      if (user.selectedServer) {
+        occupancy.set(user.selectedServer, (occupancy.get(user.selectedServer) ?? 0) + 1);
+      }
+    }
+    const occupancyRows = [...occupancy.entries()].sort((a, b) => b[1] - a[1]);
+    const occupancyMax = Math.max(1, ...occupancyRows.map(([, count]) => count));
+
+    const versions = new Map<string, number>();
+    for (const user of activityUsers) {
+      versions.set(user.clientVersion, (versions.get(user.clientVersion) ?? 0) + 1);
+    }
+    const versionRows = [...versions.entries()].sort((a, b) => b[1] - a[1]);
+    const versionMax = Math.max(1, ...versionRows.map(([, count]) => count));
+
+    const alerts: Array<{ tone: 'error' | 'warn'; text: string }> = [];
+    if (liveData) {
+      for (const node of offline) alerts.push({ tone: 'error', text: `${node.name} 大陆探测失败` });
+      for (const node of blocked) {
+        alerts.push({ tone: 'error', text: `${node.name} 疑似被墙（${node.block?.label ?? '异常'}）` });
+      }
+      for (const node of degraded) alerts.push({ tone: 'warn', text: `${node.name} IP 质量异常（${node.quality}）` });
+      const probeless = qualityNodes.filter((node) => !agentNames.has(node.name));
+      if (probeless.length > 0) {
+        alerts.push({ tone: 'warn', text: `${probeless.length} 台未装探针：${probeless.map((node) => node.name).join('、')}` });
+      }
+    }
+    if (usersRes.state === 'ready') {
+      for (const user of usersRes.data) {
+        if (user.status !== 'active') continue;
+        if (user.quotaBytes && user.usageBytes >= user.quotaBytes) {
+          alerts.push({
+            tone: 'error',
+            text: `${user.email} 已超配额（${formatBytes(user.usageBytes)} / ${formatBytes(user.quotaBytes)}）`,
+          });
+        } else if (user.quotaBytes && user.usageBytes / user.quotaBytes >= 0.8) {
+          alerts.push({
+            tone: 'warn',
+            text: `${user.email} 用量达配额 ${Math.round((user.usageBytes / user.quotaBytes) * 100)}%`,
+          });
+        }
+        if (user.expiresAt) {
+          const days = (user.expiresAt - nowSec) / 86_400;
+          if (days < 0) alerts.push({ tone: 'error', text: `${user.email} 账号已过期` });
+          else if (days <= 7) alerts.push({ tone: 'warn', text: `${user.email} 账号 ${Math.ceil(days)} 天后到期` });
+        }
+      }
+    }
+
+    const nodeState = (node: LiveQualityNodeDto) => {
+      if (!node.ok) return { key: 'down', label: '探测失败' };
+      if (node.block && node.block.status !== 'OK') return { key: 'blocked', label: node.block.label || '被墙' };
+      if (node.quality && node.quality !== 'ok') return { key: 'warn', label: `质量 ${node.quality}` };
+      return { key: 'ok', label: '正常' };
+    };
+
+    return <>
+      <div className="metrics">
+        <article className="metric">
+          <div className="metric-label"><span>节点在线</span></div>
+          <div className="metric-value">
+            {liveData ? `${qualityNodes.length - offline.length}/${qualityNodes.length}` : '—'}
+          </div>
+          <div className="metric-hint">Komari 探针 {agents.length || '—'} 个 · 大陆探测口径</div>
         </article>
-      ))}
-    </div>
-
-    {live.state === 'ready' && (() => {
-      const qualityNodes = live.data.quality?.nodes ?? [];
-      const blocked = qualityNodes.filter((node) => node.block && node.block.status !== 'OK').length;
-      const degraded = qualityNodes.filter((node) => node.quality && node.quality !== 'ok').length;
-      return (
-        <div className="quick-links">
-          <a className="link-card" href="#/monitor">
-            <strong>节点监控：{qualityNodes.length} 台 · 被墙 {blocked} · 质量异常 {degraded}</strong>
-            <span>
-              Komari 探针 {live.data.agents?.length ?? 0} 个 · 采集于 {timestamp(live.data.quality?.updatedAt)}
-            </span>
-          </a>
-        </div>
-      );
-    })()}
-
-    <div className="catalog-banner">
-      <div>
-        <div className="eyebrow">Encrypted catalog</div>
-        <h2>Revision {data.catalog.revision}</h2>
+        <article className={`metric${blocked.length ? ' metric-alert' : ''}`}>
+          <div className="metric-label"><span>被墙</span></div>
+          <div className="metric-value">{liveData ? blocked.length : '—'}</div>
+          <div className="metric-hint">{blocked.length ? blocked.map((n) => n.name).join('、') : '大陆探针多数不通才算'}</div>
+        </article>
+        <article className={`metric${degraded.length ? ' metric-warn' : ''}`}>
+          <div className="metric-label"><span>质量异常</span></div>
+          <div className="metric-value">{liveData ? degraded.length : '—'}</div>
+          <div className="metric-hint">{degraded.length ? degraded.map((n) => n.name).join('、') : 'IP 质量关键词命中'}</div>
+        </article>
+        <article className="metric">
+          <div className="metric-label"><span>用户</span></div>
+          <div className="metric-value">{data.users.active}</div>
+          <div className="metric-hint">{data.users.total} 总计 · 已注册账号</div>
+        </article>
+        <article className="metric">
+          <div className="metric-label"><span>设备</span></div>
+          <div className="metric-value">{data.devices.active}</div>
+          <div className="metric-hint">{data.devices.total} 总计 · 客户端设备</div>
+        </article>
+        <article className="metric">
+          <div className="metric-label"><span>在线用户</span></div>
+          <div className="metric-value">
+            {activityRes.state === 'ready' ? activityRes.data.onlineUsers : '—'}
+          </div>
+          <div className="metric-hint">
+            {activityRes.state === 'ready'
+              ? `${activityRes.data.onlineDevices} 台设备在用 · ${Math.round(activityRes.data.onlineWindowSeconds / 60)} 分钟心跳`
+              : '遥测心跳口径'}
+          </div>
+        </article>
       </div>
-      <div className="muted">更新于 {timestamp(data.catalog.updatedAt)}</div>
-    </div>
 
-    <div className="quick-links">
-      <a className="link-card" href="#/users">
-        <strong>添加用户 / 绑定家庭 IP</strong>
-        <span>白名单授权 → 客户端验证码登录 → 绑定住宅出口</span>
-      </a>
-      <a className="link-card" href="#/homes">
-        <strong>登记家庭出口</strong>
-        <span>proxy name 必须与 catalog 节点 name 完全一致</span>
-      </a>
-      <a className="link-card" href="https://quality.afk.ccwu.cc/" target="_blank" rel="noreferrer">
-        <strong>节点质量面板 ↗</strong>
-        <span>被墙 · 回程 · IP 质量</span>
-      </a>
-    </div>
-  </>}</StateBoundary>;
+      {(liveData || usersRes.state === 'ready') && (
+        <section className={`card attention-card${alerts.length > 0 ? ' has-alerts' : ''}`}>
+          <div className="card-header">
+            <div>
+              <h2>需要关注</h2>
+              <p>被墙 · 探测失败 · 质量异常 · 配额 · 到期</p>
+            </div>
+          </div>
+          {alerts.length === 0 ? (
+            <div className="attention-ok">✓ 所有节点与用户状态正常</div>
+          ) : (
+            <ul className="attention-list">
+              {alerts.map((alert, index) => (
+                <li key={index} className={`attention-${alert.tone}`}>
+                  <span className="attention-dot" aria-hidden />
+                  <span>{alert.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {live.state === 'ready' && qualityNodes.length > 0 && (
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>节点状态</h2>
+              <p>采集于 {timestamp(liveData?.quality?.updatedAt)} · 点任意节点看监控详情</p>
+            </div>
+            <a className="btn btn-outline btn-sm" href="#/monitor">节点监控</a>
+          </div>
+          <div className="card-body node-grid">
+            {qualityNodes.map((node) => {
+              const state = nodeState(node);
+              return (
+                <a className={`node-tile node-${state.key}`} key={node.name} href="#/monitor">
+                  <span className="node-dot" aria-hidden />
+                  <span className="node-tile-main">
+                    <strong>{node.name}</strong>
+                    <small>{state.label}{agentNames.has(node.name) ? '' : ' · 无探针'}</small>
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {activityRes.state === 'ready' && activityRes.data.users.length > 0 && (
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>用户在线状态</h2>
+              <p>客户端每 20 分钟心跳 · 谁在用、用的哪个节点、什么版本</p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>用户</th><th>状态</th><th>在用节点</th><th>客户端</th><th>最后心跳</th></tr>
+              </thead>
+              <tbody>{activityRes.data.users.map((user) => (
+                <tr key={user.userId}>
+                  <td><strong>{user.email}</strong></td>
+                  <td>
+                    {user.online
+                      ? <Status value="active" />
+                      : <span className="muted">离线</span>}
+                    {user.uiState ? <small className="muted">{user.uiState}</small> : null}
+                  </td>
+                  <td>{user.selectedServer ?? <span className="muted">—</span>}</td>
+                  <td className="muted">{user.clientVersion} · {user.osVersion}</td>
+                  <td className="muted">{timeAgo(user.lastSeenAt)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <div className="dash-split">
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>流量榜单</h2>
+              <p>用户累计用量 Top 5</p>
+            </div>
+            <a className="btn btn-outline btn-sm" href="#/users">用户管理</a>
+          </div>
+          <div className="card-body">
+            {usersRes.state === 'ready'
+              ? <UsageLeaderboard users={usersRes.data} />
+              : <div className="state"><span className="spinner" /></div>}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>节点实时占用</h2>
+              <p>在线用户当前连接的节点</p>
+            </div>
+            <a className="btn btn-outline btn-sm" href="#/monitor">节点监控</a>
+          </div>
+          <div className="card-body">
+            {activityRes.state === 'ready' && (occupancyRows.length > 0 ? (
+              <div className="lb">
+                {occupancyRows.map(([name, count]) => (
+                  <div className="lb-row lb-row-plain" key={name}>
+                    <span className="lb-email">{name}</span>
+                    <div className="lb-track">
+                      <div className="lb-fill" style={{ width: `${Math.max(2, (count / occupancyMax) * 100)}%` }} />
+                    </div>
+                    <span className="lb-value mono">{count} 人在用</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="state"><strong>当前无在线用户</strong><span>有心跳上报后显示节点占用。</span></div>)}
+            {activityRes.state !== 'ready' && <div className="state"><span className="spinner" /></div>}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>用户节点分布</h2>
+              <p>家庭 IP 绑定 vs 共享 VPS 池</p>
+            </div>
+          </div>
+          <div className="card-body">
+            {usersRes.state === 'ready' && (() => {
+              const groups = new Map<string, number>();
+              let unbound = 0;
+              for (const user of usersRes.data) {
+                if (user.homeBinding) {
+                  groups.set(user.homeBinding.displayName, (groups.get(user.homeBinding.displayName) ?? 0) + 1);
+                } else {
+                  unbound += 1;
+                }
+              }
+              const rows = [...groups.entries()].sort((a, b) => b[1] - a[1]);
+              const max = Math.max(1, unbound, ...rows.map(([, count]) => count));
+              return (
+                <div className="lb">
+                  {rows.map(([name, count]) => (
+                    <div className="lb-row lb-row-plain" key={name}>
+                      <span className="lb-email">{name}</span>
+                      <div className="lb-track">
+                        <div className="lb-fill" style={{ width: `${Math.max(2, (count / max) * 100)}%` }} />
+                      </div>
+                      <span className="lb-value mono">{count} 人</span>
+                    </div>
+                  ))}
+                  <div className="lb-row lb-row-plain">
+                    <span className="lb-email muted">共享 VPS 池（未绑定家宽）</span>
+                    <div className="lb-track">
+                      <div className="lb-fill" style={{ width: `${Math.max(2, (unbound / max) * 100)}%` }} />
+                    </div>
+                    <span className="lb-value mono">{unbound} 人</span>
+                  </div>
+                </div>
+              );
+            })()}
+            {usersRes.state !== 'ready' && <div className="state"><span className="spinner" /></div>}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>客户端版本分布</h2>
+              <p>按最近心跳上报的版本统计</p>
+            </div>
+          </div>
+          <div className="card-body">
+            {activityRes.state === 'ready' && (versionRows.length > 0 ? (
+              <div className="lb">
+                {versionRows.map(([version, count]) => (
+                  <div className="lb-row lb-row-plain" key={version}>
+                    <span className="lb-email mono">{version}</span>
+                    <div className="lb-track">
+                      <div className="lb-fill" style={{ width: `${Math.max(2, (count / versionMax) * 100)}%` }} />
+                    </div>
+                    <span className="lb-value mono">{count} 人</span>
+                  </div>
+                ))}
+              </div>
+            ) : <div className="state"><strong>暂无数据</strong><span>等待客户端心跳上报。</span></div>)}
+            {activityRes.state !== 'ready' && <div className="state"><span className="spinner" /></div>}
+          </div>
+        </section>
+      </div>
+
+      <div className="quick-links">
+        <a className="link-card" href="#/users">
+          <strong>添加用户 / 绑定家庭 IP</strong>
+          <span>白名单授权 → 客户端验证码登录 → 绑定住宅出口</span>
+        </a>
+        <a className="link-card" href="#/homes">
+          <strong>登记家庭出口</strong>
+          <span>proxy name 必须与 catalog 节点 name 完全一致</span>
+        </a>
+        <a className="link-card" href="https://quality.afk.ccwu.cc/" target="_blank" rel="noreferrer">
+          <strong>节点质量面板 ↗</strong>
+          <span>被墙 · 回程 · IP 质量完整报告</span>
+        </a>
+      </div>
+
+      <div className="muted catalog-footnote">
+        Encrypted catalog · Revision {data.catalog.revision} · 更新于 {timestamp(data.catalog.updatedAt)} ·{' '}
+        {data.servers.active} 服务器 / {data.logicalNodes.active} 逻辑节点
+      </div>
+    </>;
+  }}</StateBoundary>;
 }
 
 function UsersPage() {
@@ -348,11 +660,6 @@ function UsersPage() {
     return catalogProxyNames(catalog.data.yaml).filter((name) => !homeNames.has(name));
   }, [catalog, homes]);
 
-  const leaderboard = useMemo(() => {
-    if (users.state !== 'ready') return [];
-    return [...users.data].sort((a, b) => b.usageBytes - a.usageBytes).slice(0, 5);
-  }, [users]);
-
   return <div className="stack">
     <Banner message={error} tone="error" />
     <Banner message={message} tone="ok" />
@@ -402,31 +709,17 @@ function UsersPage() {
       </div>
     </section>
 
-    {leaderboard.some((user) => user.usageBytes > 0) && (
-      <section className="card">
-        <div className="card-header">
-          <div>
-            <h2>流量榜单</h2>
-            <p>按累计用量排序（家庭出口上报口径），仅列前五。</p>
-          </div>
+    <section className="card">
+      <div className="card-header">
+        <div>
+          <h2>流量榜单</h2>
+          <p>按累计用量排序（家庭出口上报口径），仅列前五。</p>
         </div>
-        <div className="card-body lb">
-          {leaderboard.map((user, index) => (
-            <div className="lb-row" key={user.id}>
-              <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
-              <span className="lb-email">{user.email}</span>
-              <div className="lb-track">
-                <div
-                  className="lb-fill"
-                  style={{ width: `${Math.max(2, (user.usageBytes / (leaderboard[0]?.usageBytes || 1)) * 100)}%` }}
-                />
-              </div>
-              <span className="lb-value mono">{formatBytes(user.usageBytes)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-    )}
+      </div>
+      <div className="card-body">
+        {users.state === 'ready' && <UsageLeaderboard users={users.data} />}
+      </div>
+    </section>
 
     <section className="card">
       <div className="card-header">
@@ -975,7 +1268,7 @@ function App() {
             <div>
               <h1>{selected.label}</h1>
               <p>
-                {page === 'dashboard' && '控制面容量与快捷入口'}
+                {page === 'dashboard' && '节点健康、用户流量与节点分布，一屏速览'}
                 {page === 'monitor' && 'Komari 探针 + 大陆探测 / 被墙 / IP 质量实时聚合'}
                 {page === 'users' && '注册白名单、账号启停、家庭 IP 绑定'}
                 {page === 'homes' && '登记住宅 / 家庭出口节点'}

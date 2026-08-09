@@ -908,6 +908,7 @@ async fn run_stages(
             !policy.document.domains.is_empty()
                 || !policy.document.media_endpoints.is_empty()
                 || !policy.document.web_domains.is_empty()
+                || !policy.document.direct_suffixes.is_empty()
         });
 
     // The preparation probes are independent of each other and all read-only /
@@ -3082,6 +3083,12 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
             ),
         });
     }
+    for (suffix, port) in &plan.web_suffix_rules {
+        expected.push(ControllerDirectRuleProof {
+            proxy: config::WEB_DIRECT_GROUP_NAME.to_owned(),
+            payload: format!("((Network,tcp) && (DstPort,{port}) && (DomainSuffix,{suffix}))"),
+        });
+    }
     expected
 }
 
@@ -3132,6 +3139,7 @@ async fn apply_cloud_policy(
     if policy.document.domains.is_empty()
         && policy.document.media_endpoints.is_empty()
         && policy.document.web_domains.is_empty()
+        && policy.document.direct_suffixes.is_empty()
     {
         return Ok(None);
     }
@@ -3178,6 +3186,7 @@ async fn apply_cloud_policy(
         &wechat_pins,
         &web_pins,
         &policy.document.media_endpoints,
+        &policy.document.direct_suffixes,
         node,
     ) {
         Ok(plan) => plan,
@@ -3189,6 +3198,7 @@ async fn apply_cloud_policy(
     if plan.hosts.is_empty()
         && plan.tcp_wechat_rules.is_empty()
         && plan.tcp_web_rules.is_empty()
+        && plan.web_suffix_rules.is_empty()
         && plan.udp_wechat_rules.is_empty()
     {
         return Ok(None);
@@ -3256,7 +3266,7 @@ async fn apply_cloud_policy(
         expected_controller_rules,
         direct_interface,
         !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
-        !plan.tcp_web_rules.is_empty(),
+        !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty(),
         home_node.is_some(),
         plan.tcp_wechat_rules.len(),
         plan.tcp_web_rules.len(),
@@ -4211,12 +4221,15 @@ pub fn collect_ipv4_literals(value: &serde_json::Value) -> Vec<std::net::Ipv4Add
 
 /// Assemble the runtime plan and the WFP permit tuples. Media addresses are
 /// re-checked against the node IP and the permanently protected resolvers
-/// (defense in depth on top of sync-time validation).
+/// (defense in depth on top of sync-time validation). Suffix-level web rules
+/// pin no IP: they need no DNS resolution and never join the WFP endpoint
+/// set — only the exact (host, IP, port) tuples do.
 pub fn build_direct_plan(
     interface: String,
     wechat_pins: &[(String, Vec<std::net::Ipv4Addr>, Vec<u16>)],
     web_pins: &[(String, Vec<std::net::Ipv4Addr>, Vec<u16>)],
     media: &[tono_core::policy::PolicyMedia],
+    suffixes: &[tono_core::policy::PolicyDomain],
     node: &ValidatedNode,
 ) -> Result<(tono_core::config::DirectPlan, Vec<ProxyEndpoint>), String> {
     let mut hosts: Vec<(String, String)> = Vec::new();
@@ -4259,6 +4272,16 @@ pub fn build_direct_plan(
     web_tcp.dedup();
     udp.sort_unstable();
     udp.dedup();
+    // One (suffix, port) row per entry port; validated ports are already a
+    // [80, 443] subset, so this only normalizes order and duplicates.
+    let mut web_suffix_rules: Vec<(String, u16)> = Vec::new();
+    for entry in suffixes {
+        for port in &entry.ports {
+            web_suffix_rules.push((entry.host.clone(), *port));
+        }
+    }
+    web_suffix_rules.sort_unstable();
+    web_suffix_rules.dedup();
 
     let mut endpoint_keys: std::collections::BTreeSet<(std::net::Ipv4Addr, u16, bool)> = wechat_tcp
         .iter()
@@ -4286,6 +4309,7 @@ pub fn build_direct_plan(
         hosts,
         tcp_wechat_rules: wechat_tcp,
         tcp_web_rules: web_tcp,
+        web_suffix_rules,
         udp_wechat_rules: udp,
     };
     Ok((plan, endpoints))
@@ -5884,6 +5908,11 @@ mod tests {
                 payload: "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))"
                     .to_owned(),
             },
+            ControllerDirectRuleProof {
+                proxy: "Tono-China-Web-Direct".to_owned(),
+                payload: "((Network,tcp) && (DstPort,443) && (DomainSuffix,baidu.com))"
+                    .to_owned(),
+            },
         ];
         let proxies = serde_json::json!({
             "proxies": {
@@ -5901,6 +5930,7 @@ mod tests {
                 {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"},
+                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (DomainSuffix,baidu.com))", "proxy": "Tono-China-Web-Direct"},
                 {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
             ]
@@ -5978,7 +6008,7 @@ mod tests {
         );
 
         let mut wrong_fallback = rules.clone();
-        wrong_fallback["rules"][8]["proxy"] = serde_json::json!("DIRECT");
+        wrong_fallback["rules"][9]["proxy"] = serde_json::json!("DIRECT");
         assert!(
             controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "the final fallback must remain exact Tono-Exit"
@@ -6090,7 +6120,17 @@ mod tests {
                 vec![443],
             ),
         ];
-        let (plan, endpoints) = build_direct_plan("Ethernet 2".to_string(), &pins, &web_pins, &media, &node).unwrap();
+        let suffixes = vec![
+            tono_core::policy::PolicyDomain {
+                host: "baidu.com".to_string(),
+                ports: vec![80, 443],
+            },
+            tono_core::policy::PolicyDomain {
+                host: "zoom.us".to_string(),
+                ports: vec![443],
+            },
+        ];
+        let (plan, endpoints) = build_direct_plan("Ethernet 2".to_string(), &pins, &web_pins, &media, &suffixes, &node).unwrap();
         // WeChat TCP tuples deduped: (9.0.0.10, 80|443) +
         // (9.0.0.11, 80|443) = 4; exact web remains separate by host.
         assert_eq!(plan.tcp_wechat_rules.len(), 4);
@@ -6111,11 +6151,22 @@ mod tests {
         );
         // UDP: only (9.0.0.20, 443|8000).
         assert_eq!(plan.udp_wechat_rules.len(), 2);
+        // Suffix rules: one row per (suffix, port), sorted, no DNS and no
+        // WFP endpoint consumption.
+        assert_eq!(
+            plan.web_suffix_rules,
+            vec![
+                ("baidu.com".to_string(), 80),
+                ("baidu.com".to_string(), 443),
+                ("zoom.us".to_string(), 443),
+            ]
+        );
         // hosts carry both WeChat domains and the exact web domain.
         assert_eq!(plan.hosts.len(), 5);
         assert!(plan.hosts.iter().all(|(_, ip)| ip != "203.0.113.7"));
         // Endpoints: 4 WeChat TCP + 1 distinct web TCP + 2 UDP. The shared
-        // 9.0.0.10:443 tuple consumes only one WFP permit.
+        // 9.0.0.10:443 tuple consumes only one WFP permit; suffix rules pin
+        // no IP and therefore consume none.
         assert_eq!(endpoints.len(), 7);
         assert!(endpoints.iter().all(|endpoint| endpoint.ip != "203.0.113.7"));
         assert_eq!(
@@ -6147,7 +6198,8 @@ mod tests {
             controller_rules.len(),
             wechat_tcp_rows
                 + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
-                + plan.tcp_web_rules.len(),
+                + plan.tcp_web_rules.len()
+                + plan.web_suffix_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"
         );
         assert!(
@@ -6170,7 +6222,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let error = build_direct_plan("Ethernet 2".to_string(), &pins, &[], &[], &node)
+        let error = build_direct_plan("Ethernet 2".to_string(), &pins, &[], &[], &[], &node)
             .expect_err("a partial WFP permit set must never be emitted");
 
         assert!(error.contains("257 unique endpoints"));

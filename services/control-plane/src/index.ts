@@ -645,10 +645,11 @@ async function publicManagedCatalog(
 }
 
 type TrafficPolicy = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   domains: Array<{ host: string; ports: number[] }>;
   mediaEndpoints: Array<{ address: string; ports: number[] }>;
   webDomains?: Array<{ host: string; ports: number[] }>;
+  directSuffixes?: Array<{ host: string; ports: number[] }>;
 };
 
 const emptyTrafficPolicy = (): TrafficPolicy => ({ version: 1, domains: [], mediaEndpoints: [] });
@@ -689,16 +690,25 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints']);
   const isVersion2 = policy.version === 2 &&
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains']);
-  if ((!isVersion1 && !isVersion2) ||
+  const isVersion3 = policy.version === 3 &&
+    exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes']);
+  if ((!isVersion1 && !isVersion2 && !isVersion3) ||
       !Array.isArray(policy.domains) || policy.domains.length > 32 ||
       !Array.isArray(policy.mediaEndpoints) || policy.mediaEndpoints.length > 64 ||
-      (isVersion2 && (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32))) {
+      ((isVersion2 || isVersion3) && (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32)) ||
+      (isVersion3 && (!Array.isArray(policy.directSuffixes) || policy.directSuffixes.length > 64))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid traffic policy version or shape');
   }
   const allowedWeChatSuffixes = ['qq.com', 'qq.com.cn', 'qpic.cn', 'qlogo.cn', 'gtimg.cn', 'gtimg.com', 'wechat.com', 'weixin.com', 'weixinbridge.com', 'wxs.qq.com'];
   const allowedWebSuffixes = ['bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com',
     'xiaohongshu.com', 'xhslink.com', 'xhscdn.com',
-    'feishu.cn', 'feishucdn.com', 'larksuite.com', 'larkoffice.com'];
+    'feishu.cn', 'feishucdn.com', 'larksuite.com', 'larkoffice.com',
+    'baidu.com', 'baidupcs.com', 'bcebos.com', 'baidubcs.com', 'bdstatic.com', 'bdimg.com', 'aliyuncs.com',
+    '10jqka.com.cn', 'iwencai.com', 'eastmoney.com', 'dfcfw.com', 'sina.com.cn', 'sinajs.cn', 'legulegu.com',
+    'optbbs.com', '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'ccxe.com.cn', 'pushplus.plus',
+    'baostock.com', 'sse.com.cn', 'szse.cn',
+    'zoom.us', 'zoom.com', 'zoomgov.com',
+    'oray.com', 'sunlogin.com', 'edu.cn'];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
   const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];
   const seenHosts = new Set<string>();
@@ -749,7 +759,24 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     allowedWebExactHosts,
     true,
   );
-  return { version: 2, domains, mediaEndpoints, webDomains };
+  if (isVersion2) return { version: 2, domains, mediaEndpoints, webDomains };
+  // Suffix-level TCP direct: the host is the suffix value itself (exact
+  // allowlist membership, never a host under it), ports are a [80, 443]
+  // subset, and protected suffixes stay rejected.
+  const seenSuffixes = new Set<string>();
+  const directSuffixes = (policy.directSuffixes as unknown[]).map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !exactKeys(entry as Row, ['host', 'ports'])) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid direct suffix entry');
+    }
+    const { host, ports } = entry as Row;
+    if (typeof host !== 'string' || !allowedWebSuffixes.includes(host) ||
+        protectedSuffixes.includes(host) || seenSuffixes.has(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix');
+    }
+    seenSuffixes.add(host);
+    return { host, ports: canonicalPorts(ports, [80, 443], 'direct suffix ports') };
+  }).sort((a, b) => a.host < b.host ? -1 : a.host > b.host ? 1 : 0);
+  return { version: 3, domains, mediaEndpoints, webDomains, directSuffixes };
 }
 
 async function publicTrafficPolicy(e: Env) {
@@ -1005,6 +1032,54 @@ async function operationsLive(e: Env) {
         }
       : null,
     qualityError: qualityNodes === null ? errorMessage(quality) ?? 'no quality data' : null,
+  };
+}
+
+// Per-user liveness from periodic telemetry windows (≈20 min client cadence).
+// A user is "online" when their latest window is fresher than two cadences.
+const ACTIVITY_ONLINE_SECONDS = 40 * 60;
+
+async function operationsActivity(e: Env) {
+  const rows = await e.DB.prepare(
+    `SELECT t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
+            t.payload_json, u.email
+     FROM telemetry_windows t
+     JOIN users u ON u.id = t.user_id
+     JOIN (
+       SELECT user_id, MAX(received_at) mr FROM telemetry_windows GROUP BY user_id
+     ) latest ON latest.user_id = t.user_id AND latest.mr = t.received_at
+     ORDER BY t.received_at DESC`,
+  ).all<Row>();
+  const nowSec = now();
+  const users = rows.results.map((row) => {
+    let payload: Row = {};
+    try {
+      payload = JSON.parse(String(row.payload_json));
+    } catch {
+      payload = {};
+    }
+    const lastSeenAt = Number(row.received_at);
+    return {
+      userId: String(row.user_id),
+      deviceId: row.device_id === null || row.device_id === undefined ? null : String(row.device_id),
+      email: String(row.email),
+      lastSeenAt,
+      online: nowSec - lastSeenAt <= ACTIVITY_ONLINE_SECONDS,
+      clientVersion: String(row.client_version),
+      osVersion: String(row.os_version),
+      selectedServer: typeof payload.selectedServer === 'string' ? payload.selectedServer : null,
+      uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
+      catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
+    };
+  });
+  const onlineUsers = users.filter((user) => user.online);
+  // Pre-0019 windows carry no device id; fall back to per-user counting there.
+  const onlineDevices = new Set(onlineUsers.map((user) => user.deviceId ?? user.userId)).size;
+  return {
+    onlineWindowSeconds: ACTIVITY_ONLINE_SECONDS,
+    onlineUsers: onlineUsers.length,
+    onlineDevices,
+    users,
   };
 }
 
@@ -1623,6 +1698,7 @@ async function rateLimitTelemetry(e: Env, req: Request, uid: string) {
 async function storeTelemetryWindow(
   e: Env,
   uid: string,
+  deviceId: string | null,
   clientVersion: string,
   osVersion: string,
   windowStartMs: number,
@@ -1633,9 +1709,9 @@ async function storeTelemetryWindow(
   const rowId = id();
   await e.DB.prepare(
     `INSERT INTO telemetry_windows(
-       id, user_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(rowId, uid, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson).run();
+       id, user_id, device_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(rowId, uid, deviceId, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson).run();
   return { id: rowId, receivedAt };
 }
 
@@ -3303,6 +3379,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       await storeTelemetryWindow(
         e,
         a.userId,
+        a.deviceId,
         parsed.appVersion,
         parsed.osVersion,
         parsed.windowStartMs,
@@ -3484,6 +3561,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       if (p === '/api/v1/ops/live') {
         return Response.json({ live: await operationsLive(e) });
+      }
+      if (p === '/api/v1/ops/activity') {
+        return Response.json({ activity: await operationsActivity(e) });
       }
       mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
       if (mt) {

@@ -154,6 +154,26 @@ export interface LiveDto {
   qualityError: string | null;
 }
 
+export interface ActivityUserDto {
+  userId: string;
+  deviceId: string | null;
+  email: string;
+  lastSeenAt: number;
+  online: boolean;
+  clientVersion: string;
+  osVersion: string;
+  selectedServer: string | null;
+  uiState: string | null;
+  catalogRevision: number | null;
+}
+
+export interface ActivityDto {
+  onlineWindowSeconds: number;
+  onlineUsers: number;
+  onlineDevices: number;
+  users: ActivityUserDto[];
+}
+
 interface ErrorEnvelope {
   error?: { code?: string; message?: string };
 }
@@ -197,6 +217,7 @@ const del = <T>(path: string, body?: unknown) => request<T>(path, {
 export const operationsApi = {
   dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
   live: async () => (await get<{ live: LiveDto }>('live')).live,
+  activity: async () => (await get<{ activity: ActivityDto }>('activity')).activity,
   servers: async () => (await get<{ servers: ServerDto[] }>('servers')).servers,
   nodes: async () => (await get<{ nodes: NodeDto[] }>('nodes')).nodes,
   catalogRevisions: async () => (

@@ -90,6 +90,8 @@ impl Default for RuntimePorts {
 ///   `hosts:` section (grouped per domain, sorted).
 /// - `tcp_wechat_rules`: exact (host, IP, port) tuples for WeChat TCP rules.
 /// - `tcp_web_rules`: exact (host, IP, TCP/443) tuples for reviewed web rules.
+/// - `web_suffix_rules`: (suffix, TCP port) tuples for suffix-level web
+///   direct rules — no pinned IP, TCP only, sorted by (suffix, port).
 /// - `udp_wechat_rules`: exact (IP, port) tuples for the WeChat media UDP
 ///   rules (ports ⊆ {443, 8000}).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +100,7 @@ pub struct DirectPlan {
     pub hosts: Vec<(String, String)>,
     pub tcp_wechat_rules: Vec<(String, std::net::Ipv4Addr, u16)>,
     pub tcp_web_rules: Vec<(String, std::net::Ipv4Addr, u16)>,
+    pub web_suffix_rules: Vec<(String, u16)>,
     pub udp_wechat_rules: Vec<(std::net::Ipv4Addr, u16)>,
 }
 
@@ -414,7 +417,7 @@ fn runtime_value(
         .collect();
     if let Some(plan) = direct {
         let has_wechat = !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty();
-        let has_web = !plan.tcp_web_rules.is_empty();
+        let has_web = !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty();
         if has_wechat {
             proxies.push(direct_outbound(DIRECT_GROUP_NAME, &plan.physical_interface));
         }
@@ -487,6 +490,7 @@ fn runtime_value(
     } else if let Some(plan) = direct {
         if !plan.tcp_wechat_rules.is_empty()
             || !plan.tcp_web_rules.is_empty()
+            || !plan.web_suffix_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
         {
             rules.push("AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit".to_string());
@@ -516,6 +520,13 @@ fn runtime_value(
         for (host, address, port) in &plan.tcp_web_rules {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{WEB_DIRECT_GROUP_NAME}"
+            ));
+        }
+        // Suffix-level web direct: TCP only, no pinned IP — the resolver
+        // answers through the tunnel and only the connection leaves directly.
+        for (suffix, port) in &plan.web_suffix_rules {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN-SUFFIX,{suffix})),{WEB_DIRECT_GROUP_NAME}"
             ));
         }
     }
@@ -923,6 +934,7 @@ reality-opts:
                 std::net::Ipv4Addr::new(9, 0, 0, 30),
                 443,
             )],
+            web_suffix_rules: vec![("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)],
             udp_wechat_rules: vec![(std::net::Ipv4Addr::new(9, 0, 0, 20), 443)],
         }
     }
@@ -1054,6 +1066,8 @@ reality-opts:
             expected.push(format!("AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"));
         }
         expected.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
+        expected.push("AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
+        expected.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
         expected.push("AND,((NETWORK,UDP)),REJECT".to_string());
         expected.push("MATCH,Tono-Exit".to_string());
         assert_eq!(
@@ -1144,6 +1158,7 @@ reality-opts:
             hosts: Vec::new(),
             tcp_wechat_rules: Vec::new(),
             tcp_web_rules: Vec::new(),
+            web_suffix_rules: Vec::new(),
             udp_wechat_rules: Vec::new(),
         };
         let runtime =
@@ -1301,6 +1316,8 @@ reality-opts:
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
                 "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
                 "AND,((NETWORK,UDP)),REJECT",
                 "MATCH,Tono-Exit",
             ]

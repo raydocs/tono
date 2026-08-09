@@ -29,12 +29,14 @@ pub const MAX_POLICY_CACHE_BYTES: u64 = 256 * 1024;
 pub const POLICY_CACHE_FILE_NAME: &str = "managed-traffic-policy.json";
 pub const POLICY_VERSION_V1: u32 = 1;
 pub const POLICY_VERSION_V2: u32 = 2;
+pub const POLICY_VERSION_V3: u32 = 3;
 /// Limits shared with the Mac validator.
 pub const MAX_POLICY_DOMAINS: usize = 32;
 pub const MAX_POLICY_MEDIA: usize = 64;
 pub const MAX_POLICY_WEB_DOMAINS: usize = 32;
+pub const MAX_POLICY_DIRECT_SUFFIXES: usize = 64;
 
-pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 20] = [
+pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 50] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -55,6 +57,36 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 20] = [
     "feishucdn.com",
     "larksuite.com",
     "larkoffice.com",
+    "baidu.com",
+    "baidupcs.com",
+    "bcebos.com",
+    "baidubcs.com",
+    "bdstatic.com",
+    "bdimg.com",
+    "aliyuncs.com",
+    "10jqka.com.cn",
+    "iwencai.com",
+    "eastmoney.com",
+    "dfcfw.com",
+    "sina.com.cn",
+    "sinajs.cn",
+    "legulegu.com",
+    "optbbs.com",
+    "100ppi.com",
+    "awtmt.com",
+    "cls.cn",
+    "cninfo.com.cn",
+    "ccxe.com.cn",
+    "pushplus.plus",
+    "baostock.com",
+    "sse.com.cn",
+    "szse.cn",
+    "zoom.us",
+    "zoom.com",
+    "zoomgov.com",
+    "oray.com",
+    "sunlogin.com",
+    "edu.cn",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -101,6 +133,8 @@ pub struct TonoTrafficPolicy {
     pub media_endpoints: Vec<PolicyMedia>,
     #[serde(rename = "webDomains", default)]
     pub web_domains: Vec<PolicyDomain>,
+    #[serde(rename = "directSuffixes", default)]
+    pub direct_suffixes: Vec<PolicyDomain>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,8 +187,9 @@ pub fn is_allowed_direct_domain(host: &str) -> bool {
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
-/// Exact-web hosts use a separate, deliberately narrow suffix allowlist.
-pub fn is_allowed_web_domain(host: &str) -> bool {
+/// Shared web-family host hygiene: strict DNS label shape plus the
+/// protected-suffix rejection. Does not consult any allowlist.
+fn is_well_formed_web_host(host: &str) -> bool {
     if host.is_empty()
         || host.len() > 253
         || host != host.trim()
@@ -187,10 +222,24 @@ pub fn is_allowed_web_domain(host: &str) -> bool {
     {
         return false;
     }
+    true
+}
+
+/// Exact-web hosts use a separate, deliberately narrow suffix allowlist.
+pub fn is_allowed_web_domain(host: &str) -> bool {
+    if !is_well_formed_web_host(host) {
+        return false;
+    }
     host == "ykimg.alicdn.com"
         || ALLOWED_WEB_DOMAIN_SUFFIXES
             .iter()
             .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
+/// Suffix-level direct entries carry the suffix value itself: exact
+/// allowlist table membership, never a host under one of the suffixes.
+pub fn is_allowed_direct_suffix(suffix: &str) -> bool {
+    is_well_formed_web_host(suffix) && ALLOWED_WEB_DOMAIN_SUFFIXES.contains(&suffix)
 }
 
 fn sorted_unique_ports(ports: &[u16], allowed: [u16; 2]) -> Option<Vec<u16>> {
@@ -236,6 +285,10 @@ pub fn validate_policy(
         ["version", "domains", "mediaEndpoints", "webDomains"]
             .into_iter()
             .collect()
+    } else if version == POLICY_VERSION_V3 {
+        ["version", "domains", "mediaEndpoints", "webDomains", "directSuffixes"]
+            .into_iter()
+            .collect()
     } else {
         return Err(PolicyError::InvalidResponse);
     };
@@ -247,6 +300,7 @@ pub fn validate_policy(
     if document.domains.len() > MAX_POLICY_DOMAINS
         || document.media_endpoints.len() > MAX_POLICY_MEDIA
         || document.web_domains.len() > MAX_POLICY_WEB_DOMAINS
+        || document.direct_suffixes.len() > MAX_POLICY_DIRECT_SUFFIXES
     {
         return Err(PolicyError::InvalidResponse);
     }
@@ -294,6 +348,25 @@ pub fn validate_policy(
         return Err(PolicyError::InvalidResponse);
     }
 
+    let mut direct_suffixes = Vec::with_capacity(document.direct_suffixes.len());
+    for entry in &document.direct_suffixes {
+        if !is_allowed_direct_suffix(&entry.host) {
+            return Err(PolicyError::InvalidResponse);
+        }
+        let ports =
+            sorted_unique_ports(&entry.ports, [80, 443]).ok_or(PolicyError::InvalidResponse)?;
+        direct_suffixes.push(PolicyDomain {
+            host: entry.host.clone(),
+            ports,
+        });
+    }
+    direct_suffixes.sort_by(|a, b| a.host.cmp(&b.host));
+    let before = direct_suffixes.len();
+    direct_suffixes.dedup_by(|a, b| a.host == b.host);
+    if direct_suffixes.len() != before {
+        return Err(PolicyError::InvalidResponse);
+    }
+
     let mut media: Vec<PolicyMedia> = Vec::with_capacity(document.media_endpoints.len());
     for entry in &document.media_endpoints {
         let address: Ipv4Addr = entry
@@ -325,6 +398,7 @@ pub fn validate_policy(
         domains,
         media_endpoints: media,
         web_domains,
+        direct_suffixes,
     })
 }
 
@@ -597,6 +671,10 @@ mod tests {
             policy.web_domains.is_empty(),
             "old v1 decodes with no web list"
         );
+        assert!(
+            policy.direct_suffixes.is_empty(),
+            "old v1 decodes with no suffix list"
+        );
     }
 
     #[test]
@@ -608,6 +686,59 @@ mod tests {
         let v1_web = v2.replace("\"version\":2", "\"version\":1");
         assert_eq!(
             validate_policy(&response(1, &v1_web), &no_protected()),
+            Err(PolicyError::InvalidResponse)
+        );
+    }
+
+    #[test]
+    fn accepts_v3_direct_suffixes_and_rejects_bad_ones() {
+        let v3 = r#"{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"video.bilibili.com","ports":[443]}],"directSuffixes":[{"host":"baidu.com","ports":[443,80]},{"host":"zoom.us","ports":[443]}]}"#;
+        let policy = validate_policy(&response(1, v3), &no_protected()).unwrap();
+        assert_eq!(policy.version, 3);
+        assert_eq!(policy.direct_suffixes.len(), 2);
+        // Sorted by host; ports canonicalized.
+        assert_eq!(policy.direct_suffixes[0].host, "baidu.com");
+        assert_eq!(policy.direct_suffixes[0].ports, vec![80, 443]);
+        assert_eq!(policy.direct_suffixes[1].host, "zoom.us");
+        // v2 documents must not carry the suffix list.
+        let v2_suffix = v3.replace("\"version\":3", "\"version\":2");
+        assert_eq!(
+            validate_policy(&response(1, &v2_suffix), &no_protected()),
+            Err(PolicyError::InvalidResponse)
+        );
+
+        // The suffix must be an exact allowlist entry: no hosts under a
+        // suffix, no unlisted or protected names, canonical form only.
+        for host in [
+            "example.com",
+            "www.baidu.com",
+            "anthropic.com",
+            "x.claude.ai",
+            "Baidu.com",
+            "baidu.com.",
+        ] {
+            let doc = format!(
+                r#"{{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{{"host":"{host}","ports":[443]}}]}}"#
+            );
+            assert_eq!(
+                validate_policy(&response(1, &doc), &no_protected()),
+                Err(PolicyError::InvalidResponse),
+                "{host}"
+            );
+        }
+        for ports in ["[]", "[8080]", "[443,443]", "[80,8000]"] {
+            let doc = format!(
+                r#"{{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{{"host":"baidu.com","ports":{ports}}}]}}"#
+            );
+            assert_eq!(
+                validate_policy(&response(1, &doc), &no_protected()),
+                Err(PolicyError::InvalidResponse),
+                "{ports}"
+            );
+        }
+        let duplicate = r#"{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{"host":"baidu.com","ports":[443]},{"host":"baidu.com","ports":[80]}]}"#;
+        assert_eq!(
+            validate_policy(&response(1, duplicate), &no_protected()),
             Err(PolicyError::InvalidResponse)
         );
     }

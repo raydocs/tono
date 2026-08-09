@@ -51,6 +51,7 @@ const tailscaleRequests: string[] = [];
 const emailCodes = new Map<string, string>();
 let liveAgentsPayload: unknown = { data: [] };
 let liveQualityPayload: unknown = { nodes: [] };
+let liveRequestHeaders: { clientId: string | null; clientSecret: string | null } | null = null;
 let oidcPrivateKey: CryptoKey;
 let oidcPublicKey: JsonWebKey & { kid: string };
 
@@ -276,6 +277,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       }
 
       if (url === 'https://ops.afk.ccwu.cc/api/nodes' && method === 'GET') {
+        liveRequestHeaders = {
+          clientId: request.headers.get('cf-access-client-id'),
+          clientSecret: request.headers.get('cf-access-client-secret'),
+        };
         return Response.json(liveAgentsPayload);
       }
 
@@ -568,6 +573,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(live.quality.nodes[0].backtrace).toBeUndefined();
     expect(live.agentsError).toBeNull();
     expect(live.qualityError).toBeNull();
+
+    // With a service token configured, live sources receive Access credentials.
+    (env as unknown as Env).OPS_ACCESS_CLIENT_ID = 'test-client-id';
+    (env as unknown as Env).OPS_ACCESS_CLIENT_SECRET = 'test-client-secret';
+    const authed = await operations('live');
+    expect(authed.status).toBe(200);
+    expect(liveRequestHeaders).toEqual({ clientId: 'test-client-id', clientSecret: 'test-client-secret' });
+    (env as unknown as Env).OPS_ACCESS_CLIENT_ID = undefined;
+    (env as unknown as Env).OPS_ACCESS_CLIENT_SECRET = undefined;
 
     liveAgentsPayload = { data: [] };
     liveQualityPayload = { nodes: [] };
@@ -1301,6 +1315,37 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
     });
 
+    const suffixPolicy = {
+      ...webPolicy,
+      version: 3,
+      directSuffixes: [
+        { host: 'zoom.us', ports: [443] },
+        { host: 'baidu.com', ports: [443, 80] },
+      ],
+    };
+    const suffixed = await admin(
+      'traffic-policy',
+      { policy: suffixPolicy, expectedRevision: 2 },
+      'PUT',
+    );
+    expect(suffixed.status).toBe(200);
+    expect(JSON.parse((await suffixed.json() as any).json)).toEqual({
+      version: 3,
+      domains: [
+        { host: 'res.wx.qq.com', ports: [443] },
+        { host: 'wx.qlogo.cn', ports: [80, 443] },
+      ],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443, 8000] }],
+      webDomains: [
+        { host: 'www.bilibili.com', ports: [443] },
+        { host: 'ykimg.alicdn.com', ports: [443] },
+      ],
+      directSuffixes: [
+        { host: 'baidu.com', ports: [80, 443] },
+        { host: 'zoom.us', ports: [443] },
+      ],
+    });
+
     const invalidPolicies = [
       { ...policy, version: 3 },
       { ...policy, version: 2 },
@@ -1319,9 +1364,20 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         domains: [{ host: 'v.qq.com', ports: [443] }],
         webDomains: [{ host: 'v.qq.com', ports: [443] }],
       },
+      // v3: the suffix must be an exact allowlist entry, never a host under
+      // it, never protected, and ports must stay within [80, 443].
+      { ...suffixPolicy, directSuffixes: [{ host: 'example.com', ports: [443] }] },
+      { ...suffixPolicy, directSuffixes: [{ host: 'www.baidu.com', ports: [443] }] },
+      { ...suffixPolicy, directSuffixes: [{ host: 'anthropic.com', ports: [443] }] },
+      { ...suffixPolicy, directSuffixes: [{ host: 'baidu.com', ports: [8080] }] },
+      { ...suffixPolicy, directSuffixes: [{ host: 'baidu.com', ports: [] }] },
+      {
+        ...suffixPolicy,
+        directSuffixes: [{ host: 'baidu.com', ports: [443] }, { host: 'baidu.com', ports: [80] }],
+      },
     ];
     for (const invalid of invalidPolicies) {
-      const response = await admin('traffic-policy', { policy: invalid, expectedRevision: 2 }, 'PUT');
+      const response = await admin('traffic-policy', { policy: invalid, expectedRevision: 3 }, 'PUT');
       expect(response.status).toBe(400);
       expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
     }
@@ -2616,5 +2672,34 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const listBody = await listed.json() as any;
     expect(listBody.windows.length).toBeGreaterThanOrEqual(1);
     expect(listBody.windows[0].userId).toBe(account.user.id);
+  });
+
+  it('reports per-user online activity with device attribution to Access admins', async () => {
+    const account = await createAccount('activity');
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload(), account.accessToken));
+    expect(posted.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT device_id FROM telemetry_windows ORDER BY received_at DESC LIMIT 1',
+    ).first<any>();
+    expect(stored.device_id).toBe(account.device.id);
+
+    const unauthorized = await api('ops/activity', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const response = await operations('activity');
+    expect(response.status).toBe(200);
+    const { activity } = await response.json() as any;
+    expect(activity.onlineUsers).toBeGreaterThanOrEqual(1);
+    expect(activity.onlineDevices).toBeGreaterThanOrEqual(1);
+    const me = activity.users.find((u: any) => u.userId === account.user.id);
+    expect(me).toBeDefined();
+    expect(me.online).toBe(true);
+    expect(me.deviceId).toBe(account.device.id);
+    expect(me.selectedServer).toBe('Salt Lake City · Summit');
+    expect(me.uiState).toBe('connected');
+    expect(me.catalogRevision).toBe(7);
+    expect(me.payloadJson).toBeUndefined();
   });
 });

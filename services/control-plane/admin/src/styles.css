@@ -769,3 +769,88 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* —— Dashboard: node status grid (Komari-style at-a-glance) —— */
+.metric-alert .metric-value { color: hsl(0 90% 75%); }
+.metric-warn .metric-value { color: hsl(38 90% 70%); }
+.metric-alert { border-color: hsl(0 40% 28%); }
+.metric-warn { border-color: hsl(38 40% 28%); }
+
+.node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.6rem;
+}
+.node-tile {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--secondary) / 0.4);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.node-tile:hover { border-color: hsl(var(--ring)); background: hsl(var(--secondary)); }
+.node-tile strong {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-tile small { color: hsl(var(--muted-foreground)); font-size: 0.72rem; }
+.node-tile-main { min-width: 0; }
+.node-dot {
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: hsl(var(--muted-foreground));
+}
+.node-ok .node-dot { background: hsl(142 70% 45%); box-shadow: 0 0 6px hsl(142 70% 45% / 0.6); }
+.node-warn .node-dot { background: hsl(38 92% 50%); box-shadow: 0 0 6px hsl(38 92% 50% / 0.6); }
+.node-warn { border-color: hsl(38 40% 28%); }
+.node-blocked .node-dot, .node-down .node-dot { background: hsl(0 62.8% 50%); box-shadow: 0 0 6px hsl(0 62.8% 50% / 0.6); }
+.node-blocked, .node-down { border-color: hsl(0 40% 28%); }
+
+.catalog-footnote { font-size: 0.75rem; }
+
+/* —— Dashboard split cards —— */
+.dash-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+.lb-row-plain { grid-template-columns: minmax(0, 15rem) 1fr auto; }
+
+/* —— Dashboard: attention alerts —— */
+.attention-card .card-header { padding-bottom: 0; }
+.attention-card .card-header p { margin: 0.15rem 0 0; }
+.attention-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.75rem 1.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.875rem;
+}
+.attention-list li { display: flex; align-items: baseline; gap: 0.55rem; }
+.attention-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  transform: translateY(-1px);
+}
+.attention-error .attention-dot { background: hsl(0 62.8% 50%); box-shadow: 0 0 6px hsl(0 62.8% 50% / 0.6); }
+.attention-warn .attention-dot { background: hsl(38 92% 50%); box-shadow: 0 0 6px hsl(38 92% 50% / 0.6); }
+.attention-error { color: hsl(0 90% 75%); }
+.attention-warn { color: hsl(38 90% 70%); }
+.attention-ok {
+  padding: 0.5rem 1.25rem 1.1rem;
+  color: hsl(142 70% 70%);
+  font-size: 0.875rem;
+}
