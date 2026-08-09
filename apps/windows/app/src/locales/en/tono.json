@@ -24,12 +24,14 @@
       "all": "All",
       "proxied": "Proxied",
       "direct": "Direct",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "local": "Local"
     },
     "routes": {
       "proxied": "Proxied",
       "direct": "Direct",
-      "rejected": "Rejected"
+      "rejected": "Rejected",
+      "local": "Local"
     },
     "columns": {
       "process": "Process",

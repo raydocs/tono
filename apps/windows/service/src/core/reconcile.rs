@@ -1,4 +1,4 @@
-use crate::core::process::{process_identity, terminate_process};
+use crate::core::process::{process_identity, sweep_orphan_core_processes, terminate_process};
 use crate::core::runtime::{
     cleanup_core_socket, is_core_socket_reachable, read_core_runtime_record,
     remove_core_runtime_record,
@@ -28,46 +28,55 @@ pub async fn reconcile_service_startup() -> Result<()> {
     STARTUP_RECONCILED.store(false, Ordering::Release);
     info!("Running service startup reconciliation");
 
-    let Some(record) = read_core_runtime_record().await? else {
-        STARTUP_RECONCILED.store(true, Ordering::Release);
-        return Ok(());
+    let record = read_core_runtime_record().await?;
+    if let Some(record) = record.as_ref() {
+        let current_identity = process_identity(record.pid)?;
+        let socket_reachable = is_core_socket_reachable(&record.ipc_path).await;
+
+        if current_identity.as_ref() == Some(&record.identity) {
+            warn!(
+                "Found verified previous core process {} during startup; stopping it before supervision resumes",
+                record.pid
+            );
+            terminate_process(record.pid).await?;
+            cleanup_core_socket(&record.ipc_path).await;
+            remove_core_runtime_record().await;
+        } else {
+            if let Some(current_identity) = current_identity {
+                warn!(
+                    "Runtime PID {} now belongs to a different process ({:?}); refusing to terminate it",
+                    record.pid, current_identity
+                );
+            }
+            if !socket_reachable {
+                info!(
+                    "Cleaning stale core socket from dead process: {}",
+                    record.ipc_path
+                );
+                cleanup_core_socket(&record.ipc_path).await;
+            } else {
+                warn!(
+                    "Core runtime PID {} is dead but socket {} is reachable; leaving socket untouched",
+                    record.pid, record.ipc_path
+                );
+            }
+
+            remove_core_runtime_record().await;
+        }
+    }
+
+    // The record-based cleanup above only ever reaches the one PID the record names, and only
+    // while its identity still matches. Anything else running Tono's installed core image — a
+    // core whose record was deleted after an identity mismatch on an earlier boot, or one spawned
+    // by a previous service instance or channel — is an orphan only this path sweep can see, and
+    // it would go on holding the fixed DNS listener and TUN device against every restored core.
+    // The recorded PID stays vouched for: whatever now holds it was deliberately left alone above.
+    let exempt: &[u32] = match record.as_ref() {
+        Some(record) => std::slice::from_ref(&record.pid),
+        None => &[],
     };
+    sweep_orphan_core_processes(exempt).await?;
 
-    let current_identity = process_identity(record.pid)?;
-    let socket_reachable = is_core_socket_reachable(&record.ipc_path).await;
-
-    if current_identity.as_ref() == Some(&record.identity) {
-        warn!(
-            "Found verified previous core process {} during startup; stopping it before supervision resumes",
-            record.pid
-        );
-        terminate_process(record.pid).await?;
-        cleanup_core_socket(&record.ipc_path).await;
-        remove_core_runtime_record().await;
-        STARTUP_RECONCILED.store(true, Ordering::Release);
-        return Ok(());
-    }
-
-    if let Some(current_identity) = current_identity {
-        warn!(
-            "Runtime PID {} now belongs to a different process ({:?}); refusing to terminate it",
-            record.pid, current_identity
-        );
-    }
-    if !socket_reachable {
-        info!(
-            "Cleaning stale core socket from dead process: {}",
-            record.ipc_path
-        );
-        cleanup_core_socket(&record.ipc_path).await;
-    } else {
-        warn!(
-            "Core runtime PID {} is dead but socket {} is reachable; leaving socket untouched",
-            record.pid, record.ipc_path
-        );
-    }
-
-    remove_core_runtime_record().await;
     STARTUP_RECONCILED.store(true, Ordering::Release);
     Ok(())
 }

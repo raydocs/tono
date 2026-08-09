@@ -1617,6 +1617,7 @@ export interface TranslationResources {
         filters: {
           all: string
           direct: string
+          local: string
           proxied: string
           rejected: string
         }
@@ -1625,6 +1626,7 @@ export interface TranslationResources {
         routeFilter: string
         routes: {
           direct: string
+          local: string
           proxied: string
           rejected: string
         }

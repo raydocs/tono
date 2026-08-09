@@ -1,4 +1,4 @@
-export type ActivityRoute = 'proxied' | 'direct' | 'rejected'
+export type ActivityRoute = 'proxied' | 'direct' | 'rejected' | 'local'
 
 export interface ActivityRow {
   id: string
@@ -84,7 +84,12 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     rulePayload ? `${ruleName} (${rulePayload})` : ruleName || '—',
     220,
   )
-  const route = classifyActivityRoute(connection)
+  // Loopback targets (every app's DNS to the core's 127.0.0.1:53 hijack listener,
+  // plus anything else local) terminate in DIRECT by design but are not "direct
+  // Internet" — showing them as 直连 reads as a leak that does not exist.
+  const route = /^127\.|^::1$|^\[::1\]$/.test(host)
+    ? ('local' as const)
+    : classifyActivityRoute(connection)
 
   return {
     id: connection.id,

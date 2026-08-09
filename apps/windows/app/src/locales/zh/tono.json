@@ -24,12 +24,14 @@
       "all": "全部",
       "proxied": "已代理",
       "direct": "直连",
-      "rejected": "已拒绝"
+      "rejected": "已拒绝",
+      "local": "本地"
     },
     "routes": {
       "proxied": "已代理",
       "direct": "直连",
-      "rejected": "已拒绝"
+      "rejected": "已拒绝",
+      "local": "本地"
     },
     "columns": {
       "process": "进程",

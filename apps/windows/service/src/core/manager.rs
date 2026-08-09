@@ -531,6 +531,17 @@ impl CoreManager {
 
     pub async fn start_core(&self, config: ClashConfig, owner: OwnerIdentity) -> Result<()> {
         ensure_startup_reconciled().await?;
+        // Startup reconciliation only consults the runtime record, so a core this process does
+        // not track — orphaned by an earlier service instance or channel, or by a record deleted
+        // after an identity mismatch — survives it and would fight the core spawned below for
+        // the fixed DNS listener (127.0.0.1:53) and the TUN device. Sweep those by install-path
+        // identity before anything else happens. The core this manager currently supervises is
+        // vouched for; the stop-and-replace logic below decides its fate.
+        crate::core::process::sweep_orphan_core_processes(&[
+            self.running_pid.load(Ordering::Relaxed),
+        ])
+        .await
+        .context("orphaned core sweep failed before core start")?;
         set_core_lifecycle_state(ServiceLifecycleState::Starting);
         if self.running_pid.load(Ordering::Relaxed) != 0 {
             info!("Core is already running, stopping existing instance");

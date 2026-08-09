@@ -293,3 +293,165 @@ fn terminate_process_windows(pid: u32) -> Result<()> {
             .with_context(|| format!("failed while waiting for process {pid} to terminate")),
     }
 }
+
+/// Which of the enumerated `(pid, canonical executable)` candidates are orphaned cores: the
+/// image is Tono's installed core and no caller vouches for the PID (the runtime record's PID,
+/// the core this process currently supervises, or one a start has just spawned). Pure, so the
+/// selection rule is testable without a live process table.
+#[cfg_attr(all(not(windows), not(test)), allow(dead_code))]
+pub(super) fn select_orphan_core_pids(
+    candidates: &[(u32, String)],
+    exempt_pids: &std::collections::BTreeSet<u32>,
+    is_installed_core_image: impl Fn(&str) -> bool,
+) -> Vec<u32> {
+    let mut selected: Vec<u32> = candidates
+        .iter()
+        .filter(|(pid, executable)| {
+            !exempt_pids.contains(pid) && is_installed_core_image(executable)
+        })
+        .map(|(pid, _)| *pid)
+        .collect();
+    selected.sort_unstable();
+    selected.dedup();
+    selected
+}
+
+/// Terminate every running copy of Tono's installed core image that nothing live vouches for.
+///
+/// This is the fallback the record-based cleanup cannot be: `reconcile_service_startup` only
+/// ever acts on the one PID the runtime record names, and `CoreManager` only tracks children
+/// this process spawned — a core whose record was deleted after an identity mismatch, or one
+/// spawned by a previous service instance or channel, is invisible to both and goes on holding
+/// the fixed DNS listener and the TUN device against every later core. The sweep identifies
+/// cores by canonicalized executable path against the same install-location allowlist a core
+/// start is validated with, never by image name, so a mihomo the user installed themselves,
+/// anywhere else on disk, is never touched.
+///
+/// `exempt_pids` are processes the caller vouches for: the core this process currently
+/// supervises, or one a start has just spawned. The runtime record's PID is always added here:
+/// a mismatched record means the PID now belongs to someone the record logic deliberately left
+/// alone, and a stale record must never become a license to kill whatever now holds it.
+#[cfg(windows)]
+pub(super) async fn sweep_orphan_core_processes(exempt_pids: &[u32]) -> Result<u32> {
+    // Test builds never sweep the real process table: the selection rule is unit-tested directly,
+    // and a `cargo test` run on a machine with Tono installed must not be able to kill the
+    // installed core. This mirrors `STARTUP_RECONCILED` defaulting to done under `feature = "test"`.
+    if cfg!(feature = "test") {
+        let _ = exempt_pids;
+        return Ok(0);
+    }
+    let mut exempt: std::collections::BTreeSet<u32> = exempt_pids.iter().copied().collect();
+    if let Some(record) = crate::core::runtime::read_core_runtime_record().await? {
+        exempt.insert(record.pid);
+    }
+    let orphans = select_orphan_core_pids(&core_image_candidates()?, &exempt, |path| {
+        crate::core::runtime_generation::is_installed_core_image_path(std::path::Path::new(path))
+    });
+    let mut terminated = 0_u32;
+    for pid in orphans {
+        match terminate_process(pid).await {
+            Ok(()) => terminated += 1,
+            Err(error) => warn!("Failed to terminate orphaned core process {pid}: {error:#}"),
+        }
+    }
+    if terminated > 0 {
+        warn!(
+            "Terminated {terminated} orphaned core process(es) running Tono's installed core image"
+        );
+    }
+    Ok(terminated)
+}
+
+/// Process-table enumeration is implemented for Windows only (Toolhelp32); unix core cleanup
+/// remains record- and kill-on-close-based.
+#[cfg(not(windows))]
+pub(super) async fn sweep_orphan_core_processes(exempt_pids: &[u32]) -> Result<u32> {
+    let _ = exempt_pids;
+    Ok(0)
+}
+
+/// Every running process whose image file name is the core's, as `(pid, canonical executable)`.
+/// The name is only a pre-filter that keeps the per-process path query bounded; identity is
+/// decided on the canonicalized path by the caller.
+#[cfg(windows)]
+fn core_image_candidates() -> Result<Vec<(u32, String)>> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+
+    const CORE_IMAGE_FILE_NAME: &str = "verge-mihomo.exe";
+
+    // SAFETY: a snapshot of the process table has no caller-supplied pointers to invalidate.
+    let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error())
+            .context("CreateToolhelp32Snapshot failed while sweeping for orphaned cores");
+    }
+    struct SnapshotHandle(windows_sys::Win32::Foundation::HANDLE);
+    impl Drop for SnapshotHandle {
+        fn drop(&mut self) {
+            // SAFETY: the handle came from a successful `CreateToolhelp32Snapshot` and closes once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+    let snapshot = SnapshotHandle(raw);
+
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+    let mut candidates = Vec::new();
+    // SAFETY: `snapshot` is a live snapshot and `entry` a valid, correctly sized in/out buffer.
+    let mut has_entry = unsafe { Process32FirstW(snapshot.0, &mut entry) } != 0;
+    while has_entry {
+        let name_end = entry
+            .szExeFile
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(entry.szExeFile.len());
+        let image_name = String::from_utf16_lossy(&entry.szExeFile[..name_end]);
+        if image_name.eq_ignore_ascii_case(CORE_IMAGE_FILE_NAME) {
+            // `process_identity` re-derives and canonicalizes the full image path; a process
+            // that exited mid-sweep or refuses inspection is skipped, never guessed at.
+            if let Ok(Some(identity)) = process_identity(entry.th32ProcessID) {
+                candidates.push((entry.th32ProcessID, identity.executable));
+            }
+        }
+        // SAFETY: same contract as the first call.
+        has_entry = unsafe { Process32NextW(snapshot.0, &mut entry) } != 0;
+    }
+    Ok(candidates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_orphan_core_pids;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn orphan_selection_keeps_only_unvouched_installed_core_images() {
+        let candidates = vec![
+            (100_u32, r"C:\Program Files\Tono\verge-mihomo.exe".to_owned()),
+            (200_u32, r"C:\Program Files\Tono\verge-mihomo.exe".to_owned()),
+            (300_u32, r"C:\Users\alice\mihomo\verge-mihomo.exe".to_owned()),
+        ];
+        let exempt = BTreeSet::from([100_u32]);
+        let installed = |path: &str| path.starts_with(r"C:\Program Files\Tono\");
+
+        assert_eq!(
+            select_orphan_core_pids(&candidates, &exempt, installed),
+            vec![200],
+            "the vouched-for PID and the image outside the install locations must both survive"
+        );
+    }
+
+    #[test]
+    fn orphan_selection_with_nothing_running_selects_nothing() {
+        assert!(
+            select_orphan_core_pids(&[], &BTreeSet::new(), |_| true).is_empty(),
+            "an empty process table yields an empty selection"
+        );
+    }
+}

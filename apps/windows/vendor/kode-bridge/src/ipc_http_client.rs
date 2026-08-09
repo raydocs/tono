@@ -236,12 +236,24 @@ impl IpcHttpClient {
     /// given up is dropped with this future — it is never cached or pooled, because registering a
     /// verifier disables pooling entirely.
     async fn create_direct_connection(&self) -> Result<LocalSocketStream> {
-        let mut last_error = None;
+        // ERROR_PIPE_BUSY (os error 231): every server-side pipe instance is momentarily
+        // occupied — the accept loop creates the next instance within milliseconds. Waiting it
+        // out is always safe because connection establishment carries no lost-response
+        // ambiguity (no request has been sent yet), even for mutating routes whose transport
+        // retry budget is deliberately one.
+        const PIPE_BUSY: i32 = 231;
+        const BUSY_ATTEMPTS: usize = 10;
+        const BUSY_DELAY: Duration = Duration::from_millis(50);
 
-        for attempt in 0..self.config.max_retries {
+        let mut last_error = None;
+        let mut busy_extra = 0_usize;
+        let mut attempt = 0_usize;
+
+        while attempt < self.config.max_retries {
             if attempt > 0 {
                 tokio::time::sleep(self.config.retry_delay).await;
             }
+            attempt += 1;
 
             #[cfg(windows)]
             let connection = if let Some(verifier) = self.config.windows_server_pid_verifier {
@@ -256,18 +268,24 @@ impl IpcHttpClient {
 
             match connection {
                 Ok(stream) => {
-                    debug!("Created direct connection on attempt {}", attempt + 1);
+                    debug!("Created direct connection on attempt {attempt}");
                     return Ok(stream);
                 }
                 Err(e) => {
-                    trace!("Connection attempt {} failed: {}", attempt + 1, e);
+                    trace!("Connection attempt {attempt} failed: {e}");
                     // Tono: a refused server identity is a verdict, not a transient fault. Retrying
                     // it only parks another blocking thread against the same wedged or impostor
                     // server, so stop here and let the caller see the refusal.
                     let refused = e.kind() == std::io::ErrorKind::PermissionDenied;
+                    let pipe_busy = e.raw_os_error() == Some(PIPE_BUSY);
                     last_error = Some(e);
                     if refused {
                         break;
+                    }
+                    if pipe_busy && busy_extra < BUSY_ATTEMPTS {
+                        busy_extra += 1;
+                        attempt -= 1; // Busy retries do not consume the retry budget.
+                        tokio::time::sleep(BUSY_DELAY).await;
                     }
                 }
             }

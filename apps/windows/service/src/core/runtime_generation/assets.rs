@@ -658,6 +658,19 @@ pub(super) fn classify_windows_core_path(
     WindowsCorePathClass::OutsideAllowlist
 }
 
+/// Whether a canonicalized executable path is the image of Tono's installed core: the file name
+/// the installer ships inside a location the core-path allowlist already trusts
+/// ([`is_permitted_windows_core_location`]). The orphan-core sweep terminates only processes
+/// whose image passes this — never a name match alone, so a mihomo the user installed anywhere
+/// else on disk is never touched.
+#[cfg(windows)]
+pub(crate) fn is_installed_core_image_path(canonical: &Path) -> bool {
+    let is_core_image = canonical
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("verge-mihomo.exe"));
+    is_core_image && is_permitted_windows_core_location(canonical)
+}
+
 #[cfg(windows)]
 fn is_permitted_windows_core_location(canonical: &Path) -> bool {
     let paths = crate::service_paths();

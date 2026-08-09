@@ -20,4 +20,6 @@ mod core_integrity;
 mod staging;
 
 pub(crate) use assets::{PreparedRuntime, prepare_runtime};
+#[cfg(windows)]
+pub(crate) use assets::is_installed_core_image_path;
 pub(crate) use staging::stage_runtime;

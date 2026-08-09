@@ -133,6 +133,31 @@ describe('Activity connection presentation', () => {
     ).toBe('proxied')
   })
 
+  it('classifies loopback targets as local, never as direct', () => {
+    const dns = connection('dns', {
+      metadata: {
+        ...connection('dns').metadata,
+        host: '',
+        destinationIP: '127.0.0.1',
+        destinationPort: '53',
+      },
+      chains: ['DIRECT'],
+      rule: 'IPCIDR',
+      rulePayload: '127.0.0.0/8',
+    })
+    expect(toActivityRow(dns).route).toBe('local')
+    // A public host on the same DIRECT terminal still reports direct.
+    expect(
+      toActivityRow(
+        connection('cdn', {
+          chains: ['DIRECT'],
+          rule: 'AND',
+          rulePayload: '((Network,tcp) && (DomainSuffix,baidu.com))',
+        }),
+      ).route,
+    ).toBe('direct')
+  })
+
   it('does not expose URL credentials, query strings, fragments, or full process paths', () => {
     expect(
       sanitizeActivityValue(

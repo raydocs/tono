@@ -138,6 +138,10 @@ pub(crate) const LOOPBACK_V6: &str = "::1";
 /// would put the ISP's resolvers back.
 #[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
 pub(crate) const NO_NAME_SERVERS: &str = "";
+/// Connection name of Tono's WinTUN adapter. Mirrors `tono_core::config::TUN_DEVICE_NAME`
+/// (`apps/windows/crates/tono-core/src/config.rs`); this crate is self-contained and cannot
+/// import it, so the two spellings are kept in sync by hand.
+const TUN_ADAPTER_NAME: &str = "Tono";
 const SNAPSHOT_VERSION: u32 = 1;
 
 /// One adapter's original DNS values. `None` means the registry value was absent — the
@@ -151,6 +155,13 @@ pub(crate) struct AdapterDnsSnapshot {
     /// they must never become part of the durable recovery snapshot.
     #[serde(skip)]
     pub interface_luid: Option<u64>,
+    /// Runtime-only connection name from the adapter's Network-class `Connection` key (e.g.
+    /// "Ethernet" or "Tono"). Same persistence rule as the LUID: names are operator-controlled
+    /// and must never become part of the durable recovery snapshot. This exists so the tunnel
+    /// exclusion in [`without_current_tunnel`] keeps working after the core — and with it the
+    /// WFP-validated LUID — is gone.
+    #[serde(skip)]
+    pub connection_name: Option<String>,
     pub ipv4_name_server: Option<String>,
     pub ipv4_profile_name_server: Option<String>,
     pub ipv6_name_server: Option<String>,
@@ -467,13 +478,25 @@ fn is_current_tunnel_adapter(
 /// Tono's WinTUN adapter is the route *to* the protected resolver, not a Windows resolver client
 /// that needs to be redirected. Including it would snapshot our own `198.18.0.2` as a user value,
 /// write DNS back onto the tunnel, and make snapshot-less safety checks reject a healthy connect.
+///
+/// Two identities, because neither alone covers the adapter's whole life. The WFP-validated
+/// runtime LUID is the strong one, but it dies with the core: Disconnect stops the core *before*
+/// the restore proof runs, so a stale WinTUN adapter left behind by an orphaned core would
+/// re-enter the proof and its own `198.18.0.2` would read as "still on loopback" — refused,
+/// every time. The connection name is the weaker but core-independent signal that still covers
+/// that case. Excluding by name cannot mask a real leak: physical adapters keep their exact
+/// per-value snapshot comparison, and a same-named *physical* adapter would require an
+/// administrator renaming one to "Tono", which is outside the threat model.
 fn without_current_tunnel(
     adapters: Vec<AdapterDnsSnapshot>,
     current_tunnel_luid: Option<u64>,
 ) -> Vec<AdapterDnsSnapshot> {
     adapters
         .into_iter()
-        .filter(|adapter| !is_current_tunnel_adapter(adapter, current_tunnel_luid))
+        .filter(|adapter| {
+            !is_current_tunnel_adapter(adapter, current_tunnel_luid)
+                && adapter.connection_name.as_deref() != Some(TUN_ADAPTER_NAME)
+        })
         .collect()
 }
 
@@ -1373,9 +1396,10 @@ async fn engine_collect() -> Result<Vec<AdapterDnsSnapshot>> {
     }
 }
 
-/// Collect only adapters whose Windows resolver configuration Tono owns. The current WinTUN
-/// adapter is identified by the same runtime LUID that the WFP tunnel permit validated; names
-/// and GUID strings are deliberately not trusted for this security boundary.
+/// Collect only adapters whose Windows resolver configuration Tono owns. The tunnel exclusion
+/// inside [`without_current_tunnel`] uses the WFP-validated runtime LUID while a core is alive
+/// and the WinTUN connection name once it is not, so a stale tunnel adapter left by an orphaned
+/// core can never re-enter a snapshot or a restore proof.
 async fn collect_dns_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
     let adapters = engine_collect().await?;
     let current_tunnel_luid = crate::core::windows_kill_switch::protected_tunnel_luid().await;
@@ -2462,8 +2486,13 @@ mod engine {
         r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
     const TCPIP6_INTERFACES: &str =
         r"SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces";
+    /// The Network class key (fixed network-adapter class GUID) under which each interface's
+    /// `Connection` subkey holds the operator-visible connection `Name` — "Ethernet", "Tono".
+    const NETWORK_CONNECTIONS_CLASS: &str =
+        r"SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}";
     const NAME_SERVER: &str = "NameServer";
     const PROFILE_NAME_SERVER: &str = "ProfileNameServer";
+    const CONNECTION_NAME: &str = "Name";
 
     struct RegKey(HKEY);
 
@@ -2708,10 +2737,29 @@ mod engine {
         format!(r"{TCPIP6_INTERFACES}\{guid}")
     }
 
+    /// The adapter's connection name from its Network-class `Connection` key. Best-effort: the
+    /// name is only the tunnel exclusion's core-independent fallback next to the WFP-validated
+    /// LUID, so an unreadable name must not fail the whole collect.
+    fn connection_name(guid: &str) -> Option<String> {
+        match read_sz(
+            &format!(r"{NETWORK_CONNECTIONS_CLASS}\{guid}\Connection"),
+            CONNECTION_NAME,
+        ) {
+            Ok(name) => name,
+            Err(error) => {
+                tracing::warn!(
+                    "dns: failed to read the connection name for adapter {guid}: {error:#}"
+                );
+                None
+            }
+        }
+    }
+
     fn read_adapter(guid: &str, interface_luid: Option<u64>) -> Result<AdapterDnsSnapshot> {
         Ok(AdapterDnsSnapshot {
             interface_guid: guid.to_owned(),
             interface_luid,
+            connection_name: connection_name(guid),
             ipv4_name_server: read_sz(&v4_key(guid), NAME_SERVER)?,
             ipv4_profile_name_server: read_sz(&v4_key(guid), PROFILE_NAME_SERVER)?,
             ipv6_name_server: read_sz(&v6_key(guid), NAME_SERVER)?,
@@ -3403,6 +3451,33 @@ mod tests {
         );
     }
 
+    /// Disconnect stops the core before the restore proof runs, so the WFP-validated LUID is
+    /// gone (`None`) exactly when the proof needs the tunnel excluded. The exclusion must then
+    /// still work by connection name — and must never extend to a physical adapter.
+    #[test]
+    fn the_tunnel_exclusion_survives_a_stopped_core() {
+        let mut stale_tunnel = adapter("{TONO-TUN}", Some(PROTECTED_DNS_V4));
+        stale_tunnel.connection_name = Some(TUN_ADAPTER_NAME.to_owned());
+        assert!(
+            without_current_tunnel(vec![stale_tunnel.clone()], None).is_empty(),
+            "a stale Tono WinTUN adapter is excluded by name once the core is gone"
+        );
+
+        let mut physical = adapter("{ETHERNET}", Some(PROTECTED_DNS_V4));
+        physical.connection_name = Some("Ethernet".to_owned());
+        let kept = without_current_tunnel(vec![stale_tunnel, physical], None);
+        assert_eq!(
+            kept.len(),
+            1,
+            "a physical adapter on the protected endpoint must never ride the tunnel exclusion"
+        );
+        assert_eq!(kept[0].interface_guid, "{ETHERNET}");
+        assert!(
+            ensure_snapshotless_adapters_are_safe(&kept).is_err(),
+            "the surviving physical adapter still fails the orphaned-endpoint safety check"
+        );
+    }
+
     /// The IPv6 half of the `securingDNS` regression. Nothing listens on `[::1]:53`
     /// (`tono_core::config::DNS_LISTEN` is `127.0.0.1:53`), so the protected IPv6 state is an
     /// empty static server list — and "protected" therefore has to mean something different per
@@ -3554,6 +3629,7 @@ mod tests {
         let saved = AdapterDnsSnapshot {
             interface_guid: "{DUAL}".to_owned(),
             interface_luid: None,
+            connection_name: None,
             ipv4_name_server: Some("1.1.1.1".to_owned()),
             ipv4_profile_name_server: Some("8.8.8.8, 8.8.4.4".to_owned()),
             ipv6_name_server: Some("2606:4700:4700::1111".to_owned()),
@@ -3729,6 +3805,7 @@ mod tests {
             adapters: vec![AdapterDnsSnapshot {
                 interface_guid: "{GUID}".to_owned(),
                 interface_luid: None,
+                connection_name: None,
                 ipv4_name_server: Some("1.1.1.1,8.8.8.8".to_owned()),
                 ipv4_profile_name_server: None,
                 ipv6_name_server: Some("2606:4700:4700::1111".to_owned()),

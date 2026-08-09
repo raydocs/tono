@@ -78,6 +78,9 @@ const ActivityPage = () => {
     () =>
       rows.filter(
         (row) =>
+          // Local rows (loopback DNS etc.) are pure noise — every app generates
+          // them constantly and they read as fake DIRECT leaks.
+          row.route !== 'local' &&
           (filter === 'all' || row.route === filter) &&
           (!normalizedQuery || row.searchText.includes(normalizedQuery)),
       ),
