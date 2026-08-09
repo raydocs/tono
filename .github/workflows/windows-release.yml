@@ -86,6 +86,8 @@ jobs:
         working-directory: apps/windows/service
         run: |
           cargo build --locked --release --features standalone,client --bins
+          # resources/ is gitignored locally (built artifacts), so a fresh CI checkout lacks it.
+          New-Item -ItemType Directory -Force ../app/src-tauri/resources | Out-Null
           Copy-Item target/release/tono-service.exe ../app/src-tauri/resources/tono-service.exe -Force
           Copy-Item target/release/tono-service-install.exe ../app/src-tauri/resources/tono-service-install.exe -Force
           Copy-Item target/release/tono-service-uninstall.exe ../app/src-tauri/resources/tono-service-uninstall.exe -Force
