@@ -91,7 +91,7 @@ tray:
   coreLog: 内核日志
   restartClash: 重启 Clash 内核
   restartApp: 重启应用
-  vergeVersion: Verge 版本
+  vergeVersion: Tono 版本
   more: 更多
   exit: 退出
   tooltip:

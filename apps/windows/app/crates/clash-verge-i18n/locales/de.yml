@@ -91,7 +91,7 @@ tray:
   coreLog: Core-Log
   restartClash: Clash-Core neu starten
   restartApp: Anwendung neu starten
-  vergeVersion: Verge-Version
+  vergeVersion: Tono-Version
   more: Mehr
   exit: Beenden
   tooltip:
