@@ -162,16 +162,43 @@ fn run_emergency_disarm() -> Result<()> {
             anyhow::bail!("service daemon is still running; refusing to open the kill switch")
         }
         Err(error) => {
-            print_disarm_result(
-                "解除失败，网络保护仍然生效。",
-                "The disarm failed; protection is still in place.",
-                &[
-                    "请重试一次；若仍失败，重启电脑后再运行本快捷方式。技术细节见下方。",
-                    "Try again; if it still fails, reboot and run this shortcut once more. \
-                     Technical detail follows.",
-                ],
-            );
-            Err(error)
+            // Post-WFP-removal markers change the meaning of the error entirely: the barrier
+            // is provably gone and only the DNS story is imperfect. Reporting "protection is
+            // still in place" here sent users into Windows network resets they never needed.
+            match classify_disarm_error(&format!("{error:#}")) {
+                DisarmErrorClass::RestoredToAutomatic => {
+                    print_disarm_result(
+                        "网络保护已解除。原 DNS 配置无法验证，已安全恢复为自动获取（DHCP）。",
+                        "Protection removed. The saved DNS could not be verified, so automatic \
+                         (DHCP) DNS was restored.",
+                        &["可以关闭此窗口。", "You can close this window."],
+                    );
+                    Ok(())
+                }
+                DisarmErrorClass::EnforcementGoneDnsStale => {
+                    print_disarm_result(
+                        "网络封锁已解除，但 DNS 仍指向已停止的 Tono 解析器。",
+                        "The block is removed, but DNS still points at the stopped Tono resolver.",
+                        &[
+                            "请重启电脑完成恢复；重启后网络即正常。",
+                            "Reboot once to finish the recovery; the network works after that.",
+                        ],
+                    );
+                    Err(error)
+                }
+                DisarmErrorClass::StillProtected => {
+                    print_disarm_result(
+                        "解除失败，网络保护仍然生效。",
+                        "The disarm failed; protection is still in place.",
+                        &[
+                            "请重试一次；若仍失败，重启电脑后再运行本快捷方式。技术细节见下方。",
+                            "Try again; if it still fails, reboot and run this shortcut once more. \
+                             Technical detail follows.",
+                        ],
+                    );
+                    Err(error)
+                }
+            }
         }
     }
 }
@@ -187,6 +214,59 @@ fn print_disarm_result(headline_zh: &str, headline_en: &str, next_steps: &[&str]
         println!("  {step}");
     }
     println!();
+}
+
+/// What an emergency-disarm error actually means. The marker strings mirror
+/// `core::dns` / `uninstall_service.rs` and are only emitted *after* the WFP
+/// objects are deleted, so carrying one means enforcement is provably gone.
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+enum DisarmErrorClass {
+    /// WFP removed; adapters were put back on automatic (DHCP) DNS because the
+    /// saved servers could not be proven restored. A safe end state.
+    RestoredToAutomatic,
+    /// WFP removed, but an adapter still points at Tono's (now dead) loopback
+    /// resolver. The machine needs a reboot to resolve again.
+    EnforcementGoneDnsStale,
+    /// Nothing proves the barrier is gone — the genuine failure case.
+    StillProtected,
+}
+
+#[cfg(windows)]
+fn classify_disarm_error(message: &str) -> DisarmErrorClass {
+    if message.contains("TONO_DNS_RESTORED_AUTOMATIC") {
+        DisarmErrorClass::RestoredToAutomatic
+    } else if message.contains("TONO_DNS_STILL_ON_LOOPBACK") || message.contains("TONO_WFP_REMOVED")
+    {
+        DisarmErrorClass::EnforcementGoneDnsStale
+    } else {
+        DisarmErrorClass::StillProtected
+    }
+}
+
+#[cfg(all(windows, test))]
+mod disarm_error_tests {
+    use super::{classify_disarm_error, DisarmErrorClass};
+
+    #[test]
+    fn post_wfp_markers_are_not_reported_as_still_protected() {
+        assert_eq!(
+            classify_disarm_error("TONO_DNS_RESTORED_AUTOMATIC: WFP was removed and 1 adapter(s) ..."),
+            DisarmErrorClass::RestoredToAutomatic
+        );
+        assert_eq!(
+            classify_disarm_error("TONO_DNS_STILL_ON_LOOPBACK: ..."),
+            DisarmErrorClass::EnforcementGoneDnsStale
+        );
+        assert_eq!(
+            classify_disarm_error("wrapped: TONO_WFP_REMOVED but ..."),
+            DisarmErrorClass::EnforcementGoneDnsStale
+        );
+        assert_eq!(
+            classify_disarm_error("WFP engine call failed: access denied"),
+            DisarmErrorClass::StillProtected
+        );
+    }
 }
 
 // --- Windows Service Implementation ---
