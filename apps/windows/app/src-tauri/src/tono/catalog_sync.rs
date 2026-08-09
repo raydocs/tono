@@ -267,7 +267,11 @@ async fn spawn_periodic_inner(state: &Arc<TonoState>, app: &AppHandle, auth_gene
 /// Catalog display names that Chinese networks currently cannot reach. They stay in the
 /// list (so the user sees why the previous default disappeared) but sort last and are
 /// not auto-selected. Update this list when a node is unblocked or a new exit is walled.
-const BLOCKED_EXIT_NAMES: &[&str] = &["US-VLESS-Reality"];
+/// Hard-coded blocked exits. Empty for now: the US-VLESS-Reality block was
+/// lifted after the node was re-verified live end-to-end (TCP + Reality
+/// handshake + traffic, 2026-08). Keep the mechanism — a dead exit must be
+/// quarantined faster than a catalog rotation can reach every client.
+const BLOCKED_EXIT_NAMES: &[&str] = &[];
 
 /// Preferred default when the user has no selection, or their selection is blocked.
 /// First match that is present in the catalog wins.
@@ -454,32 +458,31 @@ mod tests {
     }
 
     #[test]
-    fn blocked_exit_sorts_last_and_is_not_default() {
+    fn unblocked_exits_sort_by_region_then_name() {
+        // The blocklist is currently empty (the US-VLESS-Reality quarantine was
+        // lifted after the node was re-verified live); everything sorts by
+        // region then name. Salt Lake City ranks US via the city table.
         let nodes = vec![
             node("US-VLESS-Reality"),
             node("Salt Lake City · Summit"),
             node("JP Reality 02"),
             node("US West 01"),
         ];
-        assert!(is_exit_blocked("US-VLESS-Reality"));
-        assert!(!is_exit_blocked("Salt Lake City · Summit"));
-        // Usable first: US token → JP token → other cities; blocked always last.
+        assert!(!is_exit_blocked("US-VLESS-Reality"));
         assert_eq!(
             sort_server_names(&nodes),
             vec![
-                "US West 01",
-                "JP Reality 02",
                 "Salt Lake City · Summit",
+                "US West 01",
                 "US-VLESS-Reality",
+                "JP Reality 02",
             ]
         );
-        // Preferred default still picks Salt Lake even though sort rank is "other".
+        // Preferred default still picks Salt Lake.
         assert_eq!(
             default_usable_exit(&nodes, None).as_deref(),
             Some("Salt Lake City · Summit")
         );
-        // With only the blocked node, no usable default.
-        assert_eq!(default_usable_exit(&[node("US-VLESS-Reality")], None), None);
     }
 
     #[test]
