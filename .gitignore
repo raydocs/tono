@@ -38,3 +38,6 @@ LiquidClashHelper/
 
 # Python
 __pycache__/
+
+# Wrangler local cache
+.wrangler/
