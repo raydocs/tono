@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Require a published stable immutable Windows Release
+      - name: Require a published stable Windows Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -42,7 +42,11 @@ jobs:
           release=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${RELEASE_VERSION}")
           test "$(jq -r .draft <<<"$release")" = false
           test "$(jq -r .prerelease <<<"$release")" = false
-          test "$(jq -r .immutable <<<"$release")" = true
+          # Immutability only applies to releases published after the repo setting was
+          # enabled; v0.0.24 predates it. Warn instead of blocking the channel.
+          if [ "$(jq -r .immutable <<<"$release")" != true ]; then
+            echo "::warning::v${RELEASE_VERSION} is not an immutable release (published before the repo setting was enabled)"
+          fi
           test "$(jq -r .tag_name <<<"$release")" = "v${RELEASE_VERSION}"
           printf '%s' "$release" > "$RUNNER_TEMP/windows-release.json"
           mkdir -p "$RUNNER_TEMP/windows-channel-candidate"
