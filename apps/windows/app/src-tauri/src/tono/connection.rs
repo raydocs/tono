@@ -3594,16 +3594,30 @@ fn controller_direct_graph_is_active(
     }
     expect_rule(rules.first(), 0, "IPCIDR", "127.0.0.0/8", "DIRECT")?;
     expect_rule(rules.get(1), 1, "IPCIDR", "::1/128", "DIRECT")?;
-    expect_rule(rules.get(2), 2, "ProcessName", "Claude.exe", claude_target)?;
-    expect_rule(rules.get(3), 3, "ProcessName", "claude.exe", claude_target)?;
+    // Claude pins are TCP-scoped ANDs so Claude UDP falls through to the REJECT row
+    // instead of matching a group that cannot carry it and leaking DIRECT.
+    expect_rule(
+        rules.get(2),
+        2,
+        "AND",
+        "((Network,tcp) && (ProcessName,Claude.exe))",
+        claude_target,
+    )?;
+    expect_rule(
+        rules.get(3),
+        3,
+        "AND",
+        "((Network,tcp) && (ProcessName,claude.exe))",
+        claude_target,
+    )?;
     if claude_home {
         for (offset, domain) in config::CLAUDE_HOME_DOMAINS.iter().enumerate() {
             let index = 4 + offset;
             expect_rule(
                 rules.get(index),
                 index,
-                "DomainSuffix",
-                domain,
+                "AND",
+                &format!("((Network,tcp) && (DomainSuffix,{domain}))"),
                 config::CLAUDE_HOME_GROUP_NAME,
             )?;
         }
@@ -5885,8 +5899,8 @@ mod tests {
             "rules": [
                 {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
                 {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "ProcessName", "payload": "Claude.exe", "proxy": "Tono-Exit"},
-                {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Exit"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Exit"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Exit"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"},
@@ -5906,8 +5920,8 @@ mod tests {
             "rules": [
                 {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
                 {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "ProcessName", "payload": "Claude.exe", "proxy": "Tono-Exit"},
-                {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Exit"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Exit"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Exit"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
@@ -5994,12 +6008,12 @@ mod tests {
             "rules": [
                 {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
                 {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "ProcessName", "payload": "Claude.exe", "proxy": "Tono-Claude-Home"},
-                {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Claude-Home"},
-                {"type": "DomainSuffix", "payload": "claude.ai", "proxy": "Tono-Claude-Home"},
-                {"type": "DomainSuffix", "payload": "claude.com", "proxy": "Tono-Claude-Home"},
-                {"type": "DomainSuffix", "payload": "anthropic.com", "proxy": "Tono-Claude-Home"},
-                {"type": "DomainSuffix", "payload": "claudeusercontent.com", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.ai))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.com))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,anthropic.com))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claudeusercontent.com))", "proxy": "Tono-Claude-Home"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}

@@ -467,20 +467,30 @@ fn runtime_value(
         .map(|rule| rule.to_string())
         .collect();
     if home.is_some() {
-        // Same slot the bare PROCESS-NAME pins occupy below: ahead of every
-        // DIRECT pin so Claude traffic can never match a WeChat/web rule first.
-        rules.push(format!("PROCESS-NAME,Claude.exe,{CLAUDE_HOME_GROUP_NAME}"));
-        rules.push(format!("PROCESS-NAME,claude.exe,{CLAUDE_HOME_GROUP_NAME}"));
+        // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT row,
+        // and a network-agnostic Claude pin would swallow UDP into a group
+        // that cannot carry it (Vision) — Mihomo's fallback for that is a
+        // ruleless DIRECT dial, leaking Claude's UDP to the physical egress.
+        // With TCP scope, Claude UDP falls through to REJECT and the app
+        // retries over TCP, through the tunnel.
+        rules.push(format!(
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),{CLAUDE_HOME_GROUP_NAME}"
+        ));
+        rules.push(format!(
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),{CLAUDE_HOME_GROUP_NAME}"
+        ));
         for domain in CLAUDE_HOME_DOMAINS {
-            rules.push(format!("DOMAIN-SUFFIX,{domain},{CLAUDE_HOME_GROUP_NAME}"));
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
         }
     } else if let Some(plan) = direct {
         if !plan.tcp_wechat_rules.is_empty()
             || !plan.tcp_web_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
         {
-            rules.push("PROCESS-NAME,Claude.exe,Tono-Exit".to_string());
-            rules.push("PROCESS-NAME,claude.exe,Tono-Exit".to_string());
+            rules.push("AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit".to_string());
+            rules.push("AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit".to_string());
         }
     }
     if let Some(plan) = direct {
@@ -1031,8 +1041,8 @@ reality-opts:
         let mut expected = vec![
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
-            "PROCESS-NAME,Claude.exe,Tono-Exit".to_string(),
-            "PROCESS-NAME,claude.exe,Tono-Exit".to_string(),
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit".to_string(),
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit".to_string(),
         ];
         for (host, port) in [("wxs.qq.com", 443), ("wxs.qq.com", 80), ("qpic.cn", 443)] {
             for process in WECHAT_PROCESS_NAMES {
@@ -1052,8 +1062,8 @@ reality-opts:
         assert_eq!(
             &rules[2..4],
             [
-                "PROCESS-NAME,Claude.exe,Tono-Exit",
-                "PROCESS-NAME,claude.exe,Tono-Exit"
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit"
             ]
         );
         // MATCH remains the only fallback.
@@ -1218,12 +1228,12 @@ reality-opts:
             [
                 "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
                 "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "PROCESS-NAME,Claude.exe,Tono-Claude-Home",
-                "PROCESS-NAME,claude.exe,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,claude.ai,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,claude.com,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,anthropic.com,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,claudeusercontent.com,Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
                 "AND,((NETWORK,UDP)),REJECT",
                 "MATCH,Tono-Exit",
             ]
@@ -1277,12 +1287,12 @@ reality-opts:
             [
                 "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
                 "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "PROCESS-NAME,Claude.exe,Tono-Claude-Home",
-                "PROCESS-NAME,claude.exe,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,claude.ai,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,claude.com,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,anthropic.com,Tono-Claude-Home",
-                "DOMAIN-SUFFIX,claudeusercontent.com,Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
                 "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
                 "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
                 "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
