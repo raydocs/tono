@@ -3105,6 +3105,7 @@ struct PendingDirectCommit {
     direct_interface: String,
     require_wechat_direct: bool,
     require_web_direct: bool,
+    claude_home: bool,
     wechat_tcp: usize,
     web_tcp: usize,
     udp: usize,
@@ -3259,6 +3260,7 @@ async fn apply_cloud_policy(
         direct_interface,
         !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
         !plan.tcp_web_rules.is_empty(),
+        home_node.is_some(),
         plan.tcp_wechat_rules.len(),
         plan.tcp_web_rules.len(),
         plan.udp_wechat_rules.len(),
@@ -3463,6 +3465,7 @@ fn controller_direct_graph_is_active(
     direct_interface: &str,
     require_wechat_direct: bool,
     require_web_direct: bool,
+    claude_home: bool,
 ) -> Result<(), String> {
     if expected_direct_rules.is_empty() {
         return Err("controller proof was asked to accept an empty DIRECT graph".to_owned());
@@ -3560,10 +3563,28 @@ fn controller_direct_graph_is_active(
         Ok(())
     }
 
-    // The owned runtime has no user-supplied rules: two loopback exceptions, two exact Claude
-    // process exits, one row per staged AND selector, and a single final MATCH. Requiring the
+    // The owned runtime has no user-supplied rules: two loopback exceptions, the exact Claude
+    // exits, one row per staged AND selector, and a single final MATCH. Requiring the
     // complete cardinality/order rejects broad, missing, duplicated, or stale DIRECT selectors.
-    let expected_len = expected_direct_rules.len() + 5;
+    // With home-broadband split routing the Claude block is six rows (two process names plus
+    // CLAUDE_HOME_DOMAINS) pointing at Tono-Claude-Home instead of two process pins at Tono-Exit.
+    let claude_target = if claude_home {
+        config::CLAUDE_HOME_GROUP_NAME
+    } else {
+        EXIT_GROUP_NAME
+    };
+    if claude_home && !proxy_map.contains_key(config::CLAUDE_HOME_GROUP_NAME) {
+        return Err(format!(
+            "controller runtime omitted proxy {}",
+            config::CLAUDE_HOME_GROUP_NAME
+        ));
+    }
+    let claude_rows = if claude_home {
+        2 + config::CLAUDE_HOME_DOMAINS.len()
+    } else {
+        2
+    };
+    let expected_len = expected_direct_rules.len() + 3 + claude_rows;
     if rules.len() != expected_len {
         return Err(format!(
             "controller runtime returned {} rules, expected the exact {expected_len}-rule graph",
@@ -3572,10 +3593,22 @@ fn controller_direct_graph_is_active(
     }
     expect_rule(rules.first(), 0, "IPCIDR", "127.0.0.0/8", "DIRECT")?;
     expect_rule(rules.get(1), 1, "IPCIDR", "::1/128", "DIRECT")?;
-    expect_rule(rules.get(2), 2, "ProcessName", "Claude.exe", EXIT_GROUP_NAME)?;
-    expect_rule(rules.get(3), 3, "ProcessName", "claude.exe", EXIT_GROUP_NAME)?;
+    expect_rule(rules.get(2), 2, "ProcessName", "Claude.exe", claude_target)?;
+    expect_rule(rules.get(3), 3, "ProcessName", "claude.exe", claude_target)?;
+    if claude_home {
+        for (offset, domain) in config::CLAUDE_HOME_DOMAINS.iter().enumerate() {
+            let index = 4 + offset;
+            expect_rule(
+                rules.get(index),
+                index,
+                "DomainSuffix",
+                domain,
+                config::CLAUDE_HOME_GROUP_NAME,
+            )?;
+        }
+    }
     for (offset, expected) in expected_direct_rules.iter().enumerate() {
-        let index = 4 + offset;
+        let index = 2 + claude_rows + offset;
         expect_rule(rules.get(index), index, "AND", &expected.payload, &expected.proxy)?;
     }
     let fallback = expected_len - 1;
@@ -3590,6 +3623,7 @@ async fn verify_controller_direct_runtime(
     direct_interface: &str,
     require_wechat_direct: bool,
     require_web_direct: bool,
+    claude_home: bool,
 ) -> Result<(), String> {
     let client = controller_client(CONTROLLER_HTTP_TIMEOUT)?;
     // `/configs` must remain readable from the same authenticated controller after reload. TUN
@@ -3606,6 +3640,7 @@ async fn verify_controller_direct_runtime(
         direct_interface,
         require_wechat_direct,
         require_web_direct,
+        claude_home,
     )
 }
 
@@ -3649,6 +3684,7 @@ async fn activate_direct_runtime_cancellation_safe(
     direct_interface: String,
     require_wechat_direct: bool,
     require_web_direct: bool,
+    claude_home: bool,
     wechat_tcp: usize,
     web_tcp: usize,
     udp: usize,
@@ -3737,6 +3773,7 @@ async fn activate_direct_runtime_cancellation_safe(
                 &direct_interface,
                 require_wechat_direct,
                 require_web_direct,
+                claude_home,
             )
             .await
             .map_err(StageFailure::error)?;
@@ -3779,6 +3816,7 @@ async fn activate_direct_runtime_cancellation_safe(
                 direct_interface,
                 require_wechat_direct,
                 require_web_direct,
+                claude_home,
                 wechat_tcp,
                 web_tcp,
                 udp,
@@ -3868,6 +3906,7 @@ async fn commit_direct_policy_cancellation_safe(
                 &pending.direct_interface,
                 pending.require_wechat_direct,
                 pending.require_web_direct,
+                pending.claude_home,
             )
             .await
             .map_err(StageFailure::error)?;
@@ -5843,7 +5882,7 @@ mod tests {
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
             ]
         });
-        controller_direct_graph_is_active(&rules, &proxies, &expected, "Ethernet 2", true, true).unwrap();
+        controller_direct_graph_is_active(&rules, &proxies, &expected, "Ethernet 2", true, true, false).unwrap();
 
         let wechat_only_proxies = serde_json::json!({
             "proxies": {
@@ -5869,17 +5908,18 @@ mod tests {
             "Ethernet 2",
             true,
             false,
+            false,
         )
         .unwrap();
         assert!(
-            controller_direct_graph_is_active(&rules, &proxies, &expected[..2], "Ethernet 2", true, false,).is_err(),
+            controller_direct_graph_is_active(&rules, &proxies, &expected[..2], "Ethernet 2", true, false, false,).is_err(),
             "a stale web DIRECT proxy/rule must make read-back fail"
         );
 
         let mut wrong_order = rules.clone();
         wrong_order["rules"].as_array_mut().unwrap().swap(3, 4);
         assert!(
-            controller_direct_graph_is_active(&wrong_order, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            controller_direct_graph_is_active(&wrong_order, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "Claude must remain exit-first"
         );
 
@@ -5887,21 +5927,21 @@ mod tests {
         broad_selector["rules"][4]["payload"] =
             serde_json::json!("((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com))");
         assert!(
-            controller_direct_graph_is_active(&broad_selector, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            controller_direct_graph_is_active(&broad_selector, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "a DIRECT selector without the exact process condition must fail read-back"
         );
 
         let mut wrong_interface = proxies.clone();
         wrong_interface["proxies"]["Tono-China-Direct"]["interface"] = serde_json::json!("Wi-Fi");
         assert!(
-            controller_direct_graph_is_active(&rules, &wrong_interface, &expected, "Ethernet 2", true, true,).is_err(),
+            controller_direct_graph_is_active(&rules, &wrong_interface, &expected, "Ethernet 2", true, true, false,).is_err(),
             "a same-named DIRECT outbound bound to another interface must fail"
         );
 
         let mut wrong_type = proxies.clone();
         wrong_type["proxies"]["Tono-China-Direct"]["type"] = serde_json::json!("Selector");
         assert!(
-            controller_direct_graph_is_active(&rules, &wrong_type, &expected, "Ethernet 2", true, true,).is_err(),
+            controller_direct_graph_is_active(&rules, &wrong_type, &expected, "Ethernet 2", true, true, false,).is_err(),
             "a same-named non-Direct outbound must fail"
         );
 
@@ -5909,15 +5949,70 @@ mod tests {
         let duplicate = stale_rule["rules"][4].clone();
         stale_rule["rules"].as_array_mut().unwrap().insert(7, duplicate);
         assert!(
-            controller_direct_graph_is_active(&stale_rule, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            controller_direct_graph_is_active(&stale_rule, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "an extra stale or duplicated DIRECT rule must fail exact cardinality"
         );
 
         let mut wrong_fallback = rules.clone();
         wrong_fallback["rules"][7]["proxy"] = serde_json::json!("DIRECT");
         assert!(
-            controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true,).is_err(),
+            controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "the final fallback must remain exact Tono-Exit"
+        );
+    }
+
+    #[test]
+    fn controller_readback_accepts_the_claude_home_split_graph() {
+        // With homeProxy routing the Claude block is six rows (two process names + four
+        // domains) into Tono-Claude-Home, sitting between loopback and the DIRECT pins.
+        let expected = vec![ControllerDirectRuleProof {
+            proxy: "Tono-China-Direct".to_owned(),
+            payload: "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))"
+                .to_owned(),
+        }];
+        let proxies = serde_json::json!({
+            "proxies": {
+                "Tono-Exit": {},
+                "Tono-Claude-Home": {"type": "Selector"},
+                "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
+            }
+        });
+        let split_rules = serde_json::json!({
+            "rules": [
+                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
+                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
+                {"type": "ProcessName", "payload": "Claude.exe", "proxy": "Tono-Claude-Home"},
+                {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Claude-Home"},
+                {"type": "DomainSuffix", "payload": "claude.ai", "proxy": "Tono-Claude-Home"},
+                {"type": "DomainSuffix", "payload": "claude.com", "proxy": "Tono-Claude-Home"},
+                {"type": "DomainSuffix", "payload": "anthropic.com", "proxy": "Tono-Claude-Home"},
+                {"type": "DomainSuffix", "payload": "claudeusercontent.com", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
+            ]
+        });
+        controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
+            .expect("the exact split graph must pass");
+
+        // The same graph must fail when the caller did not stage a split (and vice versa):
+        // a split graph silently answering an unsplit proof would hide a stale reload.
+        assert!(
+            controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, false).is_err(),
+            "a split graph must not satisfy the unsplit proof"
+        );
+
+        let mut missing_group = proxies.clone();
+        missing_group["proxies"].as_object_mut().unwrap().remove("Tono-Claude-Home");
+        assert!(
+            controller_direct_graph_is_active(&split_rules, &missing_group, &expected, "Ethernet 2", true, false, true).is_err(),
+            "split rules without the Tono-Claude-Home group must fail"
+        );
+
+        let mut wrong_target = split_rules.clone();
+        wrong_target["rules"][4]["proxy"] = serde_json::json!("Tono-Exit");
+        assert!(
+            controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true).is_err(),
+            "a Claude domain leaking to Tono-Exit must fail"
         );
     }
 
