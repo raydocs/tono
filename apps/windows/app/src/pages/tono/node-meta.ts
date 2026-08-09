@@ -13,9 +13,9 @@ export const nodeDisplayName = (wireName: string) =>
   NODE_DISPLAY_NAMES[wireName] ?? wireName
 
 export const nodeFlag = (wireName: string) => {
-  const upper = wireName.toUpperCase()
-  if (/\bUS\b|^US[-_ ]/.test(upper)) return '🇺🇸'
-  if (/\bJP\b|^JP[-_ ]/.test(upper)) return '🇯🇵'
+  const region = nodeRegion(wireName)
+  if (region === 'us') return '🇺🇸'
+  if (region === 'jp') return '🇯🇵'
   return '🌐'
 }
 
@@ -24,10 +24,32 @@ export const nodeProtocol = (wireName: string) =>
 
 export type NodeRegion = 'us' | 'jp' | 'other'
 
-/** Keep the UI's groups aligned with the backend's whole-token region ranking. */
+/**
+ * Catalog names are either flag-prefixed tokens ("US-VLESS-Reality") or
+ * "City · Codename" ("Tokyo · Sakura"). Cities carry the region when the
+ * explicit US/JP token is absent. Keep this map aligned with
+ * `region_rank` in src-tauri/src/tono/catalog_sync.rs.
+ */
+const CITY_REGIONS: Record<string, NodeRegion> = {
+  'los angeles': 'us',
+  'salt lake city': 'us',
+  buffalo: 'us',
+  'new york': 'us',
+  'san jose': 'us',
+  seattle: 'us',
+  chicago: 'us',
+  dallas: 'us',
+  miami: 'us',
+  tokyo: 'jp',
+  osaka: 'jp',
+}
+
+const cityOf = (wireName: string) => wireName.split('·')[0].trim().toLowerCase()
+
+/** Keep the UI's groups aligned with the backend's region ranking. */
 export const nodeRegion = (wireName: string): NodeRegion => {
   const tokens = wireName.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
   if (tokens.some((token) => token.toLowerCase() === 'us')) return 'us'
   if (tokens.some((token) => token.toLowerCase() === 'jp')) return 'jp'
-  return 'other'
+  return CITY_REGIONS[cityOf(wireName)] ?? 'other'
 }

@@ -356,7 +356,10 @@ pub fn sort_server_names(nodes: &[ValidatedNode]) -> Vec<String> {
 }
 
 /// 0 = US, 1 = JP, 2 = other. Region tokens are matched as whole
-/// alphanumeric words so "JPN"-style names do not count as JP.
+/// alphanumeric words so "JPN"-style names do not count as JP. Catalog names
+/// without an explicit token are "City · Codename", so fall back to a city
+/// lookup — keep the map aligned with `CITY_REGIONS` in
+/// app/src/pages/tono/node-meta.ts.
 pub fn region_rank(name: &str) -> u8 {
     let mut rank = 2;
     for token in name
@@ -370,7 +373,16 @@ pub fn region_rank(name: &str) -> u8 {
             rank = 1;
         }
     }
-    rank
+    if rank != 2 {
+        return rank;
+    }
+    let city = name.split('·').next().unwrap_or(name).trim().to_lowercase();
+    match city.as_str() {
+        "los angeles" | "salt lake city" | "buffalo" | "new york" | "san jose" | "seattle"
+        | "chicago" | "dallas" | "miami" => 0,
+        "tokyo" | "osaka" => 1,
+        _ => 2,
+    }
 }
 
 #[cfg(test)]
@@ -406,6 +418,15 @@ mod tests {
         // Substrings do not count.
         assert_eq!(region_rank("JPN East"), 2);
         assert_eq!(region_rank("Rust Server"), 2);
+        // City names carry the region when no explicit token is present.
+        assert_eq!(region_rank("Tokyo · Sakura"), 1);
+        assert_eq!(region_rank("Osaka · Wave"), 1);
+        assert_eq!(region_rank("Los Angeles · Sunset"), 0);
+        assert_eq!(region_rank("Salt Lake City · Summit"), 0);
+        assert_eq!(region_rank("Buffalo · Niagara"), 0);
+        assert_eq!(region_rank("Paris · Seine"), 2);
+        // An explicit token still wins over the city segment.
+        assert_eq!(region_rank("Tokyo · US Backup"), 0);
     }
 
     #[test]
