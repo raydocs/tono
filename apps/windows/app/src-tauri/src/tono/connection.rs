@@ -3055,14 +3055,11 @@ struct ControllerDirectRuleProof {
 /// internal child option and intentionally does not appear in `Payload()`.
 fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec<ControllerDirectRuleProof> {
     let mut expected = Vec::new();
-    for (host, _address, port) in &plan.tcp_wechat_rules {
+    if !plan.tcp_wechat_rules.is_empty() {
         for process in tono_core::config::WECHAT_PROCESS_NAMES {
             expected.push(ControllerDirectRuleProof {
                 proxy: config::DIRECT_GROUP_NAME.to_owned(),
-                payload: format!(
-                    "((Network,tcp) && (DstPort,{port}) && (Domain,{}) && (ProcessName,{process}))",
-                    host.to_ascii_lowercase()
-                ),
+                payload: format!("((Network,tcp) && (ProcessName,{process}))"),
             });
         }
     }
@@ -5874,7 +5871,7 @@ mod tests {
         let expected = vec![
             ControllerDirectRuleProof {
                 proxy: "Tono-China-Direct".to_owned(),
-                payload: "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))"
+                payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
                     .to_owned(),
             },
             ControllerDirectRuleProof {
@@ -5901,7 +5898,7 @@ mod tests {
                 {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
                 {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Exit"},
                 {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Exit"},
-                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"},
                 {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
@@ -5922,7 +5919,7 @@ mod tests {
                 {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
                 {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Exit"},
                 {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Exit"},
-                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
@@ -5994,7 +5991,7 @@ mod tests {
         // domains) into Tono-Claude-Home, sitting between loopback and the DIRECT pins.
         let expected = vec![ControllerDirectRuleProof {
             proxy: "Tono-China-Direct".to_owned(),
-            payload: "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))"
+            payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
                 .to_owned(),
         }];
         let proxies = serde_json::json!({
@@ -6014,7 +6011,7 @@ mod tests {
                 {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.com))", "proxy": "Tono-Claude-Home"},
                 {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,anthropic.com))", "proxy": "Tono-Claude-Home"},
                 {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claudeusercontent.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
             ]
@@ -6139,9 +6136,16 @@ mod tests {
                 .all(|(_ip, port)| [443, 8000].contains(port))
         );
         let controller_rules = expected_controller_direct_rules(&plan);
+        // WeChat TCP collapses to one process-scoped row per client process; UDP and
+        // web rows stay per-endpoint.
+        let wechat_tcp_rows = if plan.tcp_wechat_rules.is_empty() {
+            0
+        } else {
+            tono_core::config::WECHAT_PROCESS_NAMES.len()
+        };
         assert_eq!(
             controller_rules.len(),
-            plan.tcp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
+            wechat_tcp_rows
                 + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
                 + plan.tcp_web_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"

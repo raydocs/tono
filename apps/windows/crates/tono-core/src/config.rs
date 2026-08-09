@@ -494,12 +494,15 @@ fn runtime_value(
         }
     }
     if let Some(plan) = direct {
-        // Avoid depending on Mihomo's subtle DOMAIN/IP metadata interaction.
-        // hosts pins and WFP's exact endpoint permits enforce the reviewed IP set.
-        for (host, _address, port) in &plan.tcp_wechat_rules {
+        // WeChat TCP is process-scoped, not per-domain: the clients dial Tencent's
+        // file/CDN transfer endpoints by raw IP (no SNI), so domain pins can never
+        // cover file transfer and large sends die hairpinned through the exit node.
+        // The process names are the trust boundary — WeChat only talks to Tencent.
+        // UDP stays pinned to the reviewed media endpoints.
+        if !plan.tcp_wechat_rules.is_empty() {
             for process in WECHAT_PROCESS_NAMES {
                 rules.push(format!(
-                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
+                    "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
                 ));
             }
         }
@@ -1044,10 +1047,8 @@ reality-opts:
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit".to_string(),
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit".to_string(),
         ];
-        for (host, port) in [("wxs.qq.com", 443), ("wxs.qq.com", 80), ("qpic.cn", 443)] {
-            for process in WECHAT_PROCESS_NAMES {
-                expected.push(format!("AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(PROCESS-NAME,{process})),Tono-China-Direct"));
-            }
+        for process in WECHAT_PROCESS_NAMES {
+            expected.push(format!("AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-China-Direct"));
         }
         for process in WECHAT_PROCESS_NAMES {
             expected.push(format!("AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"));
@@ -1293,15 +1294,9 @@ reality-opts:
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,wxs.qq.com),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,wxs.qq.com),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,wxs.qq.com),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,qpic.cn),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,qpic.cn),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,qpic.cn),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
