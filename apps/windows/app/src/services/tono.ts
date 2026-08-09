@@ -253,6 +253,12 @@ export const tonoAuditEnabled = () => call<boolean>('tono_audit_enabled')
 export const tonoSetAuditEnabled = (enabled: boolean) =>
   call<void>('tono_set_audit_enabled', { enabled })
 
+export const tonoPeriodicTelemetryEnabled = () =>
+  call<boolean>('tono_periodic_telemetry_enabled')
+
+export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
+  call<void>('tono_set_periodic_telemetry_enabled', { enabled })
+
 export interface TonoAuditLogInfo {
   path: string
   droppedCount: number

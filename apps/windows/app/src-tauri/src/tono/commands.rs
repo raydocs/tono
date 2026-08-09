@@ -439,6 +439,7 @@ pub async fn tono_sign_in_verify(
             return Err("sign-in was superseded while syncing account data".to_string());
         }
         catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
+        crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation).await;
     }
     Ok(info)
 }
@@ -482,6 +483,8 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
             // L4: the user is still signed in — restart the catalog sync
             // that `abort_catalog_sync` just stopped.
             catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
+            crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
+                .await;
             return Err(err);
         }
     }
@@ -1189,6 +1192,8 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 // current-owner runtime, then schedule the ordinary fully verified replacement;
                 // the restore task does not await that potentially long connection transaction.
                 connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
+                crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
+                    .await;
             }
         }
         Err(ApiError::Unauthorized) => {
@@ -1290,6 +1295,23 @@ pub async fn tono_audit_enabled(state: tauri::State<'_, Arc<TonoState>>) -> Resu
 #[tauri::command]
 pub async fn tono_set_audit_enabled(state: tauri::State<'_, Arc<TonoState>>, enabled: bool) -> Result<(), String> {
     state.audit().set_enabled(enabled)
+}
+
+/// Whether periodic cloud diagnostic timeline upload is enabled (default ON).
+#[tauri::command]
+pub async fn tono_periodic_telemetry_enabled(
+    state: tauri::State<'_, Arc<TonoState>>,
+) -> Result<bool, String> {
+    Ok(state.audit().periodic_telemetry_enabled())
+}
+
+/// Toggle periodic cloud diagnostic timeline upload (user can disable anytime).
+#[tauri::command]
+pub async fn tono_set_periodic_telemetry_enabled(
+    state: tauri::State<'_, Arc<TonoState>>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.audit().set_periodic_telemetry_enabled(enabled)
 }
 
 /// §8: the JSONL audit file info (for the settings page / support bundle).

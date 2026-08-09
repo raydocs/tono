@@ -233,6 +233,8 @@ mod app_init {
             tono::commands::tono_retry_restore,
             tono::commands::tono_audit_enabled,
             tono::commands::tono_set_audit_enabled,
+            tono::commands::tono_periodic_telemetry_enabled,
+            tono::commands::tono_set_periodic_telemetry_enabled,
             tono::commands::tono_audit_log_path,
             tono::commands::tono_connect_progress,
             tono::commands::tono_retry_now,

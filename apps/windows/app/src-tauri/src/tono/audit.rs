@@ -173,9 +173,20 @@ pub enum AuditEvent {
     DiagnosticsUploadFail {
         error: String,
     },
+    /// Periodic testing timeline window accepted by the control plane.
+    PeriodicTelemetryUploaded {
+        event_count: u32,
+        bytes: u32,
+    },
+    /// Periodic testing timeline upload failed (never fails closed).
+    PeriodicTelemetryUploadFail {
+        error: String,
+    },
     // lifecycle
     AuditEnabled,
     AuditDisabled,
+    PeriodicTelemetryEnabled,
+    PeriodicTelemetryDisabled,
 }
 
 impl AuditEvent {
@@ -215,6 +226,9 @@ impl AuditEvent {
             },
             PolicySyncFail { error } => PolicySyncFail { error: redact(&error) },
             DiagnosticsUploadFail { error } => DiagnosticsUploadFail { error: redact(&error) },
+            PeriodicTelemetryUploadFail { error } => {
+                PeriodicTelemetryUploadFail { error: redact(&error) }
+            }
             other => other,
         }
     }
@@ -357,26 +371,51 @@ fn writer_loop(mut receiver: tokio::sync::mpsc::Receiver<AuditRecord>, path: Pat
 
 // ---- Settings (`tono/settings.json`) ----
 
-#[derive(serde::Serialize, serde::Deserialize)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct SettingsFile {
+    #[serde(default = "default_true")]
     audit_enabled: bool,
+    /// Default ON while testing: short diagnostic timelines to Cloudflare.
+    /// User can disable in Settings; missing/corrupt files read as enabled.
+    #[serde(default = "default_true")]
+    periodic_telemetry_enabled: bool,
+}
+
+impl Default for SettingsFile {
+    fn default() -> Self {
+        Self {
+            audit_enabled: true,
+            periodic_telemetry_enabled: true,
+        }
+    }
+}
+
+fn load_settings(dir: &Path) -> SettingsFile {
+    std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
+        .ok()
+        .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
+        .unwrap_or_default()
 }
 
 /// Default is ON (macOS parity): a missing or corrupt settings file reads
 /// as enabled.
 pub fn audit_enabled_from_settings(dir: &Path) -> bool {
-    std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
-        .ok()
-        .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
-        .map(|settings| settings.audit_enabled)
-        .unwrap_or(true)
+    load_settings(dir).audit_enabled
+}
+
+/// Default ON for testing telemetry windows.
+pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
+    load_settings(dir).periodic_telemetry_enabled
 }
 
 /// Atomic settings write (L3): temp file with owner-only protection, then
 /// rename over the live one.
-fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<()> {
-    let body =
-        serde_json::to_string(&SettingsFile { audit_enabled: enabled }).context("failed to serialize settings")?;
+fn save_settings(dir: &Path, settings: &SettingsFile) -> Result<()> {
+    let body = serde_json::to_string(settings).context("failed to serialize settings")?;
     let temp = dir.join(format!(".{SETTINGS_FILE_NAME}.tmp-{}", std::process::id()));
     let write_result = state::write_private_file(&temp, body.as_bytes());
     let result = write_result
@@ -385,6 +424,18 @@ fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<()> {
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+fn save_audit_enabled(dir: &Path, enabled: bool) -> Result<()> {
+    let mut settings = load_settings(dir);
+    settings.audit_enabled = enabled;
+    save_settings(dir, &settings)
+}
+
+fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
+    let mut settings = load_settings(dir);
+    settings.periodic_telemetry_enabled = enabled;
+    save_settings(dir, &settings)
 }
 
 // ---- Audit handle ----
@@ -396,6 +447,7 @@ pub struct Audit {
     sender: parking_lot::Mutex<Option<tokio::sync::mpsc::Sender<AuditRecord>>>,
     writer: parking_lot::Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     enabled: AtomicBool,
+    periodic_telemetry_enabled: AtomicBool,
     /// Set by the quit path: permanently silences logging and blocks the
     /// self-heal respawn (L1's "closed is not dead" distinction).
     closed: AtomicBool,
@@ -412,10 +464,12 @@ impl Audit {
     /// Open the log under `logs_dir`, load the toggle from `settings_dir`,
     /// and spawn the writer task.
     pub fn new(logs_dir: &Path, settings_dir: &Path) -> Arc<Self> {
+        let settings = load_settings(settings_dir);
         let audit = Arc::new(Self {
             sender: parking_lot::Mutex::new(None),
             writer: parking_lot::Mutex::new(None),
-            enabled: AtomicBool::new(audit_enabled_from_settings(settings_dir)),
+            enabled: AtomicBool::new(settings.audit_enabled),
+            periodic_telemetry_enabled: AtomicBool::new(settings.periodic_telemetry_enabled),
             closed: AtomicBool::new(false),
             self_heal: true,
             dropped: AtomicU64::new(0),
@@ -435,6 +489,7 @@ impl Audit {
             sender: parking_lot::Mutex::new(Some(sender)),
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(enabled),
+            periodic_telemetry_enabled: AtomicBool::new(true),
             closed: AtomicBool::new(false),
             self_heal: false,
             dropped: AtomicU64::new(0),
@@ -465,6 +520,10 @@ impl Audit {
 
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Acquire)
+    }
+
+    pub fn periodic_telemetry_enabled(&self) -> bool {
+        self.periodic_telemetry_enabled.load(Ordering::Acquire)
     }
 
     pub fn log_path(&self) -> &Path {
@@ -509,6 +568,22 @@ impl Audit {
             self.record(AuditEvent::AuditEnabled);
         } else {
             self.record(AuditEvent::AuditDisabled);
+        }
+        Ok(())
+    }
+
+    /// Toggle cloud periodic telemetry (default ON while testing).
+    pub fn set_periodic_telemetry_enabled(&self, enabled: bool) -> Result<(), String> {
+        if self.periodic_telemetry_enabled() == enabled {
+            return Ok(());
+        }
+        save_periodic_telemetry_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        self.periodic_telemetry_enabled
+            .store(enabled, Ordering::Release);
+        if enabled {
+            self.record(AuditEvent::PeriodicTelemetryEnabled);
+        } else {
+            self.record(AuditEvent::PeriodicTelemetryDisabled);
         }
         Ok(())
     }

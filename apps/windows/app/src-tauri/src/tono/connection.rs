@@ -2987,6 +2987,14 @@ fn format_tun_probe_failures(failures: &[String]) -> String {
 
 // ---- WeChat-DIRECT cloud policy (Build 28) ----
 
+/// Product priority: **Claude first**. Hard invariants any optional DIRECT path must preserve:
+/// 1. Claude / Anthropic traffic always egresses via `Tono-Exit` (US/JP node), never via
+///    `Tono-China-Direct` / the physical China path.
+/// 2. System DNS / DoH for non-pinned names always uses `#Tono-Exit` (`1.1.1.1` / `8.8.8.8`
+///    through the tunnel) — Claude must never resolve on a mainland recursive resolver.
+/// 3. Health failure (WFP / protected DNS / core / data-plane) stays fail-closed: block and
+///    reconnect; never fall open to the real NIC for Claude.
+///
 /// Release gate for the rev-10 fail-closed hot-reload path below. Enabled since 0.0.24: the
 /// generation-mismatch defect that made `applyingCloudPolicy` fail deterministically is fixed in
 /// `prove_service_reload_mode` (the desired-state proof binds the owner session generation, not

@@ -21,6 +21,7 @@ beforeEach(async () => {
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_activation').run();
   await env.DB.prepare('DELETE FROM device_actions').run();
   await env.DB.prepare('DELETE FROM diagnostics_reports').run();
+  await env.DB.prepare('DELETE FROM telemetry_windows').run();
   await env.DB.prepare('DELETE FROM sessions').run();
   await env.DB.prepare('DELETE FROM usage_reports').run();
   await env.DB.prepare('DELETE FROM revocation_jobs').run();

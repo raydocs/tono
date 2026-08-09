@@ -38,6 +38,8 @@ pub mod endpoints {
     /// User-initiated diagnostics upload (never automatic; see
     /// [`super::DiagnosticsReport`]).
     pub const DIAGNOSTICS_REPORTS: &str = "diagnostics/reports";
+    /// Periodic testing timeline windows (client default-on, user-disableable).
+    pub const TELEMETRY_WINDOWS: &str = "telemetry/windows";
     pub fn device(id: &str) -> String {
         format!("devices/{id}")
     }
@@ -429,6 +431,122 @@ pub struct DiagnosticsReceipt {
     pub received_at: Option<i64>,
 }
 
+// ---- Periodic telemetry window (default-on while testing) ----
+//
+// Separate from diagnostics_reports: no support reference code, higher
+// cadence (~20 minutes), short event slice for ban/network forensics.
+// The client must never put emails or secrets in `events`.
+
+/// One audit event line in a telemetry window (already redacted/filtered).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryEvent {
+    pub ts: i64,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counter: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_pid: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_pid: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domains: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_domains: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wechat_tcp: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_tcp: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub udp: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_count: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wanted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<bool>,
+}
+
+/// Whitelisted periodic timeline window body.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryWindowReport {
+    pub schema_version: u32,
+    pub kind: String,
+    pub window_start_ms: i64,
+    pub window_end_ms: i64,
+    pub app_version: String,
+    pub os_version: String,
+    pub os_arch: String,
+    pub ui_state: String,
+    pub account_state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_server: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill_switch_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill_switch_wanted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kill_switch_live: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dns_enabled: Option<bool>,
+    pub event_count: u32,
+    pub events_dropped: u32,
+    pub events: Vec<TelemetryEvent>,
+}
+
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 1;
+pub const TELEMETRY_KIND_PERIODIC_WINDOW: &str = "periodic_window";
+
+#[derive(Debug, Clone, Serialize)]
+struct TelemetryWindowRequest<'a> {
+    window: &'a TelemetryWindowReport,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TelemetryWindowReceipt {
+    pub id: String,
+    #[serde(default, deserialize_with = "de_opt_epoch")]
+    pub received_at: Option<i64>,
+}
+
 /// Server error envelope `{error:{message,code}}` (§1).
 #[derive(Debug, Clone, Deserialize)]
 struct ErrorEnvelope {
@@ -631,6 +749,36 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         // A receipt with no code is useless to the user: they would be told
         // to quote nothing. Treat it as a malformed response.
         if receipt.reference_code.trim().is_empty() {
+            return Err(ApiError::InvalidResponse);
+        }
+        Ok(receipt)
+    }
+
+    /// `POST telemetry/windows`: upload one periodic diagnostic timeline window.
+    ///
+    /// Callers must honour the product toggle (default on while testing) and
+    /// must never include account emails or secrets in `events`.
+    pub async fn upload_telemetry_window(
+        &self,
+        window: &TelemetryWindowReport,
+    ) -> Result<TelemetryWindowReceipt, ApiError> {
+        if window.kind != TELEMETRY_KIND_PERIODIC_WINDOW {
+            return Err(ApiError::InvalidInput(
+                "telemetry window kind must be periodic_window".to_string(),
+            ));
+        }
+        if window.events.len() as u32 != window.event_count {
+            return Err(ApiError::InvalidInput(
+                "telemetry eventCount must match events length".to_string(),
+            ));
+        }
+        let body = serde_json::to_string(&TelemetryWindowRequest { window })
+            .map_err(|_| ApiError::InvalidResponse)?;
+        let response = self
+            .authorized(HttpMethod::Post, endpoints::TELEMETRY_WINDOWS, Some(body))
+            .await?;
+        let receipt: TelemetryWindowReceipt = decode_json(&response)?;
+        if receipt.id.trim().is_empty() {
             return Err(ApiError::InvalidResponse);
         }
         Ok(receipt)
