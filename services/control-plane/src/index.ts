@@ -59,6 +59,8 @@ export interface Env {
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   ACCESS_ADMIN_EMAILS?: string;
+  OPS_ACCESS_CLIENT_ID?: string;
+  OPS_ACCESS_CLIENT_SECRET?: string;
 }
 
 type Row = Record<string, any>;
@@ -690,11 +692,13 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
   if ((!isVersion1 && !isVersion2) ||
       !Array.isArray(policy.domains) || policy.domains.length > 32 ||
       !Array.isArray(policy.mediaEndpoints) || policy.mediaEndpoints.length > 64 ||
-      (isVersion2 && (!Array.isArray(policy.webDomains) || policy.webDomains.length > 16))) {
+      (isVersion2 && (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid traffic policy version or shape');
   }
   const allowedWeChatSuffixes = ['qq.com', 'qq.com.cn', 'qpic.cn', 'qlogo.cn', 'gtimg.cn', 'gtimg.com', 'wechat.com', 'weixin.com', 'weixinbridge.com', 'wxs.qq.com'];
-  const allowedWebSuffixes = ['bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com'];
+  const allowedWebSuffixes = ['bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com',
+    'xiaohongshu.com', 'xhslink.com', 'xhscdn.com',
+    'feishu.cn', 'feishucdn.com', 'larksuite.com', 'larkoffice.com'];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
   const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];
   const seenHosts = new Set<string>();
@@ -918,18 +922,29 @@ async function operationsNodes(e: Env) {
   }));
 }
 
-// Live node telemetry aggregated from the two public ops panels (Komari agent
-// inventory + mainland quality/block report). Both sources are read-only GETs;
-// the response is sanitized to descriptive fields only and served behind the
-// same Cloudflare Access boundary as every other /api/v1/ops/ route.
+// Live node telemetry aggregated from the two ops panels (Komari agent
+// inventory + mainland quality/block report). Both hostnames sit behind
+// Cloudflare Access; when OPS_ACCESS_CLIENT_ID/SECRET are configured the
+// Worker authenticates with that service token. Read-only GETs; the response
+// is sanitized to descriptive fields only and served behind the same
+// Cloudflare Access boundary as every other /api/v1/ops/ route.
 const OPS_LIVE_SOURCES = {
   agents: 'https://ops.afk.ccwu.cc/api/nodes',
   quality: 'https://quality.afk.ccwu.cc/report.json',
 } as const;
 
-async function opsLiveFetch(url: string) {
+async function opsLiveFetch(url: string, e: Env) {
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+    // A bare automated UA is rejected by the zone's browser integrity check.
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-admin-live/1.0',
+  };
+  if (e.OPS_ACCESS_CLIENT_ID && e.OPS_ACCESS_CLIENT_SECRET) {
+    headers['cf-access-client-id'] = e.OPS_ACCESS_CLIENT_ID;
+    headers['cf-access-client-secret'] = e.OPS_ACCESS_CLIENT_SECRET;
+  }
   const response = await fetch(url, {
-    headers: { accept: 'application/json', 'user-agent': 'tono-admin-live/1.0' },
+    headers,
     signal: AbortSignal.timeout(8_000),
   });
   if (!response.ok) {
@@ -938,10 +953,10 @@ async function opsLiveFetch(url: string) {
   return (await response.json()) as Record<string, any>;
 }
 
-async function operationsLive() {
+async function operationsLive(e: Env) {
   const [agents, quality] = await Promise.allSettled([
-    opsLiveFetch(OPS_LIVE_SOURCES.agents),
-    opsLiveFetch(OPS_LIVE_SOURCES.quality),
+    opsLiveFetch(OPS_LIVE_SOURCES.agents, e),
+    opsLiveFetch(OPS_LIVE_SOURCES.quality, e),
   ]);
   const errorMessage = (result: PromiseSettledResult<unknown>) =>
     result.status === 'rejected'
@@ -3468,7 +3483,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         return Response.json(await publicManagedCatalog(e));
       }
       if (p === '/api/v1/ops/live') {
-        return Response.json({ live: await operationsLive() });
+        return Response.json({ live: await operationsLive(e) });
       }
       mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
       if (mt) {
