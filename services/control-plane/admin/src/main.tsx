@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useMemo, useState, type FormEvent, type ReactNode, type SVGProps } from 'react';
+import { Fragment, StrictMode, useEffect, useMemo, useState, type FormEvent, type ReactNode, type SVGProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   operationsApi,
@@ -6,17 +6,20 @@ import {
   type CatalogRevisionDto,
   type DashboardDto,
   type HomeExitDto,
+  type LiveDto,
   type NodeDto,
   type ServerDto,
+  type UserDetailDto,
   type UserDto,
 } from './api';
 import './styles.css';
 
-type Page = 'dashboard' | 'users' | 'homes' | 'servers' | 'nodes' | 'catalog';
+type Page = 'dashboard' | 'users' | 'homes' | 'monitor' | 'servers' | 'nodes' | 'catalog';
 type Resource<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: T };
 
 const pages: Array<{ id: Page; label: string; group: string }> = [
   { id: 'dashboard', label: '总览', group: '概览' },
+  { id: 'monitor', label: '节点监控', group: '概览' },
   { id: 'users', label: '用户', group: '产品' },
   { id: 'homes', label: '家庭出口', group: '产品' },
   { id: 'servers', label: '服务器', group: '运维' },
@@ -39,6 +42,7 @@ const icons: Record<Page | 'quality' | 'komari' | 'external', string> = {
   servers: 'M4 6h16M4 12h16M4 18h16M8 6v.01M8 12v.01M8 18v.01',
   nodes: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
   catalog: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+  monitor: 'M22 12h-4l-3 9L9 3l-3 9H2',
   quality: 'M22 12h-4l-3 9L9 3l-3 9H2',
   komari: 'M18 20V10M12 20V4M6 20v-6',
   external: 'M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3',
@@ -81,6 +85,20 @@ function useResource<T>(load: () => Promise<T>, deps: unknown[] = []): Resource<
 function timestamp(value: number | null | undefined) {
   if (value === null || value === undefined) return '—';
   return new Date(value * 1_000).toLocaleString();
+}
+
+function formatBytes(value: number | null | undefined) {
+  if (value === null || value === undefined) return '—';
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unit = 'B';
+  for (const next of units) {
+    if (size < 1024) break;
+    size /= 1024;
+    unit = next;
+  }
+  return `${size >= 100 ? Math.round(size) : size.toFixed(1)} ${unit}`;
 }
 
 /**
@@ -149,6 +167,7 @@ function Banner({ message, tone = 'info' }: { message: string | null; tone?: 'in
 
 function Dashboard() {
   const resource = useResource(operationsApi.dashboard);
+  const live = useResource(operationsApi.live);
   return <StateBoundary resource={resource}>{(data: DashboardDto) => <>
     <div className="metrics">
       {([
@@ -164,6 +183,22 @@ function Dashboard() {
         </article>
       ))}
     </div>
+
+    {live.state === 'ready' && (() => {
+      const qualityNodes = live.data.quality?.nodes ?? [];
+      const blocked = qualityNodes.filter((node) => node.block && node.block.status !== 'OK').length;
+      const degraded = qualityNodes.filter((node) => node.quality && node.quality !== 'ok').length;
+      return (
+        <div className="quick-links">
+          <a className="link-card" href="#/monitor">
+            <strong>节点监控：{qualityNodes.length} 台 · 被墙 {blocked} · 质量异常 {degraded}</strong>
+            <span>
+              Komari 探针 {live.data.agents?.length ?? 0} 个 · 采集于 {timestamp(live.data.quality?.updatedAt)}
+            </span>
+          </a>
+        </div>
+      );
+    })()}
 
     <div className="catalog-banner">
       <div>
@@ -201,6 +236,8 @@ function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [bindPick, setBindPick] = useState<Record<string, string>>({});
   const [defaultPick, setDefaultPick] = useState<Record<string, string>>({});
+  const [showAllowlist, setShowAllowlist] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const reloadAll = () => {
     users.reload();
@@ -311,6 +348,11 @@ function UsersPage() {
     return catalogProxyNames(catalog.data.yaml).filter((name) => !homeNames.has(name));
   }, [catalog, homes]);
 
+  const leaderboard = useMemo(() => {
+    if (users.state !== 'ready') return [];
+    return [...users.data].sort((a, b) => b.usageBytes - a.usageBytes).slice(0, 5);
+  }, [users]);
+
   return <div className="stack">
     <Banner message={error} tone="error" />
     <Banner message={message} tone="ok" />
@@ -337,15 +379,54 @@ function UsersPage() {
           <button className="btn" type="submit" disabled={busy || !email.trim()}>授权注册</button>
         </form>
         <StateBoundary resource={allowlist} empty={(rows: AllowlistEntry[]) => rows.length === 0}>
-          {(rows) => <div className="chip-list">
-            {rows.map((entry) => <span className="chip" key={entry.email}>
-              {entry.email}
-              <button type="button" className="chip-x" disabled={busy} onClick={() => removeAllow(entry.email)} aria-label="remove">×</button>
-            </span>)}
+          {(rows) => <div className="allowlist-fold">
+            <div className="fold-bar">
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                disabled={busy}
+                onClick={() => setShowAllowlist((value) => !value)}
+              >
+                {showAllowlist ? '收起授权列表' : `管理已授权邮箱（${rows.length}）`}
+              </button>
+              {!showAllowlist && <span className="muted fold-hint">默认收起防误删，撤销仍会二次确认</span>}
+            </div>
+            {showAllowlist && <div className="chip-list">
+              {rows.map((entry) => <span className="chip" key={entry.email}>
+                {entry.email}
+                <button type="button" className="chip-x" disabled={busy} onClick={() => removeAllow(entry.email)} aria-label="remove">×</button>
+              </span>)}
+            </div>}
           </div>}
         </StateBoundary>
       </div>
     </section>
+
+    {leaderboard.some((user) => user.usageBytes > 0) && (
+      <section className="card">
+        <div className="card-header">
+          <div>
+            <h2>流量榜单</h2>
+            <p>按累计用量排序（家庭出口上报口径），仅列前五。</p>
+          </div>
+        </div>
+        <div className="card-body lb">
+          {leaderboard.map((user, index) => (
+            <div className="lb-row" key={user.id}>
+              <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
+              <span className="lb-email">{user.email}</span>
+              <div className="lb-track">
+                <div
+                  className="lb-fill"
+                  style={{ width: `${Math.max(2, (user.usageBytes / (leaderboard[0]?.usageBytes || 1)) * 100)}%` }}
+                />
+              </div>
+              <span className="lb-value mono">{formatBytes(user.usageBytes)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
 
     <section className="card">
       <div className="card-header">
@@ -367,8 +448,16 @@ function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((user) => <tr key={user.id}>
+              {rows.map((user) => <Fragment key={user.id}>
+                <tr>
                 <td>
+                  <button
+                    type="button"
+                    className="expand-toggle"
+                    onClick={() => setExpanded(expanded === user.id ? null : user.id)}
+                    aria-label="展开详情"
+                    title="用量 / 设备 / 诊断报告"
+                  >{expanded === user.id ? '▾' : '▸'}</button>
                   <strong>{user.email}</strong>
                   <small className="mono">{user.id}</small>
                 </td>
@@ -426,13 +515,97 @@ function UsersPage() {
                     </button>
                   </div>
                 </td>
-              </tr>)}
+                </tr>
+                {expanded === user.id && (
+                  <tr className="detail-row">
+                    <td colSpan={5}><UserDetailPanel user={user} /></td>
+                  </tr>
+                )}
+              </Fragment>)}
             </tbody>
           </table>}
         </StateBoundary>
       </div>
     </section>
   </div>;
+}
+
+function UserDetailPanel({ user }: { user: UserDto }) {
+  const detail = useResource<UserDetailDto>(() => operationsApi.userDetail(user.id), [user.id]);
+  const quotaPct = user.quotaBytes
+    ? Math.min(100, (user.usageBytes / user.quotaBytes) * 100)
+    : null;
+
+  const prettyReport = (raw: string) => {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  };
+
+  return (
+    <div className="user-detail">
+      <div className="detail-grid">
+        <div className="detail-block">
+          <h3>用量</h3>
+          <div className="usage-line mono">
+            {formatBytes(user.usageBytes)}{user.quotaBytes != null ? ` / ${formatBytes(user.quotaBytes)}` : ' / 不限'}
+          </div>
+          {quotaPct !== null && (
+            <div className="usage-track">
+              <div
+                className={`usage-fill${quotaPct > 90 ? ' danger' : ''}`}
+                style={{ width: `${Math.max(2, quotaPct)}%` }}
+              />
+            </div>
+          )}
+          <div className="muted detail-note">
+            注册于 {timestamp(user.createdAt)} · 设备上限 {user.deviceLimit}
+            {user.expiresAt ? ` · 到期 ${timestamp(user.expiresAt)}` : ''}
+          </div>
+        </div>
+
+        <div className="detail-block">
+          <h3>设备{detail.state === 'ready' ? `（${detail.data.devices.length}）` : ''}</h3>
+          {detail.state === 'loading' && <span className="muted">加载中…</span>}
+          {detail.state === 'error' && <span className="muted">{detail.message}</span>}
+          {detail.state === 'ready' && (detail.data.devices.length > 0 ? (
+            <ul className="detail-list">
+              {detail.data.devices.map((device) => (
+                <li key={device.id}>
+                  <Status value={device.status} />
+                  <strong>{device.name}</strong>
+                  <span className="muted">更新 {timestamp(device.updatedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : <span className="muted">无设备</span>)}
+        </div>
+
+        <div className="detail-block">
+          <h3>诊断报告{detail.state === 'ready' ? `（${detail.data.diagnostics.length}）` : ''}</h3>
+          {detail.state === 'loading' && <span className="muted">加载中…</span>}
+          {detail.state === 'error' && <span className="muted">{detail.message}</span>}
+          {detail.state === 'ready' && (detail.data.diagnostics.length > 0 ? (
+            <ul className="detail-list">
+              {detail.data.diagnostics.map((report) => (
+                <li key={report.referenceCode}>
+                  <details>
+                    <summary>
+                      <code>{report.referenceCode}</code>
+                      <span className="muted"> · {timestamp(report.receivedAt)} · {report.clientVersion} · {report.osVersion}</span>
+                    </summary>
+                    <pre className="report-json">{prettyReport(report.reportJson)}</pre>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          ) : <span className="muted">用户尚未上传诊断报告</span>)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function HomesPage() {
@@ -585,6 +758,92 @@ function HomesPage() {
   </div>;
 }
 
+function MonitorPage() {
+  const resource = useResource(operationsApi.live);
+  return <StateBoundary resource={resource}>{(live: LiveDto) => {
+    const qualityNodes = live.quality?.nodes ?? [];
+    const agents = live.agents ?? [];
+    const agentByName = new Map(agents.map((agent) => [agent.name, agent]));
+    const blocked = qualityNodes.filter((node) => node.block && node.block.status !== 'OK');
+    const degraded = qualityNodes.filter((node) => node.quality && node.quality !== 'ok');
+    return <div className="stack">
+      {(live.agentsError || live.qualityError) && (
+        <Banner
+          tone="error"
+          message={[
+            live.agentsError ? `Komari 数据源：${live.agentsError}` : null,
+            live.qualityError ? `质量报告数据源：${live.qualityError}` : null,
+          ].filter(Boolean).join('；')}
+        />
+      )}
+
+      <div className="metrics">
+        <article className="metric">
+          <div className="metric-label"><span>监控节点</span></div>
+          <div className="metric-value">{qualityNodes.length}</div>
+          <div className="metric-hint">采集于 {timestamp(live.quality?.updatedAt)}</div>
+        </article>
+        <article className="metric">
+          <div className="metric-label"><span>Komari 探针</span></div>
+          <div className="metric-value">{agents.length}</div>
+          <div className="metric-hint">实时资源监控 agent</div>
+        </article>
+        <article className="metric">
+          <div className="metric-label"><span>被墙</span></div>
+          <div className="metric-value">{blocked.length}</div>
+          <div className="metric-hint">大陆探针多数不通</div>
+        </article>
+        <article className="metric">
+          <div className="metric-label"><span>质量异常</span></div>
+          <div className="metric-value">{degraded.length}</div>
+          <div className="metric-hint">IP 质量关键词命中</div>
+        </article>
+      </div>
+
+      <div className="card">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>节点</th><th>探针</th><th>大陆探测</th><th>被墙</th><th>IP 质量</th><th>回程线路</th><th>风险词</th></tr>
+            </thead>
+            <tbody>{qualityNodes.map((node) => {
+              const agent = agentByName.get(node.name);
+              return <tr key={node.name}>
+                <td><strong>{node.name}</strong>{node.host ? <small className="mono">{node.host}</small> : null}</td>
+                <td>
+                  {agent ? <Status value="active" /> : <span className="muted">未安装</span>}
+                  {agent?.os ? <small className="muted">{agent.os}</small> : null}
+                </td>
+                <td>{node.ok ? <Status value="active" /> : <Status value="degraded" />}</td>
+                <td>
+                  {node.block
+                    ? (node.block.status === 'OK' ? <Status value="active" /> : <Status value="degraded" />)
+                    : '—'}
+                  {node.block?.label ? <small className="muted">{node.block.label}</small> : null}
+                </td>
+                <td>{node.quality ?? '—'}</td>
+                <td className="muted">{node.routeKeywords.join(' · ') || '—'}</td>
+                <td className="muted">{node.riskKeywords.join(' · ') || '—'}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="quick-links">
+        <a className="link-card" href="https://ops.afk.ccwu.cc/" target="_blank" rel="noreferrer">
+          <strong>Komari 完整面板 ↗</strong>
+          <span>CPU / 内存 / 流量 / 延迟曲线</span>
+        </a>
+        <a className="link-card" href="https://quality.afk.ccwu.cc/" target="_blank" rel="noreferrer">
+          <strong>质量面板 ↗</strong>
+          <span>securityCheck / backtrace 完整报告</span>
+        </a>
+      </div>
+    </div>;
+  }}</StateBoundary>;
+}
+
 function Servers() {
   const resource = useResource(operationsApi.servers);
   return <StateBoundary resource={resource} empty={(rows: ServerDto[]) => rows.length === 0}>{(rows) => <div className="cards">
@@ -717,6 +976,7 @@ function App() {
               <h1>{selected.label}</h1>
               <p>
                 {page === 'dashboard' && '控制面容量与快捷入口'}
+                {page === 'monitor' && 'Komari 探针 + 大陆探测 / 被墙 / IP 质量实时聚合'}
                 {page === 'users' && '注册白名单、账号启停、家庭 IP 绑定'}
                 {page === 'homes' && '登记住宅 / 家庭出口节点'}
                 {page === 'servers' && '物理服务器只读清单'}
@@ -727,6 +987,7 @@ function App() {
           </div>
 
           {page === 'dashboard' && <Dashboard />}
+          {page === 'monitor' && <MonitorPage />}
           {page === 'users' && <UsersPage />}
           {page === 'homes' && <HomesPage />}
           {page === 'servers' && <Servers />}

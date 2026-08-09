@@ -75,6 +75,23 @@ export interface AllowlistEntry {
   createdAt: number;
 }
 
+export interface UserDetailDto {
+  devices: Array<{
+    id: string;
+    name: string;
+    status: string;
+    createdAt: number;
+    updatedAt: number;
+  }>;
+  diagnostics: Array<{
+    referenceCode: string;
+    receivedAt: number;
+    clientVersion: string;
+    osVersion: string;
+    reportJson: string;
+  }>;
+}
+
 export interface HomeExitDto {
   id: string;
   proxyName: string;
@@ -104,6 +121,37 @@ export interface ExitCatalogDto {
   yaml: string;
   sha256: string;
   updatedAt?: number;
+}
+
+export interface LiveAgentDto {
+  name: string;
+  os: string | null;
+  arch: string | null;
+  cpuName: string | null;
+  memTotal: number | null;
+  diskTotal: number | null;
+}
+
+export interface LiveQualityNodeDto {
+  name: string;
+  host: string | null;
+  ok: boolean;
+  quality: string | null;
+  riskKeywords: string[];
+  routeKeywords: string[];
+  block: { status: string | null; label: string | null } | null;
+}
+
+export interface LiveDto {
+  fetchedAt: number;
+  agents: LiveAgentDto[] | null;
+  agentsError: string | null;
+  quality: {
+    updatedAt: number | null;
+    updatedAtIso: string | null;
+    nodes: LiveQualityNodeDto[] | null;
+  } | null;
+  qualityError: string | null;
 }
 
 interface ErrorEnvelope {
@@ -148,12 +196,14 @@ const del = <T>(path: string, body?: unknown) => request<T>(path, {
 
 export const operationsApi = {
   dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
+  live: async () => (await get<{ live: LiveDto }>('live')).live,
   servers: async () => (await get<{ servers: ServerDto[] }>('servers')).servers,
   nodes: async () => (await get<{ nodes: NodeDto[] }>('nodes')).nodes,
   catalogRevisions: async () => (
     await get<{ revisions: CatalogRevisionDto[] }>('catalog-revisions')
   ).revisions,
   users: async () => (await get<{ users: UserDto[] }>('users')).users,
+  userDetail: async (userId: string) => get<UserDetailDto>(`users/${userId}/detail`),
   signupAllowlist: async () => (await get<{ entries: AllowlistEntry[] }>('signup-allowlist')).entries,
   addSignupEmail: async (email: string) => post<{ email: string; createdAt: number; created: boolean }>(
     'signup-allowlist',
