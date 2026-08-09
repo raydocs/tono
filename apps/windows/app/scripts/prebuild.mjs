@@ -55,8 +55,11 @@ const ARCH_MAP = {
   'loongarch64-unknown-linux-gnu': 'loong64',
 }
 
-const arg1 = process.argv.slice(2)[0]
-const arg2 = process.argv.slice(2)[1]
+// pnpm forwards a literal "--" separator on some shells (pwsh on Windows runners);
+// it is not a target triple.
+const cliArgs = process.argv.slice(2).filter((arg) => arg !== '--')
+const arg1 = cliArgs[0]
+const arg2 = cliArgs[1]
 const target = arg1 === '--force' || arg1 === '-f' ? arg2 : arg1
 const { platform, arch } = target
   ? { platform: PLATFORM_MAP[target], arch: ARCH_MAP[target] }

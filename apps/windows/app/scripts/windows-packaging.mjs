@@ -522,7 +522,9 @@ export function validateNsisAutomaticUpgradeFlow(source) {
  * @returns {string | null}
  */
 export function validateWindowsReplacementHelperSource(source) {
-  const text = String(source)
+  // Normalize CRLF: Windows checkouts (local and the windows-2025 runner) hand us
+  // \r\n, and the structural regexes below anchor on bare \n sequences.
+  const text = String(source).replace(/\r\n/g, '\n')
   const candidateAt = text.indexOf(
     'let app = app_replacement_candidate(&runtime)?;',
   )
