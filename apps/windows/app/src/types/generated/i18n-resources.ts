@@ -1363,6 +1363,10 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          periodicTelemetry: {
+            description: string
+            label: string
+          }
           title: string
         }
       }

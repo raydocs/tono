@@ -199,7 +199,15 @@ impl PeerIdentity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WindowsPeer {
     /// The connecting process runs under the SID the request declared.
-    DeclaredOwner,
+    ///
+    /// `elevated_administrator` records whether that same process token is a full administrator
+    /// token (UAC full elevation, or Builtin Administrators enabled in its groups). It changes
+    /// nothing about *who* the peer is — the transport gate below admits or refuses exactly as
+    /// before — but the filesystem evidence after it may then treat Builtin Administrators as an
+    /// alias for the owner: Windows records the *group*, not the user, as the owner of whatever
+    /// an elevated administrator creates without an explicit owner, which is how the credential
+    /// directory of an Administrator-account client is owned.
+    DeclaredOwner { elevated_administrator: bool },
     /// The connecting process was identified, and is some other principal.
     OtherPrincipal,
     /// The connection named no process at all.
@@ -235,7 +243,7 @@ fn require_declared_owner_peer(
     };
 
     match peer {
-        WindowsPeer::DeclaredOwner => Ok(()),
+        WindowsPeer::DeclaredOwner { .. } => Ok(()),
         WindowsPeer::OtherPrincipal => Err(ServiceError::unauthorized(
             "connecting process does not run as the declared owner",
         )),
@@ -436,8 +444,10 @@ mod windows_auth {
     use windows_sys::Win32::Security::{
         ACCESS_ALLOWED_ACE, ACL, DACL_SECURITY_INFORMATION, EqualSid, GetAce,
         GetSecurityDescriptorControl, GetTokenInformation, IsValidSid, IsWellKnownSid,
-        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, TOKEN_QUERY,
-        TOKEN_USER, TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
+        TOKEN_ELEVATION_TYPE, TOKEN_GROUPS, TOKEN_QUERY, TOKEN_USER, TokenElevationType,
+        TokenElevationTypeFull, TokenGroups, TokenUser, WinBuiltinAdministratorsSid,
+        WinLocalSystemSid,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
@@ -471,20 +481,39 @@ mod windows_auth {
         // path the caller named and could therefore have arranged, so none of it is worth
         // consulting until the connection itself has been bound to the declared owner. Placing it
         // here also means an unidentifiable peer costs no filesystem work at all.
-        super::require_declared_owner_peer(
-            &credentials.identity,
-            classify_peer(peer, declared_sid.as_ptr()),
-        )?;
+        let peer = classify_peer(peer, declared_sid.as_ptr());
+        super::require_declared_owner_peer(&credentials.identity, peer)?;
+        // Windows records Builtin Administrators — not the user — as the owner of everything an
+        // elevated administrator creates without an explicit owner (the token's default owner is
+        // the group). On an Administrator account the client therefore presents a group-owned
+        // credential root and `owner == declared SID` can never hold. Accept the group as owner
+        // only when the kernel has just proved the connecting process is the declared user *and*
+        // holds a full administrator token; any other peer keeps the strict comparison. The
+        // DACL model below is untouched either way.
+        let allow_administrators_owner = matches!(
+            peer,
+            WindowsPeer::DeclaredOwner {
+                elevated_administrator: true
+            }
+        );
         let app_data_root = canonical_app_data_root(Path::new(&credentials.app_data_dir))?;
 
         let root = open_no_reparse(&app_data_root, true, READ_CONTROL)?;
         validate_file_kind(&root, true)?;
-        validate_owner(root.as_raw_handle(), declared_sid.as_ptr())?;
+        validate_owner(
+            root.as_raw_handle(),
+            declared_sid.as_ptr(),
+            allow_administrators_owner,
+        )?;
 
         let token_path = app_data_root.join(OWNER_TOKEN_FILE_NAME);
         let mut token_file = open_no_reparse(&token_path, false, GENERIC_READ | READ_CONTROL)?;
         validate_file_kind(&token_file, false)?;
-        validate_token_security(token_file.as_raw_handle(), declared_sid.as_ptr())?;
+        validate_token_security(
+            token_file.as_raw_handle(),
+            declared_sid.as_ptr(),
+            allow_administrators_owner,
+        )?;
 
         let mut stored_token = [0_u8; TOKEN_BYTES];
         token_file
@@ -566,7 +595,98 @@ mod windows_auth {
         if unsafe { EqualSid(user.User.Sid, declared_sid) } == 0 {
             return WindowsPeer::OtherPrincipal;
         }
-        WindowsPeer::DeclaredOwner
+        WindowsPeer::DeclaredOwner {
+            elevated_administrator: token_is_elevated_administrator(token.as_raw_handle()),
+        }
+    }
+
+    /// Whether the peer's process token is a full administrator token.
+    ///
+    /// Two token shapes qualify, because UAC names the same reality two ways: a UAC-elevated
+    /// process reports `TokenElevationTypeFull`, while the built-in Administrator with Admin
+    /// Approval Mode off reports `Default` yet still carries Builtin Administrators as an
+    /// *enabled* group. A filtered (limited) token fails both tests — its Administrators group
+    /// is deny-only — so a non-elevated process of an administrator user does not qualify, and a
+    /// token whose groups cannot be read qualifies as nothing.
+    pub(super) fn token_is_elevated_administrator(token: *mut c_void) -> bool {
+        // Not exported by windows-sys 0.61's Win32::Security (it lives in SystemServices, which
+        // this crate does not enable); the value is ABI-fixed.
+        const SE_GROUP_ENABLED: u32 = 0x4;
+
+        let mut elevation_type: TOKEN_ELEVATION_TYPE = 0;
+        let mut returned = std::mem::size_of::<TOKEN_ELEVATION_TYPE>() as u32;
+        if unsafe {
+            GetTokenInformation(
+                token,
+                TokenElevationType,
+                std::ptr::addr_of_mut!(elevation_type).cast(),
+                returned,
+                &mut returned,
+            )
+        } != 0
+            && elevation_type == TokenElevationTypeFull
+        {
+            return true;
+        }
+
+        let mut required = 0_u32;
+        unsafe {
+            GetTokenInformation(token, TokenGroups, std::ptr::null_mut(), 0, &mut required)
+        };
+        if required == 0 {
+            return false;
+        }
+        // Pointer-sized words again, as for `TOKEN_USER`: the `SID_AND_ATTRIBUTES` entries and
+        // the SIDs they point at share this buffer and expect pointer alignment.
+        let words = (required as usize).div_ceil(std::mem::size_of::<usize>());
+        let mut buffer = vec![0_usize; words];
+        if unsafe {
+            GetTokenInformation(
+                token,
+                TokenGroups,
+                buffer.as_mut_ptr().cast(),
+                required,
+                &mut required,
+            )
+        } == 0
+        {
+            return false;
+        }
+        let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
+        let entries = unsafe {
+            std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize)
+        };
+        entries.iter().any(|group| {
+            group.Attributes & SE_GROUP_ENABLED != 0
+                && !group.Sid.is_null()
+                && unsafe { IsValidSid(group.Sid) } != 0
+                && unsafe { IsWellKnownSid(group.Sid, WinBuiltinAdministratorsSid) } != 0
+        })
+    }
+
+    /// Whether a filesystem owner SID may stand in for the declared owner.
+    ///
+    /// The declared owner's own SID always matches. Builtin Administrators matches only when the
+    /// connecting peer was kernel-proved to be the declared user holding a full administrator
+    /// token — the exact situation in which Windows itself put the group there. A low-privilege
+    /// attacker cannot produce such an object (assigning the group as owner needs it in the
+    /// token with `SE_GROUP_OWNER`, or `SeRestorePrivilege`), so the relaxation admits nothing an
+    /// attacker who is not already an administrator could stage; and an attacker who *is* an
+    /// administrator already holds the whole machine, which is outside this check's threat
+    /// model. Every other principal — including LocalSystem — still fails.
+    pub(super) fn owner_is_accepted(
+        owner: PSID,
+        declared_sid: PSID,
+        allow_administrators_owner: bool,
+    ) -> bool {
+        if owner.is_null() {
+            return false;
+        }
+        if unsafe { EqualSid(owner, declared_sid) } != 0 {
+            return true;
+        }
+        allow_administrators_owner
+            && unsafe { IsWellKnownSid(owner, WinBuiltinAdministratorsSid) } != 0
     }
 
     fn canonical_app_data_root(path: &Path) -> Result<PathBuf, ServiceError> {
@@ -643,9 +763,13 @@ mod windows_auth {
         Ok(())
     }
 
-    fn validate_owner(handle: *mut c_void, declared_sid: PSID) -> Result<(), ServiceError> {
+    fn validate_owner(
+        handle: *mut c_void,
+        declared_sid: PSID,
+        allow_administrators_owner: bool,
+    ) -> Result<(), ServiceError> {
         let security = SecurityInfo::read(handle, OWNER_SECURITY_INFORMATION)?;
-        if security.owner.is_null() || unsafe { EqualSid(security.owner, declared_sid) } == 0 {
+        if !owner_is_accepted(security.owner, declared_sid, allow_administrators_owner) {
             return Err(unauthorized(
                 "owner credential path has an unexpected owner",
             ));
@@ -656,12 +780,13 @@ mod windows_auth {
     fn validate_token_security(
         handle: *mut c_void,
         declared_sid: PSID,
+        allow_administrators_owner: bool,
     ) -> Result<(), ServiceError> {
         let security = SecurityInfo::read(
             handle,
             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
         )?;
-        if security.owner.is_null() || unsafe { EqualSid(security.owner, declared_sid) } == 0 {
+        if !owner_is_accepted(security.owner, declared_sid, allow_administrators_owner) {
             return Err(unauthorized("owner token file has an unexpected owner"));
         }
         if security.dacl.is_null() {
@@ -763,10 +888,10 @@ mod windows_auth {
         ServiceError::unauthorized(message)
     }
 
-    struct LocalSid(*mut c_void);
+    pub(super) struct LocalSid(*mut c_void);
 
     impl LocalSid {
-        fn from_string(value: &str) -> Result<Self, ServiceError> {
+        pub(super) fn from_string(value: &str) -> Result<Self, ServiceError> {
             let mut wide: Vec<u16> = value.encode_utf16().collect();
             wide.push(0);
             let mut sid = std::ptr::null_mut();
@@ -778,7 +903,7 @@ mod windows_auth {
             Ok(Self(sid))
         }
 
-        fn as_ptr(&self) -> PSID {
+        pub(super) fn as_ptr(&self) -> PSID {
             self.0
         }
     }
@@ -850,7 +975,19 @@ mod peer_tests {
 
     #[test]
     fn only_a_peer_proved_to_be_the_declared_owner_is_admitted() {
-        assert!(require_declared_owner_peer(&declared_owner(), WindowsPeer::DeclaredOwner).is_ok());
+        // Elevation widens only the filesystem owner comparison, never the transport gate:
+        // both shapes of an identified owner peer are admitted here.
+        for elevated_administrator in [false, true] {
+            assert!(
+                require_declared_owner_peer(
+                    &declared_owner(),
+                    WindowsPeer::DeclaredOwner {
+                        elevated_administrator
+                    },
+                )
+                .is_ok()
+            );
+        }
     }
 
     /// The whole point of the gate: every answer other than "it is the owner" is refused, and the
@@ -878,7 +1015,9 @@ mod peer_tests {
     fn a_unix_identity_does_not_satisfy_the_windows_gate() {
         let error = require_declared_owner_peer(
             &OwnerIdentity::Unix { uid: 501, gid: 20 },
-            WindowsPeer::DeclaredOwner,
+            WindowsPeer::DeclaredOwner {
+                elevated_administrator: true,
+            },
         )
         .expect_err("a Unix identity must not pass the Windows transport gate");
 
@@ -1144,6 +1283,129 @@ mod windows_tests {
 
         std::fs::remove_dir(&link_root)?;
         std::fs::remove_dir_all(dacl_root)?;
+        Ok(())
+    }
+
+    /// The owner-substitution decision itself, pinned with hand-built SIDs so it runs on any
+    /// runner, elevated or not.
+    ///
+    /// The declared owner always matches; Builtin Administrators matches only when the peer was
+    /// proved to be that user with a full administrator token; and nothing else — LocalSystem
+    /// included — is ever substituted, flagged or not.
+    #[test]
+    fn administrators_owner_is_accepted_only_for_a_proved_elevated_admin_peer()
+    -> anyhow::Result<()> {
+        use super::windows_auth::{LocalSid, owner_is_accepted};
+
+        let declared = LocalSid::from_string("S-1-5-21-1004336348-1177238915-682003330-1001")?;
+        let other_user = LocalSid::from_string("S-1-5-21-1004336348-1177238915-682003330-1002")?;
+        let administrators = LocalSid::from_string("S-1-5-32-544")?;
+        let system = LocalSid::from_string("S-1-5-18")?;
+
+        assert!(owner_is_accepted(
+            declared.as_ptr(),
+            declared.as_ptr(),
+            false
+        ));
+        assert!(owner_is_accepted(
+            declared.as_ptr(),
+            declared.as_ptr(),
+            true
+        ));
+        // The bug's fix: group ownership substitutes for an elevated administrator peer…
+        assert!(owner_is_accepted(
+            administrators.as_ptr(),
+            declared.as_ptr(),
+            true
+        ));
+        // …but a peer that proved only its user SID — no elevation — is still refused, so a
+        // low-privilege process of the same user gains nothing from a group-owned path.
+        assert!(!owner_is_accepted(
+            administrators.as_ptr(),
+            declared.as_ptr(),
+            false
+        ));
+        // No other principal is ever substituted, even for a proved elevated administrator.
+        assert!(!owner_is_accepted(
+            other_user.as_ptr(),
+            declared.as_ptr(),
+            true
+        ));
+        assert!(!owner_is_accepted(system.as_ptr(), declared.as_ptr(), true));
+        assert!(!owner_is_accepted(
+            std::ptr::null_mut(),
+            declared.as_ptr(),
+            true
+        ));
+        Ok(())
+    }
+
+    /// The customer reproduction end to end: Builtin Administrators owns the credential root and
+    /// the token file — the Windows default for whatever an elevated administrator creates — and
+    /// the connecting process is the declared user holding a full administrator token.
+    ///
+    /// Staging needs the group assignable as owner, which only an elevated administrator token
+    /// can do (`SE_GROUP_OWNER`); on a non-elevated runner the reproduction cannot be built and
+    /// the test skips, with the decision itself covered by the unit test above.
+    #[test]
+    fn administrators_owned_credentials_authenticate_for_the_elevated_owner_peer()
+    -> anyhow::Result<()> {
+        let root = test_root("ba-owner");
+        let _ = std::fs::remove_dir_all(&root);
+        let credentials = test_owner_credentials(&root)?;
+
+        if set_administrators_owner(&root).is_err()
+            || set_administrators_owner(&root.join(OWNER_TOKEN_FILE_NAME)).is_err()
+        {
+            let _ = std::fs::remove_dir_all(&root);
+            return Ok(());
+        }
+
+        let owner = authenticate(PeerIdentity::current_process(), &credentials)
+            .expect("an elevated administrator peer must authenticate against Administrators-owned credentials");
+
+        assert_eq!(owner.app_data_root, root.canonicalize()?);
+        std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    /// Reassign a path's owner to Builtin Administrators, leaving its DACL untouched.
+    fn set_administrators_owner(path: &std::path::Path) -> anyhow::Result<()> {
+        use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
+
+        let mut sddl = "O:BA"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut descriptor = std::ptr::null_mut();
+        if unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_mut_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                std::ptr::null_mut(),
+            )
+        } == 0
+            || descriptor.is_null()
+        {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        struct Descriptor(*mut std::ffi::c_void);
+        impl Drop for Descriptor {
+            fn drop(&mut self) {
+                unsafe { LocalFree(self.0) };
+            }
+        }
+        let descriptor = Descriptor(descriptor);
+        let wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        if unsafe { SetFileSecurityW(wide.as_ptr(), OWNER_SECURITY_INFORMATION, descriptor.0) } == 0
+        {
+            return Err(std::io::Error::last_os_error().into());
+        }
         Ok(())
     }
 }

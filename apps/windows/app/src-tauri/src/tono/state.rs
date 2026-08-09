@@ -772,7 +772,14 @@ impl tono_core::catalog::CacheSafetyCheck for WindowsCacheSafetyCheck {
         }
 
         let current = CurrentUserSid::query()?;
-        if unsafe { EqualSid(owner, current.0) } == 0 {
+        // The writer is this same process, and Windows records Builtin Administrators — not the
+        // user — as the owner of whatever an elevated administrator creates (`secure_written_file`
+        // sets only the DACL, never the owner). Accept the group as an alias for the user: a
+        // non-administrator cannot assign it (it needs `SE_GROUP_OWNER` on the group or
+        // `SeRestorePrivilege`), and the protected three-principal DACL below is unchanged.
+        if unsafe { EqualSid(owner, current.0) } == 0
+            && unsafe { IsWellKnownSid(owner, WinBuiltinAdministratorsSid) } == 0
+        {
             return Err(io("cache is owned by another user"));
         }
 
