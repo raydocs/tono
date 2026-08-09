@@ -306,6 +306,11 @@ fn runtime_value(
     put(&mut root, "ipv6", Value::Bool(false));
     put(&mut root, "mode", string("rule"));
     put(&mut root, "log-level", string("info"));
+    // Without the top-level udp flag Mihomo shortcuts TUN UDP sessions to a
+    // ruleless DIRECT dial (QUIC, Discord STUN, …) — the real egress leaks
+    // past the tunnel and the MATCH fallback never runs. Every UDP packet
+    // must face the rule engine like TCP does.
+    put(&mut root, "udp", Value::Bool(true));
     put(&mut root, "unified-delay", Value::Bool(true));
     put(&mut root, "find-process-mode", string("strict"));
     let mut profile = Mapping::new();
@@ -675,6 +680,9 @@ reality-opts:
     fn forces_tun_contract_and_route_exclusion() {
         let value = parsed(&build());
         assert_eq!(get(&value, &["tun", "enable"]).as_bool(), Some(true));
+        // TUN UDP must reach the rule engine — a ruleless DIRECT dial leaks
+        // the physical egress (QUIC/STUN) past the tunnel.
+        assert_eq!(get(&value, &["udp"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["tun", "stack"]).as_str(), Some("gvisor"));
         assert_eq!(get(&value, &["tun", "device"]).as_str(), Some("Tono"));
         assert_eq!(get(&value, &["tun", "auto-route"]).as_bool(), Some(true));

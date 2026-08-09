@@ -32,9 +32,9 @@ pub const POLICY_VERSION_V2: u32 = 2;
 /// Limits shared with the Mac validator.
 pub const MAX_POLICY_DOMAINS: usize = 32;
 pub const MAX_POLICY_MEDIA: usize = 64;
-pub const MAX_POLICY_WEB_DOMAINS: usize = 16;
+pub const MAX_POLICY_WEB_DOMAINS: usize = 32;
 
-pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 13] = [
+pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 20] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -48,6 +48,13 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 13] = [
     "iqiyipic.com",
     "youku.com",
     "ykimg.com",
+    "xiaohongshu.com",
+    "xhslink.com",
+    "xhscdn.com",
+    "feishu.cn",
+    "feishucdn.com",
+    "larksuite.com",
+    "larkoffice.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
