@@ -22,6 +22,13 @@ nonisolated struct ConfigPipeline {
         var selectedNodeName: String = "Home-US"
         /// Present only after Tono reports a healthy, exit-node-pinned SOCKS endpoint.
         var tonoTransport: TonoTransportDescriptor? = nil
+        /// Control-plane-pinned home-broadband exit. When it names a validated
+        /// catalog node, Claude process/domain traffic splits onto a dedicated
+        /// `Tono-Claude-Home` selector instead of `Tono-Exit`.
+        var claudeHomeNodeName: String? = nil
+        /// Administrator-pinned default VPS exit, ordered directly after the
+        /// committed selection inside `Tono-Exit`.
+        var defaultNodeName: String? = nil
     }
 
     struct DialEndpoint: Equatable, Sendable {
@@ -99,6 +106,7 @@ nonisolated struct ConfigPipeline {
 
     static let homeNodeName = "Home-US"
     static let exitGroupName = "Tono-Exit"
+    static let claudeHomeGroupName = "Tono-Claude-Home"
     static let directProxyName = "Tono-China-Direct"
     static let webDirectProxyName = "Tono-China-Web-Direct"
     /// AliDNS DoH over TCP/443 with IP-literal certificates. Managed-direct
@@ -534,6 +542,15 @@ nonisolated struct ConfigPipeline {
                 nodes.contains(where: { $0.name == selected }) else {
             throw TonoInjectionError.missingSelection
         }
+        // Routing pins are control-plane hints: adopt them only while they
+        // still name a validated catalog node, and never fail the build over
+        // a stale or unknown pin.
+        let claudeHome = overlay.claudeHomeNodeName
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { name in nodes.contains(where: { $0.name == name }) ? name : nil }
+        let preferredDefault = overlay.defaultNodeName
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { name in nodes.contains(where: { $0.name == name }) ? name : nil }
 
         var proxyBlock = "proxies:\n"
         if let transport {
@@ -574,6 +591,15 @@ nonisolated struct ConfigPipeline {
         if let index = choices.firstIndex(of: selected) {
             choices.remove(at: index)
             choices.insert(selected, at: 0)
+        }
+        // The committed selection stays first: with store-selected disabled
+        // mihomo adopts the first member on every reload, so the
+        // administrator default ranks second and can never silently override
+        // a deliberate user selection.
+        if let preferredDefault, preferredDefault != selected,
+           let index = choices.firstIndex(of: preferredDefault) {
+            choices.remove(at: index)
+            choices.insert(preferredDefault, at: min(1, choices.count))
         }
         let choiceLines = choices.map { "      - \"\(yamlScalar($0))\"" }
             .joined(separator: "\n")
@@ -664,6 +690,17 @@ nonisolated struct ConfigPipeline {
         \(choiceLines)
 
         """
+        if let claudeHome {
+            // Single-member selector: the split target is pinned by the
+            // control plane, not user-switchable in the owned runtime UI.
+            yaml += """
+              - name: "\(claudeHomeGroupName)"
+                type: select
+                proxies:
+                  - "\(yamlScalar(claudeHome))"
+
+            """
+        }
         yaml += "\nrules:\n"
         // Claude App/Code are permanently protected before every trial
         // exception. The native WeChat rules below additionally require an
@@ -675,8 +712,20 @@ nonisolated struct ConfigPipeline {
         // together. The pinned addresses still bound egress via the hosts:
         // entries (use-hosts resolves the direct dial to exactly those IPs)
         // and the PF session allowlist.
-        yaml += "  - PROCESS-NAME,Claude,\(exitGroupName)\n"
-        yaml += "  - PROCESS-NAME,claude,\(exitGroupName)\n"
+        if claudeHome != nil {
+            // With a bound home-broadband exit, both the Claude processes and
+            // the Anthropic service domains (any process, e.g. browsers) take
+            // the pinned home route; everything else still falls to Tono-Exit.
+            yaml += "  - PROCESS-NAME,Claude,\(claudeHomeGroupName)\n"
+            yaml += "  - PROCESS-NAME,claude,\(claudeHomeGroupName)\n"
+            yaml += "  - DOMAIN-SUFFIX,claude.ai,\(claudeHomeGroupName)\n"
+            yaml += "  - DOMAIN-SUFFIX,claude.com,\(claudeHomeGroupName)\n"
+            yaml += "  - DOMAIN-SUFFIX,anthropic.com,\(claudeHomeGroupName)\n"
+            yaml += "  - DOMAIN-SUFFIX,claudeusercontent.com,\(claudeHomeGroupName)\n"
+        } else {
+            yaml += "  - PROCESS-NAME,Claude,\(exitGroupName)\n"
+            yaml += "  - PROCESS-NAME,claude,\(exitGroupName)\n"
+        }
         if transport != nil {
             yaml += "  - PROCESS-NAME,tailscaled,DIRECT\n"
             yaml += "  - PROCESS-NAME,tailscale,DIRECT\n"
@@ -728,6 +777,7 @@ nonisolated struct ConfigPipeline {
         var names = Set([
             homeNodeName,
             exitGroupName,
+            claudeHomeGroupName,
             directProxyName,
             "__tono_tailnet",
         ])

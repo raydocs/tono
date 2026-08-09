@@ -1,5 +1,46 @@
 # Tono Cloudflare control plane 0.0.1
 
+## Phase 1 read-only operations console
+
+The React/Vite console source is in `admin/` and is built to the Worker assets
+path `/ops/` by `npm run admin:build`. It has Dashboard, Users, Homes, Servers,
+Nodes, and Catalog views. Product writes (signup allowlist, home-exit registry,
+user↔home binding, user enable/disable) go through same-origin
+`/api/v1/ops/*` under Cloudflare Access — the browser never stores or sends
+`ADMIN_API_TOKEN`. Token-authenticated `/api/v1/admin/*` remains for CLI/automation.
+Node quality UI lives at `https://quality.afk.ccwu.cc/` (VPS static panel).
+
+The console and its API fail closed unless all of these non-secret Worker vars
+are configured from the same Cloudflare Access application:
+
+- `ACCESS_TEAM_DOMAIN`: hostname only, for example `team.cloudflareaccess.com`
+- `ACCESS_AUD`: the Access application audience tag
+- `ACCESS_ADMIN_EMAILS`: comma-separated exact administrator email addresses
+
+The Worker verifies `Cf-Access-Jwt-Assertion` using the team JWKS and validates
+its RS256 signature, issuer, audience, lifetime, subject, email, and exact admin
+mapping. An `Authorization` bearer value is never accepted by this boundary.
+Keep a Cloudflare Access application policy in front of `/ops*` and
+`/api/v1/ops/*`; Worker verification is defense in depth, not a replacement for
+the edge policy. Missing/invalid configuration returns 503, missing/invalid
+identity returns 401, and an authenticated non-admin returns 403.
+
+Migration `0016_operations_read_model.sql` adds separate descriptive tables for
+servers, logical nodes, deployments, and catalog revision metadata. There are no
+HTTP write routes for these tables and they contain no credential-bearing
+columns. `managed_exit_catalog` and the existing token-authenticated
+`PUT /api/v1/admin/exit-catalog` remain the sole writable catalog authority;
+the existing CLI/admin API is unchanged.
+
+Local checks (no remote writes):
+
+```sh
+npm install
+npm run admin:build
+npm run typecheck
+npm test
+```
+
 完全独立的 Cloudflare Worker + Static Assets + D1 子项目。所有 API 位于 `/api/v1`，管理页面位于 `/`。没有 secret 会被发送到客户端或写入日志。
 
 ## 部署
@@ -36,10 +77,18 @@ npm run deploy
 - confirm 要求客户端的 stable ID、public key 和完整 IP 集合（可附 `nodeId`），并绑定上述服务端签发 hostname，只通过 tailnet inventory 解析。Worker 分开保存管理 `id`、API `nodeId`、stable ID 和 public key；以短租约 + ownership generation 抢占、在 promotion 前写 durable guard，并仅用管理 `id` 调 Tailscale tag/DELETE API。撤销先关闭 D1 session/device，再由持久 outbox 重试；Tailscale API 临时故障不会丢失删除任务。被禁用用户仍有 live device 或未完成 job 时不能重新启用。
 - `/home/inventory` 与 `/home/usage` 都使用 `HOME_AGENT_TOKEN`。inventory 只返回 confirm 时已经过服务端 inventory 验证的 public key、stable node ID 审计字段、Tono user ID、device status 与已有 usage floor；家庭 exit agent 以 public key 对照 `tailscale status --json` 的 per-peer rx/tx，不把可能仅由客户端上报的 stable ID 当作归属边界。响应不返回邮箱、installation ID 或 Tailscale 管理/API ID。usage 接收 `{reports:[{reportId,userId,totalBytes,observedAt}]}`，选择**单调绝对计数**：相同 `reportId` 的完全一致重放成功，不同内容重用返回 `409 USAGE_REPORT_CONFLICT`；用户计数取 `MAX`，乱序不会倒退。每批 1–500 条、最多 100 个不同用户。家庭代理必须先持久化完整 pending batch，超时/崩溃后原样重放，且不能在重启时清零累计值。
 - 邮件 start/verify 与 OIDC challenge/verify 分别按哈希后的 IP、email、installation 或 challenge 做 D1 原子窗口限流；失败验证同样消耗配额。challenge 由 cron 清理。
-- 登录后的 `GET /exit-catalog` 返回带单调 revision 和 SHA-256 的完整节点
-  YAML；未认证请求不能读取。管理员 `PUT /admin/exit-catalog` 必须提交
-  完整 YAML，可带 `expectedRevision` 防止并发覆盖；经 admin token 鉴权的
-  `GET /admin/exit-catalog` 返回当前明文供私有运维工具做安全增量合并。D1 只保存
+- 登录后的 `GET /exit-catalog` 返回带单调 revision 和 SHA-256 的节点 YAML；
+  未认证请求不能读取。全局 `managed_exit_catalog` 仍是加密权威源。迁移 `0017`
+  增加 `home_exits`（家庭/住宅出口登记）与 `user_home_bindings`（一人一家庭 IP）。
+  登记为 `active` 的 home proxy **只**会出现在绑定用户的 catalog 里；共享节点
+  对所有已认证用户可见。管理员 `PUT /admin/exit-catalog` 必须提交完整 YAML，可带
+  `expectedRevision` 防止并发覆盖；`GET /admin/exit-catalog` 始终返回**未过滤**
+  明文供运维合并。家庭绑定管理：`GET/POST /admin/home-exits`、
+  `PATCH/DELETE /admin/home-exits/:id`、`GET /admin/home-bindings`、
+  `GET/PUT/DELETE /admin/users/:id/home-binding`（body 可 `homeExitId` 或
+  `proxyName`，proxy 名必须与 catalog 中 Clash `name` 完全一致；可选
+  `defaultProxyName` 登记用户的默认 VPS 节点名，但不能等于任何 home exit 的
+  proxyName，违反时返回 `400 INVALID_DEFAULT_PROXY`）。D1 只保存
   AES-256-GCM 密文、随机 nonce 和摘要；32-byte base64url
   `CATALOG_ENCRYPTION_KEY` 只存在于 Worker secret。目录最大 1 MiB。
   删除目录项不会远程抹除已授权客户端曾经获得的凭据；需要强制失效时
@@ -79,9 +128,15 @@ OAuth client 只授予上述 scopes；tailnet policy 中声明标签所有者并
 - `GET auth/methods` 返回 `{email,apple,google:{enabled,clientId?}}`；只有服务端配置完整的方法为 enabled。
 - `GET exit-catalog` 需要 access Bearer，返回
   `{revision,yaml,sha256,updatedAt?}`。revision 只递增；无目录时返回
-  revision `0` 与 `proxies: []`。客户端必须验证摘要、节点策略和本地
-  anti-rollback，不能把源 YAML 的 TUN/DNS/rules/controller 直接交给
-  Mihomo。
+  revision `0` 与 `proxies: []`。若管理员登记了 home exit，用户侧 YAML 会
+  过滤掉未绑定的家庭节点（`sha256` 对过滤后内容计算）。当用户存在 active
+  家庭绑定（迁移 `0018`）时，响应额外带 `routing:{homeProxy,defaultProxy?}`：
+  `homeProxy` 是绑定的 active 家庭节点 proxyName，`defaultProxy` 是绑定写入时
+  登记的非家庭默认 VPS proxyName（未设置则省略）；客户端据此把 Claude 流量路由到
+  家宽、其余流量走默认 VPS。未绑定用户与管理员全量响应不含 `routing` 字段。
+  客户端必须验证摘要、
+  节点策略和本地 anti-rollback，不能把源 YAML 的 TUN/DNS/rules/controller
+  直接交给 Mihomo。
 - 邮件：`POST auth/email/start` 接收 `{email,deviceName,installationId}`，总是以通用 `202` 返回 `{challengeId,expiresIn,message}`；`POST auth/email/verify` 接收 `{challengeId,code}`。
 - Apple/Google：`POST auth/oidc/challenge` 接收 `{provider,deviceName,installationId}`，返回 `{challengeId,nonce,expiresIn,audience}`；客户端获得 provider ID token 后向 `POST auth/oidc/verify` 发送 `{provider,challengeId,idToken}`。
 - 三种 verify 的成功 envelope 都是 `{accessToken,refreshToken,user,device,enrollment?}`。pending 设备必有 `enrollment:{id?,authKey,hostname,expiresAt,state:"pending"}`，active 设备没有 enrollment。

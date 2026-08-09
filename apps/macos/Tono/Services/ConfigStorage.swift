@@ -213,6 +213,9 @@ nonisolated struct ManagedExitCatalogCache: Codable, Sendable, Equatable {
     let yaml: String
     let sha256: String
     let updatedAt: Int?
+    /// Optional routing pins from the same catalog revision. Absent in caches
+    /// written before the control plane shipped routing.
+    let routing: TonoExitCatalogRouting?
 }
 
 nonisolated struct ManagedTrafficPolicyCache: Codable, Sendable, Equatable {

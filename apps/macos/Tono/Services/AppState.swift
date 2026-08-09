@@ -551,6 +551,9 @@ final class AppState {
     private var autoConnectRequested = false
     private var managedCatalogRevision = -1
     private var managedCatalogDigest: String?
+    /// Validated control-plane routing pins from the active catalog revision.
+    /// Both names are guaranteed to match a live validated catalog node.
+    private var managedCatalogRouting: TonoExitCatalogRouting?
     private var managedCatalogReloadPending = false
     private var managedTrafficPolicy = TonoTrafficPolicy(
         version: 1,
@@ -926,13 +929,18 @@ final class AppState {
         }
     }
 
-    /// Prefer the requested US Reality exit across catalog naming variants. If
-    /// it is temporarily absent, retain availability with the first verified
-    /// managed-cloud node.
+    /// Prefer the administrator-pinned default exit while it names a live
+    /// catalog node, then the requested US Reality exit across catalog naming
+    /// variants. If both are temporarily absent, retain availability with the
+    /// first verified managed-cloud node.
     private func defaultCloudExitNode() -> ProxyNode? {
         let nodes = proxyRegions
             .first(where: { $0.id == Self.managedCatalogRegionID })?
             .nodes ?? []
+        if let defaultName = managedCatalogRouting?.defaultProxy,
+           let pinned = nodes.first(where: { $0.name == defaultName }) {
+            return pinned
+        }
         return ConfigPipeline.preferredCloudExit(
             in: nodes,
             named: AppProfile.defaultCloudExitName
@@ -1108,7 +1116,9 @@ final class AppState {
             allowLan: false,
             tunEnabled: true,
             selectedNodeName: selectedExitName,
-            tonoTransport: tonoTransport
+            tonoTransport: tonoTransport,
+            claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+            defaultNodeName: managedCatalogRouting?.defaultProxy
         )
         let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
             .flatMap { URL(string: $0)?.host }
@@ -1204,6 +1214,7 @@ final class AppState {
                     }
                 }
                 let proxyEndpoints = try ConfigPipeline.dialEndpoints(for: selectedExit)
+                    + claudeHomeDialEndpoints(excluding: selectedExit)
                 // Always arm before TUN comes up so a crash mid-connect cannot
                 // leak the real IP. The actor keeps this blocking PF/helper work
                 // off SwiftUI and ordered with a possible cancel/disconnect.
@@ -2335,6 +2346,7 @@ final class AppState {
             guard let api else { return }
             do {
                 let endpoints = try ConfigPipeline.dialEndpoints(for: desiredNode)
+                    + claudeHomeDialEndpoints(excluding: desiredNode)
                 // The owned runtime excludes every validated catalog address,
                 // so its TUN route fingerprint is stable across selections.
                 // Move the exact PF permission first; until the selector moves,
@@ -2600,7 +2612,9 @@ final class AppState {
             allowLan: config.allowLan,
             tunEnabled: config.tunEnabled,
             selectedNodeName: selectedExitNode()?.name ?? ConfigPipeline.homeNodeName,
-            tonoTransport: tonoTransport
+            tonoTransport: tonoTransport,
+            claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+            defaultNodeName: managedCatalogRouting?.defaultProxy
         )
         let selectedExit = selectedExitNode()
         let selectedExitName = selectedExit?.name
@@ -2637,7 +2651,8 @@ final class AppState {
                     tunnelInterfaces: KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
                         ? [ConfigPipeline.tonoTunInterface]
                         : [],
-                    proxyEndpoints: try ConfigPipeline.dialEndpoints(for: selectedExit),
+                    proxyEndpoints: try ConfigPipeline.dialEndpoints(for: selectedExit)
+                        + claudeHomeDialEndpoints(excluding: selectedExit),
                     sessionDirectEndpoints: sessionEndpoints,
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil
                 )
@@ -2796,7 +2811,8 @@ final class AppState {
                     revision: response.revision,
                     yaml: response.yaml,
                     sha256: response.sha256,
-                    updatedAt: response.updatedAt
+                    updatedAt: response.updatedAt,
+                    routing: response.routing
                 ),
                 persistCache: true,
                 allowRuntimeTransition: true
@@ -2865,10 +2881,13 @@ final class AppState {
             false
         }
 
-        if allowRuntimeTransition, selectedCloudNodeWasRemoved, isConnected || isConnecting {
+        let liveSessionTornDown = allowRuntimeTransition
+            && selectedCloudNodeWasRemoved && (isConnected || isConnecting)
+        if liveSessionTornDown {
             // Remove both the old TUN and its exact PF endpoint before changing
-            // the visible selection. Automatic connect remains blocked until
-            // the user explicitly chooses a surviving exit.
+            // the visible selection. Without an administrator-pinned default,
+            // automatic connect remains blocked until the user explicitly
+            // chooses a surviving exit.
             disconnect(releaseKillSwitch: false)
         }
 
@@ -2883,12 +2902,25 @@ final class AppState {
         proxyRegions = managedRegions + customRegions
         managedCatalogRevision = catalog.revision
         managedCatalogDigest = catalog.sha256
+        managedCatalogRouting = validatedCatalogRouting(catalog.routing, nodes: nodes)
 
         if selectedCloudNodeWasRemoved {
-            catalogSelectionRequiresChoice = true
-            autoConnectRequested = false
             applyDefaultProxySelection(persist: true)
-            errorMessage = "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server."
+            if managedCatalogRouting?.defaultProxy != nil,
+               currentProxySelectionTarget() != nil {
+                // The administrator-pinned default exit is a sanctioned
+                // fallback: adopt it without forcing a manual choice. A live
+                // session torn down above reconnects straight onto it.
+                errorMessage = "The selected cloud server was removed. Tono switched to the default cloud server; Kill Switch is still blocking traffic."
+                if liveSessionTornDown {
+                    autoConnectRequested = true
+                    attemptAutomaticConnect()
+                }
+            } else {
+                catalogSelectionRequiresChoice = true
+                autoConnectRequested = false
+                errorMessage = "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server."
+            }
         } else if !migrateCloudExitDefaultIfNeeded() {
             restoreProxySelection(preferredTarget: previousSelection, persistFallback: true)
         }
@@ -2904,6 +2936,33 @@ final class AppState {
         } else if isConnecting {
             managedCatalogReloadPending = true
         }
+    }
+
+    /// Adopts control-plane routing pins only while each name still matches a
+    /// validated catalog node. Unknown or empty names are dropped individually
+    /// with an audit event; a catalog without usable pins yields nil.
+    private func validatedCatalogRouting(
+        _ routing: TonoExitCatalogRouting?,
+        nodes: [ProxyNode]
+    ) -> TonoExitCatalogRouting? {
+        guard let routing else { return nil }
+        func validatedName(_ raw: String?, field: String) -> String? {
+            guard let raw else { return nil }
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            guard nodes.contains(where: { $0.name == name }) else {
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_catalog_routing_ignored",
+                    details: ["field": field, "reason": "unknown_node"]
+                )
+                return nil
+            }
+            return name
+        }
+        let homeProxy = validatedName(routing.homeProxy, field: "homeProxy")
+        let defaultProxy = validatedName(routing.defaultProxy, field: "defaultProxy")
+        guard homeProxy != nil || defaultProxy != nil else { return nil }
+        return TonoExitCatalogRouting(homeProxy: homeProxy, defaultProxy: defaultProxy)
     }
 
     // MARK: - Managed traffic policy
@@ -3027,7 +3086,25 @@ final class AppState {
     /// PF proxy permits for the currently selected exit, matching what the
     /// connect and reload transactions arm.
     private func currentProxyEndpoints() -> [ConfigPipeline.DialEndpoint] {
-        (try? ConfigPipeline.dialEndpoints(for: selectedExitNode())) ?? []
+        let selected = selectedExitNode()
+        return ((try? ConfigPipeline.dialEndpoints(for: selected)) ?? [])
+            + claudeHomeDialEndpoints(excluding: selected)
+    }
+
+    /// PF permits for the control-plane-pinned home-broadband exit while
+    /// Claude traffic splitting is active. The pin was validated against the
+    /// live catalog at install time, so endpoint extraction cannot fail here;
+    /// a stale pin simply yields no extra permit. The selected exit's own
+    /// permit is supplied by the caller, so it is never duplicated.
+    private func claudeHomeDialEndpoints(
+        excluding selected: ProxyNode?
+    ) -> [ConfigPipeline.DialEndpoint] {
+        guard let homeName = managedCatalogRouting?.homeProxy,
+              let home = proxyRegions.flatMap(\.nodes)
+                  .first(where: { $0.name == homeName }),
+              home.id != selected?.id
+        else { return [] }
+        return (try? ConfigPipeline.dialEndpoints(for: home)) ?? []
     }
 
     /// Safety net against total pin staleness: re-resolves the managed-direct

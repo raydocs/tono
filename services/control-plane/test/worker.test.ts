@@ -7,6 +7,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
+import adminWorker from '../src/admin-worker';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
 const HOME_TOKEN = 'home-test-token-with-at-least-32-characters';
@@ -41,12 +42,47 @@ const TS_IPS = ['100.64.0.10'];
 const OIDC_KEY_ID = 'test-oidc-key';
 const GOOGLE_AUDIENCE = 'test-google-client.apps.googleusercontent.com';
 const APPLE_AUDIENCE = 'com.raydocs.tono';
+const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
+const ACCESS_AUDIENCE = 'test-access-audience-0001';
+const ACCESS_ADMIN_EMAIL = 'operator@example.com';
 
 let sequence = 0;
 const tailscaleRequests: string[] = [];
 const emailCodes = new Map<string, string>();
 let oidcPrivateKey: CryptoKey;
 let oidcPublicKey: JsonWebKey & { kid: string };
+
+async function accessAssertion(
+  accessEmail: string,
+  claimOverrides: Record<string, unknown> = {},
+  headerOverrides: Record<string, unknown> = {},
+) {
+  const encode = (value: object) => base64URL(new TextEncoder().encode(JSON.stringify(value)));
+  const issuedAt = Math.floor(Date.now() / 1_000);
+  const header = encode({ alg: 'RS256', typ: 'JWT', kid: OIDC_KEY_ID, ...headerOverrides });
+  const payload = encode({
+    iss: `https://${ACCESS_TEAM_DOMAIN}`,
+    aud: ACCESS_AUDIENCE,
+    sub: `access-user-${accessEmail}`,
+    email: accessEmail,
+    iat: issuedAt,
+    exp: issuedAt + 300,
+    ...claimOverrides,
+  });
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    oidcPrivateKey,
+    new TextEncoder().encode(`${header}.${payload}`),
+  );
+  return `${header}.${payload}.${base64URL(new Uint8Array(signature))}`;
+}
+
+async function operations(path: string, accessEmail = ACCESS_ADMIN_EMAIL, method = 'GET') {
+  return api(`ops/${path}`, {
+    method,
+    headers: { 'cf-access-jwt-assertion': await accessAssertion(accessEmail) },
+  });
+}
 
 /** In-memory mock inventory; tags mutate after promotion. */
 const mockInventory: Array<{
@@ -227,7 +263,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
       if (
         (url === 'https://www.googleapis.com/oauth2/v3/certs' ||
-          url === 'https://appleid.apple.com/auth/keys') &&
+          url === 'https://appleid.apple.com/auth/keys' ||
+          url === `https://${ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`) &&
         method === 'GET'
       ) {
         return Response.json(
@@ -302,6 +339,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   beforeEach(async () => {
     (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'true';
+    (env as unknown as Env).ACCESS_TEAM_DOMAIN = ACCESS_TEAM_DOMAIN;
+    (env as unknown as Env).ACCESS_AUD = ACCESS_AUDIENCE;
+    (env as unknown as Env).ACCESS_ADMIN_EMAILS = ACCESS_ADMIN_EMAIL;
     releaseTagPromotion?.();
     tailscaleRequests.length = 0;
     emailCodes.clear();
@@ -336,6 +376,20 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(empty.status).toBe(401);
   });
 
+  it('keeps non-operations routes unreachable on the dedicated admin worker', async () => {
+    for (const path of ['/api/v1/health', '/api/v1/admin/users', '/api/v1/diagnostics/reports']) {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request(`https://admin.afk.ccwu.cc${path}`),
+        env as unknown as Parameters<typeof adminWorker.fetch>[1],
+        context,
+      );
+      await waitOnExecutionContext(context);
+      expect(response.status).toBe(404);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+    }
+  });
+
   it('serves an isolated release archive on the release subdomain', async () => {
     const fetchRelease = async (path: string, init: RequestInit = {}) => {
       const context = createExecutionContext();
@@ -368,10 +422,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         windows: {
           current: {
             version: '2.5.4',
-            build: 'test5',
+            build: 'test6',
             trafficPolicySchemas: [1, 2],
             artifact: {
-              sha256: '0cfd68444aefded4ed9bc2d687f4ce9d481e980f08940b5e65249e0fd393bb88',
+              sha256: 'ef92f8bce4c4fdea9db4e44dcfd68d570f5bacb179892bcc6bf4b46eb97a4ece',
             },
           },
         },
@@ -392,6 +446,220 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const response = await admin(`users/${crypto.randomUUID()}`, { status: 'disabled' }, 'PATCH');
     expect(response.status).toBe(404);
     expect((await response.json() as any).error.code).toBe('NOT_FOUND');
+  });
+
+  it('fails the operations boundary closed and never accepts the legacy admin token', async () => {
+    (env as unknown as Env).ACCESS_TEAM_DOMAIN = undefined;
+    const unconfigured = await api('ops/dashboard', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(unconfigured.status).toBe(503);
+    expect((await unconfigured.json() as any).error.code).toBe('ACCESS_MISCONFIGURED');
+
+    (env as unknown as Env).ACCESS_TEAM_DOMAIN = ACCESS_TEAM_DOMAIN;
+    for (const method of ['GET', 'OPTIONS']) {
+      const legacyTokenOnly = await api('ops/dashboard', {
+        method,
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      });
+      expect(legacyTokenOnly.status).toBe(401);
+      expect((await legacyTokenOnly.json() as any).error.code).toBe('ACCESS_UNAUTHORIZED');
+    }
+
+    const staticContext = createExecutionContext();
+    const staticWithoutAccess = await worker.fetch(
+      new Request('https://test/ops/', { method: 'OPTIONS' }),
+      env as unknown as Env,
+      staticContext,
+    );
+    await waitOnExecutionContext(staticContext);
+    expect(staticWithoutAccess.status).toBe(401);
+
+    const nonAdmin = await operations('dashboard', 'viewer@example.com');
+    expect(nonAdmin.status).toBe(403);
+    expect((await nonAdmin.json() as any).error.code).toBe('ACCESS_FORBIDDEN');
+
+    const currentTime = Math.floor(Date.now() / 1_000);
+    const invalidAssertions = [
+      'not-a-jwt',
+      await accessAssertion(ACCESS_ADMIN_EMAIL, { iss: 'https://wrong.cloudflareaccess.com' }),
+      await accessAssertion(ACCESS_ADMIN_EMAIL, { aud: 'wrong-access-audience' }),
+      await accessAssertion(ACCESS_ADMIN_EMAIL, { exp: currentTime - 1 }),
+      await accessAssertion(ACCESS_ADMIN_EMAIL, { iat: currentTime + 120 }),
+      await accessAssertion(ACCESS_ADMIN_EMAIL, { nbf: currentTime + 120 }),
+      await accessAssertion(ACCESS_ADMIN_EMAIL, {}, { kid: 'unknown-access-key' }),
+    ];
+    const valid = await accessAssertion(ACCESS_ADMIN_EMAIL);
+    const [validHeader, validPayload, validSignature] = valid.split('.');
+    invalidAssertions.push(`${validHeader}.${validPayload}.${validSignature[0] === 'A' ? 'B' : 'A'}${validSignature.slice(1)}`);
+    for (const assertion of invalidAssertions) {
+      const rejected = await api('ops/dashboard', {
+        headers: { 'cf-access-jwt-assertion': assertion },
+      });
+      expect(rejected.status).toBe(401);
+    }
+
+    (env as unknown as Env).ACCESS_TEAM_DOMAIN = 'unavailable-team.cloudflareaccess.com';
+    const unavailable = await api('ops/dashboard', {
+      headers: { 'cf-access-jwt-assertion': valid },
+    });
+    expect(unavailable.status).toBe(503);
+    expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
+  });
+
+  it('lets Access admins add users and bind home exits through ops product routes', async () => {
+    const unauthorized = await api('ops/users', {
+      method: 'GET',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const addAllow = await api('ops/signup-allowlist', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ email: 'family-user@example.com' }),
+    });
+    expect(addAllow.status).toBe(201);
+
+    const account = await createAccount('ops-family');
+    const homeCreate = await api('ops/home-exits', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        proxyName: 'Home Residential Ops',
+        displayName: '家庭 Ops',
+        egressIpv4: '198.51.100.9',
+      }),
+    });
+    expect(homeCreate.status).toBe(201);
+    const homeId = ((await homeCreate.json()) as any).homeExit.id;
+
+    const bind = await api(`ops/users/${account.user.id}/home-binding`, {
+      method: 'PUT',
+      headers: accessHeaders,
+      body: JSON.stringify({ homeExitId: homeId }),
+    });
+    expect(bind.status).toBe(201);
+
+    const users = await operations('users');
+    expect(users.status).toBe(200);
+    const listed = (await users.json() as any).users.find((row: any) => row.id === account.user.id);
+    expect(listed.homeBinding).toMatchObject({
+      homeExitId: homeId,
+      proxyName: 'Home Residential Ops',
+      egressIpv4: '198.51.100.9',
+    });
+  });
+
+  it('serves strict redacted operations DTOs through GET-only queries', async () => {
+    const timestamp = 1_700_000_000;
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO operations_servers(id, display_name, region_code, provider, status, created_at, updated_at)
+         VALUES(?, ?, ?, ?, 'active', ?, ?)`,
+      ).bind('server-us-west', 'US West', 'us-west', 'provider-a', timestamp, timestamp),
+      env.DB.prepare(
+        `INSERT INTO operations_logical_nodes(id, server_id, display_name, region_code, status, created_at, updated_at)
+         VALUES(?, ?, ?, ?, 'active', ?, ?)`,
+      ).bind('node-us-west-1', 'server-us-west', 'US West 1', 'us-west', timestamp, timestamp),
+      env.DB.prepare(
+        `INSERT INTO operations_deployments(
+           id, server_id, logical_node_id, environment, release_version, status, deployed_at, created_at
+         ) VALUES(?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).bind('deployment-1', 'server-us-west', 'node-us-west-1', 'production', '2026.08.1', timestamp, timestamp),
+      env.DB.prepare(
+        `INSERT INTO operations_catalog_revision_metadata(
+           revision, content_sha256, published_at, server_count, logical_node_count, deployment_count
+         ) VALUES(?, ?, ?, ?, ?, ?)`,
+      ).bind(7, 'a'.repeat(64), timestamp, 1, 1, 1),
+      env.DB.prepare(
+        `INSERT INTO managed_exit_catalog(
+           singleton_id, revision, ciphertext, nonce, content_sha256, updated_at
+         ) VALUES(1, ?, ?, ?, ?, ?)`,
+      ).bind(7, 'encrypted-catalog', 'catalog-nonce', 'b'.repeat(64), timestamp + 1),
+    ]);
+
+    const dashboard = await operations('dashboard');
+    expect(dashboard.status).toBe(200);
+    expect((await dashboard.json() as any).dashboard.servers).toEqual({ total: 1, active: 1 });
+
+    const servers = await operations('servers');
+    expect(servers.status).toBe(200);
+    const serverPayload = await servers.json() as any;
+    expect(serverPayload.servers).toEqual([{
+      id: 'server-us-west',
+      displayName: 'US West',
+      regionCode: 'us-west',
+      provider: 'provider-a',
+      status: 'active',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      latestDeployment: {
+        releaseVersion: '2026.08.1', status: 'active', deployedAt: timestamp,
+      },
+    }]);
+
+    const nodes = await operations('nodes');
+    expect((await nodes.json() as any).nodes).toEqual([{
+      id: 'node-us-west-1',
+      serverId: 'server-us-west',
+      serverDisplayName: 'US West',
+      displayName: 'US West 1',
+      regionCode: 'us-west',
+      status: 'active',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }]);
+
+    const deployments = await operations('deployments');
+    const deploymentPayload = await deployments.json() as any;
+    expect(Object.keys(deploymentPayload.deployments[0]).sort()).toEqual([
+      'createdAt', 'deployedAt', 'environment', 'id', 'logicalNodeDisplayName', 'logicalNodeId',
+      'releaseVersion', 'serverDisplayName', 'serverId', 'status',
+    ]);
+    const serialized = JSON.stringify({ serverPayload, deploymentPayload });
+    for (const forbidden of ['uuid', 'endpoint', 'privateKey', 'ssh', 'token', 'authorization']) {
+      expect(serialized.toLowerCase()).not.toContain(forbidden.toLowerCase());
+    }
+
+    const revisions = await operations('catalog-revisions');
+    expect((await revisions.json() as any).revisions).toEqual([{
+      revision: 7,
+      sha256: 'b'.repeat(64),
+      publishedAt: timestamp + 1,
+      serverCount: 1,
+      logicalNodeCount: 1,
+      deploymentCount: 1,
+      current: true,
+    }]);
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO operations_servers(id, display_name, region_code, status, created_at, updated_at)
+         VALUES('server-jp', 'Japan', 'jp', 'active', ?, ?)`,
+      ).bind(timestamp, timestamp),
+      env.DB.prepare(
+        `INSERT INTO operations_logical_nodes(id, server_id, display_name, region_code, status, created_at, updated_at)
+         VALUES('node-jp-1', 'server-jp', 'Japan 1', 'jp', 'active', ?, ?)`,
+      ).bind(timestamp, timestamp),
+    ]);
+    await expect(env.DB.prepare(
+      `INSERT INTO operations_deployments(
+         id, server_id, logical_node_id, environment, release_version, status, created_at
+       ) VALUES('cross-server', 'server-us-west', 'node-jp-1', 'production', 'invalid', 'active', ?)`,
+    ).bind(timestamp).run()).rejects.toThrow();
+
+    const rejectedWrite = await operations('servers', ACCESS_ADMIN_EMAIL, 'POST');
+    expect(rejectedWrite.status).toBe(405);
+    expect(rejectedWrite.headers.get('allow')).toContain('GET');
+    expect((await env.DB.prepare('SELECT COUNT(*) total FROM operations_servers').first<any>()).total).toBe(2);
+
+    // Existing token-authenticated CLI/admin operations remain available on their original boundary.
+    expect((await admin('users', undefined, 'GET')).status).toBe(200);
   });
 
   it('manages exact signup access without a Worker redeployment', async () => {
@@ -567,6 +835,272 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     );
     expect(utf8Oversized.status).toBe(400);
     expect((await utf8Oversized.json() as any).error.code).toBe('INVALID_CATALOG');
+  });
+
+  it('binds one home exit per user and filters that proxy from other catalogs', async () => {
+    const yaml = `proxies:
+  - name: "Shared JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+  - name: "Home Residential A"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: 22222222-2222-4222-8222-222222222222
+    tls: true
+  - name: "Home Residential B"
+    type: vless
+    server: 9.9.9.9
+    port: 443
+    uuid: 33333333-3333-4333-8333-333333333333
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const homeA = await admin('home-exits', {
+      proxyName: 'Home Residential A',
+      displayName: '家庭 A',
+      egressIpv4: '203.0.113.10',
+    });
+    expect(homeA.status).toBe(201);
+    const homeABody = await homeA.json() as any;
+    expect(homeABody.homeExit.proxyName).toBe('Home Residential A');
+    expect(homeABody.homeExit.egressIpv4).toBe('203.0.113.10');
+
+    const homeB = await admin('home-exits', {
+      proxyName: 'Home Residential B',
+      displayName: '家庭 B',
+      egressIpv4: '203.0.113.20',
+    });
+    expect(homeB.status).toBe(201);
+    const homeBId = ((await homeB.json()) as any).homeExit.id;
+
+    const conflict = await admin('home-exits', {
+      proxyName: 'Home Residential A',
+      displayName: 'dup',
+    });
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json() as any).error.code).toBe('HOME_EXIT_CONFLICT');
+
+    const owner = await createAccount('home-owner');
+    const other = await createAccount('home-other');
+
+    const bound = await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: homeABody.homeExit.id },
+      'PUT',
+    );
+    expect(bound.status).toBe(201);
+    expect((await bound.json() as any).binding).toMatchObject({
+      userId: owner.user.id,
+      proxyName: 'Home Residential A',
+      egressIpv4: '203.0.113.10',
+    });
+
+    const rebound = await admin(
+      `users/${owner.user.id}/home-binding`,
+      { proxyName: 'Home Residential B' },
+      'PUT',
+    );
+    expect(rebound.status).toBe(200);
+    const reboundBody = await rebound.json() as any;
+    expect(reboundBody.binding.proxyName).toBe('Home Residential B');
+    expect(reboundBody.binding.homeExitId).toBe(homeBId);
+
+    // Re-bind owner to A for the filter assertion below.
+    expect((await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: homeABody.homeExit.id },
+      'PUT',
+    )).status).toBe(200);
+
+    const ownerCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(ownerCatalog.status).toBe(200);
+    const ownerBody = await ownerCatalog.json() as any;
+    expect(ownerBody.yaml).toContain('Shared JP');
+    expect(ownerBody.yaml).toContain('Home Residential A');
+    expect(ownerBody.yaml).not.toContain('Home Residential B');
+    // Home A credentials remain for the bound user; home B credentials must not leak.
+    expect(ownerBody.yaml).toContain('22222222-2222-4222-8222-222222222222');
+    expect(ownerBody.yaml).not.toContain('33333333-3333-4333-8333-333333333333');
+    expect(ownerBody.sha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    const otherCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    expect(otherCatalog.status).toBe(200);
+    const otherBody = await otherCatalog.json() as any;
+    expect(otherBody.yaml).toContain('Shared JP');
+    expect(otherBody.yaml).not.toContain('Home Residential A');
+    expect(otherBody.yaml).not.toContain('Home Residential B');
+    expect(otherBody.yaml).not.toContain('22222222-2222-4222-8222-222222222222');
+    expect(otherBody.yaml).not.toContain('33333333-3333-4333-8333-333333333333');
+
+    // Admin catalog remains the full authority.
+    const adminCatalog = await admin('exit-catalog', undefined, 'GET');
+    expect(adminCatalog.status).toBe(200);
+    const adminBody = await adminCatalog.json() as any;
+    expect(adminBody.yaml).toContain('Home Residential A');
+    expect(adminBody.yaml).toContain('Home Residential B');
+    expect(adminBody.yaml).toContain('Shared JP');
+
+    const listed = await admin('home-bindings', undefined, 'GET');
+    expect(listed.status).toBe(200);
+    expect((await listed.json() as any).bindings).toEqual([
+      expect.objectContaining({
+        userId: owner.user.id,
+        proxyName: 'Home Residential A',
+      }),
+    ]);
+
+    const inUse = await admin(`home-exits/${homeABody.homeExit.id}`, undefined, 'DELETE');
+    expect(inUse.status).toBe(409);
+    expect((await inUse.json() as any).error.code).toBe('HOME_EXIT_IN_USE');
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    const unboundCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    const unboundBody = await unboundCatalog.json() as any;
+    expect(unboundBody.yaml).toContain('Shared JP');
+    expect(unboundBody.yaml).not.toContain('Home Residential A');
+    expect(unboundBody.yaml).not.toContain('Home Residential B');
+
+    expect((await admin(`home-exits/${homeABody.homeExit.id}`, undefined, 'DELETE')).status).toBe(204);
+    expect((await admin(`home-exits/${homeBId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('publishes routing metadata to bound users and validates defaultProxyName', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+  - name: "Home Residential Route"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: 22222222-2222-4222-8222-222222222222
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const home = await admin('home-exits', {
+      proxyName: 'Home Residential Route',
+      displayName: '家庭路由',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+
+    const owner = await createAccount('routing-owner');
+    const other = await createAccount('routing-other');
+
+    // defaultProxyName must not collide with any registered home exit proxyName.
+    const invalid = await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: homeId, defaultProxyName: 'Home Residential Route' },
+      'PUT',
+    );
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json() as any).error.code).toBe('INVALID_DEFAULT_PROXY');
+
+    const bound = await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: homeId, defaultProxyName: 'Shared VPS JP' },
+      'PUT',
+    );
+    expect(bound.status).toBe(201);
+    expect((await bound.json() as any).binding).toMatchObject({
+      proxyName: 'Home Residential Route',
+      defaultProxyName: 'Shared VPS JP',
+    });
+
+    const ownerCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(ownerCatalog.status).toBe(200);
+    expect((await ownerCatalog.json() as any).routing).toEqual({
+      homeProxy: 'Home Residential Route',
+      defaultProxy: 'Shared VPS JP',
+    });
+
+    const otherCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    expect(otherCatalog.status).toBe(200);
+    expect((await otherCatalog.json() as any)).not.toHaveProperty('routing');
+
+    // The admin full catalog never carries routing metadata.
+    const adminCatalog = await admin('exit-catalog', undefined, 'GET');
+    expect(adminCatalog.status).toBe(200);
+    expect((await adminCatalog.json() as any)).not.toHaveProperty('routing');
+
+    // Re-binding without defaultProxyName leaves routing with only homeProxy.
+    const rebound = await admin(
+      `users/${owner.user.id}/home-binding`,
+      { homeExitId: homeId },
+      'PUT',
+    );
+    expect(rebound.status).toBe(200);
+    expect((await rebound.json() as any).binding.defaultProxyName).toBeUndefined();
+    const noDefault = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect((await noDefault.json() as any).routing).toEqual({ homeProxy: 'Home Residential Route' });
+
+    // The ops product route accepts and persists defaultProxyName as well.
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const opsBound = await api(`ops/users/${owner.user.id}/home-binding`, {
+      method: 'PUT',
+      headers: accessHeaders,
+      body: JSON.stringify({ homeExitId: homeId, defaultProxyName: 'Shared VPS JP' }),
+    });
+    expect(opsBound.status).toBe(200);
+    expect((await opsBound.json() as any).binding.defaultProxyName).toBe('Shared VPS JP');
+    const opsCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect((await opsCatalog.json() as any).routing).toEqual({
+      homeProxy: 'Home Residential Route',
+      defaultProxy: 'Shared VPS JP',
+    });
+
+    const opsInvalid = await api(`ops/users/${owner.user.id}/home-binding`, {
+      method: 'PUT',
+      headers: accessHeaders,
+      body: JSON.stringify({ homeExitId: homeId, defaultProxyName: 'Home Residential Route' }),
+    });
+    expect(opsInvalid.status).toBe(400);
+    expect((await opsInvalid.json() as any).error.code).toBe('INVALID_DEFAULT_PROXY');
+
+    // The ops users listing surfaces defaultProxyName for the admin console.
+    const opsUsers = await operations('users');
+    expect(opsUsers.status).toBe(200);
+    const opsListed = (await opsUsers.json() as any).users
+      .find((row: any) => row.id === owner.user.id);
+    expect(opsListed.homeBinding).toMatchObject({
+      homeExitId: homeId,
+      proxyName: 'Home Residential Route',
+      defaultProxyName: 'Shared VPS JP',
+    });
+
+    // The ops console reads the full plaintext catalog without routing metadata.
+    const opsCatalogFull = await operations('exit-catalog');
+    expect(opsCatalogFull.status).toBe(200);
+    const opsCatalogBody = await opsCatalogFull.json() as any;
+    expect(opsCatalogBody.yaml).toContain('Shared VPS JP');
+    expect(opsCatalogBody.yaml).toContain('Home Residential Route');
+    expect(opsCatalogBody).not.toHaveProperty('routing');
   });
 
   it('validates, encrypts, versions, and serves the managed traffic policy', async () => {

@@ -38,8 +38,6 @@ CREATE INDEX diagnostics_reports_retention
 -- Same posture as 0006: an accepted report is immutable evidence. There is no
 -- client-supplied idempotency key here, so instead of resolving a replay the
 -- trigger refuses mutation outright. Retention deletes; nothing rewrites.
-CREATE TRIGGER diagnostics_reports_immutable_update
-BEFORE UPDATE ON diagnostics_reports
-BEGIN
-  SELECT RAISE(ABORT, 'DIAGNOSTICS_REPORT_IMMUTABLE');
-END;
+-- Keep the full compound statement on one line: remote D1 migration ingestion
+-- cannot reliably parse multiline trigger bodies even though local D1 can.
+CREATE TRIGGER diagnostics_reports_immutable_update BEFORE UPDATE ON diagnostics_reports BEGIN SELECT RAISE(ABORT, 'DIAGNOSTICS_REPORT_IMMUTABLE'); END;
