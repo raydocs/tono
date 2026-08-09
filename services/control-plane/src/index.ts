@@ -513,6 +513,18 @@ function optionalIpv4(value: unknown, field: string): string | null {
   return address;
 }
 
+// Home-exit and binding writes change a user's served catalog (filtered node
+// set) and its routing directive without touching the raw catalog YAML. The
+// Windows client treats "same revision + different digest" as tampering and
+// silently skips routing when the digest is unchanged, so every such write
+// must advance the catalog revision to propagate. Unbound users re-install an
+// identical catalog, which is harmless churn at this scale.
+async function bumpCatalogRevision(e: Env) {
+  await e.DB.prepare(
+    'UPDATE managed_exit_catalog SET revision = revision + 1, updated_at = ? WHERE singleton_id = 1',
+  ).bind(now()).run();
+}
+
 function proxyNameField(value: unknown): string {
   const name = str(value, 'proxyName', 1, 200).trim();
   if (!name || /[\r\n\0]/.test(name)) {
@@ -904,6 +916,81 @@ async function operationsNodes(e: Env) {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   }));
+}
+
+// Live node telemetry aggregated from the two public ops panels (Komari agent
+// inventory + mainland quality/block report). Both sources are read-only GETs;
+// the response is sanitized to descriptive fields only and served behind the
+// same Cloudflare Access boundary as every other /api/v1/ops/ route.
+const OPS_LIVE_SOURCES = {
+  agents: 'https://ops.afk.ccwu.cc/api/nodes',
+  quality: 'https://quality.afk.ccwu.cc/report.json',
+} as const;
+
+async function opsLiveFetch(url: string) {
+  const response = await fetch(url, {
+    headers: { accept: 'application/json', 'user-agent': 'tono-admin-live/1.0' },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok) {
+    throw new Error(`live source returned HTTP ${response.status}`);
+  }
+  return (await response.json()) as Record<string, any>;
+}
+
+async function operationsLive() {
+  const [agents, quality] = await Promise.allSettled([
+    opsLiveFetch(OPS_LIVE_SOURCES.agents),
+    opsLiveFetch(OPS_LIVE_SOURCES.quality),
+  ]);
+  const errorMessage = (result: PromiseSettledResult<unknown>) =>
+    result.status === 'rejected'
+      ? String(result.reason instanceof Error ? result.reason.message : result.reason)
+      : null;
+
+  const agentRows = agents.status === 'fulfilled' && Array.isArray(agents.value?.data)
+    ? agents.value.data
+        .map((n: any) => ({
+          name: optionalText(n.name),
+          os: optionalText(n.os),
+          arch: optionalText(n.arch),
+          cpuName: optionalText(n.cpu_name),
+          memTotal: optionalNumber(n.mem_total),
+          diskTotal: optionalNumber(n.disk_total),
+        }))
+        .filter((n: { name: string | null }) => n.name)
+    : null;
+
+  const report = quality.status === 'fulfilled' ? quality.value : null;
+  const qualityNodes = report && Array.isArray(report.nodes)
+    ? report.nodes
+        .map((n: any) => ({
+          name: optionalText(n.name),
+          host: optionalText(n.host),
+          ok: n.ok === true,
+          quality: optionalText(n.quality),
+          riskKeywords: Array.isArray(n.risk_keywords) ? n.risk_keywords.map(String) : [],
+          routeKeywords: Array.isArray(n.route_keywords) ? n.route_keywords.map(String) : [],
+          block: n.block && typeof n.block === 'object'
+            ? { status: optionalText(n.block.status), label: optionalText(n.block.label) }
+            : null,
+        }))
+        .filter((n: { name: string | null }) => n.name)
+    : null;
+
+  return {
+    fetchedAt: now(),
+    agents: agentRows,
+    agentsError: agentRows === null ? errorMessage(agents) ?? 'no agent data' : null,
+    quality: report
+      ? {
+          updatedAt: optionalNumber(report.updated_at),
+          updatedAtIso: optionalText(report.updated_at_iso),
+          nodes: qualityNodes,
+        }
+      : null,
+    qualityError: qualityNodes === null ? errorMessage(quality) ?? 'no quality data' : null,
+  };
 }
 
 async function operationsDeployments(e: Env) {
@@ -3380,6 +3467,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         // Ops console receives the full plaintext catalog, unfiltered.
         return Response.json(await publicManagedCatalog(e));
       }
+      if (p === '/api/v1/ops/live') {
+        return Response.json({ live: await operationsLive() });
+      }
       mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
       if (mt) {
         const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
@@ -3402,6 +3492,34 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            WHERE user_home_bindings.user_id = ?`,
         ).bind(mt[1]).first<Row>();
         return Response.json({ binding: row ? publicHomeBinding(row) : null });
+      }
+      mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/detail$/);
+      if (mt) {
+        const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+        if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+        const devices = await e.DB.prepare(
+          'SELECT id, name, status, created_at, updated_at FROM devices WHERE user_id = ? ORDER BY created_at DESC',
+        ).bind(mt[1]).all<Row>();
+        const reports = await e.DB.prepare(
+          `SELECT reference_code, received_at, client_version, os_version, report_json
+           FROM diagnostics_reports WHERE user_id = ? ORDER BY received_at DESC LIMIT 20`,
+        ).bind(mt[1]).all<Row>();
+        return Response.json({
+          devices: devices.results.map((d) => ({
+            id: String(d.id),
+            name: String(d.name),
+            status: String(d.status),
+            createdAt: Number(d.created_at),
+            updatedAt: Number(d.updated_at),
+          })),
+          diagnostics: reports.results.map((r) => ({
+            referenceCode: String(r.reference_code),
+            receivedAt: Number(r.received_at),
+            clientVersion: String(r.client_version),
+            osVersion: String(r.os_version),
+            reportJson: String(r.report_json),
+          })),
+        });
       }
       throw new ApiError(404, 'NOT_FOUND', 'Route not found');
     }
@@ -3455,6 +3573,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
       }
       const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
+      await bumpCatalogRevision(e);
       return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
     }
     mt = p.match(/^\/api\/v1\/ops\/home-exits\/([^/]+)$/);
@@ -3489,6 +3608,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
       }
       const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+      await bumpCatalogRevision(e);
       return Response.json({ homeExit: publicHomeExit(row!) });
     }
     if (mt && m === 'DELETE') {
@@ -3500,6 +3620,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
       if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      await bumpCatalogRevision(e);
       return new Response(null, { status: 204 });
     }
     mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
@@ -3556,6 +3677,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
          WHERE user_home_bindings.user_id = ?`,
       ).bind(mt[1]).first<Row>();
+      await bumpCatalogRevision(e);
       return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
     }
     if (mt && m === 'DELETE') {
@@ -3565,6 +3687,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!deleted.meta.changes) {
         const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
         if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      } else {
+        await bumpCatalogRevision(e);
       }
       return new Response(null, { status: 204 });
     }
@@ -3734,6 +3858,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
       }
       const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
+      await bumpCatalogRevision(e);
       return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
     }
     mt = p.match(/^\/api\/v1\/admin\/home-exits\/([^/]+)$/);
@@ -3768,6 +3893,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
       }
       const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+      await bumpCatalogRevision(e);
       return Response.json({ homeExit: publicHomeExit(row!) });
     }
     if (mt && m === 'DELETE') {
@@ -3779,6 +3905,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
       if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      await bumpCatalogRevision(e);
       return new Response(null, { status: 204 });
     }
     if (p === '/api/v1/admin/home-bindings' && m === 'GET') {
@@ -3879,6 +4006,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
          WHERE user_home_bindings.user_id = ?`,
       ).bind(mt[1]).first<Row>();
+      await bumpCatalogRevision(e);
       return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
     }
     if (mt && m === 'DELETE') {
@@ -3888,6 +4016,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!deleted.meta.changes) {
         const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
         if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      } else {
+        await bumpCatalogRevision(e);
       }
       return new Response(null, { status: 204 });
     }

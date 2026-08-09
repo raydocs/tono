@@ -49,6 +49,8 @@ const ACCESS_ADMIN_EMAIL = 'operator@example.com';
 let sequence = 0;
 const tailscaleRequests: string[] = [];
 const emailCodes = new Map<string, string>();
+let liveAgentsPayload: unknown = { data: [] };
+let liveQualityPayload: unknown = { nodes: [] };
 let oidcPrivateKey: CryptoKey;
 let oidcPublicKey: JsonWebKey & { kid: string };
 
@@ -271,6 +273,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
           { keys: [oidcPublicKey] },
           { headers: { 'cache-control': 'public, max-age=300' } },
         );
+      }
+
+      if (url === 'https://ops.afk.ccwu.cc/api/nodes' && method === 'GET') {
+        return Response.json(liveAgentsPayload);
+      }
+
+      if (url === 'https://quality.afk.ccwu.cc/report.json' && method === 'GET') {
+        return Response.json(liveQualityPayload);
       }
 
       tailscaleRequests.push(`${method} ${url} ${requestBody}`);
@@ -505,6 +515,76 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect(unavailable.status).toBe(503);
     expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
+  });
+
+  it('serves aggregated live node telemetry to Access admins only', async () => {
+    const unauthorized = await api('ops/live', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(unauthorized.status).toBe(401);
+
+    liveAgentsPayload = {
+      data: [{
+        name: 'Los Angeles · Marina',
+        os: 'Debian GNU/Linux 11',
+        arch: 'amd64',
+        cpu_name: 'Test CPU',
+        mem_total: 1024,
+        disk_total: 10240,
+        token: 'must-not-leak',
+        ipv4: '203.0.113.10',
+      }],
+    };
+    liveQualityPayload = {
+      updated_at: 1786270932,
+      updated_at_iso: '2026-08-09T10:00:00Z',
+      nodes: [{
+        name: 'Los Angeles · Marina',
+        host: '203.0.113.10',
+        ok: true,
+        quality: 'ok',
+        risk_keywords: [],
+        route_keywords: ['4837'],
+        block: { status: 'OK', label: '正常' },
+        security_check: 'long report not shipped',
+        backtrace: 'long report not shipped',
+      }],
+    };
+
+    const response = await operations('live');
+    expect(response.status).toBe(200);
+    const { live } = await response.json() as any;
+    expect(live.agents).toHaveLength(1);
+    expect(live.agents[0]).toMatchObject({ name: 'Los Angeles · Marina', arch: 'amd64', memTotal: 1024 });
+    expect(live.agents[0].token).toBeUndefined();
+    expect(live.agents[0].ipv4).toBeUndefined();
+    expect(live.quality.updatedAt).toBe(1786270932);
+    expect(live.quality.nodes[0]).toMatchObject({
+      name: 'Los Angeles · Marina',
+      ok: true,
+      block: { status: 'OK', label: '正常' },
+    });
+    expect(live.quality.nodes[0].security_check).toBeUndefined();
+    expect(live.quality.nodes[0].backtrace).toBeUndefined();
+    expect(live.agentsError).toBeNull();
+    expect(live.qualityError).toBeNull();
+
+    liveAgentsPayload = { data: [] };
+    liveQualityPayload = { nodes: [] };
+  });
+
+  it('serves per-user device and diagnostics detail to Access admins', async () => {
+    const missing = await operations(`users/${crypto.randomUUID()}/detail`);
+    expect(missing.status).toBe(404);
+
+    const account = await createAccount('opsdetail');
+    const response = await operations(`users/${account.user.id}/detail`);
+    expect(response.status).toBe(200);
+    const detail = await response.json() as any;
+    expect(detail.devices).toHaveLength(1);
+    expect(detail.devices[0].name).toBe('Primary Mac');
+    expect(typeof detail.devices[0].status).toBe('string');
+    expect(detail.diagnostics).toEqual([]);
   });
 
   it('lets Access admins add users and bind home exits through ops product routes', async () => {
@@ -1101,6 +1181,55 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(opsCatalogBody.yaml).toContain('Shared VPS JP');
     expect(opsCatalogBody.yaml).toContain('Home Residential Route');
     expect(opsCatalogBody).not.toHaveProperty('routing');
+  });
+
+  it('advances the catalog revision on every home-exit/binding write so clients re-sync', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+  - name: "Home Route"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: 22222222-2222-4222-8222-222222222222
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    const revision = async () =>
+      Number(((await (await admin('exit-catalog', undefined, 'GET')).json()) as any).revision);
+    const base = await revision();
+
+    const home = await admin('home-exits', { proxyName: 'Home Route', displayName: '家宽' });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+    expect(await revision()).toBe(base + 1);
+
+    const owner = await createAccount('revision-owner');
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(201);
+    expect(await revision()).toBe(base + 2);
+
+    // Re-binding the same exit is still a served-catalog event (routing re-apply).
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(200);
+    expect(await revision()).toBe(base + 3);
+
+    expect(
+      (await admin(`home-exits/${homeId}`, { notes: 'retire note' }, 'PATCH')).status,
+    ).toBe(200);
+    expect(await revision()).toBe(base + 4);
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect(await revision()).toBe(base + 5);
+
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+    expect(await revision()).toBe(base + 6);
   });
 
   it('validates, encrypts, versions, and serves the managed traffic policy', async () => {
