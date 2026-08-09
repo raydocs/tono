@@ -506,6 +506,13 @@ fn runtime_value(
             ));
         }
     }
+    // Every node is VLESS+Vision today, and Vision cannot carry UDP — Mihomo
+    // marks the exit group "UDP is not supported" and *falls back to a
+    // ruleless DIRECT dial*, leaking the physical egress (QUIC, Discord
+    // STUN, …). Reject all non-pinned UDP instead: whitelisted WeChat media
+    // already matched its pins above, everything else must fail over to TCP
+    // rather than leave the machine. Revisit when nodes speak UoT.
+    rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
     rules.push(RULES[RULES.len() - 1].to_string());
     put(
         &mut root,
@@ -734,6 +741,7 @@ reality-opts:
             [
                 "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
                 "IP-CIDR6,::1/128,DIRECT,no-resolve",
+                "AND,((NETWORK,UDP)),REJECT",
                 "MATCH,Tono-Exit"
             ]
         );
@@ -855,7 +863,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, RULES);
+        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
         assert_eq!(get(&redacted, &["proxies"]).as_sequence().unwrap().len(), 3);
         let groups = get(&redacted, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 1);
@@ -922,7 +930,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, RULES);
+        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
         let proxies = get(&value, &["proxies"]).as_sequence().unwrap();
         assert_eq!(proxies.len(), 3);
         assert!(
@@ -1035,6 +1043,7 @@ reality-opts:
             expected.push(format!("AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"));
         }
         expected.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
+        expected.push("AND,((NETWORK,UDP)),REJECT".to_string());
         expected.push("MATCH,Tono-Exit".to_string());
         assert_eq!(
             rules,
@@ -1145,7 +1154,7 @@ reality-opts:
             .iter()
             .map(|rule| rule.as_str().unwrap())
             .collect();
-        assert_eq!(rules, RULES);
+        assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
     }
 
     // ---- Claude→home-exit split routing ----
@@ -1215,6 +1224,7 @@ reality-opts:
                 "DOMAIN-SUFFIX,claude.com,Tono-Claude-Home",
                 "DOMAIN-SUFFIX,anthropic.com,Tono-Claude-Home",
                 "DOMAIN-SUFFIX,claudeusercontent.com,Tono-Claude-Home",
+                "AND,((NETWORK,UDP)),REJECT",
                 "MATCH,Tono-Exit",
             ]
         );
@@ -1286,6 +1296,7 @@ reality-opts:
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
                 "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
+                "AND,((NETWORK,UDP)),REJECT",
                 "MATCH,Tono-Exit",
             ]
         );

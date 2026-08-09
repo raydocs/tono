@@ -3584,7 +3584,8 @@ fn controller_direct_graph_is_active(
     } else {
         2
     };
-    let expected_len = expected_direct_rules.len() + 3 + claude_rows;
+    // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
+    let expected_len = expected_direct_rules.len() + 3 + claude_rows + 1;
     if rules.len() != expected_len {
         return Err(format!(
             "controller runtime returned {} rules, expected the exact {expected_len}-rule graph",
@@ -3611,6 +3612,16 @@ fn controller_direct_graph_is_active(
         let index = 2 + claude_rows + offset;
         expect_rule(rules.get(index), index, "AND", &expected.payload, &expected.proxy)?;
     }
+    // Vision cannot carry UDP; unpinned UDP must die here, never fall through to a
+    // ruleless DIRECT dial.
+    let udp_reject = 2 + claude_rows + expected_direct_rules.len();
+    expect_rule(
+        rules.get(udp_reject),
+        udp_reject,
+        "AND",
+        "((Network,udp))",
+        "REJECT",
+    )?;
     let fallback = expected_len - 1;
     expect_rule(rules.get(fallback), fallback, "Match", "", EXIT_GROUP_NAME)?;
     Ok(())
@@ -5879,6 +5890,7 @@ mod tests {
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"},
+                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
             ]
         });
@@ -5898,6 +5910,7 @@ mod tests {
                 {"type": "ProcessName", "payload": "claude.exe", "proxy": "Tono-Exit"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
                 {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
             ]
         });
@@ -5954,7 +5967,7 @@ mod tests {
         );
 
         let mut wrong_fallback = rules.clone();
-        wrong_fallback["rules"][7]["proxy"] = serde_json::json!("DIRECT");
+        wrong_fallback["rules"][8]["proxy"] = serde_json::json!("DIRECT");
         assert!(
             controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "the final fallback must remain exact Tono-Exit"
@@ -5988,6 +6001,7 @@ mod tests {
                 {"type": "DomainSuffix", "payload": "anthropic.com", "proxy": "Tono-Claude-Home"},
                 {"type": "DomainSuffix", "payload": "claudeusercontent.com", "proxy": "Tono-Claude-Home"},
                 {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
                 {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
             ]
         });
