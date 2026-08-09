@@ -18,7 +18,13 @@ use super::Config;
 use crate::core::handle::Handle;
 
 /// The port mihomo listens on when nothing else is configured.
-pub const DEFAULT_MIXED_PORT: u16 = 7897;
+pub const DEFAULT_MIXED_PORT: u16 = 17970;
+
+/// The Clash Verge factory default Tono shipped before 0.0.25. A persisted
+/// config still carrying it means "the user never chose a port" — upgrade it
+/// to [`DEFAULT_MIXED_PORT`] instead of fighting every Clash-family client
+/// for 7897.
+pub const LEGACY_DEFAULT_MIXED_PORT: u16 = 7897;
 
 /// Resolving the Mixed Port.
 pub struct MixedPort;
@@ -57,11 +63,13 @@ impl MixedPort {
     }
 }
 
-/// Prefer what the user selected, else what the Merge Config resolved to.
+/// Prefer what the user selected, else what the Merge Config resolved to. A
+/// selection still holding the legacy Clash-Verge default was never a real
+/// choice — fall through so the merged (already migrated) value wins.
 const fn resolve_desired(selected: Option<u16>, merged: u16) -> u16 {
     match selected {
-        Some(port) => port,
-        None => merged,
+        Some(port) if port != LEGACY_DEFAULT_MIXED_PORT => port,
+        _ => merged,
     }
 }
 
@@ -85,7 +93,15 @@ mod tests {
 
     #[test]
     fn a_selected_port_wins_over_the_merge_config() {
-        assert_eq!(resolve_desired(Some(9000), 7897), 9000);
+        assert_eq!(resolve_desired(Some(9000), 17970), 9000);
+    }
+
+    #[test]
+    fn the_legacy_verge_default_is_not_a_real_selection() {
+        // A persisted 7897 means "never customized": it must migrate to Tono's
+        // own default instead of colliding with every Clash-family client.
+        assert_eq!(resolve_desired(Some(7897), 17970), 17970);
+        assert_eq!(resolve_desired(Some(LEGACY_DEFAULT_MIXED_PORT), 17970), 17970);
     }
 
     #[test]
@@ -96,19 +112,19 @@ mod tests {
     #[tokio::test]
     async fn a_reporting_core_overrides_what_we_configured() {
         // This is the startup-fallback case: we asked for 7897 and the Core landed on 7898.
-        assert_eq!(resolve_effective(|| async { Ok(7898) }, 7897).await, 7898);
+        assert_eq!(resolve_effective(|| async { Ok(7898) }, 17970).await, 7898);
     }
 
     #[tokio::test]
     async fn an_unreachable_core_leaves_the_configured_port_standing() {
         assert_eq!(
-            resolve_effective(|| async { anyhow::bail!("core is not running") }, 7897).await,
-            7897
+            resolve_effective(|| async { anyhow::bail!("core is not running") }, 17970).await,
+            17970
         );
     }
 
     #[tokio::test]
     async fn a_core_that_has_not_bound_yet_is_not_believed() {
-        assert_eq!(resolve_effective(|| async { Ok(0) }, 7897).await, 7897);
+        assert_eq!(resolve_effective(|| async { Ok(0) }, 17970).await, 17970);
     }
 }

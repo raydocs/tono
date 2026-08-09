@@ -8,7 +8,14 @@ pub mod network {
         pub const DEFAULT_REDIR: u16 = 7895;
         #[cfg(target_os = "linux")]
         pub const DEFAULT_TPROXY: u16 = 7896;
-        pub const DEFAULT_MIXED: u16 = 7897;
+        /// Tono's own mixed listener default. 7897 is Clash Verge's factory
+        /// default — every customer who ever installed a Clash-family client
+        /// potentially fights us for it (v2rayN/Clash Verge hold it on real
+        /// machines), so Tono listens somewhere nobody else does.
+        pub const DEFAULT_MIXED: u16 = 17970;
+        /// The Clash Verge factory default Tono inherited. A persisted config
+        /// still carrying it means "never customized", so it migrates.
+        pub const LEGACY_MIXED: u16 = 7897;
         pub const DEFAULT_SOCKS: u16 = 7898;
         pub const DEFAULT_HTTP: u16 = 7899;
     }

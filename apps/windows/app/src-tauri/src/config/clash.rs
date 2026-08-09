@@ -232,10 +232,12 @@ impl IClashTemp {
                 Value::Number(val_num) => val_num.as_u64().map(|u| u as u16),
                 _ => None,
             })
-            .unwrap_or(7897);
+            .unwrap_or(network::ports::DEFAULT_MIXED);
 
-        if port == 0 {
-            port = 7897;
+        // 0 was never valid; the legacy Clash-Verge default means "never
+        // customized" and migrates to Tono's own default.
+        if port == 0 || port == network::ports::LEGACY_MIXED {
+            port = network::ports::DEFAULT_MIXED;
         }
 
         port
@@ -370,10 +372,10 @@ fn test_clash_info() {
 
     assert_eq!(
         IClashTemp(IClashTemp::guard(Mapping::new())).get_client_info(),
-        get_result(7897, "127.0.0.1:9097")
+        get_result(17970, "127.0.0.1:9097")
     );
 
-    assert_eq!(get_case("", ""), get_result(7897, "127.0.0.1:9097"));
+    assert_eq!(get_case("", ""), get_result(17970, "127.0.0.1:9097"));
 
     assert_eq!(get_case(65537, ""), get_result(1, "127.0.0.1:9097"));
 
