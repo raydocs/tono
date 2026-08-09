@@ -247,7 +247,8 @@
       "protection": "流量保护",
       "dns": "受保护 DNS",
       "node": "当前节点",
-      "lastError": "最近错误"
+      "lastError": "最近错误",
+      "lastWarning": "提示（非错误）"
     },
     "audit": {
       "title": "本地审计日志",

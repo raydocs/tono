@@ -1123,6 +1123,7 @@ export const translationKeys = [
   'tono.support.summary.dns',
   'tono.support.summary.node',
   'tono.support.summary.lastError',
+  'tono.support.summary.lastWarning',
   'tono.support.audit.title',
   'tono.support.audit.description',
   'tono.support.audit.copyPath',

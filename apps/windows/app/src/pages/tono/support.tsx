@@ -152,10 +152,20 @@ const SupportPage = () => {
     }
   })
 
+  // DNS warning markers (TONO_DNS_UNVERIFIED / TONO_DNS_RESTORE_DEGRADED) ride in
+  // dnsLastError by design but are not failures — the tunnel stays protected. Showing
+  // them under "last error" panics users for a healthy connection, so they get their
+  // own row. Mirrors DNS_WARNING_MARKERS in src-tauri/src/tono/connection.rs.
+  const dnsWarningMarkers = ['TONO_DNS_UNVERIFIED', 'TONO_DNS_RESTORE_DEGRADED']
+  const dnsWarning =
+    report?.dnsLastError &&
+    dnsWarningMarkers.some((marker) => report.dnsLastError!.includes(marker))
+      ? report.dnsLastError
+      : null
   const lastError = report
     ? (report.error ??
       report.killSwitchLastError ??
-      report.dnsLastError ??
+      (dnsWarning ? null : report.dnsLastError) ??
       t('tono.support.none'))
     : '—'
   const secondaryBackground = dark
@@ -259,6 +269,13 @@ const SupportPage = () => {
             value={lastError}
             monospace
           />
+          {dnsWarning && (
+            <SummaryRow
+              label={t('tono.support.summary.lastWarning')}
+              value={dnsWarning}
+              monospace
+            />
+          )}
         </GlassCard>
 
         <GlassCard radius={18} padding={18}>

@@ -247,7 +247,8 @@
       "protection": "Protection",
       "dns": "Protected DNS",
       "node": "Current node",
-      "lastError": "Last error"
+      "lastError": "Last error",
+      "lastWarning": "Notice (not an error)"
     },
     "audit": {
       "title": "Local audit log",

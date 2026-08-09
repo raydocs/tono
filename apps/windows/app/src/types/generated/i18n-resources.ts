@@ -1874,6 +1874,7 @@ export interface TranslationResources {
           app: string
           dns: string
           lastError: string
+          lastWarning: string
           node: string
           protection: string
           service: string
