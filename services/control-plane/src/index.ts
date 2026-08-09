@@ -3214,7 +3214,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   if (p === '/api/v1/devices' && m === 'GET') {
     const a = await auth(req, e);
     await expirePending(e, a.userId);
-    const q = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? ORDER BY created_at DESC').bind(a.userId).all<Row>();
+    // Revoked devices are dead weight in a management list: the client renders
+    // every row it gets, so leaving them in makes a successful revoke look like
+    // it did nothing.
+    const q = await e.DB.prepare(
+      "SELECT * FROM devices WHERE user_id = ? AND status != 'revoked' ORDER BY created_at DESC",
+    ).bind(a.userId).all<Row>();
     return Response.json({ devices: q.results.map((x) => publicDevice(x, a.deviceId)) });
   }
 
