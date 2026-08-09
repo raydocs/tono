@@ -5,14 +5,36 @@
  */
 
 const NODE_DISPLAY_NAMES: Record<string, string> = {
-  'US-VLESS-Reality': 'Los Angeles · Sunset',
+  'US-VLESS-Reality': 'Los Angeles · Grove',
   'JP-VLESS-Reality': 'Tokyo · Dawn',
 }
 
 export const nodeDisplayName = (wireName: string) =>
   NODE_DISPLAY_NAMES[wireName] ?? wireName
 
+/**
+ * Per-city landmark emoji: easier to tell nodes apart at a glance than a row
+ * of identical flags. Keyed by the lowercase city segment of the *display*
+ * name so legacy wire names (US-VLESS-Reality → Los Angeles · Grove) pick up
+ * their city's icon too. Falls back to the region flag, then 🌐.
+ */
+const CITY_EMOJI: Record<string, string> = {
+  'los angeles': '🌴',
+  'salt lake city': '🏔️',
+  buffalo: '🦬',
+  'new york': '🗽',
+  'san jose': '💻',
+  seattle: '☕',
+  chicago: '🌭',
+  dallas: '🤠',
+  miami: '🏖️',
+  tokyo: '🗼',
+  osaka: '🏯',
+}
+
 export const nodeFlag = (wireName: string) => {
+  const emoji = CITY_EMOJI[cityOf(nodeDisplayName(wireName))]
+  if (emoji) return emoji
   const region = nodeRegion(wireName)
   if (region === 'us') return '🇺🇸'
   if (region === 'jp') return '🇯🇵'
