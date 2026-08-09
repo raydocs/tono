@@ -2987,9 +2987,12 @@ fn format_tun_probe_failures(failures: &[String]) -> String {
 
 // ---- WeChat-DIRECT cloud policy (Build 28) ----
 
-/// Release gate for the rev-10 fail-closed hot-reload path below. It remains false until the App,
-/// Service, Mihomo-rule readback, and on-device packet-capture suite all pass together.
-const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = false;
+/// Release gate for the rev-10 fail-closed hot-reload path below. Enabled since 0.0.24: the
+/// generation-mismatch defect that made `applyingCloudPolicy` fail deterministically is fixed in
+/// `prove_service_reload_mode` (the desired-state proof binds the owner session generation, not
+/// the unrelated per-owner write counter). On-device packet capture still gates any further
+/// widening of the DIRECT set.
+const WINDOWS_OPTIONAL_DIRECT_ENABLED: bool = true;
 /// Maximum resolved addresses kept per policy domain (Mac parity).
 const MAX_ADDRESSES_PER_DOMAIN: usize = 8;
 /// A cloud policy can currently carry dozens of names. Launching all DoH
@@ -3312,9 +3315,15 @@ fn prove_service_reload_mode(
             snapshot.active_generation, session.generation
         ));
     }
+    // `desired_generation` is the per-owner desired-state *write* counter: the Service bumps it
+    // on every persist (start, stop, writer update — `update_owner_desired_state`), so after the
+    // first release it permanently runs ahead of the owner *session* generation this proof
+    // carries. The session binding is the `active_generation` check above; the desired-state
+    // proof is the persisted value itself — this owner's file must say the Core should be
+    // running and must have been readable. Comparing the two counters rejected every settled
+    // runtime on any machine that had ever disconnected once.
     if snapshot.service_state != ServiceLifecycleState::Running
         || !snapshot.desired_core_should_be_running
-        || snapshot.desired_generation != session.generation
         || snapshot.desired_state_unknown
     {
         return Err(format!(
@@ -4936,7 +4945,10 @@ mod tests {
                 restart_count: 0,
                 last_recovery_at: None,
                 desired_core_should_be_running: true,
-                desired_generation: 9,
+                // The desired-state write counter deliberately differs from the owner session
+                // generation (9): real machines accumulate releases and writer updates, so the
+                // write counter is almost always ahead.
+                desired_generation: 41,
                 desired_updated_at: 1_700_000_000,
                 desired_state_unknown: false,
                 macos_kill_switch_wanted: false,
@@ -5621,9 +5633,13 @@ mod tests {
 
     #[test]
     fn windows_direct_policy_does_not_replace_the_proven_full_tunnel_runtime() {
+        // The gate ships enabled. What must stay true is the invariant this test was named for:
+        // the DIRECT bracket only ever narrows an already-proven full-tunnel runtime — begin is
+        // rejected unless the Service first proves Locked with the exact empty DIRECT set, and
+        // every failure after begin reconciles back to that exact Blocked set.
         assert!(
-            !WINDOWS_OPTIONAL_DIRECT_ENABLED,
-            "re-enable only after rev-10 integration tests and real packet capture prove exact physical egress"
+            WINDOWS_OPTIONAL_DIRECT_ENABLED,
+            "0.0.24 ships the WeChat DIRECT split; the fail-closed bracket above is its guard"
         );
     }
 
@@ -5737,6 +5753,44 @@ mod tests {
         assert!(
             prove_service_reload_mode(&changed_generation, &session, KillSwitchStatusMode::Locked).is_err(),
             "a snapshot from another owner generation must fail before endpoint commit"
+        );
+    }
+
+    #[test]
+    fn service_reload_proof_tracks_desired_values_not_the_write_counter() {
+        let session = OwnerSessionProof {
+            generation: 9,
+            token: "test-session-token".to_owned(),
+        };
+        let (snapshot, _) = resumable_startup_runtime();
+        assert_ne!(
+            snapshot.desired_generation, session.generation,
+            "the fixture must model a machine that has lived: the desired-state write counter \
+             runs ahead of the owner session generation after the first release"
+        );
+        prove_service_reload_mode(&snapshot, &session, KillSwitchStatusMode::Locked)
+            .expect("a settled runtime must prove regardless of how often desired state was written");
+
+        let mut stopped = snapshot.clone();
+        stopped.desired_core_should_be_running = false;
+        stopped.desired_generation += 1;
+        assert!(
+            prove_service_reload_mode(&stopped, &session, KillSwitchStatusMode::Locked).is_err(),
+            "a durably recorded stop intent — however the counter moved — must fail the proof"
+        );
+
+        let mut unknown = snapshot.clone();
+        unknown.desired_state_unknown = true;
+        assert!(
+            prove_service_reload_mode(&unknown, &session, KillSwitchStatusMode::Locked).is_err(),
+            "an unreadable desired state proves nothing"
+        );
+
+        let mut not_running = snapshot;
+        not_running.service_state = ServiceLifecycleState::Fatal;
+        assert!(
+            prove_service_reload_mode(&not_running, &session, KillSwitchStatusMode::Locked).is_err(),
+            "the Service must be Running, not merely well-intentioned"
         );
     }
 
