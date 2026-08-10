@@ -846,7 +846,9 @@ pub fn is_retryable_lock_error(message: &str) -> bool {
 /// Tono has no sidecar: the Service must be Ready and speak the kill switch
 /// protocol (rev 5 arm/lock + rev 6 release, C1).
 async fn ensure_service_ready() -> Result<(), String> {
-    service::tono_service_ready()
+    // `tono_service_ready_or_repair`: an unprotected App quit stops the SCM service, so the
+    // first connect afterwards revives it through the established install/repair entry.
+    service::tono_service_ready_or_repair()
         .await
         .map_err(|err| map_service_ready_error(&err))?;
     match service::tono_probe_kill_switch_release_support().await {
@@ -2671,14 +2673,34 @@ async fn allocate_runtime_ports() -> Result<RuntimePorts, String> {
 /// when another resolver already owns either socket, avoiding a 45-second protected-offline mystery.
 #[cfg(windows)]
 async fn preflight_dns_listener() -> Result<(), String> {
-    let tcp = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 53))
-        .await
-        .map_err(|error| format!("DNS TCP 127.0.0.1:53 is unavailable: {error}"))?;
-    let udp = tokio::net::UdpSocket::bind((std::net::Ipv4Addr::LOCALHOST, 53))
-        .await
-        .map_err(|error| format!("DNS UDP 127.0.0.1:53 is unavailable: {error}"))?;
-    drop((tcp, udp));
-    Ok(())
+    // A just-replaced core can hold 127.0.0.1:53 for a few hundred milliseconds
+    // while its process exits (unclean app restart, stop-and-replace start), so
+    // a one-shot bind test reports os error 10048 against a socket that is about
+    // to be free. Wait it out briefly — still bounded so a genuinely squatted
+    // port (another TUN proxy) fails fast with the same message.
+    const ATTEMPTS: usize = 30;
+    const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+    let mut last_error = String::from("unknown error");
+    for _ in 0..ATTEMPTS {
+        let tcp = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 53)).await;
+        let udp = tokio::net::UdpSocket::bind((std::net::Ipv4Addr::LOCALHOST, 53)).await;
+        match (tcp, udp) {
+            (Ok(tcp), Ok(udp)) => {
+                drop((tcp, udp));
+                return Ok(());
+            }
+            (tcp, udp) => {
+                if let Err(error) = tcp {
+                    last_error = format!("DNS TCP 127.0.0.1:53 is unavailable: {error}");
+                }
+                if let Err(error) = udp {
+                    last_error = format!("DNS UDP 127.0.0.1:53 is unavailable: {error}");
+                }
+                tokio::time::sleep(INTERVAL).await;
+            }
+        }
+    }
+    Err(last_error)
 }
 
 #[cfg(not(windows))]
