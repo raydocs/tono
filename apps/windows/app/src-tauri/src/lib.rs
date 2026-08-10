@@ -11,9 +11,7 @@ mod cmd;
 pub mod config;
 mod constants;
 mod core;
-mod enhance;
 mod feat;
-mod module;
 mod process;
 mod tono;
 pub mod utils;
@@ -136,82 +134,13 @@ mod app_init {
             tauri_plugin_clash_verge_sysinfo::commands::get_app_uptime,
             tauri_plugin_clash_verge_sysinfo::commands::app_is_admin,
             tauri_plugin_clash_verge_sysinfo::commands::export_diagnostic_info,
-            cmd::probe_listener,
-            cmd::save_proxy_ports,
-            cmd::get_sys_proxy,
-            cmd::get_auto_proxy,
-            cmd::get_embedded_server_port,
             cmd::open_app_dir,
             cmd::open_logs_dir,
-            cmd::open_web_url,
             cmd::open_core_dir,
-            cmd::get_portable_flag,
-            cmd::get_network_interfaces,
-            cmd::get_system_hostname,
             cmd::restart_app,
-            cmd::start_core,
-            cmd::stop_core,
-            cmd::restart_core,
             cmd::get_runtime_state,
-            cmd::get_auto_launch_status,
-            cmd::exit_lightweight_mode,
-            cmd::install_service,
-            cmd::uninstall_service,
-            cmd::reinstall_service,
-            cmd::repair_service,
-            cmd::continue_with_sidecar,
-            cmd::get_macos_kill_switch_status,
-            cmd::get_clash_info,
-            cmd::patch_clash_config,
-            cmd::patch_clash_mode,
-            cmd::get_clash_mode,
-            cmd::change_clash_core,
-            cmd::get_proxy_view,
-            cmd::get_runtime_exists,
-            cmd::update_proxy_chain_config_in_runtime,
-            cmd::invoke_uwp_tool,
-            cmd::copy_clash_env,
-            cmd::sync_tray_proxy_selection,
-            cmd::record_selected_node,
-            cmd::save_dns_config,
-            cmd::apply_dns_config,
-            cmd::check_dns_config_exists,
-            cmd::get_dns_config_content,
-            cmd::validate_dns_config,
-            cmd::get_clash_logs,
             cmd::get_verge_config,
             cmd::patch_verge_config,
-            cmd::get_app_dir,
-            cmd::copy_icon_file,
-            cmd::download_icon_cache,
-            cmd::open_devtools,
-            cmd::exit_app,
-            cmd::get_network_interfaces_info,
-            cmd::enhance_profiles,
-            cmd::patch_profiles_config,
-            cmd::patch_profile,
-            cmd::create_profile,
-            cmd::import_profile,
-            cmd::reorder_profile,
-            cmd::update_profile,
-            cmd::delete_profile,
-            cmd::save_profile_file,
-            cmd::get_next_update_time,
-            cmd::script_validate_notice,
-            cmd::validate_script_file,
-            cmd::create_local_backup,
-            cmd::list_local_backup,
-            cmd::delete_local_backup,
-            cmd::restore_local_backup,
-            cmd::import_local_backup,
-            cmd::export_local_backup,
-            cmd::create_webdav_backup,
-            cmd::save_webdav_config,
-            cmd::list_webdav_backup,
-            cmd::delete_webdav_backup,
-            cmd::restore_webdav_backup,
-            cmd::get_unlock_items,
-            cmd::check_media_unlock,
             tono::commands::tono_sign_in_start,
             tono::commands::tono_sign_in_verify,
             tono::commands::tono_sign_out,
@@ -577,14 +506,8 @@ pub fn run() {
     let builder = builder.on_web_content_process_terminate(resolve::window::on_web_content_process_terminated);
 
     mod event_handlers {
-        #[cfg(target_os = "macos")]
-        use crate::module::lightweight;
         use crate::utils::window_manager::WindowManager;
-        use crate::{
-            config::Config,
-            core::{self, handle, hotkey},
-            process::AsyncHandler,
-        };
+        use crate::core::{self, handle};
         use clash_verge_logging::{Type, logging};
         use tauri::AppHandle;
         #[cfg(target_os = "macos")]
@@ -607,11 +530,6 @@ pub fn run() {
 
         #[cfg(target_os = "macos")]
         pub async fn handle_reopen(has_visible_windows: bool) {
-            if lightweight::is_in_lightweight_mode() {
-                lightweight::exit_lightweight_mode().await;
-                return;
-            }
-
             if !has_visible_windows {
                 handle::Handle::global().set_activation_policy_regular();
                 let _ = WindowManager::show_main_window().await;
@@ -632,53 +550,6 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
-        }
-
-        pub fn handle_window_focus(focused: bool) {
-            AsyncHandler::spawn(move || async move {
-                let is_enable_global_hotkey = Config::verge().await.data_arc().enable_global_hotkey.unwrap_or(true);
-
-                if focused {
-                    #[cfg(target_os = "macos")]
-                    {
-                        use crate::core::hotkey::SystemHotkey;
-                        let _ = hotkey::Hotkey::global()
-                            .register_system_hotkey(SystemHotkey::CmdQ)
-                            .await;
-                        let _ = hotkey::Hotkey::global()
-                            .register_system_hotkey(SystemHotkey::CmdW)
-                            .await;
-                    }
-                    if !is_enable_global_hotkey {
-                        let _ = hotkey::Hotkey::global().init(false).await;
-                    }
-                    return;
-                }
-
-                #[cfg(target_os = "macos")]
-                {
-                    use crate::core::hotkey::SystemHotkey;
-                    let _ = hotkey::Hotkey::global().unregister_system_hotkey(SystemHotkey::CmdQ);
-                    let _ = hotkey::Hotkey::global().unregister_system_hotkey(SystemHotkey::CmdW);
-                }
-
-                if !is_enable_global_hotkey {
-                    let _ = hotkey::Hotkey::global().reset();
-                }
-            });
-        }
-
-        #[cfg(target_os = "macos")]
-        pub fn handle_window_destroyed() {
-            use crate::core::hotkey::SystemHotkey;
-            AsyncHandler::spawn(move || async move {
-                let _ = hotkey::Hotkey::global().unregister_system_hotkey(SystemHotkey::CmdQ);
-                let _ = hotkey::Hotkey::global().unregister_system_hotkey(SystemHotkey::CmdW);
-                let is_enable_global_hotkey = Config::verge().await.data_arc().enable_global_hotkey.unwrap_or(true);
-                if !is_enable_global_hotkey {
-                    let _ = hotkey::Hotkey::global().reset();
-                }
-            });
         }
     }
 
@@ -741,9 +612,7 @@ pub fn run() {
         }
         #[allow(unused_variables)]
         tauri::RunEvent::ExitRequested { api, code, .. } => {
-            if module::lightweight::is_in_lightweight_mode() && !handle::Handle::global().is_exiting() {
-                api.prevent_exit();
-            } else if code.is_none() {
+            if code.is_none() {
                 api.prevent_exit();
                 if !handle::Handle::global().is_exiting() {
                     // Claim the single-flight synchronously before returning to Tao. Cleanup runs
@@ -767,17 +636,12 @@ pub fn run() {
             tauri::WindowEvent::CloseRequested { .. } => {
                 event_handlers::handle_window_close(&event);
             }
+            // 兜底：原生取消最小化只触发 Focused、不走 activate_window（macOS）
+            #[cfg(target_os = "macos")]
             tauri::WindowEvent::Focused(focused) => {
-                // 兜底：原生取消最小化只触发 Focused、不走 activate_window（macOS）
-                #[cfg(target_os = "macos")]
                 if focused {
                     crate::utils::resolve::window::reload_main_window_if_needed();
                 }
-                event_handlers::handle_window_focus(focused);
-            }
-            #[cfg(target_os = "macos")]
-            tauri::WindowEvent::Destroyed => {
-                event_handlers::handle_window_destroyed();
             }
             _ => {}
         },

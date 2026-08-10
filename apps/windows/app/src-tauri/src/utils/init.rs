@@ -1,6 +1,6 @@
 // #[cfg(not(feature = "tracing"))]
 use crate::{
-    config::{Config, IClashTemp, IProfiles, IVerge},
+    config::{Config, IClashTemp, IVerge},
     constants, logging,
     process::AsyncHandler,
     utils::{
@@ -420,16 +420,6 @@ async fn initialize_config_files() -> Result<()> {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create verge config: {}", e))?;
         logging!(info, Type::Setup, "Created verge config at {:?}", path);
-    }
-
-    if let Ok(path) = dirs::profiles_path()
-        && !path.exists()
-    {
-        let template = IProfiles::default();
-        help::save_yaml(&path, &template, Some("# Tono"))
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create profiles config: {}", e))?;
-        logging!(info, Type::Setup, "Created profiles config at {:?}", path);
     }
 
     // 验证并修正verge配置

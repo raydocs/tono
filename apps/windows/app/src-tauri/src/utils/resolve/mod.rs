@@ -48,22 +48,18 @@ pub fn resolve_setup_async() {
         #[cfg(target_os = "macos")]
         resolve_dock_show().await;
         init_service_manager().await;
-        let config_initialized = init_verge_config_before_window().await;
+        init_verge_config_before_window().await;
         // Tono P0-10: hand-edited dangerous fields never survive startup.
         feat::sanitize_verge_config_for_tono().await;
         init_window().await;
         init_resources().await;
-        if config_initialized {
-            init_verge_config().await;
-        }
-        Config::verify_config_initialization().await;
 
         // Tono: the legacy core is never auto-started at boot — the mihomo
         // core may only be started by the Tono connect transaction (§6).
         // Automatic updates stay disabled until Tono owns a release endpoint
         // and signing key; never inherit the upstream Clash Verge channel.
-        // Tono keeps the user-facing tray, but does not start legacy profile timers, global
-        // hotkeys, lightweight mode, backup jobs, or old Core refresh traffic in the background.
+        // Tono keeps the user-facing tray, but does not run any legacy
+        // background jobs from the old profile/core surface.
         init_tray().await;
         refresh_tray_menu().await;
         resolve_done();
@@ -114,15 +110,9 @@ pub(super) async fn init_tray() {
     logging_error!(Type::Setup, Tray::global().init().await);
 }
 
-pub(super) async fn init_verge_config() {
-    logging_error!(Type::Setup, Config::init_runtime_config().await);
-}
-
-pub(super) async fn init_verge_config_before_window() -> bool {
+pub(super) async fn init_verge_config_before_window() {
     let result = Config::init_config_before_window().await;
-    let success = result.is_ok();
     logging_error!(Type::Setup, result);
-    success
 }
 
 pub(super) async fn init_service_manager() {

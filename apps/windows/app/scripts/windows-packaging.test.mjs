@@ -464,8 +464,8 @@ test('release Tauri handler excludes unused native probes and secret-bearing rea
     assert.match(
       validateTauriRendererCommandSurface(
         tauriLibSource.replace(
-          '            cmd::get_runtime_exists,',
-          `            cmd::get_runtime_exists,\n            cmd::${command},`,
+          '            cmd::open_app_dir,',
+          `            cmd::open_app_dir,\n            cmd::${command},`,
         ),
       ),
       new RegExp(command),

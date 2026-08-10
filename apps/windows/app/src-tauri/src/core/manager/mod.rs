@@ -1,4 +1,3 @@
-mod config;
 mod lifecycle;
 mod state;
 
@@ -10,9 +9,8 @@ use std::{
     fmt,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
-    time::Instant,
 };
 use tauri_plugin_shell::process::CommandChild;
 
@@ -26,6 +24,7 @@ pub(crate) static CLASH_LOGGER: Lazy<Arc<AsyncLogger>> = Lazy::new(|| Arc::new(A
 const CORE_READINESS_ACTIVE_BIT: u64 = 1;
 const CORE_READINESS_GENERATION_STEP: u64 = 1 << 1;
 
+#[cfg(test)]
 const fn next_active_core_readiness_state(state: u64) -> u64 {
     (state.wrapping_add(CORE_READINESS_GENERATION_STEP) & !CORE_READINESS_ACTIVE_BIT) | CORE_READINESS_ACTIVE_BIT
 }
@@ -42,6 +41,7 @@ const fn active_core_readiness_generation(state: u64) -> Option<u64> {
     }
 }
 
+#[cfg(test)]
 fn claim_core_readiness_generation(state: &AtomicU64, captured_generation: u64) -> bool {
     state
         .compare_exchange(
@@ -78,17 +78,11 @@ pub struct CoreManager {
     /// racing every other test for one process-wide Running Mode.
     run_state: &'static RunStateStore<RealEnv>,
     state: ArcSwap<State>,
-    last_update: ArcSwapOption<Instant>,
     #[cfg(target_os = "windows")]
     job_handle: ArcSwapOption<OwnedHandle>,
-    config_update_in_progress: AtomicBool,
     core_readiness_state: AtomicU64,
-    // 串行化 start/stop/restart 和 sidecar→service 交接。
-    // 锁序固定为 config_update_in_progress → lifecycle_lock。
+    // 串行化内核 stop 等生命周期操作。
     pub(crate) lifecycle_lock: tokio::sync::Mutex<()>,
-    // sidecar→service 交接 watcher 单实例标志。
-    #[cfg(target_os = "windows")]
-    handoff_watcher_running: AtomicBool,
 }
 
 /// Process-level state owned by `CoreManager`.
@@ -105,14 +99,10 @@ impl Default for CoreManager {
         Self {
             run_state: &RUN_STATE,
             state: ArcSwap::new(Arc::new(State::default())),
-            last_update: ArcSwapOption::new(None),
             #[cfg(target_os = "windows")]
             job_handle: ArcSwapOption::new(None),
-            config_update_in_progress: AtomicBool::new(false),
             core_readiness_state: AtomicU64::new(0),
             lifecycle_lock: tokio::sync::Mutex::new(()),
-            #[cfg(target_os = "windows")]
-            handoff_watcher_running: AtomicBool::new(false),
         }
     }
 }
@@ -141,14 +131,6 @@ impl CoreManager {
             .child_sidecar
             .swap(None)
             .and_then(|arc| Arc::try_unwrap(arc).ok())
-    }
-
-    pub fn get_running_sidecar_pid(&self) -> Option<u32> {
-        self.state.load().child_sidecar.load_full().map(|child| child.pid())
-    }
-
-    pub fn get_last_update(&self) -> Option<Arc<Instant>> {
-        self.last_update.load_full()
     }
 
     /// The Core is now running in `mode`.
@@ -188,6 +170,7 @@ impl CoreManager {
         state.child_sidecar.store(Some(Arc::new(child)));
     }
 
+    #[cfg(test)]
     fn mark_core_ready(&self) -> u64 {
         let mut current = self.core_readiness_state.load(Ordering::Acquire);
         loop {
@@ -202,6 +185,7 @@ impl CoreManager {
         }
     }
 
+    #[cfg(test)]
     fn current_core_readiness_generation(&self) -> Option<u64> {
         active_core_readiness_generation(self.core_readiness_state.load(Ordering::Acquire))
     }
@@ -214,14 +198,6 @@ impl CoreManager {
             });
     }
 
-    fn invalidate_core_readiness_if(&self, captured_generation: u64) -> bool {
-        claim_core_readiness_generation(&self.core_readiness_state, captured_generation)
-    }
-
-    pub fn set_last_update(&self, time: Instant) {
-        self.last_update.store(Some(Arc::new(time)));
-    }
-
     /// Replaces the Windows Job Object handle owned by the core manager
     ///
     /// Passing `None` drops the current handle, which closes the Job Object
@@ -231,14 +207,6 @@ impl CoreManager {
     #[cfg(target_os = "windows")]
     fn set_job_handle(&self, handle: Option<OwnedHandle>) {
         self.job_handle.store(handle.map(Arc::new));
-    }
-
-    pub(crate) fn try_start_config_update(&self) -> bool {
-        !self.config_update_in_progress.swap(true, Ordering::AcqRel)
-    }
-
-    pub(crate) fn finish_config_update(&self) {
-        self.config_update_in_progress.store(false, Ordering::Release);
     }
 
     #[allow(dead_code)]

@@ -12,7 +12,6 @@ use crate::{
             OwnerRecoveryReason, OwnerSample, OwnerStep, OwnerWatch, PendingAction, RUN_STATE, ReadyWaitError,
             RunState, RunStateEnv, RunStateStore, ServiceHealth,
         },
-        runtime_bundle::collect_runtime_bundle,
         tray::Tray,
     },
     process::AsyncHandler,
@@ -23,19 +22,19 @@ use clash_verge_logging::{Type, logging};
 use clash_verge_service_ipc::MacosKillSwitchMode;
 use clash_verge_service_ipc::{
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
-    KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosKillSwitchConfig, MacosProxyConfig,
-    OwnerCredentials, OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest,
-    ReplaceDirectEndpointsRequest, RuntimeBundle, ServiceErrorCode, ServiceStatusSnapshot, StageRuntimeOutcome,
-    StartClashRequest, StopClashOptions, WriterConfig,
+    KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosProxyConfig, OwnerCredentials,
+    OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
+    RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StopClashOptions, WriterConfig,
 };
-use compact_str::CompactString;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+#[cfg(any(target_os = "macos", test))]
+use std::path::Path;
 use std::{
     borrow::Cow,
     env::current_exe,
     future::Future,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command as StdCommand,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
@@ -80,17 +79,6 @@ pub(crate) fn active_service_session() -> Result<OwnerSessionProof> {
         .as_ref()
         .map(|session| session.proof.clone())
         .context("service owner session is not active")
-}
-
-/// Whether the Service that started the running Core can stage a runtime in place.
-///
-/// False for every reason that is not "yes": no session, an older Service, or a protocol query
-/// that did not come back. All of them mean the same thing to the caller — take the slow path.
-pub(crate) fn active_service_supports_runtime_staging() -> bool {
-    ACTIVE_SERVICE_SESSION
-        .lock()
-        .as_ref()
-        .is_some_and(|session| session.supports_runtime_staging)
 }
 
 /// Capture the exact owner session that will own every operation in the rev-10 reload bracket.
@@ -159,19 +147,6 @@ async fn probe_direct_runtime_reload_support() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-async fn probe_macos_kill_switch_support() -> bool {
-    matches!(
-        clash_verge_service_ipc::get_version().await,
-        Ok(response)
-            if response.code == 0
-                && response
-                    .data
-                    .as_ref()
-                    .is_some_and(clash_verge_service_ipc::ProtocolInfo::supports_macos_kill_switch)
-    )
-}
-
-#[cfg(target_os = "macos")]
 pub(crate) async fn preflight_macos_kill_switch() -> Result<()> {
     let version = clash_verge_service_ipc::get_version()
         .await
@@ -193,56 +168,6 @@ pub(crate) async fn preflight_macos_kill_switch() -> Result<()> {
         bail!(response.message);
     }
     Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-async fn probe_macos_kill_switch_support() -> bool {
-    false
-}
-
-#[cfg(target_os = "macos")]
-async fn macos_kill_switch_config(runtime: &RuntimeBundle, supported: bool) -> Result<Option<MacosKillSwitchConfig>> {
-    let verge = Config::verge().await.latest_arc();
-    let mode = verge.macos_kill_switch_mode.unwrap_or_default();
-    if mode == MacosKillSwitchMode::Disabled {
-        return Ok(supported.then_some(MacosKillSwitchConfig {
-            mode,
-            tunnel_interface: None,
-        }));
-    }
-    if !supported {
-        bail!("当前 Tono Service 不支持 Kill Switch，请先重新安装服务");
-    }
-    if !verge.enable_tun_mode.unwrap_or(false) {
-        bail!("Kill Switch 只能在 TUN 模式开启时使用");
-    }
-    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&runtime.yaml).context("无法读取最终 TUN 配置")?;
-    let tun = yaml
-        .as_mapping()
-        .and_then(|mapping| mapping.get("tun"))
-        .and_then(serde_yaml_ng::Value::as_mapping)
-        .context("Kill Switch 需要最终配置中的 TUN 设置")?;
-    if !tun
-        .get("enable")
-        .and_then(serde_yaml_ng::Value::as_bool)
-        .unwrap_or(false)
-    {
-        bail!("Kill Switch 需要已启用的最终 TUN 配置");
-    }
-    let tunnel_interface = tun
-        .get("device")
-        .and_then(serde_yaml_ng::Value::as_str)
-        .context("Kill Switch 需要明确的 macOS utun 设备名")?
-        .to_owned();
-    Ok(Some(MacosKillSwitchConfig {
-        mode,
-        tunnel_interface: Some(tunnel_interface),
-    }))
-}
-
-#[cfg(not(target_os = "macos"))]
-async fn macos_kill_switch_config(_runtime: &RuntimeBundle, _supported: bool) -> Result<Option<MacosKillSwitchConfig>> {
-    Ok(None)
 }
 
 fn session_matches_status(proof: &OwnerSessionProof, is_active: bool, active_generation: Option<u64>) -> bool {
@@ -991,65 +916,6 @@ pub(crate) fn run_privileged_service_action(action: PendingAction) -> Result<()>
     tokio::task::block_in_place(operation).with_context(|| format!("{label} failed"))
 }
 
-/// Describe what the Service should hold, for the Core binary this app would start.
-///
-/// Shared by starting and staging so the two cannot disagree about the binary or about how the
-/// configuration's provider paths are rewritten — a staged bundle naming a different core is
-/// exactly what makes the Service refuse to stage.
-async fn collect_service_runtime_bundle(config_file: &Path) -> Result<RuntimeBundle> {
-    let verge_config = Config::verge().await;
-    let clash_core = verge_config.latest_arc().get_valid_clash_core();
-    drop(verge_config);
-
-    let bin_ext = if cfg!(windows) { ".exe" } else { "" };
-    let bin_path = service_core_path(&clash_core, bin_ext)?;
-    collect_runtime_bundle(config_file, &bin_path).await
-}
-
-/// What asking the Service to stage a runtime produced.
-///
-/// A refusal carries its code because only some refusals say anything about starting. "This bundle
-/// names an asset I will not accept" does: a fresh start materialises the same bundle and is
-/// refused the same way, so stopping a working Core would add an outage to a failure that already
-/// happened. "You do not own this Core" does not — `start_clash` proposes a new session rather than
-/// presenting the old one, so starting is exactly how that gets resolved.
-pub(super) enum StageRequest {
-    Refused { code: u16, message: CompactString },
-    Answered(StageRuntimeOutcome),
-}
-
-impl StageRequest {
-    /// Whether a refusal is about the bundle, and so would be repeated by starting from it.
-    pub(super) const fn is_about_the_bundle(code: u16) -> bool {
-        code == ServiceErrorCode::InvalidRuntimeAsset as u16 || code == ServiceErrorCode::InvalidInstallLocation as u16
-    }
-}
-
-/// Have the Service make the running Core's runtime match `config_file`, without restarting it.
-///
-/// `Err` means the request did not get an answer. A refusal, and `RestartRequired`, both come back
-/// as `Ok`: neither is a failure of this function, and only the caller can decide what to do about
-/// them.
-pub(super) async fn stage_runtime_by_service(config_file: &Path) -> Result<StageRequest> {
-    let session = active_service_session()?;
-    let credentials = current_owner_credentials()?;
-    let runtime = collect_service_runtime_bundle(config_file).await?;
-
-    let response = clash_verge_service_ipc::stage_runtime(&credentials, &session, &runtime)
-        .await
-        .context("无法连接到Tono Service")?;
-    if response.code > 0 {
-        return Ok(StageRequest::Refused {
-            code: response.code,
-            message: response.message.into(),
-        });
-    }
-    response
-        .data
-        .map(StageRequest::Answered)
-        .context("Tono Service 未返回运行时暂存结果")
-}
-
 /// Stage the exact in-memory Tono runtime for a rev-10 DIRECT hot reload. Unlike the generic
 /// configuration path, this function never interprets `RestartRequired` as permission to replace
 /// the Core. The connection transaction owns that fail-closed decision.
@@ -1084,74 +950,6 @@ pub(crate) async fn tono_stage_runtime_for_direct_reload(
     )
 }
 
-/// 尝试使用服务启动core
-pub(super) async fn start_with_existing_service(config_file: &Path) -> Result<()> {
-    logging!(info, Type::Service, "尝试使用现有服务启动核心");
-    clear_active_service_session();
-
-    let credentials = current_owner_credentials()?;
-    let runtime = collect_service_runtime_bundle(config_file).await?;
-    let supports_macos_kill_switch = probe_macos_kill_switch_support().await;
-    let kill_switch = macos_kill_switch_config(&runtime, supports_macos_kill_switch).await?;
-    let proposed_session_token = generate_service_session_token()?;
-    let request = StartClashRequest {
-        runtime,
-        proposed_session_token: proposed_session_token.clone(),
-        macos_proxy: None,
-        kill_switch,
-        // Windows kill switch（协议 rev 5 新增字段）：app 侧尚未实现该功能，按旧客户端语义置 None
-        windows_kill_switch: None,
-    };
-
-    let response = match clash_verge_service_ipc::start_clash(&credentials, &request).await {
-        Ok(response) => response,
-        Err(error) => {
-            start_owner_monitor();
-            return Err(error).context("无法连接到Tono Service");
-        }
-    };
-
-    if response.code > 0 {
-        let err_msg = response.message;
-        logging!(error, Type::Service, "启动核心失败: {}", err_msg);
-        start_owner_monitor();
-        bail!(err_msg);
-    }
-
-    let result = response.data.context("Tono Service 未返回会话信息")?;
-    let supports_runtime_staging = probe_runtime_staging_support().await;
-    let supports_direct_runtime_reload = probe_direct_runtime_reload_support().await;
-    *ACTIVE_SERVICE_SESSION.lock() = Some(ActiveServiceSession {
-        proof: OwnerSessionProof {
-            generation: result.session.generation,
-            token: proposed_session_token,
-        },
-        supports_runtime_staging,
-        supports_macos_kill_switch,
-        supports_direct_runtime_reload,
-    });
-
-    // PAC follows the Running Mode; the caller opens it via `core_started(Service)`.
-    start_owner_monitor();
-    logging!(info, Type::Service, "服务成功启动核心");
-    Ok(())
-}
-
-// 以服务启动core
-pub(super) async fn run_core_by_service(config_file: &Path) -> Result<()> {
-    logging!(info, Type::Service, "正在尝试通过服务启动核心");
-
-    SERVICE_MANAGER.refresh().await?;
-
-    let status = SERVICE_MANAGER.current().await;
-    if !matches!(status, ServiceStatus::Ready) {
-        bail!("service is not ready after refresh: {status:?}");
-    }
-
-    logging!(info, Type::Service, "服务已运行且版本匹配，直接使用");
-    start_with_existing_service(config_file).await
-}
-
 async fn capture_generation_before<F, Fut, T>(generation: &AtomicU64, operation: F) -> (u64, T)
 where
     F: FnOnce() -> Fut,
@@ -1159,29 +957,6 @@ where
 {
     let captured = generation.load(Ordering::Acquire);
     (captured, operation().await)
-}
-
-pub(super) async fn get_clash_logs_by_service() -> Result<Vec<CompactString>> {
-    logging!(info, Type::Service, "正在获取服务模式下的 Clash 日志");
-
-    let credentials = current_owner_credentials()?;
-    let (generation, response) = capture_generation_before(&OWNER_MONITOR_GENERATION, || {
-        clash_verge_service_ipc::get_clash_logs(&credentials)
-    })
-    .await;
-    let response = response.context("无法连接到Tono Service")?;
-
-    if response.code > 0 {
-        if response.code == clash_verge_service_ipc::ServiceErrorCode::NotActive as u16 {
-            recover_after_owner_loss(generation, OwnerRecoveryReason::Displaced).await;
-        }
-        let err_msg = response.message;
-        logging!(error, Type::Service, "获取服务模式下的 Clash 日志失败: {}", err_msg);
-        bail!(err_msg);
-    }
-
-    logging!(info, Type::Service, "成功获取服务模式下的 Clash 日志");
-    Ok(response.data.unwrap_or_default())
 }
 
 pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {

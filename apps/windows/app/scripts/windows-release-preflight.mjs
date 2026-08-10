@@ -186,11 +186,20 @@ const assertReleaseFeatureIsolation = () => {
   if (featureError) fail(featureError)
 }
 
+const readIfExists = (filePath) => {
+  try {
+    return readFileSync(filePath, 'utf8')
+  } catch {
+    // De-forked surfaces are gone by design; absent source has no TLS surface to audit.
+    return ''
+  }
+}
+
 const assertTlsPolicy = () => {
   const tlsPolicyError = validateTlsPolicySources({
     transport: readFileSync(tonoTransportPath, 'utf8'),
-    webdav: readFileSync(webdavClientPath, 'utf8'),
-    mediaUnlock: readFileSync(mediaUnlockPath, 'utf8'),
+    webdav: readIfExists(webdavClientPath),
+    mediaUnlock: readIfExists(mediaUnlockPath),
     legacyNetwork: readFileSync(legacyNetworkPath, 'utf8'),
   })
   if (tlsPolicyError) fail(tlsPolicyError)

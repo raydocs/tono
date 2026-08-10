@@ -54,15 +54,6 @@ const CODED_ERROR_TRANSLATION_KEYS: Readonly<Record<string, string>> = {
   CORE_RESTART_FAILED: 'settings.feedback.errors.clash.restartFailed',
   CORE_START_FAILED: 'settings.feedback.errors.clash.startFailed',
   CORE_STOP_FAILED: 'settings.feedback.errors.clash.stopFailed',
-  PROFILE_CREATE_FAILED: 'profiles.page.feedback.errors.createFailed',
-  PROFILE_DELETE_FAILED: 'profiles.page.feedback.errors.deleteFailed',
-  PROFILE_ENHANCE_FAILED: 'profiles.page.feedback.errors.enhanceFailed',
-  PROFILE_IMPORT_FAILED: 'profiles.page.feedback.errors.importFailed',
-  PROFILE_OPEN_FAILED: 'profiles.page.feedback.errors.openFailed',
-  PROFILE_READ_FAILED: 'profiles.page.feedback.errors.readFailed',
-  PROFILE_REORDER_FAILED: 'profiles.page.feedback.errors.reorderFailed',
-  PROFILE_SWITCH_FAILED: 'profiles.page.feedback.errors.switchFailed',
-  PROFILE_UPDATE_FAILED: 'profiles.page.feedback.errors.updateFailed',
   SERVICE_INSTALL_FAILED: 'settings.feedback.errors.clashService.installFailed',
   SERVICE_REINSTALL_FAILED:
     'settings.feedback.errors.clashService.reinstallFailed',
@@ -379,10 +370,10 @@ const baseShowNotice = (
  * - `extras` parsed left-to-right: first plain object is i18n params; next value is raw payload; first number overrides duration (ms, 0 = persistent; defaults: success 3000 / info 5000 / error 8000)
  * - Returns a notice id for manual closing via `hideNotice(id)`
  *
- * @example showNotice.success("profiles.page.feedback.notifications.batchDeleted");
+ * @example showNotice.success("tono.settings.saved");
  * @example showNotice.error(err); // pass an Error directly
  * @example showNotice.error("shared.feedback.notifications.common.refreshFailed", err); // Simply pass an Error directly; but we recommend using { err } with i18n key and placeholders.
- * @example showNotice.error("profiles.page.feedback.errors.invalidUrl", { url }, 4000);
+ * @example showNotice.error("settings.feedback.errors.clash.restartFailed", undefined, 4000);
  */
 export const showNotice: ShowNotice = Object.assign(baseShowNotice, {
   success: (message: NoticeContent, ...extras: NoticeExtra[]) =>

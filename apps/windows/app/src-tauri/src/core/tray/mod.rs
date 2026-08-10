@@ -1,6 +1,5 @@
 use crate::config::IVerge;
 use crate::core::tray::menu_def::TrayAction;
-use crate::module::lightweight;
 use crate::process::AsyncHandler;
 use crate::singleton;
 use crate::tono::{commands, connection, state::TonoState};
@@ -444,7 +443,7 @@ async fn tono_menu_state(app_handle: &AppHandle) -> TonoMenuState {
 }
 
 /// Tono-owned controls only: connection actions enter the same transaction as frontend IPC.
-/// Legacy modes, proxies/profiles, system proxy/TUN, core restart and lightweight mode remain
+/// Legacy modes, proxies/profiles, system proxy/TUN and core restart remain
 /// absent. The retained directory/log/version entries are read-only diagnostics.
 async fn create_tray_menu(app_handle: &AppHandle) -> Result<tauri::menu::Menu<Wry>> {
     let version = env!("CARGO_PKG_VERSION");
@@ -552,9 +551,7 @@ fn on_tray_icon_event(_tray_icon: &TrayIcon, tray_event: TrayIconEvent) {
             // Tono: every left-click behavior maps to the dashboard (P0-5) —
             // no system-proxy/TUN toggles from the tray.
             logging!(debug, Type::Tray, "tray click: open dashboard");
-            if !lightweight::exit_lightweight_mode().await {
-                WindowManager::show_main_window().await;
-            };
+            WindowManager::show_main_window().await;
         });
     }
 }
@@ -597,9 +594,7 @@ fn on_menu_event(_: &AppHandle, event: MenuEvent) {
             }
             MenuCommand::Dashboard => {
                 logging!(info, Type::Tray, "托盘菜单点击: 打开窗口");
-                if !lightweight::exit_lightweight_mode().await {
-                    WindowManager::show_main_window().await;
-                };
+                WindowManager::show_main_window().await;
             }
             MenuCommand::ConfDir => {
                 let _ = cmd::open_app_dir().await;

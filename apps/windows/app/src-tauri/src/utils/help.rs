@@ -1,4 +1,4 @@
-use crate::{config::with_encryption, enhance::seq::SeqMap};
+use crate::config::with_encryption;
 use anyhow::{Context as _, Result, anyhow, bail};
 use clash_verge_logging::{Type, logging};
 use nanoid::nanoid;
@@ -52,11 +52,6 @@ pub async fn read_mapping(path: &PathBuf) -> Result<Mapping> {
     }
 }
 
-/// read mapping from yaml fix #165
-pub async fn read_seq_map(path: &PathBuf) -> Result<SeqMap> {
-    read_yaml(path).await
-}
-
 /// save the data to the file
 /// can set `prefix` string to add some comments
 pub async fn save_yaml<T: Serialize + Sync>(path: &PathBuf, data: &T, prefix: Option<&str>) -> Result<()> {
@@ -69,8 +64,7 @@ pub async fn save_yaml<T: Serialize + Sync>(path: &PathBuf, data: &T, prefix: Op
 
     // Temp file → fsync → rename, instead of truncating the destination in place. A
     // truncate-in-place write that dies on ENOSPC, a crash or a power cut leaves a *truncated*
-    // config behind, and the layer above reads an unparsable `profiles.yaml` as `default()` —
-    // after which `cleanup_orphaned_files` deletes every profile file on disk. The rename is
+    // config behind, which the layer above then reads as `default()`. The rename is
     // the atomic step: a reader sees the whole old file or the whole new one, never half of
     // either. Same pattern as `tono_core::catalog`'s durable write.
     let file_name = path

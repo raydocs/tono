@@ -2,8 +2,7 @@
 use crate::core::service;
 use crate::{
     config::{Config, IVerge},
-    core::{CoreManager, autostart, handle, hotkey, logger::Logger, tray},
-    module::{auto_backup::AutoBackupManager, lightweight},
+    core::{CoreManager, autostart, handle, logger::Logger, tray},
 };
 use anyhow::Result;
 use bitflags::bitflags;
@@ -71,7 +70,6 @@ fn determine_update_flags(patch: &IVerge) -> UpdateFlags {
     let enable_global_hotkey = patch.enable_global_hotkey;
     let tray_event = &patch.tray_event;
     let home_cards = patch.home_cards.as_ref();
-    let enable_auto_light_weight = patch.enable_auto_light_weight_mode;
     let enable_external_controller = patch.enable_external_controller;
     let tray_proxy_groups_display_mode = &patch.tray_proxy_groups_display_mode;
     let tray_inline_outbound_modes = patch.tray_inline_outbound_modes;
@@ -151,14 +149,8 @@ fn determine_update_flags(patch: &IVerge) -> UpdateFlags {
     {
         update_flags.insert(UpdateFlags::SYSTRAY_ICON);
     }
-    if patch.hotkeys.is_some() {
-        update_flags.insert(UpdateFlags::HOTKEY | UpdateFlags::SYSTRAY_MENU);
-    }
     if tray_event.is_some() {
         update_flags.insert(UpdateFlags::SYSTRAY_CLICK_BEHAVIOR);
-    }
-    if enable_auto_light_weight.is_some() {
-        update_flags.insert(UpdateFlags::LIGHT_WEIGHT);
     }
     if tray_proxy_groups_display_mode.is_some() {
         update_flags.insert(UpdateFlags::SYSTRAY_MENU);
@@ -179,14 +171,6 @@ fn determine_update_flags(patch: &IVerge) -> UpdateFlags {
 #[allow(clippy::cognitive_complexity)]
 async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> Result<()> {
     // Process updates based on flags
-    if update_flags.contains(UpdateFlags::RESTART_CORE) {
-        Config::generate().await?;
-        CoreManager::global().restart_core().await?;
-    }
-    if update_flags.contains(UpdateFlags::CLASH_CONFIG) {
-        CoreManager::global().update_config_checked().await?;
-        handle::Handle::refresh_clash();
-    }
     if update_flags.contains(UpdateFlags::VERGE_CONFIG) {
         handle::Handle::refresh_verge();
     }
@@ -202,11 +186,6 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
         let manager = CoreManager::global();
         let _lifecycle = manager.lifecycle_lock.lock().await;
         manager.apply_proxy_after_start().await?;
-    }
-    if update_flags.contains(UpdateFlags::HOTKEY)
-        && let Some(hotkeys) = &patch.hotkeys
-    {
-        hotkey::Hotkey::global().update(hotkeys.to_owned()).await?;
     }
     if update_flags.contains(UpdateFlags::SYSTRAY_MENU) {
         tray::Tray::global().update_menu().await?;
@@ -226,13 +205,6 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
     if update_flags.contains(UpdateFlags::SYSTRAY_CLICK_BEHAVIOR) {
         tray::Tray::global().update_click_behavior().await?;
     }
-    if update_flags.contains(UpdateFlags::LIGHT_WEIGHT) {
-        if patch.enable_auto_light_weight_mode.unwrap_or(false) {
-            lightweight::enable_auto_light_weight_mode().await;
-        } else {
-            lightweight::disable_auto_light_weight_mode();
-        }
-    }
     if update_flags.contains(UpdateFlags::LOG_LEVEL) {
         Logger::global().update_log_level(patch.get_log_level())?;
     }
@@ -248,11 +220,10 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
 ///
 /// Today that is TUN, which is a question about the *setting* rather than about the Run State:
 /// no Run State transition follows a TUN patch, so the reconciliation that reacts to those
-/// would never see it. Switching TUN on from the global hotkey is the case that reaches here —
-/// unlike the tray item and the settings switch it is not gated on availability, and the flags
-/// the patch raises are answered by a Core reload that changes no Run State at all. Left alone
-/// the setting stays on and every surface reports TUN as enabled while nothing carries its
-/// traffic.
+/// would never see it. A TUN patch arrives here from the Run-State-driven reconciliation
+/// itself, which is not gated on availability, and the flags the patch raises are answered
+/// without a Core reload that changes no Run State at all. Left alone the setting stays on
+/// and every surface reports TUN as enabled while nothing carries its traffic.
 ///
 /// The reconciliation writes configuration of its own, so it goes through
 /// [`apply_verge_patch`] rather than back through here. That makes the absence of a cycle a
@@ -314,14 +285,12 @@ pub(super) async fn apply_verge_patch(patch: &IVerge, not_save_file: bool) -> Re
             verge_data.save_file().await?;
         }
         process_terminated_flags(update_flags, patch).await?;
-        logging_error!(Type::Backup, AutoBackupManager::global().refresh_settings().await);
         return Ok(());
     }
 
     process_terminated_flags(update_flags, patch).await?;
     transaction.commit();
 
-    logging_error!(Type::Backup, AutoBackupManager::global().refresh_settings().await);
     if !not_save_file {
         // 分离数据获取和异步调用
         let verge_data = verge.data_arc();

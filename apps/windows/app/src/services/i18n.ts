@@ -83,15 +83,8 @@ type LocaleModule = {
 
 const STARTUP_LANGUAGE_SECTIONS = [
   'layout',
-  'home',
   'shared',
   'settings',
-  'profiles',
-  'proxies',
-  'tests',
-  'rules',
-  'connections',
-  'logs',
   'tono',
 ] as const
 

@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::core::{CoreManager, handle};
-use crate::module::lightweight;
 use crate::utils;
 use crate::utils::window_manager::WindowManager;
 use clash_verge_logging::{Type, logging};
@@ -109,14 +108,45 @@ async fn restore_dns_after_core_stop() -> bool {
     true
 }
 
-pub async fn open_or_close_dashboard() {
-    if lightweight::is_in_lightweight_mode() {
-        let _ = lightweight::exit_lightweight_mode().await;
+/// Restart the application
+pub async fn restart_app() {
+    logging!(debug, Type::System, "启动重启应用流程");
+    // 设置退出标志
+    handle::Handle::global().set_is_exiting();
+
+    // Tono: restart releases the kill switch like quit does (§6, P0-8).
+    if let Err(error) = crate::tono::commands::quit_release(handle::Handle::app_handle().clone()).await {
+        logging!(
+            error,
+            Type::Service,
+            "Tono: 无法证明重启前已恢复网络保护，取消重启: {error}"
+        );
+        handle::Handle::global().clear_is_exiting();
+        handle::Handle::notice_message("app_restart::core_stop_failed", "");
         return;
     }
 
-    let result = WindowManager::toggle_main_window().await;
-    logging!(info, Type::Window, "Window toggle result: {result:?}");
+    Config::apply_all_and_save_file().await;
+
+    logging!(info, Type::System, "开始异步清理资源");
+    let cleanup_result = clean_async().await;
+
+    logging!(
+        info,
+        Type::System,
+        "资源清理完成，退出代码: {}",
+        if cleanup_result.all_success { 0 } else { 1 }
+    );
+
+    if !cleanup_result.core_stopped {
+        handle::Handle::global().clear_is_exiting();
+        handle::Handle::notice_message("app_restart::core_stop_failed", "");
+        return;
+    }
+
+    utils::server::shutdown_embedded_server();
+    let app_handle = handle::Handle::app_handle();
+    app_handle.restart();
 }
 
 /// Make a refused Quit visible: the exit flag is already cleared, so this restores (or
@@ -328,18 +358,6 @@ pub async fn clean_session_ending_best_effort() -> CleanupResult {
 
 #[cfg(target_os = "macos")]
 pub async fn hide() {
-    use crate::module::lightweight::add_light_weight_timer;
-
-    let enable_auto_light_weight_mode = Config::verge()
-        .await
-        .data_arc()
-        .enable_auto_light_weight_mode
-        .unwrap_or(false);
-
-    if enable_auto_light_weight_mode {
-        add_light_weight_timer().await;
-    }
-
     if let Some(window) = WindowManager::get_main_window()
         && window.is_visible().unwrap_or(false)
     {

@@ -37,10 +37,9 @@ impl MixedPort {
     ///
     /// Reading the draft means a caller that hands this to something *outside* the app — the
     /// PAC endpoint is the one that does — can name a port the Core has not moved to yet.
-    /// What makes that safe is that the only path staging a listener port,
-    /// `feat::listener::save_proxy_ports`, closes PAC across the staging with `core_starting`
-    /// and reopens it with `core_start_settled`. A second path that stages a listener port
-    /// while the Core is serving would have to do the same.
+    /// What makes that safe is that PAC availability is fail-closed across any Core
+    /// start/stop transition, so the endpoint cannot serve a stale port while the Core
+    /// is being replaced.
     pub async fn desired() -> u16 {
         let selected = Config::verge().await.latest_arc().verge_mixed_port;
         // `get_mixed_port` already falls back to the default when the Merge Config is silent.
