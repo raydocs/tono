@@ -1504,6 +1504,96 @@ fn diagnostics_upload_error(err: &ApiError) -> String {
     format!("{prefix}: {err}")
 }
 
+/// The protected-state predicate of the quit path: the machine is protected while the kill
+/// switch is armed or a (dis)connection is in flight. Shared by `quit_release` and
+/// `quit_protection_active` so "protected" can never drift between the release decision and the
+/// service-stop decision.
+fn fsm_reports_protection(inner: &TonoInner) -> bool {
+    inner.fsm.kill_switch_armed()
+        || inner.fsm.status().is_connected
+        || inner.fsm.status().is_connecting
+        || inner.fsm.status().is_protection_blocked
+}
+
+/// Whether the machine is protected *right now*, as the quit path defines it. Must be called
+/// **before** `quit_release`: a successful release converges the FSM to "unprotected", and the
+/// connected-quit contract is that the Service keeps running even after its barrier is released.
+pub async fn quit_protection_active(app: &AppHandle) -> bool {
+    let Some(state) = app.try_state::<Arc<TonoState>>().map(|state| state.inner().clone()) else {
+        return false;
+    };
+    let inner = state.lock().await;
+    fsm_reports_protection(&inner)
+}
+
+/// Whether stopping the SCM service on an unprotected quit is permitted. The durable desired
+/// state must be proven "core should not be running": stopping the Windows service does not
+/// rewrite the desired-state file, so stopping it while `core_should_be_running` is true (or
+/// unreadable) would let the next service start resurrect a core the user already stopped.
+#[cfg(any(windows, test))]
+fn service_stop_permitted_on_quit(
+    desired_state_unknown: bool,
+    desired_core_should_be_running: bool,
+) -> bool {
+    !desired_state_unknown && !desired_core_should_be_running
+}
+
+/// Unprotected interactive quit on Windows: stop the TonoService SCM service so no daemon
+/// lingers after the App exits. Connected/protected quits never reach here — protection
+/// semantics win. Best-effort: the exit is already committed, so every failure is logged,
+/// never propagated.
+pub async fn stop_service_on_unprotected_quit() {
+    #[cfg(windows)]
+    {
+        match service::tono_service_status_snapshot().await {
+            Ok(snapshot)
+                if service_stop_permitted_on_quit(
+                    snapshot.desired_state_unknown,
+                    snapshot.desired_core_should_be_running,
+                ) => {}
+            Ok(snapshot) => {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: 退出时保留 TonoService 运行：desired state 未证明 core 已停 \
+                     (desired_core_should_be_running={}, desired_state_unknown={})",
+                    snapshot.desired_core_should_be_running,
+                    snapshot.desired_state_unknown
+                );
+                return;
+            }
+            Err(error) => {
+                // IPC unanswered: the Service is either already stopped (an SCM stop would be a
+                // no-op anyway) or wedged with an unprovable desired state. Skip rather than
+                // strand a stale `core_should_be_running = true`.
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: 服务未应答 IPC，退出时跳过 SCM 停止（服务已停止或状态不可证明）: {error:#}"
+                );
+                return;
+            }
+        }
+        match tokio::task::spawn_blocking(service::stop_registered_tono_service).await {
+            Ok(Ok(())) => logging!(
+                info,
+                Type::Service,
+                "Tono: 未连接状态退出，已停止 TonoService（下次连接会按需修复并拉起）"
+            ),
+            Ok(Err(error)) => logging!(
+                warn,
+                Type::Service,
+                "Tono: 退出时停止 TonoService 失败（退出继续进行）: {error:#}"
+            ),
+            Err(error) => logging!(
+                warn,
+                Type::Service,
+                "Tono: 退出时停止 TonoService 的任务失败（退出继续进行）: {error:#}"
+            ),
+        }
+    }
+}
+
 /// Explicit Quit/restart release (§6, L1): bump the generation, abort every task, then join the
 /// single-flight explicit-release sequence. A preventable interactive exit is cancelled when
 /// release cannot be proven; the unpreventable WM_ENDSESSION path applies its own short outer
@@ -1516,10 +1606,7 @@ pub async fn quit_release(app: AppHandle) -> Result<(), String> {
         let mut inner = state.lock().await;
         inner.invalidate_connection(true);
         inner.tasks.abort_catalog_sync();
-        inner.fsm.kill_switch_armed()
-            || inner.fsm.status().is_connected
-            || inner.fsm.status().is_connecting
-            || inner.fsm.status().is_protection_blocked
+        fsm_reports_protection(&inner)
     };
     if protected {
         connection::release_explicit(&state, &app).await
@@ -1585,8 +1672,25 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TokenProbe, stage_key, test_server_endpoint, token_probe, ui_state_key, unknown_protection_message};
+    use super::{
+        TokenProbe, service_stop_permitted_on_quit, stage_key, test_server_endpoint, token_probe, ui_state_key,
+        unknown_protection_message,
+    };
     use tono_core::connection::{ConnectStage, UiState};
+
+    /// The SCM service may only be stopped on an unprotected quit when the durable desired state
+    /// is proven "core should not be running"; an armed or transiently unreadable desired state
+    /// must keep the daemon, or the next service start would resurrect a stopped core.
+    #[test]
+    fn service_stop_on_quit_requires_a_proven_stopped_desired_state() {
+        assert!(service_stop_permitted_on_quit(false, false));
+        for (unknown, desired) in [(true, false), (false, true), (true, true)] {
+            assert!(
+                !service_stop_permitted_on_quit(unknown, desired),
+                "desired_state_unknown={unknown}, core_should_be_running={desired} must keep the service"
+            );
+        }
+    }
 
     #[test]
     fn stage_keys_cover_all_stages_in_order() {

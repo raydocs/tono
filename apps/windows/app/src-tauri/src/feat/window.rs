@@ -205,6 +205,13 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
     // 设置退出标志
     handle::Handle::global().set_is_exiting();
 
+    // Tono: capture protection *before* the release below converges the FSM to "unprotected".
+    // The connected-quit contract is that the Service keeps running after its barrier is
+    // released; only a quit that was never protected stops the SCM service afterwards.
+    #[cfg(windows)]
+    let tono_protected_at_quit =
+        crate::tono::commands::quit_protection_active(handle::Handle::app_handle()).await;
+
     // Tono: this is the sole owner of the preventable explicit-Quit release (§6). Session-ending
     // exits use their separate best-effort path in `RunEvent::Exit`.
     let release = tokio::time::timeout(
@@ -257,6 +264,15 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
         surface_cancelled_quit().await;
         handle::Handle::notice_message("app_quit::core_stop_failed", "");
         return clash_verge_signal::ShutdownOutcome::Canceled;
+    }
+
+    // Tono: an unprotected quit leaves nothing for the Service to do — the kill switch is not
+    // armed and the core stop above already persisted `core_should_be_running = false`. Stop the
+    // SCM service so no daemon lingers after the App exits; a protected quit keeps it running
+    // (protection semantics win). Best-effort: never blocks or cancels the exit.
+    #[cfg(windows)]
+    if !tono_protected_at_quit {
+        crate::tono::commands::stop_service_on_unprotected_quit().await;
     }
 
     utils::server::shutdown_embedded_server();

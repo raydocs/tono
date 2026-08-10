@@ -12,7 +12,7 @@ use shared::run_command;
 use shared::uninstall_old_service;
 use shared::{enter_repair_gate, run_maintenance_if_requested};
 #[cfg(windows)]
-use shared::{read_service_pid_file, stop_windows_service, terminate_process_by_pid};
+use shared::{force_stop_windows_service, read_service_pid_file, stop_windows_service, terminate_process_by_pid};
 
 /// How Windows cleanup ended. `main` maps this onto the exit-code contract with the NSIS
 /// uninstall macro, which must only block when the machine cannot be proven safe; the mapping
@@ -41,8 +41,10 @@ enum CleanupOutcome {
     /// machine is neither blocked nor redirected, so the uninstall **continues**; the deviation
     /// is reported so the installer can log it.
     RestoredToAutomatic(Error),
-    /// Cleanup could not prove the machine is unblocked. The recovery files were preserved;
-    /// only this outcome may block an uninstall.
+    /// Cleanup could not prove the machine is unblocked. The SCM service registration was
+    /// still deleted whenever a handle was available (an orphaned auto-start service with no
+    /// binary on disk is the failure this outcome exists to prevent), and the recovery files
+    /// were preserved; only this outcome may block an uninstall.
     StillProtected(Error),
 }
 
@@ -332,8 +334,10 @@ fn main() -> anyhow::Result<()> {
         }
         CleanupOutcome::StillProtected(error) => {
             eprintln!(
-                "Cleanup could not prove this machine was made safe, so nothing was deleted and \
-                 all recovery files were preserved: {error:#}"
+                "Cleanup could not prove this machine was made safe. The service registration \
+                 was deleted whenever a service handle was available, and the recovery state \
+                 files were preserved; reboot once to clear any residual network barrier: \
+                 {error:#}"
             );
             std::process::exit(code);
         }
@@ -435,10 +439,30 @@ fn windows_cleanup() -> CleanupOutcome {
         );
     }
 
+    // A stop failure no longer aborts the cleanup: the uninstall contract is that the SCM
+    // registration is deleted whenever a handle is in hand, because returning early here is
+    // what left customer machines with an auto-start service whose binary the NSIS macro then
+    // removed. The unproven stop is recorded as the blocking error and reported after the
+    // disarm attempt and the delete.
+    let mut blocking_error: Option<Error> = None;
     if let Some(service) = service.as_ref()
         && let Err(error) = stop_windows_service(service)
     {
-        return CleanupOutcome::StillProtected(error);
+        // `stop_windows_service` already escalates to a force-termination internally; one more
+        // direct attempt covers a stale status observation. Only a failure here blocks.
+        match force_stop_windows_service(service) {
+            Ok(()) => {
+                println!("Service was force-stopped after the graceful stop failed: {error:#}");
+            }
+            Err(force_error) => {
+                eprintln!(
+                    "Could not stop the service even after force-termination ({force_error:#}); \
+                     continuing with the disarm attempt and service deletion so no orphaned \
+                     auto-start service survives the uninstall."
+                );
+                blocking_error = Some(force_error);
+            }
+        }
     }
 
     // Opt this process — and only this process — into the DNS escalation ladder before the
@@ -549,51 +573,96 @@ fn windows_cleanup() -> CleanupOutcome {
                                  WFP filters are absent: {error:#}"
                             ))
                         }
-                        _ => return CleanupOutcome::StillProtected(error),
+                        _ => {
+                            // The barrier could not be proven gone. Tono's WFP objects are
+                            // dynamic and cleared on reboot, so deleting the service and asking
+                            // for one reboot is the safe fallback; what must never survive is an
+                            // orphaned auto-start service registration.
+                            eprintln!(
+                                "Disarm could not prove the network barrier was removed ({error:#}); \
+                                 the service registration will still be deleted so no orphaned \
+                                 auto-start service remains, and the state files are preserved for \
+                                 recovery. Reboot once to clear any residual network barrier."
+                            );
+                            if blocking_error.is_none() {
+                                blocking_error = Some(error);
+                            }
+                            None
+                        }
                     }
                 }
             }
             other => return other,
         },
     };
-    if dns_fallback.is_none() {
+    if dns_fallback.is_none() && blocking_error.is_none() {
         println!("Kill switch was disarmed and protected DNS restore was verified.");
     }
 
-    // Only cosmetic state remains. A failure below must not block the uninstall: the machine is
-    // provably unblocked, and nothing left behind protects or blocks anything. A cosmetic
-    // failure is reported *instead of* the DNS fallback: both continue, and the leftovers are
-    // the thing a future install has to act on.
+    // The service registration is deleted whenever the handle is in hand, even when the disarm
+    // or the stop could not be proven: an unproven barrier is cleared by one reboot (Tono's WFP
+    // objects are dynamic), while an orphaned auto-start service with no binary on disk is not
+    // cleared by anything. A delete/poll/binary failure stays cosmetic: both continue, and the
+    // leftovers are the thing a future install has to act on. `final_cleanup_outcome` gives the
+    // blocking error precedence so an unproven-safe machine never reads as a mere cosmetic miss.
+    let mut cosmetic_error: Option<Error> = None;
     if let Some(service) = service {
-        if let Err(error) = service.delete() {
-            return CleanupOutcome::CosmeticFailure(error.into());
-        }
-        drop(service);
-        if let Err(error) = poll_until(
-            POLL_ATTEMPTS,
-            || match service_manager.open_service(
-                clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
-                ServiceAccess::QUERY_STATUS,
-            ) {
-                Ok(service) => {
-                    drop(service);
-                    Ok(None)
+        match service.delete() {
+            Ok(()) => {
+                drop(service);
+                if let Err(error) = poll_until(
+                    POLL_ATTEMPTS,
+                    || match service_manager.open_service(
+                        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+                        ServiceAccess::QUERY_STATUS,
+                    ) {
+                        Ok(service) => {
+                            drop(service);
+                            Ok(None)
+                        }
+                        Err(error) if has_raw_error(&error, ERROR_SERVICE_DOES_NOT_EXIST) => {
+                            Ok(Some(()))
+                        }
+                        Err(error) => Err(error.into()),
+                    },
+                    || thread::sleep(POLL_INTERVAL),
+                    "timed out waiting for service deletion",
+                ) {
+                    cosmetic_error = Some(error);
                 }
-                Err(error) if has_raw_error(&error, ERROR_SERVICE_DOES_NOT_EXIST) => Ok(Some(())),
-                Err(error) => Err(error.into()),
-            },
-            || thread::sleep(POLL_INTERVAL),
-            "timed out waiting for service deletion",
-        ) {
-            return CleanupOutcome::CosmeticFailure(error);
+            }
+            Err(error) => cosmetic_error = Some(error.into()),
         }
     }
-    match remove_windows_service_binary() {
-        Ok(()) => match dns_fallback {
-            None => CleanupOutcome::Clean,
-            Some(error) => CleanupOutcome::RestoredToAutomatic(error),
-        },
-        Err(error) => CleanupOutcome::CosmeticFailure(error),
+    if let Err(error) = remove_windows_service_binary()
+        && cosmetic_error.is_none()
+    {
+        cosmetic_error = Some(error);
+    }
+    final_cleanup_outcome(blocking_error, cosmetic_error, dns_fallback)
+}
+
+/// Resolve the cleanup result after every step has run. Precedence: a blocking error (the stop
+/// or the disarm could not be proven) is `StillProtected` — with the service registration now
+/// deleted whenever a handle was available, per the outcome's contract. A delete, deletion-poll,
+/// or binary-removal failure is `CosmeticFailure`, reported *instead of* the DNS fallback: both
+/// continue, and the leftovers are the thing a future install has to act on. Otherwise the DNS
+/// ladder result stands.
+#[cfg(any(windows, test))]
+fn final_cleanup_outcome(
+    blocking_error: Option<Error>,
+    cosmetic_error: Option<Error>,
+    dns_fallback: Option<Error>,
+) -> CleanupOutcome {
+    if let Some(error) = blocking_error {
+        return CleanupOutcome::StillProtected(error);
+    }
+    if let Some(error) = cosmetic_error {
+        return CleanupOutcome::CosmeticFailure(error);
+    }
+    match dns_fallback {
+        None => CleanupOutcome::Clean,
+        Some(error) => CleanupOutcome::RestoredToAutomatic(error),
     }
 }
 
@@ -639,7 +708,7 @@ mod tests {
         CleanupOutcome, DNS_RESTORED_AUTOMATIC_MARKER, DNS_STILL_ON_LOOPBACK_MARKER,
         EXIT_COSMETIC_FAILURE, EXIT_RESTORED_AUTOMATIC, EXIT_STILL_PROTECTED,
         WFP_REMOVED_CONTINUE_MARKER, classify_disarm_failure, cleanup_exit_code,
-        cleanup_fast_path_allowed, poll_until, uninstall_may_continue,
+        cleanup_fast_path_allowed, final_cleanup_outcome, poll_until, uninstall_may_continue,
     };
     use std::cell::Cell;
 
@@ -829,5 +898,61 @@ mod tests {
         assert_eq!(attempts.get(), 3);
         assert_eq!(pauses.get(), 2);
         Ok(())
+    }
+
+    // --- The delete-always contract ---
+
+    /// A stop or disarm that cannot be proven no longer aborts the cleanup before
+    /// `service.delete()`: the outcome still blocks (exit 3, state files preserved), but the
+    /// SCM registration was deleted first, so `sc query TonoService` reports 1060 and no
+    /// orphaned auto-start service outlives the removed binaries.
+    #[test]
+    fn blocking_error_stays_blocking_after_the_service_was_deleted() {
+        let outcome = final_cleanup_outcome(Some(anyhow::anyhow!("disarm unproven")), None, None);
+        assert!(matches!(outcome, CleanupOutcome::StillProtected(_)));
+        let code = cleanup_exit_code(&outcome);
+        assert_eq!(code, EXIT_STILL_PROTECTED);
+        assert!(!uninstall_may_continue(code));
+    }
+
+    /// Blocking beats cosmetic: when the machine could not be proven safe, a delete or binary
+    /// failure on top must never downgrade the result to mere debris (exit 2), or the NSIS macro
+    /// would continue on an unproven machine.
+    #[test]
+    fn blocking_error_takes_precedence_over_cosmetic_debris() {
+        for with_cosmetic in [false, true] {
+            for with_fallback in [false, true] {
+                let outcome = final_cleanup_outcome(
+                    Some(anyhow::anyhow!("stop failed")),
+                    with_cosmetic.then(|| anyhow::anyhow!("delete failed")),
+                    with_fallback.then(|| anyhow::anyhow!("{DNS_RESTORED_AUTOMATIC_MARKER}")),
+                );
+                assert!(
+                    matches!(outcome, CleanupOutcome::StillProtected(_)),
+                    "blocking error must dominate: {outcome:?}"
+                );
+            }
+        }
+    }
+
+    /// Without a blocking error the precedence is unchanged: cosmetic debris is reported instead
+    /// of the DNS fallback, and a bare fallback still maps to its own continuing exit code.
+    #[test]
+    fn outcome_resolution_without_a_blocking_error_is_unchanged() {
+        let cosmetic = final_cleanup_outcome(
+            None,
+            Some(anyhow::anyhow!("delete failed")),
+            Some(anyhow::anyhow!("{DNS_RESTORED_AUTOMATIC_MARKER}")),
+        );
+        assert!(matches!(cosmetic, CleanupOutcome::CosmeticFailure(_)));
+
+        let fallback =
+            final_cleanup_outcome(None, None, Some(anyhow::anyhow!("{DNS_RESTORED_AUTOMATIC_MARKER}")));
+        assert!(matches!(fallback, CleanupOutcome::RestoredToAutomatic(_)));
+
+        assert!(matches!(
+            final_cleanup_outcome(None, None, None),
+            CleanupOutcome::Clean
+        ));
     }
 }

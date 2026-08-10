@@ -105,7 +105,9 @@ fn stop_windows_service_gracefully(service: &platform_lib::service::Service) -> 
 /// `QueryServiceStatusEx` (`SERVICE_STATUS_PROCESS.dwProcessId`); the pid file the daemon
 /// writes beside its owner lock is the fallback when the SCM no longer reports one.
 #[cfg(windows)]
-fn force_stop_windows_service(service: &platform_lib::service::Service) -> Result<(), Error> {
+pub(crate) fn force_stop_windows_service(
+    service: &platform_lib::service::Service,
+) -> Result<(), Error> {
     use platform_lib::service::{
         ServiceAction, ServiceActionType, ServiceFailureActions, ServiceFailureResetPeriod,
         ServiceState,

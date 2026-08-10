@@ -278,6 +278,63 @@ pub(crate) fn trusted_service_evidence() -> Result<bool> {
     }
 }
 
+/// Stop the registered TonoService — used when the App quits with no protection active, so no
+/// daemon lingers after exit. Registration-absent and already-stopped are both success. The
+/// wait is bounded; the caller treats any error as best-effort noise because the exit is
+/// already committed. Blocking SCM calls: invoke via `tokio::task::spawn_blocking`.
+#[cfg(windows)]
+pub(crate) fn stop_registered_tono_service() -> Result<()> {
+    use windows_service::{
+        Error as WindowsServiceError,
+        service::{ServiceAccess, ServiceState},
+        service_manager::{ServiceManager as WindowsServiceManager, ServiceManagerAccess},
+    };
+
+    const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
+    const ERROR_SERVICE_CANNOT_ACCEPT_CTRL: i32 = 1061;
+    const ERROR_SERVICE_NOT_ACTIVE: i32 = 1062;
+    const STOP_POLL_ATTEMPTS: usize = 50;
+    const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+    let manager = WindowsServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
+    let service = match manager.open_service(
+        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+        ServiceAccess::QUERY_STATUS | ServiceAccess::STOP,
+    ) {
+        Ok(service) => service,
+        Err(WindowsServiceError::Winapi(error)) if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) => {
+            return Ok(());
+        }
+        Err(error) => return Err(error).context("failed to open TonoService for stopping"),
+    };
+
+    for _ in 0..STOP_POLL_ATTEMPTS {
+        match service.query_status()?.current_state {
+            ServiceState::Stopped => return Ok(()),
+            ServiceState::StopPending => {}
+            _ => {
+                if let Err(error) = service.stop() {
+                    // Races with an in-flight or already-completed stop are not failures;
+                    // the next poll observes the outcome.
+                    let tolerable = matches!(
+                        &error,
+                        WindowsServiceError::Winapi(error)
+                            if matches!(
+                                error.raw_os_error(),
+                                Some(ERROR_SERVICE_CANNOT_ACCEPT_CTRL | ERROR_SERVICE_NOT_ACTIVE)
+                            )
+                    );
+                    if !tolerable {
+                        return Err(error).context("failed to send the STOP control to TonoService");
+                    }
+                }
+            }
+        }
+        std::thread::sleep(STOP_POLL_INTERVAL);
+    }
+    bail!("timed out waiting for TonoService to stop")
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn trusted_service_evidence() -> Result<bool> {
     let unit = format!("{}.service", clash_verge_service_ipc::SERVICE_SLUG);
@@ -1062,6 +1119,60 @@ pub(crate) async fn tono_service_ready() -> Result<()> {
         ServiceStatus::Ready => Ok(()),
         status => bail!("Tono Service 不可用: {status:?}"),
     }
+}
+
+/// Ready check for the connect flow, with one recovery attempt.
+///
+/// Since an unprotected App quit now stops the SCM service, a registered-but-unavailable Service
+/// is the expected state on the next connect, not a broken install. Revive it through the
+/// established elevated install/repair entry (`PendingAction::Install` → `tono-service-install`
+/// stops/reconfigures/starts the service idempotently), then re-check readiness. Every other
+/// failure is returned untouched.
+pub(crate) async fn tono_service_ready_or_repair() -> Result<()> {
+    match tono_service_ready().await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if repair_registered_stopped_service().await {
+                return tono_service_ready().await;
+            }
+            Err(error)
+        }
+    }
+}
+
+/// One attempt to revive a Service that is registered with the SCM but not answering, via the
+/// established privileged install/repair path. `false` means the caller stays on its original
+/// error path: the Service is not registered (install is a separate, user-authorised decision),
+/// or the repair itself failed (e.g. the elevation prompt was declined).
+#[cfg(windows)]
+async fn repair_registered_stopped_service() -> bool {
+    if !trusted_service_evidence().unwrap_or(false) {
+        return false;
+    }
+    logging!(
+        info,
+        Type::Service,
+        "Tono: 服务已注册但未运行（上次未连接退出时所停），经 install/repair 入口拉起"
+    );
+    match SERVICE_MANAGER
+        .handle_service_status(ServiceStatus::InstallRequired)
+        .await
+    {
+        Ok(()) => true,
+        Err(error) => {
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: 停止状态服务的修复拉起失败: {error:#}"
+            );
+            false
+        }
+    }
+}
+
+#[cfg(not(windows))]
+async fn repair_registered_stopped_service() -> bool {
+    false
 }
 
 /// Whether the installed Service has the complete Windows protection contract: WFP + DNS,
