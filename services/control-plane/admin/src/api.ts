@@ -65,6 +65,9 @@ export interface UserDto {
     proxyName: string;
     displayName: string;
     egressIpv4?: string;
+    kind?: string;
+    socks5Host?: string;
+    socks5Port?: number;
     defaultProxyName?: string;
     status: string;
   } | null;
@@ -97,6 +100,9 @@ export interface HomeExitDto {
   proxyName: string;
   displayName: string;
   egressIpv4?: string;
+  kind: string;
+  socks5Host?: string;
+  socks5Port?: number;
   status: string;
   notes?: string;
   createdAt: number;
@@ -110,6 +116,9 @@ export interface HomeBindingDto {
   proxyName: string;
   displayName: string;
   egressIpv4?: string;
+  kind?: string;
+  socks5Host?: string;
+  socks5Port?: number;
   defaultProxyName?: string;
   homeStatus: string;
   createdAt: number;
@@ -236,6 +245,11 @@ export const operationsApi = {
     proxyName: string;
     displayName: string;
     egressIpv4?: string;
+    kind?: string;
+    socks5Host?: string;
+    socks5Port?: number;
+    socks5Username?: string;
+    socks5Password?: string;
     notes?: string;
     status?: string;
   }) => (await post<{ homeExit: HomeExitDto }>('home-exits', input)).homeExit,
@@ -243,6 +257,11 @@ export const operationsApi = {
     proxyName: string;
     displayName: string;
     egressIpv4: string | null;
+    kind: string;
+    socks5Host: string | null;
+    socks5Port: number | null;
+    socks5Username: string | null;
+    socks5Password: string | null;
     notes: string | null;
     status: string;
   }>) => (await patch<{ homeExit: HomeExitDto }>(`home-exits/${id}`, input)).homeExit,

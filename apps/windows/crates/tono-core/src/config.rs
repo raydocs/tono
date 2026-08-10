@@ -10,6 +10,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_yaml_ng::{Mapping, Value};
 use thiserror::Error;
 
+use crate::catalog::CatalogHomeSocks5;
 use crate::node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode, validate_node_set};
 
 pub const MIXED_PORT: u16 = 7890;
@@ -25,8 +26,13 @@ pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// the exact IP:port security boundary for each generated DIRECT rule.
 pub const WECHAT_PROCESS_NAMES: [&str; 3] = ["WeChat.exe", "Weixin.exe", "WeChatAppEx.exe"];
 /// Name of the Claude→home-broadband select group, present only when the
-/// catalog carries a verified `homeProxy` routing directive.
+/// catalog carries a verified `homeProxy` or `homeSocks5` routing directive.
 pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
+/// Name of the chained residential SOCKS5 outbound emitted when the catalog
+/// carries a verified `homeSocks5` directive. It dials through `Tono-Exit`
+/// (`dialer-proxy`), so the chain hop follows the user's node selection and
+/// the VPS needs no change.
+pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
 /// Claude/Anthropic domains pinned to the home-broadband exit alongside the
 /// two Claude process names when `homeProxy` routing is in force.
 pub const CLAUDE_HOME_DOMAINS: [&str; 4] = [
@@ -143,7 +149,7 @@ pub fn build_owned_runtime(
     secret: &str,
     direct: Option<&DirectPlan>,
 ) -> Result<OwnedRuntime, ConfigError> {
-    build_owned_runtime_with_ports(nodes, selected, secret, direct, None, RuntimePorts::default())
+    build_owned_runtime_with_ports(nodes, selected, secret, direct, None, None, RuntimePorts::default())
 }
 
 /// Build the owned runtime with listeners chosen for this connection generation. This removes
@@ -154,12 +160,19 @@ pub fn build_owned_runtime(
 /// `Tono-Claude-Home` group holding that node alone, and the node's address joins the TUN
 /// route exclusions so Mihomo's second Reality socket stays out of the tunnel. A name not in
 /// `nodes` (stale caller) degrades to the unsplit runtime instead of failing the connect.
+///
+/// `home_socks5` is the catalog's verified `homeSocks5` directive and takes precedence over
+/// `home_proxy` (mirroring [`crate::catalog::sanitize_routing`]): the group then holds a
+/// chained SOCKS5 outbound that dials the residential upstream through the user's selected
+/// node (`dialer-proxy: Tono-Exit`). The upstream stays inside the tunnel, so it joins
+/// neither the TUN route exclusions nor the WFP permit set.
 pub fn build_owned_runtime_with_ports(
     nodes: &[ValidatedNode],
     selected: &str,
     secret: &str,
     direct: Option<&DirectPlan>,
     home_proxy: Option<&str>,
+    home_socks5: Option<&CatalogHomeSocks5>,
     ports: RuntimePorts,
 ) -> Result<OwnedRuntime, ConfigError> {
     if ports.controller_port == 0 {
@@ -178,7 +191,13 @@ pub fn build_owned_runtime_with_ports(
         .iter()
         .find(|node| node.name == selected)
         .ok_or_else(|| ConfigError::MissingSelection(selected.to_string()))?;
-    let home_node = home_proxy.and_then(|name| nodes.iter().find(|node| node.name == name));
+    // `home_socks5` wins over `home_proxy`: a catalog home node is ignored
+    // while a chained residential upstream is in force.
+    let home_node = if home_socks5.is_some() {
+        None
+    } else {
+        home_proxy.and_then(|name| nodes.iter().find(|node| node.name == name))
+    };
     let mut route_exclusions = vec![format!("{}/32", selected_node.server)];
     if let Some(home) = home_node
         && home.server != selected_node.server
@@ -214,6 +233,7 @@ pub fn build_owned_runtime_with_ports(
         &route_exclusions,
         direct,
         home_node,
+        home_socks5,
         ports,
     ))
     .map_err(|err| ConfigError::Node(NodeRejection::Malformed(err.to_string())))?;
@@ -281,6 +301,24 @@ fn direct_outbound(name: &str, physical_interface: &str) -> Value {
     Value::Mapping(outbound)
 }
 
+fn home_socks5_outbound(socks5: &CatalogHomeSocks5) -> Value {
+    let mut outbound = Mapping::new();
+    put(&mut outbound, "name", string(HOME_SOCKS5_OUTBOUND_NAME));
+    put(&mut outbound, "type", string("socks5"));
+    put(&mut outbound, "server", string(&socks5.host));
+    put(&mut outbound, "port", Value::Number(socks5.port.into()));
+    put(&mut outbound, "username", string(&socks5.username));
+    put(&mut outbound, "password", string(&socks5.password));
+    // Client-side chaining: the residential upstream is dialed through
+    // whatever node the user currently has selected in Tono-Exit, so the
+    // chain hop follows a node switch and the VPS needs no change.
+    put(&mut outbound, "dialer-proxy", string(EXIT_GROUP_NAME));
+    // The Claude rules pointing here are TCP-scoped; the upstream never
+    // carries UDP (the UDP REJECT row stays ahead of any fallthrough).
+    put(&mut outbound, "udp", Value::Bool(false));
+    Value::Mapping(outbound)
+}
+
 fn runtime_value(
     nodes: &[ValidatedNode],
     selected: &str,
@@ -288,6 +326,7 @@ fn runtime_value(
     route_exclusions: &[String],
     direct: Option<&DirectPlan>,
     home: Option<&ValidatedNode>,
+    home_socks5: Option<&CatalogHomeSocks5>,
     ports: RuntimePorts,
 ) -> Value {
     let mut root = Mapping::new();
@@ -415,6 +454,9 @@ fn runtime_value(
         .iter()
         .map(|node| Value::Mapping(node.to_runtime_mapping()))
         .collect();
+    if let Some(socks5) = home_socks5 {
+        proxies.push(home_socks5_outbound(socks5));
+    }
     if let Some(plan) = direct {
         let has_wechat = !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty();
         let has_web = !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty();
@@ -448,7 +490,19 @@ fn runtime_value(
         Value::Sequence(ordered.iter().map(|name| string(name)).collect()),
     );
     groups.push(Value::Mapping(group));
-    if let Some(home) = home {
+    if home_socks5.is_some() {
+        // Claude split routing via the cloud-assigned residential exit: the
+        // dedicated group holds exactly the chained SOCKS5 outbound.
+        let mut home_group = Mapping::new();
+        put(&mut home_group, "name", string(CLAUDE_HOME_GROUP_NAME));
+        put(&mut home_group, "type", string("select"));
+        put(
+            &mut home_group,
+            "proxies",
+            Value::Sequence(vec![string(HOME_SOCKS5_OUTBOUND_NAME)]),
+        );
+        groups.push(Value::Mapping(home_group));
+    } else if let Some(home) = home {
         // Claude split routing: a dedicated group holding exactly the bound
         // home-broadband node, so the Claude rules below cannot follow the
         // user's Tono-Exit selection.
@@ -469,7 +523,7 @@ fn runtime_value(
         .iter()
         .map(|rule| rule.to_string())
         .collect();
-    if home.is_some() {
+    if home.is_some() || home_socks5.is_some() {
         // TCP-scoped on purpose: these pins sit ahead of the UDP REJECT row,
         // and a network-agnostic Claude pin would swallow UDP into a group
         // that cannot carry it (Vision) — Mihomo's fallback for that is a
@@ -633,6 +687,7 @@ reality-opts:
             "test-secret",
             None,
             None,
+            None,
             RuntimePorts {
                 mixed_port: 0,
                 controller_port: 41_237,
@@ -664,6 +719,7 @@ reality-opts:
                     &three_nodes(),
                     "JP Reality 02",
                     "test-secret",
+                    None,
                     None,
                     None,
                     ports,
@@ -1192,9 +1248,32 @@ reality-opts:
             "test-secret",
             None,
             home,
+            None,
             RuntimePorts::default(),
         )
         .unwrap()
+    }
+
+    fn build_with_home_socks5(socks5: Option<&CatalogHomeSocks5>) -> OwnedRuntime {
+        build_owned_runtime_with_ports(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            None,
+            None,
+            socks5,
+            RuntimePorts::default(),
+        )
+        .unwrap()
+    }
+
+    fn home_socks5() -> CatalogHomeSocks5 {
+        CatalogHomeSocks5 {
+            host: "resi-gateway.example.com".to_string(),
+            port: 11080,
+            username: "resi-user".to_string(),
+            password: "resi-secret".to_string(),
+        }
     }
 
     #[test]
@@ -1286,6 +1365,7 @@ reality-opts:
             "test-secret",
             Some(&direct_plan()),
             Some("US Reality 01"),
+            None,
             RuntimePorts::default(),
         )
         .unwrap();
@@ -1323,4 +1403,167 @@ reality-opts:
             ]
         );
     }
+
+    // ---- Claude→residential SOCKS5 split routing ----
+
+    #[test]
+    fn no_home_socks5_build_is_byte_identical_to_the_plain_build() {
+        assert_eq!(build_with_home_socks5(None).yaml(), build().yaml());
+    }
+
+    #[test]
+    fn home_socks5_build_adds_the_chained_outbound_group_and_rules() {
+        let socks5 = home_socks5();
+        let value = parsed(&build_with_home_socks5(Some(&socks5)));
+
+        let proxies = get(&value, &["proxies"]).as_sequence().unwrap();
+        assert_eq!(proxies.len(), 4);
+        let outbound = &proxies[3];
+        assert_eq!(
+            outbound[string("name")].as_str(),
+            Some(HOME_SOCKS5_OUTBOUND_NAME)
+        );
+        assert_eq!(outbound[string("type")].as_str(), Some("socks5"));
+        assert_eq!(
+            outbound[string("server")].as_str(),
+            Some("resi-gateway.example.com")
+        );
+        assert_eq!(outbound[string("port")].as_i64(), Some(11080));
+        assert_eq!(outbound[string("username")].as_str(), Some("resi-user"));
+        assert_eq!(outbound[string("password")].as_str(), Some("resi-secret"));
+        assert_eq!(outbound[string("dialer-proxy")].as_str(), Some("Tono-Exit"));
+        assert_eq!(outbound[string("udp")].as_bool(), Some(false));
+
+        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0][string("name")].as_str(), Some("Tono-Exit"));
+        // The chained outbound never joins the user's exit choices.
+        let exit_choices: Vec<&str> = groups[0][string("proxies")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap())
+            .collect();
+        assert_eq!(exit_choices, ["JP Reality 02", "US Reality 01", "SG Reality 03"]);
+        assert_eq!(groups[1][string("name")].as_str(), Some("Tono-Claude-Home"));
+        assert_eq!(groups[1][string("type")].as_str(), Some("select"));
+        let home_choices: Vec<&str> = groups[1][string("proxies")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap())
+            .collect();
+        assert_eq!(home_choices, [HOME_SOCKS5_OUTBOUND_NAME]);
+
+        // The Claude TCP scope rules are unchanged, still ahead of the UDP
+        // REJECT row and the MATCH fallback.
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            rules,
+            [
+                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+                "IP-CIDR6,::1/128,DIRECT,no-resolve",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
+                "AND,((NETWORK,UDP)),REJECT",
+                "MATCH,Tono-Exit",
+            ]
+        );
+
+        // The upstream dials through the tunnel: only the selected node is
+        // route-excluded; the socks5 server must NOT appear.
+        assert_eq!(
+            get(&value, &["tun", "route-exclude-address"])
+                .as_sequence()
+                .unwrap(),
+            &vec![string("1.1.1.1/32")]
+        );
+    }
+
+    #[test]
+    fn home_socks5_takes_precedence_over_home_proxy() {
+        let socks5 = home_socks5();
+        let runtime = build_owned_runtime_with_ports(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            None,
+            Some("US Reality 01"),
+            Some(&socks5),
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
+        let home_choices: Vec<&str> = groups[1][string("proxies")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap())
+            .collect();
+        assert_eq!(home_choices, [HOME_SOCKS5_OUTBOUND_NAME]);
+        // The ignored catalog home node (8.8.8.8) earns no route exclusion.
+        assert_eq!(
+            get(&value, &["tun", "route-exclude-address"])
+                .as_sequence()
+                .unwrap(),
+            &vec![string("1.1.1.1/32")]
+        );
+    }
+
+    #[test]
+    fn home_socks5_build_with_direct_plan_keeps_rule_order() {
+        let socks5 = home_socks5();
+        let runtime = build_owned_runtime_with_ports(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&direct_plan()),
+            None,
+            Some(&socks5),
+            RuntimePorts::default(),
+        )
+        .unwrap();
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = get(&value, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            rules,
+            [
+                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+                "IP-CIDR6,::1/128,DIRECT,no-resolve",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
+                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
+                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
+                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
+                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
+                "AND,((NETWORK,UDP)),REJECT",
+                "MATCH,Tono-Exit",
+            ]
+        );
+    }
+
 }

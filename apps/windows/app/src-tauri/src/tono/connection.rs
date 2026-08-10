@@ -878,10 +878,17 @@ async fn run_stages(
     // the bootstrap API hosts are the only control-plane recovery channel.
     // When the catalog binds a home-broadband exit, its endpoint joins the
     // WFP permit set — otherwise the kill switch would block Mihomo's dial
-    // to the very node the Claude split-routing rules point at.
-    let home_node = routing
-        .and_then(|routing| routing.home_proxy.as_deref())
-        .and_then(|name| nodes.iter().find(|entry| entry.name == name));
+    // to the very node the Claude split-routing rules point at. A homeSocks5
+    // upstream is dialed through the tunnel (dialer-proxy), so it never
+    // joins this permit set.
+    let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
+    let home_node = if home_socks5.is_some() {
+        None
+    } else {
+        routing
+            .and_then(|routing| routing.home_proxy.as_deref())
+            .and_then(|name| nodes.iter().find(|entry| entry.name == name))
+    };
     let mut proxy_endpoints = vec![proxy_endpoint_of(node)];
     if let Some(home) = home_node
         && (home.server != node.server || home.port != node.port)
@@ -976,7 +983,7 @@ async fn run_stages(
     // the redacted copy may touch disk.
     let secret = generate_controller_secret();
     let runtime =
-        build_owned_runtime_with_ports(nodes, &node.name, &secret, None, home_node.map(|home| home.name.as_str()), runtime_ports).map_err(StageFailure::error)?;
+        build_owned_runtime_with_ports(nodes, &node.name, &secret, None, home_node.map(|home| home.name.as_str()), home_socks5, runtime_ports).map_err(StageFailure::error)?;
     // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
     // already covered because that whole stage runs inside a `wait`; this one was the only
     // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
@@ -1063,6 +1070,7 @@ async fn run_stages(
                 &node,
                 nodes,
                 home_node,
+                home_socks5,
                 generation,
                 &secret,
                 controller_port,
@@ -3125,6 +3133,7 @@ async fn apply_cloud_policy(
     node: &ValidatedNode,
     nodes: &[ValidatedNode],
     home_node: Option<&ValidatedNode>,
+    home_socks5: Option<&tono_core::CatalogHomeSocks5>,
     generation: u64,
     original_secret: &str,
     controller_port: u16,
@@ -3215,6 +3224,7 @@ async fn apply_cloud_policy(
         original_secret,
         Some(&plan),
         home_node.map(|home| home.name.as_str()),
+        home_socks5,
         RuntimePorts {
             mixed_port,
             controller_port,
@@ -3267,7 +3277,7 @@ async fn apply_cloud_policy(
         direct_interface,
         !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
         !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty(),
-        home_node.is_some(),
+        home_node.is_some() || home_socks5.is_some(),
         plan.tcp_wechat_rules.len(),
         plan.tcp_web_rules.len(),
         plan.udp_wechat_rules.len(),
@@ -6069,6 +6079,44 @@ mod tests {
             controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true).is_err(),
             "a Claude domain leaking to Tono-Exit must fail"
         );
+    }
+
+    #[test]
+    fn controller_readback_accepts_the_claude_home_socks5_split_graph() {
+        // With homeSocks5 routing the same six Claude rows point at
+        // Tono-Claude-Home; the group now holds the chained SOCKS5 outbound.
+        // The proof asserts the group's presence, not its members — the extra
+        // Tono-Home-Residential outbound must not trip it.
+        let expected = vec![ControllerDirectRuleProof {
+            proxy: "Tono-China-Direct".to_owned(),
+            payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
+                .to_owned(),
+        }];
+        let proxies = serde_json::json!({
+            "proxies": {
+                "Tono-Exit": {},
+                "Tono-Claude-Home": {"type": "Selector"},
+                "Tono-Home-Residential": {"type": "Socks5"},
+                "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
+            }
+        });
+        let split_rules = serde_json::json!({
+            "rules": [
+                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
+                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.ai))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.com))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,anthropic.com))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claudeusercontent.com))", "proxy": "Tono-Claude-Home"},
+                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
+                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
+                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
+            ]
+        });
+        controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
+            .expect("the exact socks5 split graph must pass");
     }
 
     #[test]

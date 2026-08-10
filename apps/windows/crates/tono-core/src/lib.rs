@@ -16,8 +16,8 @@ pub mod node;
 pub mod policy;
 
 pub use catalog::{
-    CatalogError, CatalogRouting, CatalogTracker, ExitCatalogResponse, InstallOutcome,
-    sanitize_routing,
+    CatalogError, CatalogHomeSocks5, CatalogRouting, CatalogTracker, ExitCatalogResponse,
+    InstallOutcome, sanitize_routing,
 };
 pub use config::{
     DirectPlan, OwnedRuntime, build_owned_runtime, generate_controller_secret, redact_secret,

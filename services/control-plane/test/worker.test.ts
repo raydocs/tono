@@ -1246,6 +1246,164 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(await revision()).toBe(base + 6);
   });
 
+  it('validates socks5 home-exit fields on both admin and ops write paths', async () => {
+    const base = { proxyName: 'Home Socks A', displayName: '家宽 Socks A' };
+    const creds = {
+      kind: 'socks5',
+      socks5Host: '203.0.113.50',
+      socks5Port: 11080,
+      socks5Username: 'resi-user',
+      socks5Password: 'resi-secret',
+    };
+
+    // Missing any of the four upstream fields is a 400.
+    for (const omit of ['socks5Host', 'socks5Port', 'socks5Username', 'socks5Password'] as const) {
+      const body: Record<string, unknown> = { ...base, ...creds };
+      delete body[omit];
+      expect((await admin('home-exits', body)).status).toBe(400);
+      expect((await api('ops/home-exits', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        },
+        body: JSON.stringify(body),
+      })).status).toBe(400);
+    }
+    // Out-of-range / non-integer ports are a 400.
+    for (const port of [0, 65536, 1.5, '11080']) {
+      expect((await admin('home-exits', { ...base, ...creds, socks5Port: port })).status).toBe(400);
+    }
+    // Malformed hosts are a 400; IPv4 literals and hostnames are accepted.
+    for (const host of ['', 'not a host', '10.0.0.1 x', 'http://x', '-bad-.com', '256.1.1.1']) {
+      expect((await admin('home-exits', { ...base, ...creds, socks5Host: host })).status).toBe(400);
+    }
+    // A catalog-kind exit must not carry socks5 fields.
+    expect((await admin('home-exits', { ...base, socks5Host: '203.0.113.50' })).status).toBe(400);
+    expect((await admin('home-exits', { ...base, kind: 'weird' })).status).toBe(400);
+
+    // Happy path: both write paths accept a complete socks5 exit, and the
+    // response shows kind/host/port but never the credentials.
+    const created = await admin('home-exits', { ...base, ...creds });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as any;
+    expect(createdBody.homeExit.kind).toBe('socks5');
+    expect(createdBody.homeExit.socks5Host).toBe('203.0.113.50');
+    expect(createdBody.homeExit.socks5Port).toBe(11080);
+    expect(createdBody.homeExit).not.toHaveProperty('socks5Username');
+    expect(createdBody.homeExit).not.toHaveProperty('socks5Password');
+    const homeId = createdBody.homeExit.id as string;
+
+    // PATCH keeps stored fields when omitted and validates merged values.
+    expect((await admin(`home-exits/${homeId}`, { socks5Port: 0 }, 'PATCH')).status).toBe(400);
+    expect((await admin(`home-exits/${homeId}`, { socks5Host: 'bad host' }, 'PATCH')).status).toBe(400);
+    const patched = await admin(`home-exits/${homeId}`, { socks5Port: 11081 }, 'PATCH');
+    expect(patched.status).toBe(200);
+    expect((await patched.json() as any).homeExit.socks5Port).toBe(11081);
+    // Switching back to catalog wipes the upstream fields.
+    const toCatalog = await admin(`home-exits/${homeId}`, { kind: 'catalog' }, 'PATCH');
+    expect(toCatalog.status).toBe(200);
+    const catalogBody = await toCatalog.json() as any;
+    expect(catalogBody.homeExit.kind).toBe('catalog');
+    expect(catalogBody.homeExit).not.toHaveProperty('socks5Host');
+    // And switching to socks5 without the full field set fails.
+    expect((await admin(`home-exits/${homeId}`, { kind: 'socks5' }, 'PATCH')).status).toBe(400);
+
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('serves homeSocks5 credentials only inside the bound user catalog routing', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const home = await admin('home-exits', {
+      proxyName: 'Home Socks Route',
+      displayName: '家宽 Socks',
+      kind: 'socks5',
+      socks5Host: 'resi-gateway.example.com',
+      socks5Port: 11080,
+      socks5Username: 'resi-user',
+      socks5Password: 'resi-secret',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+
+    const owner = await createAccount('socks5-owner');
+    const other = await createAccount('socks5-other');
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(201);
+
+    const ownerBody = await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    })).json() as any;
+    expect(ownerBody.routing).toEqual({
+      homeSocks5: {
+        host: 'resi-gateway.example.com',
+        port: 11080,
+        username: 'resi-user',
+        password: 'resi-secret',
+      },
+    });
+    // A socks5-kind exit names no catalog node, so nothing is filtered out.
+    expect(ownerBody.yaml).toContain('Shared VPS JP');
+
+    // Unbound users get no routing and no credential material at all.
+    const otherCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    const otherText = await otherCatalog.text();
+    expect(otherText).not.toContain('homeSocks5');
+    expect(otherText).not.toContain('resi-user');
+    expect(otherText).not.toContain('resi-secret');
+
+    // No GET endpoint may echo the credentials: admin/ops exit listings,
+    // binding views, and the ops user list all show at most host:port.
+    const adminList = await admin('home-exits', undefined, 'GET');
+    expect((await adminList.clone().text()).includes('resi-secret')).toBe(false);
+    const adminRows = (await adminList.json() as any).homeExits;
+    expect(adminRows).toEqual([
+      expect.objectContaining({ kind: 'socks5', socks5Host: 'resi-gateway.example.com', socks5Port: 11080 }),
+    ]);
+    expect(adminRows[0]).not.toHaveProperty('socks5Username');
+    expect(adminRows[0]).not.toHaveProperty('socks5Password');
+
+    const opsList = await operations('home-exits');
+    expect(await opsList.text()).not.toContain('resi-secret');
+
+    const bindings = await admin('home-bindings', undefined, 'GET');
+    expect((await bindings.clone().text()).includes('resi-secret')).toBe(false);
+    expect((await bindings.json() as any).bindings).toEqual([
+      expect.objectContaining({ userId: owner.user.id, kind: 'socks5', socks5Host: 'resi-gateway.example.com' }),
+    ]);
+
+    const binding = await admin(`users/${owner.user.id}/home-binding`, undefined, 'GET');
+    expect((await binding.clone().text()).includes('resi-secret')).toBe(false);
+    expect((await binding.json() as any).binding).toEqual(
+      expect.objectContaining({ kind: 'socks5', socks5Host: 'resi-gateway.example.com', socks5Port: 11080 }),
+    );
+
+    const opsUsers = await operations('users');
+    const opsUsersText = await opsUsers.text();
+    expect(opsUsersText).not.toContain('resi-secret');
+    expect(opsUsersText).not.toContain('resi-user');
+
+    // Ops/admin plaintext catalogs carry no routing (and no credentials).
+    const opsCatalog = await operations('exit-catalog');
+    const opsCatalogBody = await opsCatalog.json() as any;
+    expect(opsCatalogBody).not.toHaveProperty('routing');
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
   it('validates, encrypts, versions, and serves the managed traffic policy', async () => {
     expect((await api('traffic-policy')).status).toBe(401);
     const empty = await admin('traffic-policy', undefined, 'GET');

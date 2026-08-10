@@ -188,8 +188,9 @@ pub struct TonoInner {
     pub nodes: Vec<ValidatedNode>,
     pub selected_node: Option<String>,
     /// Split-routing directives of the installed catalog, already sanitized
-    /// against `nodes` (`homeProxy` = Claude→home exit, `defaultProxy` =
-    /// admin fallback exit). `None` for unbound users.
+    /// against `nodes` (`homeProxy` = Claude→catalog home exit, `homeSocks5`
+    /// = Claude→chained residential upstream, `defaultProxy` = admin fallback
+    /// exit). `None` for unbound users.
     pub routing: Option<tono_core::CatalogRouting>,
     /// The selected node vanished from a newer catalog: auto-reconnect stays
     /// blocked until the user picks a surviving node (§3).

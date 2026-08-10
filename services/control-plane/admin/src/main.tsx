@@ -763,7 +763,11 @@ function UsersPage() {
                   {user.homeBinding ? (
                     <div>
                       <strong>{user.homeBinding.displayName}</strong>
-                      <small className="mono">{user.homeBinding.proxyName}{user.homeBinding.egressIpv4 ? ` · ${user.homeBinding.egressIpv4}` : ''}</small>
+                      <small className="mono">
+                        {user.homeBinding.kind === 'socks5'
+                          ? `socks5 · ${user.homeBinding.socks5Host}:${user.homeBinding.socks5Port}`
+                          : `${user.homeBinding.proxyName}${user.homeBinding.egressIpv4 ? ` · ${user.homeBinding.egressIpv4}` : ''}`}
+                      </small>
                       {user.homeBinding.defaultProxyName && (
                         <small className="muted">默认 VPS：{user.homeBinding.defaultProxyName}</small>
                       )}
@@ -781,7 +785,7 @@ function UsersPage() {
                       <option value="">{activeHomes.length ? '选择家庭出口…' : '先登记家庭出口'}</option>
                       {activeHomes.map((home) => (
                         <option key={home.id} value={home.id}>
-                          {home.displayName} ({home.proxyName}{home.egressIpv4 ? ` · ${home.egressIpv4}` : ''})
+                          {home.displayName} ({home.kind === 'socks5' ? `socks5 · ${home.socks5Host}:${home.socks5Port}` : `${home.proxyName}${home.egressIpv4 ? ` · ${home.egressIpv4}` : ''}`})
                         </option>
                       ))}
                     </select>
@@ -906,6 +910,11 @@ function HomesPage() {
   const [proxyName, setProxyName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [egressIpv4, setEgressIpv4] = useState('');
+  const [kind, setKind] = useState<'catalog' | 'socks5'>('catalog');
+  const [socks5Host, setSocks5Host] = useState('');
+  const [socks5Port, setSocks5Port] = useState('');
+  const [socks5Username, setSocks5Username] = useState('');
+  const [socks5Password, setSocks5Password] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -921,12 +930,24 @@ function HomesPage() {
         proxyName: proxyName.trim(),
         displayName: displayName.trim(),
         egressIpv4: egressIpv4.trim() || undefined,
+        kind,
+        ...(kind === 'socks5' ? {
+          socks5Host: socks5Host.trim(),
+          socks5Port: Number(socks5Port),
+          socks5Username,
+          socks5Password,
+        } : {}),
         notes: notes.trim() || undefined,
       });
       setMessage(`已登记 ${created.displayName}（${created.proxyName}）`);
       setProxyName('');
       setDisplayName('');
       setEgressIpv4('');
+      setKind('catalog');
+      setSocks5Host('');
+      setSocks5Port('');
+      setSocks5Username('');
+      setSocks5Password('');
       setNotes('');
       homes.reload();
     } catch (err) {
@@ -973,8 +994,9 @@ function HomesPage() {
         <div>
           <h2>登记家庭 / 住宅出口</h2>
           <p>
-            <code>proxyName</code> 必须与已发布 catalog 里该节点的 Clash <code>name</code> 完全一致。
-            登记为 active 后，该节点只会出现在绑定用户的 catalog 里。
+            <code>catalog</code> 类型的 <code>proxyName</code> 必须与已发布 catalog 里该节点的 Clash <code>name</code> 完全一致；
+            <code>socks5</code> 类型由云端直接下发家宽上游凭据，客户端经用户选中节点链式出网。
+            登记为 active 后，家庭出口只会出现在绑定用户的 catalog 里。
           </p>
         </div>
       </div>
@@ -988,6 +1010,33 @@ function HomesPage() {
             <span>Catalog proxy name</span>
             <input className="input" required value={proxyName} onChange={(e) => setProxyName(e.target.value)} placeholder="Home Residential A" disabled={busy} />
           </label>
+          <label>
+            <span>类型</span>
+            <select className="input" value={kind} onChange={(e) => setKind(e.target.value as 'catalog' | 'socks5')} disabled={busy}>
+              <option value="catalog">catalog（节点在 catalog 里）</option>
+              <option value="socks5">socks5（云端分配家宽，经选中节点链式出网）</option>
+            </select>
+          </label>
+          {kind === 'socks5' && (
+            <>
+              <label>
+                <span>SOCKS5 主机</span>
+                <input className="input" required value={socks5Host} onChange={(e) => setSocks5Host(e.target.value)} placeholder="203.0.113.50 或 gw.example.com" disabled={busy} />
+              </label>
+              <label>
+                <span>SOCKS5 端口</span>
+                <input className="input" required type="number" min={1} max={65535} value={socks5Port} onChange={(e) => setSocks5Port(e.target.value)} placeholder="11080" disabled={busy} />
+              </label>
+              <label>
+                <span>SOCKS5 用户名</span>
+                <input className="input" required value={socks5Username} onChange={(e) => setSocks5Username(e.target.value)} disabled={busy} />
+              </label>
+              <label>
+                <span>SOCKS5 密码</span>
+                <input className="input" required type="password" value={socks5Password} onChange={(e) => setSocks5Password(e.target.value)} disabled={busy} />
+              </label>
+            </>
+          )}
           <label>
             <span>家庭公网 IP（可选）</span>
             <input className="input" value={egressIpv4} onChange={(e) => setEgressIpv4(e.target.value)} placeholder="203.0.113.10" disabled={busy} />
@@ -1018,7 +1067,8 @@ function HomesPage() {
               <tr>
                 <th>名称</th>
                 <th>proxy name</th>
-                <th>家庭 IP</th>
+                <th>类型</th>
+                <th>家庭 IP / 上游</th>
                 <th>状态</th>
                 <th>更新</th>
                 <th>操作</th>
@@ -1028,7 +1078,8 @@ function HomesPage() {
               {rows.map((home) => <tr key={home.id}>
                 <td><strong>{home.displayName}</strong>{home.notes ? <small>{home.notes}</small> : null}</td>
                 <td className="mono">{home.proxyName}</td>
-                <td className="mono">{home.egressIpv4 || '—'}</td>
+                <td className="mono">{home.kind}</td>
+                <td className="mono">{home.kind === 'socks5' ? `${home.socks5Host}:${home.socks5Port}` : (home.egressIpv4 || '—')}</td>
                 <td><Status value={home.status} /></td>
                 <td className="muted">{timestamp(home.updatedAt)}</td>
                 <td>

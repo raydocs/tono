@@ -44,17 +44,36 @@ pub struct ExitCatalogResponse {
 
 /// Split-routing directives from `GET exit-catalog`: `homeProxy` names the
 /// user's bound home-broadband node (Claude traffic exits there),
-/// `defaultProxy` the admin-designated fallback exit.
+/// `defaultProxy` the admin-designated fallback exit. `homeSocks5` is the
+/// cloud-assigned residential exit variant: full upstream credentials served
+/// only inside the bound user's own catalog. When both `homeSocks5` and
+/// `homeProxy` are present, `homeSocks5` takes precedence (see
+/// [`sanitize_routing`]).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CatalogRouting {
     #[serde(rename = "homeProxy", default, skip_serializing_if = "Option::is_none")]
     pub home_proxy: Option<String>,
     #[serde(rename = "defaultProxy", default, skip_serializing_if = "Option::is_none")]
     pub default_proxy: Option<String>,
+    #[serde(rename = "homeSocks5", default, skip_serializing_if = "Option::is_none")]
+    pub home_socks5: Option<CatalogHomeSocks5>,
+}
+
+/// A cloud-assigned residential SOCKS5 upstream. The client dials it through
+/// the user's selected VPS node (mihomo `dialer-proxy`), so it never joins
+/// the TUN route exclusions or the WFP permit set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CatalogHomeSocks5 {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
 }
 
 /// Maximum accepted length (in chars) of a routing proxy name.
 pub const MAX_ROUTING_NAME_CHARS: usize = 200;
+/// Maximum accepted length (in bytes) of a socks5 host or credential field.
+pub const MAX_SOCKS5_FIELD_BYTES: usize = 255;
 
 /// Keep only the routing fields that name an admitted node. A field that is
 /// empty, over [`MAX_ROUTING_NAME_CHARS`] chars, or matches no node is
@@ -80,14 +99,54 @@ pub fn sanitize_routing(
         Some(name.clone())
     }
     let mut dropped = Vec::new();
-    let home_proxy = keep(&routing.home_proxy, nodes, &mut dropped);
+    let home_socks5 = keep_socks5(&routing.home_socks5, &mut dropped);
+    // `homeSocks5` takes precedence over `homeProxy`: the control plane never
+    // sends both, but a hand-edited cache must degrade to exactly one home
+    // exit rather than a group the runtime builder has to arbitrate.
+    let home_proxy = if home_socks5.is_some() {
+        None
+    } else {
+        keep(&routing.home_proxy, nodes, &mut dropped)
+    };
     let default_proxy = keep(&routing.default_proxy, nodes, &mut dropped);
-    let sanitized = (home_proxy.is_some() || default_proxy.is_some())
+    let sanitized = (home_proxy.is_some() || default_proxy.is_some() || home_socks5.is_some())
         .then_some(CatalogRouting {
             home_proxy,
             default_proxy,
+            home_socks5,
         });
     (sanitized, dropped)
+}
+
+/// The residential upstream is a public address dialed through the tunnel,
+/// so the check is deliberately a narrow host grammar (IPv4 literal or
+/// hostname characters) plus length bounds — not the public-IP admission a
+/// catalog node faces. Credentials are only checked for shape; their content
+/// is never logged (the dropped marker carries `host:port` only).
+fn keep_socks5(
+    socks5: &Option<CatalogHomeSocks5>,
+    dropped: &mut Vec<String>,
+) -> Option<CatalogHomeSocks5> {
+    let socks5 = socks5.as_ref()?;
+    let host_ok = !socks5.host.is_empty()
+        && socks5.host.len() <= 253
+        && !socks5.host.starts_with('.')
+        && !socks5.host.ends_with('.')
+        && !socks5.host.contains("..")
+        && socks5
+            .host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-');
+    let field_ok = |value: &str| !value.is_empty() && value.len() <= MAX_SOCKS5_FIELD_BYTES;
+    if !host_ok
+        || socks5.port == 0
+        || !field_ok(&socks5.username)
+        || !field_ok(&socks5.password)
+    {
+        dropped.push(format!("{}:{}", socks5.host, socks5.port));
+        return None;
+    }
+    Some(socks5.clone())
 }
 
 /// SHA-256 of the YAML's UTF-8 bytes, base64url **without padding** (§3).
@@ -616,6 +675,7 @@ mod tests {
             Some(CatalogRouting {
                 home_proxy: Some("Home 01".to_string()),
                 default_proxy: Some("US Reality 01".to_string()),
+                home_socks5: None,
             })
         );
         // Absent for unbound users; partial objects keep the other field None.
@@ -631,6 +691,7 @@ mod tests {
             Some(CatalogRouting {
                 home_proxy: Some("Home 01".to_string()),
                 default_proxy: None,
+                home_socks5: None,
             })
         );
         // The cached JSON keeps the directives verbatim.
@@ -646,6 +707,7 @@ mod tests {
         let routing = CatalogRouting {
             home_proxy: Some("US Reality 01".to_string()),
             default_proxy: Some("US Reality 01".to_string()),
+            home_socks5: None,
         };
         let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
         assert_eq!(sanitized, Some(routing));
@@ -658,6 +720,7 @@ mod tests {
         let routing = CatalogRouting {
             home_proxy: Some("No Such Node".to_string()),
             default_proxy: Some("US Reality 01".to_string()),
+            home_socks5: None,
         };
         let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
         assert_eq!(
@@ -665,6 +728,7 @@ mod tests {
             Some(CatalogRouting {
                 home_proxy: None,
                 default_proxy: Some("US Reality 01".to_string()),
+                home_socks5: None,
             })
         );
         assert_eq!(dropped, ["No Such Node".to_string()]);
@@ -673,6 +737,7 @@ mod tests {
             let routing = CatalogRouting {
                 home_proxy: Some(bad.clone()),
                 default_proxy: None,
+                home_socks5: None,
             };
             let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
             assert_eq!(sanitized, None, "{bad:?}");
@@ -683,6 +748,7 @@ mod tests {
         let routing = CatalogRouting {
             home_proxy: Some(" US Reality 01 ".to_string()),
             default_proxy: None,
+            home_socks5: None,
         };
         let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
         assert_eq!(sanitized, None);
@@ -695,9 +761,114 @@ mod tests {
         catalog.routing = Some(CatalogRouting {
             home_proxy: Some("No Such Node".to_string()),
             default_proxy: None,
+            home_socks5: None,
         });
         let nodes = validate_catalog(&catalog).unwrap();
         assert_eq!(nodes.len(), 1, "a bad directive never fails the catalog");
+    }
+
+    // ---- homeSocks5 routing directive ----
+
+    fn home_socks5() -> CatalogHomeSocks5 {
+        CatalogHomeSocks5 {
+            host: "resi-gateway.example.com".to_string(),
+            port: 11080,
+            username: "resi-user".to_string(),
+            password: "resi-secret".to_string(),
+        }
+    }
+
+    #[test]
+    fn home_socks5_roundtrips_in_the_routing_directive() {
+        let parsed: ExitCatalogResponse = serde_json::from_str(
+            r#"{"revision":3,"yaml":"proxies: []","sha256":"x","routing":{"homeSocks5":{"host":"resi-gateway.example.com","port":11080,"username":"resi-user","password":"resi-secret"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.routing,
+            Some(CatalogRouting {
+                home_proxy: None,
+                default_proxy: None,
+                home_socks5: Some(home_socks5()),
+            })
+        );
+        let body = serde_json::to_string(&parsed).unwrap();
+        assert!(body.contains("\"homeSocks5\":{\"host\":\"resi-gateway.example.com\""));
+    }
+
+    #[test]
+    fn sanitize_keeps_a_wellformed_home_socks5() {
+        let nodes = validate_catalog(&valid_catalog(0)).unwrap();
+        let routing = CatalogRouting {
+            home_proxy: None,
+            default_proxy: None,
+            home_socks5: Some(home_socks5()),
+        };
+        let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+        assert_eq!(sanitized, Some(routing));
+        assert!(dropped.is_empty());
+        // IPv4 literal hosts are equally fine.
+        let mut ipv4 = home_socks5();
+        ipv4.host = "203.0.113.60".to_string();
+        let routing = CatalogRouting {
+            home_proxy: None,
+            default_proxy: None,
+            home_socks5: Some(ipv4.clone()),
+        };
+        let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+        assert_eq!(sanitized.unwrap().home_socks5, Some(ipv4));
+        assert!(dropped.is_empty());
+    }
+
+    #[test]
+    fn sanitize_drops_a_malformed_home_socks5_and_reports_host_port_only() {
+        let nodes = validate_catalog(&valid_catalog(0)).unwrap();
+        for bad in [
+            CatalogHomeSocks5 { host: String::new(), ..home_socks5() },
+            CatalogHomeSocks5 { host: "not a host".to_string(), ..home_socks5() },
+            CatalogHomeSocks5 { host: ".leading.example.com".to_string(), ..home_socks5() },
+            CatalogHomeSocks5 { host: "a..example.com".to_string(), ..home_socks5() },
+            CatalogHomeSocks5 { host: "x".repeat(254), ..home_socks5() },
+            CatalogHomeSocks5 { port: 0, ..home_socks5() },
+            CatalogHomeSocks5 { username: String::new(), ..home_socks5() },
+            CatalogHomeSocks5 { password: String::new(), ..home_socks5() },
+        ] {
+            let routing = CatalogRouting {
+                home_proxy: None,
+                default_proxy: None,
+                home_socks5: Some(bad.clone()),
+            };
+            let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+            assert_eq!(sanitized, None, "{bad:?}");
+            // The drop marker is host:port — credentials never reach the log.
+            assert_eq!(dropped, [format!("{}:{}", bad.host, bad.port)]);
+            if !bad.username.is_empty() {
+                assert!(!dropped[0].contains(&bad.username));
+            }
+            if !bad.password.is_empty() {
+                assert!(!dropped[0].contains(&bad.password));
+            }
+        }
+    }
+
+    #[test]
+    fn sanitize_prefers_home_socks5_over_home_proxy() {
+        let nodes = validate_catalog(&valid_catalog(0)).unwrap();
+        let routing = CatalogRouting {
+            home_proxy: Some("US Reality 01".to_string()),
+            default_proxy: None,
+            home_socks5: Some(home_socks5()),
+        };
+        let (sanitized, dropped) = sanitize_routing(&routing, &nodes);
+        assert_eq!(
+            sanitized,
+            Some(CatalogRouting {
+                home_proxy: None,
+                default_proxy: None,
+                home_socks5: Some(home_socks5()),
+            })
+        );
+        assert!(dropped.is_empty());
     }
 
     // ---- CatalogTracker ----

@@ -32,12 +32,14 @@ pub const REQUIRED_NETWORK: &str = "tcp";
 /// crafted node instead of the owned outbound. `Tono-Claude-Home` is the
 /// Claude→home-exit group emitted when the catalog carries a verified
 /// `homeProxy` directive; a crafted node with that name would capture the
-/// Claude rules instead.
-const RESERVED_NODE_NAMES: [&str; 8] = [
+/// Claude rules instead. `Tono-Home-Residential` is the chained SOCKS5
+/// outbound emitted for a verified `homeSocks5` directive.
+const RESERVED_NODE_NAMES: [&str; 9] = [
     "Tono-Exit",
     crate::config::DIRECT_GROUP_NAME,
     crate::config::WEB_DIRECT_GROUP_NAME,
     crate::config::CLAUDE_HOME_GROUP_NAME,
+    crate::config::HOME_SOCKS5_OUTBOUND_NAME,
     "DIRECT",
     "GLOBAL",
     "REJECT",
@@ -886,6 +888,7 @@ ws-opts: { path: /ignored }
             crate::config::DIRECT_GROUP_NAME,
             crate::config::WEB_DIRECT_GROUP_NAME,
             crate::config::CLAUDE_HOME_GROUP_NAME,
+            crate::config::HOME_SOCKS5_OUTBOUND_NAME,
             "DIRECT",
             "GLOBAL",
             "REJECT",

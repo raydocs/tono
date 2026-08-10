@@ -50,12 +50,13 @@ fn sanitized_routing(
     let routing = routing?;
     let (sanitized, dropped) = tono_core::sanitize_routing(routing, nodes);
     for name in dropped {
-        // The dropped name is unbounded server input; log only a prefix.
+        // The dropped marker is unbounded server input (a proxy name or a
+        // socks5 host:port — never credentials); log only a prefix.
         let shown: String = name.chars().take(64).collect();
         logging!(
             warn,
             Type::Service,
-            "Tono: exit-catalog routing directive names no admitted node and is ignored: {shown}"
+            "Tono: exit-catalog routing directive failed sanitization and is ignored: {shown}"
         );
     }
     sanitized

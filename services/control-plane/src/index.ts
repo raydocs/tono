@@ -547,12 +547,67 @@ async function defaultProxyNameField(e: Env, value: unknown): Promise<string | n
   return name;
 }
 
+// A socks5 upstream host is a public IPv4 literal or a plain hostname (the
+// residential gateway is always a public address; it is dialed through the
+// tunnel, never directly). Keep the grammar intentionally narrow.
+function socks5HostField(value: unknown): string {
+  const host = str(value, 'socks5Host', 1, 253).trim();
+  const ipv4 = host.split('.');
+  const isIpv4 =
+    ipv4.length === 4 &&
+    ipv4.every((part) => {
+      if (!/^\d{1,3}$/.test(part)) return false;
+      const n = Number(part);
+      return n <= 255 && (part.length === 1 || !part.startsWith('0'));
+    });
+  const isHostname =
+    /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/.test(host) &&
+    // A dotted all-numeric string that is not a valid IPv4 literal is not a
+    // hostname either — it is a mistyped address.
+    !/^[0-9.]+$/.test(host);
+  if (!isIpv4 && !isHostname) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid socks5Host');
+  }
+  return host;
+}
+
+function socks5PortField(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 65535) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid socks5Port');
+  }
+  return value as number;
+}
+
+// kind='socks5' requires all four upstream fields; kind='catalog' forbids them.
+function validateHomeSocks5(
+  kind: string,
+  host: string | null,
+  port: number | null,
+  username: string | null,
+  password: string | null,
+) {
+  if (kind === 'socks5') {
+    if (host === null || port === null || username === null || password === null) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'socks5Host, socks5Port, socks5Username and socks5Password are required when kind is socks5');
+    }
+    return;
+  }
+  if (host !== null || port !== null || username !== null || password !== null) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'socks5 fields require kind to be socks5');
+  }
+}
+
 function publicHomeExit(row: Row) {
   return {
     id: String(row.id),
     proxyName: String(row.proxy_name),
     displayName: String(row.display_name),
     egressIpv4: row.egress_ipv4 == null ? undefined : String(row.egress_ipv4),
+    kind: String(row.kind ?? 'catalog'),
+    // Credentials (socks5Username/socks5Password) are never echoed back by any
+    // GET endpoint; they only ride the bound user's own catalog routing.
+    socks5Host: row.socks5_host == null ? undefined : String(row.socks5_host),
+    socks5Port: row.socks5_port == null ? undefined : Number(row.socks5_port),
     status: String(row.status),
     notes: row.notes == null || row.notes === '' ? undefined : String(row.notes),
     createdAt: Number(row.created_at),
@@ -568,6 +623,9 @@ function publicHomeBinding(row: Row) {
     proxyName: String(row.proxy_name),
     displayName: String(row.display_name),
     egressIpv4: row.egress_ipv4 == null ? undefined : String(row.egress_ipv4),
+    kind: row.kind == null ? undefined : String(row.kind),
+    socks5Host: row.socks5_host == null ? undefined : String(row.socks5_host),
+    socks5Port: row.socks5_port == null ? undefined : Number(row.socks5_port),
     defaultProxyName: row.default_proxy_name == null || row.default_proxy_name === ''
       ? undefined
       : String(row.default_proxy_name),
@@ -609,28 +667,54 @@ async function publicManagedCatalog(
   }
 
   let served = yaml;
-  let routing: { homeProxy: string; defaultProxy?: string } | undefined;
+  let routing:
+    | {
+        homeProxy?: string;
+        defaultProxy?: string;
+        // Full upstream credentials appear only here — inside the bound user's
+        // own catalog. The ops/admin plaintext catalogs never carry them.
+        homeSocks5?: { host: string; port: number; username: string; password: string };
+      }
+    | undefined;
   if (options?.filterHomeExits && options.userId) {
+    // Only catalog-kind home exits name a node in the encrypted catalog;
+    // a socks5-kind exit lives outside the catalog and filters nothing.
     const homes = await e.DB.prepare(
-      "SELECT proxy_name FROM home_exits WHERE status = 'active'",
+      "SELECT proxy_name FROM home_exits WHERE status = 'active' AND kind = 'catalog'",
     ).all<Row>();
     const restricted = new Set(homes.results.map((item) => String(item.proxy_name)));
-    if (restricted.size > 0) {
-      const binding = await e.DB.prepare(
-        `SELECT home_exits.proxy_name, user_home_bindings.default_proxy_name
-         FROM user_home_bindings
-         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-         WHERE user_home_bindings.user_id = ?
-           AND home_exits.status = 'active'`,
-      ).bind(options.userId).first<Row>();
-      const allowed = new Set<string>();
-      if (binding) {
-        allowed.add(String(binding.proxy_name));
-        routing = { homeProxy: String(binding.proxy_name) };
-        if (binding.default_proxy_name != null && binding.default_proxy_name !== '') {
-          routing.defaultProxy = String(binding.default_proxy_name);
-        }
+    const binding = await e.DB.prepare(
+      `SELECT home_exits.proxy_name, home_exits.kind,
+              home_exits.socks5_host, home_exits.socks5_port,
+              home_exits.socks5_username, home_exits.socks5_password,
+              user_home_bindings.default_proxy_name
+       FROM user_home_bindings
+       JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+       WHERE user_home_bindings.user_id = ?
+         AND home_exits.status = 'active'`,
+    ).bind(options.userId).first<Row>();
+    const allowed = new Set<string>();
+    if (binding) {
+      allowed.add(String(binding.proxy_name));
+      const directives: NonNullable<typeof routing> = {};
+      if (String(binding.kind ?? 'catalog') === 'socks5') {
+        // Cloud-assigned residential exit: the client chains the user's
+        // selected VPS node into this SOCKS5 upstream (dialer-proxy).
+        directives.homeSocks5 = {
+          host: String(binding.socks5_host),
+          port: Number(binding.socks5_port),
+          username: String(binding.socks5_username),
+          password: String(binding.socks5_password),
+        };
+      } else {
+        directives.homeProxy = String(binding.proxy_name);
       }
+      if (binding.default_proxy_name != null && binding.default_proxy_name !== '') {
+        directives.defaultProxy = String(binding.default_proxy_name);
+      }
+      routing = directives;
+    }
+    if (restricted.size > 0) {
       served = filterCatalogYamlForUser(yaml, restricted, allowed);
     }
   }
@@ -1115,6 +1199,9 @@ async function operationsUsers(e: Env) {
        home_exits.proxy_name AS home_proxy_name,
        home_exits.display_name AS home_display_name,
        home_exits.egress_ipv4 AS home_egress_ipv4,
+       home_exits.kind AS home_kind,
+       home_exits.socks5_host AS home_socks5_host,
+       home_exits.socks5_port AS home_socks5_port,
        home_exits.status AS home_status,
        user_home_bindings.default_proxy_name AS home_default_proxy_name
      FROM users
@@ -1131,6 +1218,9 @@ async function operationsUsers(e: Env) {
         proxyName: String(row.home_proxy_name),
         displayName: String(row.home_display_name),
         egressIpv4: row.home_egress_ipv4 == null ? undefined : String(row.home_egress_ipv4),
+        kind: row.home_kind == null ? undefined : String(row.home_kind),
+        socks5Host: row.home_socks5_host == null ? undefined : String(row.home_socks5_host),
+        socks5Port: row.home_socks5_port == null ? undefined : Number(row.home_socks5_port),
         defaultProxyName: row.home_default_proxy_name == null || row.home_default_proxy_name === ''
           ? undefined
           : String(row.home_default_proxy_name),
@@ -3544,6 +3634,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
              user_home_bindings.default_proxy_name,
              home_exits.proxy_name,
              home_exits.display_name,
+             home_exits.kind,
+             home_exits.socks5_host,
+             home_exits.socks5_port,
              home_exits.egress_ipv4,
              home_exits.status AS home_status,
              user_home_bindings.created_at,
@@ -3577,6 +3670,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
              user_home_bindings.default_proxy_name,
              home_exits.proxy_name,
              home_exits.display_name,
+             home_exits.kind,
+             home_exits.socks5_host,
+             home_exits.socks5_port,
              home_exits.egress_ipv4,
              home_exits.status AS home_status,
              user_home_bindings.created_at,
@@ -3649,6 +3745,23 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const proxyName = proxyNameField(b.proxyName);
       const displayName = str(b.displayName, 'displayName', 1, 200).trim();
       const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
+      const kind = b.kind === undefined ? 'catalog' : str(b.kind, 'kind', 1, 20);
+      if (!['catalog', 'socks5'].includes(kind)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
+      }
+      const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
+        ? null
+        : socks5HostField(b.socks5Host);
+      const socks5Port = b.socks5Port === undefined || b.socks5Port === null
+        ? null
+        : socks5PortField(b.socks5Port);
+      const socks5Username = b.socks5Username === undefined || b.socks5Username === null || b.socks5Username === ''
+        ? null
+        : str(b.socks5Username, 'socks5Username', 1, 255);
+      const socks5Password = b.socks5Password === undefined || b.socks5Password === null || b.socks5Password === ''
+        ? null
+        : str(b.socks5Password, 'socks5Password', 1, 255);
+      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
       const notes = b.notes === undefined || b.notes === null || b.notes === ''
         ? null
         : str(b.notes, 'notes', 1, 1000);
@@ -3661,9 +3774,15 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       try {
         await e.DB.prepare(
           `INSERT INTO home_exits(
-             id, proxy_name, display_name, egress_ipv4, status, notes, created_at, updated_at
-           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(homeId, proxyName, displayName, egressIpv4, status, notes, t, t).run();
+             id, proxy_name, display_name, egress_ipv4, kind,
+             socks5_host, socks5_port, socks5_username, socks5_password,
+             status, notes, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          homeId, proxyName, displayName, egressIpv4, kind,
+          socks5Host, socks5Port, socks5Username, socks5Password,
+          status, notes, t, t,
+        ).run();
       } catch {
         throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
       }
@@ -3690,13 +3809,39 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!['active', 'disabled', 'retired'].includes(status)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
       }
+      const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
+      if (!['catalog', 'socks5'].includes(kind)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
+      }
+      // Omitted socks5 fields keep their stored values; switching back to
+      // catalog wipes them.
+      const keep = kind === 'socks5';
+      const socks5Host = b.socks5Host === undefined
+        ? (keep && existing.socks5_host != null ? String(existing.socks5_host) : null)
+        : (b.socks5Host === null || b.socks5Host === '' ? null : socks5HostField(b.socks5Host));
+      const socks5Port = b.socks5Port === undefined
+        ? (keep && existing.socks5_port != null ? Number(existing.socks5_port) : null)
+        : (b.socks5Port === null ? null : socks5PortField(b.socks5Port));
+      const socks5Username = b.socks5Username === undefined
+        ? (keep && existing.socks5_username != null ? String(existing.socks5_username) : null)
+        : (b.socks5Username === null || b.socks5Username === '' ? null : str(b.socks5Username, 'socks5Username', 1, 255));
+      const socks5Password = b.socks5Password === undefined
+        ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
+        : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
+      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
       const t = now();
       try {
         const updated = await e.DB.prepare(
           `UPDATE home_exits
-           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, status = ?, notes = ?, updated_at = ?
+           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
+               socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
+               status = ?, notes = ?, updated_at = ?
            WHERE id = ?`,
-        ).bind(proxyName, displayName, egressIpv4, status, notes, t, mt[1]).run();
+        ).bind(
+          proxyName, displayName, egressIpv4, kind,
+          socks5Host, socks5Port, socks5Username, socks5Password,
+          status, notes, t, mt[1],
+        ).run();
         if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
       } catch (error) {
         if (error instanceof ApiError) throw error;
@@ -3763,6 +3908,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            user_home_bindings.default_proxy_name,
            home_exits.proxy_name,
            home_exits.display_name,
+           home_exits.kind,
+           home_exits.socks5_host,
+           home_exits.socks5_port,
            home_exits.egress_ipv4,
            home_exits.status AS home_status,
            user_home_bindings.created_at,
@@ -3934,6 +4082,23 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const proxyName = proxyNameField(b.proxyName);
       const displayName = str(b.displayName, 'displayName', 1, 200).trim();
       const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
+      const kind = b.kind === undefined ? 'catalog' : str(b.kind, 'kind', 1, 20);
+      if (!['catalog', 'socks5'].includes(kind)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
+      }
+      const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
+        ? null
+        : socks5HostField(b.socks5Host);
+      const socks5Port = b.socks5Port === undefined || b.socks5Port === null
+        ? null
+        : socks5PortField(b.socks5Port);
+      const socks5Username = b.socks5Username === undefined || b.socks5Username === null || b.socks5Username === ''
+        ? null
+        : str(b.socks5Username, 'socks5Username', 1, 255);
+      const socks5Password = b.socks5Password === undefined || b.socks5Password === null || b.socks5Password === ''
+        ? null
+        : str(b.socks5Password, 'socks5Password', 1, 255);
+      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
       const notes = b.notes === undefined || b.notes === null || b.notes === ''
         ? null
         : str(b.notes, 'notes', 1, 1000);
@@ -3946,9 +4111,15 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       try {
         await e.DB.prepare(
           `INSERT INTO home_exits(
-             id, proxy_name, display_name, egress_ipv4, status, notes, created_at, updated_at
-           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(homeId, proxyName, displayName, egressIpv4, status, notes, t, t).run();
+             id, proxy_name, display_name, egress_ipv4, kind,
+             socks5_host, socks5_port, socks5_username, socks5_password,
+             status, notes, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          homeId, proxyName, displayName, egressIpv4, kind,
+          socks5Host, socks5Port, socks5Username, socks5Password,
+          status, notes, t, t,
+        ).run();
       } catch {
         throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
       }
@@ -3975,13 +4146,39 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!['active', 'disabled', 'retired'].includes(status)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
       }
+      const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
+      if (!['catalog', 'socks5'].includes(kind)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
+      }
+      // Omitted socks5 fields keep their stored values; switching back to
+      // catalog wipes them.
+      const keep = kind === 'socks5';
+      const socks5Host = b.socks5Host === undefined
+        ? (keep && existing.socks5_host != null ? String(existing.socks5_host) : null)
+        : (b.socks5Host === null || b.socks5Host === '' ? null : socks5HostField(b.socks5Host));
+      const socks5Port = b.socks5Port === undefined
+        ? (keep && existing.socks5_port != null ? Number(existing.socks5_port) : null)
+        : (b.socks5Port === null ? null : socks5PortField(b.socks5Port));
+      const socks5Username = b.socks5Username === undefined
+        ? (keep && existing.socks5_username != null ? String(existing.socks5_username) : null)
+        : (b.socks5Username === null || b.socks5Username === '' ? null : str(b.socks5Username, 'socks5Username', 1, 255));
+      const socks5Password = b.socks5Password === undefined
+        ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
+        : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
+      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
       const t = now();
       try {
         const updated = await e.DB.prepare(
           `UPDATE home_exits
-           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, status = ?, notes = ?, updated_at = ?
+           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
+               socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
+               status = ?, notes = ?, updated_at = ?
            WHERE id = ?`,
-        ).bind(proxyName, displayName, egressIpv4, status, notes, t, mt[1]).run();
+        ).bind(
+          proxyName, displayName, egressIpv4, kind,
+          socks5Host, socks5Port, socks5Username, socks5Password,
+          status, notes, t, mt[1],
+        ).run();
         if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
       } catch (error) {
         if (error instanceof ApiError) throw error;
@@ -4012,6 +4209,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            user_home_bindings.default_proxy_name,
            home_exits.proxy_name,
            home_exits.display_name,
+           home_exits.kind,
+           home_exits.socks5_host,
+           home_exits.socks5_port,
            home_exits.egress_ipv4,
            home_exits.status AS home_status,
            user_home_bindings.created_at,
@@ -4035,6 +4235,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            user_home_bindings.default_proxy_name,
            home_exits.proxy_name,
            home_exits.display_name,
+           home_exits.kind,
+           home_exits.socks5_host,
+           home_exits.socks5_port,
            home_exits.egress_ipv4,
            home_exits.status AS home_status,
            user_home_bindings.created_at,
@@ -4092,6 +4295,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            user_home_bindings.default_proxy_name,
            home_exits.proxy_name,
            home_exits.display_name,
+           home_exits.kind,
+           home_exits.socks5_host,
+           home_exits.socks5_port,
            home_exits.egress_ipv4,
            home_exits.status AS home_status,
            user_home_bindings.created_at,
