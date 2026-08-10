@@ -1690,6 +1690,13 @@ async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &AppHandle) 
     let _release_guard = state.begin_privileged_release().await;
 
     #[cfg(windows)]
+    // An unprotected quit may have stopped the Service after the last release. Revive the
+    // registered Service before asking its owner-gated endpoint to remove protection.
+    service::tono_service_ready_or_repair()
+        .await
+        .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
+
+    #[cfg(windows)]
     let status = service::tono_release_kill_switch()
         .await
         .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
@@ -3862,7 +3869,12 @@ async fn activate_direct_runtime_cancellation_safe(
             }
             prove_service_endpoint_digest(&locked_kill_switch, &empty_digest)
                 .map_err(StageFailure::error)?;
-            verify_tun_data_plane().await.map_err(StageFailure::error)?;
+            // Do not run the ordinary App HTTPS probe in this bracket. WFP is already locked,
+            // while the next connect stage has not yet moved Windows DNS to the protected TUN
+            // resolver; a fresh reqwest client would therefore depend on the physical DNS path
+            // that the fail-closed policy intentionally blocks. The authoritative TUN proof
+            // runs in verify_post_lock after protected DNS and again before finalizing DIRECT
+            // endpoints. Until those checks pass, exact physical permits remain absent.
             ensure_fresh(&task_state, generation).await?;
 
             Ok(PendingDirectCommit {
