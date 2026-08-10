@@ -546,6 +546,16 @@ FunctionEnd
     ${EndIf}
     Abort "A ${PRODUCTNAME} Service repair is still in progress. Wait for it to finish (or reboot Windows), then run this installer again."
   ${ElseIf} $0 != "0"
+    ; A generic helper failure during an upgrade is most often a transient lock held by the
+    ; running Service/core (file-in-use, SCM stop race, IPC readiness window) — customers hit
+    ; "second click works", so the installer now does that second click itself. The helper is
+    ; transactional (stages before replacing, rolls back on failure), so retrying it is safe.
+    ${If} $ServiceInstallRetries < 3
+      IntOp $ServiceInstallRetries $ServiceInstallRetries + 1
+      DetailPrint "Service installation returned exit $0; retrying ($ServiceInstallRetries/3)..."
+      Sleep 5000
+      Goto serviceInstallAttempt
+    ${EndIf}
     Abort "Tono Service installation failed (exit $0). Installation was stopped."
   ${EndIf}
   ; Only reachable when the helper reported success (every other path Aborts): the Service is
