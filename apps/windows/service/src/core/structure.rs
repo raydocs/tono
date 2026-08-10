@@ -549,6 +549,9 @@ pub enum ServiceErrorCode {
     InvalidProxyConfig = 1009,
     ProxyClearFailed = 1010,
     ProxyApplyFailed = 1011,
+    /// `POST /lifecycle/owner-goodbye` refused: the kill switch is armed, or the durable desired
+    /// state wants (or cannot prove it does not want) the core running. Mapped to 409 Conflict.
+    StillProtected = 1012,
 }
 
 pub fn owner_key(identity: &OwnerIdentity) -> String {

@@ -388,7 +388,15 @@ fn run_service() -> platform_lib::Result<()> {
         }
 
         let result = run_ipc_supervisor_until_shutdown(async {
-            let _ = shutdown_rx.recv().await;
+            tokio::select! {
+                // SCM Stop/Preshutdown, delivered through `begin_stop`.
+                _ = shutdown_rx.recv() => {}
+                // An authenticated owner asked the service to stop itself
+                // (`POST /lifecycle/owner-goodbye`, the App's unprotected-quit path).
+                () = clash_verge_service_ipc::owner_goodbye_requested() => {
+                    info!("Authenticated owner goodbye received; the service is stopping itself");
+                }
+            }
         })
         .await;
         if let Err(error) = result {
@@ -664,8 +672,11 @@ async fn run_standalone() -> Result<()> {
     Ok(())
 }
 
-/// Waits for a shutdown signal appropriate for the current platform.
+/// Waits for a shutdown signal appropriate for the current platform, or for an authenticated
+/// owner-goodbye from the IPC route (`POST /lifecycle/owner-goodbye`).
 async fn shutdown_signal() {
+    let goodbye = clash_verge_service_ipc::owner_goodbye_requested();
+    tokio::pin!(goodbye);
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
@@ -676,14 +687,18 @@ async fn shutdown_signal() {
         tokio::select! {
             _ = sigint.recv() => info!("Received SIGINT (Ctrl+C)"),
             _ = sigterm.recv() => info!("Received SIGTERM"),
+            () = &mut goodbye => info!("Authenticated owner goodbye received; stopping the service"),
         }
     }
 
     #[cfg(windows)]
     {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-        info!("Received Ctrl+C");
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.expect("Failed to install Ctrl+C handler");
+                info!("Received Ctrl+C");
+            }
+            () = &mut goodbye => info!("Authenticated owner goodbye received; stopping the service"),
+        }
     }
 }

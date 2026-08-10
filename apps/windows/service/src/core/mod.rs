@@ -121,7 +121,9 @@ pub use repair::{REPAIR_IN_PROGRESS_EXIT_CODE, ServiceRepairGate, acquire_servic
 #[cfg(all(feature = "standalone", feature = "test"))]
 pub use runtime::write_core_runtime_record_for_tests;
 #[cfg(feature = "standalone")]
-pub use server::{run_ipc_server, run_ipc_supervisor_until_shutdown, stop_ipc_server};
+pub use server::{
+    owner_goodbye_requested, run_ipc_server, run_ipc_supervisor_until_shutdown, stop_ipc_server,
+};
 #[cfg(feature = "standalone")]
 pub use state::{service_lifecycle_state, set_service_lifecycle_state};
 #[cfg(feature = "test")]

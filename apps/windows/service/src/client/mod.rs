@@ -716,6 +716,26 @@ pub async fn stop_clash_with_options(
     .await
 }
 
+/// Ask the Service to stop itself (`POST /lifecycle/owner-goodbye`).
+///
+/// Used by the App's unprotected-quit path: a plain user cannot STOP a SYSTEM service through
+/// the SCM, but the Service can stop itself. The route refuses (409, `StillProtected`) whenever
+/// the kill switch is armed or the durable desired state wants — or cannot prove it does not
+/// want — the core running, so this call is only ever accepted when the daemon is idle. The
+/// Service tears itself down after a short grace; treat transport errors after an accepted
+/// response as success-in-progress, not failure.
+pub async fn owner_goodbye(credentials: &OwnerCredentials) -> Result<Response<()>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::OwnerGoodbye,
+        credentials,
+        None,
+        (),
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
 /// Ask the service to make the running core's generation match `body`, without restarting it.
 ///
 /// Returns what the service decided, not whether it worked: a service that declines reports

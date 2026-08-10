@@ -1526,10 +1526,12 @@ pub async fn quit_protection_active(app: &AppHandle) -> bool {
     fsm_reports_protection(&inner)
 }
 
-/// Whether stopping the SCM service on an unprotected quit is permitted. The durable desired
-/// state must be proven "core should not be running": stopping the Windows service does not
-/// rewrite the desired-state file, so stopping it while `core_should_be_running` is true (or
-/// unreadable) would let the next service start resurrect a core the user already stopped.
+/// Whether asking the Service to stop itself on an unprotected quit is permitted. The durable
+/// desired state must be proven "core should not be running": stopping the Windows service does
+/// not rewrite the desired-state file, so stopping it while `core_should_be_running` is true (or
+/// unreadable) would let the next service start resurrect a core the user already stopped. The
+/// Service enforces the same check server-side (`owner_goodbye_verdict`); this client-side
+/// pre-check is the fast path that keeps the quit log truthful.
 #[cfg(any(windows, test))]
 fn service_stop_permitted_on_quit(
     desired_state_unknown: bool,
@@ -1538,10 +1540,13 @@ fn service_stop_permitted_on_quit(
     !desired_state_unknown && !desired_core_should_be_running
 }
 
-/// Unprotected interactive quit on Windows: stop the TonoService SCM service so no daemon
-/// lingers after the App exits. Connected/protected quits never reach here — protection
-/// semantics win. Best-effort: the exit is already committed, so every failure is logged,
-/// never propagated.
+/// Unprotected interactive quit on Windows: ask TonoService to stop ITSELF over IPC
+/// (`POST /lifecycle/owner-goodbye`), so no daemon lingers after the App exits. The direct SCM
+/// stop this replaced cannot work — the App runs as a plain user and `OpenService(STOP)` on a
+/// SYSTEM-owned service is `os error 5` — while the Service can always stop itself. The route
+/// refuses (409) whenever the kill switch is armed or the desired state wants the core, so
+/// connected/protected state is safe even if the local pre-check raced. Best-effort: the exit
+/// is already committed, so every refusal or transport failure is logged, never propagated.
 pub async fn stop_service_on_unprotected_quit() {
     #[cfg(windows)]
     {
@@ -1563,32 +1568,27 @@ pub async fn stop_service_on_unprotected_quit() {
                 return;
             }
             Err(error) => {
-                // IPC unanswered: the Service is either already stopped (an SCM stop would be a
+                // IPC unanswered: the Service is either already stopped (goodbye would be a
                 // no-op anyway) or wedged with an unprovable desired state. Skip rather than
                 // strand a stale `core_should_be_running = true`.
                 logging!(
                     info,
                     Type::Service,
-                    "Tono: 服务未应答 IPC，退出时跳过 SCM 停止（服务已停止或状态不可证明）: {error:#}"
+                    "Tono: 服务未应答 IPC，退出时跳过服务自停（服务已停止或状态不可证明）: {error:#}"
                 );
                 return;
             }
         }
-        match tokio::task::spawn_blocking(service::stop_registered_tono_service).await {
-            Ok(Ok(())) => logging!(
+        match service::tono_request_service_owner_goodbye().await {
+            Ok(()) => logging!(
                 info,
                 Type::Service,
-                "Tono: 未连接状态退出，已停止 TonoService（下次连接会按需修复并拉起）"
-            ),
-            Ok(Err(error)) => logging!(
-                warn,
-                Type::Service,
-                "Tono: 退出时停止 TonoService 失败（退出继续进行）: {error:#}"
+                "Tono: 未连接状态退出，已通过 IPC 请求 TonoService 自停（下次连接会按需修复并拉起）"
             ),
             Err(error) => logging!(
                 warn,
                 Type::Service,
-                "Tono: 退出时停止 TonoService 的任务失败（退出继续进行）: {error:#}"
+                "Tono: 退出时请求服务自停失败（退出继续进行）: {error:#}"
             ),
         }
     }

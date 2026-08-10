@@ -278,61 +278,23 @@ pub(crate) fn trusted_service_evidence() -> Result<bool> {
     }
 }
 
-/// Stop the registered TonoService — used when the App quits with no protection active, so no
-/// daemon lingers after exit. Registration-absent and already-stopped are both success. The
-/// wait is bounded; the caller treats any error as best-effort noise because the exit is
-/// already committed. Blocking SCM calls: invoke via `tokio::task::spawn_blocking`.
+/// Ask the Service to stop itself via IPC (`POST /lifecycle/owner-goodbye`) — the App's
+/// unprotected-quit path. A plain user cannot STOP a SYSTEM-owned service through the SCM (the
+/// direct `OpenService(STOP)` attempt fails with `os error 5`), so the App asks the Service to
+/// stop itself instead. The route is only accepted when the machine no longer needs the daemon:
+/// kill switch unarmed and the durable desired state proven "core should not be running" — the
+/// Service re-checks both server-side and refuses with 409 (`StillProtected`) otherwise, so the
+/// client-side snapshot pre-check is a fast path, not the enforcement.
 #[cfg(windows)]
-pub(crate) fn stop_registered_tono_service() -> Result<()> {
-    use windows_service::{
-        Error as WindowsServiceError,
-        service::{ServiceAccess, ServiceState},
-        service_manager::{ServiceManager as WindowsServiceManager, ServiceManagerAccess},
-    };
-
-    const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
-    const ERROR_SERVICE_CANNOT_ACCEPT_CTRL: i32 = 1061;
-    const ERROR_SERVICE_NOT_ACTIVE: i32 = 1062;
-    const STOP_POLL_ATTEMPTS: usize = 50;
-    const STOP_POLL_INTERVAL: Duration = Duration::from_millis(100);
-
-    let manager = WindowsServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-    let service = match manager.open_service(
-        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
-        ServiceAccess::QUERY_STATUS | ServiceAccess::STOP,
-    ) {
-        Ok(service) => service,
-        Err(WindowsServiceError::Winapi(error)) if error.raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST) => {
-            return Ok(());
-        }
-        Err(error) => return Err(error).context("failed to open TonoService for stopping"),
-    };
-
-    for _ in 0..STOP_POLL_ATTEMPTS {
-        match service.query_status()?.current_state {
-            ServiceState::Stopped => return Ok(()),
-            ServiceState::StopPending => {}
-            _ => {
-                if let Err(error) = service.stop() {
-                    // Races with an in-flight or already-completed stop are not failures;
-                    // the next poll observes the outcome.
-                    let tolerable = matches!(
-                        &error,
-                        WindowsServiceError::Winapi(error)
-                            if matches!(
-                                error.raw_os_error(),
-                                Some(ERROR_SERVICE_CANNOT_ACCEPT_CTRL | ERROR_SERVICE_NOT_ACTIVE)
-                            )
-                    );
-                    if !tolerable {
-                        return Err(error).context("failed to send the STOP control to TonoService");
-                    }
-                }
-            }
-        }
-        std::thread::sleep(STOP_POLL_INTERVAL);
+pub(crate) async fn tono_request_service_owner_goodbye() -> Result<()> {
+    let credentials = current_owner_credentials().context("无法读取 owner 凭证")?;
+    let response = clash_verge_service_ipc::owner_goodbye(&credentials)
+        .await
+        .context("无法连接到Tono Service")?;
+    if response.code > 0 {
+        bail!("Tono Service 拒绝了自停请求: {}", response.message);
     }
-    bail!("timed out waiting for TonoService to stop")
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]

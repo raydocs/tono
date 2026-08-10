@@ -4,8 +4,8 @@ use crate::core::auth::{
 };
 use crate::core::desired::{
     ActiveOwnerState, clear_active_owner, commit_active_owner_session, load_active_owner,
-    persist_owner_core_started, persist_owner_core_stopped, persist_owner_core_stopped_by_key,
-    persist_owner_writer_config,
+    load_owner_desired_state, persist_owner_core_started, persist_owner_core_stopped,
+    persist_owner_core_stopped_by_key, persist_owner_writer_config,
 };
 use crate::core::legacy_cleanup::cleanup_legacy_owner_files;
 use crate::core::logger::set_or_update_writer;
@@ -41,7 +41,7 @@ use std::{
 };
 #[cfg(feature = "test")]
 use tokio::sync::Notify;
-use tokio::sync::{Mutex, MutexGuard, oneshot};
+use tokio::sync::{Mutex, MutexGuard, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{info, trace, warn};
 
@@ -334,6 +334,67 @@ static IPC_SHUTDOWN_SENDER: Lazy<Mutex<Option<oneshot::Sender<()>>>> =
     Lazy::new(|| Mutex::new(None));
 static IPC_SHUTDOWN_DONE: Lazy<Mutex<Option<oneshot::Receiver<()>>>> =
     Lazy::new(|| Mutex::new(None));
+
+/// How long the owner-goodbye route waits before triggering teardown, so its 200 response
+/// reaches the App before the listener it arrived on is shut down.
+const OWNER_GOODBYE_RESPONSE_GRACE: Duration = Duration::from_millis(250);
+
+/// The service-process end of the owner-goodbye handshake. The library owns the channel so the
+/// service binary and the route share it without a registration step; the receiver is taken
+/// exactly once, by the binary's shutdown future.
+static OWNER_GOODBYE_CHANNEL: Lazy<(mpsc::Sender<()>, Mutex<Option<mpsc::Receiver<()>>>)> =
+    Lazy::new(|| {
+        let (sender, receiver) = mpsc::channel(1);
+        (sender, Mutex::new(Some(receiver)))
+    });
+
+/// Wait for an authenticated owner-goodbye (`POST /lifecycle/owner-goodbye`). Pends forever when
+/// the route never fires — the binary `select!`s this against its own shutdown signal — or when
+/// the receiver was already taken (a second consumer would be a bug, and must not resolve).
+pub async fn owner_goodbye_requested() {
+    match OWNER_GOODBYE_CHANNEL.1.lock().await.take() {
+        Some(mut receiver) => {
+            receiver.recv().await;
+        }
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// Fire the owner-goodbye after the response grace (see the constant for why the delay exists).
+/// A full channel means a goodbye is already in flight; either way one trigger is enough.
+fn schedule_owner_goodbye_shutdown() {
+    let sender = OWNER_GOODBYE_CHANNEL.0.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(OWNER_GOODBYE_RESPONSE_GRACE).await;
+        let _ = sender.try_send(());
+    });
+}
+
+/// The owner-goodbye decision, pure so the whole outcome space is testable.
+///
+/// `desired_running` is `None` when the durable desired state could not be read: an unreadable
+/// record must refuse exactly like a running one, or a transient read failure would stop the
+/// daemon out from under a core the owner still wants. Every refusal is
+/// `ServiceErrorCode::StillProtected` (409 Conflict): the machine still needs the daemon.
+fn owner_goodbye_verdict(
+    kill_switch_wanted: bool,
+    desired_running: Option<bool>,
+) -> std::result::Result<(), ServiceError> {
+    if kill_switch_wanted {
+        return Err(ServiceError::still_protected(
+            "kill switch is armed; the service must stay alive to police the barrier",
+        ));
+    }
+    match desired_running {
+        Some(false) => Ok(()),
+        Some(true) => Err(ServiceError::still_protected(
+            "the durable desired state still wants the core running",
+        )),
+        None => Err(ServiceError::still_protected(
+            "the durable desired state could not be read",
+        )),
+    }
+}
 
 /// Tell the listener to stop, then forget it.
 ///
@@ -1473,6 +1534,48 @@ fn create_ipc_router() -> Result<Router> {
                 Ok(outcome) => ok_json(outcome),
                 Err(error) => service_error(ServiceError::proxy_apply_failed(error.to_string())),
             }
+        })
+        .post(IpcCommand::OwnerGoodbye.as_ref(), |ctx| async move {
+            trace!("Received OwnerGoodbye command");
+            let (_request, owner) =
+                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+                    ControlFlow::Continue(authenticated) => authenticated,
+                    ControlFlow::Break(response) => return response,
+                };
+            // Why the gate is the owner credential and NOT `require_active_session`: this route
+            // exists for the App's unprotected-quit path, whose legitimate caller has no live
+            // session — StopClash clears the session record, and a user who never connected
+            // never had one. Security here does not rest on the session:
+            //   1. `authenticate_request` already proved the caller can read the owner token
+            //      from the ACL-protected per-user owner directory (constant-time compared);
+            //      a process running as another user cannot produce it.
+            //   2. Stopping is refused with 409 whenever the machine still needs the daemon:
+            //      kill switch armed (`wanted`), durable desired state wants the core running,
+            //      or that state is unreadable. The lifecycle lock makes those two reads atomic
+            //      against a concurrent Start/Stop/Release.
+            //   3. When neither holds the Service is idle — no barrier armed, no core desired —
+            //      so stopping it changes no security posture. The worst a same-user process can
+            //      do is stop a daemon the next connect revives via the install/repair entry.
+            let _lifecycle_guard =
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                    ControlFlow::Continue(guard) => guard,
+                    ControlFlow::Break(response) => return response,
+                };
+            let verdict = owner_goodbye_verdict(
+                windows_kill_switch::status().await.wanted,
+                load_owner_desired_state(&owner.key)
+                    .await
+                    .map(|desired| desired.core_should_be_running)
+                    .ok(),
+            );
+            match verdict {
+                Ok(()) => {
+                    info!("Authenticated owner goodbye accepted; the service is stopping itself");
+                    schedule_owner_goodbye_shutdown();
+                    ok_empty("Service is stopping at the owner's request")
+                }
+                Err(error) => service_error(error),
+            }
         });
     #[cfg(feature = "test")]
     let router = router
@@ -1593,6 +1696,7 @@ fn service_error(error: ServiceError) -> Result<HttpResponse> {
     let status = match error.code {
         crate::ServiceErrorCode::UnauthorizedOwner => StatusCode::UNAUTHORIZED,
         crate::ServiceErrorCode::NotActive => StatusCode::CONFLICT,
+        crate::ServiceErrorCode::StillProtected => StatusCode::CONFLICT,
         _ => StatusCode::UNPROCESSABLE_ENTITY,
     };
     json_response::<()>(status, error.code as u16, error.message, None)
@@ -2011,5 +2115,54 @@ mod owner_lifecycle_tests {
         );
         drop(guard);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod owner_goodbye_tests {
+    use super::{owner_goodbye_verdict, service_error};
+    use crate::ServiceErrorCode;
+    use http::StatusCode;
+
+    /// The route literal is the contract the App's client posts to; a typo here silently breaks
+    /// the unprotected-quit stop.
+    #[test]
+    fn owner_goodbye_route_is_the_documented_literal() {
+        assert_eq!(
+            crate::IpcCommand::OwnerGoodbye.as_ref(),
+            "/lifecycle/owner-goodbye"
+        );
+    }
+
+    /// Goodbye is accepted only when the machine no longer needs the daemon: nothing armed and
+    /// the durable desired state proven "core should not be running".
+    #[test]
+    fn goodbye_is_accepted_only_when_the_daemon_is_idle() {
+        assert!(owner_goodbye_verdict(false, Some(false)).is_ok());
+        for (wanted, desired) in [
+            (true, Some(false)),
+            (true, Some(true)),
+            (true, None),
+            (false, Some(true)),
+            (false, None),
+        ] {
+            let error = owner_goodbye_verdict(wanted, desired)
+                .expect_err("armed, desired-running, or desired-unreadable must refuse");
+            assert_eq!(
+                error.code,
+                ServiceErrorCode::StillProtected,
+                "wanted={wanted}, desired={desired:?}"
+            );
+        }
+    }
+
+    /// Every refusal maps to 409 Conflict, so the App can distinguish "the machine still needs
+    /// the daemon" from a transport failure and keep both best-effort at quit.
+    #[test]
+    fn goodbye_refusals_are_conflict() {
+        let error =
+            owner_goodbye_verdict(true, Some(false)).expect_err("armed must refuse");
+        let response = service_error(error).expect("refusals encode as responses");
+        assert_eq!(response.status, StatusCode::CONFLICT);
     }
 }

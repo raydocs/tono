@@ -78,6 +78,10 @@ impl ServiceError {
     pub(crate) fn proxy_apply_failed(message: impl Into<String>) -> Self {
         Self::new(ServiceErrorCode::ProxyApplyFailed, message)
     }
+
+    pub(crate) fn still_protected(message: impl Into<String>) -> Self {
+        Self::new(ServiceErrorCode::StillProtected, message)
+    }
 }
 
 impl fmt::Display for ServiceError {

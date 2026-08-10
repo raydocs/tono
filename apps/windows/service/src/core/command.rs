@@ -49,6 +49,8 @@ pub enum IpcCommand {
     StopClash,
     #[strum(serialize = "/clash/stage-runtime")]
     StageRuntime,
+    #[strum(serialize = "/lifecycle/owner-goodbye")]
+    OwnerGoodbye,
     #[strum(serialize = "/system-proxy")]
     SetSystemProxy,
     #[strum(serialize = "/writer")]
