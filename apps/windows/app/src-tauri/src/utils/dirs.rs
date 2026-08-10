@@ -19,7 +19,10 @@ pub static BACKUP_DIR: &str = "clash-verge-rev-backup-dev";
 pub static PORTABLE_FLAG: OnceCell<bool> = OnceCell::new();
 
 pub static CLASH_CONFIG: &str = "config.yaml";
-pub static VERGE_CONFIG: &str = "verge.yaml";
+pub static VERGE_CONFIG: &str = "tono.yaml";
+/// Pre-de-fork settings filename. Reads fall back to it and adopt it into the
+/// new name, so upgrading users keep their settings without any ceremony.
+pub static LEGACY_VERGE_CONFIG: &str = "verge.yaml";
 pub static PROFILE_YAML: &str = "profiles.yaml";
 
 /// init portable flag
@@ -163,7 +166,22 @@ pub fn clash_path() -> Result<PathBuf> {
 }
 
 pub fn verge_path() -> Result<PathBuf> {
-    Ok(app_home_dir()?.join(VERGE_CONFIG))
+    let home = app_home_dir()?;
+    let current = home.join(VERGE_CONFIG);
+    if current.exists() {
+        return Ok(current);
+    }
+    let legacy = home.join(LEGACY_VERGE_CONFIG);
+    if legacy.exists() {
+        // Adopt the pre-de-fork settings file. If the same-dir rename fails
+        // (transient lock), still read the legacy file this run rather than
+        // dropping the user's settings on the floor.
+        if std::fs::rename(&legacy, &current).is_ok() {
+            return Ok(current);
+        }
+        return Ok(legacy);
+    }
+    Ok(current)
 }
 
 pub fn profiles_path() -> Result<PathBuf> {
