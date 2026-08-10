@@ -1,15 +1,15 @@
 {
-  "version": "0.0.24",
+  "version": "0.0.25",
   "notes": "After review and publication, run Promote Windows update channel for this exact version.",
-  "pub_date": "2026-08-09T07:30:07.149Z",
+  "pub_date": "2026-08-10T01:21:27.960Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdWY1VWNYS1YvYnhlaGZabTE2QnB4RkVWQkVBd2VuQ0tLUkFFSFB1K3I2dUZHWEhDNlNWRGh2dnZjR0RIckNJY0ZrSHJaK2xIZXQ4TjZUR0IxSkZGSVFLMllSRi94akEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MjYwNjAzCWZpbGU6VG9ub18wLjAuMjRfeDY0LXNldHVwLmV4ZQpGTW9zYjlmYXNZajdCaXNXRkowYVFLOTdVYXZNNThJakVGUlFZUlg0L09vMWwwMHZ1U3lrOUMwcGRSdVd0d01WSE1NenFJZnhZMHJMYWZ5M0Zmd0hCQT09Cg==",
-      "url": "https://github.com/raydocs/tono/releases/download/v0.0.24/Tono_0.0.24_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdWY1VWNYS1YvYjZJaEZzdjRNcURDc29qZDNrS3ByekVWdDF0MmM4QnRrek41V29QdisxQlJNd3JNN1hxWVQ2dUp6MUlYM1cxdFBFTC84cVZDd29QWEFLTmtkcWJNTXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzI0ODg0CWZpbGU6VG9ub18wLjAuMjVfeDY0LXNldHVwLmV4ZQo3SkltVEY5TThPR0JXTEQyeVZjUUJEU3hOWU15N3FFbW9yWjQybXIwSGt2Q2RIMk1yZ1Z5TFJoNVRDQkZtS3p4SWkxdDhQVmVtK0dqMm0xWlMzdGRCQT09Cg==",
+      "url": "https://github.com/raydocs/tono/releases/download/v0.0.25/Tono_0.0.25_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdWY1VWNYS1YvYnhlaGZabTE2QnB4RkVWQkVBd2VuQ0tLUkFFSFB1K3I2dUZHWEhDNlNWRGh2dnZjR0RIckNJY0ZrSHJaK2xIZXQ4TjZUR0IxSkZGSVFLMllSRi94akEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MjYwNjAzCWZpbGU6VG9ub18wLjAuMjRfeDY0LXNldHVwLmV4ZQpGTW9zYjlmYXNZajdCaXNXRkowYVFLOTdVYXZNNThJakVGUlFZUlg0L09vMWwwMHZ1U3lrOUMwcGRSdVd0d01WSE1NenFJZnhZMHJMYWZ5M0Zmd0hCQT09Cg==",
-      "url": "https://github.com/raydocs/tono/releases/download/v0.0.24/Tono_0.0.24_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdWY1VWNYS1YvYjZJaEZzdjRNcURDc29qZDNrS3ByekVWdDF0MmM4QnRrek41V29QdisxQlJNd3JNN1hxWVQ2dUp6MUlYM1cxdFBFTC84cVZDd29QWEFLTmtkcWJNTXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzI0ODg0CWZpbGU6VG9ub18wLjAuMjVfeDY0LXNldHVwLmV4ZQo3SkltVEY5TThPR0JXTEQyeVZjUUJEU3hOWU15N3FFbW9yWjQybXIwSGt2Q2RIMk1yZ1Z5TFJoNVRDQkZtS3p4SWkxdDhQVmVtK0dqMm0xWlMzdGRCQT09Cg==",
+      "url": "https://github.com/raydocs/tono/releases/download/v0.0.25/Tono_0.0.25_x64-setup.exe"
     }
   }
 }
