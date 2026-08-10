@@ -3939,11 +3939,19 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     if (mt && m === 'PATCH') {
       const b = await body(req, 16 * 1024);
       const status = b.status;
+      const expiresAt = b.expiresAt;
       if (status !== undefined && !['active', 'disabled'].includes(status)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
       }
-      if (status === undefined) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'status is required');
+      if (
+        expiresAt !== undefined &&
+        expiresAt !== null &&
+        (!Number.isSafeInteger(expiresAt) || expiresAt <= 0)
+      ) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
+      }
+      if (status === undefined && expiresAt === undefined) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'status or expiresAt is required');
       }
       if (status === 'active') {
         const residual = await e.DB.prepare(
@@ -3965,8 +3973,18 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         }
       }
       const updated = await e.DB.prepare(
-        `UPDATE users SET status = ?, updated_at = ? WHERE id = ?`,
-      ).bind(status, now(), mt[1]).run();
+        `UPDATE users SET
+           status = COALESCE(?, status),
+           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           updated_at = ?
+         WHERE id = ?`,
+      ).bind(
+        status ?? null,
+        expiresAt !== undefined,
+        expiresAt ?? null,
+        now(),
+        mt[1],
+      ).run();
       if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
       await enforceUser(e, mt[1]);
       return Response.json({ ok: true });
@@ -4440,8 +4458,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const status = b.status;
       const quota = b.quotaBytes;
       const deviceLimit = b.deviceLimit;
+      const expiresAt = b.expiresAt;
       if (status !== undefined && !['active', 'disabled'].includes(status)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+      }
+      if (
+        expiresAt !== undefined &&
+        expiresAt !== null &&
+        (!Number.isSafeInteger(expiresAt) || expiresAt <= 0)
+      ) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
       }
       if (quota !== undefined && quota !== null && (!Number.isSafeInteger(quota) || quota < 0)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid quotaBytes');
@@ -4476,6 +4502,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            status = COALESCE(?, status),
            quota_bytes = CASE WHEN ? THEN ? ELSE quota_bytes END,
            device_limit = CASE WHEN ? THEN ? ELSE device_limit END,
+           expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
            updated_at = ?
          WHERE id = ?`,
       ).bind(
@@ -4484,6 +4511,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         quota ?? null,
         deviceLimit !== undefined,
         deviceLimit ?? null,
+        expiresAt !== undefined,
+        expiresAt ?? null,
         now(),
         mt[1],
       ).run();

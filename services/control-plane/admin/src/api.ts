@@ -279,4 +279,7 @@ export const operationsApi = {
   setUserStatus: async (userId: string, status: 'active' | 'disabled') => (
     await patch<{ ok: boolean }>(`users/${userId}`, { status })
   ),
+  setUserExpiry: async (userId: string, expiresAt: number | null) => (
+    await patch<{ ok: boolean }>(`users/${userId}`, { expiresAt })
+  ),
 };

@@ -854,3 +854,15 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   color: hsl(142 70% 70%);
   font-size: 0.875rem;
 }
+
+/* Expired accounts: dim the row, keep the action cell fully visible. */
+.row-expired > td { opacity: 0.55; }
+.row-expired > td:last-child { opacity: 1; }
+.expired-flag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  color: hsl(0 90% 75%);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}

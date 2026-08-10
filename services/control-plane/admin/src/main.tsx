@@ -550,6 +550,7 @@ function UsersPage() {
   const [defaultPick, setDefaultPick] = useState<Record<string, string>>({});
   const [showAllowlist, setShowAllowlist] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [expiryPick, setExpiryPick] = useState<Record<string, string>>({});
 
   const reloadAll = () => {
     users.reload();
@@ -606,6 +607,36 @@ function UsersPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function setExpiry(user: UserDto, expiresAt: number | null) {
+    setBusy(true);
+    setError(null);
+    try {
+      await operationsApi.setUserExpiry(user.id, expiresAt);
+      setMessage(expiresAt === null
+        ? `已清除 ${user.email} 的到期时间（不再过期）`
+        : `${user.email} 到期时间已设为 ${timestamp(expiresAt)}`);
+      users.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '到期时间更新失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyExpiryPick(user: UserDto) {
+    const value = expiryPick[user.id];
+    if (!value) {
+      setError('请先选择到期日期时间');
+      return;
+    }
+    const seconds = Math.floor(new Date(value).getTime() / 1_000);
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+      setError('到期时间无效');
+      return;
+    }
+    await setExpiry(user, seconds);
   }
 
   async function bindHome(user: UserDto) {
@@ -712,6 +743,58 @@ function UsersPage() {
     <section className="card">
       <div className="card-header">
         <div>
+          <h2>注册白名单</h2>
+          <p>已授权可注册的邮箱及加入时间；撤销不影响已创建的账号。</p>
+        </div>
+      </div>
+      <div className="card-body">
+        <form className="form-row" onSubmit={addUser}>
+          <input
+            className="input"
+            type="email"
+            required
+            placeholder="user@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={busy}
+          />
+          <button className="btn" type="submit" disabled={busy || !email.trim()}>添加邮箱</button>
+        </form>
+      </div>
+      <div className="table-wrap">
+        <StateBoundary resource={allowlist} empty={(rows: AllowlistEntry[]) => rows.length === 0}>
+          {(rows) => <table>
+            <thead>
+              <tr>
+                <th>邮箱</th>
+                <th>加入时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((entry) => <tr key={entry.email}>
+                <td><strong>{entry.email}</strong></td>
+                <td className="muted">{timestamp(entry.createdAt)}</td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy}
+                      onClick={() => removeAllow(entry.email)}
+                    >移除</button>
+                  </div>
+                </td>
+              </tr>)}
+            </tbody>
+          </table>}
+        </StateBoundary>
+      </div>
+    </section>
+
+    <section className="card">
+      <div className="card-header">
+        <div>
           <h2>流量榜单</h2>
           <p>按累计用量排序（家庭出口上报口径），仅列前五。</p>
         </div>
@@ -735,14 +818,25 @@ function UsersPage() {
               <tr>
                 <th>用户</th>
                 <th>状态</th>
+                <th>注册时间</th>
+                <th>存活天数</th>
+                <th>到期时间</th>
+                <th>剩余天数</th>
                 <th>用量</th>
                 <th>家庭 IP</th>
                 <th>操作</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((user) => <Fragment key={user.id}>
-                <tr>
+              {rows.map((user) => {
+                const nowSec = Math.floor(Date.now() / 1_000);
+                const aliveDays = Math.max(0, Math.floor((nowSec - user.createdAt) / 86_400));
+                const expired = user.expiresAt != null && user.expiresAt <= nowSec;
+                const remainDays = user.expiresAt == null
+                  ? null
+                  : Math.ceil((user.expiresAt - nowSec) / 86_400);
+                return <Fragment key={user.id}>
+                <tr className={expired ? 'row-expired' : undefined}>
                 <td>
                   <button
                     type="button"
@@ -754,7 +848,20 @@ function UsersPage() {
                   <strong>{user.email}</strong>
                   <small className="mono">{user.id}</small>
                 </td>
-                <td><Status value={user.status} /></td>
+                <td>
+                  <Status value={user.status} />
+                  {expired && <span className="expired-flag">已过期</span>}
+                </td>
+                <td className="muted">{timestamp(user.createdAt)}</td>
+                <td className="mono">{aliveDays} 天</td>
+                <td className="muted">{user.expiresAt != null ? timestamp(user.expiresAt) : '—'}</td>
+                <td className="mono">
+                  {user.expiresAt == null
+                    ? <span className="muted">—</span>
+                    : expired
+                      ? <span className="expired-flag">已过期</span>
+                      : `${remainDays} 天`}
+                </td>
                 <td className="mono">
                   {user.usageBytes.toLocaleString()}
                   {user.quotaBytes != null ? ` / ${user.quotaBytes.toLocaleString()}` : ''}
@@ -810,15 +917,45 @@ function UsersPage() {
                     <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => toggleUser(user)}>
                       {user.status === 'active' ? '禁用' : '启用'}
                     </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={busy}
+                      title="到期时间设为现在 + 30 天"
+                      onClick={() => setExpiry(user, Math.floor(Date.now() / 1_000) + 30 * 86_400)}
+                    >设 30 天</button>
+                    <input
+                      className="input compact"
+                      type="datetime-local"
+                      value={expiryPick[user.id] ?? ''}
+                      onChange={(e) => setExpiryPick((prev) => ({ ...prev, [user.id]: e.target.value }))}
+                      disabled={busy}
+                      title="选择新的到期日期时间"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      disabled={busy || !expiryPick[user.id]}
+                      onClick={() => applyExpiryPick(user)}
+                    >改到期</button>
+                    {user.expiresAt != null && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={busy}
+                        onClick={() => setExpiry(user, null)}
+                      >清到期</button>
+                    )}
                   </div>
                 </td>
                 </tr>
                 {expanded === user.id && (
                   <tr className="detail-row">
-                    <td colSpan={5}><UserDetailPanel user={user} /></td>
+                    <td colSpan={9}><UserDetailPanel user={user} /></td>
                   </tr>
                 )}
-              </Fragment>)}
+              </Fragment>;
+              })}
             </tbody>
           </table>}
         </StateBoundary>

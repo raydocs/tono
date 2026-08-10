@@ -2230,6 +2230,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(device.status).toBe('revoked');
   });
 
+  it('sets, updates, and clears expiresAt through the admin PATCH route', async () => {
+    const account = await createAccount('expiry');
+    const expiresAt = Math.floor(Date.now() / 1000) + 30 * 86_400;
+
+    const set = await admin(`users/${account.user.id}`, { expiresAt }, 'PATCH');
+    expect(set.status).toBe(200);
+    let row = await env.DB.prepare('SELECT expires_at FROM users WHERE id = ?')
+      .bind(account.user.id).first<any>();
+    expect(Number(row.expires_at)).toBe(expiresAt);
+
+    const updated = await admin(`users/${account.user.id}`, { expiresAt: expiresAt + 3_600 }, 'PATCH');
+    expect(updated.status).toBe(200);
+    row = await env.DB.prepare('SELECT expires_at FROM users WHERE id = ?')
+      .bind(account.user.id).first<any>();
+    expect(Number(row.expires_at)).toBe(expiresAt + 3_600);
+
+    const cleared = await admin(`users/${account.user.id}`, { expiresAt: null }, 'PATCH');
+    expect(cleared.status).toBe(200);
+    row = await env.DB.prepare('SELECT expires_at FROM users WHERE id = ?')
+      .bind(account.user.id).first<any>();
+    expect(row.expires_at).toBeNull();
+  });
+
+  it('rejects invalid expiresAt values with 400', async () => {
+    const account = await createAccount('expiry-invalid');
+    for (const expiresAt of [0, -100, 1.5, 'tomorrow', Number.MAX_SAFE_INTEGER + 1]) {
+      const response = await admin(`users/${account.user.id}`, { expiresAt }, 'PATCH');
+      expect(response.status).toBe(400);
+      expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
+    }
+    const row = await env.DB.prepare('SELECT expires_at FROM users WHERE id = ?')
+      .bind(account.user.id).first<any>();
+    expect(row.expires_at).toBeNull();
+  });
+
   it('exposes only verified peer usage mappings to the authenticated home agent', async () => {
     const account = await createAccount('home-inventory');
     resetMockInventory(account.device.id, account.enrollment.hostname);
