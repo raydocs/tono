@@ -56,10 +56,18 @@ export const classifyActivityRoute = (
   connection: Pick<IConnectionsItem, 'chains' | 'rule'>,
 ): ActivityRoute => {
   // Mihomo orders chains from terminal outbound to enclosing selector groups. Group/node names
-  // are user/catalog data and must not be interpreted as built-in route actions.
+  // are user/catalog data and must not be interpreted as built-in route actions. The two
+  // Tono direct groups (mirrors DIRECT_GROUP_NAME/WEB_DIRECT_GROUP_NAME in tono-core config.rs)
+  // terminate on the physical interface — that IS a direct route, not a proxy hop.
   const terminal = connection.chains[0]?.trim()
   if (terminal === 'REJECT' || terminal === 'REJECT-DROP') return 'rejected'
-  if (terminal === 'DIRECT') return 'direct'
+  if (
+    terminal === 'DIRECT' ||
+    terminal === 'Tono-China-Direct' ||
+    terminal === 'Tono-China-Web-Direct'
+  ) {
+    return 'direct'
+  }
   return 'proxied'
 }
 

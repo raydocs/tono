@@ -156,6 +156,25 @@ describe('Activity connection presentation', () => {
         }),
       ).route,
     ).toBe('direct')
+    // The Tono China direct groups are direct routes too (WeChat/suffix rules).
+    expect(
+      toActivityRow(
+        connection('wechat', {
+          chains: ['Tono-China-Direct'],
+          rule: 'AND',
+          rulePayload: '((Network,tcp) && (ProcessName,Weixin.exe))',
+        }),
+      ).route,
+    ).toBe('direct')
+    expect(
+      toActivityRow(
+        connection('baidu', {
+          chains: ['Tono-China-Web-Direct'],
+          rule: 'AND',
+          rulePayload: '((Network,tcp) && (DomainSuffix,baidu.com))',
+        }),
+      ).route,
+    ).toBe('direct')
   })
 
   it('does not expose URL credentials, query strings, fragments, or full process paths', () => {
