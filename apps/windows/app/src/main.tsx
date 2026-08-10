@@ -3,6 +3,7 @@ import './assets/styles/index.scss'
 import createCache from '@emotion/cache'
 import { CacheProvider } from '@emotion/react'
 import { ResizeObserver } from '@juggle/resize-observer'
+import { emit } from '@tauri-apps/api/event'
 import { ComposeContextProvider } from 'foxact/compose-context-provider'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
@@ -36,6 +37,10 @@ const mainElementId = 'root'
 const APP_BOOTSTRAP_BUDGET_MS = 2000
 const APP_BOOTSTRAP_TIMEOUT_MESSAGE =
   'initial App IPC/language preload timed out'
+// Gates the host's initial window show (build_new_window on the Rust side):
+// showing before the first painted frame can stick a cold WebView2
+// compositor on a blank frame at the first launch after install.
+const FIRST_PAINT_EVENT = 'tono-first-paint'
 const container = document.getElementById(mainElementId)
 
 if (!container) {
@@ -80,6 +85,15 @@ const initializeApp = (initialThemeMode: 'light' | 'dark') => {
       </React.StrictMode>
     </CacheProvider>,
   )
+
+  // Double rAF lands after the initial React commit has actually painted.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      emit(FIRST_PAINT_EVENT).catch(() => {
+        // Outside Tauri (plain browser dev): nobody to signal.
+      })
+    })
+  })
 }
 
 const bootstrap = async () => {

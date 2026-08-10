@@ -299,7 +299,7 @@ impl WindowManager {
     }
 
     /// 创建新窗口,防抖避免重复调用
-    /// 窗口创建后保持隐藏，由前端 index.html 在 overlay 渲染后调用 show，避免主题闪烁
+    /// 窗口创建后保持隐藏，前端首帧绘制事件到达后由 on_page_load 路径显示，避免主题闪烁和冷启动白屏
     pub fn create_window(should_create: bool) -> Pin<Box<dyn Future<Output = bool> + Send>> {
         Box::pin(async move {
             logging!(info, Type::Window, "开始创建主窗口, should_create={}", should_create);

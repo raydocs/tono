@@ -1,13 +1,12 @@
 use dark_light::{Mode as SystemTheme, detect as detect_system_theme};
 use tauri::utils::config::Color;
 use tauri::webview::PageLoadEvent;
-use tauri::{Theme, WebviewWindow};
+use tauri::{AppHandle, Listener, Manager, Theme, WebviewWindow};
 
 use crate::{config::Config, core::handle, utils::resolve::window_script::build_window_initial_script};
-use clash_verge_logging::{Type, logging_error};
-// logging 仅在 macOS 的渲染进程恢复逻辑中使用
-#[cfg(target_os = "macos")]
-use clash_verge_logging::logging;
+use clash_verge_logging::{Type, logging, logging_error};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 const DARK_BACKGROUND_COLOR: Color = Color(46, 48, 61, 255); // #2E303D
 const LIGHT_BACKGROUND_COLOR: Color = Color(245, 245, 245, 255); // #F5F5F5
@@ -98,8 +97,7 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
             return;
         }
 
-        logging_error!(Type::Window, window.show());
-        logging_error!(Type::Window, window.set_focus());
+        show_window_after_first_paint(&window);
     });
 
     if let Some(theme) = resolved_theme {
@@ -119,6 +117,73 @@ pub async fn build_new_window() -> Result<WebviewWindow, String> {
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Frontend event (emitted from `main.tsx` after the first painted frame)
+/// that gates the initial window show. Showing at PageLoadEvent::Finished
+/// races a cold WebView2 compositor on the first launch after install and
+/// can stick on a blank frame even though the page runs fine.
+const FIRST_PAINT_EVENT: &str = "tono-first-paint";
+/// Show the window anyway if no first-paint signal arrives — a broken page
+/// must never leave the window hidden forever.
+const SHOW_FALLBACK_DELAY: Duration = Duration::from_secs(3);
+/// Grace period after the fallback show before declaring the renderer stuck
+/// and forcing one recovery reload.
+const RELOAD_WATCHDOG_DELAY: Duration = Duration::from_secs(8);
+
+/// One forced reload performs the same recovery an app restart does. It is
+/// bounded so a genuinely broken page cannot reload-loop, and re-armed on
+/// every successful first paint.
+static FIRST_PAINT_RELOAD_USED: AtomicBool = AtomicBool::new(false);
+
+/// Show the window once the frontend reports its first painted frame, with
+/// a timed fallback and one bounded recovery reload when the renderer never
+/// produces a frame at all.
+fn show_window_after_first_paint(window: &WebviewWindow) {
+    let app = window.app_handle().clone();
+    let window = window.clone();
+    crate::process::AsyncHandler::spawn(move || async move {
+        // One listener spans the whole handshake so a signal landing right
+        // at the fallback boundary is still observed (a missed signal would
+        // cost an unnecessary reload of a healthy page).
+        let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
+        let tx = std::sync::Mutex::new(Some(tx));
+        let listener = app.listen(FIRST_PAINT_EVENT, move |_| {
+            let Ok(mut guard) = tx.lock() else {
+                return;
+            };
+            if let Some(tx) = guard.take() {
+                let _ = tx.send(());
+            }
+        });
+        let painted = tokio::time::timeout(SHOW_FALLBACK_DELAY, &mut rx).await.is_ok();
+        logging_error!(Type::Window, window.show());
+        logging_error!(Type::Window, window.set_focus());
+        if painted {
+            app.unlisten(listener);
+            FIRST_PAINT_RELOAD_USED.store(false, Ordering::SeqCst);
+            return;
+        }
+        // The fallback showed the window but the renderer never painted —
+        // the classic first-launch blank WebView2. One reload re-runs the
+        // navigation and forces new frames; PageLoadEvent::Finished then
+        // re-enters this path, and FIRST_PAINT_RELOAD_USED caps the loop.
+        let recovered = tokio::time::timeout(RELOAD_WATCHDOG_DELAY, &mut rx).await.is_ok();
+        app.unlisten(listener);
+        if recovered {
+            FIRST_PAINT_RELOAD_USED.store(false, Ordering::SeqCst);
+            return;
+        }
+        if FIRST_PAINT_RELOAD_USED.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        logging!(
+            warn,
+            Type::Window,
+            "no first paint after the fallback show; reloading the webview once to recover the compositor"
+        );
+        logging_error!(Type::Window, window.reload());
+    });
 }
 
 /// 渲染进程死亡、页面待重载标记（macOS）

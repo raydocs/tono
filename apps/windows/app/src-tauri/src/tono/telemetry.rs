@@ -10,8 +10,11 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport,
+    ApiError, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent,
+    TelemetryWindowReport,
 };
+
+use clash_verge_logging::{Type, logging};
 
 use tono_core::connection::UiState;
 
@@ -42,6 +45,44 @@ pub const PERIODIC_TELEMETRY_LOOKBACK: Duration = Duration::from_secs(22 * 60);
 const MAX_EVENTS: usize = 200;
 /// Hard cap on serialized body size (Worker limit is 64 KiB payload).
 const MAX_PAYLOAD_BYTES: usize = 48 * 1024;
+
+/// Consecutive `NotFound` uploads that trigger a session probe. A single 404
+/// may be a worker mid-deploy flap; two in a row (spaced by the interval)
+/// are not.
+const NOT_FOUND_PROBE_THRESHOLD: u32 = 2;
+
+/// What the periodic uploader does after a `NotFound` from the intake. The
+/// device (re)claim path exists only inside interactive sign-in
+/// (`ensureDevice` runs during email verify), so there is nothing to retry
+/// against a persistent 404: the intake route either does not exist on the
+/// serving worker (stale deploy; the account probe stays healthy) or the
+/// session is dead — both states stand the uploader down instead of
+/// re-failing every interval. The next auth generation (sign-in, app
+/// restart) resumes uploads, which is also how a fixed backend is picked up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NotFoundVerdict {
+    /// Inconclusive so far: keep the ordinary cadence.
+    KeepCadence,
+    /// The session probe succeeded, so account and device are fine: the
+    /// serving worker does not have the telemetry route. Stand down.
+    StandDownRouteMissing,
+    /// The session probe says the session is dead (revoked device, expired
+    /// pending claim). Stand down; startup restore owns the sign-out path.
+    StandDownSessionDead,
+}
+
+fn not_found_verdict(consecutive: u32, probe: &Result<(), ApiError>) -> NotFoundVerdict {
+    if consecutive < NOT_FOUND_PROBE_THRESHOLD {
+        return NotFoundVerdict::KeepCadence;
+    }
+    match probe {
+        Ok(()) => NotFoundVerdict::StandDownRouteMissing,
+        Err(ApiError::Unauthorized) => NotFoundVerdict::StandDownSessionDead,
+        // An inconclusive probe (transport error) must not stand the
+        // uploader down on a guess.
+        Err(_) => NotFoundVerdict::KeepCadence,
+    }
+}
 
 const INCLUDE_KINDS: &[&str] = &[
     "connectBegin",
@@ -77,6 +118,7 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
 ) {
     let task_state = state.clone();
     let handle = AsyncHandler::spawn(move || async move {
+        let mut consecutive_not_found = 0_u32;
         tokio::time::sleep(PERIODIC_TELEMETRY_FIRST_DELAY).await;
         loop {
             {
@@ -92,7 +134,35 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
                     return;
                 }
             }
-            let _ = upload_once(&task_state, generation).await;
+            match upload_once(&task_state, generation).await {
+                Ok(()) => consecutive_not_found = 0,
+                Err(ApiError::NotFound) => {
+                    consecutive_not_found += 1;
+                    let probe = probe_session(&task_state, generation).await;
+                    match not_found_verdict(consecutive_not_found, &probe) {
+                        NotFoundVerdict::KeepCadence => {}
+                        NotFoundVerdict::StandDownRouteMissing => {
+                            logging!(
+                                warn,
+                                Type::Service,
+                                "Tono: telemetry intake keeps returning 404 while the session is healthy; \
+                                 periodic uploads stand down until the next sign-in or app restart"
+                            );
+                            return;
+                        }
+                        NotFoundVerdict::StandDownSessionDead => {
+                            logging!(
+                                warn,
+                                Type::Service,
+                                "Tono: telemetry intake returns 404 and the session probe is unauthorized; \
+                                 periodic uploads stand down (session is dead)"
+                            );
+                            return;
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
             let jitter_ms = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -110,7 +180,21 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
     }
 }
 
-async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), String> {
+/// Probe whether the account session behind a `NotFound` upload is still
+/// alive. A superseded generation counts as alive (the new session owns its
+/// own uploader; this one is about to exit on the generation check anyway).
+async fn probe_session(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiError> {
+    let client = {
+        let inner = state.lock().await;
+        if inner.sign_in_generation != generation {
+            return Ok(());
+        }
+        inner.client.clone()
+    };
+    client.me().await.map(|_| ())
+}
+
+async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiError> {
     if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
         return Ok(());
     }
@@ -122,7 +206,7 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), Stri
         inner.client.clone()
     };
 
-    let report = build_window_report(state).await?;
+    let report = build_window_report(state).await.map_err(ApiError::InvalidInput)?;
     let bytes = serde_json::to_vec(&report).map(|v| v.len()).unwrap_or(0) as u32;
     let event_count = report.event_count;
     match client.upload_telemetry_window(&report).await {
@@ -137,7 +221,7 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), Stri
             state.audit().log(AuditEvent::PeriodicTelemetryUploadFail {
                 error: err.to_string(),
             });
-            Err(err.to_string())
+            Err(err)
         }
     }
 }
@@ -369,6 +453,56 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn single_not_found_keeps_cadence_so_a_flap_can_recover() {
+        // One 404 may be a worker mid-deploy flap: the uploader stays on its
+        // ordinary cadence and the next cycle can succeed (the streak resets
+        // on the first Ok).
+        for probe in [
+            Ok(()),
+            Err(ApiError::Unauthorized),
+            Err(ApiError::Transport {
+                kind: tono_core::auth::TransportKind::Timeout,
+                message: "timeout".to_string(),
+            }),
+        ] {
+            assert_eq!(
+                not_found_verdict(NOT_FOUND_PROBE_THRESHOLD - 1, &probe),
+                NotFoundVerdict::KeepCadence
+            );
+        }
+    }
+
+    #[test]
+    fn persistent_not_found_with_a_healthy_session_stands_down() {
+        assert_eq!(
+            not_found_verdict(NOT_FOUND_PROBE_THRESHOLD, &Ok(())),
+            NotFoundVerdict::StandDownRouteMissing
+        );
+    }
+
+    #[test]
+    fn persistent_not_found_with_a_dead_session_stands_down() {
+        assert_eq!(
+            not_found_verdict(NOT_FOUND_PROBE_THRESHOLD, &Err(ApiError::Unauthorized)),
+            NotFoundVerdict::StandDownSessionDead
+        );
+    }
+
+    #[test]
+    fn persistent_not_found_with_an_inconclusive_probe_keeps_cadence() {
+        // A transport-failed probe proves nothing about the route; guessing
+        // here would silence uploads on a flaky network.
+        let probe = Err(ApiError::Transport {
+            kind: tono_core::auth::TransportKind::Connect,
+            message: "connect".to_string(),
+        });
+        assert_eq!(
+            not_found_verdict(NOT_FOUND_PROBE_THRESHOLD, &probe),
+            NotFoundVerdict::KeepCadence
+        );
     }
 
     #[test]
