@@ -975,9 +975,25 @@ async fn run_stages(
     let core_path = core_path.map_err(StageFailure::error)?;
     let physical_interface = match physical_interface_probe {
         Some(interface) => {
-            let interface = interface.map_err(StageFailure::error)?;
-            tono_core::config::DirectPlan::validate_physical_interface(&interface).map_err(StageFailure::error)?;
-            Some(interface)
+            match interface {
+                Ok(interface) => {
+                    tono_core::config::DirectPlan::validate_physical_interface(&interface)
+                        .map_err(StageFailure::error)?;
+                    Some(interface)
+                }
+                Err(error) => {
+                    // The cloud DIRECT overlay is optional. A machine with a virtual-only
+                    // default route (or an adapter transition) must keep the proven full-tunnel
+                    // runtime rather than turning an unrelated VMware/Hyper-V condition into a
+                    // connection failure. WFP still has no physical DIRECT permits in this case.
+                    logging!(
+                        warn,
+                        Type::Service,
+                        "Tono: physical uplink discovery failed; skipping optional cloud DIRECT policy: {error}"
+                    );
+                    None
+                }
+            }
         }
         None => None,
     };
@@ -4404,11 +4420,15 @@ async fn detect_physical_interface_route_command() -> Result<String, String> {
 /// alias (`"Ethernet 2"`, `"以太网"`, etc.). This runs before WinTUN starts, so the best route
 /// cannot resolve back to Tono. The Service deliberately resolves aliases to LUIDs as well; using
 /// `ConvertInterfaceLuidToNameW` here would produce the adapter's internal name and recreate the
-/// alias/name mismatch behind Windows error 123.
+/// alias/name mismatch behind Windows error 123. VMware/VirtualBox/Hyper-V host adapters are
+/// deliberately not acceptable physical uplinks: they remain enabled for the customer's VMs,
+/// but Tono's optional DIRECT outbounds must bind to a real hardware interface.
 #[cfg(windows)]
 fn detect_physical_interface_windows() -> Result<String, String> {
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GetBestRoute2, GetIfEntry2, MIB_IF_ROW2, MIB_IPFORWARD_ROW2,
+        GetBestRoute2, GetIfEntry2, IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211,
+        IF_TYPE_PROP_VIRTUAL, IF_TYPE_TUNNEL, MIB_IF_ROW2, MIB_IF_TYPE_LOOPBACK,
+        MIB_IPFORWARD_ROW2,
     };
     use windows_sys::Win32::Networking::WinSock::{AF_INET, IN_ADDR, SOCKADDR_INET};
 
@@ -4436,25 +4456,129 @@ fn detect_physical_interface_windows() -> Result<String, String> {
         return Err(format!("GetBestRoute2 failed: {status}"));
     }
 
-    let mut interface = MIB_IF_ROW2 {
-        InterfaceLuid: best_route.InterfaceLuid,
-        ..Default::default()
+    let best_luid = unsafe { best_route.InterfaceLuid.Value };
+    let mut candidates = vec![best_luid];
+    for luid in default_route_interface_luids()? {
+        if !candidates.contains(&luid) {
+            candidates.push(luid);
+        }
+    }
+
+    let mut rejected = Vec::new();
+    for luid in candidates {
+        let mut interface = MIB_IF_ROW2 {
+            InterfaceLuid: windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH {
+                Value: luid,
+            },
+            ..Default::default()
+        };
+        // SAFETY: `interface` is initialized and the LUID came from IP Helper.
+        let status = unsafe { GetIfEntry2(&mut interface) };
+        if status != 0 {
+            rejected.push(format!("LUID {luid}: GetIfEntry2 failed ({status})"));
+            continue;
+        }
+        let description = utf16_field(&interface.Description);
+        let alias = utf16_field(&interface.Alias);
+        if alias.is_empty() {
+            rejected.push(format!("LUID {luid}: empty interface alias"));
+            continue;
+        }
+        let hardware = interface.InterfaceAndOperStatusFlags._bitfield & 0x01 != 0;
+        let known_hardware_type = matches!(interface.Type, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211);
+        let virtual_description = is_virtual_uplink_description(&description);
+        let forbidden_type = matches!(
+            interface.Type,
+            MIB_IF_TYPE_LOOPBACK | IF_TYPE_PROP_VIRTUAL | IF_TYPE_TUNNEL
+        );
+        if virtual_description || forbidden_type || (!hardware && !known_hardware_type) {
+            rejected.push(format!(
+                "{alias:?} ({description:?}, type {}, hardware={hardware})",
+                interface.Type
+            ));
+            continue;
+        }
+        return Ok(alias);
+    }
+
+    Err(format!(
+        "no usable hardware uplink found; rejected candidates: {}",
+        if rejected.is_empty() {
+            "none".to_string()
+        } else {
+            rejected.join("; ")
+        }
+    ))
+}
+
+/// The route chosen by Windows can point at a host-only/NAT adapter even while a real
+/// Ethernet/Wi-Fi default route is available. Return all IPv4 default-route interfaces in
+/// metric order so the caller can reject virtual adapters without disabling them.
+#[cfg(windows)]
+fn default_route_interface_luids() -> Result<Vec<u64>, String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        FreeMibTable, GetIpForwardTable2, MIB_IPFORWARD_TABLE2,
     };
-    // SAFETY: `interface` is initialized and its LUID came from a successful `GetBestRoute2`.
-    let status = unsafe { GetIfEntry2(&mut interface) };
+    use windows_sys::Win32::Networking::WinSock::AF_INET;
+
+    let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
+    // SAFETY: IP Helper allocates the table and writes its address to `table`.
+    let status = unsafe { GetIpForwardTable2(AF_INET, &mut table) };
     if status != 0 {
-        return Err(format!("GetIfEntry2 failed: {status}"));
+        return Err(format!("GetIpForwardTable2 failed: {status}"));
     }
-    let end = interface
-        .Alias
+    if table.is_null() {
+        return Err("GetIpForwardTable2 returned a null table".to_string());
+    }
+
+    // SAFETY: a successful table contains `NumEntries` rows in the trailing `Table` array;
+    // the allocation remains alive until FreeMibTable below.
+    let rows = unsafe { std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize) };
+    let mut routes: Vec<(u32, u64)> = rows
         .iter()
-        .position(|ch| *ch == 0)
-        .unwrap_or(interface.Alias.len());
-    let alias = String::from_utf16(&interface.Alias[..end]).map_err(|err| err.to_string())?;
-    if alias.is_empty() {
-        return Err("GetIfEntry2 returned an empty interface alias".to_string());
+        .filter(|row| row.DestinationPrefix.PrefixLength == 0 && !row.Loopback)
+        .map(|row| (row.Metric, unsafe { row.InterfaceLuid.Value }))
+        .collect();
+    // SAFETY: `table` was returned by GetIpForwardTable2 and is released exactly once.
+    unsafe { FreeMibTable(table.cast()) };
+    routes.sort_unstable_by_key(|(metric, _)| *metric);
+    let mut luids = Vec::with_capacity(routes.len());
+    for (_, luid) in routes {
+        if !luids.contains(&luid) {
+            luids.push(luid);
+        }
     }
-    Ok(alias)
+    Ok(luids)
+}
+
+#[cfg(windows)]
+fn utf16_field(field: &[u16]) -> String {
+    let end = field.iter().position(|ch| *ch == 0).unwrap_or(field.len());
+    String::from_utf16_lossy(&field[..end])
+}
+
+/// Adapter descriptions are diagnostic input, not a security identity. This filter is only
+/// used to choose a physical interface for optional DIRECT outbounds; it never disables or
+/// removes the matching adapter. Tono's Wintun adapter is included so it cannot become the
+/// physical DIRECT interface during a race with route installation.
+fn is_virtual_uplink_description(description: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "vmware",
+        "vmnet",
+        "virtualbox",
+        "vboxnet",
+        "hyper-v",
+        "hyperv",
+        "vethernet",
+        "wintun",
+        "tono",
+        "wsl",
+        "docker",
+        "loopback",
+        "tap-windows",
+    ];
+    let lowered = description.to_lowercase();
+    MARKERS.iter().any(|marker| lowered.contains(marker))
 }
 
 /// Open the redacted copy with the per-user DACL the rest of Tono's private files get.
@@ -5778,6 +5902,27 @@ mod tests {
             WINDOWS_OPTIONAL_DIRECT_ENABLED,
             "0.0.24 ships the WeChat DIRECT split; the fail-closed bracket above is its guard"
         );
+    }
+
+    #[test]
+    fn virtual_uplink_filter_keeps_vmware_enabled_but_never_selects_it_for_direct() {
+        for description in [
+            "VMware Network Adapter VMnet8",
+            "VirtualBox Host-Only Ethernet Adapter",
+            "Hyper-V Virtual Ethernet Adapter",
+            "Tono Wintun Userspace Tunnel",
+        ] {
+            assert!(
+                super::is_virtual_uplink_description(description),
+                "{description:?} must not be selected as the physical DIRECT uplink"
+            );
+        }
+        for description in ["Intel(R) Wi-Fi 6E AX211", "Realtek PCIe GbE Family Controller"] {
+            assert!(
+                !super::is_virtual_uplink_description(description),
+                "{description:?} should remain eligible for physical uplink selection"
+            );
+        }
     }
 
     #[test]
