@@ -62,5 +62,30 @@ jobs:
       - name: macOS incident regressions
         run: tooling/scripts/test-macos-incident-regressions.sh
 
+      - name: Reload preserves established connections
+        run: tooling/scripts/test-reload-preserves-connections.sh
+
       - name: Appcast publisher validation
         run: node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
+
+  # Split out because these need root. Locally the helper's own self-test prints
+  # `PF syntax check skipped (needs root)` and the lifecycle test refuses
+  # outright, so the checks that matter most — does pfctl actually accept this
+  # ruleset, and does a re-arm withdraw a permit the session still needs — were
+  # the ones a developer was least likely to have run. Both faults they cover
+  # shipped, in consecutive builds. On a runner they run every time.
+  privileged-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build the privileged helper
+        run: tooling/scripts/build-core-helper.sh
+
+      - name: Helper self-test including the PF parse
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --self-test
+
+      - name: Helper lifecycle self-test
+        # Loads into an anchor no parent ruleset references, so pfctl parses and
+        # installs it for real while no packet is ever evaluated against it.
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --lifecycle-self-test
