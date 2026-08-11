@@ -47,7 +47,7 @@ done
 # on to the same opaque error it was added to prevent. The protected TUN and the
 # privileged core are both visible without privileges.
 if /sbin/ifconfig utun199 >/dev/null 2>&1 ||
-   /usr/bin/pgrep -f 'tono-mihomo' >/dev/null 2>&1; then
+   /usr/bin/pgrep -x tono-mihomo >/dev/null 2>&1; then
   echo "Tono protection is running; disconnect before running this test" >&2
   echo "  (this test's core runs as you, and the armed ruleset permits the" >&2
   echo "   exit endpoint for root only, so its dials are dropped and surface" >&2

@@ -68,7 +68,9 @@ fi
 
 # Replacing the daemon under a live session would sever it, and a half-replaced
 # install is the worst state to leave a machine in.
-if /usr/bin/pgrep -f 'tono-mihomo' > /dev/null 2>&1; then
+# `-x` matches the process name; `-f` matched any command line mentioning the
+# core, including this script's own, so the guard fired on itself.
+if /usr/bin/pgrep -x tono-mihomo > /dev/null 2>&1; then
   print "a Tono core is running; disconnect before running this" >&2
   exit 1
 fi
@@ -76,7 +78,7 @@ if /sbin/ifconfig utun199 > /dev/null 2>&1; then
   print "the protected tunnel is up; disconnect before running this" >&2
   exit 1
 fi
-if /usr/bin/pgrep -f '/Applications/Tono.app/Contents/MacOS/Tono' > /dev/null 2>&1; then
+if /usr/bin/pgrep -x Tono > /dev/null 2>&1; then
   print "quit Tono first: it reinstalls the daemon on demand and would race this" >&2
   exit 1
 fi
