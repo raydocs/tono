@@ -1161,6 +1161,24 @@ nonisolated struct ConfigPipeline {
             // narrower match. Everything else still reaches `MATCH,Tono-Exit`,
             // so this changes what WeChat does, not what anything else does.
             for processPathRegex in managedDirectProcessPathRegexes {
+                // Measured over two sessions: every TCP/80 dial this bundle made
+                // on the direct path returned nothing — 0 of 5 flows carried a
+                // single byte back, across two different destinations — while
+                // TCP/443 carried 8.8 MB over 6 of 6 flows and UDP/443 carried
+                // 13 MB in the same window. The class-level fallback cannot see
+                // this: its own probe is an HTTP/80 request that answers in
+                // ~200 ms, so the group stays on direct while these specific
+                // flows hang. WeChat retries for roughly half a minute before
+                // moving on, which is the spinning users see right after
+                // connecting.
+                //
+                // The mechanism is not established — the working probe argues
+                // against a plain port block — so this is shaped by the
+                // measurement rather than by a diagnosis. Sending only TCP/80
+                // back through the tunnel restores exactly what worked before
+                // the bundle was routed direct at all, and keeps the part that
+                // is demonstrably faster.
+                yaml += "  - AND,((NETWORK,TCP),(DST-PORT,80),(PROCESS-PATH-REGEX,\(processPathRegex))),\(exitGroupName)\n"
                 yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
                 yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
             }

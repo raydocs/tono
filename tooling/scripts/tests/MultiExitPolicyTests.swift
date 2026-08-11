@@ -478,6 +478,19 @@ struct MultiExitPolicyTests {
                 with: "Tono-China-Web-Direct"
             ))
         }
+        let bundleTCP80Rule =
+            "AND,((NETWORK,TCP),(DST-PORT,80),(PROCESS-PATH-REGEX,"
+            + "^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.exitGroupName)"
+        let bundleDirectRule =
+            "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,"
+            + "^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.appDirectGroupName)"
+        let bundleTCP80PrecedesBundleDirect: Bool
+        if let a = managedDirectRuntime.range(of: bundleTCP80Rule),
+           let b = managedDirectRuntime.range(of: bundleDirectRule) {
+            bundleTCP80PrecedesBundleDirect = a.lowerBound < b.lowerBound
+        } else {
+            bundleTCP80PrecedesBundleDirect = false
+        }
         let fallbackGroupCount = managedDirectRuntime
             .components(separatedBy: "\n    type: fallback\n")
             .count - 1
@@ -578,6 +591,13 @@ struct MultiExitPolicyTests {
             ),
             ("no-name-only-identity", !managedDirectRuntime.contains("PROCESS-NAME,WeChat")),
             ("no-domain-suffix", !managedDirectRuntime.contains("DOMAIN-SUFFIX")),
+            // TCP/80 on the direct path never returned a byte across two
+            // measured sessions, so it goes to the protected exit — and it must
+            // be matched before the bundle-wide direct rule or it is dead.
+            (
+                "reviewed-bundle-tcp80-uses-exit",
+                bundleTCP80PrecedesBundleDirect
+            ),
             // The reviewed bundle routes direct as a whole: address enumeration
             // cannot follow a CDN that rotates ranges and answers no DNS.
             (
