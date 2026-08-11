@@ -425,7 +425,7 @@ struct MultiExitPolicyTests {
         let tcpDirectRule80 =
             "AND,((NETWORK,TCP),(DST-PORT,80),(IP-CIDR,49.51.67.253/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(tcpFallback80.groupName)"
         let webDirectRule =
-            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com)),Tono-China-Web-Direct"
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com)),Tono-China-Web"
         let mediaRule443 =
             "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,43.146.27.17/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),Tono-China-Direct"
         let mediaRule8000 =
@@ -475,6 +475,11 @@ struct MultiExitPolicyTests {
         let fallbackGroupCount = managedDirectRuntime
             .components(separatedBy: "\n    type: fallback\n")
             .count - 1
+        // `Tono-China-Web` is a fallback group too, so the WeChat per-port
+        // groups are no longer the whole population. Counting it explicitly
+        // keeps the per-port invariant meaningful instead of loosening it.
+        let webFallbackGroupCount = managedDirectRuntime
+            .contains("name: \"\(ConfigPipeline.webDirectGroupName)\"") ? 1 : 0
         let fallback443Block = """
           - name: "\(fallback443.groupName)"
             type: fallback
@@ -517,7 +522,10 @@ struct MultiExitPolicyTests {
             ("claude-protected-before-all-direct-rules", claudeProtectedRulesPrecedeDirect),
             ("claude-protected-never-direct", claudeProtectedRulesHaveNoDirectTarget),
             ("udp-fail-closed", managedDirectRuntime.contains("AND,((NETWORK,UDP)),REJECT")),
-            ("one-fallback-per-wechat-port", fallbackGroupCount == fallbackTargets.count),
+            (
+                "one-fallback-per-wechat-port",
+                fallbackGroupCount - webFallbackGroupCount == fallbackTargets.count
+            ),
             ("fail-closed-fallback-order", managedDirectRuntime.contains(fallback443Block)),
             (
                 "no-web-fallback-group",
@@ -537,6 +545,27 @@ struct MultiExitPolicyTests {
             ),
             ("no-name-only-identity", !managedDirectRuntime.contains("PROCESS-NAME,WeChat")),
             ("no-domain-suffix", !managedDirectRuntime.contains("DOMAIN-SUFFIX")),
+            // The reviewed bundle routes direct as a whole: address enumeration
+            // cannot follow a CDN that rotates ranges and answers no DNS.
+            (
+                "reviewed-bundle-tcp-direct",
+                managedDirectRuntime.contains(
+                    "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.directProxyName)"
+                )
+            ),
+            (
+                "reviewed-bundle-udp-direct",
+                managedDirectRuntime.contains(
+                    "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.directProxyName)"
+                )
+            ),
+            // Everything the engine does not route direct must still reach the
+            // protected exit, so a dead tunnel stays fail-closed for it.
+            (
+                "catch-all-still-protected",
+                managedDirectRuntime.contains("MATCH,\(ConfigPipeline.exitGroupName)")
+                    && !managedDirectRuntime.contains("MATCH,DIRECT")
+            ),
             // The connect-path prime was shortened for latency; the runtime
             // groups must keep the generous steady-state budget so a congested
             // but usable direct path is not flapped onto the proxy.
@@ -584,23 +613,30 @@ struct MultiExitPolicyTests {
             customNodes: sanitizedNodes,
             directPolicy: suffixOnlyPolicy
         )
-        // A suffix route has no resolved addresses, so it can never receive a PF
-        // session permit; a DOMAIN-SUFFIX rule pointing at the interface-bound
-        // direct outbound therefore sent those flows into `block drop out quick
-        // all` with no failover. Suffixes stay part of the accepted v3/v4
-        // contract but must not become routing rules: the traffic falls through
-        // to MATCH,Tono-Exit instead of being black-holed, and every direct
-        // exception in the runtime stays exact-host only.
+        // Suffix routes are rendered now that both original objections are
+        // answered: the reviewed-bundle port permit carries a dial with no
+        // exact-address PF entry, and the route targets a fallback group so an
+        // unreachable China path retreats to the tunnel instead of killing the
+        // flow. Two properties still have to hold, and they are what this
+        // guards: a suffix must never point at the bare `direct` outbound
+        // (that is the no-failover shape), and the answer behind it must come
+        // from China DoH or the "direct" hop would cross the Pacific twice.
+        let suffixRuleEdu =
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,edu.cn)),"
+            + ConfigPipeline.webDirectGroupName
         guard validatedSuffixOnlyPolicy?.sessionEndpoints.isEmpty == true,
               validatedSuffixOnlyPolicy?.webDomainSuffixes.count == 2,
-              !suffixRuntime.contains("DOMAIN-SUFFIX,edu.cn"),
-              !suffixRuntime.contains("DOMAIN-SUFFIX,baidu.com"),
-              !suffixRuntime.contains("Tono-China-Web-Direct"),
-              !suffixRuntime.contains("name: \"Tono-China-Direct\""),
+              suffixRuntime.contains(suffixRuleEdu),
+              !suffixRuntime.contains(
+                  "(DOMAIN-SUFFIX,edu.cn)),\(ConfigPipeline.webDirectProxyName)"
+              ),
+              suffixRuntime.contains("name: \"\(ConfigPipeline.webDirectGroupName)\""),
+              suffixRuntime.contains("    \"+.edu.cn\": ["),
+              suffixRuntime.contains("    \"+.baidu.com\": ["),
               suffixRuntime.contains("AND,((NETWORK,UDP)),REJECT"),
               suffixRuntime.contains("MATCH,Tono-Exit"),
               !suffixRuntime.contains("MATCH,DIRECT") else {
-            throw TestFailure("v3 suffix policy was rendered as a direct route")
+            throw TestFailure("v4 suffix policy did not render a failover-backed direct route")
         }
         let claudeProtectedSuffixRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
             subscriptionYAML: "proxies: []\n",
@@ -609,6 +645,16 @@ struct MultiExitPolicyTests {
             customNodes: sanitizedNodes,
             directPolicy: suffixOnlyPolicy
         )
+        let claudeRulesPrecedeChinaSuffix: Bool
+        if let eduRange = claudeProtectedSuffixRuntime.range(of: "DOMAIN-SUFFIX,edu.cn") {
+            claudeRulesPrecedeChinaSuffix = claudeProtectedRules.allSatisfy { rule in
+                guard let claudeRange = claudeProtectedSuffixRuntime.range(of: rule)
+                else { return false }
+                return claudeRange.lowerBound < eduRange.lowerBound
+            }
+        } else {
+            claudeRulesPrecedeChinaSuffix = false
+        }
         // The assistant rules must still precede the global UDP rejection and the
         // terminal MATCH, and must never be rewritten onto a direct target.
         guard claudeProtectedRules.allSatisfy({ rule in
@@ -619,7 +665,10 @@ struct MultiExitPolicyTests {
                   else { return false }
                   return claudeRange.lowerBound < matchRange.lowerBound
               }),
-              !claudeProtectedSuffixRuntime.contains("DOMAIN-SUFFIX,edu.cn"),
+              // The suffix route now exists, so the property worth protecting
+              // is precedence, not absence: an assistant domain must never be
+              // captured by a China suffix, and mihomo takes the first match.
+              claudeRulesPrecedeChinaSuffix,
               claudeProtectedRules.allSatisfy({ rule in
                   !claudeProtectedSuffixRuntime.contains(rule.replacingOccurrences(
                       of: "Tono-Claude-Home",

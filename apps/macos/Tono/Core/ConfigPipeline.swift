@@ -140,6 +140,19 @@ nonisolated struct ConfigPipeline {
     static let homeResidentialProxyName = "Tono-Home-Residential"
     static let directProxyName = "Tono-China-Direct"
     static let webDirectProxyName = "Tono-China-Web-Direct"
+    /// Wraps the interface-bound web direct outbound so a China path that is
+    /// unreachable from where the user actually sits degrades to the tunnel
+    /// instead of killing the flow. A bare `direct` outbound has no failover:
+    /// that is why suffix routes were withheld even after PF stopped being the
+    /// obstacle. The probe is class-level, not per destination — mihomo scores
+    /// fallback members by URL — which answers "can this machine reach China
+    /// directly at all", the question that actually distinguishes the two
+    /// members.
+    static let webDirectGroupName = "Tono-China-Web"
+    /// Reachable over plain HTTP from inside China and answers 204, so the
+    /// probe measures the direct path rather than a TLS handshake. Port 80 is
+    /// inside the reviewed-bundle permit, so the probe itself is not blocked.
+    static let chinaDirectHealthURL = "http://connect.rom.miui.com/generate_204"
     static let managedDirectFallbackGroupPrefix = "Tono-WeChat-TCP-"
     static let managedDirectHealthIntervalSeconds = 60
     /// Steady-state budget written into the runtime fallback groups. Kept
@@ -825,7 +838,11 @@ nonisolated struct ConfigPipeline {
            !directPolicy.domainPins.isEmpty
             || !directPolicy.mediaEndpoints.isEmpty
             || !directPolicy.tcpEndpoints.isEmpty
-            || !directPolicy.directResolverHosts.isEmpty {
+            || !directPolicy.directResolverHosts.isEmpty
+            // Suffix routes resolve through this outbound too, so a
+            // suffix-only policy must still define it or `nameserver-policy`
+            // would reference a proxy that does not exist.
+            || !directPolicy.webDomainSuffixes.isEmpty {
             proxyBlock += """
               - name: "\(directProxyName)"
                 type: direct
@@ -834,11 +851,12 @@ nonisolated struct ConfigPipeline {
 
             """
         }
-        // Only exact, PF-permitted web pins reference this outbound. Suffix
-        // routes are not emitted (see the rules section), so defining it for a
-        // suffix-only policy would leave an unreachable direct outbound in the
-        // runtime with nothing routed to it.
-        if let directPolicy, !directPolicy.webDomainPins.isEmpty {
+        // Referenced by both exact web pins and suffix routes now that the
+        // reviewed-bundle port permit lets a root-originated direct dial leave
+        // without an exact-address PF entry.
+        if let directPolicy,
+           !directPolicy.webDomainPins.isEmpty
+            || !directPolicy.webDomainSuffixes.isEmpty {
             proxyBlock += """
               - name: "\(webDirectProxyName)"
                 type: direct
@@ -896,7 +914,9 @@ nonisolated struct ConfigPipeline {
             yaml += "\n"
         }
         yaml += tonoDNS + "\n"
-        if let directPolicy, !directPolicy.directResolverHosts.isEmpty {
+        if let directPolicy,
+           !directPolicy.directResolverHosts.isEmpty
+            || !directPolicy.webDomainSuffixes.isEmpty {
             // Managed-direct hostnames resolve via China DoH through the
             // interface-bound direct outbound so /dns/query returns
             // region-correct answers for pinning. Client-facing answers for
@@ -905,7 +925,19 @@ nonisolated struct ConfigPipeline {
                 .map { "\"\($0)#\(directProxyName)\"" }
                 .joined(separator: ", ")
             yaml += "  nameserver-policy:\n"
-            for host in directPolicy.directResolverHosts.sorted() {
+            var policyKeys: [String] = directPolicy.directResolverHosts
+            // A suffix route is only as good as the answer behind it. Resolved
+            // through the exit, a China CDN hands back the node nearest the
+            // exit, so the "direct" hop would then cross the Pacific twice.
+            // These wildcards keep the whole matched subtree resolving through
+            // China DoH over the interface-bound direct outbound, which is the
+            // same mechanism that kept pinned answers region-correct — and it
+            // never needed the pin to work.
+            for suffix in directPolicy.webDomainSuffixes {
+                policyKeys.append(suffix.host)
+                policyKeys.append("+.\(suffix.host)")
+            }
+            for host in Set(policyKeys).sorted() {
                 yaml += "    \"\(yamlScalar(host))\": [\(upstreams)]\n"
             }
         }
@@ -984,6 +1016,22 @@ nonisolated struct ConfigPipeline {
 
             """
         }
+        if let directPolicy,
+           !directPolicy.webDomainPins.isEmpty
+            || !directPolicy.webDomainSuffixes.isEmpty {
+            yaml += """
+              - name: "\(webDirectGroupName)"
+                type: fallback
+                proxies:
+                  - "\(webDirectProxyName)"
+                  - "\(exitGroupName)"
+                url: "\(chinaDirectHealthURL)"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+
+            """
+        }
         // Each exact WeChat host/port gets an independent DIRECT → protected
         // exit decision. REJECT is deliberately first: Mihomo fallback groups
         // choose their first member before the initial health result and when
@@ -1047,6 +1095,20 @@ nonisolated struct ConfigPipeline {
             yaml += "  - PROCESS-NAME,tailscale,DIRECT\n"
         }
         if let directPolicy {
+            // WeChat resolves its message channel through its own HTTPDNS and
+            // dials raw addresses, so the pinned DOMAIN rules below can only
+            // ever match its CDN traffic: 84% of observed dials carried no
+            // hostname at all, across six different /16 ranges that Tencent
+            // rotates. Enumerating addresses cannot converge on that, and every
+            // attempt to keep the enumeration fresh reloads the runtime and
+            // severs unrelated long-lived connections. Route the whole reviewed
+            // bundle direct instead and let the pins below stay as a redundant
+            // narrower match. Everything else still reaches `MATCH,Tono-Exit`,
+            // so this changes what WeChat does, not what anything else does.
+            for processPathRegex in managedDirectProcessPathRegexes {
+                yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(directProxyName)\n"
+                yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(directProxyName)\n"
+            }
             for processPathRegex in managedDirectProcessPathRegexes {
                 for pin in directPolicy.domainPins {
                     for port in pin.ports {
@@ -1095,34 +1157,38 @@ nonisolated struct ConfigPipeline {
             // Claude's own process-name rules above still win first.
             for pin in directPolicy.webDomainPins {
                 for port in pin.ports {
-                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host))),\(webDirectProxyName)\n"
+                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host))),\(webDirectGroupName)\n"
                 }
             }
-            // Traffic-policy v3 `directSuffixes` are deliberately NOT rendered
-            // as routing rules. A suffix route carries no resolved addresses,
-            // so it produces no `sessionEndpoints` and therefore no PF permit
-            // (see `sessionEndpoints` above and the helper's session-endpoint
-            // contract). PF's `block drop out quick all` then discards every
-            // dial the suffix rule sent to the interface-bound direct outbound,
-            // and a bare `direct` outbound has no failover: the flow dies
-            // instead of taking the tunnel. Whether a given host survived
-            // depended on whether it happened to resolve onto an address some
-            // *other* exact pin had already permitted, which is not a routing
-            // decision anyone can reason about.
+            // Suffix routes were withheld for two reasons, and both have been
+            // answered rather than waived.
             //
-            // A fallback group cannot repair this either — mihomo scores
-            // fallback members by probe URL, not per destination — so the only
-            // way to honour a wildcard direct exception would be to permit the
-            // whole physical interface, which is exactly what this product does
-            // not do. Suffixes therefore stay accepted and revisioned by the
-            // control plane (so the v3/v4 contract is unchanged) but fall
-            // through to `MATCH,Tono-Exit`: slower than a direct hop, and
-            // reachable rather than black-holed.
+            // The first was PF: a suffix route carries no resolved addresses,
+            // so it produced no `sessionEndpoints` and no exact-address permit,
+            // and `block drop out quick all` discarded every dial it sent to
+            // the interface-bound direct outbound. That is no longer how the
+            // ruleset works. The reviewed-bundle permit passes root-originated
+            // direct dials on the ports this policy uses, which is why WeChat's
+            // HTTPDNS addresses — never pinned, never PF-listed — moved 1.6 MB,
+            // 1.3 MB and 1.1 MB directly in a single measured session.
             //
-            // This also restores the managed-direct invariant that every direct
-            // exception is exact-host only, which the DOMAIN-SUFFIX assertion in
-            // MultiExitPolicyTests exists to protect.
-            _ = directPolicy.webDomainSuffixes
+            // The second was failover: a bare `direct` outbound cannot retreat
+            // to the tunnel, so an unreachable China path killed the flow. The
+            // route now targets a fallback group, which is a class-level answer
+            // to a class-level question ("can this machine reach China at all")
+            // rather than the per-destination scoring mihomo does not offer.
+            //
+            // What this does change is the managed-direct invariant: a suffix
+            // is a wildcard exception, so every subdomain of a listed host now
+            // takes the direct path. That is the point — enumerating exact
+            // hosts is what forced the pin refresh whose config reload severed
+            // every long-lived connection — but it widens the direct surface,
+            // and `MATCH,Tono-Exit` remains the only thing behind it.
+            for suffix in directPolicy.webDomainSuffixes {
+                for port in suffix.ports {
+                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectGroupName)\n"
+                }
+            }
         }
         yaml += "  - AND,((NETWORK,UDP)),REJECT\n"
         yaml += """
@@ -1188,6 +1254,7 @@ nonisolated struct ConfigPipeline {
             homeResidentialProxyName,
             directProxyName,
             webDirectProxyName,
+            webDirectGroupName,
             "__tono_tailnet",
             // Mihomo installs these adapters before parsing user proxies. A
             // catalog collision would invalidate the entire owned runtime and
