@@ -1365,7 +1365,8 @@ final class AppState {
                         committedDirectPolicy?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     allowSystemResolution: allowSystemResolution,
-                    helperPrepared: true
+                    helperPrepared: true,
+                    reviewedBundleDirect: committedDirectPolicy != nil
                 )
                 try Task.checkCancellation()
                 self.connectionStage = .startingTunnel
@@ -1407,7 +1408,8 @@ final class AppState {
                     sessionDirectEndpoints:
                         committedDirectPolicy?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
-                    helperPrepared: true
+                    helperPrepared: true,
+                    reviewedBundleDirect: committedDirectPolicy != nil
                 )
                 try Task.checkCancellation()
                 self.connectionStage = .applyingCloudPolicy
@@ -1445,7 +1447,8 @@ final class AppState {
                             proxyEndpoints: proxyEndpoints,
                             sessionDirectEndpoints: resolvedPolicy.sessionEndpoints,
                             tailscaleBootstrapEnabled: usesHomeBootstrap,
-                            helperPrepared: true
+                            helperPrepared: true,
+                            reviewedBundleDirect: true
                         )
                         try Task.checkCancellation()
                         try await clashManager.rewriteConfig(
@@ -2286,7 +2289,8 @@ final class AppState {
                                 self.activeDirectPolicy?.sessionEndpoints ?? [],
                             tailscaleBootstrapEnabled:
                                 AppProfile.homeExitEnabled && self.tonoTransport != nil,
-                            helperPrepared: true
+                            helperPrepared: true,
+                            reviewedBundleDirect: self.activeDirectPolicy != nil
                         )
                         // Only a successful re-arm may consume the intent: a
                         // busy helper or a generation-guard rejection must
@@ -2300,12 +2304,34 @@ final class AppState {
                         )
                     }
                 }
-                // Managed-direct pins are a connect-time DNS snapshot, but
-                // Tencent CDN answers rotate on minute-scale TTLs. Without a
-                // refresh, WeChat direct flows strand on stale /32 pins that
-                // PF then black-holes. Re-resolve every five minutes and roll
-                // changed pins through the existing reload transaction.
-                if healthCycle.isMultiple(of: 30) {
+                // This refresh existed because pins were the only thing routing
+                // these hosts direct, so a rotated CDN answer stranded the flow
+                // on a stale /32. Pins are no longer that load-bearing: the
+                // reviewed bundle routes direct by process path, and the web
+                // hosts route direct by domain suffix with China DoH behind
+                // them. Neither reads a pin.
+                //
+                // What the refresh does still cost is exact and measured. It
+                // rewrites the runtime config, and `api.reloadConfig` tears
+                // down every connection in the session — timed here at 21m26s
+                // after connect, with all 20 health probes then timing out and
+                // zero targets reachable directly. That is the customer-facing
+                // "Connection closed mid-response" in AI tools and long
+                // downloads, and it recurred for as long as a session stayed
+                // up. Address churn is normal CDN behaviour; severing every
+                // long-lived connection to chase it is not a trade worth
+                // making now that nothing depends on the result.
+                //
+                // Pins therefore stay a connect-time snapshot and a redundant
+                // narrower match. A stale one costs a redundant rule, not a
+                // route: the suffix and process rules still resolve and dial
+                // the current address.
+                //
+                // A policy with no suffix routes has no such backstop, so the
+                // refresh stays available for it rather than being deleted.
+                let pinsAreLoadBearing =
+                    self.activeDirectPolicy?.webDomainSuffixes.isEmpty ?? false
+                if pinsAreLoadBearing, healthCycle.isMultiple(of: 30) {
                     await self.refreshManagedDirectPins()
                     guard !Task.isCancelled, self.isConnected else { return }
                 }
@@ -2755,7 +2781,8 @@ final class AppState {
                     proxyEndpoints: endpoints,
                     sessionDirectEndpoints:
                         activeDirectPolicy?.sessionEndpoints ?? [],
-                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil
+                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                    reviewedBundleDirect: activeDirectPolicy != nil
                 )
                 try Task.checkCancellation()
                 try await api.selectProxy(
@@ -3073,7 +3100,8 @@ final class AppState {
                     proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
                         + self.claudeHomeDialEndpoints(excluding: selectedExit),
                     sessionDirectEndpoints: sessionEndpoints,
-                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil
+                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil,
+                    reviewedBundleDirect: effectiveDirectPolicy != nil
                 )
                 try Task.checkCancellation()
                 try await clashManager.rewriteConfig(
@@ -3112,8 +3140,22 @@ final class AppState {
                         sessionDirectEndpoints:
                             pendingDirectPolicy.sessionEndpoints,
                         tailscaleBootstrapEnabled:
-                            AppProfile.homeExitEnabled && transport != nil
+                            AppProfile.homeExitEnabled && transport != nil,
+                        // The convergence arm rewrites the whole ruleset, so
+                        // omitting this drops the reviewed-bundle permit while
+                        // the rule engine still routes that bundle direct —
+                        // those packets then hit `block drop out quick all` and
+                        // the app silently black-holes until the next full arm.
+                        reviewedBundleDirect: true
                     )
+                    // Priming immediately after a reload measured 20 of 20
+                    // targets timing out and 0 reachable directly, versus 10
+                    // reachable on the same targets at connect. Those verdicts
+                    // are not noise: a fallback group with no healthy direct
+                    // member sends traffic that belongs on the direct path
+                    // through the tunnel until the next probe cycle. Wait for
+                    // the controller to answer before asking it anything.
+                    try? await api.waitUntilReady()
                     await primeManagedDirectFallbackGroups(
                         policy: pendingDirectPolicy,
                         api: api
@@ -3914,7 +3956,9 @@ final class AppState {
     /// - a host that failed to resolve keeps its last known-good pins;
     /// - hosts new to the resolved set are adopted as-is.
     /// Returns nil when nothing needs to change.
-    private static func mergedManagedDirectPolicy(
+    // Exposed to tests: pin stickiness decides how often a config reload —
+    // and with it every severed long-lived connection — happens at all.
+    static func mergedManagedDirectPolicy(
         current: ConfigPipeline.ManagedDirectRuntimePolicy,
         resolved: ConfigPipeline.ManagedDirectRuntimePolicy
     ) -> ConfigPipeline.ManagedDirectRuntimePolicy? {
@@ -3930,7 +3974,15 @@ final class AppState {
                 guard let fresh = resolvedByHost[pin.host] else { return pin }
                 let freshSet = Set(fresh.addresses)
                 let live = pin.addresses.filter { freshSet.contains($0) }
-                guard live.count < 2 else { return pin }
+                // Absence from one answer is not evidence that a committed
+                // address stopped working: these hosts are CDN names whose DNS
+                // returns a rotating slice of a large pool, so requiring two
+                // survivors rewrote most pins every cycle. That rewrite is what
+                // made `merged != base` true every few minutes, and each one
+                // costs a config reload that severs every long-lived
+                // connection. Replace a pin only when nothing it holds appears
+                // any more, which is the case that actually means stale.
+                guard live.isEmpty else { return pin }
                 var addresses = live
                 for address in fresh.addresses where !addresses.contains(address) {
                     guard addresses.count < 8 else { break }

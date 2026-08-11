@@ -349,7 +349,16 @@ final class ClashWebSocket {
             return
         }
         if let logsPingStartedAt {
-            guard now.timeIntervalSince(logsPingStartedAt) > 5 else { return }
+            // The inbound-frame clearing below rescues this only while Mihomo
+            // is emitting logs. At the levels this app actually runs, the logs
+            // stream is legitimately silent for minutes — measured at zero
+            // frames in 95 seconds — so nothing cancels the outstanding marker
+            // and Foundation's delayed sendPing completion tripped this every
+            // ping cycle: 11 stall/reconnect rounds in 8 connected minutes on a
+            // socket that was never actually broken. The deadline has to exceed
+            // the 15s ping interval, not undercut it. A genuinely dead socket
+            // is still caught within one further cycle.
+            guard now.timeIntervalSince(logsPingStartedAt) > 20 else { return }
             markStreamStalled("logs")
             task.cancel(with: .goingAway, reason: nil)
             logsTask = nil
