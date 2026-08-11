@@ -58,9 +58,13 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
     static let shared = AppRoutingResearch()
 
     static var isEnabled: Bool {
+        // This is the gate that actually starts collection; the @AppStorage
+        // default only paints the toggle. They disagreed, so a user who never
+        // touched the setting saw a switch labelled "Opt in to…" and was
+        // already opted in. Both now default off.
         AppProfile.defaults.object(
             forKey: SettingsKey.aggregatedAppRoutingResearchEnabled
-        ) as? Bool ?? true
+        ) as? Bool ?? false
     }
 
     static var isCollectionActive: Bool {

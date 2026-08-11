@@ -24,7 +24,11 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.aggregatedAppRoutingResearchEnabled,
         store: AppProfile.defaults
-    ) private var aggregatedAppRoutingResearchEnabled = true
+    // Its own row reads "Opt in to…", and every sibling collection toggle
+    // above defaults off. Shipping it on made the copy describe something the
+    // user had not done, and for a product used from China an opt-out default
+    // on any collection is the wrong side of the line to be guessing on.
+    ) private var aggregatedAppRoutingResearchEnabled = false
 
     // Proxy Engine. The field edits a local draft; only validated values are
     // committed to storage, so a half-typed "78" abandoned via focus loss can
