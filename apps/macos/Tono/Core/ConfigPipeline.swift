@@ -149,6 +149,13 @@ nonisolated struct ConfigPipeline {
     /// directly at all", the question that actually distinguishes the two
     /// members.
     static let webDirectGroupName = "Tono-China-Web"
+    /// Same failover the web routes got, for the reviewed bundle's own direct
+    /// path. Without it the bundle-wide process rule pointed at a bare `direct`
+    /// outbound, so a destination unreachable from where the user sits died
+    /// there instead of retreating to the tunnel — observed as six retries to
+    /// one address with bytes sent and nothing received, while other direct
+    /// flows in the same session moved 13 MB.
+    static let appDirectGroupName = "Tono-China-App"
     /// Reachable over plain HTTP from inside China and answers 204, so the
     /// probe measures the direct path rather than a TLS handshake. Port 80 is
     /// inside the reviewed-bundle permit, so the probe itself is not blocked.
@@ -228,6 +235,31 @@ nonisolated struct ConfigPipeline {
         "Codex",
         "codex",
         "Codex.exe",
+    ]
+    /// Basename matching misses two shapes that matter, so these are matched by
+    /// install path instead.
+    ///
+    /// Claude Code's launcher is the version directory's own file, so its
+    /// process name is a version string — `2.1.223` on this machine. No entry in
+    /// the list above could ever match it, which left every endpoint outside the
+    /// assistant suffix list leaving through the datacenter exit while the API
+    /// calls used the residential hop: one account, two networks. It was found
+    /// by noticing Claude Code's telemetry upload on the wrong path, and
+    /// chasing telemetry hostnames one at a time is the enumeration approach
+    /// that already failed for WeChat's rotating addresses.
+    ///
+    /// The desktop apps are Electron, so they spawn helpers like
+    /// `Claude Helper (Renderer)`. A bundle prefix covers the whole bundle the
+    /// way the reviewed-bundle rule does.
+    ///
+    /// Unlike the reviewed-bundle direct permit, these paths need no signature
+    /// review: the target is a protected residential hop, not the physical
+    /// interface, so a process that matched one it should not still leaves
+    /// through the tunnel and still fails closed.
+    static let assistantHomeProcessPathRegexes = [
+        "^/Users/[^/]+/\\.local/share/claude/versions/",
+        "^/Applications/Claude\\.app/",
+        "^/Applications/ChatGPT\\.app/",
     ]
     /// Exact suffixes accepted by traffic-policy v3. They are rendered only
     /// as TCP DOMAIN-SUFFIX rules; the control plane and client both reject
@@ -1016,6 +1048,20 @@ nonisolated struct ConfigPipeline {
 
             """
         }
+        if directPolicy != nil, !managedDirectProcessPathRegexes.isEmpty {
+            yaml += """
+              - name: "\(appDirectGroupName)"
+                type: fallback
+                proxies:
+                  - "\(directProxyName)"
+                  - "\(exitGroupName)"
+                url: "\(chinaDirectHealthURL)"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+
+            """
+        }
         if let directPolicy,
            !directPolicy.webDomainPins.isEmpty
             || !directPolicy.webDomainSuffixes.isEmpty {
@@ -1080,6 +1126,15 @@ nonisolated struct ConfigPipeline {
         for process in Self.assistantHomeProcessNames {
             yaml += "  - AND,((NETWORK,TCP),(PROCESS-NAME,\(process))),\(assistantTarget)\n"
         }
+        for pathRegex in Self.assistantHomeProcessPathRegexes {
+            // Commas and parentheses would break out of the AND payload.
+            precondition(
+                !pathRegex.contains(",") && !pathRegex.contains("(")
+                    && !pathRegex.contains(")"),
+                "assistant process path regex unsafe for rule emission"
+            )
+            yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(pathRegex))),\(assistantTarget)\n"
+        }
         // Domain rules exist only to divert assistant traffic onto the
         // residential hop. Without that hop they would be pure noise — MATCH
         // already sends these to the protected exit — and emitting them anyway
@@ -1106,8 +1161,8 @@ nonisolated struct ConfigPipeline {
             // narrower match. Everything else still reaches `MATCH,Tono-Exit`,
             // so this changes what WeChat does, not what anything else does.
             for processPathRegex in managedDirectProcessPathRegexes {
-                yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(directProxyName)\n"
-                yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(directProxyName)\n"
+                yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
+                yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
             }
             for processPathRegex in managedDirectProcessPathRegexes {
                 for pin in directPolicy.domainPins {
@@ -1263,6 +1318,7 @@ nonisolated struct ConfigPipeline {
             directProxyName,
             webDirectProxyName,
             webDirectGroupName,
+            appDirectGroupName,
             "__tono_tailnet",
             // Mihomo installs these adapters before parsing user proxies. A
             // catalog collision would invalidate the entire owned runtime and

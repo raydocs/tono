@@ -424,6 +424,12 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(DST-PORT,443),(IP-CIDR,43.146.27.19/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback443.groupName)"
         let tcpDirectRule80 =
             "AND,((NETWORK,TCP),(DST-PORT,80),(IP-CIDR,49.51.67.253/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(tcpFallback80.groupName)"
+        // Claude Code's launcher is named after its version, so the basename
+        // rules can never match it. These assert the path rules exist, target
+        // the residential hop, and are never rewritten onto a direct target.
+        let assistantPathRules = ConfigPipeline.assistantHomeProcessPathRegexes.map {
+            "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\($0))),\(ConfigPipeline.claudeHomeGroupName)"
+        }
         let webDirectRule =
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com)),Tono-China-Web"
         let mediaRule443 =
@@ -455,7 +461,7 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
-        ]
+        ] + assistantPathRules
         let claudeProtectedRulesPrecedeDirect = claudeProtectedRules.allSatisfy { rule in
             guard let claudeRange = claudeProtectedRuntime.range(of: rule),
                   let directRange = claudeProtectedRuntime.range(of: directRule443) else {
@@ -480,6 +486,30 @@ struct MultiExitPolicyTests {
         // keeps the per-port invariant meaningful instead of loosening it.
         let webFallbackGroupCount = managedDirectRuntime
             .contains("name: \"\(ConfigPipeline.webDirectGroupName)\"") ? 1 : 0
+        // The reviewed bundle's own route is a fallback group too now, so a
+        // bare `direct` outbound can no longer strand a flow it cannot reach.
+        let appFallbackGroupCount = managedDirectRuntime
+            .contains("name: \"\(ConfigPipeline.appDirectGroupName)\"") ? 1 : 0
+        // Scoped to this group's own block. A bare `contains` of the two member
+        // lines passed while the group had no exit member at all, because the
+        // WeChat per-port groups list the same pair — an assertion that cannot
+        // fail for the reason it was written.
+        let appDirectFallsBackToExit: Bool
+        if let header = managedDirectRuntime.range(
+            of: "- name: \"\(ConfigPipeline.appDirectGroupName)\"\n"
+        ) {
+            let block = managedDirectRuntime[header.upperBound...]
+                .prefix(while: { $0 != "-" || true })
+                .prefix(300)
+            let end = block.range(of: "\n  - name:")?.lowerBound ?? block.endIndex
+            let body = block[..<end]
+            appDirectFallsBackToExit =
+                body.contains("- \"\(ConfigPipeline.directProxyName)\"")
+                && body.contains("- \"\(ConfigPipeline.exitGroupName)\"")
+                && body.contains("type: fallback")
+        } else {
+            appDirectFallsBackToExit = false
+        }
         let fallback443Block = """
           - name: "\(fallback443.groupName)"
             type: fallback
@@ -522,9 +552,12 @@ struct MultiExitPolicyTests {
             ("claude-protected-before-all-direct-rules", claudeProtectedRulesPrecedeDirect),
             ("claude-protected-never-direct", claudeProtectedRulesHaveNoDirectTarget),
             ("udp-fail-closed", managedDirectRuntime.contains("AND,((NETWORK,UDP)),REJECT")),
+            ("app-direct-group-exists", appFallbackGroupCount == 1),
+            ("app-direct-falls-back-to-exit", appDirectFallsBackToExit),
             (
                 "one-fallback-per-wechat-port",
-                fallbackGroupCount - webFallbackGroupCount == fallbackTargets.count
+                fallbackGroupCount - webFallbackGroupCount - appFallbackGroupCount
+                    == fallbackTargets.count
             ),
             ("fail-closed-fallback-order", managedDirectRuntime.contains(fallback443Block)),
             (
@@ -550,13 +583,13 @@ struct MultiExitPolicyTests {
             (
                 "reviewed-bundle-tcp-direct",
                 managedDirectRuntime.contains(
-                    "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.directProxyName)"
+                    "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.appDirectGroupName)"
                 )
             ),
             (
                 "reviewed-bundle-udp-direct",
                 managedDirectRuntime.contains(
-                    "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.directProxyName)"
+                    "AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,^\\/Applications\\/WeChat\\.app\\/)),\(ConfigPipeline.appDirectGroupName)"
                 )
             ),
             // Everything the engine does not route direct must still reach the
