@@ -85,6 +85,18 @@ nonisolated enum KillSwitchService {
             guard status.armed, status.wanted, status.live else {
                 throw Error.commandFailed("The PF rules did not become active.")
             }
+            if status.flushedStates {
+                // Recorded because it is the loudest thing that can happen to a
+                // live session and it used to be invisible: withdrawing a pass
+                // rule flushes every PF state on the machine, so every
+                // established connection dies at once. The only prior symptom
+                // was probes timing out afterwards, which reads the same as a
+                // restarted core or a dead exit. One line now says which.
+                LocalTrafficAudit.shared.recordEvent(
+                    "killswitch_arm_flushed_states",
+                    details: ["reviewed_bundle_direct": String(reviewedBundleDirect)]
+                )
+            }
             isArmed = true
         } catch HelperIPCError.forbidden {
             throw Error.helperRejected

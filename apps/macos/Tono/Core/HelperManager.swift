@@ -29,6 +29,7 @@ nonisolated struct HelperManager {
         let wantArmed: Bool?
         let live: Bool?
         let healed: Bool?
+        let flushedStates: Bool?
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
@@ -516,7 +517,7 @@ nonisolated struct HelperManager {
         // No default: an omitted value silently revokes the permit while the
         // rule engine still routes that bundle direct.
         reviewedBundleDirect: Bool
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) {
+    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool) {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         if let apiHosts { object["apiHosts"] = apiHosts }
@@ -564,7 +565,11 @@ nonisolated struct HelperManager {
         armed: Bool, wanted: Bool, live: Bool, healed: Bool
     ) {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
-        return try requireKillSwitchSuccess(result, operation: "status")
+        let reply = try requireKillSwitchSuccess(result, operation: "status")
+        // A status query loads nothing, so it can never have flushed anything;
+        // dropping the field here keeps callers from reading a stale "no" as a
+        // statement about the last arm.
+        return (reply.armed, reply.wanted, reply.live, reply.healed)
     }
 
     /// Whether any daemon answered the socket at all, regardless of the reply's
@@ -705,16 +710,21 @@ nonisolated struct HelperManager {
     private static func requireKillSwitchSuccess(
         _ result: (status: Int, body: Data),
         operation: String
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) {
+    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool) {
         let envelope = try requireSuccess(result, operation: operation)
         guard let armed = envelope.armed,
               let wanted = envelope.wantArmed,
               let live = envelope.live else {
             throw HelperIPCError.invalidResponse
         }
-        // Pre-3.5.0 daemons do not report heals; treating their status as
-        // unhealed preserves the old behavior.
-        return (armed, wanted, live, envelope.healed ?? false)
+        // Pre-3.5.0 daemons do not report heals, and pre-3.9.0 daemons do not
+        // report whether they flushed PF states. Absent means "did not", which
+        // preserves old behaviour and, for the flush, errs toward not claiming an
+        // event that may not have happened.
+        return (
+            armed, wanted, live, envelope.healed ?? false,
+            envelope.flushedStates ?? false
+        )
     }
 
     private static func verifyEmbeddedExecutable(

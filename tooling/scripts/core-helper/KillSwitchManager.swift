@@ -274,7 +274,9 @@ final class KillSwitchManager {
         try Self.ensureAnchorLoaded(flushStates: revokesAccess)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
-        return response(armed: true, wanted: true, live: true)
+        return response(
+            armed: true, wanted: true, live: true, flushedStates: revokesAccess
+        )
     }
 
     private static func passRules(in rules: String) -> Set<String> {
@@ -402,7 +404,8 @@ final class KillSwitchManager {
         armed: Bool,
         wanted: Bool,
         live: Bool,
-        healed: Bool = false
+        healed: Bool = false,
+        flushedStates: Bool = false
     ) -> [String: Any] {
         [
             "ok": true,
@@ -410,6 +413,15 @@ final class KillSwitchManager {
             "wantArmed": wanted,
             "live": live,
             "healed": healed,
+            // Whether this call severed every established connection on the
+            // machine. The daemon has always known — a re-arm flushes states
+            // when it withdraws a pass rule the previous ruleset had — and never
+            // said so, which cost a day: the only visible symptom was health
+            // probes timing out afterwards, and that reads equally well as a
+            // restarted core, a dead exit, or a network change. Reporting the
+            // one bit that distinguishes them turns that investigation into a
+            // log line.
+            "flushedStates": flushedStates,
             "version": helperVersion,
         ]
     }
@@ -1934,7 +1946,50 @@ final class KillSwitchManager {
             !firstArmPassRules.isSubset(of: droppedPermitPassRules)
         )
 
-        // 5. Emergency reset leaves loopback and the catch-all, nothing else.
+        // 5. The predicate behind the reported flush bit. Note the limit: this
+        //    covers whether a withdrawal is *detected* as one, not whether the
+        //    bit `arm` returns is wired to that detection. Both read the same
+        //    local, so they can only diverge if someone edits one of them, but
+        //    proving the wiring needs a real arm — the install-and-start
+        //    integration coverage that does not exist yet.
+        check(
+            "flush-reported-when-a-pass-rule-is-withdrawn",
+            !firstArmPassRules.isSubset(of: droppedPermitPassRules)
+        )
+        check(
+            "no-flush-reported-when-nothing-is-withdrawn",
+            firstArmPassRules.isSubset(of: convergedPassRules)
+        )
+        // Widening must not count as a withdrawal, or every added endpoint would
+        // sever the session it was added for.
+        let widened = passRules(
+            in: renderRules(
+                state: KillSwitchState(
+                    armed: true,
+                    tailscaleBootstrapEnabled: false,
+                    apiHosts: [],
+                    exitHints: [],
+                    tunnelInterfaces: ["utun199"],
+                    resolvedHosts: [
+                        "api.example.com": ["1.1.1.1"],
+                        "extra.example.com": ["9.9.9.9"],
+                    ],
+                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    derpEndpoints: [],
+                    cachedDERPEndpoints: [],
+                    proxyTargets: [
+                        .init(host: "8.8.4.4", transport: "tcp", port: 443,
+                              addresses: ["8.8.4.4"]),
+                    ],
+                    sessionDirectEndpoints: [],
+                    reviewedBundleDirectEnabled: true
+                ),
+                allowedUID: 501
+            )
+        )
+        check("widening-is-not-a-withdrawal", firstArmPassRules.isSubset(of: widened))
+
+        // 6. Emergency reset leaves loopback and the catch-all, nothing else.
         let emergency = emergencyState(preserving: state(reviewedBundleDirect: true))
         guard let emergencyShown = load(renderRules(state: emergency, allowedUID: 501)) else {
             FileHandle.standardError.write(Data("lifecycle: emergency ruleset failed to load\n".utf8))

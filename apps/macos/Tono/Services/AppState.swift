@@ -1424,8 +1424,15 @@ final class AppState {
                     try Task.checkCancellation()
                     // Surface partial or total resolution failure instead of
                     // letting the stage report success with zero direct pins.
-                    let expectedDomains = trafficPolicy.domains.count
-                        + trafficPolicy.webDomains.count
+                    //
+                    // Counts only what is actually attempted. The reviewed
+                    // bundle's own hosts are no longer resolved — its rule
+                    // matches by process path — so including them reported
+                    // "expected 38, resolved 26" for a run that tried 27 and got
+                    // 26. An instrument that overstates the denominator invents a
+                    // failure, and during this session that one sent the
+                    // investigation looking for eleven missing answers.
+                    let expectedDomains = trafficPolicy.webDomains.count
                     let resolvedDomains = (resolvedPolicy?.domainPins.count ?? 0)
                         + (resolvedPolicy?.webDomainPins.count ?? 0)
                     if resolvedDomains < expectedDomains {
