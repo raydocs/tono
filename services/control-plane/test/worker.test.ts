@@ -1503,6 +1503,62 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await login.json() as any).enrollment.authKey).toMatch(/^tskey-mock-/);
   });
 
+  it('serves an exit identity roster that excludes accounts an exit must drop', async () => {
+    const yaml = `proxies:
+  - name: "Metered"
+    type: vless
+    server: 8.8.4.4
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    // A roster entry only exists once an account has been issued an identity,
+    // which happens on its first catalog fetch.
+    const active = await createAccount('roster-active');
+    const capped = await createAccount('roster-capped');
+    for (const account of [active, capped]) {
+      expect((await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      })).status).toBe(200);
+    }
+
+    expect((await api('home/exit-identities')).status).toBe(401);
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect(listed.status).toBe(200);
+    const roster = await listed.json() as any;
+    expect(typeof roster.observedAt).toBe('number');
+    const identities = roster.identities as Array<{ userId: string; clientUUID: string }>;
+    expect(identities.map((entry) => entry.userId).sort())
+      .toEqual([active.user.id, capped.user.id].sort());
+    // Two accounts, two identities: a roster that repeated one would put both on
+    // the same counter and make usage unattributable again.
+    expect(new Set(identities.map((entry) => entry.clientUUID)).size).toBe(2);
+
+    // Passing the quota removes the account from the roster, because removal is
+    // what stops traffic — an enforcement that only stops counting stops nothing.
+    await env.DB.prepare(
+      'UPDATE users SET quota_bytes = 100, usage_bytes = 100 WHERE id = ?',
+    ).bind(capped.user.id).run();
+    const afterQuota = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect((await afterQuota.json() as any).identities.map((e: any) => e.userId))
+      .toEqual([active.user.id]);
+
+    // So does being disabled.
+    await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?")
+      .bind(active.user.id).run();
+    const afterSuspend = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect((await afterSuspend.json() as any).identities).toEqual([]);
+  });
+
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {
     const account = await createAccount('quota');
     resetMockInventory(account.device.id, account.enrollment.hostname);

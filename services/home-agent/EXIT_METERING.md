@@ -28,11 +28,48 @@ A catalog published before this change carries literals and is still served
 unchanged. That is deliberate: refusing it would take every existing client
 offline the moment it deploys. Re-publish with the placeholder to drain it.
 
+## The agent
+
+`services/exit-agent/reconcile_and_report.py` does both jobs on one timer. It
+pulls, so an exit needs no inbound path and the control plane holds no per-exit
+credential — and a Worker could not reach a private management API anyway.
+
+    TONO_API_BASE=https://api.afk.ccwu.cc \
+    TONO_HOME_AGENT_TOKEN=… \
+    TONO_XRAY_BINARY=/opt/tono-xray/current/xray \
+    TONO_XRAY_API_ADDRESS=127.0.0.1:10085 \
+    TONO_XRAY_INBOUND_TAG=tono-vless \
+    TONO_AGENT_STATE=/var/lib/tono-exit-agent/state.json \
+      ./reconcile_and_report.py
+
+It asks the binary which `api` subcommands it has rather than assuming: the names
+differ between versions, and a wrong guess fails by doing nothing, which is
+indistinguishable from a working meter reporting zero. When it cannot find what it
+needs it prints what the binary does offer and exits non-zero.
+
+`test_reconcile_and_report.py` covers the arithmetic, because an error there costs
+money in both directions and looks plausible either way. Each case was checked to
+fail when the fold is broken: billing the reading instead of the delta charges
+twice, and treating a restart as a decrease forgives everything used before it.
+
 ## What the exits need
 
 Two things, neither of which the control plane can do from where it runs.
 
-### 1. Accept the issued identities
+### 1. Expose the management API and per-account counters
+
+The stack the node script installs today has neither: a single client with no
+label, and no `api`/`stats`/`policy` sections. Counters are keyed by the account
+label, so a client without one cannot be attributed — that is the whole reason
+usage has never been recorded.
+
+The inbound needs a client list rather than one client, `stats` enabled, per-user
+uplink/downlink counters switched on in `policy`, and an `api` inbound bound to
+localhost carrying `HandlerService` and `StatsService`, reachable at
+`TONO_XRAY_API_ADDRESS`. Localhost only: that interface can add and remove
+accounts.
+
+### 2. Accept the issued identities
 
 Each exit's inbound needs a client list rather than a single client, with the
 account's identity as the client id and something stable as its label — the label
@@ -47,10 +84,10 @@ restarting an exit to add an account would drop every live session on it.
 **Removal is the enforcement path.** Quota enforcement that only stops counting
 does not stop traffic; withdrawing the identity does.
 
-### 2. Report counters
+### 3. Report counters
 
-`services/home-agent/report_example.py` is the shape to follow, and its contract
-is already the right one — do not invent a second one:
+The agent implements this; the contract below is what it obeys, and it is the same
+one `report_example.py` already obeys — there is deliberately only one:
 
 - `POST /api/v1/home/usage` with `HOME_AGENT_TOKEN`.
 - Reports are `{reportId, userId, totalBytes, observedAt}`, batched, at most 500

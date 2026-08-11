@@ -3525,6 +3525,38 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     });
   }
 
+  // The list an exit reconciles its client roster against. Pull rather than push:
+  // an exit reaching out needs no inbound path and no per-exit credential held by
+  // the control plane, and a Worker cannot reach a private management API anyway.
+  //
+  // The list *is* the enforcement. It excludes accounts that are not active, have
+  // expired, or have passed their quota, so an exit that reconciles removes them —
+  // and removal is what stops traffic. Enforcement that only stops counting does
+  // not stop anything.
+  if (p === '/api/v1/home/exit-identities' && m === 'GET') {
+    await privileged(req, e.HOME_AGENT_TOKEN);
+    const t = now();
+    const rows = await e.DB.prepare(
+      `SELECT exit_credentials.user_id AS user_id, exit_credentials.client_uuid AS client_uuid
+         FROM exit_credentials
+         JOIN users ON users.id = exit_credentials.user_id
+        WHERE users.status = 'active'
+          AND (users.expires_at IS NULL OR users.expires_at > ?)
+          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
+        ORDER BY exit_credentials.user_id`,
+    ).bind(t).all<Row>();
+    return Response.json({
+      // Echoed so a reconciling agent can tell a stale response from an empty
+      // roster: applying an empty list as if it were current would disconnect
+      // every account at once.
+      observedAt: t,
+      identities: rows.results.map((row) => ({
+        userId: String(row.user_id),
+        clientUUID: String(row.client_uuid),
+      })),
+    });
+  }
+
   if (p === '/api/v1/home/usage' && m === 'POST') {
     await privileged(req, e.HOME_AGENT_TOKEN);
     const b = await body(req, 512 * 1024);
