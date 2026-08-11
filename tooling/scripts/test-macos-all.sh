@@ -66,6 +66,16 @@ else
   skip "helper staging refusal matrix" "needs root; re-run with sudo"
 fi
 
+# Installs a launchd daemon and puts the previous one back, so it is opt-in by
+# path rather than by flag: it needs a signed bundle that only a release produces.
+if [[ $EUID -eq 0 && -n ${TONO_TEST_SIGNED_APP:-} ]]; then
+  run "helper install lifecycle" \
+    tooling/scripts/test-helper-install-lifecycle.sh --app "$TONO_TEST_SIGNED_APP"
+else
+  skip "helper install lifecycle" \
+    "needs root and TONO_TEST_SIGNED_APP set to a Developer ID signed bundle"
+fi
+
 # Needs a real runtime with credentials, and refuses while protection is armed.
 if [[ -n ${TONO_TEST_RUNTIME_YAML:-} ]]; then
   run "isolated data plane" \

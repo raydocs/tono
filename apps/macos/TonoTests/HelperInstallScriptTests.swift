@@ -152,4 +152,32 @@ final class HelperInstallScriptTests: XCTestCase {
         )
         XCTAssertTrue(text.contains("\\'") || text.contains("'\\''"))
     }
+
+    /// Emits the production script so the lifecycle test can execute the real
+    /// thing instead of a copy of it. A copy would drift from what root runs,
+    /// and drift is the whole failure mode being guarded against here.
+    ///
+    /// Reachable only when the lifecycle test asks for it, so a normal test run
+    /// writes nothing. `installScript` is pure — the plist it embeds contains no
+    /// runtime lookups — so what lands in the file is byte-for-byte what the
+    /// installed app would run.
+    func testEmitInstallScriptWhenRequested() throws {
+        guard let destination = ProcessInfo.processInfo
+            .environment["TONO_EMIT_INSTALL_SCRIPT"] else {
+            throw XCTSkip("set TONO_EMIT_INSTALL_SCRIPT to a path to emit the script")
+        }
+        let app = ProcessInfo.processInfo.environment["TONO_EMIT_INSTALL_APP"]
+            ?? "/Applications/Tono.app"
+        let uidText = ProcessInfo.processInfo.environment["TONO_EMIT_INSTALL_UID"] ?? "501"
+        guard let uid = uid_t(uidText), uid > 0 else {
+            return XCTFail("TONO_EMIT_INSTALL_UID must be a non-root uid")
+        }
+        let text = HelperManager.installScript(
+            helperSource: "\(app)/Contents/Resources/liquidclash-helper",
+            mihomoSource: "\(app)/Contents/Resources/mihomo",
+            uid: uid
+        )
+        try text.write(toFile: destination, atomically: true, encoding: .utf8)
+        XCTAssertTrue(text.hasPrefix("set -e"))
+    }
 }
