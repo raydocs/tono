@@ -41,6 +41,65 @@ nonisolated struct HelperManager {
 
     /// Installs or upgrades the daemon. The old unauthenticated `/tmp` helper is
     /// never considered current, even if it happens to answer `/version`.
+    /// The privileged install, as a value. It runs as root through
+    /// `osascript`, and until it was extracted here nothing tested any of it —
+    /// including the Developer ID requirement that is the only thing standing
+    /// between this daemon and an arbitrary binary. Build 42 shipped with the
+    /// helper's code-signing identifier derived from its filename instead of
+    /// its bundle id, which made every repair on every machine fail, and no
+    /// check anywhere noticed.
+    ///
+    /// Pure so it can be asserted on without installing anything. What the
+    /// string says is what root will run.
+    static func installScript(
+        helperSource: String,
+        mihomoSource: String,
+        uid: uid_t
+    ) -> String {
+        let helperSrc = helperSource.shellEscaped
+        let mihomoSrc = mihomoSource.shellEscaped
+        let plistB64 = Data(launchdPlistContents().utf8).base64EncodedString()
+        let helperTemporaryPath = "\(helperInstallPath).new"
+        let mihomoTemporaryPath = "\(mihomoInstallPath).new"
+        let plistTemporaryPath = "\(plistInstallPath).new"
+        let uidTempPath = "\(allowedUIDPath).new.\(uid)"
+        return """
+        set -e
+        /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+        /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
+        /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
+        /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' '\(helperTemporaryPath)'
+        /usr/bin/install -o root -g wheel -m 0755 \(mihomoSrc) '\(mihomoTemporaryPath)'
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "mihomo" and certificate leaf[subject.OU] = "YY57758GS7"' '\(mihomoTemporaryPath)'
+        /usr/bin/printf '%s' '\(plistB64)' | /usr/bin/base64 -D > '\(plistTemporaryPath)'
+        /usr/sbin/chown root:wheel '\(plistTemporaryPath)'
+        /bin/chmod 0644 '\(plistTemporaryPath)'
+        /usr/bin/plutil -lint '\(plistTemporaryPath)' >/dev/null
+        /usr/bin/printf '%u\\n' \(uid) > '\(uidTempPath)'
+        /usr/sbin/chown root:wheel '\(uidTempPath)'
+        /bin/chmod 0600 '\(uidTempPath)'
+        /bin/launchctl bootout system/liquidclash.helper >/dev/null 2>&1 || true
+        /bin/rm -f /Library/LaunchDaemons/liquidclash.helper.plist
+        /bin/rm -f /Library/PrivilegedHelperTools/liquidclash-helper
+        /bin/rm -f /Library/PrivilegedHelperTools/mihomo
+        /bin/rm -f /tmp/liquidclash/service.sock
+        /bin/launchctl bootout system/com.raydocs.tono.killswitch >/dev/null 2>&1 || true
+        /bin/rm -f /Library/LaunchDaemons/com.raydocs.tono.killswitch.plist
+        /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
+        /bin/rm -f /var/run/tono-killswitch.sock
+        /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
+        /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
+        /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
+        /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
+        /bin/mv -f '\(uidTempPath)' '\(allowedUIDPath)'
+        # launchd can return EIO while replacing a daemon even though it has
+        # accepted and started the new job. Treat bootstrap as a request; the
+        # authenticated /version poll below is the authoritative result.
+        /bin/launchctl bootstrap system '\(plistInstallPath)' || true
+        """
+    }
+
     static func installIfNeeded() throws {
         let preparationStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
@@ -183,48 +242,11 @@ nonisolated struct HelperManager {
             throw HelperInstallError.installFailed("Refusing to bind the helper to root.")
         }
 
-        let helperSrc = helperSource.path.shellEscaped
-        let mihomoSrc = mihomoSource.path.shellEscaped
-        let plistB64 = Data(launchdPlistContents().utf8).base64EncodedString()
-        let helperTemporaryPath = "\(helperInstallPath).new"
-        let mihomoTemporaryPath = "\(mihomoInstallPath).new"
-        let plistTemporaryPath = "\(plistInstallPath).new"
-        let uidTempPath = "\(allowedUIDPath).new.\(uid)"
-        let script = """
-        set -e
-        /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
-        /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
-        /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
-        /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
-        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' '\(helperTemporaryPath)'
-        /usr/bin/install -o root -g wheel -m 0755 \(mihomoSrc) '\(mihomoTemporaryPath)'
-        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "mihomo" and certificate leaf[subject.OU] = "YY57758GS7"' '\(mihomoTemporaryPath)'
-        /usr/bin/printf '%s' '\(plistB64)' | /usr/bin/base64 -D > '\(plistTemporaryPath)'
-        /usr/sbin/chown root:wheel '\(plistTemporaryPath)'
-        /bin/chmod 0644 '\(plistTemporaryPath)'
-        /usr/bin/plutil -lint '\(plistTemporaryPath)' >/dev/null
-        /usr/bin/printf '%u\\n' \(uid) > '\(uidTempPath)'
-        /usr/sbin/chown root:wheel '\(uidTempPath)'
-        /bin/chmod 0600 '\(uidTempPath)'
-        /bin/launchctl bootout system/liquidclash.helper >/dev/null 2>&1 || true
-        /bin/rm -f /Library/LaunchDaemons/liquidclash.helper.plist
-        /bin/rm -f /Library/PrivilegedHelperTools/liquidclash-helper
-        /bin/rm -f /Library/PrivilegedHelperTools/mihomo
-        /bin/rm -f /tmp/liquidclash/service.sock
-        /bin/launchctl bootout system/com.raydocs.tono.killswitch >/dev/null 2>&1 || true
-        /bin/rm -f /Library/LaunchDaemons/com.raydocs.tono.killswitch.plist
-        /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
-        /bin/rm -f /var/run/tono-killswitch.sock
-        /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
-        /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
-        /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
-        /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
-        /bin/mv -f '\(uidTempPath)' '\(allowedUIDPath)'
-        # launchd can return EIO while replacing a daemon even though it has
-        # accepted and started the new job. Treat bootstrap as a request; the
-        # authenticated /version poll below is the authoritative result.
-        /bin/launchctl bootstrap system '\(plistInstallPath)' || true
-        """
+        let script = installScript(
+            helperSource: helperSource.path,
+            mihomoSource: mihomoSource.path,
+            uid: uid
+        )
 
         let prompt = "Tono needs to install its signed network helper."
         let appleScript = "do shell script \"\(script.appleScriptEscaped)\" with administrator privileges with prompt \"\(prompt.appleScriptEscaped)\""
