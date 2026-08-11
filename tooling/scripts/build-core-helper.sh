@@ -23,12 +23,19 @@ if [ -z "$helper_version" ]; then
   echo "build-core-helper: cannot read HelperProtocolVersion.current" >&2
   exit 1
 fi
+# Whole-line comments and blank lines are stripped before hashing. Without that,
+# editing a doc comment forced a protocol bump, and a bump forces an
+# administrator prompt on every existing install — a real cost for a change no
+# daemon can observe. Only lines whose first non-blank characters are `//` are
+# removed, so nothing inside code or a string literal (`http://…`) is touched,
+# and a trailing comment still counts as a change.
 helper_sources_hash=$(cat \
   "$source_file" \
   "$kill_switch_source" \
   "$protected_dns_source" \
   "$peer_authorization_source" \
-  "$protocol_version_source" | shasum -a 256 | cut -d' ' -f1)
+  "$protocol_version_source" \
+  | sed -E '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' | shasum -a 256 | cut -d' ' -f1)
 if [ -f "$contract_file" ]; then
   recorded_version=$(cut -d' ' -f1 "$contract_file")
   recorded_hash=$(cut -d' ' -f2 "$contract_file")

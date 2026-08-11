@@ -2329,6 +2329,9 @@ final class AppState {
                 //
                 // A policy with no suffix routes has no such backstop, so the
                 // refresh stays available for it rather than being deleted.
+                // The same predicate the decision uses, so the schedule and the
+                // decision cannot drift apart into a refresh that is scheduled
+                // and then always declined, or worse the reverse.
                 let pinsAreLoadBearing =
                     self.activeDirectPolicy?.webDomainSuffixes.isEmpty ?? false
                 if pinsAreLoadBearing, healthCycle.isMultiple(of: 30) {
@@ -3911,38 +3914,48 @@ final class AppState {
                 excluding: managedDirectProtectedAddresses()
             )
             guard let validated, validated != base else { return }
-            guard managedDirectRouteRecentlyUsed else {
-                // Reset here too, or an idle stretch leaves the counter parked
-                // at the cap and the first refresh after the route wakes up
-                // skips its deferral and reloads straight through a stream.
-                pinRefreshDeferralCount = 0
+            // The branch structure lives in ManagedDirectRefreshPolicy so it can
+            // be exercised without a connected session; this call site only
+            // gathers the inputs and carries out the verdict.
+            let decision = ManagedDirectRefreshPolicy.decide(
+                .init(
+                    pinsAreLoadBearing: base.webDomainSuffixes.isEmpty,
+                    routeUsedRecently: managedDirectRouteRecentlyUsed,
+                    hasInFlightProxiedStream: hasInFlightProxiedStream,
+                    deferralsSoFar: pinRefreshDeferralCount,
+                    maximumDeferrals: Self.pinRefreshMaximumDeferrals
+                )
+            )
+            pinRefreshDeferralCount = ManagedDirectRefreshPolicy
+                .deferralCount(after: decision)
+            switch decision {
+            case .skipPinsNotLoadBearing:
+                return
+            case .skipRouteIdle:
                 LocalTrafficAudit.shared.recordEvent(
                     "managed_direct_pins_refresh_skipped_idle",
                     details: ["idle_window_s": String(Int(Self.managedDirectIdleWindowSeconds))]
                 )
                 return
-            }
-            if hasInFlightProxiedStream,
-               pinRefreshDeferralCount < Self.pinRefreshMaximumDeferrals {
-                pinRefreshDeferralCount += 1
+            case .deferForInFlightStream(let deferral):
                 LocalTrafficAudit.shared.recordEvent(
                     "managed_direct_pins_refresh_deferred",
                     details: [
                         "reason": "in_flight_proxied_stream",
-                        "deferral": String(pinRefreshDeferralCount),
+                        "deferral": String(deferral),
                         "limit": String(Self.pinRefreshMaximumDeferrals),
                     ]
                 )
                 return
+            case .apply(let forcedAfterDeferrals):
+                if forcedAfterDeferrals > 0 {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_pins_refresh_forced",
+                        details: ["deferrals": String(forcedAfterDeferrals)]
+                    )
+                }
+                reloadCoreConfig(applyingDirectPolicy: validated)
             }
-            if pinRefreshDeferralCount > 0 {
-                LocalTrafficAudit.shared.recordEvent(
-                    "managed_direct_pins_refresh_forced",
-                    details: ["deferrals": String(pinRefreshDeferralCount)]
-                )
-            }
-            pinRefreshDeferralCount = 0
-            reloadCoreConfig(applyingDirectPolicy: validated)
         } catch {
             LocalTrafficAudit.shared.recordEvent(
                 "managed_direct_refresh_invalid",
