@@ -126,6 +126,210 @@ private func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
 /// Root only: it has to chown files to another user to prove ownership is
 /// actually enforced, and a check that cannot construct the failing case proves
 /// nothing about it.
+/// Start, refuse, stop — exercised against the real `CoreManager`, the installed
+/// core binary, and a real config staged through the real digest check.
+///
+/// This is the coverage Windows has as `test_start_and_stop`,
+/// `test_start_and_parse` and `test_start_permissions`, and its absence here is
+/// why every one of those behaviours was only ever confirmed by connecting and
+/// watching. It uses `Tono-Dev`, which `validateConfigDirectory` already accepts
+/// alongside `Tono` — so nothing needs a new seam, and the live configuration is
+/// never touched.
+///
+/// Root only, and it refuses if a session is running: it starts a core that
+/// binds the protected DNS port, and two of those cannot coexist.
+private func runCoreLifecycleSelfTests() -> Bool {
+    guard geteuid() == 0 else {
+        FileHandle.standardError.write(Data("""
+        core lifecycle self-test needs root: it starts the privileged core.
+          sudo <helper> --core-lifecycle-self-test
+        It stages into Tono-Dev, never the live configuration.
+
+        """.utf8))
+        return false
+    }
+    let allowedUID: uid_t
+    do {
+        allowedUID = try readAllowedUID()
+    } catch {
+        FileHandle.standardError.write(Data(
+            "core lifecycle self-test needs an installed daemon to read the trusted user from\n".utf8
+        ))
+        return false
+    }
+    guard let home = try? homeDirectory(for: allowedUID) else { return false }
+    let configDirectory = "\(home)/Library/Application Support/Tono-Dev/config"
+    let configPath = "\(configDirectory)/config.yaml"
+
+    // A core already running would own the DNS port this one needs.
+    let probe = Process()
+    probe.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    // `-x` matches the process name, not the whole command line: with `-f` this
+    // matched any shell whose arguments happened to mention the core, including
+    // the one running this test.
+    probe.arguments = ["-x", "tono-mihomo"]
+    probe.standardOutput = FileHandle.nullDevice
+    probe.standardError = FileHandle.nullDevice
+    try? probe.run()
+    probe.waitUntilExit()
+    if probe.terminationStatus == 0 {
+        FileHandle.standardError.write(Data(
+            "a core is already running; disconnect before running this\n".utf8
+        ))
+        return false
+    }
+
+    // Shaped to satisfy `ownedRuntimeConfigIsSafe` and to be accepted by the
+    // core, with the tunnel switched off: the predicate requires the device to
+    // be named, not to be created, and creating one would rearrange the routing
+    // table of whatever machine this runs on.
+    let config = """
+    # Tono owned runtime
+    allow-lan: false
+    ipv6: false
+    mode: rule
+    log-level: warning
+    external-controller: '127.0.0.1:29394'
+    secret: 'core-lifecycle-self-test'
+    dns:
+      enable: true
+      listen: \(ProtectedDNSContract.listener)
+      enhanced-mode: fake-ip
+      fake-ip-range: 198.18.0.1/16
+      nameserver:
+        - 223.5.5.5
+    tun:
+      enable: false
+      device: utun199
+      stack: gvisor
+    proxies: []
+    proxy-groups:
+      - name: Tono-Exit
+        type: select
+        proxies:
+          - DIRECT
+    rules:
+      - MATCH,Tono-Exit
+
+    """
+    defer {
+        try? FileManager.default.removeItem(
+            atPath: "\(home)/Library/Application Support/Tono-Dev"
+        )
+    }
+    guard (try? FileManager.default.createDirectory(
+        atPath: configDirectory, withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o755]
+    )) != nil else { return false }
+    // Both the directory and the document must belong to the trusted user, or
+    // the daemon is right to refuse them.
+    chown("\(home)/Library/Application Support/Tono-Dev", allowedUID, gid_t(bitPattern: -1))
+    chown(configDirectory, allowedUID, gid_t(bitPattern: -1))
+    guard (try? config.write(toFile: configPath, atomically: true, encoding: .utf8)) != nil
+    else { return false }
+    chown(configPath, allowedUID, gid_t(bitPattern: -1))
+    chmod(configPath, 0o644)
+
+    guard let staged = FileManager.default.contents(atPath: configPath) else {
+        FileHandle.standardError.write(Data("could not read the staged config\n".utf8))
+        return false
+    }
+    let digest = SHA256.hash(data: staged)
+        .map { String(format: "%02x", $0) }
+        .joined()
+
+    var failures: [String] = []
+    func check(_ name: String, _ ok: Bool) { if !ok { failures.append(name) } }
+    func refuses(_ name: String, _ body: () throws -> Void) {
+        do { try body(); failures.append(name) } catch { }
+    }
+
+    guard let manager = try? CoreManager(allowedUID: allowedUID) else {
+        FileHandle.standardError.write(Data("could not construct the core manager\n".utf8))
+        return false
+    }
+    defer {
+        try? manager.stop()
+        // `manager.stop()` only knows about the child it is holding. A failing
+        // build can leave another one behind — mutation-testing the
+        // already-running refusal did exactly that, and the leaked core then
+        // blocked every later run by holding the DNS port. Safe to be blunt
+        // here: this test refuses to start when a core is already present, so
+        // anything alive at this point was started by it.
+        let sweep = Process()
+        sweep.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        sweep.arguments = ["-x", "tono-mihomo"]
+        sweep.standardOutput = FileHandle.nullDevice
+        sweep.standardError = FileHandle.nullDevice
+        try? sweep.run()
+        sweep.waitUntilExit()
+    }
+
+    // A digest that does not match must be refused before anything is launched.
+    // This is the check that stops a document swapped in after the app read it.
+    refuses("mismatched-digest-refused") {
+        try manager.start(
+            configDirectory: configDirectory,
+            configSHA256: String(repeating: "0", count: 64)
+        )
+    }
+    check("nothing-started-after-a-refusal", manager.status().running == false)
+
+    // A directory outside the two the daemon accepts must be refused whatever it
+    // contains.
+    refuses("foreign-config-directory-refused") {
+        try manager.start(configDirectory: "/tmp", configSHA256: digest)
+    }
+
+    do {
+        try manager.start(configDirectory: configDirectory, configSHA256: digest)
+    } catch {
+        FileHandle.standardError.write(Data(
+            "the core did not start: \(error)\n".utf8
+        ))
+        return false
+    }
+    // launchd is not involved here; the process is a direct child, so it is
+    // running by the time start returns or it threw.
+    let started = manager.status()
+    check("core-reports-running", started.running)
+    check("core-reports-a-pid", (started.pid ?? 0) > 0)
+    check("core-reports-no-failure", started.lastError == nil)
+
+    // Starting twice must be refused rather than leaving two cores fighting over
+    // the same listeners.
+    refuses("second-start-refused") {
+        try manager.start(configDirectory: configDirectory, configSHA256: digest)
+    }
+    check("still-the-same-core", manager.status().pid == started.pid)
+
+    do {
+        try manager.stop()
+    } catch {
+        FileHandle.standardError.write(Data("the core did not stop: \(error)\n".utf8))
+        return false
+    }
+    let stopped = manager.status()
+    check("core-reports-stopped", stopped.running == false)
+    check("stopped-core-reports-no-pid", stopped.pid == nil)
+
+    // And it must be startable again afterwards, or a reconnect would need a
+    // daemon restart.
+    do {
+        try manager.start(configDirectory: configDirectory, configSHA256: digest)
+        check("restartable-after-stop", manager.status().running)
+        try manager.stop()
+    } catch {
+        failures.append("restartable-after-stop")
+    }
+
+    if failures.isEmpty { return true }
+    FileHandle.standardError.write(Data(
+        "core lifecycle self-test failed: \(Set(failures).sorted().joined(separator: ", "))\n".utf8
+    ))
+    return false
+}
+
 private func runStagingRefusalSelfTests() -> Bool {
     guard geteuid() == 0 else {
         FileHandle.standardError.write(Data("""
@@ -1389,6 +1593,9 @@ umask(0o077)
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)
+}
+if CommandLine.arguments.dropFirst() == ["--core-lifecycle-self-test"] {
+    exit(runCoreLifecycleSelfTests() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
     exit(runStagingRefusalSelfTests() ? 0 : 1)

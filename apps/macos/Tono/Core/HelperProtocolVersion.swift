@@ -26,7 +26,7 @@ nonisolated enum HelperProtocolVersion {
     ///   behavioural change, and that coarseness is deliberate: a missed bump
     ///   costs a silently unupgraded daemon, which has already cost two shipped
     ///   builds, while an unnecessary bump costs one administrator prompt.
-    static let current = "3.9.1"
+    static let current = "3.10.2"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

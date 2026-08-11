@@ -60,10 +60,12 @@ if [[ $EUID -eq 0 ]]; then
   run "helper self-test (with PF parse)" "$helper" --self-test
   run "helper lifecycle self-test" "$helper" --lifecycle-self-test
   run "helper staging refusal matrix" "$helper" --staging-self-test
+  run "helper core lifecycle" "$helper" --core-lifecycle-self-test
 else
   skip "helper self-test (with PF parse)" "needs root; re-run with sudo"
   skip "helper lifecycle self-test" "needs root; re-run with sudo"
   skip "helper staging refusal matrix" "needs root; re-run with sudo"
+  skip "helper core lifecycle" "needs root; re-run with sudo"
 fi
 
 # Installs a launchd daemon and puts the previous one back, so it is opt-in by

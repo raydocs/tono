@@ -90,6 +90,12 @@ jobs:
         # installs it for real while no packet is ever evaluated against it.
         run: sudo apps/macos/Tono/Resources/liquidclash-helper --lifecycle-self-test
 
+      - name: Helper core lifecycle self-test
+        # Starts the installed core against a config staged through the real
+        # digest check, in the `Tono-Dev` directory production already accepts, so
+        # no live configuration is involved and no tunnel is created.
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --core-lifecycle-self-test
+
       - name: Helper staging refusal matrix
         # Proves ownership, permission, and symlink enforcement by constructing
         # the failing cases, which needs the ability to chown to another user.
