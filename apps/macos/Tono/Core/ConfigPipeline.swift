@@ -229,7 +229,14 @@ nonisolated struct ConfigPipeline {
         "bdstatic.com", "bdimg.com", "aliyuncs.com", "10jqka.com.cn",
         "iwencai.com", "eastmoney.com", "dfcfw.com", "sina.com.cn",
         "sinajs.cn", "legulegu.com", "optbbs.com", "100ppi.com",
-        "awtmt.com", "cls.cn", "cninfo.com.cn",
+        // `ccxe.com.cn` is live in published policy revision 7. Removing it here
+        // made this client reject the *entire* policy — every WeChat direct pin
+        // and every web acceleration route with it — because one unrecognised
+        // suffix fails the whole document. The client allowlist must therefore be
+        // a superset of what published policy actually uses; it is never safe to
+        // narrow it against the Worker source alone, since the deployed Worker
+        // may still accept entries this checkout no longer lists.
+        "awtmt.com", "cls.cn", "cninfo.com.cn", "ccxe.com.cn",
         "pushplus.plus", "baostock.com", "sse.com.cn", "szse.cn",
         "zoom.us", "zoom.com", "zoomgov.com", "oray.com", "sunlogin.com",
         "edu.cn",

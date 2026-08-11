@@ -623,8 +623,9 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     'bcebos.com', 'baidubcs.com', 'bdstatic.com', 'bdimg.com',
     'aliyuncs.com', '10jqka.com.cn', 'iwencai.com', 'eastmoney.com',
     'dfcfw.com', 'sina.com.cn', 'sinajs.cn', 'legulegu.com', 'optbbs.com',
-    '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'pushplus.plus',
-    'baostock.com', 'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com',
+    '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'ccxe.com.cn',
+    'pushplus.plus', 'baostock.com', 'sse.com.cn', 'szse.cn', 'zoom.us',
+    'zoom.com',
     'zoomgov.com', 'oray.com', 'sunlogin.com', 'edu.cn',
   ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
@@ -654,8 +655,8 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     'bdimg.com', 'aliyuncs.com', '10jqka.com.cn', 'iwencai.com',
     'eastmoney.com', 'dfcfw.com', 'sina.com.cn', 'sinajs.cn',
     'legulegu.com', 'optbbs.com', '100ppi.com', 'awtmt.com', 'cls.cn',
-    'cninfo.com.cn', 'pushplus.plus', 'baostock.com', 'sse.com.cn',
-    'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
+    'cninfo.com.cn', 'ccxe.com.cn', 'pushplus.plus', 'baostock.com',
+    'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
     'sunlogin.com', 'edu.cn',
   ];
   const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];

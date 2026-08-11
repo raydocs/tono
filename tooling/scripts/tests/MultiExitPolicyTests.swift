@@ -642,10 +642,13 @@ struct MultiExitPolicyTests {
         } catch is ConfigPipeline.TonoInjectionError {
             // Expected.
         }
-        guard (try? ConfigPipeline.validatedManagedDirectSuffix("ccxe.com.cn")) == nil else {
-            throw TestFailure(
-                "client suffix allowlist must not exceed the control plane's"
-            )
+        // Live in published policy revision 7. One unrecognised suffix fails the
+        // whole policy document, so dropping an entry that published policy still
+        // uses takes down every managed-direct route at once — this asserts the
+        // direction that actually matters: the client must keep accepting it.
+        guard try ConfigPipeline.validatedManagedDirectSuffix("ccxe.com.cn")
+                == "ccxe.com.cn" else {
+            throw TestFailure("client rejected a suffix that live policy uses")
         }
 
         // The resolver-host ceiling must admit the control plane's own maxima
