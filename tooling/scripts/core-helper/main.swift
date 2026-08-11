@@ -1249,6 +1249,9 @@ if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)
 }
+if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
+    exit(KillSwitchManager.runLifecycleSelfTests() ? 0 : 1)
+}
 if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(
         KillSwitchManager.runSelfTests()

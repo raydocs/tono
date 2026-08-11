@@ -1754,6 +1754,203 @@ final class KillSwitchManager {
         return result.status == 0
     }
 
+    /// Lifecycle coverage for the ruleset, exercised through `pfctl` itself.
+    ///
+    /// Every fault this session shipped was a lifecycle fault, not a rendering
+    /// fault: a permit revoked by a later re-arm, a rule shape the parser
+    /// rejects, a contract change that never reached the installed daemon.
+    /// String assertions over a rendered document cannot see any of those,
+    /// which is why they all reached a user's machine before anything noticed.
+    ///
+    /// PF is global state, and that is the real reason this coverage did not
+    /// exist: a test that arms for real can take the machine's network down.
+    /// So these rules load into an anchor no parent ruleset references. Loading
+    /// is genuine — `pfctl -f` parses and installs it, and `pfctl -sr` reads
+    /// back what the kernel actually holds — while an unreferenced anchor is
+    /// never evaluated against a packet, so no traffic decision changes.
+    ///
+    /// Deliberately not parameterised: the anchor and the scratch path are
+    /// compiled in, so there is no seam for a caller to point this at the
+    /// production anchor, `/etc/pf.conf`, or the real state file.
+    static func runLifecycleSelfTests() -> Bool {
+        let testAnchor = "tono.lifecycle-test"
+        guard geteuid() == 0 else {
+            FileHandle.standardError.write(Data("""
+            lifecycle self-test needs root: it loads rules through pfctl.
+              sudo <helper> --lifecycle-self-test
+            The rules go into the unreferenced anchor "\(testAnchor)", so no
+            traffic decision changes and the production anchor is untouched.
+
+            """.utf8))
+            return false
+        }
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-test.conf").path
+        defer {
+            _ = try? run("/sbin/pfctl", ["-a", testAnchor, "-F", "all"])
+            try? FileManager.default.removeItem(atPath: scratch)
+        }
+
+        func state(reviewedBundleDirect: Bool) -> KillSwitchState {
+            KillSwitchState(
+                armed: true,
+                tailscaleBootstrapEnabled: false,
+                apiHosts: [],
+                exitHints: [],
+                tunnelInterfaces: ["utun199"],
+                resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                derpEndpoints: [],
+                cachedDERPEndpoints: [],
+                proxyTargets: [
+                    .init(host: "8.8.4.4", transport: "tcp", port: 443,
+                          addresses: ["8.8.4.4"]),
+                ],
+                sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: reviewedBundleDirect
+            )
+        }
+
+        /// Loads a rendered ruleset and returns what the kernel holds, or nil
+        /// when the parser refused it.
+        func load(_ rules: String) -> String? {
+            guard (try? Data(rules.utf8).write(
+                to: URL(fileURLWithPath: scratch)
+            )) != nil else { return nil }
+            guard let applied = try? run(
+                "/sbin/pfctl", ["-a", testAnchor, "-f", scratch]
+            ), applied.status == 0 else {
+                FileHandle.standardError.write(Data(
+                    "lifecycle: pfctl refused the ruleset\n".utf8
+                ))
+                return nil
+            }
+            guard let shown = try? run("/sbin/pfctl", ["-a", testAnchor, "-sr"]),
+                  shown.status == 0,
+                  let text = String(data: shown.output, encoding: .utf8)
+            else { return nil }
+            return text
+        }
+
+        // pfctl normalises what it prints, so match on the parts that carry
+        // meaning rather than on the rendered line. Calibrated against real
+        // output: a port list expands into one rule per port.
+        // Calibrated against what the kernel actually reports. A port list is
+        // expanded into one rule per port per protocol, and `from any to any`
+        // is unique to this permit — the exact-address exceptions all print as
+        // `to <address>`. Counting exactly pins the port set too, so quietly
+        // widening it fails here instead of shipping.
+        let expectedPermitRules = reviewedBundleDirectPorts.count * 2
+        func permitCount(_ shown: String) -> Int {
+            shown.split(separator: "\n").filter {
+                $0.contains("from any to any port = ") && $0.contains("user = 0")
+            }.count
+        }
+
+        var failures: [String] = []
+        func check(_ name: String, _ ok: Bool) {
+            if !ok { failures.append(name) }
+        }
+
+        // 1. Armed with the reviewed-bundle permit: it must be installed, and
+        //    the catch-all must still be the last word.
+        let armedRules = renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        guard let armed = load(armedRules) else {
+            FileHandle.standardError.write(Data("lifecycle: armed ruleset failed to load\n".utf8))
+            return false
+        }
+        if ProcessInfo.processInfo.environment["TONO_LIFECYCLE_DUMP"] != nil {
+            FileHandle.standardError.write(Data("--- kernel holds ---\n\(armed)\n".utf8))
+        }
+        check("armed-permit-installed", permitCount(armed) == expectedPermitRules)
+        check("armed-fails-closed", armed.contains("block drop out quick all"))
+        // Order is only observable in what the kernel holds. A permit placed
+        // after the catch-all parses, prints, and satisfies every substring
+        // assertion while being dead — the packet is dropped before it is
+        // reached.
+        let permitBeforeCatchAll: Bool = {
+            guard let block = armed.range(of: "block drop out quick all") else {
+                return false
+            }
+            guard let lastPermit = armed.range(
+                of: "from any to any port = ", options: .backwards
+            ) else { return false }
+            return lastPermit.lowerBound < block.lowerBound
+        }()
+        check("permit-precedes-catch-all", permitBeforeCatchAll)
+        check("armed-keeps-tunnel", armed.contains("utun199"))
+
+        // 2. A re-arm that omits the flag must revoke it. This is the shipped
+        //    bug from the other direction: the convergence arm dropped the
+        //    argument and the permit disappeared under a live session while the
+        //    rule engine still routed that bundle direct.
+        guard let withoutPermit = load(renderRules(state: state(reviewedBundleDirect: false), allowedUID: 501)) else {
+            FileHandle.standardError.write(Data("lifecycle: re-armed ruleset failed to load\n".utf8))
+            return false
+        }
+        check("re-arm-without-flag-revokes", permitCount(withoutPermit) == 0)
+        check("re-arm-still-fails-closed", withoutPermit.contains("block drop out quick all"))
+
+        // 3. The convergence sequence that actually shipped broken: arm, then
+        //    arm again for the same session. The permit must survive.
+        guard let convergence = load(renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)) else {
+            FileHandle.standardError.write(Data("lifecycle: convergence arm failed to load\n".utf8))
+            return false
+        }
+        check("convergence-arm-keeps-permit", permitCount(convergence) == expectedPermitRules)
+
+        // 4. The fault that reached customers, in its real shape.
+        //
+        // A re-arm flushes every PF state on the machine exactly when it removes
+        // a pass rule that the previous ruleset had — correct as a security
+        // rule, and devastating as an accident. The pin-refresh transaction
+        // arms twice: once with the union of old and new endpoints, then again
+        // to converge on the new set. That second arm dropped its
+        // `reviewedBundleDirect` argument, so it removed all eight permit rules,
+        // which made every refresh a machine-wide state flush. Long-lived
+        // streams died mid-response roughly every twenty minutes.
+        //
+        // Not a rendering property and not a parsing property: both arms are
+        // individually valid and both load. It is a property of the pair, which
+        // is why nothing caught it.
+        let firstArmPassRules = passRules(
+            in: renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        )
+        let convergedPassRules = passRules(
+            in: renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        )
+        let droppedPermitPassRules = passRules(
+            in: renderRules(state: state(reviewedBundleDirect: false), allowedUID: 501)
+        )
+        check(
+            "convergence-arm-does-not-revoke",
+            firstArmPassRules.isSubset(of: convergedPassRules)
+        )
+        // The same comparison against the broken shape, which is what gives the
+        // assertion above its teeth: if dropping the permit did not register as
+        // a revocation, passing it would not be protecting anything.
+        check(
+            "dropping-the-permit-registers-as-revocation",
+            !firstArmPassRules.isSubset(of: droppedPermitPassRules)
+        )
+
+        // 5. Emergency reset leaves loopback and the catch-all, nothing else.
+        let emergency = emergencyState(preserving: state(reviewedBundleDirect: true))
+        guard let emergencyShown = load(renderRules(state: emergency, allowedUID: 501)) else {
+            FileHandle.standardError.write(Data("lifecycle: emergency ruleset failed to load\n".utf8))
+            return false
+        }
+        check("emergency-drops-permit", permitCount(emergencyShown) == 0)
+        check("emergency-drops-tunnel", !emergencyShown.contains("utun199"))
+        check("emergency-fails-closed", emergencyShown.contains("block drop out quick all"))
+
+        if failures.isEmpty { return true }
+        FileHandle.standardError.write(Data(
+            "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8
+        ))
+        return false
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard canonicalPublicAddress("8.8.8.8") == "8.8.8.8",

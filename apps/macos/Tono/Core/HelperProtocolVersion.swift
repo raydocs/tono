@@ -20,7 +20,13 @@ nonisolated enum HelperProtocolVersion {
     ///
     /// `tooling/scripts/build-core-helper.sh` now fails the build when helper
     /// sources change without this string changing.
-    static let current = "3.8.0"
+    ///
+    /// - 3.8.0 → 3.8.4: added `--lifecycle-self-test`, which is test-only and
+    ///   changes no runtime behaviour. The gate cannot tell that apart from a
+    ///   behavioural change, and that coarseness is deliberate: a missed bump
+    ///   costs a silently unupgraded daemon, which has already cost two shipped
+    ///   builds, while an unnecessary bump costs one administrator prompt.
+    static let current = "3.8.4"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS
