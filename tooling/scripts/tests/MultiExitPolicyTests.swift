@@ -584,20 +584,23 @@ struct MultiExitPolicyTests {
             customNodes: sanitizedNodes,
             directPolicy: suffixOnlyPolicy
         )
+        // A suffix route has no resolved addresses, so it can never receive a PF
+        // session permit; a DOMAIN-SUFFIX rule pointing at the interface-bound
+        // direct outbound therefore sent those flows into `block drop out quick
+        // all` with no failover. Suffixes stay part of the accepted v3/v4
+        // contract but must not become routing rules: the traffic falls through
+        // to MATCH,Tono-Exit instead of being black-holed, and every direct
+        // exception in the runtime stays exact-host only.
         guard validatedSuffixOnlyPolicy?.sessionEndpoints.isEmpty == true,
-              suffixRuntime.contains("name: \"Tono-China-Web-Direct\""),
-              suffixRuntime.contains(
-                  "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web-Direct"
-              ),
-              suffixRuntime.contains(
-                  "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web-Direct"
-              ),
-              suffixRuntime.contains(
-                  "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct"
-              ),
+              validatedSuffixOnlyPolicy?.webDomainSuffixes.count == 2,
+              !suffixRuntime.contains("DOMAIN-SUFFIX,edu.cn"),
+              !suffixRuntime.contains("DOMAIN-SUFFIX,baidu.com"),
+              !suffixRuntime.contains("Tono-China-Web-Direct"),
               !suffixRuntime.contains("name: \"Tono-China-Direct\""),
+              suffixRuntime.contains("AND,((NETWORK,UDP)),REJECT"),
+              suffixRuntime.contains("MATCH,Tono-Exit"),
               !suffixRuntime.contains("MATCH,DIRECT") else {
-            throw TestFailure("v3 suffix direct policy was not TCP-only and fail-closed")
+            throw TestFailure("v3 suffix policy was rendered as a direct route")
         }
         let claudeProtectedSuffixRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
             subscriptionYAML: "proxies: []\n",
@@ -606,13 +609,17 @@ struct MultiExitPolicyTests {
             customNodes: sanitizedNodes,
             directPolicy: suffixOnlyPolicy
         )
-        let firstEduSuffixRule = "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web-Direct"
+        // The assistant rules must still precede the global UDP rejection and the
+        // terminal MATCH, and must never be rewritten onto a direct target.
         guard claudeProtectedRules.allSatisfy({ rule in
                   guard let claudeRange = claudeProtectedSuffixRuntime.range(of: rule),
-                        let suffixRange = claudeProtectedSuffixRuntime.range(of: firstEduSuffixRule)
+                        let matchRange = claudeProtectedSuffixRuntime.range(
+                            of: "AND,((NETWORK,UDP)),REJECT"
+                        )
                   else { return false }
-                  return claudeRange.lowerBound < suffixRange.lowerBound
+                  return claudeRange.lowerBound < matchRange.lowerBound
               }),
+              !claudeProtectedSuffixRuntime.contains("DOMAIN-SUFFIX,edu.cn"),
               claudeProtectedRules.allSatisfy({ rule in
                   !claudeProtectedSuffixRuntime.contains(rule.replacingOccurrences(
                       of: "Tono-Claude-Home",

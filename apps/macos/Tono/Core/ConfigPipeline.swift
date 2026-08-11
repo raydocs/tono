@@ -827,9 +827,11 @@ nonisolated struct ConfigPipeline {
 
             """
         }
-        if let directPolicy,
-           !directPolicy.webDomainPins.isEmpty
-            || !directPolicy.webDomainSuffixes.isEmpty {
+        // Only exact, PF-permitted web pins reference this outbound. Suffix
+        // routes are not emitted (see the rules section), so defining it for a
+        // suffix-only policy would leave an unreachable direct outbound in the
+        // runtime with nothing routed to it.
+        if let directPolicy, !directPolicy.webDomainPins.isEmpty {
             proxyBlock += """
               - name: "\(webDirectProxyName)"
                 type: direct
@@ -1089,14 +1091,31 @@ nonisolated struct ConfigPipeline {
                     yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host))),\(webDirectProxyName)\n"
                 }
             }
-            // Version-3 suffix rules intentionally avoid DNS pinning and PF
-            // endpoint permits. They are still TCP-only and are emitted
-            // after exact web pins but before the global UDP rejection.
-            for suffix in directPolicy.webDomainSuffixes {
-                for port in suffix.ports {
-                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectProxyName)\n"
-                }
-            }
+            // Traffic-policy v3 `directSuffixes` are deliberately NOT rendered
+            // as routing rules. A suffix route carries no resolved addresses,
+            // so it produces no `sessionEndpoints` and therefore no PF permit
+            // (see `sessionEndpoints` above and the helper's session-endpoint
+            // contract). PF's `block drop out quick all` then discards every
+            // dial the suffix rule sent to the interface-bound direct outbound,
+            // and a bare `direct` outbound has no failover: the flow dies
+            // instead of taking the tunnel. Whether a given host survived
+            // depended on whether it happened to resolve onto an address some
+            // *other* exact pin had already permitted, which is not a routing
+            // decision anyone can reason about.
+            //
+            // A fallback group cannot repair this either — mihomo scores
+            // fallback members by probe URL, not per destination — so the only
+            // way to honour a wildcard direct exception would be to permit the
+            // whole physical interface, which is exactly what this product does
+            // not do. Suffixes therefore stay accepted and revisioned by the
+            // control plane (so the v3/v4 contract is unchanged) but fall
+            // through to `MATCH,Tono-Exit`: slower than a direct hop, and
+            // reachable rather than black-holed.
+            //
+            // This also restores the managed-direct invariant that every direct
+            // exception is exact-host only, which the DOMAIN-SUFFIX assertion in
+            // MultiExitPolicyTests exists to protect.
+            _ = directPolicy.webDomainSuffixes
         }
         yaml += "  - AND,((NETWORK,UDP)),REJECT\n"
         yaml += """
