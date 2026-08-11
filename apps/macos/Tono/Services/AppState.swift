@@ -3762,8 +3762,11 @@ final class AppState {
             domainPins: [],
             webDomainPins: [],
             webDomainSuffixes: directSuffixes,
-            mediaEndpoints: media,
-            tcpEndpoints: tcp,
+            // Both are reviewed-bundle-only routes that the bundle-wide process
+            // rule already matches first, so emitting them would add fallback
+            // groups and PF endpoints for rules mihomo never reaches.
+            mediaEndpoints: [],
+            tcpEndpoints: [],
             directResolverHosts: (policy.domains + policy.webDomains)
                 .map(\.host)
         )
@@ -4059,33 +4062,46 @@ final class AppState {
         base: ConfigPipeline.ManagedDirectRuntimePolicy?,
         api: ClashAPI
     ) async -> ConfigPipeline.ManagedDirectRuntimePolicy? {
-        guard !policy.domains.isEmpty || !policy.webDomains.isEmpty,
+        guard !policy.webDomains.isEmpty,
               let physicalInterface = base?.physicalInterface else {
             return base
         }
-        await awaitResolverReadiness(
-            probeHost: (policy.domains.first ?? policy.webDomains.first)?.host,
-            api: api
-        )
+        // The reviewed bundle's own pins, TCP endpoints and media endpoints are
+        // no longer resolved, and none of them are emitted. Every rule they fed
+        // carried `PROCESS-PATH-REGEX` for the same bundle, and the bundle-wide
+        // process rule is emitted ahead of them, so mihomo never reached one:
+        // the observed dial to an address no pin contained matched
+        // `AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,…))`, which is the whole
+        // reason enumerating its rotating HTTPDNS addresses was abandoned.
+        //
+        // Dropping them removes 11 DNS resolutions, ~120 PF session endpoints,
+        // and the 20 per-host fallback groups whose connect-time prime probed
+        // 20 targets before the session was allowed to report connected.
+        //
+        // Web hosts are still resolved. They are exact `DOMAIN` routes, and
+        // while the addresses no longer decide anything — routing matches on
+        // the name, region-correct answers come from `nameserver-policy`, and
+        // PF admits the dial by port — expressing them as suffixes to skip the
+        // resolution would widen `feishu.cn` and `xiaohongshu.com` into every
+        // subdomain. That distinction is the control plane's to make, not this
+        // client's.
         let protectedAddresses = managedDirectProtectedAddresses()
-        async let domainPins = resolveManagedDirectDomainPins(
-            policy.domains,
-            protectedAddresses: protectedAddresses,
+        await awaitResolverReadiness(
+            probeHost: policy.webDomains.first?.host,
             api: api
         )
-        async let webDomainPins = resolveManagedDirectDomainPins(
+        let webPins = await resolveManagedDirectDomainPins(
             policy.webDomains,
             protectedAddresses: protectedAddresses,
             api: api
         )
-        let (pins, webPins) = await (domainPins, webDomainPins)
         let runtime = ConfigPipeline.ManagedDirectRuntimePolicy(
             physicalInterface: physicalInterface,
-            domainPins: pins,
+            domainPins: [],
             webDomainPins: webPins,
             webDomainSuffixes: base?.webDomainSuffixes ?? [],
-            mediaEndpoints: base?.mediaEndpoints ?? [],
-            tcpEndpoints: base?.tcpEndpoints ?? [],
+            mediaEndpoints: [],
+            tcpEndpoints: [],
             directResolverHosts: base?.directResolverHosts
                 ?? (policy.domains + policy.webDomains).map(\.host)
         )

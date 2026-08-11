@@ -1187,6 +1187,14 @@ nonisolated struct ConfigPipeline {
             for suffix in directPolicy.webDomainSuffixes {
                 for port in suffix.ports {
                     yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectGroupName)\n"
+                    // Without this the browser's QUIC attempt reaches the
+                    // global UDP rejection, and every one of these sites pays a
+                    // failed handshake before falling back to TCP. The port set
+                    // is the same one the TCP route already uses and the same
+                    // one the PF permit covers, so this widens the protocol,
+                    // not the destination — and the terminal UDP rejection
+                    // still stands for everything not listed here.
+                    yaml += "  - AND,((NETWORK,UDP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectGroupName)\n"
                 }
             }
         }

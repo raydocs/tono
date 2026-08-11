@@ -624,9 +624,23 @@ struct MultiExitPolicyTests {
         let suffixRuleEdu =
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,edu.cn)),"
             + ConfigPipeline.webDirectGroupName
+        // A UDP suffix rule emitted after the terminal UDP rejection would be
+        // unreachable, which is indistinguishable from not emitting it at all
+        // until someone measures a failed QUIC handshake.
+        let suffixRuleEduUDP =
+            "AND,((NETWORK,UDP),(DST-PORT,443),(DOMAIN-SUFFIX,edu.cn)),"
+            + ConfigPipeline.webDirectGroupName
+        let udpSuffixPrecedesReject: Bool
+        if let ruleRange = suffixRuntime.range(of: suffixRuleEduUDP),
+           let rejectRange = suffixRuntime.range(of: "AND,((NETWORK,UDP)),REJECT") {
+            udpSuffixPrecedesReject = ruleRange.lowerBound < rejectRange.lowerBound
+        } else {
+            udpSuffixPrecedesReject = false
+        }
         guard validatedSuffixOnlyPolicy?.sessionEndpoints.isEmpty == true,
               validatedSuffixOnlyPolicy?.webDomainSuffixes.count == 2,
               suffixRuntime.contains(suffixRuleEdu),
+              udpSuffixPrecedesReject,
               !suffixRuntime.contains(
                   "(DOMAIN-SUFFIX,edu.cn)),\(ConfigPipeline.webDirectProxyName)"
               ),
