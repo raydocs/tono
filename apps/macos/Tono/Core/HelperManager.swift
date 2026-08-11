@@ -512,9 +512,13 @@ nonisolated struct HelperManager {
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]? = nil,
         tailscaleBootstrapEnabled: Bool? = nil,
         allowSystemResolution: Bool = false,
-        bootstrapPins: [String: [String]] = [:]
+        bootstrapPins: [String: [String]] = [:],
+        // No default: an omitted value silently revokes the permit while the
+        // rule engine still routes that bundle direct.
+        reviewedBundleDirect: Bool
     ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) {
         var object: [String: Any] = [:]
+        if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         if let apiHosts { object["apiHosts"] = apiHosts }
         if let exitNodeHints { object["exitHints"] = exitNodeHints }
         if let tunnelInterfaces { object["tunnelInterfaces"] = tunnelInterfaces }

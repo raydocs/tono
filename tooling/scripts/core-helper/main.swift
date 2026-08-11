@@ -31,6 +31,7 @@ private let killSwitchArmFields = Set([
     "tailscaleBootstrapEnabled",
     "allowSystemResolution",
     "bootstrapPins",
+    "reviewedBundleDirect",
 ])
 
 enum HelperFailure: Error {

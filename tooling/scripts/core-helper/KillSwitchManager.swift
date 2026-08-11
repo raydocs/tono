@@ -16,6 +16,11 @@ private let killSwitchMaximumStateBytes = 64 * 1024
 private let killSwitchMaximumDERPMapBytes = 1024 * 1024
 private let killSwitchDERPMapURL = "https://login.tailscale.com/derpmap/default"
 
+/// Ports the reviewed bundle's direct traffic uses. Observed: 80, 443 and 8080
+/// for TCP, 443 and 8000 for its media path. Kept as a fixed list so a wider
+/// permit cannot be introduced by data.
+private let reviewedBundleDirectPorts = [80, 443, 8000, 8080]
+
 private struct KillSwitchEndpoint: Hashable {
     let address: String
     let transport: String
@@ -58,6 +63,10 @@ private struct KillSwitchState {
     /// Ephemeral exceptions supplied by the current protected session only.
     /// These must never be restored from disk or inherited by a later arm.
     let sessionDirectEndpoints: [KillSwitchEndpoint]
+    /// Whether the rule engine routes the reviewed bundle direct this session.
+    /// Ephemeral like `sessionDirectEndpoints`: never restored from disk, so a
+    /// recovery arm cannot inherit a broader permit than the session asked for.
+    let reviewedBundleDirectEnabled: Bool
 }
 
 private struct HelperCommandResult {
@@ -144,6 +153,19 @@ final class KillSwitchManager {
         let sessionDirectEndpoints = try Self.validateSessionDirectEndpoints(
             object["sessionDirectEndpoints"] ?? []
         )
+        // Omission means off, and a non-boolean is a hard error rather than a
+        // silent default: this flag widens the permit, so an ambiguous request
+        // must fail instead of guessing. `NSNumber` would accept 0/1, which the
+        // app never sends, so require a real Bool.
+        let reviewedBundleDirect: Bool
+        switch object["reviewedBundleDirect"] {
+        case nil:
+            reviewedBundleDirect = false
+        case let flag as Bool:
+            reviewedBundleDirect = flag
+        default:
+            throw HelperFailure.invalid("reviewedBundleDirect must be a boolean.")
+        }
         var availablePins = previous?.pinnedHosts ?? [:]
         for (host, addresses) in bootstrapPins {
             // Bundle pins seed recovery but must not replace addresses learned
@@ -223,7 +245,8 @@ final class KillSwitchManager {
             derpEndpoints: derpEndpoints,
             cachedDERPEndpoints: cachedDERPEndpoints,
             proxyTargets: proxyTargets,
-            sessionDirectEndpoints: sessionDirectEndpoints
+            sessionDirectEndpoints: sessionDirectEndpoints,
+            reviewedBundleDirectEnabled: reviewedBundleDirect
         )
 
         lock.lock()
@@ -426,7 +449,8 @@ final class KillSwitchManager {
             derpEndpoints: [],
             cachedDERPEndpoints: previous?.cachedDERPEndpoints ?? [],
             proxyTargets: [],
-            sessionDirectEndpoints: []
+            sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
         )
     }
 
@@ -563,7 +587,8 @@ final class KillSwitchManager {
             proxyTargets: proxyTargets,
             // Session exceptions are intentionally not persisted. A helper
             // restart and every boot therefore restore fail-closed with none.
-            sessionDirectEndpoints: []
+            sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
         )
     }
 
@@ -1326,6 +1351,28 @@ final class KillSwitchManager {
                 "to \(endpoint.address) port \(endpoint.port) user root keep state (if-bound)"
             )
         }
+        if state.reviewedBundleDirectEnabled {
+            // The reviewed bundle's traffic is routed direct by the rule engine,
+            // and those packets leave as root from the core, so no `to <address>`
+            // exception can express them: the addresses rotate and mostly never
+            // appear in DNS. Scoped as tightly as PF allows — root only, and
+            // only the ports that traffic uses — so a rule-engine mistake can at
+            // worst escape on a web port instead of any port. Everything the
+            // engine does not route direct still reaches `MATCH,Tono-Exit`, so a
+            // dead tunnel remains fail-closed for it.
+            //
+            // `from any to any` is not decoration: PF only accepts `port` as
+            // part of a host specification, so the shorter `proto tcp port {…}`
+            // is a parse error that takes the whole ruleset down and leaves the
+            // session unable to arm at all.
+            for transport in ["tcp", "udp"] {
+                lines.append(
+                    "pass out quick inet proto \(transport) from any to any " +
+                    "port { \(reviewedBundleDirectPorts.map(String.init).joined(separator: ", ")) } " +
+                    "user root keep state (if-bound)"
+                )
+            }
+        }
         lines.append("block drop out quick all")
         return lines.joined(separator: "\n") + "\n"
     }
@@ -1684,6 +1731,29 @@ final class KillSwitchManager {
 
     // MARK: - Pure self-tests
 
+    /// Hands a rendered ruleset to `pfctl -n` so the parser — not a substring
+    /// assertion — decides whether it is valid. Substring assertions cannot
+    /// catch a malformed rule they were written to match: a permit missing its
+    /// host specification passed every content check and then failed to load on
+    /// the user's machine, leaving two builds unable to arm at all.
+    ///
+    /// `nil` means the check could not run (pfctl needs root to open /dev/pf),
+    /// never "valid". Callers must surface a skip rather than absorb it.
+    static func pfSyntaxAccepts(_ rules: String) -> Bool? {
+        guard geteuid() == 0 else { return nil }
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-pf-syntax-check.conf").path
+        guard let _ = try? Data(rules.utf8).write(to: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        guard let result = try? run("/sbin/pfctl", ["-nf", path]) else { return nil }
+        if result.status != 0 {
+            FileHandle.standardError.write(Data("pf syntax: \(result.message)\n".utf8))
+        }
+        return result.status == 0
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard canonicalPublicAddress("8.8.8.8") == "8.8.8.8",
@@ -1758,7 +1828,8 @@ final class KillSwitchManager {
                         addresses: ["8.8.4.4"]
                     ),
                 ],
-                sessionDirectEndpoints: directEndpoints
+                sessionDirectEndpoints: directEndpoints,
+                reviewedBundleDirectEnabled: true
             )
             let rules = renderRules(state: state, allowedUID: 501)
             let emergencyState = emergencyState(preserving: state)
@@ -1778,7 +1849,8 @@ final class KillSwitchManager {
                     derpEndpoints: [],
                     cachedDERPEndpoints: [],
                     proxyTargets: state.proxyTargets,
-                    sessionDirectEndpoints: []
+                    sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
                 ),
                 allowedUID: 501
             )
@@ -1793,7 +1865,8 @@ final class KillSwitchManager {
                 derpEndpoints: [],
                 cachedDERPEndpoints: state.cachedDERPEndpoints,
                 proxyTargets: state.proxyTargets,
-                sessionDirectEndpoints: []
+                sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
             )
             let inactiveRules = renderRules(
                 state: inactiveState,
@@ -1858,52 +1931,108 @@ final class KillSwitchManager {
                 rejectedUDPProxyTarget = true
             }
             let persisted = persistentObject(state, allowedUID: 501)
-            return rules.contains(
-                    "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)"
-                ) &&
+            // Split into named steps: as a single boolean chain this grew past
+            // what the type checker will solve in reasonable time.
+            let required = [
+                // The reviewed-bundle permit must stay root-only and stay bound
+                // to the fixed port list; an "any port" form would let a routing
+                // mistake exfiltrate anywhere.
+                "pass out quick inet proto tcp from any to any " +
+                    "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
+                "pass out quick inet proto udp from any to any " +
+                    "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
+                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+                "to 8.8.8.8 port 443 user root keep state (if-bound)",
+                "proto udp",
+                "to 8.8.4.4 port 8443 user root keep state (if-bound)",
+                "pass out quick inet proto tcp to 8.8.8.8 port 80 user root keep state (if-bound)",
+                "pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)",
+                "pass in quick on lo0 all keep state (if-bound)",
+                "pass out quick on lo0 all keep state (if-bound)",
+                "block drop out quick all",
+            ]
+            let forbidden = [
+                // Never a permit without a user clause, and never all ports.
+                "pass out quick inet proto tcp user root keep state (if-bound)",
+                "pass out quick inet proto tcp from any to any " +
+                    "port { 80, 443, 8000, 8080 } keep state (if-bound)",
+                // PF rejects `port` that is not attached to a host spec. This
+                // shipped once and cost two builds: the ruleset failed to parse,
+                // so no session could arm at all. The substring only matches the
+                // broken form, since the correct one reads `to any port {`.
+                "proto tcp port {",
+                "proto udp port {",
                 // The bootstrap permit must never be world-usable again.
-                !rules.contains("to 1.1.1.1 port 443 keep state (if-bound)") &&
-                rules.contains("to 8.8.8.8 port 443 user root keep state (if-bound)") &&
-                !rules.contains("to 8.8.8.8 port 443 keep state (if-bound)") &&
-                rules.contains("proto udp") &&
-                rules.contains("to 8.8.4.4 port 8443 user root keep state (if-bound)") &&
-                rules.contains("pass out quick inet proto tcp to 8.8.8.8 port 80 user root keep state (if-bound)") &&
-                rules.contains("pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)") &&
-                !rules.contains("proto tcp to any") &&
-                rules.contains("pass in quick on lo0 all keep state (if-bound)") &&
-                rules.contains("pass out quick on lo0 all keep state (if-bound)") &&
-                rules.contains("block drop out quick all") &&
-                emergencyRules == [
-                    "# Managed by Tono Kill Switch — do not edit",
-                    "pass in quick on lo0 all keep state (if-bound)",
-                    "pass out quick on lo0 all keep state (if-bound)",
-                    "block drop out quick all",
-                    "",
-                ].joined(separator: "\n") &&
-                cloudRules.contains("pass in quick on utun199 all keep state (if-bound)") &&
-                cloudRules.contains("pass out quick on utun199 all keep state (if-bound)") &&
-                !cloudRules.contains("pass in quick on en") &&
-                cloudRules.contains(
-                    "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)"
-                ) &&
-                !cloudRules.contains("proto udp") &&
-                !rules.contains("to any port 443") &&
-                !inactiveRules.contains("to 1.1.1.1 port 443") &&
-                !inactiveHosts.contains("api.example.com") &&
-                inactiveState.pinnedHosts == state.pinnedHosts &&
-                emergencyState.pinnedHosts == state.pinnedHosts &&
-                emergencyState.cachedDERPEndpoints == state.cachedDERPEndpoints &&
-                emergencyState.sessionDirectEndpoints.isEmpty &&
-                persisted["sessionDirectEndpoints"] == nil &&
-                cacheOnlyResolved["api.example.com"] == ["1.1.1.1"] &&
-                bootstrapPins["api.example.com"] == ["1.1.1.1"] &&
-                rejectedUnrequestedPin &&
-                hosts.contains("1.1.1.1 api.example.com") &&
-                !hosts.contains("localhost") &&
-                rejectedPrivateTarget &&
-                rejectedUDPProxyTarget &&
-                installedHosts.contains(killSwitchHostsEndMarker) &&
-                removedHosts.isEmpty
+                "to 1.1.1.1 port 443 keep state (if-bound)",
+                "to 8.8.8.8 port 443 keep state (if-bound)",
+                "proto tcp to any",
+            ]
+            let ruleShapesHold = required.allSatisfy(rules.contains)
+                && !forbidden.contains(where: rules.contains)
+            let emergencyExpected = [
+                "# Managed by Tono Kill Switch — do not edit",
+                "pass in quick on lo0 all keep state (if-bound)",
+                "pass out quick on lo0 all keep state (if-bound)",
+                "block drop out quick all",
+                "",
+            ].joined(separator: "\n")
+            let cloudRequired = [
+                "pass in quick on utun199 all keep state (if-bound)",
+                "pass out quick on utun199 all keep state (if-bound)",
+                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+            ]
+            let cloudForbidden = [
+                "pass in quick on en",
+                "proto udp",
+                // A session that did not ask for it must not inherit the permit.
+                "port { 80, 443, 8000, 8080 }",
+            ]
+            let cloudShapesHold = cloudRequired.allSatisfy(cloudRules.contains)
+                && !cloudForbidden.contains(where: cloudRules.contains)
+            let noStrayPermits = !rules.contains("to any port 443")
+                && !inactiveRules.contains("to 1.1.1.1 port 443")
+                && !inactiveHosts.contains("api.example.com")
+            // Each comparison bound separately: the dictionary/array element
+            // types make a single chain expensive for the type checker.
+            let inactivePinsMatch: Bool = inactiveState.pinnedHosts == state.pinnedHosts
+            let emergencyPinsMatch: Bool = emergencyState.pinnedHosts == state.pinnedHosts
+            let derpCacheMatch: Bool =
+                emergencyState.cachedDERPEndpoints == state.cachedDERPEndpoints
+            let emergencySessionCleared: Bool =
+                emergencyState.sessionDirectEndpoints.isEmpty
+            let sessionNotPersisted: Bool = persisted["sessionDirectEndpoints"] == nil
+            let statesAgree = inactivePinsMatch && emergencyPinsMatch
+                && derpCacheMatch && emergencySessionCleared && sessionNotPersisted
+            let cacheOnlyMatch: Bool = cacheOnlyResolved["api.example.com"] == ["1.1.1.1"]
+            let bootstrapMatch: Bool = bootstrapPins["api.example.com"] == ["1.1.1.1"]
+            let pinsAgree = cacheOnlyMatch && bootstrapMatch && rejectedUnrequestedPin
+            let hostsAgree = hosts.contains("1.1.1.1 api.example.com")
+                && !hosts.contains("localhost")
+                && installedHosts.contains(killSwitchHostsEndMarker)
+                && removedHosts.isEmpty
+            // Reported, not silently folded in: a skip must not read as a pass.
+            let armedParse = pfSyntaxAccepts(rules)
+            let bootstrapParse = pfSyntaxAccepts(cloudRules)
+            let pfParses: Bool
+            switch (armedParse, bootstrapParse) {
+            case (nil, _), (_, nil):
+                let warning = "warn: PF syntax check skipped (needs root); "
+                    + "run `sudo tono-core-helper --self-test` to include it\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+                pfParses = true
+            case let (armed?, bootstrap?):
+                pfParses = armed && bootstrap
+            }
+            return ruleShapesHold
+                && emergencyRules == emergencyExpected
+                && cloudShapesHold
+                && pfParses
+                && noStrayPermits
+                && statesAgree
+                && pinsAgree
+                && hostsAgree
+                && rejectedPrivateTarget
+                && rejectedUDPProxyTarget
         } catch {
             return false
         }

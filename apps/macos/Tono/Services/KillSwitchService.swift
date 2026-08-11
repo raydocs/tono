@@ -59,7 +59,9 @@ nonisolated enum KillSwitchService {
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]? = nil,
         tailscaleBootstrapEnabled: Bool? = nil,
         allowSystemResolution: Bool = false,
-        helperPrepared: Bool = false
+        helperPrepared: Bool = false,
+        // No default, for the same reason as the layer below it.
+        reviewedBundleDirect: Bool
     ) throws {
         // A connect transaction can prepare the helper once, then perform its
         // ordered PF/core/PF operations without repeating authenticated version
@@ -77,7 +79,8 @@ nonisolated enum KillSwitchService {
                 sessionDirectEndpoints: sessionDirectEndpoints,
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
-                bootstrapPins: bootstrapPins
+                bootstrapPins: bootstrapPins,
+                reviewedBundleDirect: reviewedBundleDirect
             )
             guard status.armed, status.wanted, status.live else {
                 throw Error.commandFailed("The PF rules did not become active.")
@@ -209,7 +212,11 @@ nonisolated enum KillSwitchService {
             proxyEndpoints: [],
             sessionDirectEndpoints: [],
             tailscaleBootstrapEnabled: AppProfile.homeExitEnabled,
-            allowSystemResolution: false
+            allowSystemResolution: false,
+            // Recovery re-arms from bundle metadata alone. No session has
+            // committed a reviewed policy here, so the permit must not be
+            // inherited into a ruleset rebuilt without one.
+            reviewedBundleDirect: false
         )
     }
 
@@ -225,7 +232,10 @@ nonisolated enum KillSwitchService {
             proxyEndpoints: [],
             sessionDirectEndpoints: [],
             tailscaleBootstrapEnabled: AppProfile.homeExitEnabled,
-            allowSystemResolution: false
+            allowSystemResolution: false,
+            // Bootstrap restriction deliberately strips every exception it is
+            // not asked to keep; the reviewed-bundle permit is one of them.
+            reviewedBundleDirect: false
         )
     }
 

@@ -59,7 +59,14 @@ actor PrivilegedRuntimeCoordinator {
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]? = nil,
         tailscaleBootstrapEnabled: Bool? = nil,
         allowSystemResolution: Bool = false,
-        helperPrepared: Bool = false
+        helperPrepared: Bool = false,
+        // Deliberately without a default. Arming rewrites the entire ruleset,
+        // so a call that omits this silently revokes the reviewed-bundle
+        // permit while the rule engine still routes that bundle direct — the
+        // packets then hit `block drop out quick all` and the app hangs. That
+        // shipped once, from a single omission in the pin-refresh convergence
+        // arm. Make the compiler ask.
+        reviewedBundleDirect: Bool
     ) throws {
         try KillSwitchService.arm(
             apiHosts: apiHosts,
@@ -69,7 +76,8 @@ actor PrivilegedRuntimeCoordinator {
             sessionDirectEndpoints: sessionDirectEndpoints,
             tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
             allowSystemResolution: allowSystemResolution,
-            helperPrepared: helperPrepared
+            helperPrepared: helperPrepared,
+            reviewedBundleDirect: reviewedBundleDirect
         )
     }
 

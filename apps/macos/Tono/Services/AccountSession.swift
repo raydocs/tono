@@ -560,7 +560,10 @@ final class AccountSession {
                     && protectedDNSState.available
                     && !protectedDNSState.configured
                     && !protectedDNSState.snapshotPresent,
-            helperPrepared: true
+            helperPrepared: true,
+            // Pre-tunnel setup arm: no traffic policy has been reviewed or
+            // committed yet, so nothing may be permitted outside the tunnel.
+            reviewedBundleDirect: false
         )
 
         if confirm {
