@@ -513,10 +513,52 @@ function managedCatalogYAML(value: unknown): string {
   ) {
     throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must be bounded Clash YAML with a proxies section');
   }
+  // Every identity in a published catalog must be the placeholder, never a
+  // literal. One catalog served verbatim to everyone is how every account came
+  // to share one exit identity, and why the exit can count bytes but not say
+  // whose. Refusing it here means that state cannot be re-published by accident:
+  // a real UUID in the document is rejected before it is ever encrypted.
+  for (const line of yaml.split(/\r?\n/)) {
+    const identity = /^\s*(?:-\s*)?uuid\s*:\s*(.+?)\s*$/.exec(line);
+    if (!identity) continue;
+    const value = identity[1].replace(/^['"]|['"]$/g, '');
+    if (value !== CLIENT_UUID_PLACEHOLDER) {
+      throw new ApiError(
+        400,
+        'INVALID_CATALOG',
+        `Catalog identities must be ${CLIENT_UUID_PLACEHOLDER}, so each account is served its own`,
+      );
+    }
+  }
   return yaml;
 }
 
-async function publicManagedCatalog(e: Env) {
+const CLIENT_UUID_PLACEHOLDER = '{{TONO_CLIENT_UUID}}';
+
+/// The identity this account presents at the exit, minted on first need.
+///
+/// Stable across fetches on purpose: the client persists the catalog digest and
+/// compares it, so an identity that changed per request would look like a
+/// tampered catalog every time.
+async function exitClientUUID(e: Env, userId: string): Promise<string> {
+  const existing = await e.DB.prepare(
+    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+  ).bind(userId).first<Row>();
+  if (existing) return String(existing.client_uuid);
+  const minted = crypto.randomUUID();
+  // A racing request may have inserted first; that row is as good as this one,
+  // so adopt it rather than failing a catalog fetch over it.
+  await e.DB.prepare(
+    'INSERT OR IGNORE INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?,?,?)',
+  ).bind(userId, minted, now()).run();
+  const row = await e.DB.prepare(
+    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+  ).bind(userId).first<Row>();
+  if (!row) throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Could not issue an exit identity');
+  return String(row.client_uuid);
+}
+
+async function publicManagedCatalog(e: Env, userId?: string) {
   const row = await e.DB.prepare(
     'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
   ).first<Row>();
@@ -543,6 +585,24 @@ async function publicManagedCatalog(e: Env) {
   if (digest !== row.content_sha256) {
     throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog failed integrity validation');
   }
+  // The stored digest authenticates the template. What the client verifies is
+  // what it received, so substitution recomputes it — a per-account document with
+  // the template's digest would read as tampering to every client.
+  if (userId !== undefined && yaml.includes(CLIENT_UUID_PLACEHOLDER)) {
+    const issued = await exitClientUUID(e, userId);
+    const served = yaml.split(CLIENT_UUID_PLACEHOLDER).join(issued);
+    return {
+      revision: Number(row.revision),
+      yaml: served,
+      sha256: await sha256(served),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+  // A catalog published before identities were per-account carries literals and
+  // is served unchanged. Deliberate: refusing it would take every existing
+  // client offline the moment this deploys, and the upload path already refuses
+  // to publish another one, so this path drains as soon as the catalog is
+  // replaced.
   return {
     revision: Number(row.revision),
     yaml,
@@ -2748,8 +2808,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   }
 
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
-    await auth(req, e);
-    return Response.json(await publicManagedCatalog(e));
+    const a = await auth(req, e);
+    return Response.json(await publicManagedCatalog(e, a.userId));
   }
 
   if (p === '/api/v1/traffic-policy' && m === 'GET') {

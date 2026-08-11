@@ -518,15 +518,26 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('encrypts, versions, and serves the managed exit catalog only to authenticated users', async () => {
+    // Identities are placeholders now: one catalog served verbatim to everyone is
+    // how every account came to present the same identity at the exit, which is
+    // why the exit could count bytes and never say whose.
     const yaml = `proxies:
   - name: "Managed Test"
     type: vless
     server: 8.8.4.4
     port: 443
-    uuid: 11111111-1111-4111-8111-111111111111
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
 `;
     expect((await api('exit-catalog')).status).toBe(401);
+
+    const literalIdentity = await admin(
+      'exit-catalog',
+      { yaml: yaml.replace('{{TONO_CLIENT_UUID}}', '11111111-1111-4111-8111-111111111111'), expectedRevision: 0 },
+      'PUT',
+    );
+    expect(literalIdentity.status).toBe(400);
+    expect((await literalIdentity.json() as any).error.code).toBe('INVALID_CATALOG');
 
     const created = await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT');
     expect(created.status).toBe(200);
@@ -538,7 +549,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).first<any>();
     expect(stored.revision).toBe(1);
     expect(stored.ciphertext).not.toContain('Managed Test');
-    expect(stored.ciphertext).not.toContain('11111111-1111-4111-8111-111111111111');
+    expect(stored.ciphertext).not.toContain('TONO_CLIENT_UUID');
     expect(stored.nonce).not.toBe('');
 
     const adminFetched = await admin('exit-catalog', undefined, 'GET');
@@ -550,17 +561,46 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       updatedAt: createdBody.updatedAt,
     });
 
+    // An account is served its own identity, and the digest is recomputed over
+    // what it actually received — the template's digest would read as tampering
+    // to a client that verifies, and every client verifies.
     const account = await createAccount('managed-catalog');
     const fetched = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
     expect(fetched.status).toBe(200);
-    expect(await fetched.json()).toEqual({
-      revision: 1,
-      yaml,
-      sha256: stored.content_sha256,
-      updatedAt: createdBody.updatedAt,
+    const servedBody = await fetched.json() as any;
+    expect(servedBody.revision).toBe(1);
+    expect(servedBody.yaml).not.toContain('TONO_CLIENT_UUID');
+    const issued = /uuid: ([0-9a-f-]{36})/.exec(servedBody.yaml)?.[1];
+    expect(issued).toBeTruthy();
+    expect(servedBody.sha256).not.toBe(stored.content_sha256);
+    // Same encoding the Worker uses (base64url, per src/crypto.ts), so this
+    // compares digests rather than encodings.
+    const digestOf = async (text: string) => btoa(
+      String.fromCharCode(...new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)),
+      )),
+    ).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    expect(servedBody.sha256).toBe(await digestOf(servedBody.yaml));
+
+    // Stable for this account: the client persists the digest and compares it, so
+    // a fresh identity per request would look tampered every time.
+    const refetched = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
     });
+    expect((await refetched.json() as any).yaml).toBe(servedBody.yaml);
+
+    // And distinct from another account's, which is the entire point.
+    const other = await createAccount('managed-catalog-two');
+    const otherFetched = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    const otherIssued = /uuid: ([0-9a-f-]{36})/.exec(
+      (await otherFetched.json() as any).yaml,
+    )?.[1];
+    expect(otherIssued).toBeTruthy();
+    expect(otherIssued).not.toBe(issued);
 
     const conflict = await admin(
       'exit-catalog',
