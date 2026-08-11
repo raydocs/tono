@@ -656,6 +656,35 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
     });
 
+    const nativeWeChatPolicy = {
+      ...webPolicy,
+      version: 4,
+      directSuffixes: [{ host: 'edu.cn', ports: [443, 80] }],
+      tcpEndpoints: [
+        { address: '49.51.67.253', ports: [443, 80] },
+      ],
+    };
+    const nativeUpdated = await admin(
+      'traffic-policy',
+      { policy: nativeWeChatPolicy, expectedRevision: 2 },
+      'PUT',
+    );
+    expect(nativeUpdated.status).toBe(200);
+    expect(JSON.parse((await nativeUpdated.json() as any).json)).toEqual({
+      version: 4,
+      domains: [
+        { host: 'res.wx.qq.com', ports: [443] },
+        { host: 'wx.qlogo.cn', ports: [80, 443] },
+      ],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443, 8000] }],
+      webDomains: [
+        { host: 'www.bilibili.com', ports: [443] },
+        { host: 'ykimg.alicdn.com', ports: [443] },
+      ],
+      directSuffixes: [{ host: 'edu.cn', ports: [80, 443] }],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [80, 443] }],
+    });
+
     const invalidPolicies = [
       { ...policy, version: 3 },
       { ...policy, version: 2 },
@@ -676,10 +705,90 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       },
     ];
     for (const invalid of invalidPolicies) {
-      const response = await admin('traffic-policy', { policy: invalid, expectedRevision: 2 }, 'PUT');
+      const response = await admin('traffic-policy', { policy: invalid, expectedRevision: 3 }, 'PUT');
       expect(response.status).toBe(400);
       expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
     }
+  });
+
+  it('accepts the Feishu family as direct suffixes instead of exact pins', async () => {
+    // Shape produced by tooling/scripts/retarget-direct-suffixes.rb. An exact
+    // pin only ever covers the apex, so CDN traffic on *.feishucdn.com was
+    // never matched; DOMAIN-SUFFIX entries need no DNS answer at all.
+    const retargeted = {
+      version: 4,
+      domains: [{ host: 'res.wx.qq.com', ports: [443] }],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443] }],
+      webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+      directSuffixes: [
+        { host: 'feishu.cn', ports: [80, 443] },
+        { host: 'feishucdn.com', ports: [80, 443] },
+        { host: 'larkoffice.com', ports: [443] },
+        { host: 'larksuite.com', ports: [443] },
+      ],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [443] }],
+    };
+    const written = await admin('traffic-policy', { policy: retargeted, expectedRevision: 0 }, 'PUT');
+    expect(written.status).toBe(200);
+    const stored = JSON.parse((await written.json() as any).json);
+    expect(stored.directSuffixes.map((entry: any) => entry.host)).toEqual([
+      'feishu.cn', 'feishucdn.com', 'larkoffice.com', 'larksuite.com',
+    ]);
+    expect(stored.webDomains).toEqual([{ host: 'www.bilibili.com', ports: [443] }]);
+
+    // A www. form cannot be a suffix entry, which is why the script folds those
+    // ports into the apex rather than carrying the host across.
+    const wwwSuffix = await admin('traffic-policy', {
+      policy: { ...retargeted, directSuffixes: [{ host: 'www.feishu.cn', ports: [443] }] },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(wwwSuffix.status).toBe(400);
+
+    // 8080 is why the script refuses to fold non-80/443 ports into a suffix.
+    const oddPort = await admin('traffic-policy', {
+      policy: { ...retargeted, directSuffixes: [{ host: 'feishucdn.com', ports: [8080] }] },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(oddPort.status).toBe(400);
+
+    // A repeated suffix must be refused at this boundary. The client rejects the
+    // whole revision when it sees one, so accepting it here silently disables
+    // managed direct routing on every device until someone republishes.
+    const duplicateSuffix = await admin('traffic-policy', {
+      policy: {
+        ...retargeted,
+        directSuffixes: [
+          { host: 'feishu.cn', ports: [80] },
+          { host: 'feishu.cn', ports: [443] },
+        ],
+      },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(duplicateSuffix.status).toBe(400);
+    expect((await duplicateSuffix.json() as any).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects unexpected top-level fields on the managed policy and catalog writes', async () => {
+    const policy = {
+      version: 1,
+      domains: [{ host: 'res.wx.qq.com', ports: [443] }],
+      mediaEndpoints: [],
+    };
+    const strayPolicyKey = await admin(
+      'traffic-policy',
+      { policy, expectedRevision: 0, revision: 9 },
+      'PUT',
+    );
+    expect(strayPolicyKey.status).toBe(400);
+    expect((await strayPolicyKey.json() as any).error.code).toBe('VALIDATION_ERROR');
+
+    const strayCatalogKey = await admin(
+      'exit-catalog',
+      { yaml: 'proxies: []\n', expectedRevision: 0, revision: 9 },
+      'PUT',
+    );
+    expect(strayCatalogKey.status).toBe(400);
+    expect((await strayCatalogKey.json() as any).error.code).toBe('VALIDATION_ERROR');
   });
 
   it('creates an account directly from a verified email and consumes one code winner atomically', async () => {
@@ -1472,6 +1581,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await api(`device-actions/${command.id}/result`, json({
       outcome: 'succeeded', snapshot: { lastErrorCategory: '/Users/customer/private' },
     }, owner.accessToken))).status).toBe(400);
+    expect((await api(`device-actions/${command.id}/result`, json({
+      outcome: 'succeeded', snapshot: { lastCrashLabel: '/Users/customer/private' },
+    }, owner.accessToken))).status).toBe(400);
     expect((await api(`device-actions/${command.id}/result`, json(null, owner.accessToken))).status).toBe(400);
     expect((await api(`device-actions/${command.id}/result`, json({
       outcome: 'succeeded', snapshot: { connected: true, reconnectAttempt: 2 },
@@ -1479,7 +1591,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const result = {
       outcome: 'succeeded',
-      snapshot: { connected: true, reconnectAttempt: 2, lastErrorCategory: 'data_plane' },
+      snapshot: {
+        connected: true, reconnectAttempt: 2, lastErrorCategory: 'data_plane',
+        lastCrashLabel: 'SIGSEGV',
+      },
     };
     expect((await api(`device-actions/${command.id}/result`, json(result, owner.accessToken))).status).toBe(200);
     expect((await api(`device-actions/${command.id}/result`, json(result, owner.accessToken))).status).toBe(200);

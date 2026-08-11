@@ -285,11 +285,18 @@ private actor ManagedTrafficPolicyProcessor {
                 TonoTrafficPolicy.self,
                 from: data
               ),
-              policy.version == 1 || policy.version == 2,
-              policy.version == 2 || policy.webDomains.isEmpty,
+              policy.version == 1 || policy.version == 2
+                || policy.version == 3 || policy.version == 4,
+              policy.version == 2 || policy.version == 3
+                || policy.version == 4 || policy.webDomains.isEmpty,
+              policy.version == 3 || policy.version == 4
+                || policy.directSuffixes.isEmpty,
+              policy.version == 4 || policy.tcpEndpoints.isEmpty,
               policy.domains.count <= 32,
               policy.mediaEndpoints.count <= 64,
-              policy.webDomains.count <= 16 else {
+              policy.tcpEndpoints.count <= 64,
+              policy.webDomains.count <= 32,
+              policy.directSuffixes.count <= 64 else {
             throw TonoAPIClient.APIError.invalidResponse
         }
 
@@ -329,6 +336,26 @@ private actor ManagedTrafficPolicyProcessor {
             )
         }.sorted { $0.address < $1.address }
 
+        var seenTCPAddresses = Set<String>()
+        let tcp = try policy.tcpEndpoints.map { entry in
+            let address = try ConfigPipeline.validatedPublicIPv4(
+                entry.address,
+                field: "managed TCP address"
+            )
+            guard address == entry.address,
+                  !protectedAddresses.contains(address),
+                  seenTCPAddresses.insert(address).inserted,
+                  !entry.ports.isEmpty,
+                  Set(entry.ports).count == entry.ports.count,
+                  entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
+                throw TonoAPIClient.APIError.invalidResponse
+            }
+            return TonoTrafficPolicyMediaEndpoint(
+                address: address,
+                ports: entry.ports.sorted()
+            )
+        }.sorted { $0.address < $1.address }
+
         let webDomains = try policy.webDomains.map { entry in
             let host = try ConfigPipeline.validatedWebDirectDomain(entry.host)
             guard host == entry.host,
@@ -339,15 +366,44 @@ private actor ManagedTrafficPolicyProcessor {
             return TonoTrafficPolicyDomain(host: host, ports: [443])
         }.sorted { $0.host < $1.host }
 
+        var seenSuffixes = Set<String>()
+        let directSuffixes = try policy.directSuffixes.map { entry in
+            let host = try ConfigPipeline.validatedManagedDirectSuffix(entry.host)
+            guard host == entry.host,
+                  seenSuffixes.insert(host).inserted,
+                  !entry.ports.isEmpty,
+                  Set(entry.ports).count == entry.ports.count,
+                  entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
+                throw TonoAPIClient.APIError.invalidResponse
+            }
+            return TonoTrafficPolicyDomain(
+                host: host,
+                ports: entry.ports.sorted()
+            )
+        }.sorted { $0.host < $1.host }
+
         return TonoTrafficPolicy(
             version: policy.version,
             domains: domains,
             mediaEndpoints: media,
-            webDomains: webDomains
+            tcpEndpoints: tcp,
+            webDomains: webDomains,
+            directSuffixes: directSuffixes
         )
     }
 
     func persistIfNewest(_ cache: ManagedTrafficPolicyCache) throws {
+        // This actor has no lifetime across launches. Re-check the existing
+        // authenticated cache before writing so a late old response cannot
+        // replace a newer policy just because the actor's in-memory revision
+        // floor was reset to -1.
+        if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy() {
+            if persisted.revision > cache.revision { return }
+            if persisted.revision == cache.revision,
+               persisted.sha256 != cache.sha256 {
+                throw TonoAPIClient.APIError.invalidResponse
+            }
+        }
         if cache.revision < persistedRevision { return }
         if cache.revision == persistedRevision {
             guard persistedDigest == cache.sha256 else {
@@ -442,10 +498,20 @@ final class AppState {
             if isConnecting {
                 completedConnectionStages.insert(oldValue)
                 if let connectionStageStartedAt {
-                    details["previous_stage"] = oldValue.rawValue
-                    details["previous_stage_duration_ms"] = String(
-                        max(0, Int(now.timeIntervalSince(connectionStageStartedAt) * 1_000))
+                    let elapsedMs = max(
+                        0,
+                        Int(now.timeIntervalSince(connectionStageStartedAt) * 1_000)
                     )
+                    details["previous_stage"] = oldValue.rawValue
+                    details["previous_stage_duration_ms"] = String(elapsedMs)
+                    // The audit log already carried this, but only as JSONL on
+                    // disk, so nothing could show a user or support which step
+                    // actually consumed the connect time.
+                    if lastConnectionStageDurations.count < 32 {
+                        lastConnectionStageDurations.append(
+                            StageDuration(stage: oldValue, milliseconds: elapsedMs)
+                        )
+                    }
                 }
                 connectionStageStartedAt = now
             }
@@ -455,6 +521,15 @@ final class AppState {
             )
         }
     }
+    struct StageDuration: Identifiable {
+        let stage: ConnectionStage
+        let milliseconds: Int
+        var id: String { stage.rawValue }
+    }
+
+    /// Per-step timings for the most recent connect transaction, surfaced on
+    /// the Support page so a slow connect can be attributed to a step.
+    private(set) var lastConnectionStageDurations: [StageDuration] = []
     var disconnectionStage: DisconnectionStage = .finishingOperation
     private(set) var connectionStartedAt: Date?
     private(set) var connectionStageStartedAt: Date?
@@ -537,6 +612,11 @@ final class AppState {
 
     // Activity
     var connections: [ConnectionEntry] = []
+    /// Oldest currently-open proxied flow, used to hold a disruptive pin
+    /// refresh until streaming responses have finished.
+    private var oldestProxiedConnectionStart: Date?
+    private var pinRefreshDeferralCount = 0
+    private var lastManagedDirectActivity: Date?
 
     // Logs
     var logEntries: [LogEntry] = []
@@ -558,6 +638,7 @@ final class AppState {
     private var autoConnectRequested = false
     private var managedCatalogRevision = -1
     private var managedCatalogDigest: String?
+    private var managedCatalogRouting: TonoExitCatalogRouting?
     private var managedCatalogReloadPending = false
     private var managedTrafficPolicy = TonoTrafficPolicy(
         version: 1,
@@ -673,14 +754,22 @@ final class AppState {
                   !self.isConnecting, !self.isDisconnecting else { return }
             let primaryService =
                 await PrivilegedRuntimeCoordinator.shared.primaryNetworkService()
-            let dnsIntact = if let service = self.protectedDNSService {
+            let dnsIntegrity = if let service = self.protectedDNSService {
                 await PrivilegedRuntimeCoordinator.shared
-                    .protectedDNSIsIntact(service: service)
+                    .protectedDNSIntegrity(service: service)
             } else {
-                false
+                PrivilegedRuntimeCoordinator.ProtectedDNSIntegrity.broken
             }
             guard !Task.isCancelled, self.isConnected else { return }
-            guard primaryService != self.protectedDNSService || !dnsIntact else {
+            // An unreachable helper is not evidence that DNS was tampered with;
+            // tearing the session down on it closes every flow for a restart
+            // that resolves itself.
+            guard dnsIntegrity != .unverifiable else {
+                self.networkEnvironmentTask = nil
+                return
+            }
+            guard primaryService != self.protectedDNSService
+                    || dnsIntegrity == .broken else {
                 self.networkEnvironmentTask = nil
                 return
             }
@@ -957,6 +1046,10 @@ final class AppState {
         let nodes = proxyRegions
             .first(where: { $0.id == Self.managedCatalogRegionID })?
             .nodes ?? []
+        if let preferred = managedCatalogRouting?.defaultProxy,
+           let node = nodes.first(where: { proxyTarget($0.name, matches: preferred) }) {
+            return node
+        }
         return ConfigPipeline.preferredCloudExit(
             in: nodes,
             named: AppProfile.defaultCloudExitName
@@ -1081,17 +1174,18 @@ final class AppState {
     func connect() {
         guard !isConnected && !isConnecting && !isDisconnecting else { return }
         guard !catalogSelectionRequiresChoice else {
-            errorMessage = "Choose an available cloud server before reconnecting."
+            errorMessage = String(localized: "Choose an available cloud server before reconnecting.")
             return
         }
         guard isTonoReady else {
-            errorMessage = "No protected Tono cloud exit is ready."
+            errorMessage = String(localized: "No protected Tono cloud exit is ready.")
             return
         }
         protectionOperationGeneration &+= 1
         isProtectionBlocked = false
         connectionStage = .preparing
         completedConnectionStages = []
+        lastConnectionStageDurations = []
         lastConnectionFailure = nil
         connectionStartedAt = Date()
         connectionStageStartedAt = connectionStartedAt
@@ -1133,7 +1227,10 @@ final class AppState {
             allowLan: false,
             tunEnabled: true,
             selectedNodeName: selectedExitName,
-            tonoTransport: tonoTransport
+            tonoTransport: tonoTransport,
+            claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+            defaultNodeName: managedCatalogRouting?.defaultProxy,
+            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
         )
         let apiHost = (Bundle.main.object(forInfoDictionaryKey: "TonoAPIBaseURL") as? String)
             .flatMap { URL(string: $0)?.host }
@@ -1205,7 +1302,9 @@ final class AppState {
                 }
                 let policyIsEmpty = trafficPolicy.domains.isEmpty
                     && trafficPolicy.webDomains.isEmpty
+                    && trafficPolicy.directSuffixes.isEmpty
                     && trafficPolicy.mediaEndpoints.isEmpty
+                    && trafficPolicy.tcpEndpoints.isEmpty
                 var committedDirectPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
                 if let physicalInterface {
                     do {
@@ -1229,6 +1328,7 @@ final class AppState {
                     }
                 }
                 let proxyEndpoints = try ConfigPipeline.dialEndpoints(for: selectedExit)
+                    + self.claudeHomeDialEndpoints(excluding: selectedExit)
                 // Always arm before TUN comes up so a crash mid-connect cannot
                 // leak the real IP. The actor keeps this blocking PF/helper work
                 // off SwiftUI and ordered with a possible cancel/disconnect.
@@ -1691,7 +1791,20 @@ final class AppState {
             completedConnectionStages = []
             lastConnectionFailure = nil
         }
-        coreMonitorTask?.cancel()
+        // Connection-scoped observations. `/connections` stops arriving once the
+        // core is gone, so leaving these set would have the next session judge a
+        // phantom stream from the previous one — old enough to look in-flight —
+        // and needlessly defer its first pin refreshes.
+        oldestProxiedConnectionStart = nil
+        lastManagedDirectActivity = nil
+        pinRefreshDeferralCount = 0
+        // Drained below alongside connect/nodeSwitch/configReload rather than
+        // merely cancelled: this monitor issues privileged probes, and a task
+        // suspended on the coordinator actor resumes regardless of cancellation,
+        // so the release sequence has to wait for it to unwind before it
+        // restores DNS and disarms PF.
+        let pendingCoreMonitor = coreMonitorTask
+        pendingCoreMonitor?.cancel()
         coreMonitorTask = nil
         networkEnvironmentTask?.cancel()
         networkEnvironmentTask = nil
@@ -1751,6 +1864,7 @@ final class AppState {
             _ = await pendingConnect?.value
             _ = await pendingNodeSwitch?.value
             _ = await pendingConfigReload?.value
+            _ = await pendingCoreMonitor?.value
 
             var transitionError: String?
             var helperReadyForRelease = true
@@ -1763,8 +1877,9 @@ final class AppState {
                         .repairRejectingHelperForExplicitReleaseIfNeeded()
                 } catch {
                     helperReadyForRelease = false
-                    transitionError =
-                        "The installed network helper rejected Tono, so network protection was not released. Tap Protected Offline again and approve the administrator repair. If repair cannot run, quit Tono, run `sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset`, then reopen Tono. \(error.localizedDescription)"
+                    transitionError = String(
+                        localized: "Tono's network helper rejected this copy of Tono, so protection was not released and your traffic stays protected. Choose Restore internet again to repair the helper and release protection. If repair keeps failing, the Support page has a recovery command. \(error.localizedDescription)"
+                    )
                     LocalTrafficAudit.shared.recordEvent(
                         "helper_release_repair_failed",
                         details: ["error": error.localizedDescription]
@@ -1846,7 +1961,7 @@ final class AppState {
                     }
                 } catch {
                     transitionLeavesProtectionBlocked = true
-                    transitionError = "Kill switch transition failed: \(error.localizedDescription)"
+                    transitionError = String(localized: "Kill switch transition failed: \(error.localizedDescription)")
                 }
             } else {
                 transitionLeavesProtectionBlocked = true
@@ -1895,7 +2010,7 @@ final class AppState {
                 )
                 startProxyGuard()
             } catch {
-                errorMessage = "System proxy failed: \(error.localizedDescription). Core is running but traffic is NOT proxied."
+                errorMessage = String(localized: "System proxy failed: \(error.localizedDescription). Core is running but traffic is NOT proxied.")
                 proxyFailed = true
             }
         }
@@ -1933,6 +2048,11 @@ final class AppState {
                     apiConnections,
                     protection: self.trafficAuditProtectionSnapshot()
                 )
+                // Refresh scheduling depends on this, so it must not be gated on
+                // a window being visible: the rest of this handler only feeds
+                // the Activity list, but pin refreshes have to make the same
+                // decision whether or not anyone is looking at that page.
+                self.recordLongLivedRouteActivity(apiConnections)
             }
             guard self.isMainWindowVisible,
                   self.selectedPage == .activity else { return }
@@ -2043,7 +2163,12 @@ final class AppState {
         let claudeTrafficResearchEnabled =
             LocalTrafficAudit.isClaudeTrafficResearchEnabled
         let appRoutingResearchEnabled = AppRoutingResearch.isCollectionActive
-        if localAuditEnabled || claudeTrafficResearchEnabled
+        // Pin-refresh scheduling reads this stream, so it has to run for the
+        // whole connected session. Gating it on the audit toggle alone meant a
+        // user who turned the audit log off — the obvious choice in a privacy
+        // product — silently lost every pin refresh, which is the exact
+        // stranding this refresher exists to prevent.
+        if isConnected || localAuditEnabled || claudeTrafficResearchEnabled
             || appRoutingResearchEnabled
             || (isMainWindowVisible && selectedPage == .activity) {
             webSocket.startConnectionsStream(intervalMilliseconds: 2_500)
@@ -2092,9 +2217,21 @@ final class AppState {
                     // launches from roughly 36/minute to three/minute.
                     if healthCycle.isMultiple(of: 6),
                        let service = self.protectedDNSService {
+                        // Both probes queue behind the release sequence on the
+                        // one privileged actor, so a user who taps Restore
+                        // internet inside this window has their DNS restored
+                        // *before* these resume. Without re-checking, the stale
+                        // verdict then re-armed protection and blamed "Protected
+                        // DNS stopped" — an explicit release silently undone.
+                        // Cancelling coreMonitorTask cannot help: a task
+                        // suspended on an actor call still resumes.
+                        let observedGeneration = self.protectionOperationGeneration
                         let primaryService =
                             await PrivilegedRuntimeCoordinator.shared
                                 .primaryNetworkService()
+                        guard !Task.isCancelled, self.isConnected,
+                              self.protectionOperationGeneration == observedGeneration
+                        else { return }
                         guard primaryService == service else {
                             self.disconnect(releaseKillSwitch: false)
                             self.errorMessage =
@@ -2102,10 +2239,14 @@ final class AppState {
                             self.scheduleProtectedReconnect()
                             return
                         }
-                        let dnsIntact =
+                        let dnsIntegrity =
                             await PrivilegedRuntimeCoordinator.shared
-                                .protectedDNSIsIntact(service: service)
-                        guard dnsIntact else {
+                                .protectedDNSIntegrity(service: service)
+                        guard !Task.isCancelled, self.isConnected,
+                              self.protectionOperationGeneration == observedGeneration
+                        else { return }
+                        guard dnsIntegrity != .unverifiable else { continue }
+                        guard dnsIntegrity == .intact else {
                             self.disconnect(releaseKillSwitch: false)
                             self.errorMessage =
                                 "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries."
@@ -2169,23 +2310,30 @@ final class AppState {
                     guard !Task.isCancelled, self.isConnected else { return }
                 }
                 // Full external probes are recovery/liveness checks, not the
-                // leak barrier. Run them every two minutes; wake, connect,
-                // network-change, and node-switch paths still verify
+                // leak barrier. Run them every 30 seconds so a dead cloud
+                // exit cannot leave Claude waiting for several minutes. Wake,
+                // connect, network-change, and node-switch paths still verify
                 // immediately.
-                guard healthCycle.isMultiple(of: 12),
+                guard healthCycle.isMultiple(of: 3),
                       self.switchingNodeId == nil,
                       self.configReloadTask == nil,
                       let api = self.clashAPI,
                       let selected = self.proxyService.activeNodeName
                 else { continue }
 
-                let health = await api.testProxyDelay(
+                let health = await api.testProxyDelayWithRetry(
                     name: selected,
                     url: "https://www.gstatic.com/generate_204",
-                    timeout: 5_000
+                    timeout: 4_000,
+                    attempts: 2,
+                    retryIntervalMs: 300
                 )
                 let dataPlaneReady = if let delay = health.delay, delay > 0 {
-                    await self.testSystemTUNDataPlane()
+                    await self.testSystemTUNDataPlaneWithRetry(
+                        timeout: 6,
+                        attempts: 2,
+                        retryIntervalMs: 300
+                    )
                 } else {
                     false
                 }
@@ -2205,13 +2353,95 @@ final class AppState {
                 self.isProxyDegraded = true
                 guard consecutiveHealthFailures >= 2 else { continue }
 
+                // A failed managed cloud exit should not force Claude to wait
+                // through the full reconnect backoff while the same node is
+                // retried. This also applies when Home-US is enabled: the
+                // Home/Claude route stays on Tono-Home-Residential, while its
+                // dialer-proxy and the ordinary Tono-Exit traffic both depend
+                // on the selected managed cloud exit. Try one other validated
+                // catalog node while TUN and PF remain live. The node-switch
+                // transaction moves the exact root-only endpoint permit first,
+                // verifies both Mihomo and ordinary user traffic, and only
+                // then commits the new selection. If it cannot complete, the
+                // existing fail-closed reconnect path below remains the only
+                // recovery route.
+                if await self.attemptAutomaticCloudFailover() {
+                    consecutiveHealthFailures = 0
+                    self.isProxyDegraded = false
+                    continue
+                }
+                guard self.isConnected, !self.isDisconnecting else { return }
                 self.disconnect(releaseKillSwitch: false)
-                self.errorMessage =
-                    "Protected system traffic stopped responding; Kill Switch is blocking traffic while Tono reconnects."
+                self.errorMessage = self.importedExitNodes.count > 1
+                    ? String(localized: "Protected system traffic stopped responding; Kill Switch is blocking traffic while Tono reconnects.")
+                    : String(localized: "Protected system traffic stopped responding and no alternate server is available; Kill Switch is blocking traffic while Tono reconnects.")
                 self.scheduleProtectedReconnect()
                 return
             }
         }
+    }
+
+    /// Switch to one alternate validated managed cloud exit without releasing
+    /// the protected TUN/PF transaction. When Home-US is enabled this changes
+    /// only the cloud dialer beneath the Home/Claude route; it does not replace
+    /// the Home-US identity or move Claude to the ordinary cloud exit.
+    private func attemptAutomaticCloudFailover() async -> Bool {
+        guard isConnected,
+              !isDisconnecting,
+              switchingNodeId == nil,
+              configReloadTask == nil,
+              let current = selectedExitNode() else {
+            return false
+        }
+        // A single validated node has nowhere to fail over to, so the caller
+        // falls through to the fail-closed reconnect path and retries the same
+        // exit. Record that separately: without it the resulting generic
+        // "stopped responding" message hides the actual reason from support,
+        // and this branch is indistinguishable from a healthy no-op.
+        guard importedExitNodes.count > 1 else {
+            LocalTrafficAudit.shared.recordEvent(
+                "automatic_cloud_failover_unavailable",
+                details: ["reason": "single_validated_node"]
+            )
+            return false
+        }
+
+        let nodes = importedExitNodes
+        guard let currentIndex = nodes.firstIndex(where: { $0.id == current.id }) else {
+            return false
+        }
+        let rotated = Array(nodes.dropFirst(currentIndex + 1))
+            + Array(nodes.prefix(currentIndex + 1))
+        guard let candidate = rotated.first(where: { node in
+            node.id != current.id && !proxyTarget(node.name, matches: current.name)
+        }) else {
+            return false
+        }
+
+        LocalTrafficAudit.shared.recordEvent(
+            "automatic_cloud_failover_requested",
+            details: [
+                "from": current.name,
+                "to": candidate.name,
+            ]
+        )
+        selectNode(candidate.name)
+        guard let switchTask = nodeSwitchTask else { return false }
+        _ = await switchTask.value
+        guard !Task.isCancelled,
+              isConnected,
+              !isDisconnecting,
+              switchingNodeId == nil,
+              let active = selectedExitNode(),
+              active.id == candidate.id else {
+            return false
+        }
+        errorMessage = nil
+        LocalTrafficAudit.shared.recordEvent(
+            "automatic_cloud_failover_succeeded",
+            details: ["selected_exit": candidate.name]
+        )
+        return true
     }
 
     /// Non-prompting foreground reconciliation for the documented root
@@ -2254,7 +2484,9 @@ final class AppState {
             isProtectedReconnectScheduled = false
             protectedReconnectNextAttemptAt = nil
             errorMessage =
-                "The installed network helper rejected Tono. Automatic retries are paused. Tap Protected Offline and approve the administrator repair. If repair cannot run, quit Tono, run `sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset`, then reopen Tono."
+                String(
+                    localized: "Tono's network helper rejected this copy of Tono, so automatic retries are paused. Choose Repair and reconnect to reinstall the helper, or Restore internet to turn protection off. If repair keeps failing, the Support page has a recovery command."
+                )
             return false
         case .confirmed(let requiresProtectionRecovery):
             KillSwitchService.isArmed = requiresProtectionRecovery
@@ -2454,7 +2686,7 @@ final class AppState {
         }
         if nameOrId == ConfigPipeline.homeNodeName,
            !AppProfile.homeExitEnabled || tonoTransport == nil {
-            errorMessage = "Home-US is temporarily disabled. Choose a managed cloud server."
+            errorMessage = String(localized: "Home-US is temporarily disabled. Choose a managed cloud server.")
             return
         }
         let desiredNode = nameOrId == ConfigPipeline.homeNodeName
@@ -2462,7 +2694,7 @@ final class AppState {
             : localProxyNode(matching: nameOrId)
         let nodeName = desiredNode?.name ?? ConfigPipeline.homeNodeName
         guard nameOrId == ConfigPipeline.homeNodeName || desiredNode != nil else {
-            errorMessage = "The selected node is unavailable."
+            errorMessage = String(localized: "The selected node is unavailable.")
             return
         }
 
@@ -2513,6 +2745,7 @@ final class AppState {
             guard let api else { return }
             do {
                 let endpoints = try ConfigPipeline.dialEndpoints(for: desiredNode)
+                    + self.claudeHomeDialEndpoints(excluding: desiredNode)
                 // The owned runtime excludes every validated catalog address,
                 // so its TUN route fingerprint is stable across selections.
                 // Move the exact PF permission first; until the selector moves,
@@ -2662,7 +2895,7 @@ final class AppState {
 
     func setProxyMode(_ mode: ProxyMode) {
         guard !isOwnedTonoMode || mode == .rule else {
-            errorMessage = "Tono keeps Rule mode locked so traffic cannot bypass the protected cloud route."
+            errorMessage = String(localized: "Tono keeps Rule mode locked so traffic cannot bypass the protected cloud route.")
             return
         }
         proxyMode = mode
@@ -2797,7 +3030,10 @@ final class AppState {
             allowLan: config.allowLan,
             tunEnabled: config.tunEnabled,
             selectedNodeName: selectedExitNode()?.name ?? ConfigPipeline.homeNodeName,
-            tonoTransport: tonoTransport
+            tonoTransport: tonoTransport,
+            claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+            defaultNodeName: managedCatalogRouting?.defaultProxy,
+            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
         )
         let selectedExit = selectedExitNode()
         let selectedExitName = selectedExit?.name
@@ -2834,7 +3070,8 @@ final class AppState {
                     tunnelInterfaces: KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
                         ? [ConfigPipeline.tonoTunInterface]
                         : [],
-                    proxyEndpoints: try ConfigPipeline.dialEndpoints(for: selectedExit),
+                    proxyEndpoints: (try ConfigPipeline.dialEndpoints(for: selectedExit))
+                        + self.claudeHomeDialEndpoints(excluding: selectedExit),
                     sessionDirectEndpoints: sessionEndpoints,
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil
                 )
@@ -2869,9 +3106,9 @@ final class AppState {
                     // tuples rather than leaving a growing root PF allowlist.
                     try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                         tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                        proxyEndpoints: try ConfigPipeline.dialEndpoints(
+                        proxyEndpoints: (try ConfigPipeline.dialEndpoints(
                             for: selectedExit
-                        ),
+                        )) + self.claudeHomeDialEndpoints(excluding: selectedExit),
                         sessionDirectEndpoints:
                             pendingDirectPolicy.sessionEndpoints,
                         tailscaleBootstrapEnabled:
@@ -3031,7 +3268,7 @@ final class AppState {
                             name: target.groupName,
                             url: target.testURL,
                             timeout: ConfigPipeline
-                                .managedDirectHealthTimeoutMilliseconds
+                                .managedDirectPrimeTimeoutMilliseconds
                         )
                         switch outcome {
                         case .reachableMembers(let delays):
@@ -3153,13 +3390,14 @@ final class AppState {
                     revision: response.revision,
                     yaml: response.yaml,
                     sha256: response.sha256,
-                    updatedAt: response.updatedAt
+                    updatedAt: response.updatedAt,
+                    routing: response.routing
                 ),
                 persistCache: true,
                 allowRuntimeTransition: true
             )
         } catch {
-            errorMessage = "Cloud server update was rejected; the last verified catalog remains active. \(error.localizedDescription)"
+            errorMessage = String(localized: "Cloud server update was rejected; the last verified catalog remains active. \(error.localizedDescription)")
             throw error
         }
     }
@@ -3210,6 +3448,8 @@ final class AppState {
             }
         }
 
+        let validatedRouting = validatedCatalogRouting(catalog.routing, nodes: nodes)
+
         let previousSelection = currentProxySelectionTarget()
         let previousCloudNodes = proxyRegions
             .filter { $0.id != "custom" }
@@ -3222,7 +3462,10 @@ final class AppState {
             false
         }
 
-        if allowRuntimeTransition, selectedCloudNodeWasRemoved, isConnected || isConnecting {
+        let liveSessionTornDown = allowRuntimeTransition
+            && selectedCloudNodeWasRemoved
+            && (isConnected || isConnecting)
+        if liveSessionTornDown {
             // Remove both the old TUN and its exact PF endpoint before changing
             // the visible selection. Automatic connect remains blocked until
             // the user explicitly chooses a surviving exit.
@@ -3240,12 +3483,23 @@ final class AppState {
         proxyRegions = managedRegions + customRegions
         managedCatalogRevision = catalog.revision
         managedCatalogDigest = catalog.sha256
+        managedCatalogRouting = validatedRouting
 
         if selectedCloudNodeWasRemoved {
-            catalogSelectionRequiresChoice = true
-            autoConnectRequested = false
             applyDefaultProxySelection(persist: true)
-            errorMessage = "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server."
+            if managedCatalogRouting?.defaultProxy != nil,
+               currentProxySelectionTarget() != nil {
+                catalogSelectionRequiresChoice = false
+                errorMessage = String(localized: "The selected cloud server was removed. Tono switched to the managed default cloud server.")
+                if liveSessionTornDown {
+                    autoConnectRequested = true
+                    attemptAutomaticConnect()
+                }
+            } else {
+                catalogSelectionRequiresChoice = true
+                autoConnectRequested = false
+                errorMessage = String(localized: "The selected cloud server was removed. Kill Switch is still blocking traffic; choose another cloud server.")
+            }
         } else if !migrateCloudExitDefaultIfNeeded() {
             restoreProxySelection(preferredTarget: previousSelection, persistFallback: true)
         }
@@ -3261,6 +3515,51 @@ final class AppState {
         } else if isConnecting {
             managedCatalogReloadPending = true
         }
+    }
+
+    private func validatedCatalogRouting(
+        _ routing: TonoExitCatalogRouting?,
+        nodes: [ProxyNode]
+    ) -> TonoExitCatalogRouting? {
+        guard let routing else { return nil }
+
+        func validatedName(_ raw: String?, field: String) -> String? {
+            guard let raw else { return nil }
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty,
+                  nodes.contains(where: { proxyTarget($0.name, matches: name) })
+            else {
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_catalog_routing_ignored",
+                    details: ["field": field]
+                )
+                return nil
+            }
+            return nodes.first(where: { proxyTarget($0.name, matches: name) })?.name
+        }
+
+        let homeSocks5 = ConfigPipeline.validatedHomeSocks5(routing.homeSocks5)
+        if routing.homeSocks5 != nil, homeSocks5 == nil {
+            // Never include the credential-bearing value in diagnostics.
+            LocalTrafficAudit.shared.recordEvent(
+                "managed_catalog_routing_ignored",
+                details: ["field": "homeSocks5"]
+            )
+        }
+        // homeSocks5 is the stronger directive: if both arrive in a hand
+        // edited cache, keep exactly one Claude home route.
+        let homeProxy = homeSocks5 == nil
+            ? validatedName(routing.homeProxy, field: "homeProxy")
+            : nil
+        let defaultProxy = validatedName(routing.defaultProxy, field: "defaultProxy")
+        guard homeProxy != nil || homeSocks5 != nil || defaultProxy != nil else {
+            return nil
+        }
+        return TonoExitCatalogRouting(
+            homeProxy: homeProxy,
+            defaultProxy: defaultProxy,
+            homeSocks5: homeSocks5
+        )
     }
 
     // MARK: - Managed traffic policy
@@ -3291,6 +3590,21 @@ final class AppState {
         persistCache: Bool,
         allowRuntimeTransition: Bool
     ) async throws {
+        // The processor actor is recreated on every launch, while the
+        // mode-0600 disk cache may contain a newer policy than a delayed or
+        // stale control-plane response. Never let that response downgrade
+        // the active policy (or overwrite the newer cache) during startup.
+        if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy(),
+           persisted.revision > cache.revision {
+            if persisted.revision > managedTrafficPolicyRevision {
+                try await installManagedTrafficPolicy(
+                    persisted,
+                    persistCache: false,
+                    allowRuntimeTransition: allowRuntimeTransition
+                )
+            }
+            return
+        }
         if cache.revision < managedTrafficPolicyRevision { return }
         if cache.revision == managedTrafficPolicyRevision {
             guard managedTrafficPolicyDigest == cache.sha256 else {
@@ -3353,7 +3667,9 @@ final class AppState {
         policy: TonoTrafficPolicy
     ) throws -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         guard !policy.domains.isEmpty || !policy.mediaEndpoints.isEmpty
-                || !policy.webDomains.isEmpty else {
+                || !policy.tcpEndpoints.isEmpty
+                || !policy.webDomains.isEmpty
+                || !policy.directSuffixes.isEmpty else {
             return nil
         }
         let media = policy.mediaEndpoints.flatMap { endpoint in
@@ -3367,11 +3683,45 @@ final class AppState {
                 }
             }
         }
+        let tcp = policy.tcpEndpoints.flatMap { endpoint in
+            endpoint.ports.compactMap { port in
+                UInt16(exactly: port).map {
+                    ConfigPipeline.DirectEndpoint(
+                        address: endpoint.address,
+                        port: $0,
+                        transport: "tcp"
+                    )
+                }
+            }
+        }
+        let directSuffixes = try policy.directSuffixes.map { entry in
+            let host = try ConfigPipeline.validatedManagedDirectSuffix(entry.host)
+            guard host == entry.host,
+                  !entry.ports.isEmpty,
+                  Set(entry.ports).count == entry.ports.count,
+                  entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
+                throw ConfigPipeline.TonoInjectionError.unsafeNode(
+                    "managed direct suffix"
+                )
+            }
+            let ports = entry.ports.compactMap(UInt16.init(exactly:))
+            guard ports.count == entry.ports.count else {
+                throw ConfigPipeline.TonoInjectionError.unsafeNode(
+                    "managed direct suffix"
+                )
+            }
+            return ConfigPipeline.DirectDomainSuffix(
+                host: host,
+                ports: ports.sorted()
+            )
+        }.sorted { $0.host < $1.host }
         let runtime = ConfigPipeline.ManagedDirectRuntimePolicy(
             physicalInterface: physicalInterface,
             domainPins: [],
             webDomainPins: [],
+            webDomainSuffixes: directSuffixes,
             mediaEndpoints: media,
+            tcpEndpoints: tcp,
             directResolverHosts: (policy.domains + policy.webDomains)
                 .map(\.host)
         )
@@ -3384,7 +3734,25 @@ final class AppState {
     /// PF proxy permits for the currently selected exit, matching what the
     /// connect and reload transactions arm.
     private func currentProxyEndpoints() -> [ConfigPipeline.DialEndpoint] {
-        (try? ConfigPipeline.dialEndpoints(for: selectedExitNode())) ?? []
+        let selected = selectedExitNode()
+        return ((try? ConfigPipeline.dialEndpoints(for: selected)) ?? [])
+            + claudeHomeDialEndpoints(excluding: selected)
+    }
+
+    /// Claude's home route is a second exact proxy endpoint, so it must be
+    /// admitted to PF whenever the selected exit is armed. Do not duplicate a
+    /// selected node: the helper's endpoint set is intentionally unique.
+    private func claudeHomeDialEndpoints(
+        excluding selected: ProxyNode?
+    ) -> [ConfigPipeline.DialEndpoint] {
+        guard managedCatalogRouting?.homeSocks5 == nil,
+              let homeName = managedCatalogRouting?.homeProxy,
+              let home = proxyRegions
+                .flatMap(\.nodes)
+                .first(where: { proxyTarget($0.name, matches: homeName) }),
+              home.id != selected?.id
+        else { return [] }
+        return (try? ConfigPipeline.dialEndpoints(for: home)) ?? []
     }
 
     /// Safety net against total pin staleness: re-resolves the managed-direct
@@ -3394,6 +3762,83 @@ final class AppState {
     /// committed pins still overlap the live answers — CDN round-robin
     /// reshuffles answers on every query, and reacting to every reshuffle
     /// would churn PF and the runtime config all session long.
+    /// A pin refresh rewrites the runtime config, asks Mihomo to reload it, and
+    /// re-arms PF twice. Established flows do not survive that, so a rotating
+    /// WeChat CDN address was able to cut a Claude or ChatGPT response in half
+    /// every few minutes. Streaming responses are the whole point of those
+    /// routes, so the refresh waits for them — bounded, because pins that stay
+    /// stale eventually break WeChat outright: `hosts:` keeps resolving a
+    /// retired address, and no fallback group can rescue a dead dial target.
+    private static let pinRefreshStreamGraceSeconds: TimeInterval = 5
+    private static let pinRefreshMaximumDeferrals = 3
+
+    private func recordLongLivedRouteActivity(_ connections: [APIConnection]) {
+        let now = Date.now
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // Keyed on traffic that the direct policy is *meant* to serve, not on
+        // traffic already riding the direct chain. Pin resolution can fail for
+        // a whole session, and then nothing reaches the direct route at all —
+        // keying on the chain would let that session never refresh and leave
+        // the route permanently proxied.
+        let policyHosts = managedDirectPolicyHosts
+        var oldest: Date?
+        for connection in connections {
+            if connection.chains.contains(ConfigPipeline.directProxyName)
+                || connection.chains.contains(where: {
+                    $0.hasPrefix(ConfigPipeline.managedDirectFallbackGroupPrefix)
+                }) {
+                lastManagedDirectActivity = now
+            } else {
+                let host = connection.metadata.host.lowercased()
+                if !host.isEmpty, policyHosts.contains(where: {
+                    host == $0 || host.hasSuffix(".\($0)")
+                }) {
+                    lastManagedDirectActivity = now
+                }
+            }
+            // Only the assistant route. `MATCH,Tono-Exit` is the terminal rule,
+            // so including the exit group would match every proxied flow in a
+            // full-tunnel session and make this permanently true — deferring
+            // every refresh to the cap and then forcing one mid-stream anyway.
+            guard connection.chains.contains(ConfigPipeline.claudeHomeGroupName)
+            else { continue }
+            let started = formatter.date(from: connection.start)
+                ?? ISO8601DateFormatter().date(from: connection.start)
+            guard let started, started <= now else { continue }
+            if oldest == nil || started < oldest! { oldest = started }
+        }
+        oldestProxiedConnectionStart = oldest
+    }
+
+    /// Pins exist for one purpose: keeping reviewed China-direct dials working.
+    /// When nothing has used that route for a while, refreshing them buys
+    /// nobody anything and still costs every open connection, so the rotation
+    /// is simply allowed to go stale until the route is used again — a connect
+    /// or a node switch rebuilds it from scratch anyway.
+    private var managedDirectRouteRecentlyUsed: Bool {
+        guard let lastManagedDirectActivity else { return false }
+        return Date.now.timeIntervalSince(lastManagedDirectActivity)
+            < Self.managedDirectIdleWindowSeconds
+    }
+
+    private static let managedDirectIdleWindowSeconds: TimeInterval = 600
+
+    /// Hosts the current direct policy is responsible for, used to notice that
+    /// the route is wanted even while it is failing.
+    private var managedDirectPolicyHosts: [String] {
+        (managedTrafficPolicy.domains + managedTrafficPolicy.webDomains)
+            .map { $0.host.lowercased() }
+    }
+
+    /// True while a proxied flow has been open long enough to be a stream
+    /// rather than a short request that can simply be retried.
+    private var hasInFlightProxiedStream: Bool {
+        guard let oldestProxiedConnectionStart else { return false }
+        return Date.now.timeIntervalSince(oldestProxiedConnectionStart)
+            >= Self.pinRefreshStreamGraceSeconds
+    }
+
     private func refreshManagedDirectPins() async {
         guard isConnected, isOwnedTonoMode,
               switchingNodeId == nil,
@@ -3421,6 +3866,37 @@ final class AppState {
                 excluding: managedDirectProtectedAddresses()
             )
             guard let validated, validated != base else { return }
+            guard managedDirectRouteRecentlyUsed else {
+                // Reset here too, or an idle stretch leaves the counter parked
+                // at the cap and the first refresh after the route wakes up
+                // skips its deferral and reloads straight through a stream.
+                pinRefreshDeferralCount = 0
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_pins_refresh_skipped_idle",
+                    details: ["idle_window_s": String(Int(Self.managedDirectIdleWindowSeconds))]
+                )
+                return
+            }
+            if hasInFlightProxiedStream,
+               pinRefreshDeferralCount < Self.pinRefreshMaximumDeferrals {
+                pinRefreshDeferralCount += 1
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_pins_refresh_deferred",
+                    details: [
+                        "reason": "in_flight_proxied_stream",
+                        "deferral": String(pinRefreshDeferralCount),
+                        "limit": String(Self.pinRefreshMaximumDeferrals),
+                    ]
+                )
+                return
+            }
+            if pinRefreshDeferralCount > 0 {
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_pins_refresh_forced",
+                    details: ["deferrals": String(pinRefreshDeferralCount)]
+                )
+            }
+            pinRefreshDeferralCount = 0
             reloadCoreConfig(applyingDirectPolicy: validated)
         } catch {
             LocalTrafficAudit.shared.recordEvent(
@@ -3479,10 +3955,51 @@ final class AppState {
                 current.webDomainPins,
                 resolved.webDomainPins
             ),
+            webDomainSuffixes: current.webDomainSuffixes,
             mediaEndpoints: current.mediaEndpoints,
+            tcpEndpoints: current.tcpEndpoints,
             directResolverHosts: current.directResolverHosts
         )
         return merged == current ? nil : merged
+    }
+
+    /// Pin resolution used to race Mihomo's resolver: a connect that reached
+    /// this point before the DoH upstream was usable had all 38 hosts exhaust
+    /// their retry ladders together — measured at 35 of 38 failing in the same
+    /// millisecond, costing 7.6s and leaving the session with almost no pins,
+    /// which is why the WeChat direct share swung between roughly half and
+    /// three quarters depending on who won the race. One cheap probe first
+    /// turns that into a short wait. Any non-throwing reply proves the resolver
+    /// answers — an empty answer counts, since emptiness is a verdict about the
+    /// name, not about readiness.
+    private func awaitResolverReadiness(probeHost: String?, api: ClashAPI) async {
+        guard let probeHost else { return }
+        let startedAt = Date()
+        let deadline = startedAt.addingTimeInterval(5)
+        var attempts = 0
+        while Date() < deadline {
+            if Task.isCancelled { return }
+            attempts += 1
+            if (try? await api.resolveIPv4(probeHost)) != nil {
+                if attempts > 1 {
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_resolver_ready",
+                        details: [
+                            "attempts": String(attempts),
+                            "waited_ms": String(
+                                Int(Date().timeIntervalSince(startedAt) * 1_000)
+                            ),
+                        ]
+                    )
+                }
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        LocalTrafficAudit.shared.recordEvent(
+            "managed_direct_resolver_never_ready",
+            details: ["attempts": String(attempts)]
+        )
     }
 
     private func resolveManagedDirectDomains(
@@ -3494,6 +4011,10 @@ final class AppState {
               let physicalInterface = base?.physicalInterface else {
             return base
         }
+        await awaitResolverReadiness(
+            probeHost: (policy.domains.first ?? policy.webDomains.first)?.host,
+            api: api
+        )
         let protectedAddresses = managedDirectProtectedAddresses()
         async let domainPins = resolveManagedDirectDomainPins(
             policy.domains,
@@ -3510,7 +4031,9 @@ final class AppState {
             physicalInterface: physicalInterface,
             domainPins: pins,
             webDomainPins: webPins,
+            webDomainSuffixes: base?.webDomainSuffixes ?? [],
             mediaEndpoints: base?.mediaEndpoints ?? [],
+            tcpEndpoints: base?.tcpEndpoints ?? [],
             directResolverHosts: base?.directResolverHosts
                 ?? (policy.domains + policy.webDomains).map(\.host)
         )
@@ -3998,7 +4521,7 @@ final class AppState {
                         self.isProxyDegraded = false
                     } catch {
                         self.isProxyDegraded = true
-                        self.errorMessage = "系统代理丢失：\(error.localizedDescription)"
+                        self.errorMessage = String(localized: "System proxy lost: \(error.localizedDescription)")
                     }
                 } else if self.isProxyDegraded {
                     self.isProxyDegraded = false
@@ -4037,11 +4560,11 @@ final class AppState {
     func applySettingChange(key: String, value: Any) {
         if isOwnedTonoMode {
             if key == "tun", let tun = value as? [String: Any], tun["enable"] as? Bool == false {
-                errorMessage = "Tono requires TUN mode while cloud protection is active."
+                errorMessage = String(localized: "Tono requires TUN mode while cloud protection is active.")
                 return
             }
             if key == "allow-lan", value as? Bool == true {
-                errorMessage = "Tono does not expose the protected route to LAN clients."
+                errorMessage = String(localized: "Tono does not expose the protected route to LAN clients.")
                 return
             }
         }
@@ -4713,7 +5236,9 @@ final class AppState {
                     : nil,
                 route: conn.chains.isEmpty
                     ? "Direct"
-                    : conn.chains.joined(separator: " → ")
+                    : conn.chains.joined(separator: " → "),
+                uploadText: formatBytes(conn.upload),
+                downloadText: formatBytes(conn.download)
             )
         }
     }
@@ -4761,7 +5286,8 @@ final class AppState {
             protectedDNSConfigured: protectedDNSService != nil,
             selectedExit: String(selected.prefix(100)), connectionStage: String(connectionStage.rawValue.prefix(100)),
             reconnectAttempt: min(max(protectedReconnectAttempt, 0), 1000),
-            lastErrorCategory: lastErrorCategory
+            lastErrorCategory: lastErrorCategory,
+            lastCrashLabel: nil
         )
     }
 

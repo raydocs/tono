@@ -84,6 +84,9 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     private var researchConnections: [
         String: ClaudeTrafficResearchConnection
     ] = [:]
+    /// Insertion order for `researchConnections`, so the oldest byte cursors can
+    /// be evicted instead of freezing every counter at the cap.
+    private var researchConnectionOrder: [String] = []
     private var researchSeenConnectionIDs = Set<String>()
     private var researchSeenConnectionOrder: [String] = []
     private var researchDroppedKeys = Set<ClaudeTrafficResearchKey>()
@@ -186,6 +189,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             researchObservedSince = Int(Date().timeIntervalSince1970)
             researchTotals.removeAll(keepingCapacity: true)
             researchConnections.removeAll(keepingCapacity: true)
+            researchConnectionOrder.removeAll(keepingCapacity: true)
             researchSeenConnectionIDs.removeAll(keepingCapacity: true)
             researchSeenConnectionOrder.removeAll(keepingCapacity: true)
             researchDroppedKeys.removeAll(keepingCapacity: true)
@@ -715,10 +719,19 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             }
             return
         }
-        guard researchConnections.count < Self.maximumResearchConnections else {
+        if researchConnections.count >= Self.maximumResearchConnections {
+            // Mirrors the dedup map's pruning rather than returning forever:
+            // returning froze `researchTotals` for the rest of the session once
+            // 20k connections had been seen, so the metric silently died on any
+            // long-lived session. Evicting the oldest byte cursors can at worst
+            // double-count a connection that outlives 18k successors, which the
+            // sibling map already accepts for the same reason.
             researchConnectionLimitReached = true
-            return
+            let expired = researchConnectionOrder.prefix(2_000)
+            for identifier in expired { researchConnections[identifier] = nil }
+            researchConnectionOrder.removeFirst(expired.count)
         }
+        researchConnectionOrder.append(connection.id)
         var total = researchTotals[key] ?? ClaudeTrafficResearchTotal(
             connections: 0,
             upBytes: 0,

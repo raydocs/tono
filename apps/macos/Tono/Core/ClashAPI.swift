@@ -15,6 +15,14 @@ actor ClashAPI {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.urlCache = nil
         config.waitsForConnectivity = false
+        // The controller is on loopback, and pin resolution deliberately fans
+        // out one request per policy domain. At the platform default of six
+        // connections per host the surplus requests sat in URLSession's queue
+        // burning their own two-second deadline without a byte leaving the
+        // process: a measured connect had 35 of 38 domains "time out" in the
+        // same millisecond, and 15 of 20 health probes report a controller
+        // timeout, both of which were manufactured here rather than by Mihomo.
+        config.httpMaximumConnectionsPerHost = 64
         self.session = URLSession(configuration: config)
     }
 
@@ -274,7 +282,19 @@ actor ClashAPI {
     /// startup failure even though the same core connected on the next click.
     func waitUntilReady(maxAttempts: Int = 40, intervalMs: UInt64 = 250) async throws {
         let attemptCount = max(1, maxAttempts)
-        for attempt in 0..<attemptCount {
+        // The grace window is preserved exactly: the same total time may elapse
+        // before the core is declared unavailable, so the false-startup-failure
+        // regression this window exists to prevent cannot return. Only the
+        // sampling density changes — a controller that binds in 150 ms is now
+        // noticed at the next 50 ms poll instead of costing a full `intervalMs`
+        // tick, which is pure connect latency on every launch. Every poll is
+        // against 127.0.0.1, so a slow or high-latency WAN cannot make this
+        // ramp give up early.
+        let totalSleepBudgetMs = UInt64(attemptCount - 1) * intervalMs
+        let fastPollCeilingMs: UInt64 = 500
+        let fastPollIntervalMs = min(UInt64(50), intervalMs)
+        var sleptMs: UInt64 = 0
+        while true {
             try Task.checkCancellation()
             do {
                 var urlRequest = URLRequest(url: makeURL("/version"))
@@ -292,11 +312,16 @@ actor ClashAPI {
                 return // Core is ready
             } catch {
                 try Task.checkCancellation()
-                guard attempt + 1 < attemptCount else { break }
-                try await Task.sleep(for: .milliseconds(intervalMs))
+                guard sleptMs < totalSleepBudgetMs else { break }
+                let step = min(
+                    sleptMs < fastPollCeilingMs ? fastPollIntervalMs : intervalMs,
+                    totalSleepBudgetMs - sleptMs
+                )
+                try await Task.sleep(for: .milliseconds(step))
+                sleptMs += step
             }
         }
-        throw ClashAPIError.requestFailed("核心未能在规定时间内就绪")
+        throw ClashAPIError.requestFailed(String(localized: "Core did not become ready in time"))
     }
 
     // MARK: - Reload Config

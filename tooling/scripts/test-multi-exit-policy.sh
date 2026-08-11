@@ -27,6 +27,7 @@ DEVELOPER_DIR="$tono_developer_dir" /usr/bin/xcrun swiftc \
   -module-cache-path "$test_dir/module-cache" \
   "$repo_root/apps/macos/Tono/Models/ProxyNode.swift" \
   "$repo_root/apps/macos/Tono/Models/RuleEntry.swift" \
+  "$repo_root/apps/macos/Tono/Models/TonoAPIModels.swift" \
   "$repo_root/apps/macos/Tono/Services/ConfigParser.swift" \
   "$repo_root/apps/macos/Tono/Core/HelperProtocolVersion.swift" \
   "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift" \

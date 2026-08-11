@@ -26,6 +26,9 @@ xcrun swiftc \
   -framework IOKit \
   -framework Security \
   -o "$temporary_file"
+# This is an ad-hoc signature for local compilation only. The Release archive
+# must re-sign the helper with the Tono Developer ID through CodeSignOnCopy;
+# HelperManager and the installed daemon intentionally reject this ad-hoc copy.
 codesign --force --sign - --identifier com.raydocs.tono.helper "$temporary_file"
 chmod 0755 "$temporary_file"
 "$temporary_file" --self-test

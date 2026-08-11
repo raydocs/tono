@@ -19,8 +19,6 @@ struct ContentView: View {
                         switch appState.selectedPage {
                         case .dashboard:
                             DashboardView()
-                        case .subscriptions:
-                            SubscriptionsView()
                         case .proxies:
                             ProxiesView()
                         case .rules:
@@ -29,6 +27,8 @@ struct ContentView: View {
                             ActivityView()
                         case .logs:
                             LogsView()
+                        case .support:
+                            SupportView()
                         case .settings:
                             SettingsView()
                         }

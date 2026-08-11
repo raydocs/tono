@@ -165,6 +165,14 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
     /// accepting it across the update even though new snapshots use a tighter
     /// cap after the recognized-app vocabulary expands.
     private static let maximumAcceptedComponentEntries = 25
+    /// The control plane reads this payload with an 8 KiB body limit and rejects a
+    /// canonical form above the same bound, so a snapshot that does not fit can
+    /// never be delivered. Entry caps alone do not establish that: 20 entries plus
+    /// 25 legacy component entries at full count and platform width serialize to
+    /// roughly 9.4 KiB. Since there is one pending slot and expiry is ninety days,
+    /// an oversized snapshot would silently block every later upload for a quarter
+    /// of a year, so size is checked directly rather than inferred from counts.
+    private static let maximumSnapshotWireBytes = 8 * 1_024
     private static let maximumStoredBytes = 32 * 1_024
     private static let families = AppRoutingResearchClassifier.families
     private static let componentFamilies =
@@ -396,6 +404,13 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
                 let timestamp = Int(Date().timeIntervalSince1970)
                 discardExpiredPending(now: timestamp)
                 sealElapsedWindowIfNeeded(now: timestamp)
+                // Self-healing: never lease a payload the control plane cannot
+                // accept. Holding one would occupy the single pending slot until
+                // the ninety-day expiry and drop every window sealed in between.
+                if let pending = stored.pending, !Self.fitsWireBudget(pending) {
+                    stored.pending = nil
+                    persistNow()
+                }
                 guard let snapshot = stored.pending,
                       let ownerHash = activeOwnerHash else {
                     continuation.resume(returning: nil)
@@ -900,7 +915,7 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
             return false
         }
         if snapshot.schemaVersion == 1 {
-            return snapshot.bundleComponents == nil
+            return snapshot.bundleComponents == nil && fitsWireBudget(snapshot)
         }
         guard let components = snapshot.bundleComponents,
               components.count <= maximumAcceptedComponentEntries else {
@@ -952,7 +967,18 @@ nonisolated final class AppRoutingResearch: @unchecked Sendable {
             }
             componentAppTotals[component.app] = total
         }
-        return true
+        return fitsWireBudget(snapshot)
+    }
+
+    /// Measured on the encoded form rather than derived from the entry caps, so a
+    /// later field addition or a legacy payload cannot reintroduce a snapshot the
+    /// control plane is unable to accept. `JSONEncoder` emits the same keys and
+    /// values the worker canonicalizes, so the byte counts agree.
+    private static func fitsWireBudget(
+        _ snapshot: TonoAppRoutingResearchSnapshot
+    ) -> Bool {
+        guard let data = try? JSONEncoder().encode(snapshot) else { return false }
+        return data.count <= maximumSnapshotWireBytes
     }
 
     private static func trafficVolumeRank(_ value: String) -> Int {

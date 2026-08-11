@@ -95,6 +95,7 @@ const deviceActions = ['diagnostic_snapshot', 'claude_traffic_snapshot', 'refres
  *  the client's own free-text `error`/`failedStage` instead; see
  *  `canonicalDiagnosticsReport`.) */
 const errorCategories = ['preparation', 'helper', 'kill_switch', 'tunnel', 'policy', 'dns', 'exit_check', 'data_plane', 'other'];
+const crashLabels = ['SIGABRT', 'SIGILL', 'SIGSEGV', 'SIGBUS', 'SIGFPE', 'SIGTRAP', 'signal', 'exception'];
 
 function fixedAction(value: unknown) {
   if (typeof value !== 'string' || !deviceActions.includes(value as typeof deviceActions[number])) {
@@ -340,7 +341,7 @@ function canonicalActionResult(value: unknown) {
     const s = value.snapshot as Row;
     const bools = ['connected', 'connecting', 'disconnecting', 'protectionBlocked', 'killSwitchArmed', 'utunPresent', 'protectedDNSConfigured'];
     const strings = ['appVersion', 'build', 'selectedExit', 'connectionStage'];
-    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory']);
+    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory', 'lastCrashLabel']);
     const snapshot: Row = {};
     for (const key of bools) {
       if (s[key] !== undefined && typeof s[key] !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
@@ -354,6 +355,12 @@ function canonicalActionResult(value: unknown) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid lastErrorCategory');
       }
       snapshot.lastErrorCategory = s.lastErrorCategory;
+    }
+    if (s.lastCrashLabel !== undefined) {
+      if (typeof s.lastCrashLabel !== 'string' || !crashLabels.includes(s.lastCrashLabel)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid lastCrashLabel');
+      }
+      snapshot.lastCrashLabel = s.lastCrashLabel;
     }
     if (s.reconnectAttempt !== undefined) {
       if (!Number.isSafeInteger(s.reconnectAttempt) || s.reconnectAttempt < 0 || s.reconnectAttempt > 1000) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid reconnectAttempt');
@@ -545,10 +552,12 @@ async function publicManagedCatalog(e: Env) {
 }
 
 type TrafficPolicy = {
-  version: 1 | 2;
+  version: 1 | 2 | 3 | 4;
   domains: Array<{ host: string; ports: number[] }>;
   mediaEndpoints: Array<{ address: string; ports: number[] }>;
   webDomains?: Array<{ host: string; ports: number[] }>;
+  directSuffixes?: Array<{ host: string; ports: number[] }>;
+  tcpEndpoints?: Array<{ address: string; ports: number[] }>;
 };
 
 const emptyTrafficPolicy = (): TrafficPolicy => ({ version: 1, domains: [], mediaEndpoints: [] });
@@ -589,15 +598,66 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints']);
   const isVersion2 = policy.version === 2 &&
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains']);
-  if ((!isVersion1 && !isVersion2) ||
+  const isVersion3 = policy.version === 3 &&
+    exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes']);
+  const isVersion4 = policy.version === 4 &&
+    exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes', 'tcpEndpoints']);
+  if ((!isVersion1 && !isVersion2 && !isVersion3 && !isVersion4) ||
       !Array.isArray(policy.domains) || policy.domains.length > 32 ||
       !Array.isArray(policy.mediaEndpoints) || policy.mediaEndpoints.length > 64 ||
-      (isVersion2 && (!Array.isArray(policy.webDomains) || policy.webDomains.length > 16))) {
+      ((isVersion2 || isVersion3 || isVersion4) &&
+        (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32)) ||
+      ((isVersion3 || isVersion4) &&
+        (!Array.isArray(policy.directSuffixes) || policy.directSuffixes.length > 64)) ||
+      (isVersion4 &&
+        (!Array.isArray(policy.tcpEndpoints) || policy.tcpEndpoints.length > 64))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid traffic policy version or shape');
   }
   const allowedWeChatSuffixes = ['qq.com', 'qq.com.cn', 'qpic.cn', 'qlogo.cn', 'gtimg.cn', 'gtimg.com', 'wechat.com', 'weixin.com', 'weixinbridge.com', 'wxs.qq.com'];
-  const allowedWebSuffixes = ['bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com'];
+  const allowedWebSuffixes = [
+    'bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com',
+    'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com',
+    'iqiyipic.com', 'youku.com', 'ykimg.com', 'xiaohongshu.com',
+    'xhslink.com', 'xhscdn.com', 'feishu.cn', 'feishucdn.com',
+    'larksuite.com', 'larkoffice.com', 'baidu.com', 'baidupcs.com',
+    'bcebos.com', 'baidubcs.com', 'bdstatic.com', 'bdimg.com',
+    'aliyuncs.com', '10jqka.com.cn', 'iwencai.com', 'eastmoney.com',
+    'dfcfw.com', 'sina.com.cn', 'sinajs.cn', 'legulegu.com', 'optbbs.com',
+    '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'pushplus.plus',
+    'baostock.com', 'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com',
+    'zoomgov.com', 'oray.com', 'sunlogin.com', 'edu.cn',
+  ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
+  // NARROWING THESE LISTS IS A BREAKING OPERATION. `publicTrafficPolicy` runs the
+  // stored policy back through this function on every read, so removing an entry
+  // that the live policy still uses turns every policy fetch into a 503 and
+  // disables managed direct routing fleet-wide. Republish the policy without the
+  // entry first, then narrow. Widening is safe; the client re-validates against
+  // its own allowlist and rejects anything it does not recognise.
+  //
+  // Several entries here are namespaces where a third party chooses the hostname
+  // — `aliyuncs.com` and `bcebos.com`/`baidubcs.com` are tenant object storage,
+  // `edu.cn` spans thousands of independent institutions, `oray.com`/
+  // `sunlogin.com` relay arbitrary remote-access sessions. A *wildcard* direct
+  // exception over those namespaces would let anyone who can host an object
+  // there collect a real IP outside the tunnel, which is why ConfigPipeline no
+  // longer renders `directSuffixes` as routes at all. Keep that in mind before
+  // re-enabling suffix routing: these belong in `allowedWebExactHosts` as
+  // individually reviewed hosts, not as apex wildcards.
+  const allowedDirectSuffixes = [
+    'bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com',
+    'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com',
+    'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com',
+    'xiaohongshu.com', 'xhslink.com', 'xhscdn.com', 'feishu.cn',
+    'feishucdn.com', 'larksuite.com', 'larkoffice.com', 'baidu.com',
+    'baidupcs.com', 'bcebos.com', 'baidubcs.com', 'bdstatic.com',
+    'bdimg.com', 'aliyuncs.com', '10jqka.com.cn', 'iwencai.com',
+    'eastmoney.com', 'dfcfw.com', 'sina.com.cn', 'sinajs.cn',
+    'legulegu.com', 'optbbs.com', '100ppi.com', 'awtmt.com', 'cls.cn',
+    'cninfo.com.cn', 'pushplus.plus', 'baostock.com', 'sse.com.cn',
+    'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
+    'sunlogin.com', 'edu.cn',
+  ];
   const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
@@ -647,7 +707,50 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     allowedWebExactHosts,
     true,
   );
-  return { version: 2, domains, mediaEndpoints, webDomains };
+  if (isVersion2) return { version: 2, domains, mediaEndpoints, webDomains };
+
+  // Duplicates must be rejected here, not just deduplicated: the client treats a
+  // repeated suffix as a malformed policy and discards the whole revision, so a
+  // duplicate accepted at this boundary silently disables managed direct routing
+  // on every device until someone republishes.
+  const seenSuffixes = new Set<string>();
+  const directSuffixes = (policy.directSuffixes as unknown[]).map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+        !exactKeys(entry as Row, ['host', 'ports'])) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid direct suffix');
+    }
+    const { host, ports } = entry as Row;
+    if (typeof host !== 'string' || !allowedDirectSuffixes.includes(host) ||
+        seenSuffixes.has(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
+    }
+    seenSuffixes.add(host);
+    return { host, ports: canonicalPorts(ports, [80, 443], 'direct suffix ports') };
+  }).sort((a, b) => a.host < b.host ? -1 : a.host > b.host ? 1 : 0);
+  if (isVersion3) return { version: 3, domains, mediaEndpoints, webDomains, directSuffixes };
+
+  const seenTCPAddresses = new Set<string>();
+  const tcpEndpoints = (policy.tcpEndpoints as unknown[]).map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+        !exactKeys(entry as Row, ['address', 'ports'])) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid TCP endpoint');
+    }
+    const { address, ports } = entry as Row;
+    if (typeof address !== 'string' || !isPublicIPv4(address) ||
+        seenTCPAddresses.has(address)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate TCP address');
+    }
+    seenTCPAddresses.add(address);
+    return { address, ports: canonicalPorts(ports, [80, 443], 'TCP endpoint ports') };
+  }).sort((a, b) => a.address < b.address ? -1 : a.address > b.address ? 1 : 0);
+  return {
+    version: 4,
+    domains,
+    mediaEndpoints,
+    webDomains,
+    directSuffixes,
+    tcpEndpoints,
+  };
 }
 
 async function publicTrafficPolicy(e: Env) {
@@ -662,6 +765,10 @@ async function publicTrafficPolicy(e: Env) {
     const json = await decryptTrafficPolicy(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
     const digest = await sha256(json);
     if (digest !== row.content_sha256) throw new Error('digest mismatch');
+    // Re-validating on read catches tampering and digest drift, but it also
+    // couples every fetch to the current allowlists: an allowlist entry removed
+    // while the stored policy still uses it makes this throw for every device.
+    // See the note on `allowedDirectSuffixes` before narrowing anything.
     canonicalTrafficPolicy(JSON.parse(json));
     return { revision: Number(row.revision), json, sha256: digest, updatedAt: Number(row.updated_at) };
   } catch {
@@ -3095,6 +3202,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (p === '/api/v1/admin/traffic-policy' && m === 'PUT') {
       const b = await body(req, 64 * 1024);
+      rejectUnexpectedKeys(b, ['policy', 'expectedRevision']);
       const policy = canonicalTrafficPolicy(b.policy);
       const json = JSON.stringify(policy);
       const expectedRevision = b.expectedRevision;
@@ -3133,6 +3241,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (p === '/api/v1/admin/exit-catalog' && m === 'PUT') {
       const b = await body(req, 2 * 1024 * 1024);
+      rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
       const yaml = managedCatalogYAML(b.yaml);
       const expectedRevision = b.expectedRevision;
       if (

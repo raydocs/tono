@@ -48,6 +48,25 @@ struct MultiExitPolicyTests {
         guard validated.count == nodes.count else {
             throw TestFailure("node validation count changed")
         }
+        let v3PolicyJSON = """
+        {
+          "version": 3,
+          "domains": [],
+          "mediaEndpoints": [],
+          "webDomains": [],
+          "directSuffixes": [{"host": "edu.cn", "ports": [80, 443]}]
+        }
+        """
+        let decodedV3Policy = try JSONDecoder().decode(
+            TonoTrafficPolicy.self,
+            from: Data(v3PolicyJSON.utf8)
+        )
+        guard decodedV3Policy.version == 3,
+              decodedV3Policy.directSuffixes == [
+                  .init(host: "edu.cn", ports: [80, 443]),
+              ] else {
+            throw TestFailure("traffic-policy v3 directSuffixes did not decode")
+        }
 
         var japanNamed = validated[0]
         japanNamed.id = "jp-default-order-test"
@@ -153,6 +172,7 @@ struct MultiExitPolicyTests {
             ("owned-marker", "# Tono owned runtime"),
             ("lan-off", "\nallow-lan: false\n"),
             ("ipv6-off", "\nipv6: false\n"),
+            ("udp-rule-engine", "\nudp: true\n"),
             ("rule-mode", "\nmode: rule\n"),
             ("unified-delay", "\nunified-delay: true\n"),
             ("demand-process-lookup", "\nfind-process-mode: strict\n"),
@@ -162,6 +182,16 @@ struct MultiExitPolicyTests {
                 "protected-loopback-dns",
                 "\n  listen: \(ProtectedDNSContract.listener)\n"
             ),
+            (
+                "dns-upstream-through-tono-exit",
+                "\n    - https://1.1.1.1/dns-query#Tono-Exit\n"
+            ),
+            (
+                "proxy-dns-upstream-through-tono-exit",
+                "\n    - https://8.8.8.8/dns-query#Tono-Exit\n"
+            ),
+            ("dns-hijack", "\n  dns-hijack:\n"),
+            ("strict-tun-route", "\n  strict-route: true\n"),
             ("gvisor-tun-stack", "\n  stack: gvisor\n"),
             ("owned-tun", "\n  device: utun199\n"),
             (
@@ -179,6 +209,8 @@ struct MultiExitPolicyTests {
             throw TestFailure("owned runtime omitted: \(missing.joined(separator: ","))")
         }
         guard !runtime.contains("\nmode: global\n"),
+              !runtime.contains("\n      fallback:\n"),
+              !runtime.contains("\n      default-nameserver:\n"),
               !runtime.contains("skip-cert-verify: true"),
               !runtime.contains("\n    sni:"),
               runtime.contains("\n      - \"\(escaped(selected.name))\"") else {
@@ -213,6 +245,102 @@ struct MultiExitPolicyTests {
             throw TestFailure("cloud-only fallback did not preserve the owned fail-closed runtime")
         }
 
+        var claudeHomeOverlay = cloudOnlyOverlay
+        claudeHomeOverlay.claudeHomeNodeName = sanitizedNode.name
+        claudeHomeOverlay.defaultNodeName = sanitizedNode.name
+        let claudeHomeRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
+            subscriptionYAML: "proxies: []\n",
+            overlay: claudeHomeOverlay,
+            transport: nil,
+            customNodes: sanitizedNodes
+        )
+        let claudeHomeRequired = [
+            "name: \"\(ConfigPipeline.claudeHomeGroupName)\"",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
+        ]
+        guard claudeHomeRequired.allSatisfy(claudeHomeRuntime.contains),
+              !claudeHomeRuntime.contains("PROCESS-NAME,Claude)),Tono-Exit") else {
+            throw TestFailure("Claude home route was not isolated in the owned runtime")
+        }
+
+        var claudeSocks5Overlay = cloudOnlyOverlay
+        claudeSocks5Overlay.claudeHomeSocks5 = .init(
+            host: "residential.example.com",
+            port: 11_080,
+            username: "residential-user",
+            password: "test-only-password"
+        )
+        let claudeSocks5Runtime = try ConfigPipeline.buildOwnedTonoRuntime(
+            subscriptionYAML: "proxies: []\n",
+            overlay: claudeSocks5Overlay,
+            transport: nil,
+            customNodes: sanitizedNodes
+        )
+        let residentialProxy = ConfigPipeline.homeResidentialProxyName
+        guard claudeSocks5Runtime.contains("name: \"\(residentialProxy)\""),
+              claudeSocks5Runtime.contains("server: \"residential.example.com\""),
+              claudeSocks5Runtime.contains("dialer-proxy: \"\(ConfigPipeline.exitGroupName)\""),
+              claudeSocks5Runtime.contains("udp: false"),
+              claudeSocks5Runtime.contains("- \"\(residentialProxy)\""),
+              claudeSocks5Runtime.contains(
+                  "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),\(ConfigPipeline.claudeHomeGroupName)"
+              ),
+              !claudeSocks5Runtime.contains("PROCESS-NAME,Claude)),Tono-Exit") else {
+            throw TestFailure("homeSocks5 Claude chain was not fail-closed and TCP-scoped")
+        }
+
+        // Every named assistant provider must ride the residential hop, and the
+        // shared infrastructure the public AI rule lists bundle in must not:
+        // gstatic.com in particular is this group's own liveness probe, so
+        // routing it here would test the hop through itself.
+        for provider in ConfigPipeline.assistantHomeDomainSuffixes {
+            guard claudeSocks5Runtime.contains(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(provider))),\(ConfigPipeline.claudeHomeGroupName)"
+            ) else {
+                throw TestFailure("assistant provider \(provider) was not routed to the residential hop")
+            }
+        }
+        for shared in ["gstatic.com", "auth0.com", "stripe.com", "sentry.io", "statsig.com", "googleapis.com", "x.com"] {
+            guard !claudeSocks5Runtime.contains(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(shared))),\(ConfigPipeline.claudeHomeGroupName)"
+            ) else {
+                throw TestFailure("shared infrastructure \(shared) must not be pinned to the residential hop")
+            }
+        }
+
+        // The residential hop is a consumer uplink reached through a second
+        // hop; a one-member `select` group left every Claude stream with no
+        // failover and no liveness check, which is how requests died
+        // mid-response while the exit probe still reported healthy. The hop
+        // must stay first, the protected exit must back it, and both members
+        // must remain protected exits so nothing here can egress directly.
+        let claudeGroupBlock = claudeSocks5Runtime
+            .components(separatedBy: "name: \"\(ConfigPipeline.claudeHomeGroupName)\"")
+            .dropFirst()
+            .first ?? ""
+        let residentialIndex = claudeGroupBlock.range(of: "- \"\(residentialProxy)\"")?.lowerBound
+        let exitIndex = claudeGroupBlock.range(of: "- \"\(ConfigPipeline.exitGroupName)\"")?.lowerBound
+        guard claudeGroupBlock.contains("type: fallback"),
+              let residentialIndex,
+              let exitIndex,
+              residentialIndex < exitIndex,
+              claudeGroupBlock.contains("url: \"\(ConfigPipeline.claudeHomeHealthURL)\""),
+              claudeGroupBlock.contains(
+                  "interval: \(ConfigPipeline.managedDirectHealthIntervalSeconds)"
+              ),
+              !claudeGroupBlock.contains("- DIRECT"),
+              !claudeGroupBlock.contains("- \"\(ConfigPipeline.directProxyName)\"") else {
+            throw TestFailure(
+                "Claude home group must be a health-checked fallback that prefers the residential hop and backs it with the protected exit only"
+            )
+        }
+
         let managedDirectPolicy = ConfigPipeline.ManagedDirectRuntimePolicy(
             physicalInterface: "en0",
             domainPins: [
@@ -232,26 +360,37 @@ struct MultiExitPolicyTests {
             mediaEndpoints: [
                 .init(address: "43.146.27.17", port: 443, transport: "udp"),
                 .init(address: "43.146.27.17", port: 8000, transport: "udp"),
+            ],
+            tcpEndpoints: [
+                .init(address: "49.51.67.253", port: 80, transport: "tcp"),
             ]
         )
         let validatedDirectPolicy = try ConfigPipeline.validatedManagedDirectPolicy(
             managedDirectPolicy,
             excluding: Set(sanitizedNodes.map(\.server))
         )
-        guard validatedDirectPolicy?.sessionEndpoints.count == 5 else {
+        guard validatedDirectPolicy?.sessionEndpoints.count == 6 else {
             throw TestFailure("managed direct policy did not produce exact PF tuples")
         }
         let fallbackTargets = ConfigPipeline.managedDirectFallbackTargets(
             for: validatedDirectPolicy
         )
-        guard fallbackTargets.count == 2,
-              Set(fallbackTargets.map(\.groupName)).count == 2,
-              let fallback80 = fallbackTargets.first(where: { $0.port == 80 }),
-              let fallback443 = fallbackTargets.first(where: { $0.port == 443 }),
+        guard fallbackTargets.count == 3,
+              Set(fallbackTargets.map(\.groupName)).count == 3,
+              let fallback80 = fallbackTargets.first(where: {
+                  $0.host == "res.wx.qq.com" && $0.port == 80
+              }),
+              let fallback443 = fallbackTargets.first(where: {
+                  $0.host == "res.wx.qq.com" && $0.port == 443
+              }),
+              let tcpFallback80 = fallbackTargets.first(where: {
+                  $0.host == "49.51.67.253" && $0.port == 80
+              }),
               fallback80.host == "res.wx.qq.com",
               fallback80.testURL == "http://res.wx.qq.com/",
               fallback443.host == "res.wx.qq.com",
               fallback443.testURL == "https://res.wx.qq.com/",
+              tcpFallback80.testURL == "http://mmbiz.qpic.cn/",
               fallbackTargets.allSatisfy({
                   $0.groupName.hasPrefix(
                       ConfigPipeline.managedDirectFallbackGroupPrefix
@@ -266,6 +405,13 @@ struct MultiExitPolicyTests {
             customNodes: sanitizedNodes,
             directPolicy: managedDirectPolicy
         )
+        let claudeProtectedRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
+            subscriptionYAML: "proxies: []\n",
+            overlay: claudeSocks5Overlay,
+            transport: nil,
+            customNodes: sanitizedNodes,
+            directPolicy: managedDirectPolicy
+        )
         guard let weChatProcessPathRegex =
                 ConfigPipeline.managedDirectProcessPathRegexes.first else {
             throw TestFailure("managed DIRECT omitted the standard WeChat bundle")
@@ -274,6 +420,10 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,res.wx.qq.com),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback80.groupName)"
         let directRule443 =
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,res.wx.qq.com),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback443.groupName)"
+        let pinnedIPRule443 =
+            "AND,((NETWORK,TCP),(DST-PORT,443),(IP-CIDR,43.146.27.19/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback443.groupName)"
+        let tcpDirectRule80 =
+            "AND,((NETWORK,TCP),(DST-PORT,80),(IP-CIDR,49.51.67.253/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(tcpFallback80.groupName)"
         let webDirectRule =
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com)),Tono-China-Web-Direct"
         let mediaRule443 =
@@ -288,9 +438,9 @@ struct MultiExitPolicyTests {
             directRulePrecedesMatch = false
         }
         let claudeRules = [
-            "PROCESS-NAME,Claude,Tono-Exit",
-            "PROCESS-NAME,claude,Tono-Exit",
-            "PROCESS-NAME,claude.exe,Tono-Exit",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),Tono-Exit",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),Tono-Exit",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit",
         ]
         let claudeRulesPrecedeDirect = claudeRules.allSatisfy { rule in
             guard let claudeRange = managedDirectRuntime.range(of: rule),
@@ -298,6 +448,29 @@ struct MultiExitPolicyTests {
                 return false
             }
             return claudeRange.lowerBound < directRange.lowerBound
+        }
+        let claudeProtectedRules = [
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
+        ]
+        let claudeProtectedRulesPrecedeDirect = claudeProtectedRules.allSatisfy { rule in
+            guard let claudeRange = claudeProtectedRuntime.range(of: rule),
+                  let directRange = claudeProtectedRuntime.range(of: directRule443) else {
+                return false
+            }
+            return claudeRange.lowerBound < directRange.lowerBound
+        }
+        let claudeProtectedRulesHaveNoDirectTarget = claudeProtectedRules.allSatisfy { rule in
+            !claudeProtectedRuntime.contains(rule.replacingOccurrences(
+                of: "Tono-Claude-Home",
+                with: "Tono-China-Direct"
+            )) && !claudeProtectedRuntime.contains(rule.replacingOccurrences(
+                of: "Tono-Claude-Home",
+                with: "Tono-China-Web-Direct"
+            ))
         }
         let fallbackGroupCount = managedDirectRuntime
             .components(separatedBy: "\n    type: fallback\n")
@@ -334,11 +507,16 @@ struct MultiExitPolicyTests {
             ),
             ("tcp-80-fallback-rule", managedDirectRuntime.contains(directRule80)),
             ("tcp-443-fallback-rule", managedDirectRuntime.contains(directRule443)),
+            ("pinned-ip-443-fallback-rule", managedDirectRuntime.contains(pinnedIPRule443)),
+            ("tcp-ip-80-fallback-rule", managedDirectRuntime.contains(tcpDirectRule80)),
             ("web-tcp-rule", managedDirectRuntime.contains(webDirectRule)),
             ("udp-443-rule", managedDirectRuntime.contains(mediaRule443)),
             ("udp-8000-rule", managedDirectRuntime.contains(mediaRule8000)),
             ("rule-order", directRulePrecedesMatch),
             ("claude-process-rules", claudeRulesPrecedeDirect),
+            ("claude-protected-before-all-direct-rules", claudeProtectedRulesPrecedeDirect),
+            ("claude-protected-never-direct", claudeProtectedRulesHaveNoDirectTarget),
+            ("udp-fail-closed", managedDirectRuntime.contains("AND,((NETWORK,UDP)),REJECT")),
             ("one-fallback-per-wechat-port", fallbackGroupCount == fallbackTargets.count),
             ("fail-closed-fallback-order", managedDirectRuntime.contains(fallback443Block)),
             (
@@ -359,6 +537,18 @@ struct MultiExitPolicyTests {
             ),
             ("no-name-only-identity", !managedDirectRuntime.contains("PROCESS-NAME,WeChat")),
             ("no-domain-suffix", !managedDirectRuntime.contains("DOMAIN-SUFFIX")),
+            // The connect-path prime was shortened for latency; the runtime
+            // groups must keep the generous steady-state budget so a congested
+            // but usable direct path is not flapped onto the proxy.
+            (
+                "runtime-keeps-steady-state-timeout",
+                managedDirectRuntime.contains(
+                    "timeout: \(ConfigPipeline.managedDirectHealthTimeoutMilliseconds)"
+                )
+                    && !managedDirectRuntime.contains(
+                        "timeout: \(ConfigPipeline.managedDirectPrimeTimeoutMilliseconds)"
+                    )
+            ),
             ("no-domain-keyword", !managedDirectRuntime.contains("DOMAIN-KEYWORD")),
             ("no-wide-cidr", !managedDirectRuntime.contains("43.146.27.0/24")),
             ("no-direct-fallback", !managedDirectRuntime.contains("MATCH,DIRECT")),
@@ -371,6 +561,137 @@ struct MultiExitPolicyTests {
                 "managed DIRECT runtime failed: "
                     + failedManagedDirectChecks.joined(separator: ",")
             )
+        }
+
+        let suffixOnlyPolicy = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0",
+            domainPins: [],
+            webDomainPins: [],
+            webDomainSuffixes: [
+                .init(host: "edu.cn", ports: [80, 443]),
+                .init(host: "baidu.com", ports: [443]),
+            ],
+            mediaEndpoints: []
+        )
+        let validatedSuffixOnlyPolicy = try ConfigPipeline.validatedManagedDirectPolicy(
+            suffixOnlyPolicy,
+            excluding: Set(sanitizedNodes.map(\.server))
+        )
+        let suffixRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
+            subscriptionYAML: "proxies: []\n",
+            overlay: cloudOnlyOverlay,
+            transport: nil,
+            customNodes: sanitizedNodes,
+            directPolicy: suffixOnlyPolicy
+        )
+        guard validatedSuffixOnlyPolicy?.sessionEndpoints.isEmpty == true,
+              suffixRuntime.contains("name: \"Tono-China-Web-Direct\""),
+              suffixRuntime.contains(
+                  "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web-Direct"
+              ),
+              suffixRuntime.contains(
+                  "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web-Direct"
+              ),
+              suffixRuntime.contains(
+                  "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct"
+              ),
+              !suffixRuntime.contains("name: \"Tono-China-Direct\""),
+              !suffixRuntime.contains("MATCH,DIRECT") else {
+            throw TestFailure("v3 suffix direct policy was not TCP-only and fail-closed")
+        }
+        let claudeProtectedSuffixRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
+            subscriptionYAML: "proxies: []\n",
+            overlay: claudeSocks5Overlay,
+            transport: nil,
+            customNodes: sanitizedNodes,
+            directPolicy: suffixOnlyPolicy
+        )
+        let firstEduSuffixRule = "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web-Direct"
+        guard claudeProtectedRules.allSatisfy({ rule in
+                  guard let claudeRange = claudeProtectedSuffixRuntime.range(of: rule),
+                        let suffixRange = claudeProtectedSuffixRuntime.range(of: firstEduSuffixRule)
+                  else { return false }
+                  return claudeRange.lowerBound < suffixRange.lowerBound
+              }),
+              claudeProtectedRules.allSatisfy({ rule in
+                  !claudeProtectedSuffixRuntime.contains(rule.replacingOccurrences(
+                      of: "Tono-Claude-Home",
+                      with: "Tono-China-Direct"
+                  )) && !claudeProtectedSuffixRuntime.contains(rule.replacingOccurrences(
+                      of: "Tono-Claude-Home",
+                      with: "Tono-China-Web-Direct"
+                  ))
+              }),
+              claudeProtectedSuffixRuntime.contains("AND,((NETWORK,UDP)),REJECT"),
+              claudeProtectedSuffixRuntime.contains("#Tono-Exit") else {
+            throw TestFailure("Claude protection was not preserved with v3 edu.cn suffix routing")
+        }
+        guard try ConfigPipeline.validatedManagedDirectSuffix("edu.cn") == "edu.cn" else {
+            throw TestFailure("edu.cn was not admitted as an exact direct suffix")
+        }
+        do {
+            _ = try ConfigPipeline.validatedManagedDirectSuffix("www.edu.cn")
+            throw TestFailure("direct suffix validation accepted a subdomain")
+        } catch is ConfigPipeline.TonoInjectionError {
+            // Expected.
+        }
+        guard (try? ConfigPipeline.validatedManagedDirectSuffix("ccxe.com.cn")) == nil else {
+            throw TestFailure(
+                "client suffix allowlist must not exceed the control plane's"
+            )
+        }
+
+        // The resolver-host ceiling must admit the control plane's own maxima
+        // (32 `domains` + 32 `webDomains`). It used to stop at 48, so a policy
+        // that was valid at the boundary made every client discard managed
+        // direct routing wholesale.
+        let maximumResolverHosts = (0..<32).map { "host-\($0).qq.com" }
+            + (0..<32).map { "host-\($0).bilibili.com" }
+        guard let wideResolverPolicy = try ConfigPipeline.validatedManagedDirectPolicy(
+            .init(
+                physicalInterface: "en0",
+                domainPins: [],
+                mediaEndpoints: [],
+                directResolverHosts: maximumResolverHosts
+            )
+        ), wideResolverPolicy.directResolverHosts.count == 64 else {
+            throw TestFailure("resolver hosts rejected the published policy maxima")
+        }
+
+        // The residential hop is the one policy-supplied address that had no
+        // public-address screening at all.
+        for privateHost in ["127.0.0.1", "192.168.1.10", "10.0.0.5", "192.88.99.1"] {
+            guard ConfigPipeline.validatedHomeSocks5(
+                .init(
+                    host: privateHost,
+                    port: 11_080,
+                    username: "u",
+                    password: "p"
+                )
+            ) == nil else {
+                throw TestFailure(
+                    "residential hop accepted non-public address \(privateHost)"
+                )
+            }
+        }
+        guard ConfigPipeline.validatedHomeSocks5(
+            .init(
+                host: "residential.example.com",
+                port: 11_080,
+                username: "u",
+                password: "p"
+            )
+        ) != nil else {
+            throw TestFailure("residential hop rejected a valid hostname")
+        }
+        do {
+            _ = try ConfigPipeline.validatedPublicIPv4(
+                "192.88.99.1",
+                field: "6to4 relay anycast"
+            )
+            throw TestFailure("public address screening accepted 6to4 relay anycast")
+        } catch is ConfigPipeline.TonoInjectionError {
+            // Expected.
         }
 
         do {
@@ -502,6 +823,16 @@ struct MultiExitPolicyTests {
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600],
             ofItemAtPath: managedDirectRuntimeURL.path
+        )
+        let claudeSocks5RuntimeURL = runtimeDirectory
+            .appendingPathComponent("claude-home-socks5.yaml", isDirectory: false)
+        try Data(claudeSocks5Runtime.utf8).write(
+            to: claudeSocks5RuntimeURL,
+            options: .atomic
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: claudeSocks5RuntimeURL.path
         )
         for (index, node) in sanitizedNodes.enumerated() {
             var selectedOverlay = cloudOnlyOverlay

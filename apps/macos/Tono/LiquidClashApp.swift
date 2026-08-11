@@ -633,6 +633,9 @@ struct LiquidClashApp: App {
     @State private var accountSession: AccountSession
 
     init() {
+        // Before any service exists: a fault while constructing AppState or the
+        // account session would otherwise leave no local trace at all.
+        CrashReporter.shared.install()
         let appState = AppState()
         let sidecar = TonoSidecarService()
 #if DEBUG
@@ -673,7 +676,11 @@ struct LiquidClashApp: App {
             killSwitchDisarmConsumer: {
                 await appState.disconnectAndWait(releaseKillSwitch: true)
             },
-            diagnosticSnapshotConsumer: { appState.compactRemoteDiagnosticSnapshot() },
+            diagnosticSnapshotConsumer: {
+                CrashReporter.shared.annotatedRemoteDiagnosticSnapshot(
+                    appState.compactRemoteDiagnosticSnapshot()
+                )
+            },
             claudeTrafficResearchConsumer: {
                 await appState.claudeTrafficResearchSnapshot()
             },

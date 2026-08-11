@@ -473,7 +473,7 @@ nonisolated struct SystemProxy {
         if process.terminationStatus != 0 {
             let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             let errMsg = String(data: errData, encoding: .utf8) ?? ""
-            if errMsg.contains("canceled") || errMsg.contains("User canceled") {
+            if errMsg.contains("-128") || errMsg.contains("canceled") || errMsg.contains("User canceled") {
                 throw SystemProxyError.privilegesDenied
             }
             throw SystemProxyError.commandFailed(errMsg.trimmingCharacters(in: .whitespacesAndNewlines))

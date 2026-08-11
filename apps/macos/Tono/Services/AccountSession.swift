@@ -65,7 +65,7 @@ final class AccountSession {
                  killSwitchArmed: false, utunPresent: false,
                  protectedDNSConfigured: false, selectedExit: "unknown",
                  connectionStage: "unknown", reconnectAttempt: 0,
-                 lastErrorCategory: nil
+                 lastErrorCategory: nil, lastCrashLabel: nil
              )
          },
          claudeTrafficResearchConsumer: @escaping

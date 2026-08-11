@@ -118,9 +118,9 @@ These **block user testing**, not more unit tests:
 
 ### Preferred order
 1. **Re-read** these reports (don’t re-audit from zero):
-   - `Tono/reports/TONO_WINDOWS_P0_P4_FINAL_REVIEW_2026-08-02.md`
-   - `Tono/reports/TONO_WINDOWS_PRETEST_GATE_2026-08-02.md`
-   - `Tono/reports/TONO_WINDOWS_TEST5_REMEDIATION_REVIEW_2026-08-02.md`
+   - `docs/reports/TONO_WINDOWS_P0_P4_FINAL_REVIEW_2026-08-02.md`
+   - `docs/reports/TONO_WINDOWS_PRETEST_GATE_2026-08-02.md`
+   - `docs/reports/TONO_WINDOWS_TEST5_REMEDIATION_REVIEW_2026-08-02.md`
 2. **Verify HEAD** includes `3786195` / packaging whitelist.
 3. **Only fix new bugs** with static proof or failing tests.
 4. If no new code P0: **drive Test 6 release gates**:

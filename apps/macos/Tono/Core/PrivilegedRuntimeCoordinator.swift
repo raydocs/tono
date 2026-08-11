@@ -114,9 +114,24 @@ actor PrivilegedRuntimeCoordinator {
         try HelperManager.restoreProtectedDNSIfConfigured()
     }
 
-    func protectedDNSIsIntact(service: String) -> Bool {
+    /// Three-state on purpose. `protectedDNSStatus()` reports the same
+    /// all-false tuple for a socket error, a receive timeout, a 403, and a
+    /// malformed body as it does for an authenticated "not configured", so
+    /// collapsing this to a Bool turned a 1-2 second helper restart into a
+    /// verdict of "protected DNS is gone" and tore down a healthy session —
+    /// every 60s of connected time, and again on every network change. PF is
+    /// the leak boundary, so withholding a verdict until the next cycle is not
+    /// fail-open.
+    enum ProtectedDNSIntegrity {
+        case intact
+        case broken
+        case unverifiable
+    }
+
+    func protectedDNSIntegrity(service: String) -> ProtectedDNSIntegrity {
         let status = HelperManager.protectedDNSStatus()
-        return status.configured && status.service == service
+        guard status.available else { return .unverifiable }
+        return status.configured && status.service == service ? .intact : .broken
     }
 
     func protectedDNSStatus() -> (

@@ -1,0 +1,66 @@
+name: macOS CI
+
+on:
+  pull_request:
+    paths:
+      - apps/macos/**
+      - tooling/scripts/**
+      - .github/workflows/macos-ci.yml
+  push:
+    branches:
+      - main
+    paths:
+      - apps/macos/**
+      - tooling/scripts/**
+      - .github/workflows/macos-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build the macOS app without signing
+        run: |
+          xcodebuild \
+            -project apps/macos/LiquidClash.xcodeproj \
+            -scheme LiquidClash \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run the TonoTests unit tests
+        run: |
+          xcodebuild \
+            -project apps/macos/LiquidClash.xcodeproj \
+            -scheme LiquidClash \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+  policy-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Subscription URL policy
+        run: tooling/scripts/test-subscription-url-policy.sh
+
+      - name: Helper peer authorization
+        run: tooling/scripts/test-helper-peer-authorization.sh
+
+      - name: Multi-exit policy
+        run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
+
+      - name: macOS incident regressions
+        run: tooling/scripts/test-macos-incident-regressions.sh
+
+      - name: Appcast publisher validation
+        run: node --test tooling/scripts/tests/publish-macos-appcast.test.mjs

@@ -281,7 +281,16 @@ nonisolated struct HelperManager {
             throw HelperInstallError.installFailed(String(message.prefix(500)))
         }
 
-        for _ in 0..<30 {
+        // A cold `launchctl bootstrap` of a freshly installed daemon has been
+        // observed taking well over six seconds on a busy machine: the install
+        // itself succeeded, the socket appeared moments later, and the app had
+        // already surfaced a terminal "the authenticated helper did not start"
+        // that only a manual retry could clear. Poll densely at first so the
+        // common fast path stays immediate, then keep waiting far longer than
+        // launchd realistically needs before calling it a failure.
+        let startupDeadline = Date().addingTimeInterval(45)
+        var probeIntervalMicroseconds: UInt32 = 100_000
+        while true {
             if currentVersion() == helperVersion {
                 LocalTrafficAudit.shared.recordEvent(
                     "helper_install_succeeded",
@@ -294,7 +303,12 @@ nonisolated struct HelperManager {
                 )
                 return
             }
-            usleep(200_000)
+            guard Date() < startupDeadline else { break }
+            usleep(probeIntervalMicroseconds)
+            probeIntervalMicroseconds = min(
+                probeIntervalMicroseconds * 2,
+                1_000_000
+            )
         }
         LocalTrafficAudit.shared.recordEvent(
             "helper_install_startup_timed_out",
@@ -725,9 +739,11 @@ nonisolated struct HelperManager {
                 code,
                 SecCSFlags(rawValue: 0),
                 requirement
-              ) == errSecSuccess else {
+        ) == errSecSuccess else {
             throw HelperInstallError.installFailed(
-                "An embedded helper failed the Tono signing requirement."
+                "This Tono build is not signed with the Tono Developer ID identity. "
+                    + "Install a signed Tono package; an administrator repair "
+                    + "cannot fix an unsigned app."
             )
         }
     }

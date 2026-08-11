@@ -2,15 +2,25 @@ import SwiftUI
 
 struct ProxiesView: View {
     @Environment(AppState.self) private var appState
+    @Environment(AccountSession.self) private var accountSession
     @Environment(\.colorScheme) private var colorScheme
     @State private var showingAddNode = false
     @State private var editingNode: ProxyNode?
     @State private var isTesting = false
+    @State private var isRefreshingCatalog = false
+    @State private var catalogFeedback: String?
+    @State private var catalogRefreshSucceeded = false
+    @State private var searchText = ""
+    @State private var nodeFilter: NodeFilter = .all
     @State private var targetGroup: ProxyService.MihomoGroup?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerRow
+            catalogSummary
+                .padding(.top, 14)
+            nodeToolbar
+                .padding(.top, 12)
                 .padding(.bottom, 16)
 
             ScrollView {
@@ -66,6 +76,22 @@ struct ProxiesView: View {
                     }
                 }, editingNode: editingNode)
                 .transition(.opacity)
+            }
+        }
+    }
+
+    private enum NodeFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case us = "US"
+        case japan = "Japan"
+
+        var id: Self { self }
+
+        var icon: String {
+            switch self {
+            case .all: "square.grid.2x2"
+            case .us: "🇺🇸"
+            case .japan: "🇯🇵"
             }
         }
     }
@@ -196,13 +222,21 @@ struct ProxiesView: View {
     // MARK: - Nodes Section (flat list from mihomo API)
 
     private var nodesSection: some View {
-        let localNodes = appState.proxyRegions.filter { $0.id != "custom" }
+        let allNodes = appState.proxyRegions.filter { $0.id != "custom" }
             .flatMap(\.nodes)
+        let localNodes = filteredNodes(from: allNodes)
 
         return Group {
             if !localNodes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    sectionTitle("Cloud Servers", count: localNodes.count)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        sectionTitle("Cloud Servers", count: localNodes.count)
+                        if localNodes.count != allNodes.count {
+                            Text("of " + String(allNodes.count))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
 
                     let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
                     LazyVGrid(columns: columns, spacing: 12) {
@@ -213,9 +247,13 @@ struct ProxiesView: View {
                 }
             } else {
                 ContentUnavailableView(
-                    "No Cloud Servers",
-                    systemImage: "network.slash",
-                    description: Text("Sign in and wait for the protected server catalog to synchronize.")
+                    allNodes.isEmpty ? "No Cloud Servers" : "No Matching Servers",
+                    systemImage: allNodes.isEmpty ? "network.slash" : "magnifyingglass",
+                    description: Text(
+                        allNodes.isEmpty
+                            ? "Sign in and wait for the protected server catalog to synchronize."
+                            : "Try a different search or region filter."
+                    )
                 )
                 .frame(maxWidth: .infinity, minHeight: 260)
             }
@@ -255,17 +293,32 @@ struct ProxiesView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if let runtimeNode, runtimeNode.latency > 0 {
-                    Text("\(runtimeNode.latency)ms")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(
-                            runtimeNode.latency < 200 ? Color(hex: "30D158")
-                                : runtimeNode.latency < 400 ? Color(hex: "FF9F0A")
-                                : Color(hex: "FF3B30")
-                        )
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("\(runtimeNode.latency)ms")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(
+                                runtimeNode.latency < 200 ? Color(hex: "30D158")
+                                    : runtimeNode.latency < 400 ? Color(hex: "FF9F0A")
+                                    : Color(hex: "FF3B30")
+                            )
+                        Text(isActive ? "Selected" : "Ready")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
                 } else if runtimeNode?.lastTestFailed == true {
                     Text("Timeout")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Color(hex: "FF3B30").opacity(0.7))
+                } else {
+                    Text(isActive ? "Selected" : "Ready")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                }
+
+                if isActive {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(hex: "30D158"))
                 }
             }
             .padding(10)
@@ -579,13 +632,44 @@ struct ProxiesView: View {
         String(format: String(localized: "%lld more"), Int64(count))
     }
 
+    private func filteredNodes(from nodes: [ProxyNode]) -> [ProxyNode] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedLowercase
+
+        return nodes.filter { node in
+            let matchesFilter: Bool
+            switch nodeFilter {
+            case .all:
+                matchesFilter = true
+            case .us:
+                matchesFilter = node.flag.contains("🇺🇸")
+                    || node.name.localizedCaseInsensitiveContains("US")
+            case .japan:
+                matchesFilter = node.flag.contains("🇯🇵")
+                    || node.name.localizedCaseInsensitiveContains("JP")
+                    || node.name.localizedCaseInsensitiveContains("Japan")
+            }
+
+            guard !query.isEmpty else { return matchesFilter }
+            return matchesFilter
+                && (node.displayName.localizedLowercase.contains(query)
+                    || node.name.localizedLowercase.contains(query)
+                    || node.type.displayName.localizedLowercase.contains(query))
+        }
+    }
+
     // MARK: - Header
 
     private var headerRow: some View {
-        HStack(alignment: .center) {
-            Text("Nodes")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.primary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Nodes")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Choose a secure exit for your protected traffic.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
 
@@ -598,44 +682,217 @@ struct ProxiesView: View {
                     }
                 }
 
-                Button {
-                    guard !isTesting else { return }
-                    isTesting = true
-                    Task {
-                        await appState.testAllLatency()
-                        isTesting = false
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        if isTesting {
-                            ProgressView()
-                                .controlSize(.mini)
-                        } else {
-                            Image(systemName: "bolt.fill")
-                                .font(.system(size: 11))
+                if appState.isConnected {
+                    Button {
+                        guard !isTesting else { return }
+                        isTesting = true
+                        Task {
+                            await appState.testAllLatency()
+                            isTesting = false
                         }
-                        Text("Test Current")
+                    } label: {
+                        HStack(spacing: 5) {
+                            if isTesting {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Image(systemName: "bolt.fill")
+                                    .font(.system(size: 11))
+                            }
+                            Text("Test Latency")
                             .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .contentShape(Capsule())
                     }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .contentShape(Capsule())
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .disabled(
+                        isTesting
+                            || appState.isConnecting
+                            || appState.isDisconnecting
+                            || appState.switchingNodeId != nil
+                    )
+                    .glassEffect(
+                        .regular.tint(.white.opacity(0.08)),
+                        in: Capsule()
+                    )
                 }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .disabled(
-                    isTesting
-                        || !appState.isConnected
-                        || appState.isConnecting
-                        || appState.isDisconnecting
-                        || appState.switchingNodeId != nil
-                )
-                .glassEffect(
-                    .regular.tint(.white.opacity(0.08)),
-                    in: Capsule()
-                )
             }
+        }
+    }
+
+    private var catalogSummary: some View {
+        HStack(spacing: 12) {
+            Image(systemName: catalogStatusIcon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(catalogStatusColor)
+                .frame(width: 30, height: 30)
+                .background(catalogStatusColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(catalogStatusTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(catalogStatusDetail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if let catalogFeedback {
+                Text(catalogFeedback)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(catalogRefreshSucceeded ? Color.green : Color.orange)
+                    .lineLimit(1)
+            }
+
+            Button {
+                refreshCatalog()
+            } label: {
+                HStack(spacing: 5) {
+                    if isRefreshingCatalog {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    Text(isRefreshingCatalog ? "Refreshing…" : "Refresh")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule())
+            .disabled(isRefreshingCatalog || accountSession.state != .ready)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(.white.opacity(colorScheme == .dark ? 0.07 : 0.42), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.65), lineWidth: 0.5)
+        )
+    }
+
+    private var nodeToolbar: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("Search servers", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.white.opacity(colorScheme == .dark ? 0.07 : 0.38), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.6), lineWidth: 0.5)
+            )
+
+            HStack(spacing: 3) {
+                ForEach(NodeFilter.allCases) { filter in
+                    Button {
+                        nodeFilter = filter
+                    } label: {
+                        HStack(spacing: 4) {
+                            if filter == .all {
+                                Image(systemName: filter.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                            } else {
+                                Text(filter.icon)
+                                    .font(.system(size: 11))
+                            }
+                            Text(filter.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(nodeFilter == filter ? .primary : .secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 7)
+                        .background(
+                            nodeFilter == filter ? Color.accentColor.opacity(0.14) : .clear,
+                            in: Capsule()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(3)
+            .background(.white.opacity(colorScheme == .dark ? 0.06 : 0.32), in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(.white.opacity(colorScheme == .dark ? 0.1 : 0.55), lineWidth: 0.5)
+            )
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var catalogStatusTitle: String {
+        if accountSession.catalogFailureMessage != nil {
+            return String(localized: "Using last verified catalog")
+        }
+        if appState.managedCatalogNodeCount > 0 {
+            return String(localized: "Verified server catalog")
+        }
+        return String(localized: "Waiting for server catalog")
+    }
+
+    private var catalogStatusDetail: String {
+        let count = appState.managedCatalogNodeCount
+        let serverCount = String.localizedStringWithFormat(
+            String(localized: "%lld cloud servers"),
+            Int64(count)
+        )
+        if let version = appState.managedCatalogVersion {
+            return "\(serverCount) · v\(version) · updates automatically"
+        }
+        return "\(serverCount) · waiting for the first verified sync"
+    }
+
+    private var catalogStatusIcon: String {
+        accountSession.catalogFailureMessage == nil && appState.managedCatalogNodeCount > 0
+            ? "checkmark.shield.fill"
+            : "exclamationmark.shield"
+    }
+
+    private var catalogStatusColor: Color {
+        accountSession.catalogFailureMessage == nil && appState.managedCatalogNodeCount > 0
+            ? Color.green
+            : Color.orange
+    }
+
+    private func refreshCatalog() {
+        guard !isRefreshingCatalog else { return }
+        isRefreshingCatalog = true
+        catalogFeedback = nil
+        Task {
+            let succeeded = await accountSession.refreshManagedCatalog()
+            isRefreshingCatalog = false
+            catalogRefreshSucceeded = succeeded
+            catalogFeedback = succeeded
+                ? String(localized: "Updated")
+                : String(localized: "Using last verified copy")
         }
     }
 
@@ -652,4 +909,8 @@ struct ProxiesView: View {
         state.loadMockData()
         return state
     }())
+    .environment(AccountSession(
+        sidecar: TonoSidecarService(),
+        descriptorConsumer: { _ in }
+    ))
 }

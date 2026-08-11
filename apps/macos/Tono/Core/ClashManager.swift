@@ -173,11 +173,11 @@ enum ClashError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .binaryNotFound:
-            "找不到 mihomo 核心文件"
+            String(localized: "mihomo core binary not found")
         case .configWriteFailed:
-            "配置文件写入失败"
+            String(localized: "Failed to write config file")
         case .startFailed(let msg):
-            "核心启动失败：\(msg)"
+            String(localized: "Core failed to start: \(msg)")
         }
     }
 }

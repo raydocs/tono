@@ -71,6 +71,10 @@ private struct HelperCommandResult {
 }
 
 final class KillSwitchManager {
+    /// Ceiling for the persisted recovery pin set of a single host. Well under
+    /// the 128-address limit `validateAddresses` enforces when those pins are
+    /// read back, so accumulation can never lock out a future arm.
+    private static let maximumPinnedAddressesPerHost = 32
     private static let defaultHosts = [
         "console.tailscale.com",
         "controlplane.tailscale.com",
@@ -146,9 +150,21 @@ final class KillSwitchManager {
             // by a later successful clean-system resolution. Keep both so a
             // Cloudflare anycast rotation cannot make the next protected
             // reconnect depend on one stale build-time address set.
-            availablePins[host] = (availablePins[host] ?? []).reduce(into: addresses) {
-                if !$0.contains($1) { $0.append($1) }
-            }
+            //
+            // Bounded, because this set is persisted and re-merged on every
+            // arm: an unbounded union grew past the resolved-address ceiling as
+            // the control plane's anycast addresses rotated, and once it did,
+            // `validateAddresses` rejected the recovery pins and every
+            // subsequent arm failed — a fail-closed machine that could no
+            // longer be re-armed. Bundle pins are kept first so the build-time
+            // recovery path always survives truncation; this set is only the
+            // fallback anyway, since a successful resolution overwrites
+            // `pinnedHosts` for the host immediately below.
+            availablePins[host] = Array(
+                (availablePins[host] ?? []).reduce(into: addresses) {
+                    if !$0.contains($1) { $0.append($1) }
+                }.prefix(Self.maximumPinnedAddressesPerHost)
+            )
         }
         let (normalizedHosts, resolvedHosts) = try Self.resolveHosts(
             requestedHosts,
@@ -217,7 +233,7 @@ final class KillSwitchManager {
                 "The network changed during Kill Switch preparation; protection remains fail-closed."
             )
         }
-        try Self.writeRules(state: state)
+        try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
         try Self.ensureHostsMappings(state: state)
@@ -226,7 +242,9 @@ final class KillSwitchManager {
         // and config reloads re-arm with identical or wider rules; flushing
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
-        let passRules = Self.passRules(in: Self.renderRules(state: state))
+        let passRules = Self.passRules(
+            in: Self.renderRules(state: state, allowedUID: allowedUID)
+        )
         let revokesAccess = lastLoadedPassRules.map {
             !$0.isSubset(of: passRules)
         } ?? true
@@ -263,7 +281,7 @@ final class KillSwitchManager {
             stateGeneration &+= 1
             lastLoadedPassRules = nil
             let state = Self.emergencyState(preserving: previous)
-            try Self.writeRules(state: state)
+            try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
             try Self.ensureAnchorLoaded(flushStates: true)
             // Stale /etc/hosts pins do not permit traffic through the all-block
@@ -273,7 +291,7 @@ final class KillSwitchManager {
         } catch {
             if Self.stateFileExists() {
                 stateGeneration &+= 1
-                try? Self.installEmergencyBlock()
+                try? Self.installEmergencyBlock(allowedUID: allowedUID)
                 return true
             }
             return false
@@ -326,7 +344,7 @@ final class KillSwitchManager {
                 if wanted {
                     try Self.ensureHostsMappings(state: state)
                     if !live {
-                        try Self.writeRules(state: state)
+                        try Self.writeRules(state: state, allowedUID: allowedUID)
                         try Self.ensureAnchorLoaded(flushStates: true)
                         lastLoadedPassRules = nil
                         live = Self.effectiveStatus()
@@ -344,7 +362,7 @@ final class KillSwitchManager {
             if Self.stateFileExists() {
                 wanted = true
                 if !live {
-                    try? Self.installEmergencyBlock()
+                    try? Self.installEmergencyBlock(allowedUID: allowedUID)
                     lastLoadedPassRules = nil
                     live = Self.effectiveStatus()
                     healed = true
@@ -376,21 +394,21 @@ final class KillSwitchManager {
     private func restoreAtLaunch() throws {
         do {
             guard let state = try loadState(), state.armed else { return }
-            try Self.writeRules(state: state)
+            try Self.writeRules(state: state, allowedUID: allowedUID)
             try Self.ensureHostsMappings(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
         } catch {
             if Self.stateFileExists() {
-                try Self.installEmergencyBlock()
+                try Self.installEmergencyBlock(allowedUID: allowedUID)
             } else {
                 throw error
             }
         }
     }
 
-    private static func installEmergencyBlock() throws {
+    private static func installEmergencyBlock(allowedUID: uid_t) throws {
         let state = emergencyState(preserving: nil)
-        try writeRules(state: state)
+        try writeRules(state: state, allowedUID: allowedUID)
         try ensureAnchorLoaded(flushStates: true)
     }
 
@@ -424,9 +442,18 @@ final class KillSwitchManager {
               let armed = object["armed"] as? Bool else {
             throw HelperFailure.invalid("Kill Switch state is invalid.")
         }
-        if let stateUID = object["allowedUid"] as? NSNumber,
-           stateUID.uint32Value != UInt32(allowedUID) {
-            throw HelperFailure.invalid("Kill Switch state belongs to another user.")
+        // Present-but-unreadable must not read as "no opinion". `if let … as?
+        // NSNumber` alone skipped the comparison for any non-numeric value, so a
+        // state file claiming `"allowedUid": "501"` — or any other type — was
+        // accepted for every user. Absence still means legacy: builds before this
+        // field existed wrote none, and `persistentObject` always writes it now,
+        // so the compatibility window closes after the first arm.
+        if object.keys.contains("allowedUid") {
+            guard let stateUID = object["allowedUid"] as? NSNumber,
+                  CFGetTypeID(stateUID) != CFBooleanGetTypeID(),
+                  stateUID.uint32Value == UInt32(allowedUID) else {
+                throw HelperFailure.invalid("Kill Switch state belongs to another user.")
+            }
         }
         let tailscaleBootstrapEnabled = try Self.boolean(
             object["tailscaleBootstrapEnabled"] ?? false,
@@ -1198,8 +1225,11 @@ final class KillSwitchManager {
         return candidate
     }
 
-    private static func writeRules(state: KillSwitchState) throws {
-        let rules = renderRules(state: state)
+    private static func writeRules(
+        state: KillSwitchState,
+        allowedUID: uid_t
+    ) throws {
+        let rules = renderRules(state: state, allowedUID: allowedUID)
         try atomicWrite(
             path: killSwitchPFPath,
             data: Data(rules.utf8),
@@ -1213,7 +1243,10 @@ final class KillSwitchManager {
         }
     }
 
-    private static func renderRules(state: KillSwitchState) -> String {
+    private static func renderRules(
+        state: KillSwitchState,
+        allowedUID: uid_t
+    ) -> String {
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
             // Mihomo's controller is loopback-only. Both directions must pass
@@ -1245,10 +1278,21 @@ final class KillSwitchManager {
         for endpoint in controlEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {
+            // Restricted to the two identities that legitimately use this
+            // bootstrap path: the root helper (DERP map refresh) and the signed
+            // app running as the interactive user (control-plane recovery while
+            // the tunnel is down). Without a `user` clause — the only exception
+            // family that lacked one — *any* local process could send to these
+            // addresses on 443 outside the tunnel. Because the control plane is
+            // fronted by shared anycast addresses and the edge routes by SNI,
+            // that was enough for an unprivileged process to reach an unrelated
+            // origin of its choosing on the same address and disclose the real
+            // IP while the kill switch was armed.
             let family = endpoint.address.contains(":") ? "inet6" : "inet"
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +
-                "to \(endpoint.address) port \(endpoint.port) keep state (if-bound)"
+                "to \(endpoint.address) port \(endpoint.port) " +
+                "user { 0, \(allowedUID) } keep state (if-bound)"
             )
         }
         for endpoint in state.derpEndpoints.sorted(by: {
@@ -1716,22 +1760,28 @@ final class KillSwitchManager {
                 ],
                 sessionDirectEndpoints: directEndpoints
             )
-            let rules = renderRules(state: state)
+            let rules = renderRules(state: state, allowedUID: 501)
             let emergencyState = emergencyState(preserving: state)
-            let emergencyRules = renderRules(state: emergencyState)
-            let cloudRules = renderRules(state: .init(
-                armed: true,
-                tailscaleBootstrapEnabled: false,
-                apiHosts: ["api.example.com"],
-                exitHints: [],
-                tunnelInterfaces: ["utun199"],
-                resolvedHosts: ["api.example.com": ["1.1.1.1"]],
-                pinnedHosts: ["api.example.com": ["1.1.1.1"]],
-                derpEndpoints: [],
-                cachedDERPEndpoints: [],
-                proxyTargets: state.proxyTargets,
-                sessionDirectEndpoints: []
-            ))
+            let emergencyRules = renderRules(
+                state: emergencyState,
+                allowedUID: 501
+            )
+            let cloudRules = renderRules(
+                state: .init(
+                    armed: true,
+                    tailscaleBootstrapEnabled: false,
+                    apiHosts: ["api.example.com"],
+                    exitHints: [],
+                    tunnelInterfaces: ["utun199"],
+                    resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    derpEndpoints: [],
+                    cachedDERPEndpoints: [],
+                    proxyTargets: state.proxyTargets,
+                    sessionDirectEndpoints: []
+                ),
+                allowedUID: 501
+            )
             let inactiveState = KillSwitchState(
                 armed: true,
                 tailscaleBootstrapEnabled: false,
@@ -1745,7 +1795,10 @@ final class KillSwitchManager {
                 proxyTargets: state.proxyTargets,
                 sessionDirectEndpoints: []
             )
-            let inactiveRules = renderRules(state: inactiveState)
+            let inactiveRules = renderRules(
+                state: inactiveState,
+                allowedUID: 501
+            )
             let inactiveHosts = renderHostsMappings(state: inactiveState)
             let (_, cacheOnlyResolved) = try resolveHosts(
                 ["api.example.com"],
@@ -1805,7 +1858,11 @@ final class KillSwitchManager {
                 rejectedUDPProxyTarget = true
             }
             let persisted = persistentObject(state, allowedUID: 501)
-            return rules.contains("to 1.1.1.1 port 443 keep state (if-bound)") &&
+            return rules.contains(
+                    "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)"
+                ) &&
+                // The bootstrap permit must never be world-usable again.
+                !rules.contains("to 1.1.1.1 port 443 keep state (if-bound)") &&
                 rules.contains("to 8.8.8.8 port 443 user root keep state (if-bound)") &&
                 !rules.contains("to 8.8.8.8 port 443 keep state (if-bound)") &&
                 rules.contains("proto udp") &&
@@ -1826,7 +1883,9 @@ final class KillSwitchManager {
                 cloudRules.contains("pass in quick on utun199 all keep state (if-bound)") &&
                 cloudRules.contains("pass out quick on utun199 all keep state (if-bound)") &&
                 !cloudRules.contains("pass in quick on en") &&
-                cloudRules.contains("to 1.1.1.1 port 443 keep state (if-bound)") &&
+                cloudRules.contains(
+                    "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)"
+                ) &&
                 !cloudRules.contains("proto udp") &&
                 !rules.contains("to any port 443") &&
                 !inactiveRules.contains("to 1.1.1.1 port 443") &&

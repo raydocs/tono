@@ -38,3 +38,6 @@ LiquidClashHelper/
 
 # Python
 __pycache__/
+
+# Packaged macOS build output (1.1 GB of .app bundles as of build 47)
+artifacts/

@@ -89,11 +89,94 @@ nonisolated struct TonoMeResponse: Codable, Sendable { let user: TonoUser }
 nonisolated struct TonoDevicesResponse: Codable, Sendable { let devices: [TonoDevice] }
 nonisolated struct TonoEnrollmentResponse: Codable, Sendable { let enrollment: TonoEnrollment }
 nonisolated struct TonoConfirmResponse: Codable, Sendable { let device: TonoDevice }
+/// Optional control-plane route pins. Older servers omit this object and keep
+/// the pre-routing behavior.
+nonisolated struct TonoExitCatalogHomeSocks5: Codable, Sendable, Equatable {
+    let host: String
+    let port: Int
+    let username: String
+    let password: String
+
+    init(
+        host: String,
+        port: Int,
+        username: String,
+        password: String
+    ) {
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+    }
+
+    /// Keep a malformed optional routing directive from rejecting the whole
+    /// verified catalog. Validation happens again before runtime generation.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        host = (try? container.decode(String.self, forKey: .host)) ?? ""
+        port = (try? container.decode(Int.self, forKey: .port)) ?? 0
+        username = (try? container.decode(String.self, forKey: .username)) ?? ""
+        password = (try? container.decode(String.self, forKey: .password)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case host, port, username, password
+    }
+}
+
+nonisolated struct TonoExitCatalogRouting: Codable, Sendable, Equatable {
+    let homeProxy: String?
+    let defaultProxy: String?
+    let homeSocks5: TonoExitCatalogHomeSocks5?
+
+    init(
+        homeProxy: String? = nil,
+        defaultProxy: String? = nil,
+        homeSocks5: TonoExitCatalogHomeSocks5? = nil
+    ) {
+        self.homeProxy = homeProxy
+        self.defaultProxy = defaultProxy
+        self.homeSocks5 = homeSocks5
+    }
+
+    /// Routing is additive server input. Ignore malformed individual fields
+    /// while allowing revision/YAML integrity validation to continue.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        homeProxy = try? container.decodeIfPresent(String.self, forKey: .homeProxy)
+        defaultProxy = try? container.decodeIfPresent(String.self, forKey: .defaultProxy)
+        homeSocks5 = try? container.decodeIfPresent(
+            TonoExitCatalogHomeSocks5.self,
+            forKey: .homeSocks5
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case homeProxy, defaultProxy, homeSocks5
+    }
+}
 nonisolated struct TonoExitCatalogResponse: Codable, Sendable, Equatable {
     let revision: Int
     let yaml: String
     let sha256: String
     let updatedAt: Int?
+    let routing: TonoExitCatalogRouting?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try container.decode(Int.self, forKey: .revision)
+        yaml = try container.decode(String.self, forKey: .yaml)
+        sha256 = try container.decode(String.self, forKey: .sha256)
+        updatedAt = try container.decodeIfPresent(Int.self, forKey: .updatedAt)
+        routing = try? container.decodeIfPresent(
+            TonoExitCatalogRouting.self,
+            forKey: .routing
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case revision, yaml, sha256, updatedAt, routing
+    }
 }
 nonisolated struct TonoTrafficPolicyResponse: Codable, Sendable, Equatable {
     let revision: Int
@@ -105,18 +188,30 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
     let version: Int
     let domains: [TonoTrafficPolicyDomain]
     let mediaEndpoints: [TonoTrafficPolicyMediaEndpoint]
+    /// Exact reviewed TCP IPv4 endpoints used by native WeChat HTTPDNS.
+    /// These remain separate from UDP media endpoints so TCP IP routes can
+    /// receive per-endpoint health fallbacks without widening UDP rules.
+    let tcpEndpoints: [TonoTrafficPolicyMediaEndpoint]
     let webDomains: [TonoTrafficPolicyDomain]
+    /// Version-3 suffix-level TCP direct rules. These deliberately do not
+    /// resolve or pin IPs; the runtime emits exact allowlisted
+    /// DOMAIN-SUFFIX rules instead.
+    let directSuffixes: [TonoTrafficPolicyDomain]
 
     init(
         version: Int,
         domains: [TonoTrafficPolicyDomain],
         mediaEndpoints: [TonoTrafficPolicyMediaEndpoint],
-        webDomains: [TonoTrafficPolicyDomain] = []
+        tcpEndpoints: [TonoTrafficPolicyMediaEndpoint] = [],
+        webDomains: [TonoTrafficPolicyDomain] = [],
+        directSuffixes: [TonoTrafficPolicyDomain] = []
     ) {
         self.version = version
         self.domains = domains
         self.mediaEndpoints = mediaEndpoints
+        self.tcpEndpoints = tcpEndpoints
         self.webDomains = webDomains
+        self.directSuffixes = directSuffixes
     }
 
     init(from decoder: Decoder) throws {
@@ -130,10 +225,23 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
             [TonoTrafficPolicyMediaEndpoint].self,
             forKey: .mediaEndpoints
         )
+        tcpEndpoints = try container.decodeIfPresent(
+            [TonoTrafficPolicyMediaEndpoint].self,
+            forKey: .tcpEndpoints
+        ) ?? []
         webDomains = try container.decodeIfPresent(
             [TonoTrafficPolicyDomain].self,
             forKey: .webDomains
         ) ?? []
+        directSuffixes = try container.decodeIfPresent(
+            [TonoTrafficPolicyDomain].self,
+            forKey: .directSuffixes
+        ) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, domains, mediaEndpoints, tcpEndpoints, webDomains,
+             directSuffixes
     }
 }
 nonisolated struct TonoTrafficPolicyDomain: Codable, Sendable, Equatable {
@@ -176,6 +284,9 @@ nonisolated struct TonoDiagnosticSnapshot: Codable, Sendable {
     let connectionStage: String
     let reconnectAttempt: Int
     let lastErrorCategory: String?
+    /// Fixed label from `CrashSummary.labels` when the previous run of this
+    /// session crashed. The control plane whitelists the same set.
+    let lastCrashLabel: String?
 }
 nonisolated struct TonoClaudeTrafficResearchEntry: Codable, Sendable {
     let service: String

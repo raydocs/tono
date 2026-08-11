@@ -1252,6 +1252,7 @@ if CommandLine.arguments.dropFirst() == ["--self-test"] {
     exit(
         KillSwitchManager.runSelfTests()
             && ProtectedDNSManager.runSelfTests()
+            && TonoPeerAuthorizer.runSelfTests()
             && runRequestContractSelfTests()
             && runCoreLifecyclePolicySelfTests()
             && runOwnedRuntimeContractSelfTests()

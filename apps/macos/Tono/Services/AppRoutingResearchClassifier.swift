@@ -97,10 +97,18 @@ nonisolated enum AppRoutingResearchClassifier {
         let relative: [String]
     }
 
+    /// Iterated in sorted order, not in `Set` order. Attribution must be a
+    /// function of the input alone: `Set` iteration order varies between launches
+    /// (it depends on the seeded hash), so the moment any token appears under two
+    /// families the same connection would be attributed differently from run to
+    /// run and the aggregates would disagree with themselves. No token overlaps
+    /// today; this makes that a correctness property instead of a coincidence.
+    private static let orderedFamilies = families.filter { $0 != "other" }.sorted()
+
     static func family(process: String?, path: String?) -> String {
         let bundleRoot = standardBundlePath(path)?.root
         if let bundleRoot {
-            for family in families where family != "other" {
+            for family in orderedFamilies {
                 if bundleRoots[family]?.contains(bundleRoot) == true {
                     return family
                 }
@@ -109,7 +117,7 @@ nonisolated enum AppRoutingResearchClassifier {
 
         let processName = (process ?? "").lowercased()
         guard !processName.isEmpty else { return "other" }
-        for family in families where family != "other" {
+        for family in orderedFamilies {
             if processNames[family]?.contains(processName) == true {
                 return family
             }

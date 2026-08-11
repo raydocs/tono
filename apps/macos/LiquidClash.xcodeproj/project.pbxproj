@@ -27,8 +27,19 @@
 		};
 /* End PBXCopyFilesBuildPhase section */
 
+/* Begin PBXContainerItemProxy section */
+		D0E0000B0000000000000000 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 14F0D2002F78C04F000C4896 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 14F0D2072F78C04F000C4896;
+			remoteInfo = LiquidClash;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		14F0D2082F78C04F000C4896 /* Tono.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tono.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0E000020000000000000000 /* TonoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TonoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0D000052F80000000000001 /* mihomo */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = Tono/Resources/mihomo; sourceTree = "<group>"; };
 		C0D000082F80000000000001 /* liquidclash-helper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = Tono/Resources/liquidclash-helper; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -49,6 +60,7 @@
 					Resources/tailscale,
 					Resources/tailscaled,
 					Services/WebViewDownloader.swift,
+					reports,
 					Tools,
 					Tools/.cargo/config.toml,
 					Tools/Cargo.lock,
@@ -68,6 +80,11 @@
 			path = Tono;
 			sourceTree = "<group>";
 		};
+		D0E000030000000000000000 /* TonoTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TonoTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +96,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0E000050000000000000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -86,6 +110,7 @@
 			isa = PBXGroup;
 			children = (
 				14F0D20A2F78C04F000C4896 /* Tono */,
+				D0E000030000000000000000 /* TonoTests */,
 				C0D000092F80000000000001 /* Embedded Executables */,
 				14F0D2092F78C04F000C4896 /* Products */,
 			);
@@ -104,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				14F0D2082F78C04F000C4896 /* Tono.app */,
+				D0E000020000000000000000 /* TonoTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -135,6 +161,29 @@
 			productReference = 14F0D2082F78C04F000C4896 /* Tono.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D0E000010000000000000000 /* TonoTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0E000070000000000000000 /* Build configuration list for PBXNativeTarget "TonoTests" */;
+			buildPhases = (
+				D0E000040000000000000000 /* Sources */,
+				D0E000050000000000000000 /* Frameworks */,
+				D0E000060000000000000000 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D0E0000A0000000000000000 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D0E000030000000000000000 /* TonoTests */,
+			);
+			name = TonoTests;
+			packageProductDependencies = (
+			);
+			productName = TonoTests;
+			productReference = D0E000020000000000000000 /* TonoTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -147,6 +196,10 @@
 				TargetAttributes = {
 					14F0D2072F78C04F000C4896 = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					D0E000010000000000000000 = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = 14F0D2072F78C04F000C4896;
 					};
 				};
 			};
@@ -168,12 +221,20 @@
 			projectRoot = "";
 			targets = (
 				14F0D2072F78C04F000C4896 /* LiquidClash */,
+				D0E000010000000000000000 /* TonoTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		14F0D2062F78C04F000C4896 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0E000060000000000000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -190,7 +251,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0E000040000000000000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D0E0000A0000000000000000 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 14F0D2072F78C04F000C4896 /* LiquidClash */;
+			targetProxy = D0E0000B0000000000000000 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		14F0D2132F78C050000C4896 /* Debug */ = {
@@ -319,9 +395,10 @@
 				CODE_SIGN_ENTITLEMENTS = Tono/LiquidClash.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 42;
+				CURRENT_PROJECT_VERSION = 48;
 				DEVELOPMENT_TEAM = YY57758GS7;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Tono/Info.plist;
@@ -330,7 +407,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.1;
+				MARKETING_VERSION = 0.0.48;
 				PRODUCT_BUNDLE_IDENTIFIER = com.raydocs.tono;
 				PRODUCT_NAME = Tono;
 				REGISTER_APP_GROUPS = YES;
@@ -353,7 +430,7 @@
 				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 42;
+				CURRENT_PROJECT_VERSION = 48;
 				DEVELOPMENT_TEAM = YY57758GS7;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -365,7 +442,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.1;
+				MARKETING_VERSION = 0.0.48;
 				PRODUCT_BUNDLE_IDENTIFIER = com.raydocs.tono;
 				PRODUCT_NAME = Tono;
 				REGISTER_APP_GROUPS = YES;
@@ -375,6 +452,59 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		D0E000080000000000000000 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YY57758GS7;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.3;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydocs.tono.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tono.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Tono";
+			};
+			name = Debug;
+		};
+		D0E000090000000000000000 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YY57758GS7;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.3;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.raydocs.tono.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Tono.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Tono";
 			};
 			name = Release;
 		};
@@ -395,6 +525,15 @@
 			buildConfigurations = (
 				14F0D2162F78C050000C4896 /* Debug */,
 				14F0D2172F78C050000C4896 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0E000070000000000000000 /* Build configuration list for PBXNativeTarget "TonoTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0E000080000000000000000 /* Debug */,
+				D0E000090000000000000000 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
