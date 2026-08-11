@@ -89,3 +89,8 @@ jobs:
         # Loads into an anchor no parent ruleset references, so pfctl parses and
         # installs it for real while no packet is ever evaluated against it.
         run: sudo apps/macos/Tono/Resources/liquidclash-helper --lifecycle-self-test
+
+      - name: Helper staging refusal matrix
+        # Proves ownership, permission, and symlink enforcement by constructing
+        # the failing cases, which needs the ability to chown to another user.
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --staging-self-test

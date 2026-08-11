@@ -111,6 +111,147 @@ private func ownedRuntimeConfigIsSafe(_ contents: String) -> Bool {
         && contents.contains("\n  - MATCH,Tono-Exit")
 }
 
+/// The refusal matrix that keeps an unprivileged user from getting root to run a
+/// document of their choosing.
+///
+/// `secureMetadata` and `atomicCopy` are the two primitives every privileged
+/// entry point funnels through, and until now neither had a test. The composed
+/// path above them — `validateConfigDirectory` — cannot be tested without
+/// building conditions inside the real `~/Library/Application Support/Tono/config`,
+/// which on a developer's machine is the live configuration. Adding an injectable
+/// home to reach it would put a seam in privileged code pointing at where
+/// "trusted" lives, which is the one thing that must not be movable. So the
+/// primitives are tested directly, on paths owned by this test.
+///
+/// Root only: it has to chown files to another user to prove ownership is
+/// actually enforced, and a check that cannot construct the failing case proves
+/// nothing about it.
+private func runStagingRefusalSelfTests() -> Bool {
+    guard geteuid() == 0 else {
+        FileHandle.standardError.write(Data("""
+        staging self-test needs root: proving ownership is enforced requires
+        creating a file owned by somebody else.
+          sudo <helper> --staging-self-test
+        It works only inside its own temporary directory.
+
+        """.utf8))
+        return false
+    }
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tono-staging-self-test-\(getpid())").path
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    guard (try? FileManager.default.createDirectory(
+        atPath: root, withIntermediateDirectories: true,
+        attributes: [.posixPermissions: 0o700]
+    )) != nil else { return false }
+
+    var failures: [String] = []
+    func expectRefusal(_ name: String, _ body: () throws -> Void) {
+        do {
+            try body()
+            failures.append(name)
+        } catch {
+            // Refusing is the pass condition.
+        }
+    }
+    func expectAcceptance(_ name: String, _ body: () throws -> Void) {
+        do { try body() } catch { failures.append(name) }
+    }
+
+    let payload = "# Tono owned runtime\n"
+    let digest = "0000000000000000000000000000000000000000000000000000000000000000"
+
+    func write(_ name: String, permissions: Int, owner: uid_t) -> String {
+        let path = "\(root)/\(name)"
+        FileManager.default.createFile(atPath: path, contents: Data(payload.utf8),
+                                       attributes: [.posixPermissions: permissions])
+        if owner != 0 { chown(path, owner, gid_t(bitPattern: -1)) }
+        return path
+    }
+
+    // A file the daemon must trust: root-owned, not writable by anyone else.
+    let trusted = write("trusted", permissions: 0o600, owner: 0)
+    expectAcceptance("root-owned-file-accepted") {
+        _ = try secureMetadata(trusted, type: mode_t(S_IFREG), owner: 0)
+    }
+
+    // Owned by somebody else. This is the escalation case: if ownership were not
+    // enforced, any user could place a document where the daemon reads one.
+    let foreign = write("foreign", permissions: 0o600, owner: 1)
+    expectRefusal("foreign-owner-refused") {
+        _ = try secureMetadata(foreign, type: mode_t(S_IFREG), owner: 0)
+    }
+
+    // Root-owned but group or world writable, which makes the owner irrelevant.
+    let loose = write("loose", permissions: 0o666, owner: 0)
+    expectRefusal("group-writable-refused") {
+        _ = try secureMetadata(loose, type: mode_t(S_IFREG), owner: 0)
+    }
+    // The same file is acceptable only where the caller explicitly opts out of
+    // that check, so the default cannot be silently permissive.
+    expectAcceptance("permission-check-is-opt-out-not-default") {
+        _ = try secureMetadata(loose, type: mode_t(S_IFREG), owner: 0,
+                               rejectWritableByGroupOrWorld: false)
+    }
+
+    // A symlink is not a regular file. `lstat` is deliberate: resolving it here
+    // would let a link planted by anyone redirect a privileged read.
+    let link = "\(root)/link"
+    symlink(trusted, link)
+    expectRefusal("symlink-refused-as-regular-file") {
+        _ = try secureMetadata(link, type: mode_t(S_IFREG), owner: 0)
+    }
+
+    // A directory where a file is required, and the reverse.
+    expectRefusal("directory-refused-as-regular-file") {
+        _ = try secureMetadata(root, type: mode_t(S_IFREG), owner: 0)
+    }
+    expectRefusal("file-refused-as-directory") {
+        _ = try secureMetadata(trusted, type: mode_t(S_IFDIR), owner: 0)
+    }
+
+    expectRefusal("absent-path-refused") {
+        _ = try secureMetadata("\(root)/does-not-exist", type: mode_t(S_IFREG), owner: 0)
+    }
+
+    // A digest that is not 64 hex characters must be refused before any file is
+    // read, so a caller cannot smuggle anything through the digest argument.
+    for malformed in ["", "abc", digest + "0", digest.replacingOccurrences(of: "0", with: "g")] {
+        expectRefusal("malformed-digest-refused") {
+            try atomicCopy(
+                source: trusted, destination: "\(root)/out",
+                expectedOwner: 0, expectedSHA256: malformed,
+                maximumBytes: 1024, required: true
+            )
+        }
+    }
+
+    // A well-formed digest that does not match the content must also be refused.
+    expectRefusal("digest-mismatch-refused") {
+        try atomicCopy(
+            source: trusted, destination: "\(root)/out",
+            expectedOwner: 0, expectedSHA256: digest,
+            maximumBytes: 1024, required: true
+        )
+    }
+
+    // And a size cap below the input, so a large document cannot be staged into
+    // a privileged location by exhausting memory first.
+    expectRefusal("oversize-input-refused") {
+        try atomicCopy(
+            source: trusted, destination: "\(root)/out",
+            expectedOwner: 0, expectedSHA256: digest,
+            maximumBytes: 1, required: true
+        )
+    }
+
+    if failures.isEmpty { return true }
+    FileHandle.standardError.write(Data(
+        "staging self-test failed: \(Set(failures).sorted().joined(separator: ", "))\n".utf8
+    ))
+    return false
+}
+
 private func runOwnedRuntimeContractSelfTests() -> Bool {
     let valid = """
     # Tono owned runtime
@@ -1248,6 +1389,9 @@ umask(0o077)
 if CommandLine.arguments.dropFirst() == ["--version"] {
     print(helperVersion)
     exit(0)
+}
+if CommandLine.arguments.dropFirst() == ["--staging-self-test"] {
+    exit(runStagingRefusalSelfTests() ? 0 : 1)
 }
 if CommandLine.arguments.dropFirst() == ["--lifecycle-self-test"] {
     exit(KillSwitchManager.runLifecycleSelfTests() ? 0 : 1)
