@@ -1,6 +1,9 @@
 name: macOS CI
 
 on:
+  # Manual re-run, so a flake or an infrastructure hiccup does not need a
+  # pointless commit to retry.
+  workflow_dispatch:
   pull_request:
     paths:
       - apps/macos/**

@@ -13,6 +13,9 @@ name: Windows CI
 # whole of Windows CI red for a reason nobody can locate.
 
 on:
+  # Manual re-run, so a flake or an infrastructure hiccup does not need a
+  # pointless commit to retry.
+  workflow_dispatch:
   pull_request:
     paths:
       - apps/windows/crates/**
