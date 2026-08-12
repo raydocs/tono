@@ -233,10 +233,40 @@ fn sorted_unique_ports(ports: &[u16], allowed: [u16; 2]) -> Option<Vec<u16>> {
 /// per-entry admission. `protected` carries the currently protected
 /// addresses (the selected node's IP at sync time); media endpoints must
 /// also avoid the permanently protected resolvers.
+/// What was accepted and what was not.
+///
+/// Degrading instead of refusing only helps if the degradation is visible.
+/// Replacing "silently discarded everything" with "silently discarded some" would
+/// be the same fault with a smaller blast radius, so every entry that does not
+/// survive is named here and the caller is expected to record it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PolicyAcceptance {
+    /// Hosts and addresses this build refused to route. A newer policy naming
+    /// something not in the compiled allowlist lands here.
+    pub dropped: Vec<String>,
+    /// Entries removed as duplicates of one already accepted.
+    pub duplicates: usize,
+    /// True when the published list was longer than this build's limit and the
+    /// remainder was cut. Means the limit is stale, not that the policy is wrong.
+    pub truncated: bool,
+    /// Set when the document declared a version this build does not know, which it
+    /// then read as the newest version it does.
+    pub newer_version: Option<u32>,
+}
+
 pub fn validate_policy(
     response: &TonoTrafficPolicyResponse,
     protected: &BTreeSet<Ipv4Addr>,
 ) -> Result<TonoTrafficPolicy, PolicyError> {
+    validate_policy_reporting(response, protected).map(|(policy, _)| policy)
+}
+
+/// As `validate_policy`, and also reports what did not survive.
+pub fn validate_policy_reporting(
+    response: &TonoTrafficPolicyResponse,
+    protected: &BTreeSet<Ipv4Addr>,
+) -> Result<(TonoTrafficPolicy, PolicyAcceptance), PolicyError> {
+    let mut dropped: Vec<String> = Vec::new();
     if response.revision < 0 || response.json.len() > MAX_POLICY_JSON_BYTES {
         return Err(PolicyError::InvalidResponse);
     }
@@ -251,10 +281,16 @@ pub fn validate_policy(
         .and_then(|value| value.as_u64())
         .and_then(|value| u32::try_from(value).ok())
         .ok_or(PolicyError::InvalidResponse)?;
-    let expected: BTreeSet<&str> = if version == POLICY_VERSION_V1 {
-        ["version", "domains", "mediaEndpoints"]
-            .into_iter()
-            .collect()
+    // Forward compatible on purpose. A version this build has not heard of used to
+    // discard the whole document, so every policy revision needed a client release
+    // and a missed release looked exactly like an empty policy. Unknown versions
+    // are treated as the newest known one, and unknown keys are ignored rather
+    // than fatal — an additive revision reaches every client without a release.
+    if version < POLICY_VERSION_V1 {
+        return Err(PolicyError::InvalidResponse);
+    }
+    let required: BTreeSet<&str> = if version == POLICY_VERSION_V1 {
+        ["version", "domains", "mediaEndpoints"].into_iter().collect()
     } else if version == POLICY_VERSION_V2 {
         ["version", "domains", "mediaEndpoints", "webDomains"]
             .into_iter()
@@ -263,7 +299,9 @@ pub fn validate_policy(
         ["version", "domains", "mediaEndpoints", "webDomains", "directSuffixes"]
             .into_iter()
             .collect()
-    } else if version == POLICY_VERSION_V4 {
+    } else {
+        // v4 and anything newer: the v4 shape is what this build understands, and
+        // whatever a newer revision adds is carried without being acted on.
         [
             "version",
             "domains",
@@ -272,22 +310,23 @@ pub fn validate_policy(
             "directSuffixes",
             "tcpEndpoints",
         ]
-            .into_iter()
-            .collect()
-    } else {
-        return Err(PolicyError::InvalidResponse);
+        .into_iter()
+        .collect()
     };
-    if object.keys().map(String::as_str).collect::<BTreeSet<_>>() != expected {
+    let present: BTreeSet<&str> = object.keys().map(String::as_str).collect();
+    // Missing a field this version promises is a malformed document. Carrying an
+    // extra one is a newer server, which is not this client's problem to refuse.
+    if !required.is_subset(&present) {
         return Err(PolicyError::InvalidResponse);
     }
     let document: TonoTrafficPolicy =
         serde_json::from_str(&response.json).map_err(|_| PolicyError::InvalidResponse)?;
-    if document.domains.len() > MAX_POLICY_DOMAINS
+    // Truncated rather than refused. A published list longer than this build's
+    // limit means the limit is stale, and answering that by routing nothing is a
+    // worse outcome than routing the part that fits.
+    let over_capacity = document.domains.len() > MAX_POLICY_DOMAINS
         || document.media_endpoints.len() > MAX_POLICY_MEDIA
-        || document.web_domains.len() > MAX_POLICY_WEB_DOMAINS
-    {
-        return Err(PolicyError::InvalidResponse);
-    }
+        || document.web_domains.len() > MAX_POLICY_WEB_DOMAINS;
 
     let mut domains: Vec<PolicyDomain> = Vec::with_capacity(document.domains.len());
     for entry in &document.domains {
@@ -296,13 +335,17 @@ pub fn validate_policy(
         let normalized = entry.host.trim().to_lowercase();
         let normalized = normalized.strip_suffix('.').unwrap_or(&normalized);
         if normalized != entry.host {
-            return Err(PolicyError::InvalidResponse);
+            dropped.push(entry.host.clone());
+            continue;
         }
         if !is_allowed_direct_domain(&entry.host) {
-            return Err(PolicyError::Domain(entry.host.clone()));
+            dropped.push(entry.host.clone());
+            continue;
         }
-        let ports =
-            sorted_unique_ports(&entry.ports, [80, 443]).ok_or(PolicyError::InvalidResponse)?;
+        let Some(ports) = sorted_unique_ports(&entry.ports, [80, 443]) else {
+            dropped.push(entry.host.clone());
+            continue;
+        };
         domains.push(PolicyDomain {
             host: normalized.to_string(),
             ports,
@@ -311,41 +354,52 @@ pub fn validate_policy(
     domains.sort_by(|left, right| left.host.cmp(&right.host));
     let before = domains.len();
     domains.dedup_by(|left, right| left.host == right.host);
-    if domains.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
+    let duplicate_domains = before - domains.len();
+    domains.truncate(MAX_POLICY_DOMAINS);
 
-    let mut web_domains = Vec::with_capacity(document.web_domains.len());
-    for entry in &document.web_domains {
-        if !is_allowed_web_domain(&entry.host) || entry.ports != [443] {
-            return Err(PolicyError::InvalidResponse);
-        }
-        if domains.iter().any(|domain| domain.host == entry.host) {
-            return Err(PolicyError::InvalidResponse);
+    // A version that does not declare web domains does not get them, even if the
+    // document carries the field. Ignoring what a version does not promise keeps
+    // the old invariant — v1 never routes web hosts — without discarding a
+    // document over it.
+    let declared_web: &[PolicyDomain] = if version >= POLICY_VERSION_V2 {
+        &document.web_domains
+    } else {
+        &[]
+    };
+    let mut web_domains = Vec::with_capacity(declared_web.len());
+    for entry in declared_web {
+        if !is_allowed_web_domain(&entry.host)
+            || entry.ports != [443]
+            || domains.iter().any(|domain| domain.host == entry.host)
+        {
+            dropped.push(entry.host.clone());
+            continue;
         }
         web_domains.push(entry.clone());
     }
     web_domains.sort_by(|a, b| a.host.cmp(&b.host));
     let before = web_domains.len();
     web_domains.dedup_by(|a, b| a.host == b.host);
-    if web_domains.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
+    let duplicate_web = before - web_domains.len();
+    web_domains.truncate(MAX_POLICY_WEB_DOMAINS);
 
     let mut media: Vec<PolicyMedia> = Vec::with_capacity(document.media_endpoints.len());
     for entry in &document.media_endpoints {
-        let address: Ipv4Addr = entry
-            .address
-            .parse()
-            .map_err(|_| PolicyError::Address(entry.address.clone()))?;
+        let Ok(address) = entry.address.parse::<Ipv4Addr>() else {
+            dropped.push(entry.address.clone());
+            continue;
+        };
         if !is_public_ipv4(address)
             || is_permanently_protected(address)
             || protected.contains(&address)
         {
-            return Err(PolicyError::Address(entry.address.clone()));
+            dropped.push(entry.address.clone());
+            continue;
         }
-        let ports =
-            sorted_unique_ports(&entry.ports, [443, 8000]).ok_or(PolicyError::InvalidResponse)?;
+        let Some(ports) = sorted_unique_ports(&entry.ports, [443, 8000]) else {
+            dropped.push(entry.address.clone());
+            continue;
+        };
         media.push(PolicyMedia {
             address: address.to_string(),
             ports,
@@ -354,16 +408,25 @@ pub fn validate_policy(
     media.sort_by(|left, right| left.address.cmp(&right.address));
     let before = media.len();
     media.dedup_by(|left, right| left.address == right.address);
-    if media.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
+    let duplicate_media = before - media.len();
+    media.truncate(MAX_POLICY_MEDIA);
 
-    Ok(TonoTrafficPolicy {
-        version,
-        domains,
-        media_endpoints: media,
-        web_domains,
-    })
+    dropped.sort();
+    dropped.dedup();
+    Ok((
+        TonoTrafficPolicy {
+            version,
+            domains,
+            media_endpoints: media,
+            web_domains,
+        },
+        PolicyAcceptance {
+            dropped,
+            duplicates: duplicate_domains + duplicate_web + duplicate_media,
+            truncated: over_capacity,
+            newer_version: (version > POLICY_VERSION_V4).then_some(version),
+        },
+    ))
 }
 
 /// Result of a [`PolicyTracker::install`] call.
@@ -594,6 +657,32 @@ mod tests {
             .expect("the published policy must be usable by this client");
     }
 
+    /// The point of the whole change: a revision this build has never heard of is
+    /// usable. Without this, every policy change needs a client release, and a
+    /// missed release is indistinguishable from an empty policy.
+    #[test]
+    fn a_future_version_with_unknown_fields_is_still_usable() {
+        let json = r#"{"version":9,"domains":[{"host":"qq.com","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"bilibili.com","ports":[443]}],"directSuffixes":[],"tcpEndpoints":[],"somethingAddedLater":{"nested":true}}"#;
+        let (policy, report) = validate_policy_reporting(&response(9, json), &no_protected())
+            .expect("a newer revision must not be discarded");
+        assert_eq!(policy.domains.len(), 1);
+        assert_eq!(policy.web_domains.len(), 1);
+        // Recorded, so an operator can see the client is behind rather than guess.
+        assert_eq!(report.newer_version, Some(9));
+        assert!(report.dropped.is_empty());
+    }
+
+    /// Missing what the declared version promises is still a malformed document.
+    /// Tolerating extra fields is not the same as tolerating absent ones.
+    #[test]
+    fn a_document_missing_a_promised_field_is_refused() {
+        let json = r#"{"version":2,"domains":[],"webDomains":[]}"#;
+        assert_eq!(
+            validate_policy(&response(1, json), &no_protected()),
+            Err(PolicyError::InvalidResponse),
+        );
+    }
+
     /// The limit must not drop below what the control plane accepts, or the same
     /// silent discard returns as soon as the list grows again.
     #[test]
@@ -657,11 +746,13 @@ mod tests {
         assert!(is_allowed_direct_domain("Qpic.CN."));
         for host in ["Qpic.CN", "qpic.cn.", " qpic.cn"] {
             let doc = policy_json(&format!(r#"{{"host":"{host}","ports":[443]}}"#), "");
-            assert_eq!(
-                validate_policy(&response(0, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{host}"
-            );
+            // Dropped, not fatal. The entry is still not routed — which is what
+            // "canonical or nothing" was protecting — but one malformed host no
+            // longer costs every other route in the document.
+            let (policy, report) = validate_policy_reporting(&response(0, &doc), &no_protected())
+                .expect("one bad host must not discard the document");
+            assert!(policy.domains.is_empty(), "{host}");
+            assert_eq!(report.dropped, vec![host.to_string()], "{host}");
         }
     }
 
@@ -688,11 +779,14 @@ mod tests {
         let policy = validate_policy(&response(1, v2), &no_protected()).unwrap();
         assert_eq!(policy.version, 2);
         assert_eq!(policy.web_domains.len(), 2);
+        // A v1 document carrying web domains is accepted and its web list ignored:
+        // a version does not get what it does not declare, and discarding the whole
+        // document over an extra field is how a client ends up with no policy at
+        // all.
         let v1_web = v2.replace("\"version\":2", "\"version\":1");
-        assert_eq!(
-            validate_policy(&response(1, &v1_web), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        let v1 = validate_policy(&response(1, &v1_web), &no_protected())
+            .expect("an extra field must not discard the document");
+        assert!(v1.web_domains.is_empty(), "v1 must not route web hosts");
     }
 
     #[test]
@@ -708,37 +802,43 @@ mod tests {
             let doc = format!(
                 r#"{{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{{"host":"{host}","ports":[443]}}]}}"#
             );
-            assert_eq!(
-                validate_policy(&response(1, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{host}"
-            );
+            // Still fails closed for that host — it is not routed — but a host this
+            // build has not been told about no longer takes the document with it.
+            let (policy, report) = validate_policy_reporting(&response(1, &doc), &no_protected())
+                .expect("an unknown web host must not discard the document");
+            assert!(policy.web_domains.is_empty(), "{host}");
+            assert_eq!(report.dropped, vec![host.to_string()], "{host}");
         }
         for ports in ["[]", "[80]", "[443,443]"] {
             let doc = format!(
                 r#"{{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{{"host":"bilibili.com","ports":{ports}}}]}}"#
             );
-            assert_eq!(
-                validate_policy(&response(1, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse)
-            );
+            let (policy, report) = validate_policy_reporting(&response(1, &doc), &no_protected())
+                .expect("bad web ports must not discard the document");
+            assert!(policy.web_domains.is_empty(), "{ports}");
+            assert_eq!(report.dropped, vec!["bilibili.com".to_string()], "{ports}");
         }
+        // A host already claimed by `domains` must not also appear as a web domain:
+        // two rules for one host is ambiguous, so the web copy is dropped and the
+        // WeChat-path entry — the narrower one — is what survives.
         let duplicate = r#"{"version":2,"domains":[{"host":"qq.com","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"qq.com","ports":[443]}]}"#;
-        assert_eq!(
-            validate_policy(&response(1, duplicate), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        let (policy, report) = validate_policy_reporting(&response(1, duplicate), &no_protected())
+            .expect("an ambiguous host must not discard the document");
+        assert_eq!(policy.domains.len(), 1);
+        assert!(policy.web_domains.is_empty());
+        assert_eq!(report.dropped, vec!["qq.com".to_string()]);
     }
 
     #[test]
     fn rejects_domain_port_violations() {
         for ports in ["[80,80]", "[8080]", "[]", "[443,8000]"] {
             let doc = policy_json(&format!(r#"{{"host":"qq.com","ports":{ports}}}"#), "");
-            assert_eq!(
-                validate_policy(&response(0, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{ports}"
-            );
+            // The entry is refused; the document is not. A port list this build will
+            // not honour still routes nothing, and now costs nothing else.
+            let (policy, report) = validate_policy_reporting(&response(0, &doc), &no_protected())
+                .expect("bad ports on one entry must not discard the document");
+            assert!(policy.domains.is_empty(), "{ports}");
+            assert_eq!(report.dropped, vec!["qq.com".to_string()], "{ports}");
         }
     }
 
@@ -746,42 +846,45 @@ mod tests {
     fn rejects_media_port_and_duplicate_violations() {
         for ports in ["[443,443]", "[80]", "[]"] {
             let doc = policy_json("", &format!(r#"{{"address":"9.0.0.9","ports":{ports}}}"#));
-            assert_eq!(
-                validate_policy(&response(0, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{ports}"
-            );
+            let (policy, report) = validate_policy_reporting(&response(0, &doc), &no_protected())
+                .expect("bad ports on one endpoint must not discard the document");
+            assert!(policy.media_endpoints.is_empty(), "{ports}");
+            assert_eq!(report.dropped, vec!["9.0.0.9".to_string()], "{ports}");
         }
         let dup_domain = policy_json(
             r#"{"host":"qq.com","ports":[80]},{"host":"QQ.com","ports":[80]}"#,
             "",
         );
-        assert_eq!(
-            validate_policy(&response(0, &dup_domain), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        // One survivor, one counted duplicate: a repeated host is the server saying
+        // the same thing twice, not a reason to route nothing.
+        let (policy, report) = validate_policy_reporting(&response(0, &dup_domain), &no_protected())
+            .expect("a duplicate must not discard the document");
+        assert_eq!(policy.domains.len(), 1);
+        // `QQ.com` never reaches the duplicate check: it is not canonical, so it is
+        // dropped first. Asserting the count rather than the reason would have
+        // passed for the wrong reason.
+        assert_eq!(report.dropped, vec!["QQ.com".to_string()]);
     }
 
     #[test]
     fn rejects_disallowed_and_protected_addresses() {
         for address in ["10.0.0.1", "198.18.0.1", "1.1.1.1", "8.8.8.8", "not-an-ip"] {
             let doc = policy_json("", &format!(r#"{{"address":"{address}","ports":[443]}}"#));
-            assert!(
-                matches!(
-                    validate_policy(&response(0, &doc), &no_protected()),
-                    Err(PolicyError::Address(_)) | Err(PolicyError::InvalidResponse),
-                ),
-                "{address}"
-            );
+            // What matters is that it is never routed. Dropping achieves that, and
+            // the drop is named so it cannot happen unnoticed.
+            let (policy, report) = validate_policy_reporting(&response(0, &doc), &no_protected())
+                .expect("a refused address must not discard the document");
+            assert!(policy.media_endpoints.is_empty(), "{address}");
+            assert_eq!(report.dropped, vec![address.to_string()], "{address}");
         }
         // The selected node's IP is protected at sync time.
         let mut protected = BTreeSet::new();
         protected.insert(Ipv4Addr::new(9, 0, 0, 7));
         let doc = policy_json("", r#"{"address":"9.0.0.7","ports":[443]}"#);
-        assert_eq!(
-            validate_policy(&response(0, &doc), &protected),
-            Err(PolicyError::Address("9.0.0.7".to_string()))
-        );
+        let (policy, report) = validate_policy_reporting(&response(0, &doc), &protected)
+            .expect("a protected address must not discard the document");
+        assert!(policy.media_endpoints.is_empty());
+        assert_eq!(report.dropped, vec!["9.0.0.7".to_string()]);
     }
 
     #[test]
