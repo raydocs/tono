@@ -129,7 +129,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $installers = @(
-            Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' `
+            Get-ChildItem -LiteralPath 'target/release/bundle/nsis' `
               -Filter '*-setup.exe' -File
           )
           if ($installers.Count -ne 1) {
