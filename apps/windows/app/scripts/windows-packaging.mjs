@@ -528,7 +528,10 @@ export function validateWindowsReplacementHelperSource(source) {
   const candidateAt = text.indexOf(
     'let app = app_replacement_candidate(&runtime)?;',
   )
-  const repairGateAt = text.indexOf('let _gate = enter_repair_gate()?;', candidateAt)
+  const repairGateAt = text.indexOf(
+    'let _gate = enter_repair_gate()?;',
+    candidateAt,
+  )
   if (candidateAt < 0 || repairGateAt <= candidateAt) {
     return 'the helper must validate the staged GUI before entering the privileged repair gate'
   }
@@ -536,10 +539,7 @@ export function validateWindowsReplacementHelperSource(source) {
   const dispatch = text.match(
     /if let Some\(\(runtime_candidate, app_candidate\)\)[\s\S]*?return replace_existing_service_and_runtime\(([\s\S]*?)\);/,
   )?.[1]
-  if (
-    !dispatch ||
-    !/runtime_candidate,\s*app_candidate,/.test(dispatch)
-  ) {
+  if (!dispatch || !/runtime_candidate,\s*app_candidate,/.test(dispatch)) {
     return 'the replace-runtime dispatch must pass both Mihomo and GUI candidates into the transaction'
   }
 
@@ -573,8 +573,12 @@ export function validateWindowsReplacementHelperSource(source) {
     return 'both successful commit and successful rollback must clean GUI transaction artifacts'
   }
 
-  const runtimePublishAt = transaction.indexOf('runtime_replacement.publish()?;')
-  const servicePublishAt = transaction.indexOf('service_replacement.publish()?;')
+  const runtimePublishAt = transaction.indexOf(
+    'runtime_replacement.publish()?;',
+  )
+  const servicePublishAt = transaction.indexOf(
+    'service_replacement.publish()?;',
+  )
   const appPublishAt = transaction.indexOf('app_replacement.publish()?;')
   const recoverySuppressedAt = transaction.indexOf(
     'suppress_windows_service_recovery(service)?;',
@@ -583,7 +587,10 @@ export function validateWindowsReplacementHelperSource(source) {
     'service.start(&Vec::<&OsStr>::new())?;',
     servicePublishAt,
   )
-  const readinessAt = transaction.indexOf('wait_for_service_ready()?;', serviceStartAt)
+  const readinessAt = transaction.indexOf(
+    'wait_for_service_ready()?;',
+    serviceStartAt,
+  )
   const recoveryRestoredAt = transaction.indexOf(
     'configure_windows_service_recovery(service)?;',
     readinessAt,
@@ -663,8 +670,7 @@ export function validateTlsPolicySources(sources) {
     if (sharedBuilder) {
       const baseBuilderAt = sharedBuilder.indexOf('reqwest::Client::builder()')
       const noProxyAt = sharedBuilder.indexOf('.no_proxy()', baseBuilderAt)
-      proxyFreePinnedBuilder =
-        baseBuilderAt >= 0 && noProxyAt > baseBuilderAt
+      proxyFreePinnedBuilder = baseBuilderAt >= 0 && noProxyAt > baseBuilderAt
     }
   }
 
@@ -788,18 +794,22 @@ export function validatePayloadEntries(entries) {
     return `installer payload must contain exactly one staged GUI basename Tono.exe.next, found ${stagedGui.length}`
   }
   const unexpectedGui = bases.filter(
-    (base) => /^Tono\.exe(?:\..*)?$/i.test(base) && !/^Tono\.exe\.next$/i.test(base),
+    (base) =>
+      /^Tono\.exe(?:\..*)?$/i.test(base) && !/^Tono\.exe\.next$/i.test(base),
   )
   if (unexpectedGui.length) {
     return `installer payload must not contain a live or repair GUI basename: ${[...new Set(unexpectedGui)].join(', ')}`
   }
 
-  const stagedMihomo = bases.filter((base) => /^verge-mihomo\.exe\.next$/i.test(base))
+  const stagedMihomo = bases.filter((base) =>
+    /^verge-mihomo\.exe\.next$/i.test(base),
+  )
   if (stagedMihomo.length !== 1) {
     return `installer payload is missing stable Mihomo staging contract (expected exactly one verge-mihomo.exe.next, found ${stagedMihomo.length})`
   }
   const unexpectedMihomo = bases.filter(
-    (base) => /^verge-mihomo/i.test(base) && !/^verge-mihomo\.exe\.next$/i.test(base),
+    (base) =>
+      /^verge-mihomo/i.test(base) && !/^verge-mihomo\.exe\.next$/i.test(base),
   )
   if (unexpectedMihomo.length) {
     return `installer payload must not contain a live, repair, or alternate stable Mihomo basename: ${[...new Set(unexpectedMihomo)].join(', ')}`
@@ -826,6 +836,34 @@ export function validatePayloadEntries(entries) {
     }
   }
 
+  return null
+}
+
+/**
+ * Prove that a privileged Service binary carries the digest of the exact Core in the package.
+ * Rust's `option_env!("TONO_CORE_SHA256")` embeds the lowercase ASCII digest in both the daemon
+ * and replacement helper. An absent pin is deliberately a runtime refusal, so release packaging
+ * must reject it here instead of asking a customer to discover it after installation.
+ *
+ * @param {Uint8Array} binaryBytes bytes of tono-service.exe or tono-service-install.exe
+ * @param {string} coreDigest lowercase SHA-256 hex digest of the packaged Mihomo
+ * @param {string} label binary name used in diagnostics
+ * @returns {string | null}
+ */
+export function validateEmbeddedCoreDigestPin(
+  binaryBytes,
+  coreDigest,
+  label = 'Service binary',
+) {
+  const normalized = String(coreDigest).trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    return 'packaged Mihomo SHA-256 is missing or malformed'
+  }
+  const binary = Buffer.from(binaryBytes)
+  const pin = Buffer.from(normalized, 'ascii')
+  if (!binary.includes(pin)) {
+    return `${label} does not embed the packaged Mihomo SHA-256 pin ${normalized}`
+  }
   return null
 }
 
