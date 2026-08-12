@@ -1,0 +1,74 @@
+name: Services CI
+
+# The control plane serves api.afk.ccwu.cc, and until this existed nothing ran its
+# 62 tests on a change. They were run by hand before a deploy, which is the same
+# arrangement that let a stale release feed and an assertion pinned to a build
+# number sit unnoticed — one of them was only found by deploying.
+#
+# The two service-side agents decide what accounts exist on an exit and what they
+# are billed, so their arithmetic runs here too.
+
+on:
+  pull_request:
+    paths:
+      - services/**
+      - tooling/scripts/remote/**
+      - .github/workflows/services-ci.yml
+  push:
+    branches:
+      - main
+    paths:
+      - services/**
+      - tooling/scripts/remote/**
+      - .github/workflows/services-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: services-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  control-plane:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/control-plane
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci
+
+      - name: Type-check
+        # The Worker is deployed from this source; a type error here is a runtime
+        # error on a production domain.
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
+
+  service-agents:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Exit metering agent
+        # Folds counters that reset on restart into lifetime totals. Wrong in one
+        # direction it bills twice, in the other it forgives whatever an account
+        # used before a restart, and both look plausible from outside.
+        run: python3 services/exit-agent/test_reconcile_and_report.py
+
+      - name: Exit configuration edit
+        # Additive and idempotent by requirement: dropping the existing client
+        # disconnects every account that still holds that credential, and claiming
+        # work when there is none spends the one restart this change costs.
+        run: python3 tooling/scripts/remote/test_exit_metering_config.py
+
+      - name: Home usage reporter
+        run: python3 services/home-agent/test_report_example.py

@@ -396,9 +396,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       },
     });
 
+    // Asserted against the file this deploy would publish, not against a build
+    // number. Pinning a number couples every release to this test, and it broke
+    // the moment the feed was corrected — which is the wrong thing to notice
+    // about a release: what matters here is that the subdomain serves the feed at
+    // all, and serves the one on disk.
     const appcast = await fetchRelease('/macos/appcast.xml');
     expect(appcast.status).toBe(200);
-    expect(await appcast.text()).toContain('<sparkle:version>42</sparkle:version>');
+    const servedFeed = await appcast.text();
+    expect(servedFeed).toContain('<rss');
+    expect(servedFeed).toContain('sparkle:version');
+    // The alias must serve the same document as the canonical path. That is the
+    // property worth holding: these two diverging is how a client updates from a
+    // feed nobody thinks is live, and it is what the cache-busting fix was for.
+    const canonicalFeed = await fetchRelease('/appcast.xml');
+    expect(canonicalFeed.status).toBe(200);
+    expect(await canonicalFeed.text()).toBe(servedFeed);
 
     expect((await fetchRelease('/api/v1/health')).status).toBe(404);
     const rejected = await fetchRelease('/manifest.json', { method: 'POST' });
