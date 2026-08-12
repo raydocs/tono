@@ -296,6 +296,26 @@ private actor ManagedTrafficPolicyProcessor {
               policy.version >= 1 else {
             throw TonoAPIClient.APIError.invalidResponse
         }
+        let verdict = ManagedTrafficPolicySignature.verdict(
+            json: cache.json,
+            signature: cache.signature
+        )
+        if verdict == .untrustworthy {
+            // Refused whole, unlike an entry this build does not understand. A
+            // dropped entry is a document whose author is known and whose
+            // contents are partly unsupported; a bad signature is a document
+            // whose author is not known at all, and honouring any of it would
+            // make the signature decorative.
+            LocalTrafficAudit.shared.recordEvent(
+                "managed_direct_policy_signature_rejected",
+                details: [
+                    "revision": String(cache.revision),
+                    "policy_version": String(policy.version),
+                ]
+            )
+            throw TonoAPIClient.APIError.invalidResponse
+        }
+        let trusted = verdict == .trusted
         // Trimmed rather than refused. A published list longer than this build's
         // limit means the limit is stale, and answering that by routing nothing at
         // all is worse than routing the part that fits.
@@ -313,7 +333,7 @@ private actor ManagedTrafficPolicyProcessor {
         var dropped: [String] = []
         var seenHosts = Set<String>()
         let domains = policyDomains.compactMap { entry -> TonoTrafficPolicyDomain? in
-            guard let host = try? ConfigPipeline.validatedManagedDirectDomain(entry.host),
+            guard let host = try? ConfigPipeline.validatedManagedDirectDomain(entry.host, trusted: trusted),
                   host == entry.host,
                   seenHosts.insert(host).inserted,
                   !entry.ports.isEmpty,
@@ -371,7 +391,7 @@ private actor ManagedTrafficPolicyProcessor {
         }.sorted { $0.address < $1.address }
 
         let webDomains = declaredWeb.compactMap { entry -> TonoTrafficPolicyDomain? in
-            guard let host = try? ConfigPipeline.validatedWebDirectDomain(entry.host),
+            guard let host = try? ConfigPipeline.validatedWebDirectDomain(entry.host, trusted: trusted),
                   host == entry.host,
                   seenHosts.insert(host).inserted,
                   entry.ports == [443] else {
@@ -383,7 +403,7 @@ private actor ManagedTrafficPolicyProcessor {
 
         var seenSuffixes = Set<String>()
         let directSuffixes = declaredSuffixes.compactMap { entry -> TonoTrafficPolicyDomain? in
-            guard let host = try? ConfigPipeline.validatedManagedDirectSuffix(entry.host),
+            guard let host = try? ConfigPipeline.validatedManagedDirectSuffix(entry.host, trusted: trusted),
                   host == entry.host,
                   seenSuffixes.insert(host).inserted,
                   !entry.ports.isEmpty,
@@ -412,6 +432,11 @@ private actor ManagedTrafficPolicyProcessor {
                     // Bounded: a report is a diagnostic, not a copy of the document.
                     "hosts": dropped.sorted().prefix(12).joined(separator: ","),
                     "newer_than_known": String(policy.version > 4),
+                    // Which gate did the dropping: an allowlist this build ships,
+                    // or this build's own limits. Without it a signed policy whose
+                    // new hosts were dropped anyway is indistinguishable from an
+                    // unsigned one.
+                    "trusted": String(trusted),
                 ]
             )
         }
@@ -3658,7 +3683,8 @@ final class AppState {
                     revision: response.revision,
                     json: response.json,
                     sha256: response.sha256,
-                    updatedAt: response.updatedAt
+                    updatedAt: response.updatedAt,
+                    signature: response.signature
                 ),
                 persistCache: true,
                 allowRuntimeTransition: true

@@ -221,6 +221,19 @@ nonisolated struct ManagedTrafficPolicyCache: Codable, Sendable, Equatable {
     let json: String
     let sha256: String
     let updatedAt: Int?
+    /// Carried through the cache so a policy that was trusted when it arrived is
+    /// still trusted after a restart. Decoded as optional so a cache written by
+    /// an earlier build loads instead of being discarded — a cache that fails to
+    /// decode means no managed routing until the next successful fetch.
+    let signature: String?
+
+    init(revision: Int, json: String, sha256: String, updatedAt: Int?, signature: String? = nil) {
+        self.revision = revision
+        self.json = json
+        self.sha256 = sha256
+        self.updatedAt = updatedAt
+        self.signature = signature
+    }
 }
 
 // MARK: - Region Container (Codable wrapper)

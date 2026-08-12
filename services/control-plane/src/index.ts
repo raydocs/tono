@@ -8,6 +8,8 @@ import {
   jwtVerify,
   randomToken,
   sha256,
+  TRAFFIC_POLICY_SIGNATURE_CONTEXT,
+  verifyTrafficPolicySignature,
 } from './crypto';
 import {
   OidcVerificationError,
@@ -46,6 +48,12 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   DIRECT_SIGNUP_ALLOWLIST?: string;
   CATALOG_ENCRYPTION_KEY?: string;
+  // Public half of the offline policy signing key, standard base64, 32 bytes. A
+  // var rather than a secret: it is a public key, and keeping it readable is what
+  // lets anyone confirm which key this deployment trusts. Unset means signature
+  // verification is unavailable, so a signed policy cannot be published and a
+  // stored signature cannot be checked — see `publicTrafficPolicy`.
+  TRAFFIC_POLICY_PUBLIC_KEY?: string;
   CONFIRM_CLAIM_TTL_SECONDS?: string;
   RATE_LIMIT_DIAGNOSTICS_IP_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
@@ -649,7 +657,19 @@ function isPublicIPv4(address: string) {
     (a === 203 && b === 0 && c === 113));
 }
 
-function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
+// `trusted` is set only once an Ed25519 signature over the resulting canonical
+// document has verified against the compiled-in public key. It relaxes exactly
+// one thing: the lists of hostnames permitted to route direct. Every other check
+// stays, because a signature says who wrote the document, not that the document
+// is well formed — a signed policy with a malformed entry or one list too long
+// would be faithfully delivered to every client and break all of them.
+//
+// `protectedSuffixes` is NOT relaxed, and must never be. Those are the hosts that
+// must never leave the tunnel, including this control plane itself. Folding them
+// into what a signature can override would make a leaked private key sufficient
+// to expose the traffic the product exists to protect, which is a strictly worse
+// position than the allowlist this mechanism replaces.
+function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid policy');
   }
@@ -733,7 +753,14 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     const { host, ports } = entry as Row;
     if (typeof host !== 'string' || host.length > 253 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
         protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
-        !allowedExactHosts.includes(host) && !allowedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) || seenHosts.has(host)) {
+        seenHosts.has(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
+    }
+    // Reviewed by list, or vouched for by a signature. Evaluated after the type
+    // and syntax checks above so a non-string host is a 400 rather than a
+    // TypeError from `endsWith` surfacing as a 500.
+    if (!trusted && !allowedExactHosts.includes(host) &&
+        !allowedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
     }
     seenHosts.add(host);
@@ -781,8 +808,24 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid direct suffix');
     }
     const { host, ports } = entry as Row;
-    if (typeof host !== 'string' || !allowedDirectSuffixes.includes(host) ||
+    // The syntax check is explicit rather than implied by list membership. While
+    // every accepted suffix had to appear in `allowedDirectSuffixes`, that list
+    // *was* the syntax guarantee; a signature relaxing membership would otherwise
+    // leave this field with no validation at all and hand clients a suffix they
+    // have to parse.
+    //
+    // A signature vouches for authorship, not for judgement. A wildcard suffix
+    // over a namespace where a third party picks the hostname still lets anyone
+    // who can host there obtain a real IP outside the tunnel — see the note above
+    // `allowedDirectSuffixes`. Signing moves that review from this code to
+    // whoever holds the key; it does not remove it.
+    if (typeof host !== 'string' || host.length > 253 ||
+        !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
+        protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
         seenSuffixes.has(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
+    }
+    if (!trusted && !allowedDirectSuffixes.includes(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
     }
     seenSuffixes.add(host);
@@ -816,7 +859,7 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
 
 async function publicTrafficPolicy(e: Env) {
   const row = await e.DB.prepare(
-    'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_traffic_policy WHERE singleton_id = 1',
+    'SELECT revision, ciphertext, nonce, content_sha256, updated_at, signature FROM managed_traffic_policy WHERE singleton_id = 1',
   ).first<Row>();
   if (!row) {
     const json = JSON.stringify(emptyTrafficPolicy());
@@ -826,12 +869,41 @@ async function publicTrafficPolicy(e: Env) {
     const json = await decryptTrafficPolicy(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
     const digest = await sha256(json);
     if (digest !== row.content_sha256) throw new Error('digest mismatch');
-    // Re-validating on read catches tampering and digest drift, but it also
-    // couples every fetch to the current allowlists: an allowlist entry removed
-    // while the stored policy still uses it makes this throw for every device.
-    // See the note on `allowedDirectSuffixes` before narrowing anything.
-    canonicalTrafficPolicy(JSON.parse(json));
-    return { revision: Number(row.revision), json, sha256: digest, updatedAt: Number(row.updated_at) };
+    const signature = typeof row.signature === 'string' && row.signature.length
+      ? row.signature
+      : undefined;
+    // A stored signature is what permits trusted canonicalisation here. That
+    // sounds circular and is not: the client verifies the signature itself
+    // against a compiled-in key and is the only party whose trust decision
+    // matters, because it is the only one that routes traffic. This function
+    // re-validates to catch a malformed or drifted document, and structural
+    // validation is all that requires.
+    //
+    // So verification on this path is defence in depth, and runs only when the
+    // public key is configured. Making it mandatory would mean an unset or
+    // mistyped var turns every policy fetch into a 503 for the whole fleet, and
+    // trades a real outage for a check the client already performs. When the key
+    // *is* present a bad signature means the stored row was altered underneath
+    // us, which is worth refusing to serve.
+    const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
+    if (signature && publicKey) {
+      if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
+        throw new Error('policy signature does not verify');
+      }
+    }
+    // Re-validating on read catches tampering and digest drift, but for an
+    // unsigned policy it also couples every fetch to the current allowlists: an
+    // allowlist entry removed while the stored policy still uses it makes this
+    // throw for every device. See the note on `allowedDirectSuffixes` before
+    // narrowing anything.
+    canonicalTrafficPolicy(JSON.parse(json), Boolean(signature));
+    return {
+      revision: Number(row.revision),
+      json,
+      sha256: digest,
+      updatedAt: Number(row.updated_at),
+      ...(signature ? { signature } : {}),
+    };
   } catch {
     throw new ApiError(503, 'TRAFFIC_POLICY_UNAVAILABLE', 'Managed traffic policy is unavailable');
   }
@@ -3263,9 +3335,54 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (p === '/api/v1/admin/traffic-policy' && m === 'PUT') {
       const b = await body(req, 64 * 1024);
-      rejectUnexpectedKeys(b, ['policy', 'expectedRevision']);
-      const policy = canonicalTrafficPolicy(b.policy);
+      rejectUnexpectedKeys(b, ['policy', 'expectedRevision', 'signature', 'dryRun']);
+      if (b.signature !== undefined && (typeof b.signature !== 'string' || !b.signature.length || b.signature.length > 128)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid signature');
+      }
+      if (b.dryRun !== undefined && typeof b.dryRun !== 'boolean') {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid dryRun');
+      }
+      const signature = b.signature as string | undefined;
+      const dryRun = b.dryRun === true;
+      // A dry run exists because a signature has to cover the document this
+      // endpoint will serve, byte for byte, and that document is this function's
+      // output — not the operator's input. Rather than reimplement
+      // canonicalisation in the signing tool and let the two drift, the tool asks
+      // for the canonical bytes, signs those, and sends them back. The real PUT
+      // re-canonicalises and re-verifies, so if anything differed between the two
+      // calls the signature fails and nothing is stored.
+      //
+      // Canonicalised as trusted: an operator asking what they would be signing
+      // is by definition about to sign it. Nothing is stored on this path.
+      const policy = canonicalTrafficPolicy(b.policy, dryRun || Boolean(signature));
       const json = JSON.stringify(policy);
+      if (signature) {
+        const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
+        if (!publicKey) {
+          throw new ApiError(409, 'TRAFFIC_POLICY_KEY_UNCONFIGURED', 'This deployment has no policy signing public key, so a signed policy cannot be accepted');
+        }
+        if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
+          throw new ApiError(400, 'TRAFFIC_POLICY_SIGNATURE_INVALID', 'The signature does not cover the canonical policy this would serve');
+        }
+      }
+      if (dryRun) {
+        // Whether publishing this document actually needs a signature: if the
+        // allowlists already cover every host in it, they do not, and the
+        // operator can skip signing entirely.
+        let signatureRequired = false;
+        try {
+          canonicalTrafficPolicy(b.policy, false);
+        } catch {
+          signatureRequired = true;
+        }
+        return Response.json({
+          dryRun: true,
+          json,
+          sha256: await sha256(json),
+          signatureRequired,
+          signatureContext: TRAFFIC_POLICY_SIGNATURE_CONTEXT,
+        });
+      }
       const expectedRevision = b.expectedRevision;
       if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
@@ -3281,21 +3398,29 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const encrypted = await encryptTrafficPolicy(json, requiredCatalogKey(e));
       const digest = await sha256(json);
       const t = now();
+      // `signature` is written on both paths, including as NULL. Leaving a
+      // previous signature in place while replacing the document it covers would
+      // ship bytes and a signature that disagree, and every client that verifies
+      // would reject the whole policy — an unsigned republish must clear it.
+      const storedSignature = signature ?? null;
       const changed = current
         ? await e.DB.prepare(
           `UPDATE managed_traffic_policy
-           SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
+           SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?, signature = ?
            WHERE singleton_id = 1 AND revision = ?`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, currentRevision).run()
+        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature, currentRevision).run()
         : await e.DB.prepare(
           `INSERT OR IGNORE INTO managed_traffic_policy(
-             singleton_id, revision, ciphertext, nonce, content_sha256, updated_at
-           ) VALUES(1, ?, ?, ?, ?, ?)`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t).run();
+             singleton_id, revision, ciphertext, nonce, content_sha256, updated_at, signature
+           ) VALUES(1, ?, ?, ?, ?, ?, ?)`,
+        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature).run();
       if (!changed.meta.changes) {
         throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
       }
-      return Response.json({ revision, json, sha256: digest, updatedAt: t });
+      return Response.json({
+        revision, json, sha256: digest, updatedAt: t,
+        ...(signature ? { signature } : {}),
+      });
     }
     if (p === '/api/v1/admin/exit-catalog' && m === 'GET') {
       return Response.json(await publicManagedCatalog(e));

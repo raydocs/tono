@@ -764,6 +764,221 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  // Private half of the test-only keypair whose public half is bound as
+  // TRAFFIC_POLICY_PUBLIC_KEY in vitest.config.ts. Signing here rather than
+  // pasting fixed signatures means these tests still hold if the canonical byte
+  // layout changes: they sign whatever the endpoint says it will serve.
+  const TEST_POLICY_PKCS8 =
+    'MC4CAQAwBQYDK2VwBCIEIAIwT13QKhcJliAMcXcFnjUys571THcVvHLBTICbjKzy';
+  const signPolicy = async (json: string) => {
+    const key = await crypto.subtle.importKey(
+      'pkcs8',
+      Uint8Array.from(atob(TEST_POLICY_PKCS8), (c) => c.charCodeAt(0)),
+      { name: 'Ed25519' },
+      false,
+      ['sign'],
+    );
+    const signature = await crypto.subtle.sign(
+      'Ed25519',
+      key,
+      new TextEncoder().encode(`tono-traffic-policy-v1\n${json}`),
+    );
+    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+  };
+  // A host no allowlist in this Worker contains, which is the whole point: a
+  // signature is what makes adding one a remote-only change.
+  const unlistedPolicy = {
+    version: 4,
+    domains: [],
+    mediaEndpoints: [],
+    webDomains: [{ host: 'www.dianping.com', ports: [443] }],
+    directSuffixes: [],
+    tcpEndpoints: [],
+  };
+
+  it('signs a policy over the bytes it will serve, not over the bytes submitted', async () => {
+    // The document served is this endpoint's canonicalised output — reordered,
+    // sorted, ports normalised. A signature over the operator's input would not
+    // cover it, so the tool asks what it would be signing first.
+    const submitted = {
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [
+        { ports: [443], host: 'www.dianping.com' },
+        { host: 'shop.dianping.com', ports: [443] },
+      ],
+      directSuffixes: [],
+      tcpEndpoints: [],
+    };
+    const preview = await admin('traffic-policy', { policy: submitted, dryRun: true }, 'PUT');
+    expect(preview.status).toBe(200);
+    const previewed = await preview.json() as any;
+    expect(previewed.dryRun).toBe(true);
+    expect(previewed.signatureRequired).toBe(true);
+    expect(previewed.signatureContext).toBe('tono-traffic-policy-v1\n');
+    // Canonical, and demonstrably not what was submitted.
+    expect(previewed.json).not.toBe(JSON.stringify(submitted));
+    expect(JSON.parse(previewed.json).webDomains.map((d: any) => d.host))
+      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+    // A dry run stores nothing.
+    expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
+
+    const published = await admin('traffic-policy', {
+      policy: submitted,
+      expectedRevision: 0,
+      signature: await signPolicy(previewed.json),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    const body = await published.json() as any;
+    expect(body.json).toBe(previewed.json);
+
+    // And the client is handed the signature so it can make the same decision.
+    const account = await createAccount('signed-policy-delivery');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    const delivered = await fetched.json() as any;
+    expect(delivered.signature).toBe(body.signature);
+    expect(JSON.parse(delivered.json).webDomains.map((d: any) => d.host))
+      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+  });
+
+  it('refuses an unlisted host that arrives without a valid signature', async () => {
+    // Unsigned: the allowlist is still the only authority, exactly as before.
+    const unsigned = await admin(
+      'traffic-policy', { policy: unlistedPolicy, expectedRevision: 0 }, 'PUT',
+    );
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+
+    // A well-formed signature over a *different* document. This is the attack the
+    // dry-run flow could otherwise enable: capture a signature, reuse it.
+    const other = await admin('traffic-policy', {
+      policy: { version: 4, domains: [], mediaEndpoints: [], webDomains: [{ host: 'www.bilibili.com', ports: [443] }], directSuffixes: [], tcpEndpoints: [] },
+      dryRun: true,
+    }, 'PUT');
+    const replayed = await admin('traffic-policy', {
+      policy: unlistedPolicy,
+      expectedRevision: 0,
+      signature: await signPolicy((await other.json() as any).json),
+    }, 'PUT');
+    expect(replayed.status).toBe(400);
+    expect((await replayed.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    // Signed by the wrong key, right shape.
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const foreign = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']) as CryptoKeyPair;
+    const forged = await crypto.subtle.sign(
+      'Ed25519', foreign.privateKey,
+      new TextEncoder().encode(`tono-traffic-policy-v1\n${(await preview.json() as any).json}`),
+    );
+    const impostor = await admin('traffic-policy', {
+      policy: unlistedPolicy,
+      expectedRevision: 0,
+      signature: btoa(String.fromCharCode(...new Uint8Array(forged))),
+    }, 'PUT');
+    expect(impostor.status).toBe(400);
+    expect((await impostor.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    // Nothing above was stored.
+    expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
+  });
+
+  it('will not let a signature pull a protected host out of the tunnel', async () => {
+    // The invariant that must survive a leaked key. A signature relaxes which
+    // hosts may route direct; it must never relax which hosts may not. If this
+    // ever passes, one stolen key exposes this control plane and Claude traffic
+    // — strictly worse than the allowlist the signature replaces.
+    for (const field of ['domains', 'webDomains', 'directSuffixes'] as const) {
+      for (const host of ['api.anthropic.com', 'claude.ai', 'api.afk.ccwu.cc'.replace('api.afk.ccwu.cc', 'tono.app')]) {
+        const attempt = { ...unlistedPolicy, webDomains: [], [field]: [{ host, ports: [443] }] };
+        // Even the dry run, which canonicalises as trusted, must refuse.
+        const preview = await admin('traffic-policy', { policy: attempt, dryRun: true }, 'PUT');
+        expect(preview.status, `${field}/${host}`).toBe(400);
+      }
+    }
+  });
+
+  it('clears a stored signature when an unsigned policy replaces a signed one', async () => {
+    // Otherwise the old signature ships alongside new bytes and every client
+    // that verifies rejects the whole policy — managed direct routing off,
+    // fleet-wide, from a republish that looked like it worked.
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const signed = await admin('traffic-policy', {
+      policy: unlistedPolicy,
+      expectedRevision: 0,
+      signature: await signPolicy((await preview.json() as any).json),
+    }, 'PUT');
+    expect(signed.status).toBe(200);
+    expect((await signed.json() as any).signature).toBeTruthy();
+
+    const listedOnly = {
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+      directSuffixes: [],
+      tcpEndpoints: [],
+    };
+    const unsigned = await admin(
+      'traffic-policy', { policy: listedOnly, expectedRevision: 1 }, 'PUT',
+    );
+    expect(unsigned.status).toBe(200);
+    expect((await unsigned.json() as any).signature).toBeUndefined();
+    expect(await env.DB.prepare(
+      'SELECT signature FROM managed_traffic_policy WHERE singleton_id = 1',
+    ).first<any>()).toEqual({ signature: null });
+
+    // And the policy is still served, rather than 503-ing on a signature that
+    // no longer covers anything.
+    const account = await createAccount('signature-cleared');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    expect((await fetched.json() as any).signature).toBeUndefined();
+  });
+
+  it('refuses to serve a signed policy whose stored row was altered', async () => {
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const canonical = (await preview.json() as any).json;
+    expect((await admin('traffic-policy', {
+      policy: unlistedPolicy, expectedRevision: 0, signature: await signPolicy(canonical),
+    }, 'PUT')).status).toBe(200);
+
+    // Substitute a signature of the right shape that does not cover these bytes,
+    // the way a compromised database would.
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = ? WHERE singleton_id = 1',
+    ).bind(await signPolicy(`${canonical} `)).run();
+    const account = await createAccount('policy-row-altered');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(503);
+    expect((await fetched.json() as any).error.code).toBe('TRAFFIC_POLICY_UNAVAILABLE');
+  });
+
+  it('tells the operator when a policy needs no signature at all', async () => {
+    // Adding a host the allowlists already cover must not start requiring a key
+    // ceremony. Most republishes are this case.
+    const preview = await admin('traffic-policy', {
+      policy: {
+        version: 4,
+        domains: [],
+        mediaEndpoints: [],
+        webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+        directSuffixes: [],
+        tcpEndpoints: [],
+      },
+      dryRun: true,
+    }, 'PUT');
+    expect(preview.status).toBe(200);
+    expect((await preview.json() as any).signatureRequired).toBe(false);
+  });
+
   it('accepts the Feishu family as direct suffixes instead of exact pins', async () => {
     // Shape produced by tooling/scripts/retarget-direct-suffixes.rb. An exact
     // pin only ever covers the apex, so CDN traffic on *.feishucdn.com was

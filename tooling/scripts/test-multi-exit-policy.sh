@@ -31,6 +31,7 @@ DEVELOPER_DIR="$tono_developer_dir" /usr/bin/xcrun swiftc \
   "$repo_root/apps/macos/Tono/Services/ConfigParser.swift" \
   "$repo_root/apps/macos/Tono/Core/HelperProtocolVersion.swift" \
   "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift" \
+  "$repo_root/apps/macos/Tono/Core/ManagedTrafficPolicySignature.swift" \
   "$repo_root/tooling/scripts/tests/MultiExitPolicyTests.swift" \
   -o "$test_dir/test-multi-exit"
 

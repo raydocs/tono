@@ -18,6 +18,16 @@ thiserror = "2"
 rand = "0.9"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+# Verifies the offline signature on a managed traffic policy. The client checks
+# who authored a policy rather than matching its contents against a compiled-in
+# allowlist, which is what lets a new domain reach the fleet without shipping a
+# release — this client spent days discarding every policy it was served, and a
+# release was the only remedy.
+#
+# Verification only: no signing key exists on a client, so `rand` is not needed
+# and default features are off. A security primitive is the wrong place to
+# hand-roll or to pick the smallest crate, so this is the widely reviewed one.
+ed25519-dalek = { version = "3.0.0", default-features = false, features = ["alloc"] }
 
 # std has no safe API for the current process uid and this crate forbids
 # unsafe code; nix provides the safe getuid() wrapper used by the unix

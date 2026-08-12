@@ -183,6 +183,15 @@ nonisolated struct TonoTrafficPolicyResponse: Codable, Sendable, Equatable {
     let json: String
     let sha256: String
     let updatedAt: Int?
+    /// Ed25519 signature, standard base64, over
+    /// `"tono-traffic-policy-v1\n" + json`, made offline by the holder of the
+    /// policy signing key. Optional because every policy published before this
+    /// existed is unsigned, and those must keep working: absent means validate
+    /// against the compiled-in allowlist, which is what this build did before.
+    /// Present and valid means the document's author is known, and hosts this
+    /// build has never heard of may be honoured — that is what makes adding a
+    /// domain a change to the server alone.
+    let signature: String?
 }
 nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
     let version: Int

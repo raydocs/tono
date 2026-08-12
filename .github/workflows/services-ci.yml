@@ -60,6 +60,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Policy signing contract
+        # Four implementations must agree on the signing key and the signed byte
+        # prefix. Drift is silent: signatures verify nowhere, every signed policy
+        # reads as untrustworthy, and managed direct routing stops fleet-wide.
+        run: tooling/scripts/test-policy-signing-contract.sh
+
   service-agents:
     runs-on: ubuntu-24.04
     steps:

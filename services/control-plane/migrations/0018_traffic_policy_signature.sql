@@ -1,0 +1,17 @@
+-- An offline Ed25519 signature over the exact canonical policy document served
+-- to clients.
+--
+-- Nullable on purpose. The policy live at the time this ran is unsigned, and
+-- every deployed client predates verification, so an unsigned policy has to keep
+-- working: absent means "validate against the compiled-in allowlist", the
+-- behaviour that exists today. Present means the document was authored by the
+-- holder of the private key, and a client that can verify it may then accept
+-- hosts its own allowlist has never heard of — which is the entire point, since
+-- that is what makes adding a domain a remote-only change.
+--
+-- The private key is never here and never in the Worker. If it were, taking the
+-- Worker would be enough to mint a policy that pulls arbitrary hosts out of the
+-- tunnel, and the allowlist this replaces would have been protecting against
+-- exactly that. Signing happens on the operator's machine; this column only ever
+-- stores the result.
+ALTER TABLE managed_traffic_policy ADD COLUMN signature TEXT;

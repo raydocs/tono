@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // ConfigPipeline only needs this value contract; the product definition lives
@@ -1075,10 +1076,134 @@ struct MultiExitPolicyTests {
             // Expected.
         }
 
+        try verifyPolicySignatureContract()
+
         print(
             "multi-exit fixture validated and selected individually: " +
             "\(validated.map(\.name).joined(separator: ", "))"
         )
+    }
+
+    /// The offline policy signing contract.
+    ///
+    /// Signing is what lets a new domain reach the fleet without a client
+    /// release: the client checks who authored the policy instead of matching its
+    /// contents against a compiled-in allowlist. Two things must hold for that to
+    /// be safe, and both are asserted here — a document whose signature does not
+    /// verify is refused rather than downgraded, and no signature ever lets a
+    /// protected host leave the tunnel.
+    private static func verifyPolicySignatureContract() throws {
+        let json = #"{"version":4,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"www.dianping.com","ports":[443]}],"directSuffixes":[],"tcpEndpoints":[]}"#
+        let signer = Curve25519.Signing.PrivateKey()
+        let publicKey = signer.publicKey.rawRepresentation.base64EncodedString()
+        let sign = { (message: String) -> String in
+            try! signer.signature(for: Data(message.utf8)).base64EncodedString()
+        }
+        let context = ManagedTrafficPolicySignature.context
+
+        // The context prefix is part of the signed bytes and every implementation
+        // must use the same one. A mismatch means signatures verify nowhere, which
+        // presents as the whole fleet silently falling back to its allowlist.
+        guard context == "tono-traffic-policy-v1\n" else {
+            throw TestFailure("policy signature context drifted from the control plane's")
+        }
+
+        guard ManagedTrafficPolicySignature.verdict(json: json, signature: nil) == .unsigned,
+              ManagedTrafficPolicySignature.verdict(json: json, signature: "") == .unsigned else {
+            throw TestFailure("an absent signature must read as unsigned, not as a failure")
+        }
+        guard ManagedTrafficPolicySignature.verdict(
+                json: json,
+                signature: sign(context + json),
+                publicKeyBase64: publicKey
+              ) == .trusted else {
+            throw TestFailure("a good signature over the served bytes did not verify")
+        }
+        // Every way a signature can be wrong reads as untrustworthy, never as
+        // unsigned. Downgrading to unsigned would let anyone strip trust by
+        // corrupting one field, and the allowlist would then decide.
+        let bad: [(String, String?)] = [
+            ("signed without the context prefix", sign(json)),
+            ("signed over a different document", sign(context + json + " ")),
+            ("signed by another key", try Curve25519.Signing.PrivateKey()
+                .signature(for: Data((context + json).utf8)).base64EncodedString()),
+            ("not base64", "not-a-signature"),
+            ("right encoding, wrong length", Data(repeating: 0, count: 32).base64EncodedString()),
+        ]
+        for (reason, signature) in bad {
+            guard ManagedTrafficPolicySignature.verdict(
+                    json: json,
+                    signature: signature,
+                    publicKeyBase64: publicKey
+                  ) == .untrustworthy else {
+                throw TestFailure("a signature \(reason) was not treated as untrustworthy")
+            }
+        }
+
+        // The compiled-in production key must be a usable Ed25519 key. A typo here
+        // makes every signed policy untrustworthy, and because that path refuses
+        // the document, managed direct routing would stop fleet-wide the moment a
+        // signed policy is published.
+        guard let shipped = Data(base64Encoded: ManagedTrafficPolicySignature.publicKeyBase64),
+              shipped.count == 32,
+              (try? Curve25519.Signing.PublicKey(rawRepresentation: shipped)) != nil else {
+            throw TestFailure("the compiled-in policy signing public key is not a valid Ed25519 key")
+        }
+
+        // What a signature buys: a host on no allowlist becomes routable.
+        for host in ["www.dianping.com", "static.dianping.com"] {
+            guard (try? ConfigPipeline.validatedWebDirectDomain(host)) == nil else {
+                throw TestFailure("\(host) is on an allowlist, so it proves nothing about trust")
+            }
+            guard try ConfigPipeline.validatedWebDirectDomain(host, trusted: true) == host else {
+                throw TestFailure("a trusted policy could not carry \(host)")
+            }
+        }
+        guard try ConfigPipeline.validatedManagedDirectSuffix("dianping.com", trusted: true)
+                == "dianping.com",
+              (try? ConfigPipeline.validatedManagedDirectSuffix("dianping.com")) == nil else {
+            throw TestFailure("trust did not open the suffix path, or the allowlist never closed it")
+        }
+
+        // What a signature must never buy. If this ever passes, one leaked key
+        // exposes this product's own control plane and its users' assistant
+        // traffic — strictly worse than the allowlist trust replaces.
+        for host in ["api.anthropic.com", "anthropic.com", "claude.ai", "www.claude.ai",
+                     "tono.app", "api.tono.app", "tono.com"] {
+            for (name, validate) in [
+                ("exact WeChat domain", ConfigPipeline.validatedManagedDirectDomain),
+                ("web domain", ConfigPipeline.validatedWebDirectDomain),
+                ("direct suffix", ConfigPipeline.validatedManagedDirectSuffix),
+            ] as [(String, (String, Bool) throws -> String)] {
+                guard (try? validate(host, true)) == nil else {
+                    throw TestFailure(
+                        "a signed policy pulled the protected host \(host) out of the tunnel via \(name)"
+                    )
+                }
+            }
+        }
+
+        // Syntax is still enforced under trust: a signature attests to authorship,
+        // not to the document being well formed. Before trust existed the
+        // allowlist was the only thing rejecting these.
+        for malformed in ["*.dianping.com", "dianping", "-dianping.com",
+                          "a..b.com", "http://dianping.com", "dianping.com:443",
+                          "dian ping.com", "xn--"] {
+            guard (try? ConfigPipeline.validatedWebDirectDomain(malformed, trusted: true)) == nil else {
+                throw TestFailure("a trusted policy carried the malformed host \(malformed)")
+            }
+        }
+        // A trailing dot is normalised away rather than rejected, so this
+        // validator is not what stops it. The processor is: it keeps an entry only
+        // when validation returns the host unchanged, which a normalised value
+        // never does. Pinned here because removing that comparison would make
+        // these entries route under a name the policy did not publish.
+        guard try ConfigPipeline.validatedWebDirectDomain("dianping.com.", trusted: true)
+                == "dianping.com" else {
+            throw TestFailure("a trailing dot is expected to normalise, not to be rejected")
+        }
+
+        print("policy signing contract verified: trust opens the allowlist, never the protected list")
     }
 
     private static func escaped(_ value: String) -> String {

@@ -70,6 +70,12 @@ jobs:
       - name: Multi-exit policy
         run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
 
+      - name: Policy signing contract
+        # Four implementations must agree on the signing key and the signed byte
+        # prefix. Drift is silent: signatures verify nowhere, every signed policy
+        # reads as untrustworthy, and managed direct routing stops fleet-wide.
+        run: tooling/scripts/test-policy-signing-contract.sh
+
       - name: macOS incident regressions
         run: tooling/scripts/test-macos-incident-regressions.sh
 

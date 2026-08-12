@@ -1535,8 +1535,42 @@ nonisolated struct ConfigPipeline {
         try normalizedServerAddress(raw, field: field)
     }
 
-    static func validatedManagedDirectDomain(_ raw: String) throws -> String {
+    /// Hosts that must never be routed direct, whatever a policy says and
+    /// whoever signed it.
+    ///
+    /// A signature relaxes *which hosts may* leave the tunnel. It must never
+    /// relax which hosts may not. Folding these in would make one leaked signing
+    /// key sufficient to expose this product's own control plane and its users'
+    /// assistant traffic — strictly worse than the allowlist a signature
+    /// replaces, and the opposite of what signing is for.
+    ///
+    /// Mirrors `protectedSuffixes` in services/control-plane/src/index.ts. Until
+    /// a signature could relax an allowlist these were enforced only implicitly,
+    /// by never appearing on one; a trusted path needs them stated.
+    static let managedDirectProtectedSuffixes = [
+        "anthropic.com", "claude.ai", "tono.app", "tono.com",
+    ]
+
+    private static func isProtectedFromDirect(_ host: String) -> Bool {
+        managedDirectProtectedSuffixes.contains {
+            host == $0 || host.hasSuffix(".\($0)")
+        }
+    }
+
+    /// `trusted` is set only after an Ed25519 signature over the policy document
+    /// has verified against the compiled-in public key. It skips the allowlist
+    /// and nothing else: hostname syntax and the protected suffixes above are
+    /// still enforced, because a signature attests to authorship, not to the
+    /// document being well formed or safe.
+    static func validatedManagedDirectDomain(
+        _ raw: String,
+        trusted: Bool = false
+    ) throws -> String {
         let host = try normalizedHost(raw, field: "managed direct domain")
+        guard !isProtectedFromDirect(host) else {
+            throw TonoInjectionError.unsafeNode("managed direct domain")
+        }
+        if trusted { return host }
         let allowedSuffixes = [
             "qq.com", "qq.com.cn", "qpic.cn", "qlogo.cn", "gtimg.cn",
             "gtimg.com", "wechat.com", "weixin.com", "weixinbridge.com",
@@ -1550,8 +1584,15 @@ nonisolated struct ConfigPipeline {
         return host
     }
 
-    static func validatedWebDirectDomain(_ raw: String) throws -> String {
+    static func validatedWebDirectDomain(
+        _ raw: String,
+        trusted: Bool = false
+    ) throws -> String {
         let host = try normalizedHost(raw, field: "managed web direct domain")
+        guard !isProtectedFromDirect(host) else {
+            throw TonoInjectionError.unsafeNode("managed web direct domain")
+        }
+        if trusted { return host }
         let allowedSuffixes = managedWebDirectSuffixAllowlist
         let allowedExactHosts = ["ykimg.alicdn.com"]
         guard allowedExactHosts.contains(host) || allowedSuffixes.contains(where: {
@@ -1565,8 +1606,15 @@ nonisolated struct ConfigPipeline {
     /// Validate the exact suffix value used by traffic-policy v3. A host such
     /// as `www.edu.cn` is valid for an exact web pin, but it is not itself an
     /// admitted suffix rule; only `edu.cn` may be emitted here.
-    static func validatedManagedDirectSuffix(_ raw: String) throws -> String {
+    static func validatedManagedDirectSuffix(
+        _ raw: String,
+        trusted: Bool = false
+    ) throws -> String {
         let host = try normalizedHost(raw, field: "managed direct suffix")
+        guard !isProtectedFromDirect(host) else {
+            throw TonoInjectionError.unsafeNode("managed direct suffix")
+        }
+        if trusted { return host }
         guard managedWebDirectSuffixAllowlist.contains(host) else {
             throw TonoInjectionError.unsafeNode("managed direct suffix")
         }

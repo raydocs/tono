@@ -99,6 +99,112 @@ pub const ALLOWED_DOMAIN_SUFFIXES: [&str; 10] = [
 
 /// Addresses that may never receive a DIRECT permit (the pinned DoH
 /// resolvers ride the tunnel by contract).
+/// Public half of the offline policy signing key, standard base64, 32 bytes.
+/// Mirrors TRAFFIC_POLICY_PUBLIC_KEY in services/control-plane/wrangler.jsonc and
+/// `ManagedTrafficPolicySignature.publicKeyBase64` on macOS.
+pub const TRAFFIC_POLICY_PUBLIC_KEY: &str = "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM=";
+
+/// Prefixed to the signed bytes. Domain separation, so a signature this key made
+/// over some other document cannot be presented as a policy signature. Every
+/// implementation must prefix identically or nothing verifies; the definition
+/// lives in services/control-plane/src/crypto.ts.
+pub const TRAFFIC_POLICY_SIGNATURE_CONTEXT: &str = "tono-traffic-policy-v1\n";
+
+/// Hosts that must never be routed direct, whatever a policy says and whoever
+/// signed it. A signature relaxes which hosts *may* leave the tunnel; it must
+/// never relax which hosts may not, or one leaked key would expose this product's
+/// own control plane and its users' assistant traffic — strictly worse than the
+/// allowlist a signature replaces.
+const PROTECTED_FROM_DIRECT: [&str; 4] = ["anthropic.com", "claude.ai", "tono.app", "tono.com"];
+
+/// Whether a policy document was authored by the holder of the signing key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureVerdict {
+    /// No signature. Validate against the compiled-in allowlist, which is what
+    /// every build did before signing existed, so unsigned policies keep working.
+    Unsigned,
+    /// Signed by the expected key over exactly these bytes. The allowlist may be
+    /// bypassed; the protected list may not.
+    Trusted,
+    /// A signature is present and does not verify. Deliberately not the same as
+    /// `Unsigned`: somebody attached a signature, so authorship is in question and
+    /// the caller refuses the whole document. Falling back to the allowlist here
+    /// would let anyone strip trust by corrupting one field.
+    Untrustworthy,
+}
+
+/// Classify a policy document's signature. Every way a signature can be wrong —
+/// malformed key, malformed signature, wrong length, right shape over other bytes
+/// — is `Untrustworthy`; the distinction is not the caller's to act on.
+pub fn policy_signature_verdict(json: &str, signature: Option<&str>) -> SignatureVerdict {
+    policy_signature_verdict_with_key(json, signature, TRAFFIC_POLICY_PUBLIC_KEY)
+}
+
+/// As [`policy_signature_verdict`], against a caller-supplied key. Exists so the
+/// verification logic can be tested against a throwaway keypair; the app always
+/// uses the compiled-in key.
+pub fn policy_signature_verdict_with_key(
+    json: &str,
+    signature: Option<&str>,
+    public_key: &str,
+) -> SignatureVerdict {
+    use base64::Engine as _;
+    let Some(signature) = signature.filter(|value| !value.is_empty()) else {
+        return SignatureVerdict::Unsigned;
+    };
+    let engine = base64::engine::general_purpose::STANDARD;
+    let Ok(key_bytes) = engine.decode(public_key) else {
+        return SignatureVerdict::Untrustworthy;
+    };
+    let Ok(key_bytes) = <[u8; 32]>::try_from(key_bytes.as_slice()) else {
+        return SignatureVerdict::Untrustworthy;
+    };
+    let Ok(key) = ed25519_dalek::VerifyingKey::from_bytes(&key_bytes) else {
+        return SignatureVerdict::Untrustworthy;
+    };
+    let Ok(signature_bytes) = engine.decode(signature) else {
+        return SignatureVerdict::Untrustworthy;
+    };
+    let Ok(signature_bytes) = <[u8; 64]>::try_from(signature_bytes.as_slice()) else {
+        return SignatureVerdict::Untrustworthy;
+    };
+    let message = format!("{TRAFFIC_POLICY_SIGNATURE_CONTEXT}{json}");
+    match key.verify_strict(message.as_bytes(), &ed25519_dalek::Signature::from_bytes(&signature_bytes)) {
+        Ok(()) => SignatureVerdict::Trusted,
+        Err(_) => SignatureVerdict::Untrustworthy,
+    }
+}
+
+/// Strict hostname syntax, independent of any allowlist.
+///
+/// Extracted because list membership *was* the syntax guarantee: every accepted
+/// host had to appear on a list of well-formed names. A trusted path bypasses the
+/// list, so without this it would bypass syntax checking too and hand the runtime
+/// a host it cannot parse.
+pub fn is_valid_direct_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && host == host.trim()
+        && !host.ends_with('.')
+        && host.split('.').count() >= 2
+        && !host.split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                || !label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+                || !label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+        })
+}
+
+/// Whether a host may never route direct. Enforced on every path, trusted or not.
+pub fn is_protected_from_direct(host: &str) -> bool {
+    PROTECTED_FROM_DIRECT
+        .iter()
+        .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
 pub fn is_permanently_protected(address: Ipv4Addr) -> bool {
     address == Ipv4Addr::new(1, 1, 1, 1) || address == Ipv4Addr::new(8, 8, 8, 8)
 }
@@ -112,6 +218,11 @@ pub struct TonoTrafficPolicyResponse {
     pub sha256: String,
     #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+    /// Ed25519 signature over `"tono-traffic-policy-v1\n" + json`, standard
+    /// base64, made offline by the holder of the signing key. Absent for every
+    /// policy published before signing existed, and those must keep working.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 /// The validated policy document.
@@ -176,44 +287,32 @@ pub fn is_allowed_direct_domain(host: &str) -> bool {
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
+/// The exact-domain gate under a verified signature.
+///
+/// Stricter than `is_allowed_direct_domain`, not looser: that function checks only
+/// a character range, because membership of `ALLOWED_DOMAIN_SUFFIXES` supplied the
+/// rest. With the list bypassed the full label check has to be applied here, or a
+/// signed policy could carry a name the runtime cannot parse.
+pub fn is_signed_direct_domain(host: &str) -> bool {
+    is_valid_direct_host(host) && !is_protected_from_direct(host)
+}
+
 /// Exact-web hosts use a separate, deliberately narrow suffix allowlist.
 pub fn is_allowed_web_domain(host: &str) -> bool {
-    if host.is_empty()
-        || host.len() > 253
-        || host != host.trim()
-        || host.ends_with('.')
-        || host.split('.').count() < 2
-        || host.split('.').any(|label| {
-            label.is_empty()
-                || label.len() > 63
-                || !label
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-                || !label
-                    .as_bytes()
-                    .first()
-                    .is_some_and(u8::is_ascii_alphanumeric)
-                || !label
-                    .as_bytes()
-                    .last()
-                    .is_some_and(u8::is_ascii_alphanumeric)
-        })
-    {
-        return false;
-    }
-    if matches!(
-        host,
-        "anthropic.com" | "claude.ai" | "tono.app" | "tono.com"
-    ) || ["anthropic.com", "claude.ai", "tono.app", "tono.com"]
-        .iter()
-        .any(|s| host.ends_with(&format!(".{s}")))
-    {
+    if !is_valid_direct_host(host) || is_protected_from_direct(host) {
         return false;
     }
     host == "ykimg.alicdn.com"
         || ALLOWED_WEB_DOMAIN_SUFFIXES
             .iter()
             .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
+/// The web-host gate under a verified signature: syntax and the protected list
+/// still apply, the allowlist does not. This is what makes adding a domain a
+/// change to the control plane alone.
+pub fn is_signed_web_domain(host: &str) -> bool {
+    is_valid_direct_host(host) && !is_protected_from_direct(host)
 }
 
 fn sorted_unique_ports(ports: &[u16], allowed: [u16; 2]) -> Option<Vec<u16>> {
@@ -252,6 +351,10 @@ pub struct PolicyAcceptance {
     /// Set when the document declared a version this build does not know, which it
     /// then read as the newest version it does.
     pub newer_version: Option<u32>,
+    /// Whether a verified signature admitted hosts the compiled-in allowlist does
+    /// not contain. Without this, a signed policy whose new hosts were dropped
+    /// anyway is indistinguishable from an unsigned one.
+    pub trusted: bool,
 }
 
 pub fn validate_policy(
@@ -266,6 +369,18 @@ pub fn validate_policy_reporting(
     response: &TonoTrafficPolicyResponse,
     protected: &BTreeSet<Ipv4Addr>,
 ) -> Result<(TonoTrafficPolicy, PolicyAcceptance), PolicyError> {
+    validate_policy_reporting_with_key(response, protected, TRAFFIC_POLICY_PUBLIC_KEY)
+}
+
+/// As [`validate_policy_reporting`], against a caller-supplied signing key. Exists
+/// so the trusted path can be tested against a real signature; the app always uses
+/// the compiled-in key, and a caller able to choose the key could equally skip the
+/// check, so this weakens nothing.
+pub fn validate_policy_reporting_with_key(
+    response: &TonoTrafficPolicyResponse,
+    protected: &BTreeSet<Ipv4Addr>,
+    public_key: &str,
+) -> Result<(TonoTrafficPolicy, PolicyAcceptance), PolicyError> {
     let mut dropped: Vec<String> = Vec::new();
     if response.revision < 0 || response.json.len() > MAX_POLICY_JSON_BYTES {
         return Err(PolicyError::InvalidResponse);
@@ -273,6 +388,19 @@ pub fn validate_policy_reporting(
     if response.sha256 != catalog_digest(&response.json) {
         return Err(PolicyError::InvalidResponse);
     }
+    // Refused whole, unlike an entry this build does not understand. A dropped
+    // entry comes from a document whose author is known and whose contents are
+    // partly unsupported; a signature that does not verify means the author is not
+    // known at all, and honouring any of it would make the signature decorative.
+    let verdict = policy_signature_verdict_with_key(
+        &response.json,
+        response.signature.as_deref(),
+        public_key,
+    );
+    if verdict == SignatureVerdict::Untrustworthy {
+        return Err(PolicyError::InvalidResponse);
+    }
+    let trusted = verdict == SignatureVerdict::Trusted;
     let shape: serde_json::Value =
         serde_json::from_str(&response.json).map_err(|_| PolicyError::InvalidResponse)?;
     let object = shape.as_object().ok_or(PolicyError::InvalidResponse)?;
@@ -338,7 +466,12 @@ pub fn validate_policy_reporting(
             dropped.push(entry.host.clone());
             continue;
         }
-        if !is_allowed_direct_domain(&entry.host) {
+        let admitted = if trusted {
+            is_signed_direct_domain(normalized)
+        } else {
+            is_allowed_direct_domain(&entry.host)
+        };
+        if !admitted {
             dropped.push(entry.host.clone());
             continue;
         }
@@ -368,7 +501,12 @@ pub fn validate_policy_reporting(
     };
     let mut web_domains = Vec::with_capacity(declared_web.len());
     for entry in declared_web {
-        if !is_allowed_web_domain(&entry.host)
+        let admitted = if trusted {
+            is_signed_web_domain(&entry.host)
+        } else {
+            is_allowed_web_domain(&entry.host)
+        };
+        if !admitted
             || entry.ports != [443]
             || domains.iter().any(|domain| domain.host == entry.host)
         {
@@ -425,6 +563,7 @@ pub fn validate_policy_reporting(
             duplicates: duplicate_domains + duplicate_web + duplicate_media,
             truncated: over_capacity,
             newer_version: (version > POLICY_VERSION_V4).then_some(version),
+            trusted,
         },
     ))
 }
@@ -621,7 +760,186 @@ mod tests {
             json: json.to_string(),
             sha256: catalog_digest(json),
             updated_at: None,
+            signature: None,
         }
+    }
+
+    /// The same document with a signature attached, valid under `key`.
+    fn signed_response(
+        revision: i64,
+        json: &str,
+        key: &ed25519_dalek::SigningKey,
+    ) -> TonoTrafficPolicyResponse {
+        use base64::Engine as _;
+        use ed25519_dalek::Signer as _;
+        let message = format!("{TRAFFIC_POLICY_SIGNATURE_CONTEXT}{json}");
+        let signature = key.sign(message.as_bytes());
+        TonoTrafficPolicyResponse {
+            signature: Some(
+                base64::engine::general_purpose::STANDARD.encode(signature.to_bytes()),
+            ),
+            ..response(revision, json)
+        }
+    }
+
+    fn test_signing_key() -> ed25519_dalek::SigningKey {
+        // Fixed bytes: a test that generates a key needs an rng feature this crate
+        // does not enable, and a constant is reproducible.
+        ed25519_dalek::SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    fn test_public_key(key: &ed25519_dalek::SigningKey) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes())
+    }
+
+    /// A host on no allowlist becomes routable once the document is signed. This
+    /// is the whole point: adding a domain stops requiring a client release, which
+    /// is what this client's version gate cost for days.
+    #[test]
+    fn a_signed_policy_carries_a_host_no_allowlist_contains() {
+        let key = test_signing_key();
+        let json = r#"{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"www.dianping.com","ports":[443]}]}"#;
+        assert!(
+            !is_allowed_web_domain("www.dianping.com"),
+            "the host must be off the allowlist or this proves nothing",
+        );
+
+        let unsigned = validate_policy_reporting(&response(1, json), &no_protected())
+            .expect("an unknown host must be dropped, not fatal");
+        assert!(unsigned.0.web_domains.is_empty());
+        assert!(!unsigned.1.trusted);
+        assert_eq!(unsigned.1.dropped, vec!["www.dianping.com".to_string()]);
+
+        let (policy, report) = validate_policy_reporting_with_key(
+            &signed_response(1, json, &key),
+            &no_protected(),
+            &test_public_key(&key),
+        )
+        .expect("a signed policy must be accepted");
+        assert!(report.trusted);
+        assert!(report.dropped.is_empty(), "{:?}", report.dropped);
+        assert_eq!(policy.web_domains.len(), 1);
+        assert_eq!(policy.web_domains[0].host, "www.dianping.com");
+    }
+
+    /// A signature that does not verify refuses the document outright rather than
+    /// degrading to the allowlist. Degrading would let anyone strip trust by
+    /// corrupting one field, and the allowlist would silently decide instead.
+    #[test]
+    fn a_signature_that_does_not_verify_refuses_the_whole_document() {
+        use base64::Engine as _;
+        use ed25519_dalek::Signer as _;
+        let key = test_signing_key();
+        let public = test_public_key(&key);
+        // Hosts the allowlist *does* accept, so a fallback would visibly succeed.
+        let json = r#"{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"www.bilibili.com","ports":[443]}]}"#;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let sign = |message: &str| engine.encode(key.sign(message.as_bytes()).to_bytes());
+
+        let bad = [
+            ("no context prefix", sign(json)),
+            ("different document", sign(&format!("{TRAFFIC_POLICY_SIGNATURE_CONTEXT}{json} "))),
+            (
+                "another key",
+                engine.encode(
+                    ed25519_dalek::SigningKey::from_bytes(&[9u8; 32])
+                        .sign(format!("{TRAFFIC_POLICY_SIGNATURE_CONTEXT}{json}").as_bytes())
+                        .to_bytes(),
+                ),
+            ),
+            ("not base64", "not-a-signature".to_string()),
+            ("wrong length", engine.encode([0u8; 32])),
+        ];
+        for (reason, signature) in bad {
+            let mut document = response(1, json);
+            document.signature = Some(signature);
+            assert_eq!(
+                validate_policy_reporting_with_key(&document, &no_protected(), &public),
+                Err(PolicyError::InvalidResponse),
+                "a signature with {reason} was accepted or silently downgraded",
+            );
+        }
+
+        // And the same document with no signature at all is still fine, so the
+        // refusal above is about the signature and not about the document.
+        assert!(validate_policy_reporting(&response(1, json), &no_protected()).is_ok());
+    }
+
+    /// The invariant that must survive a leaked key. If this ever fails, one stolen
+    /// key pulls this product's own control plane and its users' assistant traffic
+    /// out of the tunnel — strictly worse than the allowlist trust replaces.
+    #[test]
+    fn no_signature_pulls_a_protected_host_out_of_the_tunnel() {
+        let key = test_signing_key();
+        let public = test_public_key(&key);
+        for host in [
+            "api.anthropic.com", "anthropic.com", "claude.ai", "www.claude.ai",
+            "tono.app", "api.tono.app", "tono.com", "www.tono.com",
+        ] {
+            assert!(!is_signed_web_domain(host), "web gate admitted {host}");
+            assert!(!is_signed_direct_domain(host), "exact gate admitted {host}");
+            let json = format!(
+                r#"{{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{{"host":"{host}","ports":[443]}}]}}"#
+            );
+            let (policy, report) = validate_policy_reporting_with_key(
+                &signed_response(1, &json, &key),
+                &no_protected(),
+                &public,
+            )
+            .expect("the document is well formed; only the entry must be refused");
+            assert!(report.trusted);
+            assert!(policy.web_domains.is_empty(), "a signed policy routed {host}");
+            assert_eq!(report.dropped, vec![host.to_string()]);
+        }
+    }
+
+    /// Syntax is still enforced under a signature. Before trust existed, list
+    /// membership *was* the syntax guarantee — bypassing the list without this
+    /// would hand the runtime hosts it cannot parse.
+    #[test]
+    fn a_signature_does_not_excuse_a_malformed_host() {
+        let key = test_signing_key();
+        let public = test_public_key(&key);
+        for host in [
+            "*.dianping.com", "dianping", "-dianping.com", "dianping-.com",
+            "a..b.com", "dianping.com.", "DIANPING.com", " dianping.com",
+        ] {
+            assert!(!is_signed_web_domain(host), "web gate admitted {host}");
+            let json = format!(
+                r#"{{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{{"host":"{host}","ports":[443]}}]}}"#
+            );
+            let (policy, report) = validate_policy_reporting_with_key(
+                &signed_response(1, &json, &key),
+                &no_protected(),
+                &public,
+            )
+            .expect("a malformed entry is dropped, not fatal");
+            assert!(policy.web_domains.is_empty(), "a signed policy routed {host}");
+            assert_eq!(report.dropped, vec![host.to_string()]);
+        }
+    }
+
+    /// The compiled-in key must be a usable Ed25519 key, and the signed byte layout
+    /// must match what the control plane produces. A typo in either makes every
+    /// signed policy untrustworthy, and because that path refuses the document,
+    /// managed direct routing stops fleet-wide the moment one is published.
+    #[test]
+    fn the_compiled_in_signing_contract_matches_the_control_plane() {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(TRAFFIC_POLICY_PUBLIC_KEY)
+            .expect("the compiled-in public key must be standard base64");
+        let bytes = <[u8; 32]>::try_from(bytes.as_slice())
+            .expect("an Ed25519 public key is 32 bytes");
+        ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+            .expect("the compiled-in public key must be a valid Ed25519 point");
+        assert_eq!(TRAFFIC_POLICY_SIGNATURE_CONTEXT, "tono-traffic-policy-v1\n");
+        assert_eq!(
+            policy_signature_verdict("{}", None),
+            SignatureVerdict::Unsigned,
+            "an absent signature must read as unsigned, not as a failure",
+        );
     }
 
     /// The published policy, at the size it actually is. Validation is
