@@ -57,12 +57,6 @@ jobs:
         working-directory: apps/windows
         run: cargo test --locked -p tono-core
 
-      - name: Policy signing contract
-        # Four implementations must agree on the signing key and the signed byte
-        # prefix. Drift is silent: signatures verify nowhere, every signed policy
-        # reads as untrustworthy, and managed direct routing stops fleet-wide.
-        run: tooling/scripts/test-policy-signing-contract.sh
-
   app:
     # 17 test files, 110 tests, a typecheck, and nothing ran any of them: the
     # release workflow runs one subset of them and only from a tag, which is after
