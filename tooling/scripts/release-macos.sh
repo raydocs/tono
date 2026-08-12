@@ -89,6 +89,24 @@ fi
 step "building and notarising"
 out="$repo_root/artifacts"
 base="Tono-macOS-$short_version-build$build"
+# The flow this script documents is "run it, look at what it would do, run it
+# again with --publish". That could never complete: the packaging step refuses to
+# overwrite an existing artifact, so the second run always failed on the output the
+# first one left behind, reported as "the build or notarisation failed".
+#
+# Only this version's own outputs are removed, and only ones that are files or
+# directories directly under artifacts/ — never a symlink, and never anything whose
+# name this run did not compose. Rebuilding is safe because the tree is verified
+# clean above, so the inputs cannot have moved between the two runs.
+for stale in "$out/$base.app" "$out/$base.zip" "$out/$archive_name"; do
+  if [[ -L $stale ]]; then
+    fail "refusing to remove $stale: it is a symlink, not an artifact this script wrote"
+  fi
+  if [[ -e $stale ]]; then
+    print "  replacing previous artifact ${stale:t}"
+    /bin/rm -rf -- "$stale" || fail "could not remove the previous ${stale:t}"
+  fi
+done
 # Output is kept and shown on failure. Swallowing it turned "refusing to
 # overwrite an existing artifact" into "the build or notarisation failed", which
 # describes the outcome and hides the one thing the operator needs to act on.
