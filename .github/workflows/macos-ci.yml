@@ -93,6 +93,22 @@ jobs:
       - name: Build the privileged helper
         run: tooling/scripts/build-core-helper.sh
 
+      - name: Place what an install would place
+        # The core lifecycle test starts the privileged core, so it needs the two
+        # things an install puts on disk: the runtime directory and the core
+        # binary at its privileged path. Without them `CoreManager` cannot be
+        # constructed and the failure reads only as "could not construct the core
+        # manager".
+        #
+        # Done here rather than inside the self-test: fabricating an installation
+        # is the installer's job, and a test that quietly creates its own
+        # privileged paths hides what it depends on.
+        run: |
+          sudo /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
+          sudo /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+          sudo /usr/bin/install -o root -g wheel -m 0755 \
+            apps/macos/Tono/Resources/mihomo /Library/PrivilegedHelperTools/tono-mihomo
+
       - name: Helper self-test including the PF parse
         run: sudo apps/macos/Tono/Resources/liquidclash-helper --self-test
 
