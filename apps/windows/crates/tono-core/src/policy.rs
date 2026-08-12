@@ -29,12 +29,36 @@ pub const MAX_POLICY_CACHE_BYTES: u64 = 256 * 1024;
 pub const POLICY_CACHE_FILE_NAME: &str = "managed-traffic-policy.json";
 pub const POLICY_VERSION_V1: u32 = 1;
 pub const POLICY_VERSION_V2: u32 = 2;
+/// v3 added `directSuffixes`, v4 added `tcpEndpoints`. Both are accepted and
+/// neither is acted on here: this client does not implement suffix routing, and
+/// ignoring a field it cannot use is the difference between routing less than the
+/// policy asks for and routing nothing at all.
+///
+/// Rejecting them was not a conservative default. Validation compares the key set
+/// for exact equality, so an unknown version — or a known version carrying one
+/// extra key — discards the whole document. The published policy has been v3 with
+/// `directSuffixes` since 2026-08-10, which means every fetch since then was
+/// thrown away and this client has been running with no traffic policy at all.
+pub const POLICY_VERSION_V3: u32 = 3;
+pub const POLICY_VERSION_V4: u32 = 4;
 /// Limits shared with the Mac validator.
 pub const MAX_POLICY_DOMAINS: usize = 32;
 pub const MAX_POLICY_MEDIA: usize = 64;
-pub const MAX_POLICY_WEB_DOMAINS: usize = 16;
+// 32, matching what the control plane accepts and what the macOS client accepts.
+// At 16 this rejected the entire published policy — validation is whole-document —
+// and the published policy has held 26 web domains for some time, so this client
+// has been discarding every policy it fetched rather than routing anything by it.
+// A limit below the server's own maximum is not a safety margin; it is a
+// guaranteed rejection waiting for the list to grow.
+pub const MAX_POLICY_WEB_DOMAINS: usize = 32;
 
-pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 13] = [
+// Exactly the registrable domains the control plane already publishes. The list
+// exists so a compromised control plane cannot route an arbitrary domain
+// direct, so it is extended to match what is published rather than widened.
+// Short of that it rejected the whole document — validation compares the key
+// set and every host — and the published policy has carried Xiaohongshu, Feishu
+// and Youku's CDN for some time.
+pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 19] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -48,6 +72,12 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 13] = [
     "iqiyipic.com",
     "youku.com",
     "ykimg.com",
+    "alicdn.com",
+    "feishu.cn",
+    "larkoffice.com",
+    "larksuite.com",
+    "xhslink.com",
+    "xiaohongshu.com",
 ];
 
 /// Domain suffixes allowed for DIRECT routing (Mac
@@ -227,6 +257,21 @@ pub fn validate_policy(
             .collect()
     } else if version == POLICY_VERSION_V2 {
         ["version", "domains", "mediaEndpoints", "webDomains"]
+            .into_iter()
+            .collect()
+    } else if version == POLICY_VERSION_V3 {
+        ["version", "domains", "mediaEndpoints", "webDomains", "directSuffixes"]
+            .into_iter()
+            .collect()
+    } else if version == POLICY_VERSION_V4 {
+        [
+            "version",
+            "domains",
+            "mediaEndpoints",
+            "webDomains",
+            "directSuffixes",
+            "tcpEndpoints",
+        ]
             .into_iter()
             .collect()
     } else {
@@ -514,6 +559,51 @@ mod tests {
             sha256: catalog_digest(json),
             updated_at: None,
         }
+    }
+
+    /// The published policy, at the size it actually is. Validation is
+    /// whole-document, so a client limit below the server's own maximum does not
+    /// degrade — it discards everything. This client sat at 16 while the
+    /// published list held 26, which means every policy it fetched was thrown
+    /// away and nothing was ever routed by one.
+    #[test]
+    fn accepts_a_policy_at_the_size_the_control_plane_publishes() {
+        let web: Vec<String> = (0..26)
+            .map(|index| format!(r#"{{"host":"host{index}.bilibili.com","ports":[443]}}"#))
+            .collect();
+        // The live shape: v3 carries `directSuffixes`, and the key set is compared
+        // for exact equality, so omitting it here would test a document the
+        // control plane does not publish.
+        let json = format!(
+            r#"{{"version":3,"domains":[{{"host":"wxs.qq.com","ports":[443]}}],"mediaEndpoints":[],"webDomains":[{}],"directSuffixes":[{{"host":"edu.cn","ports":[80,443]}}]}}"#,
+            web.join(","),
+        );
+        let parsed = validate_policy(&response(7, &json), &no_protected())
+            .expect("a policy the control plane would publish must be usable");
+        assert_eq!(parsed.web_domains.len(), 26);
+    }
+
+    /// The document the control plane is serving right now, verbatim. Every other
+    /// test here builds a policy that this file believes is valid; this one asks
+    /// whether the published one is, which is the question that mattered and the
+    /// one nothing was asking.
+    #[test]
+    fn accepts_the_document_the_control_plane_is_serving() {
+        let json = r##"{"version":3,"domains":[{"host":"mmbiz.qpic.cn","ports":[443]},{"host":"mmhead.c2c.wechat.com","ports":[443]},{"host":"mmhead.hk.wechat.com","ports":[443]},{"host":"mp.weixin.qq.com","ports":[443]},{"host":"res.wx.qq.com","ports":[443]},{"host":"shortcloud.weixin.com","ports":[443]},{"host":"weishi.qq.com","ports":[443]},{"host":"wx.qlogo.cn","ports":[443]},{"host":"wxa.wxs.qq.com","ports":[443]}],"mediaEndpoints":[{"address":"43.146.27.17","ports":[443,8000]},{"address":"43.146.27.19","ports":[443,8000]},{"address":"43.146.27.30","ports":[443,8000]},{"address":"43.175.144.12","ports":[443,8000]},{"address":"43.175.144.13","ports":[443]},{"address":"43.175.144.32","ports":[443,8000]},{"address":"43.175.144.34","ports":[443,8000]},{"address":"43.175.144.37","ports":[443]},{"address":"43.175.144.38","ports":[443,8000]},{"address":"43.175.144.40","ports":[443,8000]},{"address":"43.175.144.47","ports":[443,8000]}],"webDomains":[{"host":"acs.youku.com","ports":[443]},{"host":"api.bilibili.com","ports":[443]},{"host":"cache.video.iqiyi.com","ports":[443]},{"host":"data.video.iqiyi.com","ports":[443]},{"host":"edith.xiaohongshu.com","ports":[443]},{"host":"feishu.cn","ports":[443]},{"host":"larkoffice.com","ports":[443]},{"host":"larksuite.com","ports":[443]},{"host":"mesh.if.iqiyi.com","ports":[443]},{"host":"pbaccess.video.qq.com","ports":[443]},{"host":"upos-sz-mirrorali.bilivideo.com","ports":[443]},{"host":"upos-sz-mirrorcos.bilivideo.com","ports":[443]},{"host":"ups.youku.com","ports":[443]},{"host":"v.qq.com","ports":[443]},{"host":"vm.gtimg.cn","ports":[443]},{"host":"vv.video.qq.com","ports":[443]},{"host":"wetype.weixin.qq.com","ports":[443]},{"host":"www.bilibili.com","ports":[443]},{"host":"www.feishu.cn","ports":[443]},{"host":"www.iqiyi.com","ports":[443]},{"host":"www.larksuite.com","ports":[443]},{"host":"www.xhslink.com","ports":[443]},{"host":"www.xiaohongshu.com","ports":[443]},{"host":"www.youku.com","ports":[443]},{"host":"xiaohongshu.com","ports":[443]},{"host":"ykimg.alicdn.com","ports":[443]}],"directSuffixes":[{"host":"100ppi.com","ports":[80,443]},{"host":"10jqka.com.cn","ports":[80,443]},{"host":"aliyuncs.com","ports":[80,443]},{"host":"awtmt.com","ports":[80,443]},{"host":"baidu.com","ports":[80,443]},{"host":"baidubcs.com","ports":[80,443]},{"host":"baidupcs.com","ports":[80,443]},{"host":"baostock.com","ports":[80,443]},{"host":"bcebos.com","ports":[80,443]},{"host":"bdimg.com","ports":[80,443]},{"host":"bdstatic.com","ports":[80,443]},{"host":"bilibili.com","ports":[80,443]},{"host":"bilivideo.com","ports":[80,443]},{"host":"ccxe.com.cn","ports":[80,443]},{"host":"cls.cn","ports":[80,443]},{"host":"cninfo.com.cn","ports":[80,443]},{"host":"dfcfw.com","ports":[80,443]},{"host":"eastmoney.com","ports":[80,443]},{"host":"edu.cn","ports":[80,443]},{"host":"feishu.cn","ports":[80,443]},{"host":"feishucdn.com","ports":[80,443]},{"host":"iqiyi.com","ports":[80,443]},{"host":"iwencai.com","ports":[80,443]},{"host":"larkoffice.com","ports":[80,443]},{"host":"larksuite.com","ports":[80,443]},{"host":"legulegu.com","ports":[80,443]},{"host":"optbbs.com","ports":[80,443]},{"host":"oray.com","ports":[80,443]},{"host":"pushplus.plus","ports":[80,443]},{"host":"sina.com.cn","ports":[80,443]},{"host":"sinajs.cn","ports":[80,443]},{"host":"sse.com.cn","ports":[80,443]},{"host":"sunlogin.com","ports":[80,443]},{"host":"szse.cn","ports":[80,443]},{"host":"xhslink.com","ports":[80,443]},{"host":"xiaohongshu.com","ports":[80,443]},{"host":"youku.com","ports":[80,443]},{"host":"zoom.com","ports":[80,443]},{"host":"zoom.us","ports":[80,443]},{"host":"zoomgov.com","ports":[80,443]}]}"##;
+        validate_policy(&response(7, json), &no_protected())
+            .expect("the published policy must be usable by this client");
+    }
+
+    /// The limit must not drop below what the control plane accepts, or the same
+    /// silent discard returns as soon as the list grows again.
+    #[test]
+    fn the_web_domain_limit_is_not_below_the_control_planes_maximum() {
+        const CONTROL_PLANE_MAXIMUM: usize = 32;
+        assert!(
+            MAX_POLICY_WEB_DOMAINS >= CONTROL_PLANE_MAXIMUM,
+            "the server accepts {CONTROL_PLANE_MAXIMUM} web domains; accepting fewer here \
+             rejects the whole document rather than part of it",
+        );
     }
 
     fn no_protected() -> BTreeSet<Ipv4Addr> {
