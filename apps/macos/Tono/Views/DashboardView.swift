@@ -226,8 +226,8 @@ struct DashboardView: View {
     private var networkInfoBar: some View {
         HStack(spacing: 24) {
             infoItem(label: "IP", value: appState.networkInfo.ip)
-            infoItem(label: "ASN Type", value: appState.networkInfo.asType)
-            infoItem(label: "City", value: appState.networkInfo.city)
+            infoItem(label: "Network", value: appState.networkInfo.org)
+            infoItem(label: "Location", value: appState.networkInfo.location)
             infoItem(label: "DNS", value: ProtectedDNSContract.server)
                 .help(
                     "System DNS: \(ProtectedDNSContract.server) · "
@@ -644,7 +644,11 @@ private struct DashboardStatCard: View {
     .environment({
         let state = AppState()
         state.isConnected = true
-        state.networkInfo = NetworkInfo(ip: "192.0.2.1", asType: "ISP", city: "Tokyo, JP")
+        state.networkInfo = NetworkInfo(
+            ip: "192.0.2.1",
+            org: "NTT America, Inc.",
+            location: "US"
+        )
         return state
     }())
 }

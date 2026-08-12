@@ -39,6 +39,19 @@ actor TonoAPIClient {
     private let keychain: KeychainStore
     private var accessToken: String?
     private var refreshTask: Task<String, Error>?
+    /// Expiry of `accessToken`, read from its own `exp` claim.
+    ///
+    /// Nothing here trusts the claim for security — the server validates the
+    /// signature on every request. It is used only to decide when to renew, and
+    /// a wrong value costs at most one extra refresh or falls through to the
+    /// existing 401 path. Reading it locally is what avoids adding a field to
+    /// the token response and waiting for every client to ship it.
+    private var accessTokenExpiry: Date?
+    /// Renew this far ahead of expiry. The access TTL is 15 minutes, and from a
+    /// connection inside China the 401-then-refresh pair costs two extra round
+    /// trips at up to seven seconds each — measured on a customer's log, where
+    /// it recurred every fifteen minutes exactly.
+    private static let accessTokenRenewalWindow: TimeInterval = 60
     /// A rotated refresh token whose keychain write failed. The server has
     /// already invalidated the previous token, so this value must stay usable
     /// in-memory (and be re-persisted at the next opportunity) or the user is
@@ -171,7 +184,48 @@ actor TonoAPIClient {
 
     func adopt(_ auth: TonoAuthResponse) throws {
         accessToken = auth.accessToken
+        accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
         if let refresh = auth.refreshToken { try keychain.set(refresh, for: .refreshToken) }
+    }
+
+    /// `exp` from a JWT payload, or nil when the token is not a readable JWT.
+    ///
+    /// Returning nil disables proactive renewal for that token rather than
+    /// guessing a lifetime: the 401 path still works, so an unreadable token
+    /// degrades to the previous behaviour instead of to a wrong deadline.
+    nonisolated static func expiry(ofJWT token: String) -> Date? {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count == 3 else { return nil }
+        var encoded = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        // base64url drops the padding a strict decoder still requires.
+        if encoded.count % 4 != 0 {
+            encoded += String(repeating: "=", count: 4 - encoded.count % 4)
+        }
+        guard let data = Data(base64Encoded: encoded),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = json["exp"] as? Double,
+              exp.isFinite, exp > 0 else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
+    /// The token to send, renewed first when it is about to expire.
+    ///
+    /// Every authorized path went through the same `if let accessToken` dance,
+    /// which used a token right up to its final second and then paid for a 401.
+    private func currentAccessToken() async throws -> String {
+        if let accessToken {
+            guard let expiry = accessTokenExpiry else { return accessToken }
+            if expiry.timeIntervalSinceNow > Self.accessTokenRenewalWindow {
+                return accessToken
+            }
+            // Expired or nearly so: drop it first, so a refresh failure cannot
+            // leave a stale token in place to be retried forever.
+            self.accessToken = nil
+            accessTokenExpiry = nil
+        }
+        return try await refreshAccessToken()
     }
 
     func logout() async {
@@ -202,6 +256,7 @@ actor TonoAPIClient {
             }
         }
         accessToken = nil
+        accessTokenExpiry = nil
         unpersistedRefreshToken = nil
         try? keychain.remove(.refreshToken)
     }
@@ -231,6 +286,7 @@ actor TonoAPIClient {
             guard let refresh = currentRefreshToken() else { throw APIError.unauthorized }
             let response: TonoTokenResponse = try await publicRequest("auth/refresh", body: TonoRefreshRequest(refreshToken: refresh))
             accessToken = response.accessToken
+            accessTokenExpiry = Self.expiry(ofJWT: response.accessToken)
             do {
                 try keychain.set(response.refreshToken, for: .refreshToken)
                 unpersistedRefreshToken = nil
@@ -283,13 +339,8 @@ actor TonoAPIClient {
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Response {
         try Self.requireCurrent(requestIsCurrent)
-        let token: String
-        if let accessToken {
-            token = accessToken
-        } else {
-            token = try await refreshAccessToken()
-            try Self.requireCurrent(requestIsCurrent)
-        }
+        let token = try await currentAccessToken()
+        try Self.requireCurrent(requestIsCurrent)
         do {
             try Self.requireCurrent(requestIsCurrent)
             return try await send(
@@ -304,6 +355,7 @@ actor TonoAPIClient {
         catch APIError.unauthorized {
             try Self.requireCurrent(requestIsCurrent)
             accessToken = nil
+            accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             try Self.requireCurrent(requestIsCurrent)
             return try await send(
@@ -317,22 +369,22 @@ actor TonoAPIClient {
         }
     }
     private func authorizedVoid(_ path: String, method: String) async throws {
-        let token: String
-        if let accessToken { token = accessToken } else { token = try await refreshAccessToken() }
+        let token = try await currentAccessToken()
         do { _ = try await sendData(path, method: method, body: nil, bearer: token) }
         catch APIError.unauthorized {
             accessToken = nil
+            accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             _ = try await sendData(path, method: method, body: nil, bearer: renewed)
         }
     }
     private func authorizedVoid<Body: Encodable>(_ path: String, method: String, body: Body) async throws {
-        let token: String
-        if let accessToken { token = accessToken } else { token = try await refreshAccessToken() }
+        let token = try await currentAccessToken()
         let bodyData = try TonoCoding.encoder().encode(body)
         do { _ = try await sendData(path, method: method, body: bodyData, bearer: token) }
         catch APIError.unauthorized {
             accessToken = nil
+            accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
             _ = try await sendData(path, method: method, body: bodyData, bearer: renewed)
         }

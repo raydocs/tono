@@ -182,6 +182,19 @@ pub enum AuditEvent {
     PeriodicTelemetryUploadFail {
         error: String,
     },
+    /// One gzip segment of this log accepted by the control plane. Recorded into
+    /// the very file being uploaded, which is deliberate: the next segment then
+    /// carries the receipt for the previous one, so a gap in the sequence is
+    /// visible from the uploaded data alone.
+    NetworkLogSegmentUploaded {
+        sequence: u32,
+        line_count: u32,
+        bytes: u32,
+    },
+    /// A segment upload failed (never fails closed; the cursor does not advance).
+    NetworkLogSegmentUploadFail {
+        error: String,
+    },
     // lifecycle
     AuditEnabled,
     AuditDisabled,
@@ -226,6 +239,9 @@ impl AuditEvent {
             },
             PolicySyncFail { error } => PolicySyncFail { error: redact(&error) },
             DiagnosticsUploadFail { error } => DiagnosticsUploadFail { error: redact(&error) },
+            NetworkLogSegmentUploadFail { error } => {
+                NetworkLogSegmentUploadFail { error: redact(&error) }
+            }
             PeriodicTelemetryUploadFail { error } => {
                 PeriodicTelemetryUploadFail { error: redact(&error) }
             }
@@ -383,6 +399,12 @@ struct SettingsFile {
     /// User can disable in Settings; missing/corrupt files read as enabled.
     #[serde(default = "default_true")]
     periodic_telemetry_enabled: bool,
+    /// Default ON during the test programme: uploads the audit log itself, which
+    /// unlike the timeline above carries hostnames, process names and routes. It
+    /// is a separate flag from `periodic_telemetry_enabled` on purpose — one
+    /// consent must not stand in for a materially larger disclosure.
+    #[serde(default = "default_true")]
+    network_log_upload_enabled: bool,
 }
 
 impl Default for SettingsFile {
@@ -390,6 +412,7 @@ impl Default for SettingsFile {
         Self {
             audit_enabled: true,
             periodic_telemetry_enabled: true,
+            network_log_upload_enabled: true,
         }
     }
 }
@@ -410,6 +433,12 @@ pub fn audit_enabled_from_settings(dir: &Path) -> bool {
 /// Default ON for testing telemetry windows.
 pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).periodic_telemetry_enabled
+}
+
+/// Default ON during the test programme; see the field's own note for why this
+/// is not folded into the telemetry flag.
+pub fn network_log_upload_enabled_from_settings(dir: &Path) -> bool {
+    load_settings(dir).network_log_upload_enabled
 }
 
 /// Atomic settings write (L3): temp file with owner-only protection, then
@@ -528,6 +557,14 @@ impl Audit {
 
     pub fn log_path(&self) -> &Path {
         &self.log_path
+    }
+
+    /// Read from the settings file rather than cached in an atomic like the two
+    /// flags above: the uploader consults this once per sweep, minutes apart, so
+    /// there is nothing to gain from a cache and a stale one would keep sending
+    /// after the user switched it off.
+    pub fn network_log_upload_enabled(&self) -> bool {
+        network_log_upload_enabled_from_settings(&self.settings_dir)
     }
 
     pub fn dropped_count(&self) -> u64 {

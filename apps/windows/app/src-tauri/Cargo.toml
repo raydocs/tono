@@ -41,6 +41,11 @@ identifier = "com.raydocs.tono"
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
+# Gzip for the test-programme audit-log upload. The alternative was uploading the
+# log uncompressed and compressing in the Worker, which needs no crate here but
+# costs roughly eighteen times the bytes on the customer's own tunnel — measured
+# on real audit data — and leaves the two clients behaving differently.
+flate2 = "1"
 clash-verge-draft = { workspace = true }
 clash-verge-logging = { workspace = true }
 clash-verge-signal = { workspace = true }

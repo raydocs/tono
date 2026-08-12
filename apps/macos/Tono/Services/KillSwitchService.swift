@@ -122,6 +122,37 @@ nonisolated enum KillSwitchService {
     /// state erased its old control-plane resolution, to migrate without using
     /// the physical network's DNS. The helper independently validates that all
     /// pins are public and belong to an explicitly activated API host.
+    private static let pinCacheKey = "Tono_controlPlanePinCache"
+    /// Learned addresses kept per host. Bounded because the helper rejects an
+    /// oversized pin set outright, and a rotation that never repeats an address
+    /// would otherwise grow this until the next arm failed.
+    private static let maximumCachedPins = 6
+
+    /// Records addresses resolved through the protected resolver, newest first.
+    ///
+    /// Union rather than replacement, and the compiled pins are added back at
+    /// read time: a single bad or partial answer must never be able to remove
+    /// the address that is currently working.
+    static func rememberControlPlaneAddresses(_ addresses: [String], for host: String) {
+        let cleaned = addresses
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0.count <= 45 && !$0.contains(":") }
+        guard !cleaned.isEmpty else { return }
+        var cache = (AppProfile.defaults.dictionary(forKey: pinCacheKey)
+            as? [String: [String]]) ?? [:]
+        var merged = cleaned
+        for existing in cache[host] ?? [] where !merged.contains(existing) {
+            merged.append(existing)
+        }
+        cache[host] = Array(merged.prefix(maximumCachedPins))
+        // Only ever one host in practice; the bound keeps a corrupted or
+        // hand-edited domain from growing the defaults dictionary.
+        if cache.count > 4 {
+            cache = [host: cache[host] ?? []]
+        }
+        AppProfile.defaults.set(cache, forKey: pinCacheKey)
+    }
+
     private static func configuredBootstrapPins(
         for apiHosts: [String]?
     ) -> [String: [String]] {
@@ -135,7 +166,17 @@ nonisolated enum KillSwitchService {
               ) as? [String], !addresses.isEmpty else {
             return [:]
         }
-        return [apiHost: addresses]
+        // Compiled pins first, then anything learned while connected. The
+        // helper validates every entry as public and belonging to an activated
+        // API host, so a cache entry is held to the same standard as a build
+        // constant rather than being trusted for having been resolved.
+        var pins = addresses
+        let cache = (AppProfile.defaults.dictionary(forKey: pinCacheKey)
+            as? [String: [String]]) ?? [:]
+        for learned in cache[apiHost] ?? [] where !pins.contains(learned) {
+            pins.append(learned)
+        }
+        return [apiHost: Array(pins.prefix(addresses.count + maximumCachedPins))]
     }
 
     /// Explicit disconnect/logout/quit path. DNS recovery is an invariant of

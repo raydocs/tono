@@ -165,7 +165,19 @@ nonisolated struct ConfigPipeline {
     /// Reachable over plain HTTP from inside China and answers 204, so the
     /// probe measures the direct path rather than a TLS handshake. Port 80 is
     /// inside the reviewed-bundle permit, so the probe itself is not blocked.
-    static let chinaDirectHealthURL = "http://connect.rom.miui.com/generate_204"
+    /// Probe for the China-direct fallback groups.
+    ///
+    /// Was Xiaomi's captive-portal check, which shares nothing with the traffic
+    /// it gates except the port. This is a Tencent host on the same port as the
+    /// WeChat flows the app group carries, so a Tencent-wide TCP/80 problem — the
+    /// shape of what was originally measured when WeChat's port 80 was detoured
+    /// through the exit — now flips the group instead of being invisible to it.
+    ///
+    /// It still cannot see a hang specific to one rotating CDN address; nothing
+    /// short of probing every address could, and that is documented where the
+    /// group is emitted. Verified against mihomo rather than assumed: it answers
+    /// 302 and mihomo records the member alive at ~89 ms.
+    static let chinaDirectHealthURL = "http://res.wx.qq.com/"
     static let managedDirectFallbackGroupPrefix = "Tono-WeChat-TCP-"
     static let managedDirectHealthIntervalSeconds = 60
     /// Steady-state budget written into the runtime fallback groups. Kept

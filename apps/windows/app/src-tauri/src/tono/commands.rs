@@ -440,6 +440,8 @@ pub async fn tono_sign_in_verify(
         }
         catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
         crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation).await;
+        crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &app, generation)
+            .await;
     }
     Ok(info)
 }
@@ -484,6 +486,8 @@ pub async fn tono_sign_out(state: tauri::State<'_, Arc<TonoState>>, app: AppHand
             // that `abort_catalog_sync` just stopped.
             catalog_sync::spawn_periodic_for_auth_generation(&state, &app, generation).await;
             crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
+                .await;
+            crate::tono::log_upload::spawn_periodic_for_auth_generation(&state, &app, generation)
                 .await;
             return Err(err);
         }
@@ -1194,6 +1198,10 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
                 crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
                     .await;
+                crate::tono::log_upload::spawn_periodic_for_auth_generation(
+                    &state, &app, generation,
+                )
+                .await;
             }
         }
         Err(ApiError::Unauthorized) => {

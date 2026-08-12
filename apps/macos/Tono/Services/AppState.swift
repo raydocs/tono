@@ -529,8 +529,16 @@ private actor AppStatePersistenceWriter {
 
 struct NetworkInfo {
     var ip: String = "--"
-    var asType: String = "--"
-    var city: String = "--"
+    /// Network operator behind the exit address, from the lookup's ASN owner.
+    ///
+    /// Replaces the old `asType`, which read a nested `asn.type` field the
+    /// provider stopped returning: the response is flat now, so every client
+    /// displayed "--" for it. Naming the operator is also the more useful fact —
+    /// it is what a support conversation can act on.
+    var org: String = "--"
+    /// Country code. The provider no longer returns a city on this endpoint, so
+    /// claiming one would be inventing it.
+    var location: String = "--"
 }
 
 // MARK: - Traffic Stats
@@ -694,6 +702,9 @@ final class AppState {
 
     // Activity
     var connections: [ConnectionEntry] = []
+    /// Per-app totals with a route split. Fed from every connections
+    /// snapshot, not only while the Activity page is visible.
+    let appTrafficLedger = AppTrafficLedger()
     /// Oldest currently-open proxied flow, used to hold a disruptive pin
     /// refresh until streaming responses have finished.
     private var oldestProxiedConnectionStart: Date?
@@ -1564,7 +1575,19 @@ final class AppState {
                         LocalTrafficAudit.shared.recordEvent(
                             "managed_direct_policy_activated",
                             details: [
-                                "domains": String(resolvedPolicy.domainPins.count),
+                                // Always 0 on macOS, and that is correct rather
+                                // than broken: the bundle-wide process rule
+                                // matches first, so emitting the per-host pins
+                                // would add fallback groups and PF entries for
+                                // rules Mihomo never reaches. Windows *does* use
+                                // the same field — it turns those hosts into
+                                // `hosts:` SNI recovery and per-host rules — so
+                                // the entries are not dead weight in the policy,
+                                // only unused here. Reporting received alongside
+                                // emitted stops the pair reading as a fault, as
+                                // it did to the last person who went looking.
+                                "domains_emitted": String(resolvedPolicy.domainPins.count),
+                                "domains_received": String(trafficPolicy.domains.count),
                                 "web_domains": String(
                                     resolvedPolicy.webDomainPins.count
                                 ),
@@ -1700,6 +1723,15 @@ final class AppState {
                     details: self.auditProtectionDetails()
                 )
                 self.activeDirectPolicy = committedDirectPolicy
+                // Learn the control plane's current addresses while a safe
+                // resolver exists. Nothing uses them now — the arm above cleared
+                // `apiHosts`, so API traffic goes through the exit like
+                // everything else — they are for the next fail-closed window
+                // where no tunnel exists and system DNS is blocked. Without this
+                // that window can only offer addresses compiled into the build,
+                // and an address rotation between two releases leaves a machine
+                // that has to be rescued by finding the restore button.
+                await self.refreshControlPlanePinCache(api: api)
                 // /core/start already snapshots the exact digested config into
                 // the root-owned runtime directory before launching Mihomo.
                 // Reloading that identical file here added another helper/API
@@ -1943,6 +1975,7 @@ final class AppState {
         networkInfo = NetworkInfo()
         trafficStats = TrafficStats()
         connections = []
+        appTrafficLedger.reset()
         logEntries = []
         activeRules = []
         ruleProviders = [:]
@@ -2148,6 +2181,10 @@ final class AppState {
                 // the Activity list, but pin refreshes have to make the same
                 // decision whether or not anyone is looking at that page.
                 self.recordLongLivedRouteActivity(apiConnections)
+                // Above the visibility guard deliberately: totals that only
+                // advance while someone is looking at Activity would depend on
+                // where the user navigated, which is worse than showing none.
+                self.appTrafficLedger.ingest(apiConnections)
             }
             guard self.isMainWindowVisible,
                   self.selectedPage == .activity else { return }
@@ -5417,25 +5454,49 @@ final class AppState {
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                json["error"] == nil,
                let ip = json["ip"] as? String, !ip.isEmpty {
-                let location = json["location"] as? [String: Any]
-                let city = location?["city"] as? String ?? "--"
-                let country = location?["country_code"] as? String ?? ""
-                let type = (json["asn"] as? [String: Any])?["type"] as? String
-                var info = NetworkInfo(
+                // The response is flat: `cc`, `asn_org`, `company_name`, and the
+                // `is_*` risk flags. It used to nest `location` and `asn`, and
+                // reading those keys is why the exit row showed "--" for both
+                // fields on every install. Nested forms are still accepted so a
+                // provider that restores them does not break this again.
+                let nestedLocation = json["location"] as? [String: Any]
+                let nestedASN = json["asn"] as? [String: Any]
+                let country = (json["cc"] as? String)
+                    ?? (nestedLocation?["country_code"] as? String)
+                    ?? ""
+                let city = nestedLocation?["city"] as? String ?? ""
+                let organisation = (json["asn_org"] as? String)
+                    ?? (json["company_name"] as? String)
+                    ?? (nestedASN?["org"] as? String)
+                    ?? ""
+                let located = [city, country]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: ", ")
+                let info = NetworkInfo(
                     ip: ip,
-                    asType: "--",
-                    city: country.isEmpty ? city : "\(city), \(country)"
+                    org: organisation.isEmpty ? "--" : organisation,
+                    location: located.isEmpty ? "--" : located
                 )
-                if let type, !type.isEmpty {
-                    info.asType = type.uppercased()
-                }
                 networkInfo = info
+                // The risk flags go to the audit trail, not to the exit row. They
+                // are one vendor's ASN-ownership heuristic, and the residential
+                // hops this product sells are flagged `is_datacenter` by it while
+                // working perfectly against the service that matters. Showing a
+                // verdict that contradicts the product would alarm a user over a
+                // disagreement between two vendors; recording it lets support see
+                // the same disagreement when it is relevant.
+                let flag = { (key: String) in
+                    (json[key] as? Bool).map { $0 ? "true" : "false" } ?? "--"
+                }
                 LocalTrafficAudit.shared.recordEvent(
                     "exit_identity_observed",
                     details: [
                         "exit_ip": info.ip,
-                        "location": info.city,
-                        "asn_type": info.asType,
+                        "location": info.location,
+                        "asn_org": info.org,
+                        "vendor_datacenter": flag("is_datacenter"),
+                        "vendor_vpn": flag("is_vpn"),
+                        "vendor_proxy": flag("is_proxy"),
                     ]
                 )
                 return
@@ -5494,6 +5555,22 @@ final class AppState {
                 downloadText: formatBytes(conn.download)
             )
         }
+    }
+
+    /// Resolves the control-plane host through the protected resolver and stores
+    /// the answer for the helper's next arm.
+    ///
+    /// Runs only while connected, which is the whole point: the resolver reached
+    /// here is Mihomo's, over the tunnel, so this never queries the physical
+    /// network's DNS — the exact thing `allowSystemResolution: false` exists to
+    /// prevent during protected recovery.
+    private func refreshControlPlanePinCache(api: ClashAPI) async {
+        guard let host = TonoAPIClient.configuredBaseURL().host?.lowercased(),
+              !host.isEmpty else { return }
+        guard let answers = try? await api.resolveIPv4(host), !answers.isEmpty else {
+            return
+        }
+        KillSwitchService.rememberControlPlaneAddresses(answers, for: host)
     }
 
     private func trafficAuditProtectionSnapshot()

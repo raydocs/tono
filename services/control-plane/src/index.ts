@@ -1314,6 +1314,308 @@ async function privileged(req: Request, expected: string) {
   }
 }
 
+/**
+ * Resources served identically to both administrative front doors.
+ *
+ * The operations console authenticates with Cloudflare Access and the scripted
+ * surface with a bearer token, but home exits, their bindings and the signup
+ * allowlist are the same resource either way — and each was implemented twice,
+ * byte for byte, about 260 lines of it. That is not a tidiness problem: a fix to
+ * one copy leaves the other wrong. The two had already begun to diverge — the
+ * allowlist listing coerced `email` on one path and not the other, harmless in
+ * itself because D1 returns a string for a TEXT column either way, but it is
+ * divergence appearing in code nobody had touched deliberately.
+ * `directSuffixes` shipping with no syntax validation at all came from this
+ * same shape, and that one was not harmless.
+ *
+ * Returns null when the resource is not one of the shared ones, so each caller
+ * still reaches the handlers that genuinely are its own — `/ops/dashboard`,
+ * `/admin/traffic-policy`, and the two `users` listings, which return
+ * deliberately different shapes and are not merged.
+ *
+ * Authentication is the caller's responsibility and must already have happened:
+ * this performs no authorization of its own.
+ */
+async function sharedAdministrativeResource(
+  req: Request,
+  e: Env,
+  resource: string,
+  m: string,
+): Promise<Response | null> {
+  let mt: RegExpMatchArray | null;
+  if (resource === 'home-exits' && m === 'GET') {
+    const q = await e.DB.prepare(
+      'SELECT * FROM home_exits ORDER BY status ASC, display_name ASC, created_at ASC',
+    ).all<Row>();
+    return Response.json({ homeExits: q.results.map(publicHomeExit) });
+  }
+  if (resource === 'home-exits' && m === 'POST') {
+    const b = await body(req, 8 * 1024);
+    const proxyName = proxyNameField(b.proxyName);
+    const displayName = str(b.displayName, 'displayName', 1, 200).trim();
+    const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
+    const kind = b.kind === undefined ? 'catalog' : str(b.kind, 'kind', 1, 20);
+    if (!['catalog', 'socks5'].includes(kind)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
+    }
+    const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
+      ? null
+      : socks5HostField(b.socks5Host);
+    const socks5Port = b.socks5Port === undefined || b.socks5Port === null
+      ? null
+      : socks5PortField(b.socks5Port);
+    const socks5Username = b.socks5Username === undefined || b.socks5Username === null || b.socks5Username === ''
+      ? null
+      : str(b.socks5Username, 'socks5Username', 1, 255);
+    const socks5Password = b.socks5Password === undefined || b.socks5Password === null || b.socks5Password === ''
+      ? null
+      : str(b.socks5Password, 'socks5Password', 1, 255);
+    validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
+    const notes = b.notes === undefined || b.notes === null || b.notes === ''
+      ? null
+      : str(b.notes, 'notes', 1, 1000);
+    const status = b.status === undefined ? 'active' : str(b.status, 'status', 1, 20);
+    if (!['active', 'disabled', 'retired'].includes(status)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+    }
+    const homeId = id();
+    const t = now();
+    try {
+      await e.DB.prepare(
+        `INSERT INTO home_exits(
+           id, proxy_name, display_name, egress_ipv4, kind,
+           socks5_host, socks5_port, socks5_username, socks5_password,
+           status, notes, created_at, updated_at
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        homeId, proxyName, displayName, egressIpv4, kind,
+        socks5Host, socks5Port, socks5Username, socks5Password,
+        status, notes, t, t,
+      ).run();
+    } catch {
+      throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+    }
+    const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
+    await bumpCatalogRevision(e);
+    return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
+  }
+  mt = resource.match(/^home-exits\/([^/]+)$/);
+  if (mt && m === 'PATCH') {
+    const b = await body(req, 8 * 1024);
+    const existing = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+    const proxyName = b.proxyName === undefined ? String(existing.proxy_name) : proxyNameField(b.proxyName);
+    const displayName = b.displayName === undefined
+      ? String(existing.display_name)
+      : str(b.displayName, 'displayName', 1, 200).trim();
+    const egressIpv4 = b.egressIpv4 === undefined
+      ? (existing.egress_ipv4 == null ? null : String(existing.egress_ipv4))
+      : optionalIpv4(b.egressIpv4, 'egressIpv4');
+    const notes = b.notes === undefined
+      ? (existing.notes == null ? null : String(existing.notes))
+      : (b.notes === null || b.notes === '' ? null : str(b.notes, 'notes', 1, 1000));
+    const status = b.status === undefined ? String(existing.status) : str(b.status, 'status', 1, 20);
+    if (!['active', 'disabled', 'retired'].includes(status)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+    }
+    const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
+    if (!['catalog', 'socks5'].includes(kind)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
+    }
+    // Omitted socks5 fields keep their stored values; switching back to
+    // catalog wipes them.
+    const keep = kind === 'socks5';
+    const socks5Host = b.socks5Host === undefined
+      ? (keep && existing.socks5_host != null ? String(existing.socks5_host) : null)
+      : (b.socks5Host === null || b.socks5Host === '' ? null : socks5HostField(b.socks5Host));
+    const socks5Port = b.socks5Port === undefined
+      ? (keep && existing.socks5_port != null ? Number(existing.socks5_port) : null)
+      : (b.socks5Port === null ? null : socks5PortField(b.socks5Port));
+    const socks5Username = b.socks5Username === undefined
+      ? (keep && existing.socks5_username != null ? String(existing.socks5_username) : null)
+      : (b.socks5Username === null || b.socks5Username === '' ? null : str(b.socks5Username, 'socks5Username', 1, 255));
+    const socks5Password = b.socks5Password === undefined
+      ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
+      : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
+    validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
+    const t = now();
+    try {
+      const updated = await e.DB.prepare(
+        `UPDATE home_exits
+         SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
+             socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
+             status = ?, notes = ?, updated_at = ?
+         WHERE id = ?`,
+      ).bind(
+        proxyName, displayName, egressIpv4, kind,
+        socks5Host, socks5Port, socks5Username, socks5Password,
+        status, notes, t, mt[1],
+      ).run();
+      if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+    }
+    const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+    await bumpCatalogRevision(e);
+    return Response.json({ homeExit: publicHomeExit(row!) });
+  }
+  if (mt && m === 'DELETE') {
+    const bound = await e.DB.prepare(
+      'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
+    ).bind(mt[1]).first<Row>();
+    if (bound) {
+      throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
+    }
+    const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
+    if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+    await bumpCatalogRevision(e);
+    return new Response(null, { status: 204 });
+  }
+  if (resource === 'home-bindings' && m === 'GET') {
+    const q = await e.DB.prepare(
+      `SELECT
+         user_home_bindings.user_id,
+         users.email,
+         user_home_bindings.home_exit_id,
+         user_home_bindings.default_proxy_name,
+         home_exits.proxy_name,
+         home_exits.display_name,
+         home_exits.kind,
+         home_exits.socks5_host,
+         home_exits.socks5_port,
+         home_exits.egress_ipv4,
+         home_exits.status AS home_status,
+         user_home_bindings.created_at,
+         user_home_bindings.updated_at
+       FROM user_home_bindings
+       JOIN users ON users.id = user_home_bindings.user_id
+       JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+       ORDER BY users.email ASC`,
+    ).all<Row>();
+    return Response.json({ bindings: q.results.map(publicHomeBinding) });
+  }
+  mt = resource.match(/^users\/([^/]+)\/home-binding$/);
+  if (mt && m === 'GET') {
+    const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    const row = await e.DB.prepare(
+      `SELECT
+         user_home_bindings.user_id,
+         users.email,
+         user_home_bindings.home_exit_id,
+         user_home_bindings.default_proxy_name,
+         home_exits.proxy_name,
+         home_exits.display_name,
+         home_exits.kind,
+         home_exits.socks5_host,
+         home_exits.socks5_port,
+         home_exits.egress_ipv4,
+         home_exits.status AS home_status,
+         user_home_bindings.created_at,
+         user_home_bindings.updated_at
+       FROM user_home_bindings
+       JOIN users ON users.id = user_home_bindings.user_id
+       JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+       WHERE user_home_bindings.user_id = ?`,
+    ).bind(mt[1]).first<Row>();
+    return Response.json({ binding: row ? publicHomeBinding(row) : null });
+  }
+  if (mt && m === 'PUT') {
+    const b = await body(req, 8 * 1024);
+    const user = await e.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    let homeExitId: string | undefined;
+    if (b.homeExitId !== undefined) {
+      homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
+    } else if (b.proxyName !== undefined) {
+      const byName = await e.DB.prepare(
+        'SELECT id FROM home_exits WHERE proxy_name = ?',
+      ).bind(proxyNameField(b.proxyName)).first<Row>();
+      if (!byName) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+      homeExitId = String(byName.id);
+    } else {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'homeExitId or proxyName is required');
+    }
+    const home = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeExitId).first<Row>();
+    if (!home) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+    if (String(home.status) !== 'active') {
+      throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
+    }
+    const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
+    const t = now();
+    const existing = await e.DB.prepare(
+      'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
+    ).bind(mt[1]).first<Row>();
+    if (existing) {
+      await e.DB.prepare(
+        `UPDATE user_home_bindings
+         SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
+         WHERE user_id = ?`,
+      ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
+    } else {
+      await e.DB.prepare(
+        `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
+         VALUES(?, ?, ?, ?, ?)`,
+      ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
+    }
+    const row = await e.DB.prepare(
+      `SELECT
+         user_home_bindings.user_id,
+         users.email,
+         user_home_bindings.home_exit_id,
+         user_home_bindings.default_proxy_name,
+         home_exits.proxy_name,
+         home_exits.display_name,
+         home_exits.kind,
+         home_exits.socks5_host,
+         home_exits.socks5_port,
+         home_exits.egress_ipv4,
+         home_exits.status AS home_status,
+         user_home_bindings.created_at,
+         user_home_bindings.updated_at
+       FROM user_home_bindings
+       JOIN users ON users.id = user_home_bindings.user_id
+       JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+       WHERE user_home_bindings.user_id = ?`,
+    ).bind(mt[1]).first<Row>();
+    await bumpCatalogRevision(e);
+    return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
+  }
+  if (mt && m === 'DELETE') {
+    const deleted = await e.DB.prepare(
+      'DELETE FROM user_home_bindings WHERE user_id = ?',
+    ).bind(mt[1]).run();
+    if (!deleted.meta.changes) {
+      const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    } else {
+      await bumpCatalogRevision(e);
+    }
+    return new Response(null, { status: 204 });
+  }
+  if (resource === 'signup-allowlist' && m === 'POST') {
+    const b = await body(req, 4 * 1024);
+    const address = email(b.email);
+    const createdAt = now();
+    const inserted = await e.DB.prepare(
+      'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+    ).bind(address, createdAt).run();
+    const entry = await e.DB.prepare(
+      'SELECT created_at FROM signup_allowlist WHERE email = ?',
+    ).bind(address).first<Row>();
+    return Response.json(
+      {
+        email: address,
+        createdAt: Number(entry?.created_at ?? createdAt),
+        created: inserted.meta.changes === 1,
+      },
+      { status: inserted.meta.changes === 1 ? 201 : 200 },
+    );
+  }
+  return null;
+}
+
 async function operationsAdmin(req: Request, e: Env) {
   try {
     return await verifyAccessRequest(req, {
@@ -4223,6 +4525,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p.startsWith('/api/v1/ops/')) {
     await operationsAdmin(req, e);
+    const shared = await sharedAdministrativeResource(
+      req, e, p.slice('/api/v1/ops/'.length), m,
+    );
+    if (shared) return shared;
 
     // --- Product ops reads (Cloudflare Access) ---
     if (m === 'GET') {
@@ -4254,35 +4560,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             createdAt: Number(entry.created_at),
           })),
         });
-      }
-      if (p === '/api/v1/ops/home-exits') {
-        const q = await e.DB.prepare(
-          'SELECT * FROM home_exits ORDER BY status ASC, display_name ASC, created_at ASC',
-        ).all<Row>();
-        return Response.json({ homeExits: q.results.map(publicHomeExit) });
-      }
-      if (p === '/api/v1/ops/home-bindings') {
-        const q = await e.DB.prepare(
-          `SELECT
-             user_home_bindings.user_id,
-             users.email,
-             user_home_bindings.home_exit_id,
-             user_home_bindings.default_proxy_name,
-             home_exits.proxy_name,
-             home_exits.display_name,
-             home_exits.kind,
-             home_exits.socks5_host,
-             home_exits.socks5_port,
-             home_exits.egress_ipv4,
-             home_exits.status AS home_status,
-             user_home_bindings.created_at,
-             user_home_bindings.updated_at
-           FROM user_home_bindings
-           JOIN users ON users.id = user_home_bindings.user_id
-           JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-           ORDER BY users.email ASC`,
-        ).all<Row>();
-        return Response.json({ bindings: q.results.map(publicHomeBinding) });
       }
       if (p === '/api/v1/ops/exit-catalog') {
         // Ops console receives the full plaintext catalog, unfiltered.
@@ -4352,223 +4629,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
 
     // --- Product ops writes (same Access boundary; no ADMIN_API_TOKEN in browser) ---
-    if (p === '/api/v1/ops/signup-allowlist' && m === 'POST') {
-      const b = await body(req, 4 * 1024);
-      const address = email(b.email);
-      const createdAt = now();
-      const inserted = await e.DB.prepare(
-        'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-      ).bind(address, createdAt).run();
-      const entry = await e.DB.prepare(
-        'SELECT created_at FROM signup_allowlist WHERE email = ?',
-      ).bind(address).first<Row>();
-      return Response.json(
-        {
-          email: address,
-          createdAt: Number(entry?.created_at ?? createdAt),
-          created: inserted.meta.changes === 1,
-        },
-        { status: inserted.meta.changes === 1 ? 201 : 200 },
-      );
-    }
     if (p === '/api/v1/ops/signup-allowlist' && m === 'DELETE') {
       const b = await body(req, 4 * 1024);
       await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(email(b.email)).run();
-      return new Response(null, { status: 204 });
-    }
-    if (p === '/api/v1/ops/home-exits' && m === 'POST') {
-      const b = await body(req, 8 * 1024);
-      const proxyName = proxyNameField(b.proxyName);
-      const displayName = str(b.displayName, 'displayName', 1, 200).trim();
-      const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
-      const kind = b.kind === undefined ? 'catalog' : str(b.kind, 'kind', 1, 20);
-      if (!['catalog', 'socks5'].includes(kind)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
-      }
-      const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
-        ? null
-        : socks5HostField(b.socks5Host);
-      const socks5Port = b.socks5Port === undefined || b.socks5Port === null
-        ? null
-        : socks5PortField(b.socks5Port);
-      const socks5Username = b.socks5Username === undefined || b.socks5Username === null || b.socks5Username === ''
-        ? null
-        : str(b.socks5Username, 'socks5Username', 1, 255);
-      const socks5Password = b.socks5Password === undefined || b.socks5Password === null || b.socks5Password === ''
-        ? null
-        : str(b.socks5Password, 'socks5Password', 1, 255);
-      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
-      const notes = b.notes === undefined || b.notes === null || b.notes === ''
-        ? null
-        : str(b.notes, 'notes', 1, 1000);
-      const status = b.status === undefined ? 'active' : str(b.status, 'status', 1, 20);
-      if (!['active', 'disabled', 'retired'].includes(status)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
-      }
-      const homeId = id();
-      const t = now();
-      try {
-        await e.DB.prepare(
-          `INSERT INTO home_exits(
-             id, proxy_name, display_name, egress_ipv4, kind,
-             socks5_host, socks5_port, socks5_username, socks5_password,
-             status, notes, created_at, updated_at
-           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          homeId, proxyName, displayName, egressIpv4, kind,
-          socks5Host, socks5Port, socks5Username, socks5Password,
-          status, notes, t, t,
-        ).run();
-      } catch {
-        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
-      }
-      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
-      await bumpCatalogRevision(e);
-      return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
-    }
-    mt = p.match(/^\/api\/v1\/ops\/home-exits\/([^/]+)$/);
-    if (mt && m === 'PATCH') {
-      const b = await body(req, 8 * 1024);
-      const existing = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
-      if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      const proxyName = b.proxyName === undefined ? String(existing.proxy_name) : proxyNameField(b.proxyName);
-      const displayName = b.displayName === undefined
-        ? String(existing.display_name)
-        : str(b.displayName, 'displayName', 1, 200).trim();
-      const egressIpv4 = b.egressIpv4 === undefined
-        ? (existing.egress_ipv4 == null ? null : String(existing.egress_ipv4))
-        : optionalIpv4(b.egressIpv4, 'egressIpv4');
-      const notes = b.notes === undefined
-        ? (existing.notes == null ? null : String(existing.notes))
-        : (b.notes === null || b.notes === '' ? null : str(b.notes, 'notes', 1, 1000));
-      const status = b.status === undefined ? String(existing.status) : str(b.status, 'status', 1, 20);
-      if (!['active', 'disabled', 'retired'].includes(status)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
-      }
-      const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
-      if (!['catalog', 'socks5'].includes(kind)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
-      }
-      // Omitted socks5 fields keep their stored values; switching back to
-      // catalog wipes them.
-      const keep = kind === 'socks5';
-      const socks5Host = b.socks5Host === undefined
-        ? (keep && existing.socks5_host != null ? String(existing.socks5_host) : null)
-        : (b.socks5Host === null || b.socks5Host === '' ? null : socks5HostField(b.socks5Host));
-      const socks5Port = b.socks5Port === undefined
-        ? (keep && existing.socks5_port != null ? Number(existing.socks5_port) : null)
-        : (b.socks5Port === null ? null : socks5PortField(b.socks5Port));
-      const socks5Username = b.socks5Username === undefined
-        ? (keep && existing.socks5_username != null ? String(existing.socks5_username) : null)
-        : (b.socks5Username === null || b.socks5Username === '' ? null : str(b.socks5Username, 'socks5Username', 1, 255));
-      const socks5Password = b.socks5Password === undefined
-        ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
-        : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
-      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
-      const t = now();
-      try {
-        const updated = await e.DB.prepare(
-          `UPDATE home_exits
-           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
-               socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
-               status = ?, notes = ?, updated_at = ?
-           WHERE id = ?`,
-        ).bind(
-          proxyName, displayName, egressIpv4, kind,
-          socks5Host, socks5Port, socks5Username, socks5Password,
-          status, notes, t, mt[1],
-        ).run();
-        if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      } catch (error) {
-        if (error instanceof ApiError) throw error;
-        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
-      }
-      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
-      await bumpCatalogRevision(e);
-      return Response.json({ homeExit: publicHomeExit(row!) });
-    }
-    if (mt && m === 'DELETE') {
-      const bound = await e.DB.prepare(
-        'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
-      ).bind(mt[1]).first<Row>();
-      if (bound) {
-        throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
-      }
-      const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
-      if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      await bumpCatalogRevision(e);
-      return new Response(null, { status: 204 });
-    }
-    mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
-    if (mt && m === 'PUT') {
-      const b = await body(req, 8 * 1024);
-      const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-      let homeExitId: string | undefined;
-      if (b.homeExitId !== undefined) {
-        homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
-      } else if (b.proxyName !== undefined) {
-        const byName = await e.DB.prepare(
-          'SELECT id FROM home_exits WHERE proxy_name = ?',
-        ).bind(proxyNameField(b.proxyName)).first<Row>();
-        if (!byName) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-        homeExitId = String(byName.id);
-      } else {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'homeExitId or proxyName is required');
-      }
-      const home = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeExitId).first<Row>();
-      if (!home) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      if (String(home.status) !== 'active') {
-        throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
-      }
-      const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
-      const t = now();
-      const existing = await e.DB.prepare(
-        'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
-      ).bind(mt[1]).first<Row>();
-      if (existing) {
-        await e.DB.prepare(
-          `UPDATE user_home_bindings SET home_exit_id = ?, default_proxy_name = ?, updated_at = ? WHERE user_id = ?`,
-        ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
-      } else {
-        await e.DB.prepare(
-          `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
-           VALUES(?, ?, ?, ?, ?)`,
-        ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
-      }
-      const row = await e.DB.prepare(
-        `SELECT
-           user_home_bindings.user_id,
-           users.email,
-           user_home_bindings.home_exit_id,
-           user_home_bindings.default_proxy_name,
-           home_exits.proxy_name,
-           home_exits.display_name,
-           home_exits.kind,
-           home_exits.socks5_host,
-           home_exits.socks5_port,
-           home_exits.egress_ipv4,
-           home_exits.status AS home_status,
-           user_home_bindings.created_at,
-           user_home_bindings.updated_at
-         FROM user_home_bindings
-         JOIN users ON users.id = user_home_bindings.user_id
-         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-         WHERE user_home_bindings.user_id = ?`,
-      ).bind(mt[1]).first<Row>();
-      await bumpCatalogRevision(e);
-      return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
-    }
-    if (mt && m === 'DELETE') {
-      const deleted = await e.DB.prepare(
-        'DELETE FROM user_home_bindings WHERE user_id = ?',
-      ).bind(mt[1]).run();
-      if (!deleted.meta.changes) {
-        const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-        if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-      } else {
-        await bumpCatalogRevision(e);
-      }
       return new Response(null, { status: 204 });
     }
     mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)$/);
@@ -4634,6 +4697,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p.startsWith('/api/v1/admin/')) {
     await privileged(req, e.ADMIN_API_TOKEN);
+    const shared = await sharedAdministrativeResource(
+      req, e, p.slice('/api/v1/admin/'.length), m,
+    );
+    if (shared) return shared;
     if (p === '/api/v1/admin/routing-research/summary' && m === 'GET') {
       let unexpectedQuery = false;
       url.searchParams.forEach((_value, key) => { if (key !== 'days') unexpectedQuery = true; });
@@ -4996,257 +5063,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       // Admin always receives the full encrypted catalog authority, unfiltered.
       return Response.json(await publicManagedCatalog(e));
     }
-    if (p === '/api/v1/admin/home-exits' && m === 'GET') {
-      const q = await e.DB.prepare(
-        'SELECT * FROM home_exits ORDER BY status ASC, display_name ASC, created_at ASC',
-      ).all<Row>();
-      return Response.json({ homeExits: q.results.map(publicHomeExit) });
-    }
-    if (p === '/api/v1/admin/home-exits' && m === 'POST') {
-      const b = await body(req, 8 * 1024);
-      const proxyName = proxyNameField(b.proxyName);
-      const displayName = str(b.displayName, 'displayName', 1, 200).trim();
-      const egressIpv4 = optionalIpv4(b.egressIpv4, 'egressIpv4');
-      const kind = b.kind === undefined ? 'catalog' : str(b.kind, 'kind', 1, 20);
-      if (!['catalog', 'socks5'].includes(kind)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
-      }
-      const socks5Host = b.socks5Host === undefined || b.socks5Host === null || b.socks5Host === ''
-        ? null
-        : socks5HostField(b.socks5Host);
-      const socks5Port = b.socks5Port === undefined || b.socks5Port === null
-        ? null
-        : socks5PortField(b.socks5Port);
-      const socks5Username = b.socks5Username === undefined || b.socks5Username === null || b.socks5Username === ''
-        ? null
-        : str(b.socks5Username, 'socks5Username', 1, 255);
-      const socks5Password = b.socks5Password === undefined || b.socks5Password === null || b.socks5Password === ''
-        ? null
-        : str(b.socks5Password, 'socks5Password', 1, 255);
-      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
-      const notes = b.notes === undefined || b.notes === null || b.notes === ''
-        ? null
-        : str(b.notes, 'notes', 1, 1000);
-      const status = b.status === undefined ? 'active' : str(b.status, 'status', 1, 20);
-      if (!['active', 'disabled', 'retired'].includes(status)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
-      }
-      const homeId = id();
-      const t = now();
-      try {
-        await e.DB.prepare(
-          `INSERT INTO home_exits(
-             id, proxy_name, display_name, egress_ipv4, kind,
-             socks5_host, socks5_port, socks5_username, socks5_password,
-             status, notes, created_at, updated_at
-           ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          homeId, proxyName, displayName, egressIpv4, kind,
-          socks5Host, socks5Port, socks5Username, socks5Password,
-          status, notes, t, t,
-        ).run();
-      } catch {
-        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
-      }
-      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
-      await bumpCatalogRevision(e);
-      return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
-    }
-    mt = p.match(/^\/api\/v1\/admin\/home-exits\/([^/]+)$/);
-    if (mt && m === 'PATCH') {
-      const b = await body(req, 8 * 1024);
-      const existing = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
-      if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      const proxyName = b.proxyName === undefined ? String(existing.proxy_name) : proxyNameField(b.proxyName);
-      const displayName = b.displayName === undefined
-        ? String(existing.display_name)
-        : str(b.displayName, 'displayName', 1, 200).trim();
-      const egressIpv4 = b.egressIpv4 === undefined
-        ? (existing.egress_ipv4 == null ? null : String(existing.egress_ipv4))
-        : optionalIpv4(b.egressIpv4, 'egressIpv4');
-      const notes = b.notes === undefined
-        ? (existing.notes == null ? null : String(existing.notes))
-        : (b.notes === null || b.notes === '' ? null : str(b.notes, 'notes', 1, 1000));
-      const status = b.status === undefined ? String(existing.status) : str(b.status, 'status', 1, 20);
-      if (!['active', 'disabled', 'retired'].includes(status)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
-      }
-      const kind = b.kind === undefined ? String(existing.kind ?? 'catalog') : str(b.kind, 'kind', 1, 20);
-      if (!['catalog', 'socks5'].includes(kind)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid kind');
-      }
-      // Omitted socks5 fields keep their stored values; switching back to
-      // catalog wipes them.
-      const keep = kind === 'socks5';
-      const socks5Host = b.socks5Host === undefined
-        ? (keep && existing.socks5_host != null ? String(existing.socks5_host) : null)
-        : (b.socks5Host === null || b.socks5Host === '' ? null : socks5HostField(b.socks5Host));
-      const socks5Port = b.socks5Port === undefined
-        ? (keep && existing.socks5_port != null ? Number(existing.socks5_port) : null)
-        : (b.socks5Port === null ? null : socks5PortField(b.socks5Port));
-      const socks5Username = b.socks5Username === undefined
-        ? (keep && existing.socks5_username != null ? String(existing.socks5_username) : null)
-        : (b.socks5Username === null || b.socks5Username === '' ? null : str(b.socks5Username, 'socks5Username', 1, 255));
-      const socks5Password = b.socks5Password === undefined
-        ? (keep && existing.socks5_password != null ? String(existing.socks5_password) : null)
-        : (b.socks5Password === null || b.socks5Password === '' ? null : str(b.socks5Password, 'socks5Password', 1, 255));
-      validateHomeSocks5(kind, socks5Host, socks5Port, socks5Username, socks5Password);
-      const t = now();
-      try {
-        const updated = await e.DB.prepare(
-          `UPDATE home_exits
-           SET proxy_name = ?, display_name = ?, egress_ipv4 = ?, kind = ?,
-               socks5_host = ?, socks5_port = ?, socks5_username = ?, socks5_password = ?,
-               status = ?, notes = ?, updated_at = ?
-           WHERE id = ?`,
-        ).bind(
-          proxyName, displayName, egressIpv4, kind,
-          socks5Host, socks5Port, socks5Username, socks5Password,
-          status, notes, t, mt[1],
-        ).run();
-        if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      } catch (error) {
-        if (error instanceof ApiError) throw error;
-        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
-      }
-      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
-      await bumpCatalogRevision(e);
-      return Response.json({ homeExit: publicHomeExit(row!) });
-    }
-    if (mt && m === 'DELETE') {
-      const bound = await e.DB.prepare(
-        'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
-      ).bind(mt[1]).first<Row>();
-      if (bound) {
-        throw new ApiError(409, 'HOME_EXIT_IN_USE', 'Unbind all users before deleting this home exit');
-      }
-      const deleted = await e.DB.prepare('DELETE FROM home_exits WHERE id = ?').bind(mt[1]).run();
-      if (!deleted.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      await bumpCatalogRevision(e);
-      return new Response(null, { status: 204 });
-    }
-    if (p === '/api/v1/admin/home-bindings' && m === 'GET') {
-      const q = await e.DB.prepare(
-        `SELECT
-           user_home_bindings.user_id,
-           users.email,
-           user_home_bindings.home_exit_id,
-           user_home_bindings.default_proxy_name,
-           home_exits.proxy_name,
-           home_exits.display_name,
-           home_exits.kind,
-           home_exits.socks5_host,
-           home_exits.socks5_port,
-           home_exits.egress_ipv4,
-           home_exits.status AS home_status,
-           user_home_bindings.created_at,
-           user_home_bindings.updated_at
-         FROM user_home_bindings
-         JOIN users ON users.id = user_home_bindings.user_id
-         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-         ORDER BY users.email ASC`,
-      ).all<Row>();
-      return Response.json({ bindings: q.results.map(publicHomeBinding) });
-    }
-    mt = p.match(/^\/api\/v1\/admin\/users\/([^/]+)\/home-binding$/);
-    if (mt && m === 'GET') {
-      const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-      const row = await e.DB.prepare(
-        `SELECT
-           user_home_bindings.user_id,
-           users.email,
-           user_home_bindings.home_exit_id,
-           user_home_bindings.default_proxy_name,
-           home_exits.proxy_name,
-           home_exits.display_name,
-           home_exits.kind,
-           home_exits.socks5_host,
-           home_exits.socks5_port,
-           home_exits.egress_ipv4,
-           home_exits.status AS home_status,
-           user_home_bindings.created_at,
-           user_home_bindings.updated_at
-         FROM user_home_bindings
-         JOIN users ON users.id = user_home_bindings.user_id
-         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-         WHERE user_home_bindings.user_id = ?`,
-      ).bind(mt[1]).first<Row>();
-      return Response.json({ binding: row ? publicHomeBinding(row) : null });
-    }
-    if (mt && m === 'PUT') {
-      const b = await body(req, 8 * 1024);
-      const user = await e.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-      let homeExitId: string | undefined;
-      if (b.homeExitId !== undefined) {
-        homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
-      } else if (b.proxyName !== undefined) {
-        const byName = await e.DB.prepare(
-          'SELECT id FROM home_exits WHERE proxy_name = ?',
-        ).bind(proxyNameField(b.proxyName)).first<Row>();
-        if (!byName) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-        homeExitId = String(byName.id);
-      } else {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'homeExitId or proxyName is required');
-      }
-      const home = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeExitId).first<Row>();
-      if (!home) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-      if (String(home.status) !== 'active') {
-        throw new ApiError(409, 'HOME_EXIT_INACTIVE', 'Home exit must be active before binding');
-      }
-      const defaultProxyName = await defaultProxyNameField(e, b.defaultProxyName);
-      const t = now();
-      const existing = await e.DB.prepare(
-        'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
-      ).bind(mt[1]).first<Row>();
-      if (existing) {
-        await e.DB.prepare(
-          `UPDATE user_home_bindings
-           SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
-           WHERE user_id = ?`,
-        ).bind(homeExitId, defaultProxyName, t, mt[1]).run();
-      } else {
-        await e.DB.prepare(
-          `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
-           VALUES(?, ?, ?, ?, ?)`,
-        ).bind(mt[1], homeExitId, defaultProxyName, t, t).run();
-      }
-      const row = await e.DB.prepare(
-        `SELECT
-           user_home_bindings.user_id,
-           users.email,
-           user_home_bindings.home_exit_id,
-           user_home_bindings.default_proxy_name,
-           home_exits.proxy_name,
-           home_exits.display_name,
-           home_exits.kind,
-           home_exits.socks5_host,
-           home_exits.socks5_port,
-           home_exits.egress_ipv4,
-           home_exits.status AS home_status,
-           user_home_bindings.created_at,
-           user_home_bindings.updated_at
-         FROM user_home_bindings
-         JOIN users ON users.id = user_home_bindings.user_id
-         JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-         WHERE user_home_bindings.user_id = ?`,
-      ).bind(mt[1]).first<Row>();
-      await bumpCatalogRevision(e);
-      return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
-    }
-    if (mt && m === 'DELETE') {
-      const deleted = await e.DB.prepare(
-        'DELETE FROM user_home_bindings WHERE user_id = ?',
-      ).bind(mt[1]).run();
-      if (!deleted.meta.changes) {
-        const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
-        if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-      } else {
-        await bumpCatalogRevision(e);
-      }
-      return new Response(null, { status: 204 });
-    }
     if (p === '/api/v1/admin/exit-catalog' && m === 'PUT') {
       const b = await body(req, 2 * 1024 * 1024);
       rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
@@ -5305,25 +5121,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           createdAt: Number(entry.created_at),
         })),
       });
-    }
-    if (p === '/api/v1/admin/signup-allowlist' && m === 'POST') {
-      const b = await body(req, 4 * 1024);
-      const address = email(b.email);
-      const createdAt = now();
-      const inserted = await e.DB.prepare(
-        'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
-      ).bind(address, createdAt).run();
-      const entry = await e.DB.prepare(
-        'SELECT created_at FROM signup_allowlist WHERE email = ?',
-      ).bind(address).first<Row>();
-      return Response.json(
-        {
-          email: address,
-          createdAt: Number(entry?.created_at ?? createdAt),
-          created: inserted.meta.changes === 1,
-        },
-        { status: inserted.meta.changes === 1 ? 201 : 200 },
-      );
     }
     if (p === '/api/v1/admin/signup-allowlist' && m === 'DELETE') {
       const b = await body(req, 4 * 1024);

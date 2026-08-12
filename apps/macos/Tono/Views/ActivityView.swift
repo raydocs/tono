@@ -50,10 +50,120 @@ private struct ClientAppIcon: View {
     }
 }
 
+/// Byte formatting matching the connection rows, which come from AppState's own
+/// formatter. Duplicated rather than shared because the two live on opposite
+/// sides of the view boundary and a shared helper would be one file holding one
+/// function; if a third caller appears, promote it then.
+private func activityBytes(_ bytes: Int64) -> String {
+    if bytes < 1024 { return "\(bytes) B" }
+    let kb = Double(bytes) / 1024
+    if kb < 1024 { return String(format: "%.1f KB", kb) }
+    let mb = kb / 1024
+    if mb < 1024 { return String(format: "%.1f MB", mb) }
+    return String(format: "%.2f GB", mb / 1024)
+}
+
+/// One colour per path class, used by every split bar and legend on this page so
+/// a colour means the same thing in the header card and in an app's own row.
+private enum RouteTint {
+    static let direct = Color(hex: "30D158")
+    static let residential = Color(hex: "BF5AF2")
+    static let tunnel = Color(hex: "4B6EFF")
+    static let blocked = Color(hex: "8E8E93")
+}
+
+/// Proportional bar for a route split.
+///
+/// Segments below a pixel are dropped rather than rounded up: a hairline that
+/// cannot be read is worse than an absent one, because it implies a category is
+/// present at a size the eye cannot compare.
+private struct RouteSplitBar: View {
+    let split: AppTrafficLedger.RouteSplit
+    var height: CGFloat = 6
+
+    private var segments: [(Color, Int64)] {
+        [
+            (RouteTint.direct, split.direct),
+            (RouteTint.residential, split.residential),
+            (RouteTint.tunnel, split.tunnel),
+            (RouteTint.blocked, split.blocked),
+        ].filter { $0.1 > 0 }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let total = max(split.total, 1)
+            HStack(spacing: 1) {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    let width = geometry.size.width * CGFloat(segment.1) / CGFloat(total)
+                    if width >= 1 {
+                        Rectangle().fill(segment.0).frame(width: width)
+                    }
+                }
+                if segments.isEmpty {
+                    Rectangle().fill(.secondary.opacity(0.18))
+                }
+            }
+            .frame(height: height)
+            .clipShape(Capsule())
+        }
+        .frame(height: height)
+    }
+}
+
+/// Data card.
+///
+/// Deliberately *not* `.glassEffect(.regular)` like the chrome and the Dashboard
+/// stat cards: this page puts numbers at 26pt over an animating mesh gradient,
+/// and regular glass drops their contrast to the point where a rate is hard to
+/// read at a glance. Chrome stays glass; data sits on a near-opaque surface and
+/// keeps only the glass border and corner radius so the two still belong to one
+/// design. The transparency slider in Settings governs the chrome, not this.
+private struct ActivityCard<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let title: LocalizedStringKey
+    var accessory: AnyView?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer(minLength: 4)
+                if let accessory { accessory }
+            }
+            content
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.06 : 0.62),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14).strokeBorder(
+                .white.opacity(colorScheme == .dark ? 0.10 : 0.75),
+                lineWidth: 0.5
+            )
+        )
+    }
+}
+
 struct ActivityView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedFilter: String = "All"
+    @State private var section: Section = .apps
+    @State private var isTestingLatency = false
+    @State private var trafficHistory = TrafficHistory()
+
+    private enum Section: String, CaseIterable {
+        case apps = "Apps"
+        case connections = "Connections"
+    }
 
     private let filters = ["All", "Proxied", "Direct", "Rejected"]
 
@@ -62,34 +172,240 @@ struct ActivityView: View {
         return appState.connections.filter { $0.type.rawValue == selectedFilter }
     }
 
+    private var selectedExitLatency: Int? {
+        guard let name = appState.proxyService.activeNodeName else { return nil }
+        guard let node = appState.proxyService.nodes.first(where: { $0.name == name }),
+              node.latency > 0 else { return nil }
+        return node.latency
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerRow
-                .padding(.bottom, 24)
+                .padding(.bottom, 14)
 
-            // Timeline logs
-            ScrollView {
-                ZStack(alignment: .leading) {
-                    // Timeline line
-                    timelineLine
-
-                    // Log entries
-                    VStack(spacing: 14) {
-                        ForEach(filteredConnections) { entry in
-                            LogEntryRow(entry: entry) {
-                                Task { await appState.closeConnection(entry.id) }
-                            }
-                        }
-                    }
-                    .padding(.leading, 32)
-                }
+            // One container so neighbouring cards' glass borders merge and move
+            // together — the part of this that a screenshot of another client
+            // cannot be copied into.
+            GlassEffectContainer(spacing: 10) {
+                statCards
             }
-            .scrollIndicators(.hidden)
+            .padding(.bottom, 14)
+
+            sectionPicker
+                .padding(.bottom, 12)
+
+            switch section {
+            case .apps: appsList
+            case .connections: connectionsList
+            }
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 16)
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
+            trafficHistory.record(
+                up: appState.trafficStats.uploadSpeed,
+                down: appState.trafficStats.downloadSpeed
+            )
+        }
+    }
+
+    // MARK: - Stat cards
+
+    private var statCards: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                ActivityCard(
+                    title: "Selected exit latency",
+                    accessory: AnyView(latencyRefreshButton)
+                ) {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(selectedExitLatency.map(String.init) ?? "—")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                        if selectedExitLatency != nil {
+                            Text("ms").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text(appState.proxyService.activeNodeName ?? "No exit selected")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
+                ActivityCard(title: "Upload") {
+                    rateValue(appState.trafficStats.uploadSpeed, tint: Color(hex: "64D2FF"))
+                    Text(activityBytes(appState.trafficStats.totalUpload) + " total")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+
+                ActivityCard(title: "Download") {
+                    rateValue(appState.trafficStats.downloadSpeed, tint: Color(hex: "2ED573"))
+                    Text(activityBytes(appState.trafficStats.totalDownload) + " total")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+            }
+
+            HStack(spacing: 10) {
+                ActivityCard(title: "Active connections") {
+                    Text("\(appState.trafficStats.activeConnections)")
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    Text("\(appState.appTrafficLedger.apps.count) apps seen this session")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                }
+
+                ActivityCard(title: "Traffic by route · this session") {
+                    let split = appState.appTrafficLedger.overall
+                    Text(activityBytes(split.total))
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    RouteSplitBar(split: split, height: 7).padding(.top, 1)
+                    routeLegend(split)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private func rateValue(_ bytesPerSecond: Int64, tint: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(activityBytes(bytesPerSecond))
+                .font(.system(size: 26, weight: .semibold, design: .rounded))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text("/s").font(.system(size: 12)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func routeLegend(_ split: AppTrafficLedger.RouteSplit) -> some View {
+        HStack(spacing: 10) {
+            legendItem("Direct", RouteTint.direct, split.direct)
+            legendItem("Residential", RouteTint.residential, split.residential)
+            legendItem("Tunnel", RouteTint.tunnel, split.tunnel)
+            if split.blocked > 0 {
+                legendItem("Blocked", RouteTint.blocked, split.blocked)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func legendItem(
+        _ label: LocalizedStringKey,
+        _ tint: Color,
+        _ bytes: Int64
+    ) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(label).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(activityBytes(bytes))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Probes the selected exit only. The kill switch permits that address and no
+    /// other, so a sweep across the whole node list would measure a firewall
+    /// rather than a network — which is why the label names one exit instead of
+    /// promising "test all".
+    private var latencyRefreshButton: some View {
+        Button {
+            guard !isTestingLatency, appState.isConnected else { return }
+            isTestingLatency = true
+            Task {
+                await appState.testAllLatency()
+                isTestingLatency = false
+            }
+        } label: {
+            if isTestingLatency {
+                ProgressView().controlSize(.mini)
+            } else {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(
+                        appState.isConnected
+                            ? AnyShapeStyle(.tint)
+                            : AnyShapeStyle(.tertiary)
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isTestingLatency || !appState.isConnected)
+        .help(String(localized: "Re-test the selected exit"))
+    }
+
+    // MARK: - Section picker
+
+    private var sectionPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(Section.allCases, id: \.self) { candidate in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { section = candidate }
+                } label: {
+                    Text(LocalizedStringKey(candidate.rawValue))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(section == candidate ? .white : .secondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(
+                            section == candidate
+                                ? AnyShapeStyle(Color(hex: "4B6EFF"))
+                                : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.08 : 0.4)),
+                            in: Capsule()
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+
+            if section == .connections {
+                Divider().frame(height: 16).padding(.horizontal, 4)
+                filterPills
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Apps
+
+    private var appsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                ForEach(appState.appTrafficLedger.apps) { app in
+                    AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
+                }
+                if appState.appTrafficLedger.apps.isEmpty {
+                    Text(appState.isConnected
+                        ? "Waiting for the first traffic sample…"
+                        : "Connect to see which apps use which route.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 40)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Connections
+
+    private var connectionsList: some View {
+        ScrollView {
+            ZStack(alignment: .leading) {
+                timelineLine
+                VStack(spacing: 14) {
+                    ForEach(filteredConnections) { entry in
+                        LogEntryRow(entry: entry) {
+                            Task { await appState.closeConnection(entry.id) }
+                        }
+                    }
+                }
+                .padding(.leading, 32)
+            }
+        }
+        .scrollIndicators(.hidden)
     }
 
     // MARK: - Timeline Line
@@ -109,66 +425,128 @@ struct ActivityView: View {
 
     private var headerRow: some View {
         HStack(alignment: .center) {
-            Text("Connections")
+            Text("Activity")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.primary)
 
             Spacer()
 
-            HStack(spacing: 14) {
-                // Filter pills
-                HStack(spacing: 6) {
-                    ForEach(filters, id: \.self) { filter in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                selectedFilter = filter
-                            }
-                        } label: {
-                            Text(LocalizedStringKey(filter))
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(selectedFilter == filter ? .white : .secondary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 6)
-                                .background(
-                                    selectedFilter == filter
-                                        ? Color(hex: "4B6EFF")
-                                        : .white.opacity(colorScheme == .dark ? 0.08 : 0.4),
-                                    in: Capsule()
-                                )
-                                .overlay(
-                                    Capsule().strokeBorder(
-                                        selectedFilter == filter ? .clear : .white.opacity(colorScheme == .dark ? 0.12 : 0.7),
-                                        lineWidth: 0.5
-                                    )
-                                )
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
+            if !appState.connections.isEmpty, section == .connections {
+                Button {
+                    Task { await appState.closeAllConnections() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 11))
+                        Text("Close All")
+                            .font(.system(size: 12, weight: .medium))
                     }
+                    .foregroundStyle(Color(hex: "FF6E52"))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(0.3), lineWidth: 0.5))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var filterPills: some View {
+        HStack(spacing: 6) {
+            ForEach(filters, id: \.self) { filter in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { selectedFilter = filter }
+                } label: {
+                    Text(LocalizedStringKey(filter))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(selectedFilter == filter ? .primary : .secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(
+                            .white.opacity(
+                                selectedFilter == filter
+                                    ? (colorScheme == .dark ? 0.16 : 0.7)
+                                    : (colorScheme == .dark ? 0.06 : 0.3)
+                            ),
+                            in: Capsule()
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+// MARK: - App Traffic Row
+
+private struct AppTrafficRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let app: AppTrafficLedger.AppTotals
+    /// The largest total on the page, so every bar shares one scale and two rows
+    /// can be compared by length rather than only by their labels.
+    let peak: Int64
+
+    var body: some View {
+        HStack(spacing: 11) {
+            ClientAppIcon(processName: app.id == AppTrafficLedger.unattributed ? nil : app.id)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(app.id)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    if app.liveConnections > 0 {
+                        Text("\(app.liveConnections)")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.secondary.opacity(0.14), in: Capsule())
+                    }
+                    Spacer(minLength: 6)
+                    Text(activityBytes(app.total))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 }
 
-                // Close All button
-                if !appState.connections.isEmpty {
-                    Button {
-                        Task { await appState.closeAllConnections() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle")
-                                .font(.system(size: 11))
-                            Text("Close All")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(Color(hex: "FF6E52"))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color(hex: "FF6E52").opacity(0.3), lineWidth: 0.5))
-                        .contentShape(Capsule())
+                // Two bars: the outer one scales this app against the busiest,
+                // the inner one splits it by route. A single bar could show one
+                // or the other, and the interesting question needs both.
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.secondary.opacity(0.12)).frame(height: 6)
+                    GeometryReader { geometry in
+                        RouteSplitBar(split: app.split, height: 6)
+                            .frame(
+                                width: max(
+                                    geometry.size.width
+                                        * CGFloat(app.total)
+                                        / CGFloat(max(peak, 1)),
+                                    2
+                                )
+                            )
                     }
-                    .buttonStyle(.plain)
+                    .frame(height: 6)
+                }
+
+                HStack(spacing: 10) {
+                    Label(activityBytes(app.upload), systemImage: "arrow.up")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Label(activityBytes(app.download), systemImage: "arrow.down")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
     }
 }
 

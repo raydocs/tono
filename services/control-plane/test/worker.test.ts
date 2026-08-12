@@ -686,6 +686,93 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
   });
 
+  it('serves the shared administrative resources identically through both front doors', async () => {
+    // The two surfaces authenticate differently and used to carry their own copy
+    // of these handlers, which had already drifted. Asserting the responses are
+    // byte-identical is what keeps one consolidated implementation honest — and
+    // what would have caught the drift that existed before it.
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const created = await api('admin/home-exits', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        proxyName: 'parity-exit',
+        displayName: 'Parity',
+        kind: 'socks5',
+        socks5Host: '198.51.100.20',
+        socks5Port: 1080,
+        socks5Username: 'u',
+        socks5Password: 'p',
+      }),
+    });
+    expect(created.status).toBe(201);
+    const exitId = ((await created.json()) as any).homeExit.id;
+    const account = await createAccount('front-door-parity');
+    expect((await api(`admin/users/${account.user.id}/home-binding`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ homeExitId: exitId }),
+    })).status).toBe(201);
+
+    for (const resource of ['home-exits', 'home-bindings', 'signup-allowlist']) {
+      const viaToken = await api(`admin/${resource}`, {
+        method: 'GET',
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+      });
+      const viaAccess = await api(`ops/${resource}`, {
+        method: 'GET',
+        headers: accessHeaders,
+      });
+      expect(viaToken.status).toBe(200);
+      expect(viaAccess.status).toBe(200);
+      expect(await viaAccess.text()).toBe(await viaToken.text());
+    }
+
+    // Locks the response contract rather than the coercion. The pre-consolidation
+    // difference here — one door wrapping `email` in `String()`, the other
+    // returning D1's value — turns out to have no runtime effect, because D1
+    // already hands back a string for a TEXT column. Asserting the types is
+    // still worth having: it is a schema change to a non-text column, not a
+    // missing `String()`, that this would catch.
+    const allowlist = await api('admin/signup-allowlist', {
+      method: 'GET',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    for (const entry of ((await allowlist.json()) as any).entries) {
+      expect(typeof entry.email).toBe('string');
+      expect(typeof entry.createdAt).toBe('number');
+    }
+
+    // A write reaches the same implementation too: the PATCH is issued through
+    // Access and read back through the token surface.
+    const patched = await api(`ops/home-exits/${exitId}`, {
+      method: 'PATCH',
+      headers: accessHeaders,
+      body: JSON.stringify({ displayName: 'Parity renamed' }),
+    });
+    expect(patched.status).toBe(200);
+    const readBack = await api('admin/home-exits', {
+      method: 'GET',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(((await readBack.json()) as any).homeExits.find(
+      (row: any) => row.id === exitId,
+    ).displayName).toBe('Parity renamed');
+
+    // And neither door accepts the other's credential.
+    expect((await api('ops/home-exits', {
+      method: 'GET',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    })).status).toBe(401);
+    expect((await api('admin/home-exits', {
+      method: 'GET',
+      headers: accessHeaders,
+    })).status).toBe(401);
+  });
+
   it('serves strict redacted operations DTOs through GET-only queries', async () => {
     const timestamp = 1_700_000_000;
     await env.DB.batch([
@@ -3778,17 +3865,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin('diagnostics/reports/O0O0O0O0', undefined, 'GET')).status).toBe(400);
   });
 
-  const gzip = async (text: string) => new Uint8Array(
-    await new Response(
-      new Blob([text]).stream().pipeThrough(new CompressionStream('gzip')),
-    ).arrayBuffer(),
-  );
+  // Typed as `Uint8Array<ArrayBuffer>` rather than the default
+  // `Uint8Array<ArrayBufferLike>`: the latter admits SharedArrayBuffer, which
+  // `BlobPart` rejects, so the request body below would not typecheck.
+  const gzip = async (text: string): Promise<Uint8Array<ArrayBuffer>> =>
+    new Uint8Array(
+      await new Response(
+        new Blob([text]).stream().pipeThrough(new CompressionStream('gzip')),
+      ).arrayBuffer(),
+    );
   const gunzip = async (bytes: ArrayBuffer) => new Response(
     new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')),
   ).text();
   const logUpload = async (
     token: string,
-    payload: Uint8Array,
+    payload: Uint8Array<ArrayBuffer>,
     overrides: Record<string, string> = {},
   ) => api('diagnostics/logs', {
     method: 'POST',
@@ -3802,7 +3893,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       'X-Tono-Log-Os-Version': 'macOS 26.3',
       ...overrides,
     },
-    body: payload,
+    // Wrapped because a Uint8Array is not a `BodyInit` under the Workers types,
+    // even though workerd accepts one at run time.
+    body: new Blob([payload]),
   });
 
   it('stores a raw log segment in R2 and indexes it in D1', async () => {
@@ -3824,7 +3917,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       `logs/${account.user.id}/${new Date(row.received_at * 1000).toISOString().slice(0, 10)}`
       + '/FE5919D3-405E-4538-9C4C-1866E088F24F-0000000.jsonl.gz',
     );
-    const stored = await env.DIAGNOSTICS_LOGS.get(row.r2_key);
+    const stored = await (env as unknown as Env).DIAGNOSTICS_LOGS.get(row.r2_key);
     expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(body);
   });
 
@@ -3850,7 +3943,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // Decompress before asserting. Reading the object as text compares gzip
     // bytes, in which no plaintext marker ever appears — an assertion that
     // passes whether or not the replay overwrote the segment.
-    const stored = await env.DIAGNOSTICS_LOGS.get(row.r2_key);
+    const stored = await (env as unknown as Env).DIAGNOSTICS_LOGS.get(row.r2_key);
     const text = await gunzip(await stored!.arrayBuffer());
     expect(text).toContain('"a":1');
     expect(text).not.toContain('different');
@@ -3890,12 +3983,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   it('rejects an oversized log segment without storing a partial object', async () => {
     const account = await createAccount('log-oversize');
     // Incompressible bytes, so the gzip stays above the 2 MiB cap.
-    const noise = new Uint8Array(3 * 1024 * 1024);
+    const noise = new Uint8Array(new ArrayBuffer(3 * 1024 * 1024));
     crypto.getRandomValues(noise.subarray(0, 65_536));
     for (let offset = 65_536; offset < noise.byteLength; offset += 65_536) {
       noise.set(noise.subarray(0, 65_536), offset);
     }
-    const body = new Uint8Array([0x1f, 0x8b, ...noise]);
+    const body = new Uint8Array(new ArrayBuffer(noise.byteLength + 2));
+    body.set([0x1f, 0x8b]);
+    body.set(noise, 2);
     expect((await logUpload(account.accessToken, body)).status).toBe(413);
     const count = await env.DB.prepare(
       'SELECT COUNT(*) AS n FROM diagnostics_log_objects',
@@ -3938,7 +4033,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const inside = createExecutionContext();
     await worker.scheduled(createScheduledController(), env as unknown as Env, inside);
     await waitOnExecutionContext(inside);
-    expect(await env.DIAGNOSTICS_LOGS.get(row.r2_key)).not.toBeNull();
+    expect(await (env as unknown as Env).DIAGNOSTICS_LOGS.get(row.r2_key)).not.toBeNull();
 
     // The row is immutable by trigger, so it cannot simply be aged in place.
     // Asserting that first is what keeps the replace-outright dance below from
@@ -3964,7 +4059,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const after = createExecutionContext();
     await worker.scheduled(createScheduledController(), env as unknown as Env, after);
     await waitOnExecutionContext(after);
-    expect(await env.DIAGNOSTICS_LOGS.get(row.r2_key)).toBeNull();
+    expect(await (env as unknown as Env).DIAGNOSTICS_LOGS.get(row.r2_key)).toBeNull();
     expect(await env.DB.prepare(
       'SELECT id FROM diagnostics_log_objects WHERE id = ?',
     ).bind(segment.id).first()).toBeNull();

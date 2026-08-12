@@ -14,6 +14,7 @@ mod integration_profile;
 pub mod policy_sync;
 pub mod state;
 pub mod steps;
+pub mod log_upload;
 pub mod telemetry;
 pub mod transport;
 #[cfg(windows)]

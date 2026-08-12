@@ -239,6 +239,16 @@ impl TonoTransport {
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .body(body.clone());
         }
+        // Mutually exclusive with `json_body` by construction, so the two cannot
+        // both set a content type on one request.
+        if let Some(body) = &request.binary_body {
+            builder = builder
+                .header(reqwest::header::CONTENT_TYPE, body.content_type)
+                .body(body.bytes.clone());
+        }
+        for (name, value) in &request.headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
 
         let mut response = builder.send().await.map_err(|err| transport(&err))?;
         let status = response.status().as_u16();
@@ -476,6 +486,8 @@ mod tests {
                 url: url.clone(),
                 bearer: None,
                 json_body: None,
+                binary_body: None,
+                headers: Vec::new(),
             })
             .await
             .expect("the fallback must carry the request");
@@ -518,6 +530,8 @@ mod tests {
                 url: format!("http://tono-stall.test:{port}/"),
                 bearer: None,
                 json_body: Some("{}".to_string()),
+                binary_body: None,
+                headers: Vec::new(),
             })
             .await
             .expect_err("a server that never answers must fail");
@@ -550,6 +564,8 @@ mod tests {
                 url: "http://tono-nowhere.test/".to_string(),
                 bearer: None,
                 json_body: None,
+                binary_body: None,
+                headers: Vec::new(),
             })
             .await
             .expect_err("both paths are dead");

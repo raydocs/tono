@@ -40,6 +40,10 @@ pub mod endpoints {
     pub const DIAGNOSTICS_REPORTS: &str = "diagnostics/reports";
     /// Periodic testing timeline windows (client default-on, user-disableable).
     pub const TELEMETRY_WINDOWS: &str = "telemetry/windows";
+    /// Raw audit-log segments for the test programme. Unlike
+    /// [`DIAGNOSTICS_REPORTS`] this carries hostnames, process paths and routes,
+    /// so it is gated on its own product toggle and its own disclosure.
+    pub const DIAGNOSTICS_LOGS: &str = "diagnostics/logs";
     pub fn device(id: &str) -> String {
         format!("devices/{id}")
     }
@@ -570,6 +574,54 @@ pub enum HttpMethod {
     Delete,
 }
 
+/// Server bound for one gzip segment, matching the column CHECK it is stored
+/// under. A client wanting to send more splits into further segments rather than
+/// having one truncated.
+pub const MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES: usize = 2 * 1024 * 1024;
+
+/// One gzip segment of the local audit log, with the metadata the server needs
+/// to place it in a session's sequence.
+#[derive(Debug, Clone, Copy)]
+pub struct DiagnosticsLogSegment<'a> {
+    pub session_id: &'a str,
+    pub sequence: u32,
+    pub line_count: u32,
+    pub client_version: &'a str,
+    pub os_version: &'a str,
+    pub gzip: &'a [u8],
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsLogReceipt {
+    pub segment: DiagnosticsLogReceiptSegment,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsLogReceiptSegment {
+    pub id: String,
+    pub received_at: i64,
+}
+
+/// Trims a header value to printable ASCII within a length bound.
+///
+/// A Windows build string can carry anything the OS reports; the server rejects
+/// a control character outright, so a value is cleaned here rather than turning
+/// an unusual OS string into a failed upload.
+fn bounded_header(value: &str, max: usize) -> String {
+    let cleaned: String = value
+        .chars()
+        .filter(|c| c.is_ascii() && *c >= ' ' && *c != '\u{7f}')
+        .take(max)
+        .collect();
+    if cleaned.is_empty() {
+        "unknown".to_string()
+    } else {
+        cleaned
+    }
+}
+
 /// One control-plane request, fully built (URL = base + `/api/v1/` + path).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiRequest {
@@ -577,6 +629,20 @@ pub struct ApiRequest {
     pub url: String,
     pub bearer: Option<String>,
     pub json_body: Option<String>,
+    /// Pre-encoded body with its own content type, for the one upload that is
+    /// not JSON. Mutually exclusive with `json_body`: a request carrying both
+    /// would leave the content type up to whichever branch the transport
+    /// happened to check first, so the constructor below never sets both.
+    pub binary_body: Option<BinaryBody>,
+    /// Extra request headers, already validated by the caller. Bounded and
+    /// ASCII-only so a transport can set them without further screening.
+    pub headers: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryBody {
+    pub content_type: &'static str,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -784,6 +850,72 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         Ok(receipt)
     }
 
+    /// `POST diagnostics/logs`: upload one gzip segment of the local audit log.
+    ///
+    /// The body is compressed bytes rather than JSON, because these are the
+    /// largest uploads the client makes and a base64 envelope would inflate
+    /// every one of them by a third. Metadata travels in headers so the stored
+    /// object is exactly the bytes that were compressed.
+    ///
+    /// Callers must honour the product toggle. Session identifiers are screened
+    /// here rather than trusted: they become part of a server-side object key,
+    /// and the server refuses anything outside this grammar anyway — failing in
+    /// the client turns a rejected upload into an obvious programming error.
+    pub async fn upload_diagnostics_log_segment(
+        &self,
+        segment: DiagnosticsLogSegment<'_>,
+    ) -> Result<DiagnosticsLogReceipt, ApiError> {
+        if segment.gzip.len() < 2 || segment.gzip[0] != 0x1f || segment.gzip[1] != 0x8b {
+            return Err(ApiError::InvalidInput(
+                "diagnostics log segment must be gzip".to_string(),
+            ));
+        }
+        if segment.gzip.len() > MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES {
+            return Err(ApiError::InvalidInput(
+                "diagnostics log segment is too large".to_string(),
+            ));
+        }
+        if segment.session_id.is_empty()
+            || segment.session_id.len() > 64
+            || !segment
+                .session_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err(ApiError::InvalidInput(
+                "diagnostics log session id must be 1-64 chars of [0-9A-Za-z-]".to_string(),
+            ));
+        }
+        let headers = vec![
+            ("X-Tono-Log-Session".to_string(), segment.session_id.to_string()),
+            ("X-Tono-Log-Sequence".to_string(), segment.sequence.to_string()),
+            ("X-Tono-Log-Lines".to_string(), segment.line_count.to_string()),
+            (
+                "X-Tono-Log-Client-Version".to_string(),
+                bounded_header(segment.client_version, 40),
+            ),
+            (
+                "X-Tono-Log-Os-Version".to_string(),
+                bounded_header(segment.os_version, 80),
+            ),
+        ];
+        let response = self
+            .authorized_binary(
+                endpoints::DIAGNOSTICS_LOGS,
+                BinaryBody {
+                    content_type: "application/gzip",
+                    bytes: segment.gzip.to_vec(),
+                },
+                headers,
+            )
+            .await?;
+        let receipt: DiagnosticsLogReceipt = decode_json(&response)?;
+        if receipt.segment.id.trim().is_empty() {
+            return Err(ApiError::InvalidResponse);
+        }
+        Ok(receipt)
+    }
+
     /// `DELETE devices/{uuid}`. Any device except the current one may be
     /// revoked (§2); the current-device check is the caller's policy.
     pub async fn revoke_device(&self, id: &str) -> Result<(), ApiError> {
@@ -861,6 +993,53 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 // No transport retry on the replay: the refresh just proved
                 // connectivity, and the budget is one retry per logical request.
                 self.send(method, path, body, Some(&renewed)).await
+            }
+            result => result,
+        }
+    }
+
+    /// Binary twin of [`Self::authorized`], with the same single 401 replay.
+    ///
+    /// Kept separate rather than generalising `authorized`: that function is on
+    /// the path of every request in the product, and threading an
+    /// `Option<BinaryBody>` plus a header vector through it would put an unused
+    /// branch in all of them to serve exactly one caller.
+    async fn authorized_binary(
+        &self,
+        path: &str,
+        body: BinaryBody,
+        headers: Vec<(String, String)>,
+    ) -> Result<Vec<u8>, ApiError> {
+        let (token, epoch) = {
+            let state = self.state.lock().await;
+            match &state.access_token {
+                Some(token) => (token.clone(), state.epoch),
+                None => {
+                    let epoch = state.epoch;
+                    drop(state);
+                    let token = self.refresh_access_token(epoch).await?;
+                    let epoch = self.state.lock().await.epoch;
+                    (token, epoch)
+                }
+            }
+        };
+        let build = |bearer: &str| ApiRequest {
+            method: HttpMethod::Post,
+            url: format!("{}/{API_PREFIX}{path}", self.base_url),
+            bearer: Some(bearer.to_string()),
+            json_body: None,
+            binary_body: Some(body.clone()),
+            headers: headers.clone(),
+        };
+        match map_status(self.transport.send(build(&token)).await?) {
+            Err(ApiError::Unauthorized) => {
+                let mut state = self.state.lock().await;
+                if state.epoch == epoch {
+                    state.access_token = None;
+                }
+                drop(state);
+                let renewed = self.refresh_access_token(epoch).await?;
+                map_status(self.transport.send(build(&renewed)).await?)
             }
             result => result,
         }
@@ -955,6 +1134,8 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             url: format!("{}/{API_PREFIX}{path}", self.base_url),
             bearer: bearer.map(str::to_string),
             json_body: body,
+            binary_body: None,
+            headers: Vec::new(),
         };
         map_status(self.transport.send(request).await?)
     }
@@ -1163,6 +1344,140 @@ mod tests {
             normalize_installation_id("not-a-uuid"),
             Err(ApiError::InvalidInput(_))
         ));
+    }
+
+    // ---- raw diagnostics log segments ----
+
+    fn segment_headers(request: &ApiRequest) -> std::collections::HashMap<String, String> {
+        request.headers.iter().cloned().collect()
+    }
+
+    fn log_segment<'a>(gzip: &'a [u8], session: &'a str) -> DiagnosticsLogSegment<'a> {
+        DiagnosticsLogSegment {
+            session_id: session,
+            sequence: 7,
+            line_count: 42,
+            client_version: "0.0.30",
+            os_version: "Windows 11 26100",
+            gzip,
+        }
+    }
+
+    #[tokio::test]
+    async fn uploads_a_log_segment_as_gzip_with_its_metadata_in_headers() {
+        let (client, mock, _store) = test_client(|request| {
+            if request.url.ends_with("auth/refresh") {
+                return json(200, r#"{"accessToken":"a","refreshToken":"r"}"#);
+            }
+            json(201, r#"{"segment":{"id":"seg-1","receivedAt":1786500000}}"#)
+        });
+        client.adopt(&auth_response("access", Some("refresh"))).await.unwrap();
+        let gzip = vec![0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02];
+        let receipt = client
+            .upload_diagnostics_log_segment(log_segment(&gzip, "FE5919D3-405E-4538"))
+            .await
+            .unwrap();
+        assert_eq!(receipt.segment.id, "seg-1");
+
+        let request = mock
+            .requests()
+            .into_iter()
+            .find(|r| r.url.ends_with("diagnostics/logs"))
+            .expect("no upload request");
+        // The bytes must arrive exactly as compressed: the server stores the body
+        // verbatim, so any re-encoding here would land unreadable objects.
+        let body = request.binary_body.clone().expect("binary body");
+        assert_eq!(body.bytes, gzip);
+        assert_eq!(body.content_type, "application/gzip");
+        assert!(request.json_body.is_none());
+        let headers = segment_headers(&request);
+        assert_eq!(headers.get("X-Tono-Log-Session").unwrap(), "FE5919D3-405E-4538");
+        assert_eq!(headers.get("X-Tono-Log-Sequence").unwrap(), "7");
+        assert_eq!(headers.get("X-Tono-Log-Lines").unwrap(), "42");
+        assert_eq!(headers.get("X-Tono-Log-Client-Version").unwrap(), "0.0.30");
+        assert_eq!(headers.get("X-Tono-Log-Os-Version").unwrap(), "Windows 11 26100");
+    }
+
+    #[tokio::test]
+    async fn refuses_a_segment_that_is_not_gzip_before_sending_anything() {
+        let (client, mock, _store) = test_client(|_| json(201, r#"{"segment":{"id":"x","receivedAt":1}}"#));
+        client.adopt(&auth_response("access", Some("refresh"))).await.unwrap();
+        for bad in [vec![], vec![0x1f], b"{\"a\":1}".to_vec(), vec![0x8b, 0x1f]] {
+            assert!(matches!(
+                client
+                    .upload_diagnostics_log_segment(log_segment(&bad, "s"))
+                    .await,
+                Err(ApiError::InvalidInput(_))
+            ));
+        }
+        assert_eq!(mock.count_to("diagnostics/logs"), 0);
+    }
+
+    #[tokio::test]
+    async fn refuses_an_oversized_segment_and_a_session_id_that_could_escape_a_key() {
+        let (client, mock, _store) = test_client(|_| json(201, r#"{"segment":{"id":"x","receivedAt":1}}"#));
+        client.adopt(&auth_response("access", Some("refresh"))).await.unwrap();
+        let mut huge = vec![0x1f, 0x8b];
+        huge.resize(MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES + 1, 0);
+        assert!(matches!(
+            client.upload_diagnostics_log_segment(log_segment(&huge, "s")).await,
+            Err(ApiError::InvalidInput(_))
+        ));
+        let gzip = vec![0x1f, 0x8b, 0x00];
+        for session in ["", "../etc/passwd", "a/b", "has space", &"x".repeat(65)] {
+            assert!(
+                matches!(
+                    client
+                        .upload_diagnostics_log_segment(log_segment(&gzip, session))
+                        .await,
+                    Err(ApiError::InvalidInput(_))
+                ),
+                "accepted session id {session:?}"
+            );
+        }
+        assert_eq!(mock.count_to("diagnostics/logs"), 0);
+    }
+
+    #[tokio::test]
+    async fn a_log_upload_replays_once_after_a_401_with_the_same_bytes() {
+        let attempts = Arc::new(Mutex::new(0u32));
+        let seen = attempts.clone();
+        let (client, mock, _store) = test_client(move |request| {
+            if request.url.ends_with("auth/refresh") {
+                return json(200, r#"{"accessToken":"fresh","refreshToken":"r2"}"#);
+            }
+            let mut count = seen.lock().unwrap();
+            *count += 1;
+            if *count == 1 {
+                return Ok(ApiResponse { status: 401, body: Vec::new() });
+            }
+            json(201, r#"{"segment":{"id":"seg-2","receivedAt":2}}"#)
+        });
+        client.adopt(&auth_response("stale", Some("refresh"))).await.unwrap();
+        let gzip = vec![0x1f, 0x8b, 0x11, 0x22];
+        let receipt = client
+            .upload_diagnostics_log_segment(log_segment(&gzip, "s1"))
+            .await
+            .unwrap();
+        assert_eq!(receipt.segment.id, "seg-2");
+        assert_eq!(mock.count_to("diagnostics/logs"), 2);
+        // The replay must carry the identical payload — a re-read or re-compress
+        // would upload different bytes under the same sequence number.
+        let uploads: Vec<_> = mock
+            .requests()
+            .into_iter()
+            .filter(|r| r.url.ends_with("diagnostics/logs"))
+            .collect();
+        assert_eq!(uploads[0].binary_body, uploads[1].binary_body);
+        assert_eq!(uploads[1].bearer.as_deref(), Some("fresh"));
+    }
+
+    #[test]
+    fn header_values_are_bounded_printable_ascii() {
+        assert_eq!(bounded_header("Windows 11", 40), "Windows 11");
+        assert_eq!(bounded_header("a\u{7f}b\nc", 40), "abc");
+        assert_eq!(bounded_header("中文", 40), "unknown");
+        assert_eq!(bounded_header(&"x".repeat(200), 40), "x".repeat(40));
     }
 
     // ---- base url validation ----
