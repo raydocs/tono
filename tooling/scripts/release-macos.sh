@@ -177,8 +177,14 @@ staging="$out/.release-$short_version-build$build"
 # The rename must not have invalidated anything, and the archive must contain the
 # bundle under the name Sparkle will look for.
 /usr/bin/unzip -tq "$named" >/dev/null || fail "the release archive is not readable"
-/usr/bin/unzip -Z1 "$named" | /usr/bin/head -1 | /usr/bin/grep -q '^Tono\.app/' \
-  || fail "the release archive does not contain Tono.app at its root"
+# Listed into a variable rather than piped through `head`: this script runs with
+# `pipefail`, and `head` closing the pipe early kills `unzip` with SIGPIPE, which
+# fails the pipeline even when the check itself passed. That reported a correct
+# archive as one missing its bundle.
+archive_entries=$(/usr/bin/unzip -Z1 "$named") \
+  || fail "the release archive could not be listed"
+[[ ${archive_entries%%$'\n'*} == "Tono.app/" ]] \
+  || fail "the release archive does not begin with Tono.app/ but with ${archive_entries%%$'\n'*}"
 signature=$("$sign_update" "$named" 2>/dev/null \
   | /usr/bin/sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
 [[ -n $signature ]] || fail "signing the archive produced no signature"
