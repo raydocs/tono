@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publish a managed traffic policy, signing it offline when it needs a signature.
+// Publish a managed traffic policy, signing it offline.
 //
 // The private key never leaves this machine and never reaches the Worker. That is
 // the whole point of signing: if the Worker could sign, taking the Worker would be
@@ -19,8 +19,10 @@
 //      re-verifies, so if anything differed between the two calls the signature
 //      fails and nothing is stored.
 //
-// A policy whose hosts the allowlists already cover needs no signature, and the
-// dry run says so. Most republishes are that case and stay a single unsigned PUT.
+// Every revision is signed when a key is available, whether or not the allowlists
+// would have accepted it unsigned. Signing only when forced would make the first
+// policy that needs a signature also the first ever signed, putting a fault in the
+// signing path on the worst possible day.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -34,11 +36,10 @@ const KEYCHAIN_SERVICE = 'tono-policy-signing';
 const usage = () => {
   process.stderr.write(`usage: publish-traffic-policy.mjs --policy <file> [--api <base>] [--publish]
 
-  Without --publish: asks what would be served, reports whether a signature is
-  required, signs it, verifies the signature locally, and stops. Nothing is
-  stored.
+  Without --publish: asks what would be served, signs it, verifies the signature
+  against the key the fleet trusts, and stops. Nothing is stored.
 
-  With --publish: also PUTs the policy, with a signature when one is needed.
+  With --publish: also PUTs the policy together with its signature.
 
   --api defaults to https://api.afk.ccwu.cc
   The admin token is read from the keychain (service tono-admin).
@@ -123,40 +124,54 @@ process.stdout.write(`  version ${parsed.version}: ${counts}\n`);
 process.stdout.write(`  sha256 ${preview.body.sha256}\n`);
 process.stdout.write(`  signature ${preview.body.signatureRequired ? 'required' : 'not required'}\n`);
 
+// Signed whenever a key is available, not only when the allowlists fail to cover
+// the document.
+//
+// `signatureRequired` says whether an *unsigned* publish would be accepted; it is
+// not a reason to withhold a signature. Signing only when forced would mean the
+// first policy that needs one is also the first that has ever been signed, so a
+// fault in the signing path would surface on the day it is least welcome and
+// would look like the new domain being at fault. Signing every revision keeps the
+// trusted path continuously exercised, and costs a keychain read.
 let signature;
-if (preview.body.signatureRequired) {
+{
   const pkcs8 = keychain(KEYCHAIN_SERVICE);
-  if (!pkcs8) {
+  if (!pkcs8 && preview.body.signatureRequired) {
     fail(`this policy needs a signature but no signing key is in the keychain (service ${KEYCHAIN_SERVICE})`);
   }
-  process.stdout.write('── signing, offline\n');
-  const message = new TextEncoder().encode(SIGNATURE_CONTEXT + canonical);
-  let raw;
-  try {
-    const key = await webcrypto.subtle.importKey(
-      'pkcs8', Buffer.from(pkcs8, 'base64'), { name: 'Ed25519' }, false, ['sign'],
-    );
-    raw = await webcrypto.subtle.sign('Ed25519', key, message);
-  } catch (error) {
-    fail(`the signing key could not be used: ${error.message}`);
+  if (!pkcs8) {
+    process.stdout.write('  no signing key available; publishing unsigned\n');
   }
-  signature = Buffer.from(raw).toString('base64');
+  if (pkcs8) {
+    process.stdout.write('── signing, offline\n');
+    const message = new TextEncoder().encode(SIGNATURE_CONTEXT + canonical);
+    let raw;
+    try {
+      const key = await webcrypto.subtle.importKey(
+        'pkcs8', Buffer.from(pkcs8, 'base64'), { name: 'Ed25519' }, false, ['sign'],
+      );
+      raw = await webcrypto.subtle.sign('Ed25519', key, message);
+    } catch (error) {
+      fail(`the signing key could not be used: ${error.message}`);
+    }
+    signature = Buffer.from(raw).toString('base64');
 
-  // Verified here, against the public key the deployment and the clients were
-  // built with, before anything is sent. A signature that only the server can
-  // reject costs a round trip to discover; one that the server accepts and the
-  // clients reject silently disables managed direct routing fleet-wide.
-  const configured = readFileSync(
-    new URL('../../services/control-plane/wrangler.jsonc', import.meta.url), 'utf8',
-  ).match(/"TRAFFIC_POLICY_PUBLIC_KEY":\s*"([^"]+)"/);
-  if (!configured) fail('wrangler.jsonc declares no TRAFFIC_POLICY_PUBLIC_KEY to check against');
-  const publicKey = await webcrypto.subtle.importKey(
-    'raw', Buffer.from(configured[1], 'base64'), { name: 'Ed25519' }, false, ['verify'],
-  );
-  if (!await webcrypto.subtle.verify('Ed25519', publicKey, Buffer.from(signature, 'base64'), message)) {
-    fail('the signature does not verify against the public key this deployment trusts; the keychain key and TRAFFIC_POLICY_PUBLIC_KEY are not a pair');
+    // Verified here, against the public key the deployment and the clients were
+    // built with, before anything is sent. A signature that only the server can
+    // reject costs a round trip to discover; one that the server accepts and the
+    // clients reject silently disables managed direct routing fleet-wide.
+    const configured = readFileSync(
+      new URL('../../services/control-plane/wrangler.jsonc', import.meta.url), 'utf8',
+    ).match(/"TRAFFIC_POLICY_PUBLIC_KEY":\s*"([^"]+)"/);
+    if (!configured) fail('wrangler.jsonc declares no TRAFFIC_POLICY_PUBLIC_KEY to check against');
+    const publicKey = await webcrypto.subtle.importKey(
+      'raw', Buffer.from(configured[1], 'base64'), { name: 'Ed25519' }, false, ['verify'],
+    );
+    if (!await webcrypto.subtle.verify('Ed25519', publicKey, Buffer.from(signature, 'base64'), message)) {
+      fail('the signature does not verify against the public key this deployment trusts; the keychain key and TRAFFIC_POLICY_PUBLIC_KEY are not a pair');
+    }
+    process.stdout.write('  verifies against the key the fleet trusts\n');
   }
-  process.stdout.write('  verifies against the key the fleet trusts\n');
 }
 
 if (!publish) {
