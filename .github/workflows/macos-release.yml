@@ -38,7 +38,7 @@ on:
         type: string
   push:
     tags:
-      - tono-*-build*
+      - tono-macos-*-build*
 
 permissions:
   contents: read
@@ -49,7 +49,9 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
+    # Manual releases belong to the macOS release line. A tag is accepted only
+    # after the ancestry check below proves it names a commit on that line.
+    if: github.ref_type == 'tag' || github.ref == 'refs/heads/release/macos'
     runs-on: macos-26
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}
@@ -70,6 +72,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Require the macOS release line
+        run: |
+          set -eu
+          git fetch --no-tags origin release/macos
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/release/macos; then
+            echo "FATAL: $GITHUB_SHA is not on release/macos; refusing a macOS release from another platform line." >&2
+            exit 1
+          fi
 
       - name: Require every macOS signing and notarization secret
         env:
@@ -118,13 +131,13 @@ jobs:
             expected_build=
           else
             case "$GITHUB_REF_NAME" in
-              tono-*-build*) ;;
+              tono-macos-*-build*) ;;
               *)
-                echo "FATAL: tag $GITHUB_REF_NAME is not tono-<short-version>-build<build>." >&2
+                echo "FATAL: tag $GITHUB_REF_NAME is not tono-macos-<short-version>-build<build>." >&2
                 exit 1
                 ;;
             esac
-            short_version=${GITHUB_REF_NAME#tono-}
+            short_version=${GITHUB_REF_NAME#tono-macos-}
             short_version=${short_version%-build*}
             expected_build=${GITHUB_REF_NAME##*-build}
           fi
@@ -159,7 +172,7 @@ jobs:
             exit 1
           fi
           artifact_name="Tono-$short_version-build$project_build-arm64"
-          tag="tono-$short_version-build$project_build"
+          tag="tono-macos-$short_version-build$project_build"
           {
             echo "short_version=$short_version"
             echo "build=$project_build"

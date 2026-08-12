@@ -59,7 +59,7 @@ done
 [[ -f $notes ]] || { print "release notes not found: $notes" >&2; exit 2 }
 
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
-tag="tono-$short_version-build$build"
+tag="tono-macos-$short_version-build$build"
 # The publisher checks that the enclosure URL's filename matches the archive, so
 # the archive is named for the release from the start rather than renamed later.
 archive_name="Tono-$short_version-build$build-arm64.zip"
@@ -85,6 +85,8 @@ project="$repo_root/apps/macos/LiquidClash.xcodeproj/project.pbxproj"
 if [[ -n $(git -C "$repo_root" status --porcelain) ]]; then
   fail "the tree is dirty; a release should be reproducible from a commit"
 fi
+source_commit=$(git -C "$repo_root" rev-parse HEAD) \
+  || fail "could not resolve the source commit"
 
 step "building and notarising"
 out="$repo_root/artifacts"
@@ -207,6 +209,7 @@ if [[ $publish != yes ]]; then
   print "\n── not published (no --publish)"
   print "  archive: $named"
   print "  would tag:      $tag"
+  print "  source commit:  $source_commit"
   print "  would enclose:  $enclosure"
   print "\n  Before publishing, run the install lifecycle against this exact bundle:"
   print "    sudo tooling/scripts/test-helper-install-lifecycle.sh --app $app"
@@ -215,11 +218,28 @@ if [[ $publish != yes ]]; then
 fi
 
 step "creating the GitHub release"
+source_branch=$(git -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null) \
+  || fail "publishing requires the checked-out release/macos branch, not a detached HEAD"
+[[ $source_branch == release/macos ]] \
+  || fail "publishing is restricted to release/macos; current branch is $source_branch"
+/usr/bin/git -C "$repo_root" fetch --quiet origin release/macos \
+  || fail "could not refresh origin/release/macos"
+remote_release_commit=$(/usr/bin/git -C "$repo_root" rev-parse origin/release/macos) \
+  || fail "could not resolve origin/release/macos"
+[[ $source_commit == $remote_release_commit ]] \
+  || fail "release/macos is not pushed exactly: local $source_commit, remote $remote_release_commit"
 /usr/bin/env gh release view "$tag" --repo "$release_repo" >/dev/null 2>&1 \
   && fail "$tag already exists; releases are immutable by intent"
 /usr/bin/env gh release create "$tag" --repo "$release_repo" --prerelease \
-  --title "Tono $short_version Build $build" --notes-file "$notes" "$named" \
+  --target "$source_commit" \
+  --title "Tono macOS $short_version Build $build" --notes-file "$notes" "$named" \
   || fail "creating the release failed"
+released_commit=$(/usr/bin/env gh api \
+  "repos/$release_repo/commits/$tag" --jq .sha 2>/dev/null) \
+  || fail "could not resolve the published tag"
+[[ $released_commit == $source_commit ]] \
+  || fail "published tag resolved to $released_commit, expected $source_commit"
+print "  tag resolves to source commit $source_commit"
 
 step "writing the feed entry"
 /usr/bin/env node "$repo_root/tooling/scripts/publish-macos-appcast.mjs" "${validate_args[@]}" \
@@ -232,4 +252,4 @@ print "  Deploy it yourself, after checking what else is in that directory —"
 print "  publishing it once nearly shipped build 42, whose helper could not be"
 print "  repaired on any machine:"
 print "    git -C $repo_root diff --stat services/control-plane/public/"
-print "    cd services/control-plane && npx wrangler deploy"
+print "    cd services/control-plane && npm run deploy"
