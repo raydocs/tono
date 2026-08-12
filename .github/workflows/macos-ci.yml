@@ -30,7 +30,11 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    # The app uses macOS 26 APIs — `glassEffect` among them — so a macos-15 image
+    # cannot compile it. On that runner every job that builds the app failed with
+    # "value of type 'some View' has no member 'glassEffect'", which reads like a
+    # code error and is really a missing SDK.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -53,7 +57,7 @@ jobs:
             test
 
   policy-tests:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -82,7 +86,7 @@ jobs:
   # the ones a developer was least likely to have run. Both faults they cover
   # shipped, in consecutive builds. On a runner they run every time.
   privileged-tests:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 

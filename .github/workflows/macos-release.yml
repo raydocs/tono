@@ -50,7 +50,7 @@ concurrency:
 jobs:
   build:
     if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
-    runs-on: macos-15
+    runs-on: macos-26
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}
       build: ${{ steps.release-version.outputs.build }}
@@ -266,7 +266,7 @@ jobs:
 
   validate-appcast:
     needs: build
-    runs-on: macos-15
+    runs-on: macos-26
     environment: macos-appcast
     env:
       RELEASE_SHORT_VERSION: ${{ needs.build.outputs.short_version }}

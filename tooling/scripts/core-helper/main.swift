@@ -148,13 +148,27 @@ private func runCoreLifecycleSelfTests() -> Bool {
         """.utf8))
         return false
     }
+    // Prefer the installed daemon's trusted user, so a developer machine exercises
+    // the same identity production does. Where nothing is installed — a fresh CI
+    // runner — fall back to whoever invoked sudo: this needs *a* trusted uid, not
+    // an installation, and refusing here made the check unrunnable in the one
+    // place it runs unattended.
+    //
+    // Scoped to this self-test on purpose. `readAllowedUID` is what the daemon
+    // itself uses and keeps demanding a root-owned file; a fallback there would be
+    // a way to talk it into trusting somebody else.
     let allowedUID: uid_t
-    do {
-        allowedUID = try readAllowedUID()
-    } catch {
-        FileHandle.standardError.write(Data(
-            "core lifecycle self-test needs an installed daemon to read the trusted user from\n".utf8
-        ))
+    if let installed = try? readAllowedUID() {
+        allowedUID = installed
+    } else if let invoking = ProcessInfo.processInfo.environment["SUDO_UID"],
+              let parsed = uid_t(invoking), parsed > 0 {
+        allowedUID = parsed
+    } else {
+        FileHandle.standardError.write(Data("""
+        core lifecycle self-test needs a trusted user: either an installed daemon
+        to read one from, or SUDO_UID from having been run through sudo.
+
+        """.utf8))
         return false
     }
     guard let home = try? homeDirectory(for: allowedUID) else { return false }
