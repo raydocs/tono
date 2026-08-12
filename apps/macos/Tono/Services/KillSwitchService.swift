@@ -96,6 +96,19 @@ nonisolated enum KillSwitchService {
                     "killswitch_arm_flushed_states",
                     details: ["reviewed_bundle_direct": String(reviewedBundleDirect)]
                 )
+            } else if status.killedHosts > 0 {
+                // The narrow path. Recorded separately so the two are countable
+                // apart in a log: a customer's showed seventeen machine-wide
+                // flushes in sixty-three minutes, and knowing how many of those
+                // became targeted kills is the whole measure of whether the
+                // 3.11.0 daemon is doing its job.
+                LocalTrafficAudit.shared.recordEvent(
+                    "killswitch_arm_killed_hosts",
+                    details: [
+                        "hosts": String(status.killedHosts),
+                        "reviewed_bundle_direct": String(reviewedBundleDirect),
+                    ]
+                )
             }
             isArmed = true
         } catch HelperIPCError.forbidden {

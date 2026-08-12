@@ -30,6 +30,10 @@ nonisolated struct HelperManager {
         let live: Bool?
         let healed: Bool?
         let flushedStates: Bool?
+        /// Addresses whose states were killed individually instead of flushing
+        /// the machine. Absent from a pre-3.11.0 daemon, which only had the
+        /// all-or-nothing choice.
+        let killedHosts: Int?
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
@@ -539,7 +543,7 @@ nonisolated struct HelperManager {
         // No default: an omitted value silently revokes the permit while the
         // rule engine still routes that bundle direct.
         reviewedBundleDirect: Bool
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool) {
+    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool, killedHosts: Int) {
         var object: [String: Any] = [:]
         if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         if let apiHosts { object["apiHosts"] = apiHosts }
@@ -732,7 +736,7 @@ nonisolated struct HelperManager {
     private static func requireKillSwitchSuccess(
         _ result: (status: Int, body: Data),
         operation: String
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool) {
+    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool, killedHosts: Int) {
         let envelope = try requireSuccess(result, operation: operation)
         guard let armed = envelope.armed,
               let wanted = envelope.wantArmed,
@@ -745,7 +749,8 @@ nonisolated struct HelperManager {
         // event that may not have happened.
         return (
             armed, wanted, live, envelope.healed ?? false,
-            envelope.flushedStates ?? false
+            envelope.flushedStates ?? false,
+            envelope.killedHosts ?? 0
         )
     }
 

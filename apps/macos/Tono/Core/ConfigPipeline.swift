@@ -274,10 +274,33 @@ nonisolated struct ConfigPipeline {
     /// review: the target is a protected residential hop, not the physical
     /// interface, so a process that matched one it should not still leaves
     /// through the tunnel and still fails closed.
+    /// Deliberately unanchored. These were `^/Applications/Claude.app/` and
+    /// friends, which is the same assumption that had already cost WeChat its
+    /// entire China-direct path: a customer whose bundle sits in `~/Applications`
+    /// — what macOS itself suggests for a non-administrator install — or in a
+    /// folder of their own matched nothing, so the Electron helpers that do the
+    /// actual fetching left through the datacenter exit while the CLI, matched by
+    /// process name, used the residential hop. One account, two egress
+    /// identities, and nothing on screen to say so.
+    ///
+    /// `PROCESS-PATH-REGEX` is a contains match, verified rather than assumed: a
+    /// process under a nested `Claude.app` matches `/Claude\.app/` while an
+    /// unrelated path does not. So naming the bundle is enough and its location
+    /// stops mattering, on any volume at any depth.
+    ///
+    /// The npm entry covers every prefix `npm -g`, pnpm and bun can choose; the
+    /// installer entry covers any home directory layout. Widening is safe here
+    /// for the reason below: the target is a protected hop, so a process matched
+    /// by mistake still leaves through the tunnel and still fails closed.
+    ///
+    /// Residual limit: a *renamed* Claude.app still misses. Unlike WeChat, whose
+    /// Chinese installer produces `微信.app` by default, this bundle ships as
+    /// Claude.app and renaming it is a deliberate act.
     static let assistantHomeProcessPathRegexes = [
-        "^/Users/[^/]+/\\.local/share/claude/versions/",
-        "^/Applications/Claude\\.app/",
-        "^/Applications/ChatGPT\\.app/",
+        "/\\.local/share/claude/versions/",
+        "/node_modules/@anthropic-ai/claude-code/",
+        "/Claude\\.app/",
+        "/ChatGPT\\.app/",
     ]
     /// Exact suffixes accepted by traffic-policy v3. They are rendered only
     /// as TCP DOMAIN-SUFFIX rules; the control plane and client both reject
@@ -323,29 +346,78 @@ nonisolated struct ConfigPipeline {
     /// dedicated NetworkService helper, WeChatHelper, wxplayer, wxocr). Process
     /// matching therefore covers the whole reviewed bundle prefix, not one
     /// exact executable path. The standard install location is always present;
-    /// a Launch Services lookup adds the real install path (e.g. under
-    /// ~/Applications) so a non-standard install keeps routing and audit
-    /// attribution. Dynamic entries are validated before adoption: they must
-    /// still be a WeChat.app bundle and must be safe to embed in a Mihomo
-    /// rule payload (no comma or parenthesis, printable ASCII only).
-    static let managedDirectProcessBundlePaths: [String] = {
+    /// a Launch Services lookup adds the real install path so a non-standard
+    /// install keeps routing and audit attribution.
+    ///
+    /// Adoption is gated on the code signature and on being safe to embed in a
+    /// Mihomo rule payload — and on nothing else. It used to also require the
+    /// bundle be *named* `WeChat.app` and its path be printable ASCII, and both
+    /// of those excluded the install a customer actually had:
+    ///
+    ///     /Applications/联系软件/微信.app/Contents/MacOS/WeChat
+    ///
+    /// A renamed bundle inside a folder of their own — ordinary housekeeping,
+    /// and the localized name is what the Chinese installer offers. Every one of
+    /// that account's WeChat connections fell through to `MATCH,Tono-Exit`: 342
+    /// of 342 in one three-hour window, including the TCP/443 flows that should
+    /// have been direct, so China-direct had never once worked for them while
+    /// the UI reported the policy as active. Neither gate bought anything a
+    /// signature does not: `isSignedWeChatBundle` requires an Apple-anchored
+    /// signature claiming `com.tencent.xinWeChat` from Tencent's team, and
+    /// anyone able to satisfy that can equally name their bundle `WeChat.app`.
+    ///
+    /// What must still hold is what the rule payload cannot survive: control
+    /// characters would corrupt the emitted YAML line. Non-ASCII is fine — the
+    /// rule is UTF-8 and matched by RE2. Commas and parentheses, which delimit
+    /// Mihomo AND sub-rules, are not rejected either: they are emitted as RE2
+    /// hex escapes so the payload never contains the character itself. A folder
+    /// called `Apps (2)` is ordinary, and rejecting it would be the same failure
+    /// as rejecting `微信.app` — a customer whose layout we did not anticipate
+    /// silently losing the whole feature.
+    /// Recomputed on each access rather than cached for the process lifetime.
+    ///
+    /// It was a `static let`, which meant a customer who installed or moved
+    /// WeChat while Tono was running got no China-direct routing until they
+    /// quit and reopened the app — with the UI reporting the policy as active
+    /// the whole time, which is the same silent shape as the path gates this
+    /// replaced. Cost is one Launch Services query and one signature check per
+    /// bundle, on a path that runs when a config is built, not per packet.
+    ///
+    /// Remaining limit: a bundle Launch Services has never registered is still
+    /// invisible, and the list is sampled when the runtime is generated, so a
+    /// move mid-session is picked up on the next connect or policy refresh
+    /// rather than immediately.
+    static var managedDirectProcessBundlePaths: [String] {
         var paths = ["/Applications/WeChat.app/"]
         let discovered = NSWorkspace.shared.urlsForApplications(
             withBundleIdentifier: "com.tencent.xinWeChat"
         )
         for url in discovered {
             let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
-            guard path.hasSuffix("/WeChat.app/"),
-                  !path.contains(","), !path.contains("("), !path.contains(")"),
-                  path.unicodeScalars.allSatisfy({
-                      $0.isASCII && $0.value > 0x20 && $0.value < 0x7F
-                  }),
+            guard isRulePayloadSafeBundlePath(path),
                   !paths.contains(path),
                   isSignedWeChatBundle(at: url) else { continue }
             paths.append(path)
         }
         return paths
-    }()
+    }
+
+    /// Whether a bundle path can be embedded in a Mihomo rule without changing
+    /// how that rule parses.
+    ///
+    /// Separated from the discovery loop so it can be tested without a signed
+    /// bundle on disk, which is the part of adoption a test cannot fabricate.
+    static func isRulePayloadSafeBundlePath(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), path.hasSuffix("/"), path.count <= 1_024
+        else { return false }
+        // Control characters, DEL, and the Unicode line/paragraph separators a
+        // YAML emitter would treat as a break.
+        return path.unicodeScalars.allSatisfy {
+            $0.value >= 0x20 && $0.value != 0x7F
+                && $0.value != 0x2028 && $0.value != 0x2029
+                && $0.value != 0x85
+        }
+    }
 
     /// Path shape is not an identity. Launch Services returns whatever bundle
     /// currently claims `com.tencent.xinWeChat`, and any process running as the
@@ -409,18 +481,47 @@ nonisolated struct ConfigPipeline {
     /// Anchored RE2 patterns for Mihomo PROCESS-PATH-REGEX sub-rules, derived
     /// from the reviewed bundle prefixes so the two can never drift apart.
     static var managedDirectProcessPathRegexes: [String] {
-        managedDirectProcessBundlePaths.map {
-            let pattern = "^" + NSRegularExpression.escapedPattern(for: $0)
-            // Commas separate AND sub-rules and parentheses delimit them, so
-            // either character (even backslash-escaped) would corrupt the
-            // emitted rule payload. Bundle paths must never contain them.
-            precondition(
-                !pattern.contains(",") && !pattern.contains("(")
-                    && !pattern.contains(")"),
-                "managed direct bundle path unsafe for rule emission"
-            )
-            return pattern
+        managedDirectProcessBundlePaths.map(rulePathRegex(for:))
+    }
+
+    /// Anchored RE2 pattern for one bundle prefix, with the three characters
+    /// Mihomo's rule grammar owns replaced by hex escapes.
+    ///
+    /// A comma separates AND sub-rules and parentheses delimit them, so a path
+    /// containing either would be split in the wrong place — backslash-escaping
+    /// does not help, because the splitting happens before the regex is parsed.
+    /// `\x2c` and friends carry the character without the payload containing
+    /// it. Verified against mihomo rather than assumed: a process under a
+    /// directory named `a,b` matches a rule written with `\x2c`, while one
+    /// outside it does not.
+    static func rulePathRegex(for path: String) -> String {
+        // Built one character at a time rather than by escaping the whole path
+        // and patching the result. The patching version replaced `\(` and then
+        // `(`, which is order-dependent: dropping the first replacement left the
+        // second one rewriting the parenthesis *inside* the backslash escape and
+        // producing `\\x28`, a literal backslash followed by an escape. The
+        // pattern still contained no delimiter, so a "contains" assertion could
+        // not see it. Per-character has no such ordering to get wrong.
+        var escaped = ""
+        for character in path {
+            switch character {
+            case ",": escaped += "\\x2c"
+            case "(": escaped += "\\x28"
+            case ")": escaped += "\\x29"
+            default:
+                escaped += NSRegularExpression.escapedPattern(for: String(character))
+            }
         }
+        let pattern = "^" + escaped
+        // Backstop, not the mechanism: if a future edit reintroduces a literal
+        // delimiter the emitted ruleset would silently mis-parse, and a crash
+        // here is preferable to a rule that routes the wrong traffic.
+        precondition(
+            !pattern.contains(",") && !pattern.contains("(")
+                && !pattern.contains(")"),
+            "managed direct bundle path unsafe for rule emission"
+        )
+        return pattern
     }
 
     /// Deterministic, bounded group names avoid exposing long policy hostnames
@@ -1178,7 +1279,12 @@ nonisolated struct ConfigPipeline {
             // bundle direct instead and let the pins below stay as a redundant
             // narrower match. Everything else still reaches `MATCH,Tono-Exit`,
             // so this changes what WeChat does, not what anything else does.
-            for processPathRegex in managedDirectProcessPathRegexes {
+            // Sampled once: the property queries Launch Services, and two
+            // loops reading it separately could emit a ruleset that permits a
+            // bundle in one direction and not the other if an install landed
+            // between them.
+            let bundlePathRegexes = managedDirectProcessPathRegexes
+            for processPathRegex in bundlePathRegexes {
                 // TCP/80 used to be sent to the protected exit here, because
                 // five measured direct dials returned no bytes. That
                 // measurement was taken on this project's own Mac, whose direct
@@ -1213,7 +1319,7 @@ nonisolated struct ConfigPipeline {
                 yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
                 yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
             }
-            for processPathRegex in managedDirectProcessPathRegexes {
+            for processPathRegex in bundlePathRegexes {
                 for pin in directPolicy.domainPins {
                     for port in pin.ports {
                         guard let groupName = directFallbackGroups[

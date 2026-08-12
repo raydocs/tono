@@ -251,9 +251,24 @@ final class KillSwitchManager {
 
         lock.lock()
         defer { lock.unlock() }
-        guard stateGeneration == startingGeneration, commitAllowed() else {
+        // Two different failures shared one message, and that message named a
+        // cause neither of them has. A customer's log carried 21 of these in
+        // five hours — 46 user-visible errors — while only three wake events
+        // occurred, so nearly all of them were the generation check rather than
+        // the sleep gate, and the text sent everyone looking at their Wi-Fi.
+        // Naming which condition failed is what lets the next log distinguish
+        // "a concurrent helper operation superseded this arm" from "the machine
+        // went to sleep mid-arm"; the two have completely different fixes.
+        if stateGeneration != startingGeneration {
             throw HelperFailure.invalid(
-                "The network changed during Kill Switch preparation; protection remains fail-closed."
+                "Kill Switch preparation was superseded by another protection change; "
+                + "protection remains fail-closed."
+            )
+        }
+        guard commitAllowed() else {
+            throw HelperFailure.invalid(
+                "The machine began sleeping during Kill Switch preparation; "
+                + "protection remains fail-closed."
             )
         }
         try Self.writeRules(state: state, allowedUID: allowedUID)
@@ -268,14 +283,36 @@ final class KillSwitchManager {
         let passRules = Self.passRules(
             in: Self.renderRules(state: state, allowedUID: allowedUID)
         )
-        let revokesAccess = lastLoadedPassRules.map {
-            !$0.isSubset(of: passRules)
-        } ?? true
-        try Self.ensureAnchorLoaded(flushStates: revokesAccess)
+        let withdrawn = lastLoadedPassRules.map { $0.subtracting(passRules) }
+        // A first arm after daemon start has no baseline, so it cannot know what
+        // it is replacing and takes the machine-wide flush.
+        let disposal: StateDisposal
+        switch withdrawn {
+        case .none:
+            disposal = .full
+        case .some(let rules) where rules.isEmpty:
+            disposal = .keep
+        case .some(let rules):
+            // Address-scoped withdrawals — a node switch moving the exit permit,
+            // a refreshed control-plane pin — kill only those addresses' states.
+            // Anything structural falls back to the flush. A customer's log
+            // showed seventeen machine-wide flushes in sixty-three minutes, one
+            // every 3.7 minutes, mostly from node switches; each of those took
+            // every unrelated connection on the host down with it.
+            disposal = Self.withdrawnHosts(rules).map { StateDisposal.targeted($0) } ?? .full
+        }
+        try Self.ensureAnchorLoaded(disposal: disposal)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
         return response(
-            armed: true, wanted: true, live: true, flushedStates: revokesAccess
+            armed: true,
+            wanted: true,
+            live: true,
+            flushedStates: disposal == .full,
+            killedHosts: {
+                if case .targeted(let hosts) = disposal { return hosts.count }
+                return 0
+            }()
         )
     }
 
@@ -405,7 +442,8 @@ final class KillSwitchManager {
         wanted: Bool,
         live: Bool,
         healed: Bool = false,
-        flushedStates: Bool = false
+        flushedStates: Bool = false,
+        killedHosts: Int = 0
     ) -> [String: Any] {
         [
             "ok": true,
@@ -422,6 +460,11 @@ final class KillSwitchManager {
             // one bit that distinguishes them turns that investigation into a
             // log line.
             "flushedStates": flushedStates,
+            // How many addresses had their states killed individually instead.
+            // Distinguishes "withdrew a permit and dealt with it narrowly" from
+            // "withdrew nothing" — both report flushedStates false, and only one
+            // of them changed the ruleset.
+            "killedHosts": killedHosts,
             "version": helperVersion,
         ]
     }
@@ -1488,7 +1531,54 @@ final class KillSwitchManager {
         return candidate != original
     }
 
+    /// What to do about states established under rules that no longer exist.
+    ///
+    /// A withdrawal must never leave a usable state behind — that is the whole
+    /// point of the kill switch — but `pfctl -F states` achieves it by freeing
+    /// every state on the machine, which severs every unrelated flow the user
+    /// has open. `.targeted` kills only states involving the addresses whose
+    /// permits went away, which is a superset of what the withdrawn rules could
+    /// have created (the rules were address+port+user, this kills the address)
+    /// and therefore cannot under-kill.
+    enum StateDisposal: Equatable {
+        case keep
+        case targeted([String])
+        case full
+    }
+
+    /// Reduces withdrawn pass rules to the addresses they permitted, or nil when
+    /// any of them is not expressible that way.
+    ///
+    /// Returning nil is the safe answer and the common one for anything
+    /// structural: interface rules (`pass in quick on utun199 all`), the
+    /// reviewed-bundle `from any to any` permits, and any future shape all fall
+    /// back to the machine-wide flush. Only the address-scoped exceptions — exit
+    /// endpoints, DERP tuples, proxy targets, control-plane pins — take the
+    /// narrow path, and those are exactly the ones that churn on a node switch.
+    static func withdrawnHosts(_ withdrawn: Set<String>) -> [String]? {
+        guard !withdrawn.isEmpty else { return [] }
+        var hosts: Set<String> = []
+        for rule in withdrawn {
+            // Deliberately matched against this file's own renderer rather than
+            // parsing PF generally: a rule shape it does not recognise must
+            // reach the fallback, not a best guess.
+            guard let range = rule.range(of: #"(?<= to )[0-9A-Fa-f:.]+(?= port )"#, options: .regularExpression)
+            else { return nil }
+            let host = String(rule[range])
+            // `from any to any` renders as `to any`, which the pattern above
+            // rejects; this is belt and braces for a renderer change.
+            guard host != "any", host.rangeOfCharacter(from: CharacterSet(charactersIn: "0123456789:")) != nil
+            else { return nil }
+            hosts.insert(host)
+        }
+        return hosts.sorted()
+    }
+
     private static func ensureAnchorLoaded(flushStates: Bool) throws {
+        try ensureAnchorLoaded(disposal: flushStates ? .full : .keep)
+    }
+
+    private static func ensureAnchorLoaded(disposal: StateDisposal) throws {
         let mainChanged = try ensureMainHook()
         let loaded: HelperCommandResult
         if mainChanged || !mainAnchorActive() {
@@ -1518,7 +1608,32 @@ final class KillSwitchManager {
         guard effectiveStatus() else {
             throw HelperFailure.system("Kill Switch rules are not active.")
         }
-        if flushStates {
+        switch disposal {
+        case .keep:
+            break
+        case .targeted(let hosts):
+            // Ordering matters: the new ruleset is already loaded above, so a
+            // killed state cannot be re-established under the rule that was
+            // withdrawn. `-k 0.0.0.0/0 -k <host>` is the documented way to kill
+            // by destination irrespective of source.
+            for host in hosts {
+                let wildcard = host.contains(":") ? "::/0" : "0.0.0.0/0"
+                let killed = try run("/sbin/pfctl", ["-k", wildcard, "-k", host])
+                // A kill that fails leaves a state the withdrawn rule created,
+                // which is the one outcome that must not be tolerated: fall
+                // back to the machine-wide flush rather than continuing.
+                guard killed.status == 0 else {
+                    let flushed = try run("/sbin/pfctl", ["-F", "states"])
+                    guard flushed.status == 0 else {
+                        throw HelperFailure.system(
+                            flushed.message.isEmpty
+                                ? "PF state flush failed." : flushed.message
+                        )
+                    }
+                    break
+                }
+            }
+        case .full:
             let flushed = try run("/sbin/pfctl", ["-F", "states"])
             guard flushed.status == 0 else {
                 throw HelperFailure.system(
@@ -2018,6 +2133,59 @@ final class KillSwitchManager {
                   canonicalPublicAddress("fd00::1") == nil,
                   try normalizeHost("ControlPlane.Tailscale.com.") ==
                     "controlplane.tailscale.com" else {
+                return false
+            }
+            // A withdrawal may only take the narrow per-address kill when every
+            // rule it removed is expressible as an address. These checks first
+            // went into `pfSyntaxAccepts`, which returns early without root — so
+            // they passed by never executing, and two mutations of the function
+            // they cover went undetected. They live here because this is the
+            // function `--self-test` actually calls.
+            let exitPermit =
+                "pass out quick inet proto tcp to 198.12.84.154 port 443 "
+                + "user { 0, 501 } keep state (if-bound)"
+            let otherPermit =
+                "pass out quick inet proto udp to 43.146.27.19 port 8000 "
+                + "user { 0, 501 } keep state (if-bound)"
+            let sixPermit =
+                "pass out quick inet6 proto tcp to 2606:4700::1111 port 443 "
+                + "user { 0, 501 } keep state (if-bound)"
+            let interfaceRule = "pass in quick on utun199 all keep state (if-bound)"
+            let anyRule =
+                "pass out quick inet proto tcp from any to any port 443 "
+                + "user { 0, 501 } keep state (if-bound)"
+            // Same address on a second port. This is where de-duplication is
+            // reachable at all: the parameter is a Set, so identical rules are
+            // already collapsed before this function sees them, and only two
+            // distinct rules reducing to one host exercise it. The first version
+            // of this check passed the same rule twice and therefore proved
+            // nothing — a mutation that dropped de-duplication survived it.
+            let exitPermitPort80 =
+                "pass out quick inet proto tcp to 198.12.84.154 port 80 "
+                + "user { 0, 501 } keep state (if-bound)"
+            guard withdrawnHosts([exitPermit]) == ["198.12.84.154"],
+                  // Membership and de-duplication, not order: the hosts are
+                  // iterated to run one kill each, so order is not a behaviour.
+                  // `sorted()` in the implementation is for reproducible logs,
+                  // and an order assertion here would depend on Set hashing —
+                  // it survived being reversed, which is the correct outcome.
+                  // Membership, not order: the hosts are iterated to run one
+                  // kill each, so order is not a behaviour. `sorted()` in the
+                  // implementation is for reproducible logs, and an order
+                  // assertion would depend on Set hashing — it survived being
+                  // reversed, which is the correct outcome.
+                  Set(withdrawnHosts([exitPermit, otherPermit]) ?? [])
+                    == ["198.12.84.154", "43.146.27.19"],
+                  withdrawnHosts([exitPermit, exitPermitPort80])
+                    == ["198.12.84.154"],
+                  withdrawnHosts([sixPermit]) == ["2606:4700::1111"],
+                  // The two shapes that must never take the narrow path.
+                  withdrawnHosts([interfaceRule]) == nil,
+                  withdrawnHosts([anyRule]) == nil,
+                  // One unreducible rule poisons the set: a partial targeted kill
+                  // would leave behind the states of the rule it could not read.
+                  withdrawnHosts([exitPermit, interfaceRule]) == nil,
+                  withdrawnHosts([]) == [] else {
                 return false
             }
             let sample = Data(

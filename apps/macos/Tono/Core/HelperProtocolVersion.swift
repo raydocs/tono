@@ -26,7 +26,16 @@ nonisolated enum HelperProtocolVersion {
     ///   behavioural change, and that coarseness is deliberate: a missed bump
     ///   costs a silently unupgraded daemon, which has already cost two shipped
     ///   builds, while an unnecessary bump costs one administrator prompt.
-    static let current = "3.10.3"
+    /// - 3.10.3 → 3.11.0: a withdrawal that is expressible as a set of addresses
+    ///   now kills only those addresses' states instead of flushing every state
+    ///   on the machine. The IPC contract is unchanged apart from an added
+    ///   `killedHosts` counter, but the behaviour lives entirely in the daemon,
+    ///   so without this bump no installed helper would ever stop flushing.
+    /// - 3.11.0 → 3.11.1: the arm commit guard reports which of its two
+    ///   conditions failed. Same contract, daemon-side text, so a stale daemon
+    ///   would keep emitting the message that misattributed a concurrency
+    ///   failure to the user's network.
+    static let current = "3.11.1"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -534,6 +534,94 @@ struct MultiExitPolicyTests {
             lazy: false
             hidden: true
         """
+        // A customer's WeChat lived at
+        // /Applications/联系软件/微信.app — renamed bundle, own folder — and the
+        // adoption gates rejected it for not being named WeChat.app and for not
+        // being ASCII. Every one of their WeChat connections fell through to the
+        // exit as a result. What must still be refused is anything that changes
+        // how the emitted rule parses.
+        let bundlePathChecks: [(String, Bool)] = [
+            ("/Applications/WeChat.app/", true),
+            ("/Applications/联系软件/微信.app/", true),
+            ("/Users/someone/Applications/WeChat.app/", true),
+            ("/Applications/Мой софт/WeChat.app/", true),
+            // Comma and parentheses delimit Mihomo AND sub-rules, and are now
+            // carried as RE2 hex escapes rather than rejected.
+            ("/Applications/Apps, old/WeChat.app/", true),
+            ("/Applications/Apps (2)/微信.app/", true),
+            ("/Applications/Apps)/WeChat.app/", true),
+            // Control characters and Unicode breaks would corrupt the YAML line.
+            ("/Applications/We\u{0}Chat.app/", false),
+            ("/Applications/We\nChat.app/", false),
+            ("/Applications/We\u{7f}Chat.app/", false),
+            ("/Applications/We\u{2028}Chat.app/", false),
+            ("/Applications/We\u{85}Chat.app/", false),
+            // Shape: absolute, and a bundle prefix rather than an executable.
+            ("Applications/WeChat.app/", false),
+            ("/Applications/WeChat.app", false),
+            ("/" + String(repeating: "a", count: 2000) + "/", false),
+        ]
+        let bundlePathVerdictsHold = bundlePathChecks.allSatisfy { path, expected in
+            ConfigPipeline.isRulePayloadSafeBundlePath(path) == expected
+        }
+        // The emitted pattern must carry the three delimiters without containing
+        // them. Verified against mihomo separately: a process under a directory
+        // named `a,b` matches a rule written with `\x2c` and one outside it does
+        // not, so this is the shape that works rather than the shape that looks
+        // plausible.
+        let delimiterRegexes = [
+            ConfigPipeline.rulePathRegex(for: "/Applications/Apps, old/WeChat.app/"),
+            ConfigPipeline.rulePathRegex(for: "/Applications/Apps (2)/微信.app/"),
+        ]
+        // Exact patterns, not `contains`. A "contains \x28" assertion passed a
+        // version that emitted `\\x28` — a literal backslash then an escape,
+        // which matches nothing — so the whole string is pinned instead.
+        let delimitersAreHexEscaped =
+            delimiterRegexes[0]
+                == "^\\/Applications\\/Apps\\x2c old\\/WeChat\\.app\\/"
+            && delimiterRegexes[1]
+                == "^\\/Applications\\/Apps \\x282\\x29\\/微信\\.app\\/"
+            && delimiterRegexes.allSatisfy {
+                !$0.contains(",") && !$0.contains("(") && !$0.contains(")")
+            }
+
+        // Claude's helper processes can only be matched by bundle path, and the
+        // patterns were anchored at /Applications — so an install under
+        // ~/Applications or in a subfolder sent that traffic out the datacenter
+        // exit while the CLI used the residential hop. These paths are the real
+        // shapes seen in the field, including a customer's npm-global install.
+        let assistantPaths = ConfigPipeline.assistantHomeProcessPathRegexes
+        func assistantMatches(_ path: String) -> Bool {
+            assistantPaths.contains { pattern in
+                path.range(of: pattern, options: .regularExpression) != nil
+            }
+        }
+        let assistantPathCases: [(String, Bool)] = [
+            ("/Applications/Claude.app/Contents/MacOS/Claude", true),
+            // The locations that used to miss.
+            ("/Users/lys/Applications/Claude.app/Contents/MacOS/Claude", true),
+            ("/Applications/AI工具/Claude.app/Contents/MacOS/Claude", true),
+            ("/Volumes/Data/Claude.app/Contents/MacOS/Claude", true),
+            // The Electron helper, which no process-name rule can match.
+            (
+                "/Users/x/Applications/Claude.app/Contents/Frameworks/"
+                + "Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+                true
+            ),
+            // Claude Code, official installer and every npm-style prefix.
+            ("/Users/x/.local/share/claude/versions/2.1.223", true),
+            ("/Users/lys/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", true),
+            ("/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", true),
+            ("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", true),
+            // Must not swallow unrelated processes.
+            ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", false),
+            ("/Applications/WeChat.app/Contents/MacOS/WeChat", false),
+            ("/usr/bin/curl", false),
+        ]
+        let assistantPathVerdictsHold = assistantPathCases.allSatisfy { path, expected in
+            assistantMatches(path) == expected
+        }
+
         let managedDirectChecks = [
             ("proxy", managedDirectRuntime.contains("\n  - name: \"Tono-China-Direct\"\n")),
             ("web-proxy", managedDirectRuntime.contains("\n  - name: \"Tono-China-Web-Direct\"\n")),
@@ -588,6 +676,9 @@ struct MultiExitPolicyTests {
                 )
             ),
             ("no-name-only-identity", !managedDirectRuntime.contains("PROCESS-NAME,WeChat")),
+            ("bundle-path-adoption-verdicts", bundlePathVerdictsHold),
+            ("rule-delimiters-are-hex-escaped", delimitersAreHexEscaped),
+            ("assistant-path-verdicts", assistantPathVerdictsHold),
             ("no-domain-suffix", !managedDirectRuntime.contains("DOMAIN-SUFFIX")),
             (
                 "reviewed-bundle-tcp80-has-no-exit-detour",
