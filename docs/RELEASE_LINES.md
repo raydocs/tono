@@ -35,10 +35,12 @@ format and the release script passes and verifies the exact source commit.
 - `release/macos` contains the post-Build-62 trust-monotonicity and exact-source
   release fixes. Build 62 remains the latest notarized artifact; these source
   fixes require a future Mac build and do not rewrite Build 62.
-- `release/windows` contains Windows 0.0.29 / Service 2.6.5 / protocol 2.11.
-  It fixes the 0.0.28 DNS TCP/UDP port-53 stale Tono-owner failure. Windows
-  0.0.27 remains the latest published installer until 0.0.29 passes the signed
-  Windows build and real-machine release gates.
+- `release/windows` contains Windows 0.0.30 / Service 2.6.6 / protocol 2.12.
+  It fixes the 0.0.29 failure where an inactive but still supervised Tono Core
+  owned DNS TCP/UDP `127.0.0.1:53`: startup now replaces that stale Tono-owned
+  runtime before the fixed-port preflight, while leaving third-party owners
+  untouched. Windows 0.0.27 remains the latest published installer; 0.0.30
+  stays a draft until its signed build and real-machine release gates pass.
 - `main` integrates both lines and is the only source allowed to deploy the
   shared control plane.
 
