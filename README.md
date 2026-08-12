@@ -27,4 +27,11 @@ Open `apps/macos/LiquidClash.xcodeproj` in Xcode. App sources live in
 
 ## Releases
 
-Windows pre-release installers are published as GitHub Releases (`tono-windows-*` tags).
+Windows stable installers use `v<version>` tags; legacy Windows prereleases use
+`tono-windows-*` tags. Future macOS releases use
+`tono-macos-<version>-build<build>` tags.
+
+The maintained release lines are `release/macos` and `release/windows`;
+`main` is their reviewed integration point and the only production
+control-plane deployment source. See [release lines and immutable
+history](docs/RELEASE_LINES.md).

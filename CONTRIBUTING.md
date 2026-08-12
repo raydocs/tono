@@ -28,3 +28,11 @@ open apps/macos/LiquidClash.xcodeproj
 Build and run the macOS client with `⌘R` in Xcode. Requires macOS 26.0+ and
 Xcode 26.0+. See `apps/windows/README.md` for Windows prerequisites and build
 instructions.
+
+## Branch and release ownership
+
+macOS work is released from `release/macos`, Windows work from
+`release/windows`, and both are merged normally into `main`. Only `main` may
+deploy the shared production control plane. See
+[`docs/RELEASE_LINES.md`](docs/RELEASE_LINES.md) for tag formats, immutable
+legacy records, update-channel ownership, and merge gates.

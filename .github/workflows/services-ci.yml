@@ -55,16 +55,19 @@ jobs:
       - name: Type-check
         # The Worker is deployed from this source; a type error here is a runtime
         # error on a production domain.
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Test
         run: npm test
 
       - name: Policy signing contract
-        # Four implementations must agree on the signing key and the signed byte
+        # The signature-aware implementations must agree on the key and signed byte
         # prefix. Drift is silent: signatures verify nowhere, every signed policy
         # reads as untrustworthy, and managed direct routing stops fleet-wide.
-        run: tooling/scripts/test-policy-signing-contract.sh
+        # This job's default directory is services/control-plane. Use the
+        # repository-relative path from there; the previous command looked for
+        # services/control-plane/tooling/... and made an otherwise green PR red.
+        run: ../../tooling/scripts/test-policy-signing-contract.sh
 
   service-agents:
     runs-on: ubuntu-24.04

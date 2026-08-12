@@ -451,15 +451,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       schemaVersion: 1,
       channel: 'test',
       platforms: {
-        macos: { current: { build: 42 } },
+        macos: { current: { version: '0.0.62', build: 62 } },
         windows: {
           current: {
-            version: '2.5.4',
-            build: 'test6',
-            trafficPolicySchemas: [1, 2],
+            version: '0.0.27',
+            build: 27,
+            trafficPolicySchemas: [1, 2, 3],
             artifact: {
-              sha256: 'ef92f8bce4c4fdea9db4e44dcfd68d570f5bacb179892bcc6bf4b46eb97a4ece',
+              sha256: 'fe29a3e2bc7aee24026f8bdb5e6c717555c16c2f32c7652a1aa6ee09090e8319',
             },
+          },
+          candidate: {
+            version: '0.0.29',
+            availability: 'source-ready-unpublished',
+            serviceVersion: '2.6.5',
+            serviceProtocol: '2.11',
           },
         },
       },

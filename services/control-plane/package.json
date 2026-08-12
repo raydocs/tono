@@ -9,8 +9,7 @@
     "admin:worker:deploy": "npm run admin:build && wrangler deploy --config wrangler.admin.jsonc",
     "predev": "npm run admin:build",
     "dev": "wrangler dev",
-    "predeploy": "npm run admin:build",
-    "deploy": "wrangler deploy",
+    "deploy": "../../tooling/scripts/deploy-control-plane-main.sh",
     "typecheck": "tsc --noEmit && tsc -p admin/tsconfig.json --noEmit",
     "test": "vitest run"
   },
