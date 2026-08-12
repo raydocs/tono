@@ -20,6 +20,7 @@ on:
     paths:
       - apps/windows/crates/**
       - apps/windows/service/**
+      - apps/windows/app/**
       - .github/workflows/windows-ci.yml
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
@@ -31,6 +32,7 @@ on:
     paths:
       - apps/windows/crates/**
       - apps/windows/service/**
+      - apps/windows/app/**
       - .github/workflows/windows-ci.yml
 
 permissions:
@@ -54,6 +56,37 @@ jobs:
         # from the crate directory would look for one that does not exist.
         working-directory: apps/windows
         run: cargo test --locked -p tono-core
+
+  app:
+    # 17 test files, 110 tests, a typecheck, and nothing ran any of them: the
+    # release workflow runs one subset of them and only from a tag, which is after
+    # the point where a failure is cheap. Verified locally before being made a
+    # gate — 110 passing, typecheck clean.
+    #
+    # On Linux because the frontend does not need Windows to be type-checked or
+    # unit-tested, and the Windows runner is the slow one.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/windows/app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install pnpm as the project pins it
+        run: npm install --global pnpm@11.3.0
+
+      - name: Install exactly what the lockfile pins
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
 
   service:
     runs-on: windows-2022
