@@ -117,6 +117,35 @@ actor TonoAPIClient {
             requestIsCurrent: isLeaseCurrent
         )
     }
+    /// Uploads one gzip segment of the local audit log.
+    ///
+    /// The body is compressed bytes, not JSON: a base64 envelope would inflate
+    /// every segment by a third, and these are the largest uploads the client
+    /// makes. `additionalHeaders` is applied after the JSON content type is set,
+    /// so declaring gzip here replaces it rather than adding a second value.
+    func uploadDiagnosticsLogSegment(
+        payload: Data,
+        sessionID: String,
+        sequence: Int,
+        lineCount: Int,
+        clientVersion: String,
+        osVersion: String
+    ) async throws -> TonoDiagnosticsLogSegmentResponse {
+        try await authorizedRequest(
+            "diagnostics/logs",
+            method: "POST",
+            bodyData: payload,
+            additionalHeaders: [
+                "Content-Type": "application/gzip",
+                "X-Tono-Log-Session": sessionID,
+                "X-Tono-Log-Sequence": String(sequence),
+                "X-Tono-Log-Lines": String(lineCount),
+                "X-Tono-Log-Client-Version": clientVersion,
+                "X-Tono-Log-Os-Version": osVersion,
+            ]
+        )
+    }
+
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {
         let validID = try validatedDeviceID(id)
         let _: TonoDeviceActionResultResponse = try await authorizedRequest(

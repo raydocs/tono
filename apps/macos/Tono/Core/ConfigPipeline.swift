@@ -1167,24 +1167,37 @@ nonisolated struct ConfigPipeline {
             // narrower match. Everything else still reaches `MATCH,Tono-Exit`,
             // so this changes what WeChat does, not what anything else does.
             for processPathRegex in managedDirectProcessPathRegexes {
-                // Measured over two sessions: every TCP/80 dial this bundle made
-                // on the direct path returned nothing — 0 of 5 flows carried a
-                // single byte back, across two different destinations — while
-                // TCP/443 carried 8.8 MB over 6 of 6 flows and UDP/443 carried
-                // 13 MB in the same window. The class-level fallback cannot see
-                // this: its own probe is an HTTP/80 request that answers in
-                // ~200 ms, so the group stays on direct while these specific
-                // flows hang. WeChat retries for roughly half a minute before
-                // moving on, which is the spinning users see right after
-                // connecting.
+                // TCP/80 used to be sent to the protected exit here, because
+                // five measured direct dials returned no bytes. That
+                // measurement was taken on this project's own Mac, whose direct
+                // path is a US ISP — a path no customer has. On a customer in
+                // China the same rule sends WeChat's main channel on a
+                // transpacific round trip, and two audit logs from one such
+                // customer show what that costs: 320 of 388 and 217 of 300
+                // WeChat connections left through the exit, all of them TCP/80,
+                // while the destinations were China Telecom and China Mobile
+                // access points (112.65.193.0/24, 221.181.99.0/24,
+                // 101.91.37.0/24, 122.188.0.0/16) being reached via Los
+                // Angeles. One address was re-dialled 88 times with 63% of the
+                // gaps at or under three seconds, 28 of them in the first
+                // minute after connecting — the same spinning the rule was
+                // written to stop, now caused by it.
                 //
-                // The mechanism is not established — the working probe argues
-                // against a plain port block — so this is shaped by the
-                // measurement rather than by a diagnosis. Sending only TCP/80
-                // back through the tunnel restores exactly what worked before
-                // the bundle was routed direct at all, and keeps the part that
-                // is demonstrably faster.
-                yaml += "  - AND,((NETWORK,TCP),(DST-PORT,80),(PROCESS-PATH-REGEX,\(processPathRegex))),\(exitGroupName)\n"
+                // The original evidence also no longer reproduces on the
+                // machine it came from: a TCP/80 dial to the four hottest of
+                // those destinations returns 101, 45, 289 and 45 bytes on the
+                // direct path, matching the exit path byte for byte. Windows
+                // never had this exception — `WECHAT_PROCESS_NAMES` routes the
+                // whole bundle direct — so macOS was the outlier.
+                //
+                // TCP/80 now joins the bundle-wide rule below, which is
+                // direct-first with the exit as a fallback member. Accepted
+                // limitation, unchanged from before: that group's probe is a
+                // cheap HTTP/80 request, so a destination-specific hang keeps
+                // the group on direct instead of failing over. If the original
+                // symptom returns it will show in the audit log as repeated
+                // WeChat :80 dials on `Tono-China-Direct`, and the fix then is a
+                // probe that shares the failure mode — not a blanket detour.
                 yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
                 yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
             }

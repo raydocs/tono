@@ -24,11 +24,17 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.aggregatedAppRoutingResearchEnabled,
         store: AppProfile.defaults
-    // Its own row reads "Opt in to…", and every sibling collection toggle
-    // above defaults off. Shipping it on made the copy describe something the
-    // user had not done, and for a product used from China an opt-out default
-    // on any collection is the wrong side of the line to be guessing on.
-    ) private var aggregatedAppRoutingResearchEnabled = false
+    // Defaults on for the test programme. The earlier reversal here was about a
+    // copy/default mismatch — the row claimed "On by default" while the stored
+    // default was off, so the text described something the user had not done.
+    // The copy below now states the default it actually has, and the build ships
+    // with raw-log upload on regardless, so leaving this aggregate off would
+    // have withheld the cheap, hostname-free half of the same picture.
+    ) private var aggregatedAppRoutingResearchEnabled = true
+    @AppStorage(
+        SettingsKey.networkLogUploadEnabled,
+        store: AppProfile.defaults
+    ) private var networkLogUploadEnabled = true
 
     // Proxy Engine. The field edits a local draft; only validated values are
     // committed to storage, so a half-typed "78" abandoned via focus loss can
@@ -172,7 +178,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Aggregated App Routing Research",
-                subtitle: "On by default; you can turn it off at any time. Only while signed in and Ready, about every six hours Tono shares a reviewed fixed list of app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. The list covers WeChat, QQ, Feishu/Lark, DingTalk, WeCom, Tencent Meeting, WPS, Baidu Netdisk, Aliyun Drive, Douyin, bilibili, NetEase Music, QQMusic, Thunder, Jianying, Youdao, AweSun, major browsers, Claude and Trae. For reviewed native apps, absolute process paths are reduced on-device to five fixed bundle-component categories (main, framework helper, XPC, plugin or other bundle helper); unknown apps remain one aggregate “other” family, and no executable name or path text is sent. Turning this off immediately stops collection and deletes pending local research data. Reports are linked to your account and device for abuse prevention, deleted within 90 days, and shown to administrators only as cohort totals. No hostnames, IPs, ports, usernames, absolute paths, bundle IDs, user file paths, content or connection records leave this device. Results create human-review candidates only and never add DIRECT rules automatically.",
+                subtitle: "On by default in this test build; you can turn it off at any time. Only while signed in and Ready, about every six hours Tono shares a reviewed fixed list of app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. The list covers WeChat, QQ, Feishu/Lark, DingTalk, WeCom, Tencent Meeting, WPS, Baidu Netdisk, Aliyun Drive, Douyin, bilibili, NetEase Music, QQMusic, Thunder, Jianying, Youdao, AweSun, major browsers, Claude and Trae. For reviewed native apps, absolute process paths are reduced on-device to five fixed bundle-component categories (main, framework helper, XPC, plugin or other bundle helper); unknown apps remain one aggregate “other” family, and no executable name or path text is sent. Turning this off immediately stops collection and deletes pending local research data. Reports are linked to your account and device for abuse prevention, deleted within 90 days, and shown to administrators only as cohort totals. No hostnames, IPs, ports, usernames, absolute paths, bundle IDs, user file paths, content or connection records leave this device. Results create human-review candidates only and never add DIRECT rules automatically.",
                 isOn: $aggregatedAppRoutingResearchEnabled
             )
             .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
@@ -180,9 +186,22 @@ struct SettingsView: View {
                 accountSession.appRoutingResearchSettingChanged()
             }
 
+            settingDivider
+
+            SettingToggleRow(
+                label: "Network Log Upload (Test Build)",
+                subtitle: "On during the test programme. Uploads the audit log itself — visited hostnames and destination IPs, the process that opened each connection and its path, and which rule and route it matched — to Tono support, in compressed segments every couple of minutes while you are signed in. This is how routing bugs get diagnosed: the WeChat detour was found this way. Credentials, URL queries, page content and message content are removed before anything is written to the log, and TLS bodies are never observed. Segments are linked to your account, readable only by Tono administrators, and deleted after 14 days. Turn this off and nothing from the log leaves this Mac.",
+                isOn: $networkLogUploadEnabled
+            )
+            .onChange(of: networkLogUploadEnabled) { _, _ in
+                accountSession.networkLogUploadSettingChanged()
+            }
+
+            settingDivider
+
             SettingRow(
                 label: "Audit Log",
-                subtitle: "Local only · 10 MB × 3 · credentials and URL queries redacted"
+                subtitle: "10 MB × 3 · credentials and URL queries redacted · uploaded to support while Network Log Upload is on"
             ) {
                 Button("Show in Finder") {
                     let url = LocalTrafficAudit.shared.prepareForReveal()

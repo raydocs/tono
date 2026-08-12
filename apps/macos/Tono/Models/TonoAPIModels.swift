@@ -278,6 +278,17 @@ nonisolated struct TonoAppRoutingResearchResponse: Codable, Sendable {
     let receivedAt: Int
 }
 
+/// Receipt for one uploaded audit-log segment. The server answers a replay with
+/// the identifier of the segment already stored, so the client advances its
+/// cursor on both 200 and 201 and never needs to tell the two apart.
+nonisolated struct TonoDiagnosticsLogSegmentResponse: Codable, Sendable {
+    nonisolated struct Segment: Codable, Sendable {
+        let id: String
+        let receivedAt: Int
+    }
+    let segment: Segment
+}
+
 nonisolated enum TonoDeviceActionName: String, Codable, Sendable {
     case diagnosticSnapshot = "diagnostic_snapshot"
     case claudeTrafficSnapshot = "claude_traffic_snapshot"

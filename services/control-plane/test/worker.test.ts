@@ -3778,6 +3778,198 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin('diagnostics/reports/O0O0O0O0', undefined, 'GET')).status).toBe(400);
   });
 
+  const gzip = async (text: string) => new Uint8Array(
+    await new Response(
+      new Blob([text]).stream().pipeThrough(new CompressionStream('gzip')),
+    ).arrayBuffer(),
+  );
+  const gunzip = async (bytes: ArrayBuffer) => new Response(
+    new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')),
+  ).text();
+  const logUpload = async (
+    token: string,
+    payload: Uint8Array,
+    overrides: Record<string, string> = {},
+  ) => api('diagnostics/logs', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/gzip',
+      'X-Tono-Log-Session': 'FE5919D3-405E-4538-9C4C-1866E088F24F',
+      'X-Tono-Log-Sequence': '0',
+      'X-Tono-Log-Lines': '3',
+      'X-Tono-Log-Client-Version': '0.0.63',
+      'X-Tono-Log-Os-Version': 'macOS 26.3',
+      ...overrides,
+    },
+    body: payload,
+  });
+
+  it('stores a raw log segment in R2 and indexes it in D1', async () => {
+    const account = await createAccount('log-happy');
+    const body = await gzip('{"kind":"connection_opened"}\n{"kind":"mihomo_route"}\n');
+    const response = await logUpload(account.accessToken, body);
+    expect(response.status).toBe(201);
+    const { segment } = await response.json() as any;
+
+    const row = await env.DB.prepare(
+      'SELECT * FROM diagnostics_log_objects WHERE id = ?',
+    ).bind(segment.id).first() as any;
+    expect(row.user_id).toBe(account.user.id);
+    expect(row.sequence).toBe(0);
+    expect(row.byte_size).toBe(body.byteLength);
+    // The key is server-derived from the account, so a client cannot choose
+    // where its own segment lands.
+    expect(row.r2_key).toBe(
+      `logs/${account.user.id}/${new Date(row.received_at * 1000).toISOString().slice(0, 10)}`
+      + '/FE5919D3-405E-4538-9C4C-1866E088F24F-0000000.jsonl.gz',
+    );
+    const stored = await env.DIAGNOSTICS_LOGS.get(row.r2_key);
+    expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(body);
+  });
+
+  it('answers a replayed segment from the index instead of storing it twice', async () => {
+    const account = await createAccount('log-replay');
+    const first = await logUpload(account.accessToken, await gzip('{"a":1}\n'));
+    expect(first.status).toBe(201);
+    const firstId = ((await first.json()) as any).segment.id;
+
+    // A client that lost its cursor re-sends the same sequence with different
+    // bytes. The stored object must not be replaced, or triage would see a
+    // segment whose content no longer matches what the first upload recorded.
+    const replay = await logUpload(account.accessToken, await gzip('{"different":true}\n'));
+    expect(replay.status).toBe(200);
+    expect(((await replay.json()) as any).segment.id).toBe(firstId);
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM diagnostics_log_objects WHERE user_id = ?',
+    ).bind(account.user.id).first() as any;
+    expect(count.n).toBe(1);
+    const row = await env.DB.prepare(
+      'SELECT r2_key FROM diagnostics_log_objects WHERE id = ?',
+    ).bind(firstId).first() as any;
+    // Decompress before asserting. Reading the object as text compares gzip
+    // bytes, in which no plaintext marker ever appears — an assertion that
+    // passes whether or not the replay overwrote the segment.
+    const stored = await env.DIAGNOSTICS_LOGS.get(row.r2_key);
+    const text = await gunzip(await stored!.arrayBuffer());
+    expect(text).toContain('"a":1');
+    expect(text).not.toContain('different');
+  });
+
+  it('refuses a log body that is not gzip', async () => {
+    const account = await createAccount('log-plaintext');
+    const response = await logUpload(
+      account.accessToken,
+      new TextEncoder().encode('{"kind":"connection_opened"}\n'),
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as any).error.message).toBe('Expected a gzip body');
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM diagnostics_log_objects',
+    ).first() as any;
+    expect(count.n).toBe(0);
+  });
+
+  it('refuses log metadata that could escape the derived object key', async () => {
+    const account = await createAccount('log-key-escape');
+    const body = await gzip('{"a":1}\n');
+    for (const session of ['../../etc/passwd', 'a/b', 'has space', '']) {
+      const response = await logUpload(account.accessToken, body, {
+        'X-Tono-Log-Session': session,
+      });
+      expect(response.status).toBe(400);
+    }
+    expect(((await logUpload(account.accessToken, body, {
+      'X-Tono-Log-Sequence': '-1',
+    })).status)).toBe(400);
+    expect(((await logUpload(account.accessToken, body, {
+      'X-Tono-Log-Sequence': '1e3',
+    })).status)).toBe(400);
+  });
+
+  it('rejects an oversized log segment without storing a partial object', async () => {
+    const account = await createAccount('log-oversize');
+    // Incompressible bytes, so the gzip stays above the 2 MiB cap.
+    const noise = new Uint8Array(3 * 1024 * 1024);
+    crypto.getRandomValues(noise.subarray(0, 65_536));
+    for (let offset = 65_536; offset < noise.byteLength; offset += 65_536) {
+      noise.set(noise.subarray(0, 65_536), offset);
+    }
+    const body = new Uint8Array([0x1f, 0x8b, ...noise]);
+    expect((await logUpload(account.accessToken, body)).status).toBe(413);
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM diagnostics_log_objects',
+    ).first() as any;
+    expect(count.n).toBe(0);
+  });
+
+  it('serves a stored segment to admins and lists it per account', async () => {
+    const account = await createAccount('log-admin');
+    const body = await gzip('{"kind":"connection_opened","host":"example.test"}\n');
+    const { segment } = await (await logUpload(account.accessToken, body)).json() as any;
+
+    const listed = await admin(`diagnostics/logs?userId=${account.user.id}`, undefined, 'GET');
+    expect(listed.status).toBe(200);
+    const { segments } = await listed.json() as any;
+    expect(segments.map((row: any) => row.id)).toEqual([segment.id]);
+    expect(segments[0].byteSize).toBe(body.byteLength);
+    expect(segments[0].clientVersion).toBe('0.0.63');
+
+    const download = await admin(`diagnostics/logs/${segment.id}`, undefined, 'GET');
+    expect(download.status).toBe(200);
+    expect(download.headers.get('content-type')).toBe('application/gzip');
+    expect(new Uint8Array(await download.arrayBuffer())).toEqual(body);
+
+    // No admin token, no payload — this bucket is the one place holding
+    // unredacted hostnames.
+    expect((await api(`admin/diagnostics/logs/${segment.id}`, { method: 'GET' })).status).toBe(401);
+  });
+
+  it('deletes the R2 payload when a log segment passes retention', async () => {
+    const account = await createAccount('log-retention');
+    const { segment } = await (await logUpload(
+      account.accessToken,
+      await gzip('{"a":1}\n'),
+    )).json() as any;
+    const row = await env.DB.prepare(
+      'SELECT r2_key FROM diagnostics_log_objects WHERE id = ?',
+    ).bind(segment.id).first() as any;
+
+    const inside = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, inside);
+    await waitOnExecutionContext(inside);
+    expect(await env.DIAGNOSTICS_LOGS.get(row.r2_key)).not.toBeNull();
+
+    // The row is immutable by trigger, so it cannot simply be aged in place.
+    // Asserting that first is what keeps the replace-outright dance below from
+    // quietly becoming the only reason this test passes.
+    await expect(env.DB.prepare(
+      'UPDATE diagnostics_log_objects SET received_at = ? WHERE id = ?',
+    ).bind(Math.floor(Date.now() / 1000) - 15 * 86_400, segment.id).run())
+      .rejects.toThrow(/DIAGNOSTICS_LOG_IMMUTABLE/);
+    await env.DB.prepare('DELETE FROM diagnostics_log_objects WHERE id = ?')
+      .bind(segment.id).run();
+    await env.DB.prepare(
+      `INSERT INTO diagnostics_log_objects(
+         id, user_id, device_id, session_id, sequence, r2_key,
+         byte_size, line_count, received_at, client_version, os_version
+       ) VALUES(?, ?, NULL, 'aged', 0, ?, 10, 1, ?, '0.0.63', 'macOS 26.3')`,
+    ).bind(
+      segment.id,
+      account.user.id,
+      row.r2_key,
+      Math.floor(Date.now() / 1000) - 15 * 86_400,
+    ).run();
+
+    const after = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, after);
+    await waitOnExecutionContext(after);
+    expect(await env.DIAGNOSTICS_LOGS.get(row.r2_key)).toBeNull();
+    expect(await env.DB.prepare(
+      'SELECT id FROM diagnostics_log_objects WHERE id = ?',
+    ).bind(segment.id).first()).toBeNull();
+  });
+
   it('deletes diagnostics reports once they pass retention', async () => {
     const account = await createAccount('diagnostics-retention');
     const upload = await api('diagnostics/reports', json(diagnosticsPayload(), account.accessToken));

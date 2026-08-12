@@ -60,6 +60,13 @@ export interface Env {
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_DAY?: string;
   DIAGNOSTICS_RETENTION_SECONDS?: string;
+  // Raw audit-log segments. The bucket is required, not optional: a build
+  // that forgets the binding must fail at the first upload rather than
+  // silently accepting segments it cannot store.
+  DIAGNOSTICS_LOGS: R2Bucket;
+  DIAGNOSTICS_LOG_RETENTION_SECONDS?: string;
+  RATE_LIMIT_DIAGNOSTICS_LOG_USER_HOUR?: string;
+  RATE_LIMIT_DIAGNOSTICS_LOG_USER_DAY?: string;
   RATE_LIMIT_TELEMETRY_IP_HOUR?: string;
   RATE_LIMIT_TELEMETRY_USER_HOUR?: string;
   RATE_LIMIT_TELEMETRY_USER_DAY?: string;
@@ -458,6 +465,48 @@ async function body(req: Request, maxBytes = 1024 * 1024) {
     if (x instanceof ApiError) throw x;
     throw new ApiError(400, 'INVALID_JSON', 'Expected a JSON body');
   }
+}
+
+// Raw-bytes twin of `body`. Same oversize discipline — drain the stream before
+// responding so neither workerd nor the sender is left feeding an abandoned
+// request — but no JSON parse: the log pipeline uploads gzip, and base64 in a
+// JSON envelope would inflate every segment by a third for nothing.
+async function binaryBody(req: Request, maxBytes: number): Promise<Uint8Array> {
+  const declared = Number(req.headers.get('content-length') ?? '0');
+  let tooLarge = Number.isFinite(declared) && declared > maxBytes;
+  const reader = req.body?.getReader();
+  if (!reader) {
+    if (tooLarge) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Expected a request body');
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      if (tooLarge) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        continue;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (tooLarge) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
+  if (total === 0) throw new ApiError(400, 'VALIDATION_ERROR', 'Expected a request body');
+  const raw = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    raw.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return raw;
 }
 
 const str = (v: any, n: string, min = 1, max = 200) => {
@@ -1724,6 +1773,13 @@ const DIAGNOSTICS_REPORT_MAX_BYTES = 16 * 1024;
 const DIAGNOSTICS_HOUR_SECONDS = 3_600;
 const DIAGNOSTICS_DAY_SECONDS = 86_400;
 const DIAGNOSTICS_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
+// Gzip, not text. Matches the column CHECK; a client that wants to send more
+// splits into more segments rather than having one truncated.
+const DIAGNOSTICS_LOG_MAX_BYTES = 2 * 1024 * 1024;
+const DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS = 14 * DIAGNOSTICS_DAY_SECONDS;
+// Every component of an R2 key is either a fixed string or matched against
+// this, so a session identifier can never introduce a path segment.
+const DIAGNOSTICS_LOG_SESSION_PATTERN = /^[0-9A-Za-z-]{1,64}$/;
 /** Crockford-style: no 0/O/1/I, so a code survives being read over the phone. */
 const referenceAlphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const referencePattern = /^[2-9A-HJ-NP-Z]{8}$/;
@@ -1888,6 +1944,121 @@ function canonicalDiagnosticsReport(value: unknown) {
     appVersion: report.appVersion as string,
     osVersion: report.osVersion as string,
   };
+}
+
+async function rateLimitDiagnosticsLog(e: Env, uid: string) {
+  // Deliberately keyed on the account only. The IP bucket that guards reports
+  // would collapse a household or an office behind one NAT into a single
+  // budget, and unlike a report this upload is a background timer the user is
+  // not waiting on — the account caps are what bound the cost.
+  await consumeRateLimit(
+    e,
+    `rl:${await sha256(`diagnostics-log:user-hour:${uid}`)}`,
+    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_LOG_USER_HOUR', 80),
+    DIAGNOSTICS_HOUR_SECONDS,
+  );
+  await consumeRateLimit(
+    e,
+    `rl:${await sha256(`diagnostics-log:user-day:${uid}`)}`,
+    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_LOG_USER_DAY', 800),
+    DIAGNOSTICS_DAY_SECONDS,
+  );
+}
+
+/** Header-carried metadata for a log segment, validated as strictly as a body. */
+function diagnosticsLogMetadata(req: Request) {
+  const header = (name: string, max: number) => {
+    const value = req.headers.get(name);
+    if (value === null) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Missing ${name}`);
+    }
+    // Header values are ASCII by transport but not by content: reject anything
+    // that could smuggle a control character into a stored column.
+    if (value.length < 1 || value.length > max || /[^\x20-\x7E]/.test(value)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+    }
+    return value;
+  };
+  const integer = (name: string, max: number) => {
+    const raw = header(name, 20);
+    if (!/^\d{1,19}$/.test(raw)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+    }
+    const parsed = Number(raw);
+    if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > max) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+    }
+    return parsed;
+  };
+  const sessionId = header('X-Tono-Log-Session', 64);
+  if (!DIAGNOSTICS_LOG_SESSION_PATTERN.test(sessionId)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid X-Tono-Log-Session');
+  }
+  return {
+    sessionId,
+    sequence: integer('X-Tono-Log-Sequence', 1_000_000),
+    lineCount: integer('X-Tono-Log-Lines', 10_000_000),
+    clientVersion: header('X-Tono-Log-Client-Version', 40),
+    osVersion: header('X-Tono-Log-Os-Version', 80),
+  };
+}
+
+async function storeDiagnosticsLogSegment(
+  e: Env,
+  uid: string,
+  deviceId: string | null,
+  meta: ReturnType<typeof diagnosticsLogMetadata>,
+  payload: Uint8Array,
+) {
+  // A client that loses its upload cursor replays from the last segment it is
+  // sure about. Answering the replay from the index — rather than writing the
+  // object again — is what keeps that cheap and keeps `sequence` meaningful.
+  const existing = await e.DB.prepare(
+    'SELECT id, received_at FROM diagnostics_log_objects WHERE user_id = ? AND session_id = ? AND sequence = ?',
+  ).bind(uid, meta.sessionId, meta.sequence).first<Row>();
+  if (existing) {
+    return {
+      id: String(existing.id),
+      receivedAt: Number(existing.received_at),
+      duplicate: true,
+    };
+  }
+  const t = now();
+  const id = crypto.randomUUID();
+  // Every component is server-derived. The date prefix is what makes a
+  // retention sweep able to list a day without walking the whole bucket.
+  const day = new Date(t * 1000).toISOString().slice(0, 10);
+  const key = `logs/${uid}/${day}/${meta.sessionId}-${String(meta.sequence).padStart(7, '0')}.jsonl.gz`;
+  await e.DIAGNOSTICS_LOGS.put(key, payload, {
+    httpMetadata: { contentType: 'application/gzip', contentEncoding: 'gzip' },
+  });
+  try {
+    await e.DB.prepare(
+      `INSERT INTO diagnostics_log_objects(
+         id, user_id, device_id, session_id, sequence, r2_key,
+         byte_size, line_count, received_at, client_version, os_version
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      id, uid, deviceId, meta.sessionId, meta.sequence, key,
+      payload.byteLength, meta.lineCount, t, meta.clientVersion, meta.osVersion,
+    ).run();
+  } catch {
+    // Two concurrent uploads of the same sequence: the object is already the
+    // right content, so resolve to the row that won instead of failing a client
+    // that did nothing wrong.
+    const winner = await e.DB.prepare(
+      'SELECT id, received_at FROM diagnostics_log_objects WHERE user_id = ? AND session_id = ? AND sequence = ?',
+    ).bind(uid, meta.sessionId, meta.sequence).first<Row>();
+    if (!winner) {
+      throw new ApiError(503, 'DIAGNOSTICS_LOG_UNAVAILABLE', 'Could not record the log segment');
+    }
+    return {
+      id: String(winner.id),
+      receivedAt: Number(winner.received_at),
+      duplicate: true,
+    };
+  }
+  return { id, receivedAt: t, duplicate: false };
 }
 
 async function rateLimitDiagnostics(e: Env, req: Request, uid: string) {
@@ -3063,6 +3234,28 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
     .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
     .run();
+  // Raw log segments: delete the payload before the index row. Losing the row
+  // first would orphan the object with nothing left pointing at it, and this
+  // bucket is the one place in the system holding unredacted hostnames.
+  const logRetention = envInt(
+    e,
+    'DIAGNOSTICS_LOG_RETENTION_SECONDS',
+    DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
+  );
+  const expiredLogs = await e.DB.prepare(
+    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 500',
+  ).bind(t - logRetention).all<Row>();
+  for (const row of expiredLogs.results) {
+    try {
+      await e.DIAGNOSTICS_LOGS.delete(String(row.r2_key));
+      await e.DB.prepare('DELETE FROM diagnostics_log_objects WHERE id = ?')
+        .bind(String(row.id)).run();
+    } catch (x) {
+      // Keep the row so the next sweep retries this object rather than leaving
+      // it in the bucket with no index entry to find it by.
+      console.error('log retention failed', row.id, x instanceof Error ? x.message : String(x));
+    }
+  }
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
     .run();
@@ -3793,6 +3986,37 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json(
       await storeDiagnosticsReport(e, a.userId, appVersion, osVersion, reportJson),
       { status: 201 },
+    );
+  }
+
+  // Continuous network-log ingest. Unlike `/diagnostics/reports` this carries
+  // the unredacted audit log — hostnames, process paths, rules, routes — so the
+  // client only sends it while its own upload setting is on, and the Settings
+  // and Support copy states plainly that it leaves the device. The body is gzip
+  // rather than JSON; metadata rides in headers so the payload is stored exactly
+  // as received.
+  if (p === '/api/v1/diagnostics/logs' && m === 'POST') {
+    const a = await auth(req, e);
+    const meta = diagnosticsLogMetadata(req);
+    const payload = await binaryBody(req, DIAGNOSTICS_LOG_MAX_BYTES);
+    // Cheap shape check with real value: it catches a client that uploads plain
+    // JSONL by mistake before a day of unreadable objects accumulates.
+    if (payload.byteLength < 2 || payload[0] !== 0x1f || payload[1] !== 0x8b) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Expected a gzip body');
+    }
+    await rateLimitDiagnosticsLog(e, a.userId);
+    const stored = await storeDiagnosticsLogSegment(
+      e,
+      a.userId,
+      a.deviceId ?? null,
+      meta,
+      payload,
+    );
+    // 200 on a replay, 201 on a new segment: the client advances its cursor on
+    // either, but the distinction is what makes a cursor bug visible in logs.
+    return Response.json(
+      { segment: { id: stored.id, receivedAt: stored.receivedAt } },
+      { status: stored.duplicate ? 200 : 201 },
     );
   }
 
@@ -4625,6 +4849,56 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           'SELECT * FROM telemetry_windows ORDER BY received_at DESC LIMIT 100',
         ).all<Row>();
       return Response.json({ windows: q.results.map(publicTelemetryWindow) });
+    }
+    if (p === '/api/v1/admin/diagnostics/logs' && m === 'GET') {
+      const url = new URL(req.url);
+      const userId = url.searchParams.get('userId');
+      const limitRaw = url.searchParams.get('limit');
+      const limit = limitRaw === null
+        ? 200
+        : Math.min(Math.max(Number(limitRaw) || 0, 1), 1000);
+      const rows = userId
+        ? await e.DB.prepare(
+          `SELECT * FROM diagnostics_log_objects WHERE user_id = ?
+             ORDER BY received_at DESC LIMIT ?`,
+        ).bind(userId, limit).all<Row>()
+        : await e.DB.prepare(
+          `SELECT * FROM diagnostics_log_objects
+             ORDER BY received_at DESC LIMIT ?`,
+        ).bind(limit).all<Row>();
+      return Response.json({
+        segments: rows.results.map((row) => ({
+          id: String(row.id),
+          userId: String(row.user_id),
+          deviceId: row.device_id == null ? undefined : String(row.device_id),
+          sessionId: String(row.session_id),
+          sequence: Number(row.sequence),
+          byteSize: Number(row.byte_size),
+          lineCount: Number(row.line_count),
+          receivedAt: Number(row.received_at),
+          clientVersion: String(row.client_version),
+          osVersion: String(row.os_version),
+        })),
+      });
+    }
+    mt = p.match(/^\/api\/v1\/admin\/diagnostics\/logs\/([^/]+)$/);
+    if (mt && m === 'GET') {
+      const row = await e.DB.prepare(
+        'SELECT r2_key, session_id, sequence FROM diagnostics_log_objects WHERE id = ?',
+      ).bind(mt[1]).first<Row>();
+      if (!row) throw new ApiError(404, 'NOT_FOUND', 'Log segment not found');
+      const object = await e.DIAGNOSTICS_LOGS.get(String(row.r2_key));
+      // The index outlives a bucket lifecycle rule or a partial retention
+      // sweep, so a missing object is an expected 404 rather than a 500.
+      if (!object) throw new ApiError(404, 'NOT_FOUND', 'Log segment payload is gone');
+      const name = `${row.session_id}-${String(row.sequence).padStart(7, '0')}.jsonl.gz`;
+      return new Response(object.body, {
+        headers: {
+          'content-type': 'application/gzip',
+          'content-disposition': `attachment; filename="${name}"`,
+          'cache-control': 'no-store',
+        },
+      });
     }
     if (p === '/api/v1/admin/traffic-policy' && m === 'GET') {
       return Response.json(await publicTrafficPolicy(e));
