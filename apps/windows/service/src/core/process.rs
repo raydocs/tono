@@ -316,6 +316,20 @@ pub(super) fn select_orphan_core_pids(
     selected
 }
 
+#[cfg(any(windows, test))]
+fn orphan_core_exemptions(
+    exempt_pids: &[u32],
+    runtime_record_pid: Option<u32>,
+    preserve_runtime_record: bool,
+) -> std::collections::BTreeSet<u32> {
+    let mut exempt: std::collections::BTreeSet<u32> =
+        exempt_pids.iter().copied().collect();
+    if preserve_runtime_record && let Some(pid) = runtime_record_pid {
+        exempt.insert(pid);
+    }
+    exempt
+}
+
 /// Terminate every running copy of Tono's installed core image that nothing live vouches for.
 ///
 /// This is the fallback the record-based cleanup cannot be: `reconcile_service_startup` only
@@ -328,22 +342,30 @@ pub(super) fn select_orphan_core_pids(
 /// anywhere else on disk, is never touched.
 ///
 /// `exempt_pids` are processes the caller vouches for: the core this process currently
-/// supervises, or one a start has just spawned. The runtime record's PID is always added here:
-/// a mismatched record means the PID now belongs to someone the record logic deliberately left
-/// alone, and a stale record must never become a license to kill whatever now holds it.
+/// supervises, or one a start has just spawned. `preserve_runtime_record` additionally protects
+/// the PID in the durable runtime record. That protection is deliberately caller-controlled: a
+/// strongly proven active runtime needs it to close the watchdog-restart race, while an inactive
+/// recorded Core is precisely the stale DNS owner that `PrepareCoreStart` must remove.
 #[cfg(windows)]
-pub(super) async fn sweep_orphan_core_processes(exempt_pids: &[u32]) -> Result<u32> {
+pub(super) async fn sweep_orphan_core_processes(
+    exempt_pids: &[u32],
+    preserve_runtime_record: bool,
+) -> Result<u32> {
     // Test builds never sweep the real process table: the selection rule is unit-tested directly,
     // and a `cargo test` run on a machine with Tono installed must not be able to kill the
     // installed core. This mirrors `STARTUP_RECONCILED` defaulting to done under `feature = "test"`.
     if cfg!(feature = "test") {
-        let _ = exempt_pids;
+        let _ = (exempt_pids, preserve_runtime_record);
         return Ok(0);
     }
-    let mut exempt: std::collections::BTreeSet<u32> = exempt_pids.iter().copied().collect();
-    if let Some(record) = crate::core::runtime::read_core_runtime_record().await? {
-        exempt.insert(record.pid);
-    }
+    let runtime_record_pid = if preserve_runtime_record {
+        crate::core::runtime::read_core_runtime_record()
+            .await?
+            .map(|record| record.pid)
+    } else {
+        None
+    };
+    let exempt = orphan_core_exemptions(exempt_pids, runtime_record_pid, preserve_runtime_record);
     let orphans = select_orphan_core_pids(&core_image_candidates()?, &exempt, |path| {
         crate::core::runtime_generation::is_installed_core_image_path(std::path::Path::new(path))
     });
@@ -365,8 +387,11 @@ pub(super) async fn sweep_orphan_core_processes(exempt_pids: &[u32]) -> Result<u
 /// Process-table enumeration is implemented for Windows only (Toolhelp32); unix core cleanup
 /// remains record- and kill-on-close-based.
 #[cfg(not(windows))]
-pub(super) async fn sweep_orphan_core_processes(exempt_pids: &[u32]) -> Result<u32> {
-    let _ = exempt_pids;
+pub(super) async fn sweep_orphan_core_processes(
+    exempt_pids: &[u32],
+    preserve_runtime_record: bool,
+) -> Result<u32> {
+    let _ = (exempt_pids, preserve_runtime_record);
     Ok(0)
 }
 
@@ -427,7 +452,7 @@ fn core_image_candidates() -> Result<Vec<(u32, String)>> {
 
 #[cfg(test)]
 mod tests {
-    use super::select_orphan_core_pids;
+    use super::{orphan_core_exemptions, select_orphan_core_pids};
     use std::collections::BTreeSet;
 
     #[test]
@@ -452,6 +477,28 @@ mod tests {
         assert!(
             select_orphan_core_pids(&[], &BTreeSet::new(), |_| true).is_empty(),
             "an empty process table yields an empty selection"
+        );
+    }
+
+    #[test]
+    fn inactive_runtime_record_does_not_exempt_its_dns_owner() {
+        let candidates = vec![(
+            4860_u32,
+            r"C:\Program Files\Tono\verge-mihomo.exe".to_owned(),
+        )];
+        let installed = |path: &str| path.starts_with(r"C:\Program Files\Tono\");
+
+        let inactive = orphan_core_exemptions(&[], Some(4860), false);
+        assert_eq!(
+            select_orphan_core_pids(&candidates, &inactive, installed),
+            vec![4860],
+            "an inactive Tono runtime record must not keep its loopback DNS owner alive"
+        );
+
+        let protected = orphan_core_exemptions(&[], Some(4860), true);
+        assert!(
+            select_orphan_core_pids(&candidates, &protected, installed).is_empty(),
+            "a fully protected runtime record closes the watchdog replacement race"
         );
     }
 }

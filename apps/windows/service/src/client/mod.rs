@@ -644,9 +644,10 @@ pub async fn is_reinstall_service_needed() -> bool {
         }
 }
 
-/// Ask the authenticated Service to reconcile only untracked Tono-installed Core processes
-/// before the App probes the fixed DNS listener. The returned count is diagnostic; a third-party
-/// listener is never touched and remains visible to the subsequent bind preflight.
+/// Ask the authenticated Service to reconcile Tono-installed Core processes before the App probes
+/// the fixed DNS listener. A completely verified protected runtime is preserved for fail-closed
+/// replacement; stale supervised, recorded, and orphaned Tono cores are stopped. The returned
+/// count is diagnostic, and a third-party listener is never touched.
 pub async fn prepare_core_start(credentials: &OwnerCredentials) -> Result<Response<u32>> {
     protected_call(
         Verb::Post,

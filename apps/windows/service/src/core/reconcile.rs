@@ -75,7 +75,9 @@ pub async fn reconcile_service_startup() -> Result<()> {
         Some(record) => std::slice::from_ref(&record.pid),
         None => &[],
     };
-    sweep_orphan_core_processes(exempt).await?;
+    // `exempt` already contains the startup record PID. Do not re-read a record that was removed
+    // above: on later prepare passes an inactive record must not become a permanent exemption.
+    sweep_orphan_core_processes(exempt, false).await?;
 
     STARTUP_RECONCILED.store(true, Ordering::Release);
     Ok(())

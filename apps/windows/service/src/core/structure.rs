@@ -689,6 +689,39 @@ pub struct ServiceStatusSnapshot {
     pub network_events: NetworkEventsStatus,
 }
 
+/// Whether an already-running Windows Core is safe to preserve until `StartClash` replaces it.
+///
+/// This proof is intentionally shared by the App and Service. The App uses it to admit the
+/// expected loopback-DNS collision during a fail-closed startup replacement; the Service uses it
+/// to decide whether `PrepareCoreStart` may leave its supervised process alive before that bind
+/// probe. Anything weaker must be stopped first, otherwise an inactive Tono Core can permanently
+/// occupy `127.0.0.1:53` and prevent the replacement path from ever reaching `StartClash`.
+pub fn is_protected_startup_replacement_candidate(
+    snapshot: &ServiceStatusSnapshot,
+    dns: &DnsProtectionStatus,
+) -> bool {
+    let protected_runtime = snapshot.kill_switch.as_ref().is_some_and(|status| {
+        status.wanted
+            && status.live
+            && status.verified
+            && status.mode == KillSwitchStatusMode::Locked
+            && status.tunnel_permit_rendered
+            && status.last_error.is_none()
+    });
+    snapshot.active_operation.is_none()
+        && snapshot.is_active
+        && snapshot.active_generation.is_some()
+        && snapshot.service_state == ServiceLifecycleState::Running
+        && snapshot.core_pid.is_some()
+        && snapshot.desired_core_should_be_running
+        && !snapshot.desired_state_unknown
+        && protected_runtime
+        && dns.enabled
+        && dns.snapshot_present
+        && dns.adapters > 0
+        && dns.last_error.is_none()
+}
+
 #[cfg(feature = "response")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response<T> {
