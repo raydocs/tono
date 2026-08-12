@@ -153,7 +153,32 @@ sign_update=$(/usr/bin/find "$HOME/Library/Developer/Xcode/DerivedData" \
   -name sign_update -type f 2>/dev/null | /usr/bin/head -1)
 [[ -n $sign_update ]] || fail "Sparkle's sign_update was not found; build once in Xcode to fetch it"
 named="$out/$archive_name"
-/bin/cp "$zip" "$named"
+# Repackaged, not copied. `package-macos-test.sh` renames the bundle to the
+# artifact name so several test builds can sit side by side, and copying its
+# archive under a release filename kept that name inside: the archive contained
+# `Tono-macOS-0.0.60-build60.app`.
+#
+# For a release that is wrong twice. A customer who unzips it and drags it in gets
+# a second application beside their existing Tono.app rather than replacing it —
+# two copies, two helpers. And Sparkle locates the new bundle in an archive by the
+# host application's name, so an installed Tono.app would find nothing to update
+# from and the update would fail.
+staging="$out/.release-$short_version-build$build"
+[[ -L $staging ]] && fail "refusing to use $staging: it is a symlink"
+/bin/rm -rf -- "$staging"
+/bin/mkdir -p "$staging" || fail "could not stage the release archive"
+# ditto rather than cp: it preserves the extended attributes and resource forks the
+# code signature covers.
+/usr/bin/ditto "$app" "$staging/Tono.app" || fail "could not stage Tono.app"
+/bin/rm -f -- "$named"
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$staging/Tono.app" "$named" \
+  || fail "could not build the release archive"
+/bin/rm -rf -- "$staging"
+# The rename must not have invalidated anything, and the archive must contain the
+# bundle under the name Sparkle will look for.
+/usr/bin/unzip -tq "$named" >/dev/null || fail "the release archive is not readable"
+/usr/bin/unzip -Z1 "$named" | /usr/bin/head -1 | /usr/bin/grep -q '^Tono\.app/' \
+  || fail "the release archive does not contain Tono.app at its root"
 signature=$("$sign_update" "$named" 2>/dev/null \
   | /usr/bin/sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
 [[ -n $signature ]] || fail "signing the archive produced no signature"
