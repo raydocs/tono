@@ -94,6 +94,11 @@ jobs:
 
       - name: Prepare and validate the Windows payload inputs
         run: |
+          # PowerShell normally continues after a native executable returns nonzero. Without
+          # these preferences the release preflight can fail, then a later passing test makes
+          # the whole step green and allows an unchecked installer to be uploaded.
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           pnpm prebuild -- x86_64-pc-windows-msvc
           pnpm release:preflight --config-only
           pnpm typecheck
@@ -117,3 +122,17 @@ jobs:
           releaseBody: After review and publication, run Promote Windows update channel for this exact version.
           releaseDraft: true
           prerelease: false
+
+      - name: Inspect the built NSIS payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $installers = @(
+            Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' `
+              -Filter '*-setup.exe' -File
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS setup executable, found $($installers.Count)"
+          }
+          pnpm release:preflight --payload-only $installers[0].FullName

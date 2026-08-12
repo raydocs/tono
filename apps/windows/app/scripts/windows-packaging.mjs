@@ -633,17 +633,42 @@ export function validateReleaseFeatureTree(featureTree) {
  */
 export function validateTlsPolicySources(sources) {
   const transport = String(sources?.transport ?? '')
-  const clientBuilderAt = transport.indexOf('reqwest::Client::builder()')
-  const noProxyAt = transport.indexOf('.no_proxy()', clientBuilderAt)
   const pinnedResolutionAt = transport.indexOf(
     '.resolve_to_addrs(bootstrap::API_HOST, &pinned)',
-    clientBuilderAt,
   )
-  if (
-    clientBuilderAt < 0 ||
-    noProxyAt <= clientBuilderAt ||
-    pinnedResolutionAt <= noProxyAt
-  ) {
+  const directBuilderAt = transport.lastIndexOf(
+    'reqwest::Client::builder()',
+    pinnedResolutionAt,
+  )
+  const sharedBuilderAt = transport.lastIndexOf(
+    'Self::builder()',
+    pinnedResolutionAt,
+  )
+
+  // The transport may configure the pinned client directly, or it may use the
+  // shared `Self::builder()` factory so the pinned and system-resolved fallback
+  // clients cannot drift. Inspect the builder that actually feeds the pinned
+  // resolution instead of assuming `.no_proxy()` must be textually adjacent to
+  // `.resolve_to_addrs()`: the production transport deliberately uses the shared
+  // factory, and the old adjacency check rejected that safe shape.
+  let proxyFreePinnedBuilder = false
+  if (pinnedResolutionAt >= 0 && directBuilderAt > sharedBuilderAt) {
+    const noProxyAt = transport.indexOf('.no_proxy()', directBuilderAt)
+    proxyFreePinnedBuilder =
+      noProxyAt > directBuilderAt && noProxyAt < pinnedResolutionAt
+  } else if (pinnedResolutionAt >= 0 && sharedBuilderAt >= 0) {
+    const sharedBuilder = transport.match(
+      /fn\s+builder\(\)\s*->\s*reqwest::ClientBuilder\s*\{([\s\S]*?)\n\s*\}/,
+    )?.[1]
+    if (sharedBuilder) {
+      const baseBuilderAt = sharedBuilder.indexOf('reqwest::Client::builder()')
+      const noProxyAt = sharedBuilder.indexOf('.no_proxy()', baseBuilderAt)
+      proxyFreePinnedBuilder =
+        baseBuilderAt >= 0 && noProxyAt > baseBuilderAt
+    }
+  }
+
+  if (!proxyFreePinnedBuilder) {
     return 'Tono control-plane transport must disable application-level proxy discovery before applying its pinned resolver'
   }
 
