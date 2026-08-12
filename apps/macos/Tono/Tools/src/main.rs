@@ -12,7 +12,8 @@ fn main() {
         }
     };
 
-    // Match Clash Verge Rev's exact reqwest+rustls configuration
+    // Keep ordinary rustls chain and hostname verification even though this
+    // legacy development helper is excluded from the Tono.app target.
     let client = Client::builder()
         .use_rustls_tls()
         .redirect(Policy::limited(10))
@@ -21,7 +22,6 @@ fn main() {
         .pool_idle_timeout(None)
         .no_proxy()
         .user_agent("clash-verge/v2.4.8")
-        .danger_accept_invalid_certs(true)
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(15))
         .build()
