@@ -901,6 +901,25 @@ async fn run_stages(
     transaction.check("preparing service")?;
     set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
 
+    // Revision 11 closes the ordering hole in the old orphan-Core reaper. The Service already
+    // knew how to terminate only untracked copies of Tono's canonical installed Core, but that
+    // happened inside StartClash — after the App's loopback:53 availability test. An interrupted
+    // upgrade could therefore leave a Tono Core holding DNS and make the preflight fail forever,
+    // preventing the safe reaper from ever being reached. Reconcile under the authenticated
+    // Service lifecycle lock first; third-party DNS software is never touched and still fails the
+    // ordinary bind proof below with an actionable error.
+    let terminated_orphans = transaction
+        .wait("preparing Tono Core ownership", service::tono_prepare_core_start())
+        .await?
+        .map_err(StageFailure::error)?;
+    if terminated_orphans > 0 {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: Service reconciled {terminated_orphans} orphaned Core process(es) before DNS preflight"
+        );
+    }
+
     // Capture both the policy and its physical egress before WinTUN changes the default route.
     // Re-reading either after the first Core start can select the Tono adapter itself and makes
     // the runtime plan disagree with the WFP preflight that was actually performed.
@@ -2694,6 +2713,24 @@ async fn allocate_runtime_ports() -> Result<RuntimePorts, String> {
 
 /// Protected DNS requires Mihomo to own both TCP and UDP loopback:53. Fail before WFP is installed
 /// when another resolver already owns either socket, avoiding a 45-second protected-offline mystery.
+fn dns_listener_conflict_message(tcp_error: Option<&str>, udp_error: Option<&str>) -> String {
+    let mut failures = Vec::with_capacity(2);
+    if let Some(error) = tcp_error {
+        failures.push(format!("TCP: {error}"));
+    }
+    if let Some(error) = udp_error {
+        failures.push(format!("UDP: {error}"));
+    }
+    let detail = if failures.is_empty() {
+        "socket ownership could not be proven".to_owned()
+    } else {
+        failures.join("; ")
+    };
+    format!(
+        "DNS port 127.0.0.1:53 is unavailable ({detail}). Another DNS or proxy process is using it; close that process and retry"
+    )
+}
+
 #[cfg(windows)]
 async fn preflight_dns_listener() -> Result<(), String> {
     // A just-replaced core can hold 127.0.0.1:53 for a few hundred milliseconds
@@ -2703,8 +2740,8 @@ async fn preflight_dns_listener() -> Result<(), String> {
     // port (another TUN proxy) fails fast with the same message.
     const ATTEMPTS: usize = 30;
     const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
-    let mut last_error = String::from("unknown error");
-    for _ in 0..ATTEMPTS {
+    let mut last_error = dns_listener_conflict_message(None, None);
+    for attempt in 0..ATTEMPTS {
         let tcp = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 53)).await;
         let udp = tokio::net::UdpSocket::bind((std::net::Ipv4Addr::LOCALHOST, 53)).await;
         match (tcp, udp) {
@@ -2713,13 +2750,15 @@ async fn preflight_dns_listener() -> Result<(), String> {
                 return Ok(());
             }
             (tcp, udp) => {
-                if let Err(error) = tcp {
-                    last_error = format!("DNS TCP 127.0.0.1:53 is unavailable: {error}");
+                let tcp_error = tcp.err().map(|error| error.to_string());
+                let udp_error = udp.err().map(|error| error.to_string());
+                last_error = dns_listener_conflict_message(
+                    tcp_error.as_deref(),
+                    udp_error.as_deref(),
+                );
+                if attempt + 1 < ATTEMPTS {
+                    tokio::time::sleep(INTERVAL).await;
                 }
-                if let Err(error) = udp {
-                    last_error = format!("DNS UDP 127.0.0.1:53 is unavailable: {error}");
-                }
-                tokio::time::sleep(INTERVAL).await;
             }
         }
     }
@@ -4666,7 +4705,7 @@ mod tests {
         TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT, VERIFY_LOCK_ATTEMPTS,
         WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan, classify_core_sample,
         collect_ipv4_literals, controller_direct_graph_is_active, controller_error_detail, core_change_fires,
-        expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
+        dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
         health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
@@ -4684,6 +4723,18 @@ mod tests {
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
     };
     use tono_core::{connection::ConnectionStatus, node::ValidatedNode};
+
+    #[test]
+    fn dns_listener_conflict_reports_both_socket_owners_consistently() {
+        let message = dns_listener_conflict_message(
+            Some("tcp address already in use"),
+            Some("udp address already in use"),
+        );
+        assert!(message.contains("DNS port 127.0.0.1:53 is unavailable"));
+        assert!(message.contains("TCP: tcp address already in use"));
+        assert!(message.contains("UDP: udp address already in use"));
+        assert!(message.contains("Another DNS or proxy process"));
+    }
 
     // ---- H7: the monitor's tick source must never collapse its thresholds ----
 

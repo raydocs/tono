@@ -103,11 +103,14 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Requiring it prevents a failed installer replacement from silently pairing the new App with
 /// the older Test 5 Service that still has the original freeze/recovery semantics.
 /// Revision 10 adds the mandatory fail-closed DIRECT runtime-reload bracket.
-pub const PROTOCOL_REVISION: u16 = 10;
-/// Revisions 7 through 10 are wire/behaviour incompatible with older peers. Reject a mismatch at
+/// Revision 11 adds an authenticated pre-start orphan-core reconciliation. It must run before
+/// the App probes loopback DNS so a Tono Core left by an interrupted upgrade cannot permanently
+/// squat `127.0.0.1:53` and prevent the Service's existing safe reaper from ever being reached.
+pub const PROTOCOL_REVISION: u16 = 11;
+/// Revisions 7 through 11 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation.
-pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 10;
-pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 10;
+pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 11;
+pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 11;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;
 /// Revision that introduced `/clash/stage-runtime`.
 pub const MIN_SERVICE_REVISION_FOR_RUNTIME_STAGING: u16 = 2;

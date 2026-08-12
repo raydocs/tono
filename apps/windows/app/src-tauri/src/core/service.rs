@@ -1064,6 +1064,20 @@ pub(super) async fn stop_core_by_service(release_kill_switch: bool) -> Result<()
 // the legacy flows above; these wrappers only differ in the payload they carry (owned runtime +
 // Windows kill switch) and in always speaking the protocol rev 5 options.
 
+/// Reconcile orphaned copies of Tono's installed Core before the App binds loopback DNS as an
+/// availability proof. The privileged Service validates canonical image paths and exempts its
+/// supervised/runtime-record processes; the App never enumerates or terminates processes itself.
+pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
+    let credentials = current_owner_credentials()?;
+    let response = clash_verge_service_ipc::prepare_core_start(&credentials)
+        .await
+        .context("无法连接到 Tono Service 以准备核心")?;
+    if response.code > 0 {
+        bail!(response.message);
+    }
+    response.data.context("Tono Service 未返回核心准备结果")
+}
+
 /// Core binary path for the Tono owned runtime: the same mihomo build the Service runs.
 pub(crate) async fn tono_core_binary_path() -> Result<PathBuf> {
     let bin_ext = if cfg!(windows) { ".exe" } else { "" };
