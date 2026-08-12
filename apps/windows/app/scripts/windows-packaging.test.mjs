@@ -514,8 +514,13 @@ test('Windows release stops when a native preflight command fails', () => {
   )
   assert.match(
     windowsReleaseWorkflowSource,
-    /- name: Inspect the built NSIS payload[\s\S]*pnpm release:preflight --payload-only/,
+    /- name: Inspect the built NSIS payload[\s\S]*Get-ChildItem -LiteralPath 'target\/release\/bundle\/nsis'[\s\S]*pnpm release:preflight --payload-only/,
     'the signed draft must be inspected as a real NSIS package',
+  )
+  assert.doesNotMatch(
+    windowsReleaseWorkflowSource,
+    /Get-ChildItem -LiteralPath 'src-tauri\/target\/release\/bundle\/nsis'/,
+    'the NSIS inspection path must follow the Cargo workspace target directory',
   )
 })
 
