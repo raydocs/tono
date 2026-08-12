@@ -644,6 +644,21 @@ pub async fn is_reinstall_service_needed() -> bool {
         }
 }
 
+/// Ask the authenticated Service to reconcile only untracked Tono-installed Core processes
+/// before the App probes the fixed DNS listener. The returned count is diagnostic; a third-party
+/// listener is never touched and remains visible to the subsequent bind preflight.
+pub async fn prepare_core_start(credentials: &OwnerCredentials) -> Result<Response<u32>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::PrepareCoreStart,
+        credentials,
+        None,
+        (),
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
 pub async fn start_clash(
     credentials: &OwnerCredentials,
     body: &StartClashRequest,

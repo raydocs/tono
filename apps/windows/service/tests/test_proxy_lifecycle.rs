@@ -6,7 +6,7 @@ use anyhow::{Context as _, Result};
 use clash_verge_service_ipc::{
     AuthenticatedRequest, IpcCommand, MacosProxyConfig, OwnerSessionProof, RuntimeBundle,
     ServiceErrorCode, ServiceOperationKind, StartClashRequest, StartClashResult, get_status,
-    run_ipc_server, set_system_proxy, start_clash, stop_clash, stop_ipc_server, test_client,
+    prepare_core_start, run_ipc_server, set_system_proxy, start_clash, stop_clash, stop_ipc_server, test_client,
 };
 use serde::Deserialize;
 use serial_test::serial;
@@ -56,6 +56,9 @@ async fn client_uses_versioned_session_aware_proxy_lifecycle() -> Result<()> {
     common::wait_for_ipc().await?;
 
     let credentials = common::owner_credentials();
+    let preparation = prepare_core_start(&credentials).await?;
+    assert_eq!(preparation.code, 0, "{}", preparation.message);
+    assert_eq!(preparation.data, Some(0));
     let bundle = RuntimeBundle {
         yaml: "mode: rule\n".to_owned(),
         assets: vec![],

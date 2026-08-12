@@ -529,19 +529,28 @@ impl CoreManager {
         config.clone().map(|config| (identity, config))
     }
 
-    pub async fn start_core(&self, config: ClashConfig, owner: OwnerIdentity) -> Result<()> {
+    /// Reconcile only Tono-owned Core processes before the unprivileged App tests the fixed DNS
+    /// listener. This is intentionally exposed separately from `start_core`: if an interrupted
+    /// upgrade leaves an installed `verge-mihomo.exe` holding loopback port 53, the App's DNS
+    /// preflight otherwise fails before `start_core` can reach this same safe process sweep.
+    ///
+    /// The currently supervised PID and the runtime-record PID remain exempt inside the sweep.
+    /// Candidate identity is the canonical installed image path, never the process name alone, so
+    /// a third-party DNS server or a user-installed Mihomo is reported to the App and never killed.
+    pub async fn prepare_start(&self) -> Result<u32> {
         ensure_startup_reconciled().await?;
-        // Startup reconciliation only consults the runtime record, so a core this process does
-        // not track — orphaned by an earlier service instance or channel, or by a record deleted
-        // after an identity mismatch — survives it and would fight the core spawned below for
-        // the fixed DNS listener (127.0.0.1:53) and the TUN device. Sweep those by install-path
-        // identity before anything else happens. The core this manager currently supervises is
-        // vouched for; the stop-and-replace logic below decides its fate.
         crate::core::process::sweep_orphan_core_processes(&[
             self.running_pid.load(Ordering::Relaxed),
         ])
         .await
-        .context("orphaned core sweep failed before core start")?;
+        .context("orphaned core sweep failed before core start")
+    }
+
+    pub async fn start_core(&self, config: ClashConfig, owner: OwnerIdentity) -> Result<()> {
+        // Keep the final start gate even though revision-11 Apps call `prepare_start` before
+        // their DNS preflight. The process table can change between IPC calls, and non-App
+        // clients must receive the same ownership-safe cleanup.
+        self.prepare_start().await?;
         set_core_lifecycle_state(ServiceLifecycleState::Starting);
         if self.running_pid.load(Ordering::Relaxed) != 0 {
             info!("Core is already running, stopping existing instance");

@@ -1199,6 +1199,33 @@ fn create_ipc_router() -> Result<Router> {
             // Authenticated and lock-free: the DNS watchdog/mutations publish this snapshot.
             ok_json(dns::status().await)
         })
+        .post(IpcCommand::PrepareCoreStart.as_ref(), |ctx| async move {
+            trace!("Received PrepareCoreStart command");
+            let (_request, owner) =
+                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+                    ControlFlow::Continue(authenticated) => authenticated,
+                    ControlFlow::Break(response) => return response,
+                };
+            // No active session exists on a first connection, so this uses the same authenticated
+            // owner gate as StartClash. The lifecycle lock prevents reconciliation from racing a
+            // start/stop; CoreManager exempts every process it currently vouches for, and the
+            // process module admits only Tono's canonical installed Core image.
+            let _lifecycle_guard =
+                match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
+                    ControlFlow::Continue(guard) => guard,
+                    ControlFlow::Break(response) => return response,
+                };
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::PrepareCoreStart,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match CORE_MANAGER.lock().await.prepare_start().await {
+                Ok(terminated) => ok_json(terminated),
+                Err(error) => service_unavailable(format!(
+                    "Failed to reconcile Tono Core before DNS preflight: {error:#}"
+                )),
+            }
+        })
         .post(IpcCommand::StartClash.as_ref(), |ctx| async move {
             trace!("Received StartClash command");
             let (request, owner) =

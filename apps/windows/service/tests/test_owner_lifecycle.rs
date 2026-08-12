@@ -450,6 +450,11 @@ async fn protected_routes_reject_protocol_mismatch_before_deserialization() -> R
             .send()
             .await?,
         client
+            .post(IpcCommand::PrepareCoreStart.as_ref())
+            .json_body(&invalid)
+            .send()
+            .await?,
+        client
             .delete(IpcCommand::StopClash.as_ref())
             .json_body(&invalid)
             .send()

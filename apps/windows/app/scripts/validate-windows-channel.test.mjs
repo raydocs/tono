@@ -141,7 +141,7 @@ test('promotion validates before one non-forced atomic channel ref update', asyn
   )
 })
 
-test('signing and channel write jobs require protected main-only environments', async () => {
+test('signing and channel write jobs require the protected Windows release line', async () => {
   const [releaseWorkflow, promotionWorkflow] = await Promise.all([
     readFile(
       new URL(
@@ -159,8 +159,14 @@ test('signing and channel write jobs require protected main-only environments', 
     ),
   ])
 
-  assert.match(releaseWorkflow, /if: github\.ref == 'refs\/heads\/main'/)
+  assert.match(
+    releaseWorkflow,
+    /if: github\.ref == 'refs\/heads\/release\/windows'/,
+  )
   assert.match(releaseWorkflow, /environment: windows-release/)
-  assert.match(promotionWorkflow, /if: github\.ref == 'refs\/heads\/main'/)
+  assert.match(
+    promotionWorkflow,
+    /if: github\.ref == 'refs\/heads\/release\/windows'/,
+  )
   assert.match(promotionWorkflow, /environment: windows-update-channel/)
 })
