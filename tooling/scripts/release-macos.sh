@@ -89,9 +89,18 @@ fi
 step "building and notarising"
 out="$repo_root/artifacts"
 base="Tono-macOS-$short_version-build$build"
-TONO_MACOS_NOTARIZE=1 TONO_MACOS_NOTARY_PROFILE=${TONO_MACOS_NOTARY_PROFILE:-tono-notary} \
-  "$repo_root/tooling/scripts/package-macos-test.sh" "$out" "$base" >/dev/null \
-  || fail "the build or notarisation failed"
+# Output is kept and shown on failure. Swallowing it turned "refusing to
+# overwrite an existing artifact" into "the build or notarisation failed", which
+# describes the outcome and hides the one thing the operator needs to act on.
+build_log=$(/usr/bin/mktemp -t tono-release-build)
+if ! TONO_MACOS_NOTARIZE=1 TONO_MACOS_NOTARY_PROFILE=${TONO_MACOS_NOTARY_PROFILE:-tono-notary} \
+     "$repo_root/tooling/scripts/package-macos-test.sh" "$out" "$base" > "$build_log" 2>&1; then
+  print "release-macos: the build or notarisation failed:" >&2
+  /usr/bin/tail -12 "$build_log" | /usr/bin/sed 's/^/  /' >&2
+  /bin/rm -f "$build_log"
+  exit 1
+fi
+/bin/rm -f "$build_log"
 app="$out/$base.app"
 zip="$out/$base.zip"
 [[ -d $app && -f $zip ]] || fail "the build produced no app or archive"
