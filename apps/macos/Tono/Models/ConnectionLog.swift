@@ -26,4 +26,10 @@ nonisolated struct ConnectionEntry: Identifiable, Codable {
     var destination: String = ""
     var processName: String? = nil
     var route: String = ""
+    /// Split direction counters. `dataSize` keeps the combined total for the
+    /// menu bar and compact surfaces; the connection list shows the two
+    /// directions separately, which is what makes a stalled upload or a
+    /// runaway download visible at a glance.
+    var uploadText: String = ""
+    var downloadText: String = ""
 }

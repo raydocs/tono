@@ -4,22 +4,17 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @Namespace private var dashboardNS
+    @State private var trafficHistory = TrafficHistory()
 
     var body: some View {
         @Bindable var appState = appState
 
         GlassEffectContainer(spacing: 24) {
             VStack(spacing: 0) {
-                Label(
-                    appState.isConnected ? "Protected cloud route" : "Reality cloud protection",
-                    systemImage: appState.isConnected ? "lock.shield.fill" : "lock.shield"
-                )
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 2)
+                dashboardHeader
 
                 // Center: ConnectPill + ActiveNodeCard
-                Spacer()
+                Spacer(minLength: 12)
 
                 VStack(spacing: 24) {
                     ConnectPill(isConnected: Binding(
@@ -65,7 +60,9 @@ struct DashboardView: View {
 
                 }
 
-                Spacer()
+                Spacer(minLength: 12)
+
+                dashboardOverview
 
                 // Network info bar (when connected)
                 if appState.isConnected {
@@ -83,6 +80,137 @@ struct DashboardView: View {
                 appState.networkInfo = NetworkInfo()
             }
         }
+    }
+
+    private var dashboardHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Dashboard")
+                    .font(.system(size: 27, weight: .bold))
+
+                Text("Reality cloud protection")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(statusBadgeColor)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: statusBadgeColor.opacity(0.45), radius: 3)
+
+                Text(statusBadgeTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(statusBadgeColor.opacity(0.10), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(statusBadgeColor.opacity(0.18), lineWidth: 1)
+            }
+        }
+    }
+
+    private var dashboardOverview: some View {
+        HStack(spacing: 10) {
+            DashboardStatCard(
+                title: "Protection",
+                value: protectionValue,
+                detail: protectionDetail,
+                systemImage: appState.isConnected ? "checkmark.shield.fill" : "shield",
+                tint: appState.isConnected ? Color(hex: "30D158") : Color(hex: "8E8E93")
+            )
+
+            DashboardStatCard(
+                title: "Server pool",
+                value: serverPoolValue,
+                detail: serverPoolDetail,
+                systemImage: "globe",
+                tint: Color(hex: "32ADE6")
+            )
+
+            DashboardStatCard(
+                title: "Live traffic",
+                value: trafficSummaryValue,
+                detail: trafficSummaryDetail,
+                systemImage: "waveform.path.ecg",
+                tint: Color(hex: "5856D6")
+            )
+        }
+    }
+
+    private var statusBadgeTitle: LocalizedStringKey {
+        if appState.isConnecting { return "Connecting" }
+        if appState.isDisconnecting { return "Disconnecting" }
+        if appState.isProtectionBlocked { return "Protected offline" }
+        if isDegradedWhileConnected { return "Protected — exit degraded" }
+        return appState.isConnected ? "Protected" : "Standby"
+    }
+
+    private var statusBadgeColor: Color {
+        if appState.isConnecting || appState.isDisconnecting { return Color(hex: "B29500") }
+        if appState.isProtectionBlocked { return Color(hex: "FF9F0A") }
+        if isDegradedWhileConnected { return Color(hex: "FF9F0A") }
+        return appState.isConnected ? Color(hex: "30D158") : Color(hex: "8E8E93")
+    }
+
+    /// The health loop marks a degraded exit on its first failed probe, well
+    /// before the second failure triggers failover. Only the menu bar used to
+    /// show it, so the main window stayed green while traffic was stalling.
+    private var isDegradedWhileConnected: Bool {
+        appState.isConnected
+            && appState.isProxyDegraded
+            && !appState.isConnecting
+            && !appState.isDisconnecting
+    }
+
+    private var protectionValue: String {
+        if appState.isConnecting { return String(localized: "Connecting") }
+        if appState.isDisconnecting { return String(localized: "Finishing") }
+        if appState.isProtectionBlocked { return String(localized: "Offline") }
+        if isDegradedWhileConnected { return String(localized: "Degraded") }
+        return appState.isConnected
+            ? String(localized: "Protected")
+            : String(localized: "Standby")
+    }
+
+    private var protectionDetail: String {
+        if appState.isProtectionBlocked {
+            return String(localized: "Direct traffic blocked")
+        }
+        if isDegradedWhileConnected {
+            return String(localized: "Exit not responding — checking")
+        }
+        if appState.isConnected { return String(localized: "Traffic is routed") }
+        return String(localized: "Ready to connect")
+    }
+
+    private var serverPoolValue: String {
+        let count = appState.managedCatalogNodeCount
+        return count > 0
+            ? String(localized: "\(count) exits")
+            : String(localized: "Loading")
+    }
+
+    private var serverPoolDetail: String {
+        appState.managedCatalogNodeCount > 0
+            ? String(localized: "Verified catalog")
+            : String(localized: "Refreshing catalog")
+    }
+
+    private var trafficSummaryValue: String {
+        guard appState.isConnected else { return String(localized: "Idle") }
+        let speed = max(appState.trafficStats.uploadSpeed, appState.trafficStats.downloadSpeed)
+        return speed > 0 ? formatSpeed(speed) : String(localized: "Connected")
+    }
+
+    private var trafficSummaryDetail: String {
+        guard appState.isConnected else { return String(localized: "No active route") }
+        return String(localized: "\(appState.trafficStats.activeConnections) active")
     }
 
     private var showsConnectionDetails: Bool {
@@ -110,6 +238,11 @@ struct DashboardView: View {
 
             // Traffic stats
             HStack(spacing: 16) {
+                TrafficSparkline(
+                    history: trafficHistory,
+                    isLive: appState.isConnected
+                )
+
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 9, weight: .bold))
@@ -133,6 +266,17 @@ struct DashboardView: View {
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
+        .task {
+            // AppState publishes only the newest reading, so sample on a fixed
+            // cadence: an idle stretch is as meaningful to the series as a spike.
+            while !Task.isCancelled {
+                trafficHistory.record(
+                    up: appState.trafficStats.uploadSpeed,
+                    down: appState.trafficStats.downloadSpeed
+                )
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     private func infoItem(label: String, value: String) -> some View {
@@ -375,7 +519,9 @@ private struct ConnectionProgressCard: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             } else if appState.isProtectionBlocked, !appState.isDisconnecting {
-                Button("Retry now") {
+                Button(appState.protectedReconnectPausedForUserAction
+                    ? "Repair and reconnect"
+                    : "Retry now") {
                     appState.retryProtectedConnectionNow()
                 }
                 .buttonStyle(.borderedProminent)
@@ -426,9 +572,55 @@ private struct ConnectionProgressCard: View {
         Error: \(failure.message)
         Retry attempt: \(appState.protectedReconnectAttempt)
         Kill Switch: \(KillSwitchService.isArmed ? "active" : "inactive")
+        Recovery command (last resort, restores normal internet):
+        sudo /Library/PrivilegedHelperTools/tono-core-helper --emergency-reset
         """
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(summary, forType: .string)
+    }
+}
+
+private struct DashboardStatCard: View {
+    let title: LocalizedStringKey
+    let value: String
+    let detail: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Text(value)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+        .glassEffect(
+            .regular.tint(tint.opacity(0.045)),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
     }
 }
 

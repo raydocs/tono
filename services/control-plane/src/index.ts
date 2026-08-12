@@ -8,6 +8,8 @@ import {
   jwtVerify,
   randomToken,
   sha256,
+  TRAFFIC_POLICY_SIGNATURE_CONTEXT,
+  verifyTrafficPolicySignature,
 } from './crypto';
 import {
   OidcVerificationError,
@@ -47,6 +49,12 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   DIRECT_SIGNUP_ALLOWLIST?: string;
   CATALOG_ENCRYPTION_KEY?: string;
+  // Public half of the offline policy signing key, standard base64, 32 bytes. A
+  // var rather than a secret: it is a public key, and keeping it readable is what
+  // lets anyone confirm which key this deployment trusts. Unset means signature
+  // verification is unavailable, so a signed policy cannot be published and a
+  // stored signature cannot be checked — see `publicTrafficPolicy`.
+  TRAFFIC_POLICY_PUBLIC_KEY?: string;
   CONFIRM_CLAIM_TTL_SECONDS?: string;
   RATE_LIMIT_DIAGNOSTICS_IP_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_USER_HOUR?: string;
@@ -61,6 +69,9 @@ export interface Env {
   ACCESS_ADMIN_EMAILS?: string;
   OPS_ACCESS_CLIENT_ID?: string;
   OPS_ACCESS_CLIENT_SECRET?: string;
+  RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY?: string;
+  RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY?: string;
+  ROUTING_RESEARCH_RETENTION_SECONDS?: string;
 }
 
 type Row = Record<string, any>;
@@ -73,11 +84,36 @@ class ApiError extends Error {
 
 const now = () => Math.floor(Date.now() / 1000);
 const id = () => crypto.randomUUID();
+const sha256Hex = async (value: string) => Array.from(new Uint8Array(
+  await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)),
+)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+const routingResearchApps = [
+  'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge',
+  'safari', 'firefox', 'arc', 'brave', 'claude', 'wecom', 'tencent_meeting',
+  'wps', 'baidu_netdisk', 'alipan', 'douyin', 'bilibili', 'netease_music',
+  'qq_music', 'xunlei', 'jianying', 'youdao', 'awesun', 'other',
+] as const;
+const routingResearchComponentApps = [
+  'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'wecom', 'tencent_meeting',
+  'wps', 'baidu_netdisk', 'alipan', 'douyin', 'bilibili', 'netease_music',
+  'qq_music', 'xunlei', 'jianying', 'youdao', 'awesun',
+] as const;
+const routingResearchBundleComponents = ['main_executable', 'framework_helper', 'xpc_service', 'plugin_helper', 'bundle_helper'] as const;
+const trafficBuckets = ['none', 'under_1_mib', '1_to_10_mib', '10_to_100_mib', '100_mib_to_1_gib', '1_to_10_gib', 'over_10_gib'] as const;
+const ROUTING_RESEARCH_WINDOW_SECONDS = 6 * 60 * 60;
+const ROUTING_RESEARCH_DAY_SECONDS = 24 * 60 * 60;
+const ROUTING_RESEARCH_RETENTION_MAX_SECONDS = 90 * ROUTING_RESEARCH_DAY_SECONDS;
+const ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS = 3;
+// Release-host aliases rewrite to the same static asset path. Include an
+// explicit revision in the inner asset request so a previously cached alias
+// cannot keep serving an older Sparkle feed after an asset-only deployment.
+const RELEASE_ASSET_REVISION = 'macos-build42-20260807';
 const deviceActions = ['diagnostic_snapshot', 'claude_traffic_snapshot', 'refresh_catalog', 'retry_protection'] as const;
 /** Failure vocabulary for device-action snapshots. (Diagnostics uploads carry
  *  the client's own free-text `error`/`failedStage` instead; see
  *  `canonicalDiagnosticsReport`.) */
 const errorCategories = ['preparation', 'helper', 'kill_switch', 'tunnel', 'policy', 'dns', 'exit_check', 'data_plane', 'other'];
+const crashLabels = ['SIGABRT', 'SIGILL', 'SIGSEGV', 'SIGBUS', 'SIGFPE', 'SIGTRAP', 'signal', 'exception'];
 
 function fixedAction(value: unknown) {
   if (typeof value !== 'string' || !deviceActions.includes(value as typeof deviceActions[number])) {
@@ -93,6 +129,112 @@ function rejectUnexpectedKeys(value: unknown, allowed: string[]): asserts value 
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Unexpected field');
   }
+}
+
+function canonicalRoutingResearch(value: unknown) {
+  const commonKeys = ['schemaVersion', 'snapshotId', 'observedSince', 'observedUntil', 'appVersion', 'build', 'osVersion', 'architecture', 'observedConnectionCount', 'identifiedAppConnectionCount', 'connectionLimitReached', 'entries'];
+  const versionTwoKeys = [...commonKeys, 'bundleComponents'];
+  rejectUnexpectedKeys(value, versionTwoKeys);
+  const schemaVersion = value.schemaVersion;
+  const timestamp = now();
+  if ((schemaVersion !== 1 && schemaVersion !== 2) ||
+      !exactKeys(value, schemaVersion === 1 ? commonKeys : versionTwoKeys) ||
+      typeof value.snapshotId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.snapshotId) ||
+      !Number.isSafeInteger(value.observedSince) || !Number.isSafeInteger(value.observedUntil) ||
+      value.observedSince < 0 || value.observedUntil > timestamp + 300 ||
+      value.observedUntil < timestamp - ROUTING_RESEARCH_RETENTION_MAX_SECONDS ||
+      value.observedUntil - value.observedSince !== ROUTING_RESEARCH_WINDOW_SECONDS ||
+      !Number.isSafeInteger(value.observedConnectionCount) || value.observedConnectionCount < 1 || value.observedConnectionCount > 1_000_000 ||
+      !Number.isSafeInteger(value.identifiedAppConnectionCount) || value.identifiedAppConnectionCount < 0 || value.identifiedAppConnectionCount > 1_000_000 ||
+      typeof value.connectionLimitReached !== 'boolean' || !Array.isArray(value.entries) || value.entries.length < 1 || value.entries.length > 20) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid routing research snapshot');
+  }
+  const appVersion = str(value.appVersion, 'appVersion', 1, 40);
+  const build = str(value.build, 'build', 1, 20);
+  const osVersion = str(value.osVersion, 'osVersion', 3, 12);
+  const architecture = str(value.architecture, 'architecture', 5, 6);
+  if (!/^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[a-z0-9][a-z0-9.-]{0,19})?$/.test(appVersion) ||
+      !/^(?:0|[1-9]\d{0,9})$/.test(build) ||
+      !/^\d{1,3}\.\d{1,3}$/.test(osVersion) ||
+      !['arm64', 'x86_64'].includes(architecture)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid platform metadata');
+  }
+  const seen = new Set<string>();
+  let total = 0; let identified = 0;
+  const entries = value.entries.map((raw: unknown) => {
+    const entryKeys = ['app', 'connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount', 'trafficVolume'];
+    rejectUnexpectedKeys(raw, entryKeys);
+    if (!exactKeys(raw, entryKeys)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid routing research entry');
+    const app = str(raw.app, 'app', 2, 15);
+    if (!routingResearchApps.includes(app as typeof routingResearchApps[number]) || seen.has(app)) throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown or duplicate app');
+    seen.add(app);
+    for (const key of ['connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount']) {
+      if (!Number.isSafeInteger(raw[key]) || raw[key] < 0 || raw[key] > 1_000_000) throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+    }
+    if (raw.connectionCount < 1 || raw.directConnectionCount + raw.proxiedConnectionCount + raw.blockedConnectionCount !== raw.connectionCount || !trafficBuckets.includes(raw.trafficVolume)) throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent routing research entry');
+    total += raw.connectionCount; if (app !== 'other') identified += raw.connectionCount;
+    return { app, connectionCount: raw.connectionCount, directConnectionCount: raw.directConnectionCount, proxiedConnectionCount: raw.proxiedConnectionCount, blockedConnectionCount: raw.blockedConnectionCount, trafficVolume: raw.trafficVolume };
+  }).sort((a, b) => a.app.localeCompare(b.app));
+  if (total !== value.observedConnectionCount || identified !== value.identifiedAppConnectionCount) throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent routing research totals');
+  const base = { schemaVersion, snapshotId: value.snapshotId.toLowerCase(), observedSince: value.observedSince, observedUntil: value.observedUntil, appVersion, build, osVersion, architecture, observedConnectionCount: total, identifiedAppConnectionCount: identified, connectionLimitReached: value.connectionLimitReached, entries };
+  let snapshot;
+  if (schemaVersion === 1) {
+    snapshot = base;
+  } else {
+    if (!Array.isArray(value.bundleComponents) || value.bundleComponents.length > 25) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid bundle components');
+    }
+    const appTotals = new Map(entries.map((entry) => [entry.app, entry]));
+    const componentTotals = new Map<string, { connectionCount: number; directConnectionCount: number; proxiedConnectionCount: number; blockedConnectionCount: number }>();
+    const componentSeen = new Set<string>();
+    const bundleComponents = value.bundleComponents.map((raw: unknown) => {
+      const componentKeys = ['app', 'bundleComponent', 'connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount', 'trafficVolume'];
+      rejectUnexpectedKeys(raw, componentKeys);
+      if (!exactKeys(raw, componentKeys)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid bundle component entry');
+      const app = str(raw.app, 'app', 2, 15);
+      const bundleComponent = str(raw.bundleComponent, 'bundleComponent', 11, 20);
+      const identity = `${app}:${bundleComponent}`;
+      if (!routingResearchComponentApps.includes(app as typeof routingResearchComponentApps[number]) ||
+          !routingResearchBundleComponents.includes(bundleComponent as typeof routingResearchBundleComponents[number]) ||
+          componentSeen.has(identity)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown or duplicate bundle component');
+      }
+      componentSeen.add(identity);
+      for (const key of ['connectionCount', 'directConnectionCount', 'proxiedConnectionCount', 'blockedConnectionCount']) {
+        if (!Number.isSafeInteger(raw[key]) || raw[key] < 0 || raw[key] > 1_000_000) throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+      }
+      if (raw.connectionCount < 1 || raw.directConnectionCount + raw.proxiedConnectionCount + raw.blockedConnectionCount !== raw.connectionCount || !trafficBuckets.includes(raw.trafficVolume)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Inconsistent bundle component entry');
+      }
+      const appTotal = appTotals.get(app);
+      if (!appTotal) throw new ApiError(400, 'VALIDATION_ERROR', 'Bundle component app is absent');
+      if (trafficBuckets.indexOf(raw.trafficVolume) >
+          trafficBuckets.indexOf(appTotal.trafficVolume)) {
+        throw new ApiError(
+          400,
+          'VALIDATION_ERROR',
+          'Bundle component volume exceeds app volume',
+        );
+      }
+      const aggregate = componentTotals.get(app) ?? { connectionCount: 0, directConnectionCount: 0, proxiedConnectionCount: 0, blockedConnectionCount: 0 };
+      aggregate.connectionCount += raw.connectionCount;
+      aggregate.directConnectionCount += raw.directConnectionCount;
+      aggregate.proxiedConnectionCount += raw.proxiedConnectionCount;
+      aggregate.blockedConnectionCount += raw.blockedConnectionCount;
+      if (aggregate.connectionCount > appTotal.connectionCount ||
+          aggregate.directConnectionCount > appTotal.directConnectionCount ||
+          aggregate.proxiedConnectionCount > appTotal.proxiedConnectionCount ||
+          aggregate.blockedConnectionCount > appTotal.blockedConnectionCount) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Bundle component exceeds app totals');
+      }
+      componentTotals.set(app, aggregate);
+      return { app, bundleComponent, connectionCount: raw.connectionCount, directConnectionCount: raw.directConnectionCount, proxiedConnectionCount: raw.proxiedConnectionCount, blockedConnectionCount: raw.blockedConnectionCount, trafficVolume: raw.trafficVolume };
+    }).sort((a, b) => a.app.localeCompare(b.app) || a.bundleComponent.localeCompare(b.bundleComponent));
+    snapshot = { ...base, bundleComponents };
+  }
+  const json = JSON.stringify(snapshot);
+  if (new TextEncoder().encode(json).length > 8192) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Routing research payload is too large');
+  return { snapshot, json };
 }
 
 function canonicalClaudeTrafficResearch(value: unknown) {
@@ -217,7 +359,7 @@ function canonicalActionResult(value: unknown) {
     const s = value.snapshot as Row;
     const bools = ['connected', 'connecting', 'disconnecting', 'protectionBlocked', 'killSwitchArmed', 'utunPresent', 'protectedDNSConfigured'];
     const strings = ['appVersion', 'build', 'selectedExit', 'connectionStage'];
-    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory']);
+    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory', 'lastCrashLabel']);
     const snapshot: Row = {};
     for (const key of bools) {
       if (s[key] !== undefined && typeof s[key] !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
@@ -231,6 +373,12 @@ function canonicalActionResult(value: unknown) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid lastErrorCategory');
       }
       snapshot.lastErrorCategory = s.lastErrorCategory;
+    }
+    if (s.lastCrashLabel !== undefined) {
+      if (typeof s.lastCrashLabel !== 'string' || !crashLabels.includes(s.lastCrashLabel)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid lastCrashLabel');
+      }
+      snapshot.lastCrashLabel = s.lastCrashLabel;
     }
     if (s.reconnectAttempt !== undefined) {
       if (!Number.isSafeInteger(s.reconnectAttempt) || s.reconnectAttempt < 0 || s.reconnectAttempt > 1000) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid reconnectAttempt');
@@ -382,6 +530,23 @@ function managedCatalogYAML(value: unknown): string {
     !/^proxies\s*:/m.test(yaml)
   ) {
     throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must be bounded Clash YAML with a proxies section');
+  }
+  // Every identity in a published catalog must be the placeholder, never a
+  // literal. One catalog served verbatim to everyone is how every account came
+  // to share one exit identity, and why the exit can count bytes but not say
+  // whose. Refusing it here means that state cannot be re-published by accident:
+  // a real UUID in the document is rejected before it is ever encrypted.
+  for (const line of yaml.split(/\r?\n/)) {
+    const identity = /^\s*(?:-\s*)?uuid\s*:\s*(.+?)\s*$/.exec(line);
+    if (!identity) continue;
+    const value = identity[1].replace(/^['"]|['"]$/g, '');
+    if (value !== CLIENT_UUID_PLACEHOLDER) {
+      throw new ApiError(
+        400,
+        'INVALID_CATALOG',
+        `Catalog identities must be ${CLIENT_UUID_PLACEHOLDER}, so each account is served its own`,
+      );
+    }
   }
   return yaml;
 }
@@ -635,6 +800,31 @@ function publicHomeBinding(row: Row) {
   };
 }
 
+const CLIENT_UUID_PLACEHOLDER = '{{TONO_CLIENT_UUID}}';
+
+/// The identity this account presents at the exit, minted on first need.
+///
+/// Stable across fetches on purpose: the client persists the catalog digest and
+/// compares it, so an identity that changed per request would look like a
+/// tampered catalog every time.
+async function exitClientUUID(e: Env, userId: string): Promise<string> {
+  const existing = await e.DB.prepare(
+    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+  ).bind(userId).first<Row>();
+  if (existing) return String(existing.client_uuid);
+  const minted = crypto.randomUUID();
+  // A racing request may have inserted first; that row is as good as this one,
+  // so adopt it rather than failing a catalog fetch over it.
+  await e.DB.prepare(
+    'INSERT OR IGNORE INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?,?,?)',
+  ).bind(userId, minted, now()).run();
+  const row = await e.DB.prepare(
+    'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+  ).bind(userId).first<Row>();
+  if (!row) throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Could not issue an exit identity');
+  return String(row.client_uuid);
+}
+
 async function publicManagedCatalog(
   e: Env,
   options?: { userId?: string; filterHomeExits?: boolean },
@@ -665,8 +855,14 @@ async function publicManagedCatalog(
   if (digest !== row.content_sha256) {
     throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog failed integrity validation');
   }
-
   let served = yaml;
+  // The stored digest authenticates the catalog template. Authenticated clients
+  // receive a stable per-account identity, so recompute the digest after
+  // substitution and any per-user home-exit filtering.
+  if (options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)) {
+    const issued = await exitClientUUID(e, options.userId);
+    served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
+  }
   let routing:
     | {
         homeProxy?: string;
@@ -715,10 +911,9 @@ async function publicManagedCatalog(
       routing = directives;
     }
     if (restricted.size > 0) {
-      served = filterCatalogYamlForUser(yaml, restricted, allowed);
+      served = filterCatalogYamlForUser(served, restricted, allowed);
     }
   }
-
   return {
     revision: Number(row.revision),
     yaml: served,
@@ -729,11 +924,12 @@ async function publicManagedCatalog(
 }
 
 type TrafficPolicy = {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   domains: Array<{ host: string; ports: number[] }>;
   mediaEndpoints: Array<{ address: string; ports: number[] }>;
   webDomains?: Array<{ host: string; ports: number[] }>;
   directSuffixes?: Array<{ host: string; ports: number[] }>;
+  tcpEndpoints?: Array<{ address: string; ports: number[] }>;
 };
 
 const emptyTrafficPolicy = (): TrafficPolicy => ({ version: 1, domains: [], mediaEndpoints: [] });
@@ -765,7 +961,19 @@ function isPublicIPv4(address: string) {
     (a === 203 && b === 0 && c === 113));
 }
 
-function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
+// `trusted` is set only once an Ed25519 signature over the resulting canonical
+// document has verified against the compiled-in public key. It relaxes exactly
+// one thing: the lists of hostnames permitted to route direct. Every other check
+// stays, because a signature says who wrote the document, not that the document
+// is well formed — a signed policy with a malformed entry or one list too long
+// would be faithfully delivered to every client and break all of them.
+//
+// `protectedSuffixes` is NOT relaxed, and must never be. Those are the hosts that
+// must never leave the tunnel, including this control plane itself. Folding them
+// into what a signature can override would make a leaked private key sufficient
+// to expose the traffic the product exists to protect, which is a strictly worse
+// position than the allowlist this mechanism replaces.
+function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid policy');
   }
@@ -776,24 +984,65 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains']);
   const isVersion3 = policy.version === 3 &&
     exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes']);
-  if ((!isVersion1 && !isVersion2 && !isVersion3) ||
+  const isVersion4 = policy.version === 4 &&
+    exactKeys(policy, ['version', 'domains', 'mediaEndpoints', 'webDomains', 'directSuffixes', 'tcpEndpoints']);
+  if ((!isVersion1 && !isVersion2 && !isVersion3 && !isVersion4) ||
       !Array.isArray(policy.domains) || policy.domains.length > 32 ||
       !Array.isArray(policy.mediaEndpoints) || policy.mediaEndpoints.length > 64 ||
-      ((isVersion2 || isVersion3) && (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32)) ||
-      (isVersion3 && (!Array.isArray(policy.directSuffixes) || policy.directSuffixes.length > 64))) {
+      ((isVersion2 || isVersion3 || isVersion4) &&
+        (!Array.isArray(policy.webDomains) || policy.webDomains.length > 32)) ||
+      ((isVersion3 || isVersion4) &&
+        (!Array.isArray(policy.directSuffixes) || policy.directSuffixes.length > 64)) ||
+      (isVersion4 &&
+        (!Array.isArray(policy.tcpEndpoints) || policy.tcpEndpoints.length > 64))) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid traffic policy version or shape');
   }
   const allowedWeChatSuffixes = ['qq.com', 'qq.com.cn', 'qpic.cn', 'qlogo.cn', 'gtimg.cn', 'gtimg.com', 'wechat.com', 'weixin.com', 'weixinbridge.com', 'wxs.qq.com'];
-  const allowedWebSuffixes = ['bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com',
-    'xiaohongshu.com', 'xhslink.com', 'xhscdn.com',
-    'feishu.cn', 'feishucdn.com', 'larksuite.com', 'larkoffice.com',
-    'baidu.com', 'baidupcs.com', 'bcebos.com', 'baidubcs.com', 'bdstatic.com', 'bdimg.com', 'aliyuncs.com',
-    '10jqka.com.cn', 'iwencai.com', 'eastmoney.com', 'dfcfw.com', 'sina.com.cn', 'sinajs.cn', 'legulegu.com',
-    'optbbs.com', '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'ccxe.com.cn', 'pushplus.plus',
-    'baostock.com', 'sse.com.cn', 'szse.cn',
-    'zoom.us', 'zoom.com', 'zoomgov.com',
-    'oray.com', 'sunlogin.com', 'edu.cn'];
+  const allowedWebSuffixes = [
+    'bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com',
+    'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com',
+    'iqiyipic.com', 'youku.com', 'ykimg.com', 'xiaohongshu.com',
+    'xhslink.com', 'xhscdn.com', 'feishu.cn', 'feishucdn.com',
+    'larksuite.com', 'larkoffice.com', 'baidu.com', 'baidupcs.com',
+    'bcebos.com', 'baidubcs.com', 'bdstatic.com', 'bdimg.com',
+    'aliyuncs.com', '10jqka.com.cn', 'iwencai.com', 'eastmoney.com',
+    'dfcfw.com', 'sina.com.cn', 'sinajs.cn', 'legulegu.com', 'optbbs.com',
+    '100ppi.com', 'awtmt.com', 'cls.cn', 'cninfo.com.cn', 'ccxe.com.cn',
+    'pushplus.plus', 'baostock.com', 'sse.com.cn', 'szse.cn', 'zoom.us',
+    'zoom.com',
+    'zoomgov.com', 'oray.com', 'sunlogin.com', 'edu.cn',
+  ];
   const allowedWebExactHosts = ['ykimg.alicdn.com'];
+  // NARROWING THESE LISTS IS A BREAKING OPERATION. `publicTrafficPolicy` runs the
+  // stored policy back through this function on every read, so removing an entry
+  // that the live policy still uses turns every policy fetch into a 503 and
+  // disables managed direct routing fleet-wide. Republish the policy without the
+  // entry first, then narrow. Widening is safe; the client re-validates against
+  // its own allowlist and rejects anything it does not recognise.
+  //
+  // Several entries here are namespaces where a third party chooses the hostname
+  // — `aliyuncs.com` and `bcebos.com`/`baidubcs.com` are tenant object storage,
+  // `edu.cn` spans thousands of independent institutions, `oray.com`/
+  // `sunlogin.com` relay arbitrary remote-access sessions. A *wildcard* direct
+  // exception over those namespaces would let anyone who can host an object
+  // there collect a real IP outside the tunnel, which is why ConfigPipeline no
+  // longer renders `directSuffixes` as routes at all. Keep that in mind before
+  // re-enabling suffix routing: these belong in `allowedWebExactHosts` as
+  // individually reviewed hosts, not as apex wildcards.
+  const allowedDirectSuffixes = [
+    'bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com',
+    'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com',
+    'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com',
+    'xiaohongshu.com', 'xhslink.com', 'xhscdn.com', 'feishu.cn',
+    'feishucdn.com', 'larksuite.com', 'larkoffice.com', 'baidu.com',
+    'baidupcs.com', 'bcebos.com', 'baidubcs.com', 'bdstatic.com',
+    'bdimg.com', 'aliyuncs.com', '10jqka.com.cn', 'iwencai.com',
+    'eastmoney.com', 'dfcfw.com', 'sina.com.cn', 'sinajs.cn',
+    'legulegu.com', 'optbbs.com', '100ppi.com', 'awtmt.com', 'cls.cn',
+    'cninfo.com.cn', 'ccxe.com.cn', 'pushplus.plus', 'baostock.com',
+    'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
+    'sunlogin.com', 'edu.cn',
+  ];
   const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
@@ -808,7 +1057,14 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     const { host, ports } = entry as Row;
     if (typeof host !== 'string' || host.length > 253 || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
         protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
-        !allowedExactHosts.includes(host) && !allowedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) || seenHosts.has(host)) {
+        seenHosts.has(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
+    }
+    // Reviewed by list, or vouched for by a signature. Evaluated after the type
+    // and syntax checks above so a non-string host is a 400 rather than a
+    // TypeError from `endsWith` surfacing as a 500.
+    if (!trusted && !allowedExactHosts.includes(host) &&
+        !allowedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate domain host');
     }
     seenHosts.add(host);
@@ -844,28 +1100,69 @@ function canonicalTrafficPolicy(value: unknown): TrafficPolicy {
     true,
   );
   if (isVersion2) return { version: 2, domains, mediaEndpoints, webDomains };
-  // Suffix-level TCP direct: the host is the suffix value itself (exact
-  // allowlist membership, never a host under it), ports are a [80, 443]
-  // subset, and protected suffixes stay rejected.
+  // Duplicates must be rejected here, not just deduplicated: the client treats a
+  // repeated suffix as a malformed policy and discards the whole revision, so a
+  // duplicate accepted at this boundary silently disables managed direct routing
+  // on every device until someone republishes.
   const seenSuffixes = new Set<string>();
   const directSuffixes = (policy.directSuffixes as unknown[]).map((entry: unknown) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !exactKeys(entry as Row, ['host', 'ports'])) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid direct suffix entry');
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+        !exactKeys(entry as Row, ['host', 'ports'])) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid direct suffix');
     }
     const { host, ports } = entry as Row;
-    if (typeof host !== 'string' || !allowedWebSuffixes.includes(host) ||
-        protectedSuffixes.includes(host) || seenSuffixes.has(host)) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix');
+    // The syntax check is explicit rather than implied by list membership. While
+    // every accepted suffix had to appear in `allowedDirectSuffixes`, that list
+    // *was* the syntax guarantee; a signature relaxing membership would otherwise
+    // leave this field with no validation at all and hand clients a suffix they
+    // have to parse.
+    //
+    // A signature vouches for authorship, not for judgement. A wildcard suffix
+    // over a namespace where a third party picks the hostname still lets anyone
+    // who can host there obtain a real IP outside the tunnel — see the note above
+    // `allowedDirectSuffixes`. Signing moves that review from this code to
+    // whoever holds the key; it does not remove it.
+    if (typeof host !== 'string' || host.length > 253 ||
+        !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
+        protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
+        seenSuffixes.has(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
+    }
+    if (!trusted && !allowedDirectSuffixes.includes(host)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
     }
     seenSuffixes.add(host);
     return { host, ports: canonicalPorts(ports, [80, 443], 'direct suffix ports') };
   }).sort((a, b) => a.host < b.host ? -1 : a.host > b.host ? 1 : 0);
-  return { version: 3, domains, mediaEndpoints, webDomains, directSuffixes };
+  if (isVersion3) return { version: 3, domains, mediaEndpoints, webDomains, directSuffixes };
+
+  const seenTCPAddresses = new Set<string>();
+  const tcpEndpoints = (policy.tcpEndpoints as unknown[]).map((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+        !exactKeys(entry as Row, ['address', 'ports'])) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid TCP endpoint');
+    }
+    const { address, ports } = entry as Row;
+    if (typeof address !== 'string' || !isPublicIPv4(address) ||
+        seenTCPAddresses.has(address)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate TCP address');
+    }
+    seenTCPAddresses.add(address);
+    return { address, ports: canonicalPorts(ports, [80, 443], 'TCP endpoint ports') };
+  }).sort((a, b) => a.address < b.address ? -1 : a.address > b.address ? 1 : 0);
+  return {
+    version: 4,
+    domains,
+    mediaEndpoints,
+    webDomains,
+    directSuffixes,
+    tcpEndpoints,
+  };
 }
 
 async function publicTrafficPolicy(e: Env) {
   const row = await e.DB.prepare(
-    'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_traffic_policy WHERE singleton_id = 1',
+    'SELECT revision, ciphertext, nonce, content_sha256, updated_at, signature FROM managed_traffic_policy WHERE singleton_id = 1',
   ).first<Row>();
   if (!row) {
     const json = JSON.stringify(emptyTrafficPolicy());
@@ -875,8 +1172,41 @@ async function publicTrafficPolicy(e: Env) {
     const json = await decryptTrafficPolicy(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
     const digest = await sha256(json);
     if (digest !== row.content_sha256) throw new Error('digest mismatch');
-    canonicalTrafficPolicy(JSON.parse(json));
-    return { revision: Number(row.revision), json, sha256: digest, updatedAt: Number(row.updated_at) };
+    const signature = typeof row.signature === 'string' && row.signature.length
+      ? row.signature
+      : undefined;
+    // A stored signature is what permits trusted canonicalisation here. That
+    // sounds circular and is not: the client verifies the signature itself
+    // against a compiled-in key and is the only party whose trust decision
+    // matters, because it is the only one that routes traffic. This function
+    // re-validates to catch a malformed or drifted document, and structural
+    // validation is all that requires.
+    //
+    // So verification on this path is defence in depth, and runs only when the
+    // public key is configured. Making it mandatory would mean an unset or
+    // mistyped var turns every policy fetch into a 503 for the whole fleet, and
+    // trades a real outage for a check the client already performs. When the key
+    // *is* present a bad signature means the stored row was altered underneath
+    // us, which is worth refusing to serve.
+    const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
+    if (signature && publicKey) {
+      if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
+        throw new Error('policy signature does not verify');
+      }
+    }
+    // Re-validating on read catches tampering and digest drift, but for an
+    // unsigned policy it also couples every fetch to the current allowlists: an
+    // allowlist entry removed while the stored policy still uses it makes this
+    // throw for every device. See the note on `allowedDirectSuffixes` before
+    // narrowing anything.
+    canonicalTrafficPolicy(JSON.parse(json), Boolean(signature));
+    return {
+      revision: Number(row.revision),
+      json,
+      sha256: digest,
+      updatedAt: Number(row.updated_at),
+      ...(signature ? { signature } : {}),
+    };
   } catch {
     throw new ApiError(503, 'TRAFFIC_POLICY_UNAVAILABLE', 'Managed traffic policy is unavailable');
   }
@@ -2736,6 +3066,16 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
     .run();
+  const routingResearchRetention = Math.min(
+    envInt(
+      e,
+      'ROUTING_RESEARCH_RETENTION_SECONDS',
+      ROUTING_RESEARCH_RETENTION_MAX_SECONDS,
+    ),
+    ROUTING_RESEARCH_RETENTION_MAX_SECONDS,
+  );
+  await e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
+    .bind(t - routingResearchRetention).run();
   if (tailscaleEnrollmentEnabled(e)) {
     try {
       await cleanupOrphanPendingNodes(e);
@@ -3480,6 +3820,78 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     );
   }
 
+  if (p === '/api/v1/routing-research/snapshots' && m === 'POST') {
+    const a = await auth(req, e);
+    const declaredOwner = req.headers.get('X-Tono-Routing-Owner');
+    if (declaredOwner === null || !/^[0-9a-f]{64}$/.test(declaredOwner) ||
+        declaredOwner !== await sha256Hex(a.userId)) {
+      // A conflict (rather than 401) prevents an old account's request from
+      // triggering token refresh and being replayed under a newer account.
+      throw new ApiError(
+        409,
+        'ROUTING_RESEARCH_OWNER_MISMATCH',
+        'Routing research owner does not match the authenticated account',
+      );
+    }
+    // Request-level limits cover malformed bodies, replays, and conflicts. The
+    // tighter limiter below applies only to distinct accepted snapshots.
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`routing-research:request-device:${a.deviceId}`)}`,
+      envInt(e, 'RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY', 100),
+      ROUTING_RESEARCH_DAY_SECONDS,
+    );
+    const b = await body(req, 8 * 1024);
+    const { snapshot, json } = canonicalRoutingResearch(b);
+    const existing = await e.DB.prepare(
+      `SELECT aggregate_json, received_at
+       FROM routing_research_snapshots
+       WHERE device_id = ? AND snapshot_id = ?`,
+    ).bind(a.deviceId, snapshot.snapshotId).first<Row>();
+    if (existing) {
+      if (existing.aggregate_json !== json) throw new ApiError(409, 'SNAPSHOT_ID_CONFLICT', 'Snapshot ID was already used');
+      return Response.json({ snapshotId: snapshot.snapshotId, receivedAt: Number(existing.received_at) });
+    }
+    await consumeRateLimit(
+      e,
+      `rl:${await sha256(`routing-research:new-device:${a.deviceId}`)}`,
+      envInt(e, 'RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY', 4),
+      ROUTING_RESEARCH_DAY_SECONDS,
+    );
+    const receivedAt = now();
+    const inserted = await e.DB.prepare(
+      `INSERT INTO routing_research_snapshots(
+         id, snapshot_id, user_id, device_id, received_at, observed_since,
+         observed_until, app_version, build, os_version, architecture,
+         aggregate_json
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(device_id, snapshot_id) DO NOTHING`,
+    ).bind(
+      id(), snapshot.snapshotId, a.userId, a.deviceId, receivedAt,
+      snapshot.observedSince, snapshot.observedUntil, snapshot.appVersion,
+      snapshot.build, snapshot.osVersion, snapshot.architecture, json,
+    ).run();
+    if (!inserted.meta.changes) {
+      const replay = await e.DB.prepare(
+        `SELECT aggregate_json, received_at
+         FROM routing_research_snapshots
+         WHERE device_id = ? AND snapshot_id = ?`,
+      ).bind(a.deviceId, snapshot.snapshotId).first<Row>();
+      if (replay?.aggregate_json === json) {
+        return Response.json({
+          snapshotId: snapshot.snapshotId,
+          receivedAt: Number(replay.received_at),
+        });
+      }
+      throw new ApiError(
+        409,
+        'SNAPSHOT_ID_CONFLICT',
+        'Snapshot ID was already used',
+      );
+    }
+    return Response.json({ snapshotId: snapshot.snapshotId, receivedAt }, { status: 201 });
+  }
+
   if (p === '/api/v1/devices' && m === 'GET') {
     const a = await auth(req, e);
     await expirePending(e, a.userId);
@@ -3998,6 +4410,173 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p.startsWith('/api/v1/admin/')) {
     await privileged(req, e.ADMIN_API_TOKEN);
+    if (p === '/api/v1/admin/routing-research/summary' && m === 'GET') {
+      let unexpectedQuery = false;
+      url.searchParams.forEach((_value, key) => { if (key !== 'days') unexpectedQuery = true; });
+      if (unexpectedQuery) throw new ApiError(400, 'VALIDATION_ERROR', 'Unexpected query parameter');
+      const rawDays = url.searchParams.get('days');
+      const days = rawDays === null ? 30 : Number(rawDays);
+      if (!Number.isSafeInteger(days) || days < 1 || days > 90) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid days');
+      const timestamp = now();
+      const since = timestamp - days * ROUTING_RESEARCH_DAY_SECONDS;
+      // Filter by when traffic was observed rather than delayed receipt time.
+      // JSON1 expands only the canonical fixed-vocabulary entries; grouping is
+      // done in D1 so no per-user rows enter the API process or response.
+      const overall = await e.DB.prepare(
+        `SELECT COUNT(*) snapshot_count,
+                COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count
+         FROM routing_research_snapshots
+         WHERE observed_until >= ? AND observed_until <= ?`,
+      ).bind(since, timestamp).first<Row>();
+      const participantCount = Number(overall?.participant_count ?? 0);
+      if (participantCount < ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS) {
+        return Response.json({
+          days,
+          cohortMinimum: ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
+          suppressed: true,
+          byApp: [],
+          byBundleComponent: [],
+          byBuild: [],
+        });
+      }
+      const appRows = await e.DB.prepare(
+        `WITH filtered AS (
+           SELECT user_id, device_id, aggregate_json
+           FROM routing_research_snapshots
+           WHERE observed_until >= ? AND observed_until <= ?
+         ), entries AS (
+           SELECT filtered.user_id, filtered.device_id,
+                  json_extract(item.value, '$.app') app,
+                  json_extract(item.value, '$.connectionCount') connection_count,
+                  json_extract(item.value, '$.directConnectionCount') direct_count,
+                  json_extract(item.value, '$.proxiedConnectionCount') proxied_count,
+                  json_extract(item.value, '$.blockedConnectionCount') blocked_count,
+                  json_extract(item.value, '$.trafficVolume') traffic_volume
+           FROM filtered, json_each(filtered.aggregate_json, '$.entries') item
+         )
+         SELECT app, COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count,
+                COUNT(*) snapshot_count,
+                SUM(connection_count) connection_count,
+                SUM(direct_count) direct_count,
+                SUM(proxied_count) proxied_count,
+                SUM(blocked_count) blocked_count,
+                SUM(CASE WHEN traffic_volume = 'none' THEN 1 ELSE 0 END) volume_none,
+                SUM(CASE WHEN traffic_volume = 'under_1_mib' THEN 1 ELSE 0 END) volume_under_1_mib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_mib' THEN 1 ELSE 0 END) volume_1_to_10_mib,
+                SUM(CASE WHEN traffic_volume = '10_to_100_mib' THEN 1 ELSE 0 END) volume_10_to_100_mib,
+                SUM(CASE WHEN traffic_volume = '100_mib_to_1_gib' THEN 1 ELSE 0 END) volume_100_mib_to_1_gib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_gib' THEN 1 ELSE 0 END) volume_1_to_10_gib,
+                SUM(CASE WHEN traffic_volume = 'over_10_gib' THEN 1 ELSE 0 END) volume_over_10_gib
+         FROM entries
+         GROUP BY app
+         HAVING COUNT(DISTINCT user_id) >= 3
+         ORDER BY participant_count DESC, device_count DESC, app`,
+      ).bind(since, timestamp).all<Row>();
+      const componentRows = await e.DB.prepare(
+        `WITH filtered AS (
+           SELECT user_id, device_id, aggregate_json
+           FROM routing_research_snapshots
+           WHERE observed_until >= ? AND observed_until <= ?
+         ), components AS (
+           SELECT filtered.user_id, filtered.device_id,
+                  json_extract(item.value, '$.app') app,
+                  json_extract(item.value, '$.bundleComponent') bundle_component,
+                  json_extract(item.value, '$.connectionCount') connection_count,
+                  json_extract(item.value, '$.directConnectionCount') direct_count,
+                  json_extract(item.value, '$.proxiedConnectionCount') proxied_count,
+                  json_extract(item.value, '$.blockedConnectionCount') blocked_count,
+                  json_extract(item.value, '$.trafficVolume') traffic_volume
+           FROM filtered,
+                json_each(filtered.aggregate_json, '$.bundleComponents') item
+         )
+         SELECT app, bundle_component,
+                COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count,
+                COUNT(*) snapshot_count,
+                SUM(connection_count) connection_count,
+                SUM(direct_count) direct_count,
+                SUM(proxied_count) proxied_count,
+                SUM(blocked_count) blocked_count,
+                SUM(CASE WHEN traffic_volume = 'none' THEN 1 ELSE 0 END) volume_none,
+                SUM(CASE WHEN traffic_volume = 'under_1_mib' THEN 1 ELSE 0 END) volume_under_1_mib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_mib' THEN 1 ELSE 0 END) volume_1_to_10_mib,
+                SUM(CASE WHEN traffic_volume = '10_to_100_mib' THEN 1 ELSE 0 END) volume_10_to_100_mib,
+                SUM(CASE WHEN traffic_volume = '100_mib_to_1_gib' THEN 1 ELSE 0 END) volume_100_mib_to_1_gib,
+                SUM(CASE WHEN traffic_volume = '1_to_10_gib' THEN 1 ELSE 0 END) volume_1_to_10_gib,
+                SUM(CASE WHEN traffic_volume = 'over_10_gib' THEN 1 ELSE 0 END) volume_over_10_gib
+         FROM components
+         GROUP BY app, bundle_component
+         HAVING COUNT(DISTINCT user_id) >= 3
+         ORDER BY participant_count DESC, device_count DESC, app,
+                  bundle_component`,
+      ).bind(since, timestamp).all<Row>();
+      const buildRows = await e.DB.prepare(
+        `SELECT app_version, build,
+                COUNT(DISTINCT user_id) participant_count,
+                COUNT(DISTINCT device_id) device_count,
+                COUNT(*) snapshot_count
+         FROM routing_research_snapshots
+         WHERE observed_until >= ? AND observed_until <= ?
+         GROUP BY app_version, build
+         HAVING COUNT(DISTINCT user_id) >= 3
+         ORDER BY participant_count DESC, app_version DESC, build DESC`,
+      ).bind(since, timestamp).all<Row>();
+      return Response.json({
+        days,
+        cohortMinimum: ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS,
+        participantCount,
+        deviceCount: Number(overall?.device_count ?? 0),
+        snapshotCount: Number(overall?.snapshot_count ?? 0),
+        byApp: appRows.results.map((row) => ({
+          app: String(row.app),
+          participantCount: Number(row.participant_count),
+          deviceCount: Number(row.device_count),
+          snapshotCount: Number(row.snapshot_count),
+          connectionCount: Number(row.connection_count),
+          directConnectionCount: Number(row.direct_count),
+          proxiedConnectionCount: Number(row.proxied_count),
+          blockedConnectionCount: Number(row.blocked_count),
+          trafficVolumes: {
+            none: Number(row.volume_none),
+            under_1_mib: Number(row.volume_under_1_mib),
+            '1_to_10_mib': Number(row.volume_1_to_10_mib),
+            '10_to_100_mib': Number(row.volume_10_to_100_mib),
+            '100_mib_to_1_gib': Number(row.volume_100_mib_to_1_gib),
+            '1_to_10_gib': Number(row.volume_1_to_10_gib),
+            over_10_gib: Number(row.volume_over_10_gib),
+          },
+        })),
+        byBundleComponent: componentRows.results.map((row) => ({
+          app: String(row.app),
+          bundleComponent: String(row.bundle_component),
+          participantCount: Number(row.participant_count),
+          deviceCount: Number(row.device_count),
+          snapshotCount: Number(row.snapshot_count),
+          connectionCount: Number(row.connection_count),
+          directConnectionCount: Number(row.direct_count),
+          proxiedConnectionCount: Number(row.proxied_count),
+          blockedConnectionCount: Number(row.blocked_count),
+          trafficVolumes: {
+            none: Number(row.volume_none),
+            under_1_mib: Number(row.volume_under_1_mib),
+            '1_to_10_mib': Number(row.volume_1_to_10_mib),
+            '10_to_100_mib': Number(row.volume_10_to_100_mib),
+            '100_mib_to_1_gib': Number(row.volume_100_mib_to_1_gib),
+            '1_to_10_gib': Number(row.volume_1_to_10_gib),
+            over_10_gib: Number(row.volume_over_10_gib),
+          },
+        })),
+        byBuild: buildRows.results.map((row) => ({
+          appVersion: String(row.app_version),
+          build: String(row.build),
+          participantCount: Number(row.participant_count),
+          deviceCount: Number(row.device_count),
+          snapshotCount: Number(row.snapshot_count),
+        })),
+      });
+    }
     if (p === '/api/v1/admin/device-actions' && m === 'POST') {
       const b = await body(req, 8 * 1024);
       rejectUnexpectedKeys(b, ['deviceId', 'action', 'ttlSeconds']);
@@ -4052,8 +4631,54 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (p === '/api/v1/admin/traffic-policy' && m === 'PUT') {
       const b = await body(req, 64 * 1024);
-      const policy = canonicalTrafficPolicy(b.policy);
+      rejectUnexpectedKeys(b, ['policy', 'expectedRevision', 'signature', 'dryRun']);
+      if (b.signature !== undefined && (typeof b.signature !== 'string' || !b.signature.length || b.signature.length > 128)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid signature');
+      }
+      if (b.dryRun !== undefined && typeof b.dryRun !== 'boolean') {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid dryRun');
+      }
+      const signature = b.signature as string | undefined;
+      const dryRun = b.dryRun === true;
+      // A dry run exists because a signature has to cover the document this
+      // endpoint will serve, byte for byte, and that document is this function's
+      // output — not the operator's input. Rather than reimplement
+      // canonicalisation in the signing tool and let the two drift, the tool asks
+      // for the canonical bytes, signs those, and sends them back. The real PUT
+      // re-canonicalises and re-verifies, so if anything differed between the two
+      // calls the signature fails and nothing is stored.
+      //
+      // Canonicalised as trusted: an operator asking what they would be signing
+      // is by definition about to sign it. Nothing is stored on this path.
+      const policy = canonicalTrafficPolicy(b.policy, dryRun || Boolean(signature));
       const json = JSON.stringify(policy);
+      if (signature) {
+        const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
+        if (!publicKey) {
+          throw new ApiError(409, 'TRAFFIC_POLICY_KEY_UNCONFIGURED', 'This deployment has no policy signing public key, so a signed policy cannot be accepted');
+        }
+        if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
+          throw new ApiError(400, 'TRAFFIC_POLICY_SIGNATURE_INVALID', 'The signature does not cover the canonical policy this would serve');
+        }
+      }
+      if (dryRun) {
+        // Whether publishing this document actually needs a signature: if the
+        // allowlists already cover every host in it, they do not, and the
+        // operator can skip signing entirely.
+        let signatureRequired = false;
+        try {
+          canonicalTrafficPolicy(b.policy, false);
+        } catch {
+          signatureRequired = true;
+        }
+        return Response.json({
+          dryRun: true,
+          json,
+          sha256: await sha256(json),
+          signatureRequired,
+          signatureContext: TRAFFIC_POLICY_SIGNATURE_CONTEXT,
+        });
+      }
       const expectedRevision = b.expectedRevision;
       if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
@@ -4069,21 +4694,29 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const encrypted = await encryptTrafficPolicy(json, requiredCatalogKey(e));
       const digest = await sha256(json);
       const t = now();
+      // `signature` is written on both paths, including as NULL. Leaving a
+      // previous signature in place while replacing the document it covers would
+      // ship bytes and a signature that disagree, and every client that verifies
+      // would reject the whole policy — an unsigned republish must clear it.
+      const storedSignature = signature ?? null;
       const changed = current
         ? await e.DB.prepare(
           `UPDATE managed_traffic_policy
-           SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
+           SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?, signature = ?
            WHERE singleton_id = 1 AND revision = ?`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, currentRevision).run()
+        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature, currentRevision).run()
         : await e.DB.prepare(
           `INSERT OR IGNORE INTO managed_traffic_policy(
-             singleton_id, revision, ciphertext, nonce, content_sha256, updated_at
-           ) VALUES(1, ?, ?, ?, ?, ?)`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t).run();
+             singleton_id, revision, ciphertext, nonce, content_sha256, updated_at, signature
+           ) VALUES(1, ?, ?, ?, ?, ?, ?)`,
+        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature).run();
       if (!changed.meta.changes) {
         throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
       }
-      return Response.json({ revision, json, sha256: digest, updatedAt: t });
+      return Response.json({
+        revision, json, sha256: digest, updatedAt: t,
+        ...(signature ? { signature } : {}),
+      });
     }
     if (p === '/api/v1/admin/exit-catalog' && m === 'GET') {
       // Admin always receives the full encrypted catalog authority, unfiltered.
@@ -4342,6 +4975,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (p === '/api/v1/admin/exit-catalog' && m === 'PUT') {
       const b = await body(req, 2 * 1024 * 1024);
+      rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
       const yaml = managedCatalogYAML(b.yaml);
       const expectedRevision = b.expectedRevision;
       if (
@@ -4575,6 +5209,38 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     });
   }
 
+  // The list an exit reconciles its client roster against. Pull rather than push:
+  // an exit reaching out needs no inbound path and no per-exit credential held by
+  // the control plane, and a Worker cannot reach a private management API anyway.
+  //
+  // The list *is* the enforcement. It excludes accounts that are not active, have
+  // expired, or have passed their quota, so an exit that reconciles removes them —
+  // and removal is what stops traffic. Enforcement that only stops counting does
+  // not stop anything.
+  if (p === '/api/v1/home/exit-identities' && m === 'GET') {
+    await privileged(req, e.HOME_AGENT_TOKEN);
+    const t = now();
+    const rows = await e.DB.prepare(
+      `SELECT exit_credentials.user_id AS user_id, exit_credentials.client_uuid AS client_uuid
+         FROM exit_credentials
+         JOIN users ON users.id = exit_credentials.user_id
+        WHERE users.status = 'active'
+          AND (users.expires_at IS NULL OR users.expires_at > ?)
+          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
+        ORDER BY exit_credentials.user_id`,
+    ).bind(t).all<Row>();
+    return Response.json({
+      // Echoed so a reconciling agent can tell a stale response from an empty
+      // roster: applying an empty list as if it were current would disconnect
+      // every account at once.
+      observedAt: t,
+      identities: rows.results.map((row) => ({
+        userId: String(row.user_id),
+        clientUUID: String(row.client_uuid),
+      })),
+    });
+  }
+
   if (p === '/api/v1/home/usage' && m === 'POST') {
     await privileged(req, e.HOME_AGENT_TOKEN);
     const b = await body(req, 512 * 1024);
@@ -4761,6 +5427,7 @@ export default {
       }
       const assetURL = new URL(req.url);
       assetURL.pathname = assetPath;
+      assetURL.searchParams.set('tono-release-revision', RELEASE_ASSET_REVISION);
       return secure(await e.ASSETS.fetch(new Request(assetURL, req)), false);
     }
     if (origin && origin !== e.ALLOWED_ORIGIN) {

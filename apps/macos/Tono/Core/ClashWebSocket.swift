@@ -243,6 +243,13 @@ final class ClashWebSocket {
                 guard let self, !self.isStopped, self.logsTask === task else { return }
                 switch result {
                 case .success:
+                    // Any inbound frame proves the observation path is alive.
+                    // Foundation can delay sendPing's completion while Mihomo
+                    // continues delivering logs; leaving that ping marked as
+                    // outstanding made the watchdog cancel a healthy socket
+                    // every ~10 seconds. Clearing the marker also invalidates
+                    // the late callback through the identity check below.
+                    self.logsPingStartedAt = nil
                     self.markStreamRecovered("logs")
                     if let entry {
                         self.enqueueLog(level: entry.0, message: entry.1)
@@ -342,7 +349,16 @@ final class ClashWebSocket {
             return
         }
         if let logsPingStartedAt {
-            guard now.timeIntervalSince(logsPingStartedAt) > 5 else { return }
+            // The inbound-frame clearing below rescues this only while Mihomo
+            // is emitting logs. At the levels this app actually runs, the logs
+            // stream is legitimately silent for minutes — measured at zero
+            // frames in 95 seconds — so nothing cancels the outstanding marker
+            // and Foundation's delayed sendPing completion tripped this every
+            // ping cycle: 11 stall/reconnect rounds in 8 connected minutes on a
+            // socket that was never actually broken. The deadline has to exceed
+            // the 15s ping interval, not undercut it. A genuinely dead socket
+            // is still caught within one further cycle.
+            guard now.timeIntervalSince(logsPingStartedAt) > 20 else { return }
             markStreamStalled("logs")
             task.cancel(with: .goingAway, reason: nil)
             logsTask = nil
@@ -355,12 +371,14 @@ final class ClashWebSocket {
            now.timeIntervalSince(lastLogsPingAt) < 15 {
             return
         }
-        logsPingStartedAt = now
+        let pingStartedAt = now
+        logsPingStartedAt = pingStartedAt
         lastLogsPingAt = now
         task.sendPing { [weak self, weak task] error in
             Task { @MainActor [weak self, weak task] in
                 guard let self, let task,
-                      !self.isStopped, self.logsTask === task else { return }
+                      !self.isStopped, self.logsTask === task,
+                      self.logsPingStartedAt == pingStartedAt else { return }
                 self.logsPingStartedAt = nil
                 guard error != nil else {
                     self.markStreamRecovered("logs")

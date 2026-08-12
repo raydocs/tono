@@ -23,6 +23,7 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM operations_deployments').run();
   await env.DB.prepare('DELETE FROM operations_logical_nodes').run();
   await env.DB.prepare('DELETE FROM operations_servers').run();
+  await env.DB.prepare('DELETE FROM routing_research_snapshots').run();
   await env.DB.prepare('DELETE FROM device_actions').run();
   await env.DB.prepare('DELETE FROM diagnostics_reports').run();
   await env.DB.prepare('DELETE FROM telemetry_windows').run();

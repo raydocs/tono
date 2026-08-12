@@ -36,11 +36,31 @@ for port in 21053 28790 29090; do
   fi
 done
 
+# This test's core runs as the invoking user, and the armed ruleset permits the
+# exit endpoint for root only, so every dial it makes is dropped before it
+# leaves. The result was an opaque `SSL_ERROR_SYSCALL` several steps later,
+# which is most of the reason this script sat unrun: the failure looked like a
+# broken exit rather than a precondition. Say so up front instead.
+#
+# Detected without root on purpose: the first version of this gate read `pfctl`,
+# which needs /dev/pf, so it failed silently as a normal user and the script ran
+# on to the same opaque error it was added to prevent. The protected TUN and the
+# privileged core are both visible without privileges.
+if /sbin/ifconfig utun199 >/dev/null 2>&1 ||
+   /usr/bin/pgrep -x tono-mihomo >/dev/null 2>&1; then
+  echo "Tono protection is running; disconnect before running this test" >&2
+  echo "  (this test's core runs as you, and the armed ruleset permits the" >&2
+  echo "   exit endpoint for root only, so its dials are dropped and surface" >&2
+  echo "   several steps later as an SSL_ERROR_SYSCALL against an unrelated host)" >&2
+  exit 1
+fi
+
 tono_developer_dir=/Applications/Xcode.app/Contents/Developer
 DEVELOPER_DIR="$tono_developer_dir" /usr/bin/xcrun swiftc \
   -module-cache-path "$test_dir/module-cache" \
   "$repo_root/apps/macos/Tono/Models/ProxyNode.swift" \
   "$repo_root/apps/macos/Tono/Models/RuleEntry.swift" \
+  "$repo_root/apps/macos/Tono/Models/TonoAPIModels.swift" \
   "$repo_root/apps/macos/Tono/Services/ConfigParser.swift" \
   "$repo_root/apps/macos/Tono/Core/HelperProtocolVersion.swift" \
   "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift" \

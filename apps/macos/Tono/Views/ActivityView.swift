@@ -1,4 +1,54 @@
 import SwiftUI
+import AppKit
+
+/// Resolves a client process name to the owning application's real icon.
+///
+/// Mihomo reports the executable name only, so the icon is recovered by
+/// matching against currently running applications. A process that has already
+/// exited, or a helper with no bundle, resolves to nil exactly once and is then
+/// cached — the connection list re-renders on every traffic tick and must never
+/// re-walk the process table per row.
+@MainActor
+private enum ClientAppIconCache {
+    private static var cache: [String: NSImage?] = [:]
+
+    static func icon(for processName: String) -> NSImage? {
+        if let cached = cache[processName] { return cached }
+        var resolved: NSImage?
+        for app in NSWorkspace.shared.runningApplications {
+            let executable = app.executableURL?.lastPathComponent
+            guard executable == processName
+                    || app.localizedName == processName else { continue }
+            if let bundleURL = app.bundleURL {
+                resolved = NSWorkspace.shared.icon(forFile: bundleURL.path)
+            }
+            break
+        }
+        cache[processName] = resolved
+        return resolved
+    }
+}
+
+private struct ClientAppIcon: View {
+    let processName: String?
+
+    var body: some View {
+        ZStack {
+            if let processName, let icon = ClientAppIconCache.icon(for: processName) {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 22, height: 22)
+            } else {
+                Image(systemName: processName == nil ? "globe" : "app.dashed")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+            }
+        }
+        .frame(width: 22, height: 22)
+        .help(processName ?? "")
+    }
+}
 
 struct ActivityView: View {
     @Environment(AppState.self) private var appState
@@ -138,6 +188,22 @@ private struct LogEntryRow: View {
         }
     }
 
+    @ViewBuilder
+    private func directionRow(
+        symbol: String,
+        value: String,
+        tint: Color
+    ) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(tint)
+            Text(value.isEmpty ? "0 B" : value)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.primary)
+        }
+    }
+
     private var latencyStyle: (fg: String, bg: String) {
         guard let ms = entry.latency else { return ("A2A3C4", "000000") }
         if ms <= 80 { return ("10B981", "10B981") }
@@ -157,21 +223,41 @@ private struct LogEntryRow: View {
 
             // Card content
             HStack(spacing: 16) {
-                // Domain info
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(
-                        entry.processName.map { "\($0) · \(entry.domain)" }
-                            ?? entry.domain
-                    )
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                // Client app icon. The process is the identity a user actually
+                // recognises — the host is secondary detail.
+                ClientAppIcon(processName: entry.processName)
 
+                // Client process + destination host
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        if let processName = entry.processName {
+                            Text(processName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .layoutPriority(1)
+                            Text(entry.domain)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        } else {
+                            Text(entry.domain)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+
+                    // Routing policy is deliberately not surfaced here: Tono
+                    // decides it and the user never configures it, so naming
+                    // the matched rule would only invite questions about
+                    // settings that do not exist.
                     Text(
                         [
                             entry.network.isEmpty ? entry.protocolName : entry.network,
                             entry.destination,
-                            "rule: \(entry.rule)",
                         ]
                         .filter { !$0.isEmpty }
                         .joined(separator: " • ")
@@ -214,16 +300,30 @@ private struct LogEntryRow: View {
                         .frame(width: 80)
                 }
 
-                // Stats
+                // Stats: two directions, or the combined total when a source
+                // has not filled the split counters in.
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(entry.dataSize)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
-                    Text(entry.dataLabel)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    if entry.downloadText.isEmpty, entry.uploadText.isEmpty {
+                        Text(entry.dataSize)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.primary)
+                        Text(entry.dataLabel)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        directionRow(
+                            symbol: "arrow.down",
+                            value: entry.downloadText,
+                            tint: Color(hex: "10B981")
+                        )
+                        directionRow(
+                            symbol: "arrow.up",
+                            value: entry.uploadText,
+                            tint: Color(hex: "4B6EFF")
+                        )
+                    }
                 }
-                .frame(width: 80, alignment: .trailing)
+                .frame(width: 88, alignment: .trailing)
 
                 // Close button
                 Button {

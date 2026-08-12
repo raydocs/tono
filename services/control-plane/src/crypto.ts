@@ -15,6 +15,51 @@ async function catalogKey(encodedKey: string, usage: KeyUsage[]) {
   return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, usage);
 }
 
+// What an Ed25519 policy signature actually covers.
+//
+// Standard base64 rather than the base64url used elsewhere in this file, because
+// this value is produced on an operator's machine and consumed by two clients in
+// two other languages; standard base64 is what `Data(base64Encoded:)`, Rust's
+// STANDARD engine, and `atob` all accept without a conversion step, and it is the
+// encoding the update feed's EdDSA signatures already use.
+//
+// The context prefix is part of the signed bytes. Without it a signature made by
+// this key over some other document could be presented as a policy signature; a
+// key that only ever signs policies today does not stay that way. All three
+// implementations must prefix identically or nothing verifies — this constant is
+// the single definition, mirrored in sign-traffic-policy.mjs, AppState.swift, and
+// policy.rs, each pointing back here.
+export const TRAFFIC_POLICY_SIGNATURE_CONTEXT = 'tono-traffic-policy-v1\n';
+
+const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+// Returns false for anything that is not a good signature by the given key,
+// including a malformed key, a malformed signature, and a signature of the right
+// shape over different bytes. Callers must treat all of those identically: a
+// document whose signature does not verify is a document of unknown authorship,
+// and the reason it failed is not the caller's decision to make.
+export async function verifyTrafficPolicySignature(
+  json: string,
+  signature: string,
+  encodedPublicKey: string,
+): Promise<boolean> {
+  try {
+    const raw = unb64(encodedPublicKey);
+    if (raw.byteLength !== 32) return false;
+    const sig = unb64(signature);
+    if (sig.byteLength !== 64) return false;
+    const key = await crypto.subtle.importKey('raw', raw, { name: 'Ed25519' }, false, ['verify']);
+    return await crypto.subtle.verify(
+      'Ed25519',
+      key,
+      sig,
+      enc.encode(TRAFFIC_POLICY_SIGNATURE_CONTEXT + json),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const randomToken = (bytes = 32) => b64u(crypto.getRandomValues(new Uint8Array(bytes)));
 export async function sha256(s: string) { return b64u(await crypto.subtle.digest('SHA-256', enc.encode(s))); }
 export async function hmacSha256(message: string, secret: string) {

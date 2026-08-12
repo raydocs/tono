@@ -33,6 +33,18 @@
   }],
   "vars": {
     "ALLOWED_ORIGIN": "https://api.afk.ccwu.cc",
+    // Public half of the traffic-policy signing key. A var, not a secret: it is
+    // public by construction, and keeping it in the repository is what lets
+    // anyone check which key this deployment trusts against what the clients
+    // were built with. The private half exists only in the operator's keychain
+    // (`security find-generic-password -s tono-policy-signing`) and is never
+    // held by this Worker — if it were, taking the Worker would be enough to
+    // mint a policy that pulls arbitrary hosts out of the tunnel.
+    //
+    // Changing this value invalidates the signature on the live policy. Publish
+    // a policy signed by the new key in the same change, or clients will reject
+    // the document and fall back to their compiled-in allowlists.
+    "TRAFFIC_POLICY_PUBLIC_KEY": "Sf2burVHXZWzYikU0FlC+N64BeRZJxJe8XaneblmTkM=",
     "TAILSCALE_TAILNET": "Tcw8bpg2c621CNTRL",
     "TAILSCALE_ENROLLMENT_ENABLED": "false",
     "ACCESS_TOKEN_TTL_SECONDS": "900",
@@ -51,6 +63,9 @@
     "RATE_LIMIT_DIAGNOSTICS_USER_HOUR": "5",
     "RATE_LIMIT_DIAGNOSTICS_USER_DAY": "20",
     "DIAGNOSTICS_RETENTION_SECONDS": "2592000",
+    "RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY": "100",
+    "RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY": "4",
+    "ROUTING_RESEARCH_RETENTION_SECONDS": "7776000",
     "EMAIL_CODE_TTL_SECONDS": "600",
     "OIDC_CHALLENGE_TTL_SECONDS": "300",
     "EMAIL_FROM": "Tono <login@lecvia.com>",

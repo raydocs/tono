@@ -16,6 +16,11 @@ private let killSwitchMaximumStateBytes = 64 * 1024
 private let killSwitchMaximumDERPMapBytes = 1024 * 1024
 private let killSwitchDERPMapURL = "https://login.tailscale.com/derpmap/default"
 
+/// Ports the reviewed bundle's direct traffic uses. Observed: 80, 443 and 8080
+/// for TCP, 443 and 8000 for its media path. Kept as a fixed list so a wider
+/// permit cannot be introduced by data.
+private let reviewedBundleDirectPorts = [80, 443, 8000, 8080]
+
 private struct KillSwitchEndpoint: Hashable {
     let address: String
     let transport: String
@@ -58,6 +63,10 @@ private struct KillSwitchState {
     /// Ephemeral exceptions supplied by the current protected session only.
     /// These must never be restored from disk or inherited by a later arm.
     let sessionDirectEndpoints: [KillSwitchEndpoint]
+    /// Whether the rule engine routes the reviewed bundle direct this session.
+    /// Ephemeral like `sessionDirectEndpoints`: never restored from disk, so a
+    /// recovery arm cannot inherit a broader permit than the session asked for.
+    let reviewedBundleDirectEnabled: Bool
 }
 
 private struct HelperCommandResult {
@@ -71,6 +80,10 @@ private struct HelperCommandResult {
 }
 
 final class KillSwitchManager {
+    /// Ceiling for the persisted recovery pin set of a single host. Well under
+    /// the 128-address limit `validateAddresses` enforces when those pins are
+    /// read back, so accumulation can never lock out a future arm.
+    private static let maximumPinnedAddressesPerHost = 32
     private static let defaultHosts = [
         "console.tailscale.com",
         "controlplane.tailscale.com",
@@ -140,15 +153,40 @@ final class KillSwitchManager {
         let sessionDirectEndpoints = try Self.validateSessionDirectEndpoints(
             object["sessionDirectEndpoints"] ?? []
         )
+        // Omission means off, and a non-boolean is a hard error rather than a
+        // silent default: this flag widens the permit, so an ambiguous request
+        // must fail instead of guessing. `NSNumber` would accept 0/1, which the
+        // app never sends, so require a real Bool.
+        let reviewedBundleDirect: Bool
+        switch object["reviewedBundleDirect"] {
+        case nil:
+            reviewedBundleDirect = false
+        case let flag as Bool:
+            reviewedBundleDirect = flag
+        default:
+            throw HelperFailure.invalid("reviewedBundleDirect must be a boolean.")
+        }
         var availablePins = previous?.pinnedHosts ?? [:]
         for (host, addresses) in bootstrapPins {
             // Bundle pins seed recovery but must not replace addresses learned
             // by a later successful clean-system resolution. Keep both so a
             // Cloudflare anycast rotation cannot make the next protected
             // reconnect depend on one stale build-time address set.
-            availablePins[host] = (availablePins[host] ?? []).reduce(into: addresses) {
-                if !$0.contains($1) { $0.append($1) }
-            }
+            //
+            // Bounded, because this set is persisted and re-merged on every
+            // arm: an unbounded union grew past the resolved-address ceiling as
+            // the control plane's anycast addresses rotated, and once it did,
+            // `validateAddresses` rejected the recovery pins and every
+            // subsequent arm failed — a fail-closed machine that could no
+            // longer be re-armed. Bundle pins are kept first so the build-time
+            // recovery path always survives truncation; this set is only the
+            // fallback anyway, since a successful resolution overwrites
+            // `pinnedHosts` for the host immediately below.
+            availablePins[host] = Array(
+                (availablePins[host] ?? []).reduce(into: addresses) {
+                    if !$0.contains($1) { $0.append($1) }
+                }.prefix(Self.maximumPinnedAddressesPerHost)
+            )
         }
         let (normalizedHosts, resolvedHosts) = try Self.resolveHosts(
             requestedHosts,
@@ -207,7 +245,8 @@ final class KillSwitchManager {
             derpEndpoints: derpEndpoints,
             cachedDERPEndpoints: cachedDERPEndpoints,
             proxyTargets: proxyTargets,
-            sessionDirectEndpoints: sessionDirectEndpoints
+            sessionDirectEndpoints: sessionDirectEndpoints,
+            reviewedBundleDirectEnabled: reviewedBundleDirect
         )
 
         lock.lock()
@@ -217,7 +256,7 @@ final class KillSwitchManager {
                 "The network changed during Kill Switch preparation; protection remains fail-closed."
             )
         }
-        try Self.writeRules(state: state)
+        try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
         try Self.ensureHostsMappings(state: state)
@@ -226,14 +265,18 @@ final class KillSwitchManager {
         // and config reloads re-arm with identical or wider rules; flushing
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
-        let passRules = Self.passRules(in: Self.renderRules(state: state))
+        let passRules = Self.passRules(
+            in: Self.renderRules(state: state, allowedUID: allowedUID)
+        )
         let revokesAccess = lastLoadedPassRules.map {
             !$0.isSubset(of: passRules)
         } ?? true
         try Self.ensureAnchorLoaded(flushStates: revokesAccess)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
-        return response(armed: true, wanted: true, live: true)
+        return response(
+            armed: true, wanted: true, live: true, flushedStates: revokesAccess
+        )
     }
 
     private static func passRules(in rules: String) -> Set<String> {
@@ -263,7 +306,7 @@ final class KillSwitchManager {
             stateGeneration &+= 1
             lastLoadedPassRules = nil
             let state = Self.emergencyState(preserving: previous)
-            try Self.writeRules(state: state)
+            try Self.writeRules(state: state, allowedUID: allowedUID)
             try saveState(state)
             try Self.ensureAnchorLoaded(flushStates: true)
             // Stale /etc/hosts pins do not permit traffic through the all-block
@@ -273,7 +316,7 @@ final class KillSwitchManager {
         } catch {
             if Self.stateFileExists() {
                 stateGeneration &+= 1
-                try? Self.installEmergencyBlock()
+                try? Self.installEmergencyBlock(allowedUID: allowedUID)
                 return true
             }
             return false
@@ -326,7 +369,7 @@ final class KillSwitchManager {
                 if wanted {
                     try Self.ensureHostsMappings(state: state)
                     if !live {
-                        try Self.writeRules(state: state)
+                        try Self.writeRules(state: state, allowedUID: allowedUID)
                         try Self.ensureAnchorLoaded(flushStates: true)
                         lastLoadedPassRules = nil
                         live = Self.effectiveStatus()
@@ -344,7 +387,7 @@ final class KillSwitchManager {
             if Self.stateFileExists() {
                 wanted = true
                 if !live {
-                    try? Self.installEmergencyBlock()
+                    try? Self.installEmergencyBlock(allowedUID: allowedUID)
                     lastLoadedPassRules = nil
                     live = Self.effectiveStatus()
                     healed = true
@@ -361,7 +404,8 @@ final class KillSwitchManager {
         armed: Bool,
         wanted: Bool,
         live: Bool,
-        healed: Bool = false
+        healed: Bool = false,
+        flushedStates: Bool = false
     ) -> [String: Any] {
         [
             "ok": true,
@@ -369,6 +413,15 @@ final class KillSwitchManager {
             "wantArmed": wanted,
             "live": live,
             "healed": healed,
+            // Whether this call severed every established connection on the
+            // machine. The daemon has always known — a re-arm flushes states
+            // when it withdraws a pass rule the previous ruleset had — and never
+            // said so, which cost a day: the only visible symptom was health
+            // probes timing out afterwards, and that reads equally well as a
+            // restarted core, a dead exit, or a network change. Reporting the
+            // one bit that distinguishes them turns that investigation into a
+            // log line.
+            "flushedStates": flushedStates,
             "version": helperVersion,
         ]
     }
@@ -376,21 +429,21 @@ final class KillSwitchManager {
     private func restoreAtLaunch() throws {
         do {
             guard let state = try loadState(), state.armed else { return }
-            try Self.writeRules(state: state)
+            try Self.writeRules(state: state, allowedUID: allowedUID)
             try Self.ensureHostsMappings(state: state)
             try Self.ensureAnchorLoaded(flushStates: true)
         } catch {
             if Self.stateFileExists() {
-                try Self.installEmergencyBlock()
+                try Self.installEmergencyBlock(allowedUID: allowedUID)
             } else {
                 throw error
             }
         }
     }
 
-    private static func installEmergencyBlock() throws {
+    private static func installEmergencyBlock(allowedUID: uid_t) throws {
         let state = emergencyState(preserving: nil)
-        try writeRules(state: state)
+        try writeRules(state: state, allowedUID: allowedUID)
         try ensureAnchorLoaded(flushStates: true)
     }
 
@@ -408,7 +461,8 @@ final class KillSwitchManager {
             derpEndpoints: [],
             cachedDERPEndpoints: previous?.cachedDERPEndpoints ?? [],
             proxyTargets: [],
-            sessionDirectEndpoints: []
+            sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
         )
     }
 
@@ -424,9 +478,18 @@ final class KillSwitchManager {
               let armed = object["armed"] as? Bool else {
             throw HelperFailure.invalid("Kill Switch state is invalid.")
         }
-        if let stateUID = object["allowedUid"] as? NSNumber,
-           stateUID.uint32Value != UInt32(allowedUID) {
-            throw HelperFailure.invalid("Kill Switch state belongs to another user.")
+        // Present-but-unreadable must not read as "no opinion". `if let … as?
+        // NSNumber` alone skipped the comparison for any non-numeric value, so a
+        // state file claiming `"allowedUid": "501"` — or any other type — was
+        // accepted for every user. Absence still means legacy: builds before this
+        // field existed wrote none, and `persistentObject` always writes it now,
+        // so the compatibility window closes after the first arm.
+        if object.keys.contains("allowedUid") {
+            guard let stateUID = object["allowedUid"] as? NSNumber,
+                  CFGetTypeID(stateUID) != CFBooleanGetTypeID(),
+                  stateUID.uint32Value == UInt32(allowedUID) else {
+                throw HelperFailure.invalid("Kill Switch state belongs to another user.")
+            }
         }
         let tailscaleBootstrapEnabled = try Self.boolean(
             object["tailscaleBootstrapEnabled"] ?? false,
@@ -536,7 +599,8 @@ final class KillSwitchManager {
             proxyTargets: proxyTargets,
             // Session exceptions are intentionally not persisted. A helper
             // restart and every boot therefore restore fail-closed with none.
-            sessionDirectEndpoints: []
+            sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
         )
     }
 
@@ -1198,8 +1262,11 @@ final class KillSwitchManager {
         return candidate
     }
 
-    private static func writeRules(state: KillSwitchState) throws {
-        let rules = renderRules(state: state)
+    private static func writeRules(
+        state: KillSwitchState,
+        allowedUID: uid_t
+    ) throws {
+        let rules = renderRules(state: state, allowedUID: allowedUID)
         try atomicWrite(
             path: killSwitchPFPath,
             data: Data(rules.utf8),
@@ -1213,7 +1280,10 @@ final class KillSwitchManager {
         }
     }
 
-    private static func renderRules(state: KillSwitchState) -> String {
+    private static func renderRules(
+        state: KillSwitchState,
+        allowedUID: uid_t
+    ) -> String {
         var lines = [
             "# Managed by Tono Kill Switch — do not edit",
             // Mihomo's controller is loopback-only. Both directions must pass
@@ -1245,10 +1315,21 @@ final class KillSwitchManager {
         for endpoint in controlEndpoints.sorted(by: {
             ($0.transport, $0.port, $0.address) < ($1.transport, $1.port, $1.address)
         }) {
+            // Restricted to the two identities that legitimately use this
+            // bootstrap path: the root helper (DERP map refresh) and the signed
+            // app running as the interactive user (control-plane recovery while
+            // the tunnel is down). Without a `user` clause — the only exception
+            // family that lacked one — *any* local process could send to these
+            // addresses on 443 outside the tunnel. Because the control plane is
+            // fronted by shared anycast addresses and the edge routes by SNI,
+            // that was enough for an unprivileged process to reach an unrelated
+            // origin of its choosing on the same address and disclose the real
+            // IP while the kill switch was armed.
             let family = endpoint.address.contains(":") ? "inet6" : "inet"
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +
-                "to \(endpoint.address) port \(endpoint.port) keep state (if-bound)"
+                "to \(endpoint.address) port \(endpoint.port) " +
+                "user { 0, \(allowedUID) } keep state (if-bound)"
             )
         }
         for endpoint in state.derpEndpoints.sorted(by: {
@@ -1281,6 +1362,28 @@ final class KillSwitchManager {
                 "pass out quick inet proto \(endpoint.transport) " +
                 "to \(endpoint.address) port \(endpoint.port) user root keep state (if-bound)"
             )
+        }
+        if state.reviewedBundleDirectEnabled {
+            // The reviewed bundle's traffic is routed direct by the rule engine,
+            // and those packets leave as root from the core, so no `to <address>`
+            // exception can express them: the addresses rotate and mostly never
+            // appear in DNS. Scoped as tightly as PF allows — root only, and
+            // only the ports that traffic uses — so a rule-engine mistake can at
+            // worst escape on a web port instead of any port. Everything the
+            // engine does not route direct still reaches `MATCH,Tono-Exit`, so a
+            // dead tunnel remains fail-closed for it.
+            //
+            // `from any to any` is not decoration: PF only accepts `port` as
+            // part of a host specification, so the shorter `proto tcp port {…}`
+            // is a parse error that takes the whole ruleset down and leaves the
+            // session unable to arm at all.
+            for transport in ["tcp", "udp"] {
+                lines.append(
+                    "pass out quick inet proto \(transport) from any to any " +
+                    "port { \(reviewedBundleDirectPorts.map(String.init).joined(separator: ", ")) } " +
+                    "user root keep state (if-bound)"
+                )
+            }
         }
         lines.append("block drop out quick all")
         return lines.joined(separator: "\n") + "\n"
@@ -1640,6 +1743,269 @@ final class KillSwitchManager {
 
     // MARK: - Pure self-tests
 
+    /// Hands a rendered ruleset to `pfctl -n` so the parser — not a substring
+    /// assertion — decides whether it is valid. Substring assertions cannot
+    /// catch a malformed rule they were written to match: a permit missing its
+    /// host specification passed every content check and then failed to load on
+    /// the user's machine, leaving two builds unable to arm at all.
+    ///
+    /// `nil` means the check could not run (pfctl needs root to open /dev/pf),
+    /// never "valid". Callers must surface a skip rather than absorb it.
+    static func pfSyntaxAccepts(_ rules: String) -> Bool? {
+        guard geteuid() == 0 else { return nil }
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-pf-syntax-check.conf").path
+        guard let _ = try? Data(rules.utf8).write(to: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        guard let result = try? run("/sbin/pfctl", ["-nf", path]) else { return nil }
+        if result.status != 0 {
+            FileHandle.standardError.write(Data("pf syntax: \(result.message)\n".utf8))
+        }
+        return result.status == 0
+    }
+
+    /// Lifecycle coverage for the ruleset, exercised through `pfctl` itself.
+    ///
+    /// Every fault this session shipped was a lifecycle fault, not a rendering
+    /// fault: a permit revoked by a later re-arm, a rule shape the parser
+    /// rejects, a contract change that never reached the installed daemon.
+    /// String assertions over a rendered document cannot see any of those,
+    /// which is why they all reached a user's machine before anything noticed.
+    ///
+    /// PF is global state, and that is the real reason this coverage did not
+    /// exist: a test that arms for real can take the machine's network down.
+    /// So these rules load into an anchor no parent ruleset references. Loading
+    /// is genuine — `pfctl -f` parses and installs it, and `pfctl -sr` reads
+    /// back what the kernel actually holds — while an unreferenced anchor is
+    /// never evaluated against a packet, so no traffic decision changes.
+    ///
+    /// Deliberately not parameterised: the anchor and the scratch path are
+    /// compiled in, so there is no seam for a caller to point this at the
+    /// production anchor, `/etc/pf.conf`, or the real state file.
+    static func runLifecycleSelfTests() -> Bool {
+        let testAnchor = "tono.lifecycle-test"
+        guard geteuid() == 0 else {
+            FileHandle.standardError.write(Data("""
+            lifecycle self-test needs root: it loads rules through pfctl.
+              sudo <helper> --lifecycle-self-test
+            The rules go into the unreferenced anchor "\(testAnchor)", so no
+            traffic decision changes and the production anchor is untouched.
+
+            """.utf8))
+            return false
+        }
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-lifecycle-test.conf").path
+        defer {
+            _ = try? run("/sbin/pfctl", ["-a", testAnchor, "-F", "all"])
+            try? FileManager.default.removeItem(atPath: scratch)
+        }
+
+        func state(reviewedBundleDirect: Bool) -> KillSwitchState {
+            KillSwitchState(
+                armed: true,
+                tailscaleBootstrapEnabled: false,
+                apiHosts: [],
+                exitHints: [],
+                tunnelInterfaces: ["utun199"],
+                resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                derpEndpoints: [],
+                cachedDERPEndpoints: [],
+                proxyTargets: [
+                    .init(host: "8.8.4.4", transport: "tcp", port: 443,
+                          addresses: ["8.8.4.4"]),
+                ],
+                sessionDirectEndpoints: [],
+                reviewedBundleDirectEnabled: reviewedBundleDirect
+            )
+        }
+
+        /// Loads a rendered ruleset and returns what the kernel holds, or nil
+        /// when the parser refused it.
+        func load(_ rules: String) -> String? {
+            guard (try? Data(rules.utf8).write(
+                to: URL(fileURLWithPath: scratch)
+            )) != nil else { return nil }
+            guard let applied = try? run(
+                "/sbin/pfctl", ["-a", testAnchor, "-f", scratch]
+            ), applied.status == 0 else {
+                FileHandle.standardError.write(Data(
+                    "lifecycle: pfctl refused the ruleset\n".utf8
+                ))
+                return nil
+            }
+            guard let shown = try? run("/sbin/pfctl", ["-a", testAnchor, "-sr"]),
+                  shown.status == 0,
+                  let text = String(data: shown.output, encoding: .utf8)
+            else { return nil }
+            return text
+        }
+
+        // pfctl normalises what it prints, so match on the parts that carry
+        // meaning rather than on the rendered line. Calibrated against real
+        // output: a port list expands into one rule per port.
+        // Calibrated against what the kernel actually reports. A port list is
+        // expanded into one rule per port per protocol, and `from any to any`
+        // is unique to this permit — the exact-address exceptions all print as
+        // `to <address>`. Counting exactly pins the port set too, so quietly
+        // widening it fails here instead of shipping.
+        let expectedPermitRules = reviewedBundleDirectPorts.count * 2
+        func permitCount(_ shown: String) -> Int {
+            shown.split(separator: "\n").filter {
+                $0.contains("from any to any port = ") && $0.contains("user = 0")
+            }.count
+        }
+
+        var failures: [String] = []
+        func check(_ name: String, _ ok: Bool) {
+            if !ok { failures.append(name) }
+        }
+
+        // 1. Armed with the reviewed-bundle permit: it must be installed, and
+        //    the catch-all must still be the last word.
+        let armedRules = renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        guard let armed = load(armedRules) else {
+            FileHandle.standardError.write(Data("lifecycle: armed ruleset failed to load\n".utf8))
+            return false
+        }
+        if ProcessInfo.processInfo.environment["TONO_LIFECYCLE_DUMP"] != nil {
+            FileHandle.standardError.write(Data("--- kernel holds ---\n\(armed)\n".utf8))
+        }
+        check("armed-permit-installed", permitCount(armed) == expectedPermitRules)
+        check("armed-fails-closed", armed.contains("block drop out quick all"))
+        // Order is only observable in what the kernel holds. A permit placed
+        // after the catch-all parses, prints, and satisfies every substring
+        // assertion while being dead — the packet is dropped before it is
+        // reached.
+        let permitBeforeCatchAll: Bool = {
+            guard let block = armed.range(of: "block drop out quick all") else {
+                return false
+            }
+            guard let lastPermit = armed.range(
+                of: "from any to any port = ", options: .backwards
+            ) else { return false }
+            return lastPermit.lowerBound < block.lowerBound
+        }()
+        check("permit-precedes-catch-all", permitBeforeCatchAll)
+        check("armed-keeps-tunnel", armed.contains("utun199"))
+
+        // 2. A re-arm that omits the flag must revoke it. This is the shipped
+        //    bug from the other direction: the convergence arm dropped the
+        //    argument and the permit disappeared under a live session while the
+        //    rule engine still routed that bundle direct.
+        guard let withoutPermit = load(renderRules(state: state(reviewedBundleDirect: false), allowedUID: 501)) else {
+            FileHandle.standardError.write(Data("lifecycle: re-armed ruleset failed to load\n".utf8))
+            return false
+        }
+        check("re-arm-without-flag-revokes", permitCount(withoutPermit) == 0)
+        check("re-arm-still-fails-closed", withoutPermit.contains("block drop out quick all"))
+
+        // 3. The convergence sequence that actually shipped broken: arm, then
+        //    arm again for the same session. The permit must survive.
+        guard let convergence = load(renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)) else {
+            FileHandle.standardError.write(Data("lifecycle: convergence arm failed to load\n".utf8))
+            return false
+        }
+        check("convergence-arm-keeps-permit", permitCount(convergence) == expectedPermitRules)
+
+        // 4. The fault that reached customers, in its real shape.
+        //
+        // A re-arm flushes every PF state on the machine exactly when it removes
+        // a pass rule that the previous ruleset had — correct as a security
+        // rule, and devastating as an accident. The pin-refresh transaction
+        // arms twice: once with the union of old and new endpoints, then again
+        // to converge on the new set. That second arm dropped its
+        // `reviewedBundleDirect` argument, so it removed all eight permit rules,
+        // which made every refresh a machine-wide state flush. Long-lived
+        // streams died mid-response roughly every twenty minutes.
+        //
+        // Not a rendering property and not a parsing property: both arms are
+        // individually valid and both load. It is a property of the pair, which
+        // is why nothing caught it.
+        let firstArmPassRules = passRules(
+            in: renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        )
+        let convergedPassRules = passRules(
+            in: renderRules(state: state(reviewedBundleDirect: true), allowedUID: 501)
+        )
+        let droppedPermitPassRules = passRules(
+            in: renderRules(state: state(reviewedBundleDirect: false), allowedUID: 501)
+        )
+        check(
+            "convergence-arm-does-not-revoke",
+            firstArmPassRules.isSubset(of: convergedPassRules)
+        )
+        // The same comparison against the broken shape, which is what gives the
+        // assertion above its teeth: if dropping the permit did not register as
+        // a revocation, passing it would not be protecting anything.
+        check(
+            "dropping-the-permit-registers-as-revocation",
+            !firstArmPassRules.isSubset(of: droppedPermitPassRules)
+        )
+
+        // 5. The predicate behind the reported flush bit. Note the limit: this
+        //    covers whether a withdrawal is *detected* as one, not whether the
+        //    bit `arm` returns is wired to that detection. Both read the same
+        //    local, so they can only diverge if someone edits one of them, but
+        //    proving the wiring needs a real arm — the install-and-start
+        //    integration coverage that does not exist yet.
+        check(
+            "flush-reported-when-a-pass-rule-is-withdrawn",
+            !firstArmPassRules.isSubset(of: droppedPermitPassRules)
+        )
+        check(
+            "no-flush-reported-when-nothing-is-withdrawn",
+            firstArmPassRules.isSubset(of: convergedPassRules)
+        )
+        // Widening must not count as a withdrawal, or every added endpoint would
+        // sever the session it was added for.
+        let widened = passRules(
+            in: renderRules(
+                state: KillSwitchState(
+                    armed: true,
+                    tailscaleBootstrapEnabled: false,
+                    apiHosts: [],
+                    exitHints: [],
+                    tunnelInterfaces: ["utun199"],
+                    resolvedHosts: [
+                        "api.example.com": ["1.1.1.1"],
+                        "extra.example.com": ["9.9.9.9"],
+                    ],
+                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    derpEndpoints: [],
+                    cachedDERPEndpoints: [],
+                    proxyTargets: [
+                        .init(host: "8.8.4.4", transport: "tcp", port: 443,
+                              addresses: ["8.8.4.4"]),
+                    ],
+                    sessionDirectEndpoints: [],
+                    reviewedBundleDirectEnabled: true
+                ),
+                allowedUID: 501
+            )
+        )
+        check("widening-is-not-a-withdrawal", firstArmPassRules.isSubset(of: widened))
+
+        // 6. Emergency reset leaves loopback and the catch-all, nothing else.
+        let emergency = emergencyState(preserving: state(reviewedBundleDirect: true))
+        guard let emergencyShown = load(renderRules(state: emergency, allowedUID: 501)) else {
+            FileHandle.standardError.write(Data("lifecycle: emergency ruleset failed to load\n".utf8))
+            return false
+        }
+        check("emergency-drops-permit", permitCount(emergencyShown) == 0)
+        check("emergency-drops-tunnel", !emergencyShown.contains("utun199"))
+        check("emergency-fails-closed", emergencyShown.contains("block drop out quick all"))
+
+        if failures.isEmpty { return true }
+        FileHandle.standardError.write(Data(
+            "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8
+        ))
+        return false
+    }
+
     static func runSelfTests() -> Bool {
         do {
             guard canonicalPublicAddress("8.8.8.8") == "8.8.8.8",
@@ -1714,24 +2080,32 @@ final class KillSwitchManager {
                         addresses: ["8.8.4.4"]
                     ),
                 ],
-                sessionDirectEndpoints: directEndpoints
+                sessionDirectEndpoints: directEndpoints,
+                reviewedBundleDirectEnabled: true
             )
-            let rules = renderRules(state: state)
+            let rules = renderRules(state: state, allowedUID: 501)
             let emergencyState = emergencyState(preserving: state)
-            let emergencyRules = renderRules(state: emergencyState)
-            let cloudRules = renderRules(state: .init(
-                armed: true,
-                tailscaleBootstrapEnabled: false,
-                apiHosts: ["api.example.com"],
-                exitHints: [],
-                tunnelInterfaces: ["utun199"],
-                resolvedHosts: ["api.example.com": ["1.1.1.1"]],
-                pinnedHosts: ["api.example.com": ["1.1.1.1"]],
-                derpEndpoints: [],
-                cachedDERPEndpoints: [],
-                proxyTargets: state.proxyTargets,
-                sessionDirectEndpoints: []
-            ))
+            let emergencyRules = renderRules(
+                state: emergencyState,
+                allowedUID: 501
+            )
+            let cloudRules = renderRules(
+                state: .init(
+                    armed: true,
+                    tailscaleBootstrapEnabled: false,
+                    apiHosts: ["api.example.com"],
+                    exitHints: [],
+                    tunnelInterfaces: ["utun199"],
+                    resolvedHosts: ["api.example.com": ["1.1.1.1"]],
+                    pinnedHosts: ["api.example.com": ["1.1.1.1"]],
+                    derpEndpoints: [],
+                    cachedDERPEndpoints: [],
+                    proxyTargets: state.proxyTargets,
+                    sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
+                ),
+                allowedUID: 501
+            )
             let inactiveState = KillSwitchState(
                 armed: true,
                 tailscaleBootstrapEnabled: false,
@@ -1743,9 +2117,13 @@ final class KillSwitchManager {
                 derpEndpoints: [],
                 cachedDERPEndpoints: state.cachedDERPEndpoints,
                 proxyTargets: state.proxyTargets,
-                sessionDirectEndpoints: []
+                sessionDirectEndpoints: [],
+            reviewedBundleDirectEnabled: false
             )
-            let inactiveRules = renderRules(state: inactiveState)
+            let inactiveRules = renderRules(
+                state: inactiveState,
+                allowedUID: 501
+            )
             let inactiveHosts = renderHostsMappings(state: inactiveState)
             let (_, cacheOnlyResolved) = try resolveHosts(
                 ["api.example.com"],
@@ -1805,46 +2183,108 @@ final class KillSwitchManager {
                 rejectedUDPProxyTarget = true
             }
             let persisted = persistentObject(state, allowedUID: 501)
-            return rules.contains("to 1.1.1.1 port 443 keep state (if-bound)") &&
-                rules.contains("to 8.8.8.8 port 443 user root keep state (if-bound)") &&
-                !rules.contains("to 8.8.8.8 port 443 keep state (if-bound)") &&
-                rules.contains("proto udp") &&
-                rules.contains("to 8.8.4.4 port 8443 user root keep state (if-bound)") &&
-                rules.contains("pass out quick inet proto tcp to 8.8.8.8 port 80 user root keep state (if-bound)") &&
-                rules.contains("pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)") &&
-                !rules.contains("proto tcp to any") &&
-                rules.contains("pass in quick on lo0 all keep state (if-bound)") &&
-                rules.contains("pass out quick on lo0 all keep state (if-bound)") &&
-                rules.contains("block drop out quick all") &&
-                emergencyRules == [
-                    "# Managed by Tono Kill Switch — do not edit",
-                    "pass in quick on lo0 all keep state (if-bound)",
-                    "pass out quick on lo0 all keep state (if-bound)",
-                    "block drop out quick all",
-                    "",
-                ].joined(separator: "\n") &&
-                cloudRules.contains("pass in quick on utun199 all keep state (if-bound)") &&
-                cloudRules.contains("pass out quick on utun199 all keep state (if-bound)") &&
-                !cloudRules.contains("pass in quick on en") &&
-                cloudRules.contains("to 1.1.1.1 port 443 keep state (if-bound)") &&
-                !cloudRules.contains("proto udp") &&
-                !rules.contains("to any port 443") &&
-                !inactiveRules.contains("to 1.1.1.1 port 443") &&
-                !inactiveHosts.contains("api.example.com") &&
-                inactiveState.pinnedHosts == state.pinnedHosts &&
-                emergencyState.pinnedHosts == state.pinnedHosts &&
-                emergencyState.cachedDERPEndpoints == state.cachedDERPEndpoints &&
-                emergencyState.sessionDirectEndpoints.isEmpty &&
-                persisted["sessionDirectEndpoints"] == nil &&
-                cacheOnlyResolved["api.example.com"] == ["1.1.1.1"] &&
-                bootstrapPins["api.example.com"] == ["1.1.1.1"] &&
-                rejectedUnrequestedPin &&
-                hosts.contains("1.1.1.1 api.example.com") &&
-                !hosts.contains("localhost") &&
-                rejectedPrivateTarget &&
-                rejectedUDPProxyTarget &&
-                installedHosts.contains(killSwitchHostsEndMarker) &&
-                removedHosts.isEmpty
+            // Split into named steps: as a single boolean chain this grew past
+            // what the type checker will solve in reasonable time.
+            let required = [
+                // The reviewed-bundle permit must stay root-only and stay bound
+                // to the fixed port list; an "any port" form would let a routing
+                // mistake exfiltrate anywhere.
+                "pass out quick inet proto tcp from any to any " +
+                    "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
+                "pass out quick inet proto udp from any to any " +
+                    "port { 80, 443, 8000, 8080 } user root keep state (if-bound)",
+                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+                "to 8.8.8.8 port 443 user root keep state (if-bound)",
+                "proto udp",
+                "to 8.8.4.4 port 8443 user root keep state (if-bound)",
+                "pass out quick inet proto tcp to 8.8.8.8 port 80 user root keep state (if-bound)",
+                "pass out quick inet proto udp to 8.8.8.8 port 8000 user root keep state (if-bound)",
+                "pass in quick on lo0 all keep state (if-bound)",
+                "pass out quick on lo0 all keep state (if-bound)",
+                "block drop out quick all",
+            ]
+            let forbidden = [
+                // Never a permit without a user clause, and never all ports.
+                "pass out quick inet proto tcp user root keep state (if-bound)",
+                "pass out quick inet proto tcp from any to any " +
+                    "port { 80, 443, 8000, 8080 } keep state (if-bound)",
+                // PF rejects `port` that is not attached to a host spec. This
+                // shipped once and cost two builds: the ruleset failed to parse,
+                // so no session could arm at all. The substring only matches the
+                // broken form, since the correct one reads `to any port {`.
+                "proto tcp port {",
+                "proto udp port {",
+                // The bootstrap permit must never be world-usable again.
+                "to 1.1.1.1 port 443 keep state (if-bound)",
+                "to 8.8.8.8 port 443 keep state (if-bound)",
+                "proto tcp to any",
+            ]
+            let ruleShapesHold = required.allSatisfy(rules.contains)
+                && !forbidden.contains(where: rules.contains)
+            let emergencyExpected = [
+                "# Managed by Tono Kill Switch — do not edit",
+                "pass in quick on lo0 all keep state (if-bound)",
+                "pass out quick on lo0 all keep state (if-bound)",
+                "block drop out quick all",
+                "",
+            ].joined(separator: "\n")
+            let cloudRequired = [
+                "pass in quick on utun199 all keep state (if-bound)",
+                "pass out quick on utun199 all keep state (if-bound)",
+                "to 1.1.1.1 port 443 user { 0, 501 } keep state (if-bound)",
+            ]
+            let cloudForbidden = [
+                "pass in quick on en",
+                "proto udp",
+                // A session that did not ask for it must not inherit the permit.
+                "port { 80, 443, 8000, 8080 }",
+            ]
+            let cloudShapesHold = cloudRequired.allSatisfy(cloudRules.contains)
+                && !cloudForbidden.contains(where: cloudRules.contains)
+            let noStrayPermits = !rules.contains("to any port 443")
+                && !inactiveRules.contains("to 1.1.1.1 port 443")
+                && !inactiveHosts.contains("api.example.com")
+            // Each comparison bound separately: the dictionary/array element
+            // types make a single chain expensive for the type checker.
+            let inactivePinsMatch: Bool = inactiveState.pinnedHosts == state.pinnedHosts
+            let emergencyPinsMatch: Bool = emergencyState.pinnedHosts == state.pinnedHosts
+            let derpCacheMatch: Bool =
+                emergencyState.cachedDERPEndpoints == state.cachedDERPEndpoints
+            let emergencySessionCleared: Bool =
+                emergencyState.sessionDirectEndpoints.isEmpty
+            let sessionNotPersisted: Bool = persisted["sessionDirectEndpoints"] == nil
+            let statesAgree = inactivePinsMatch && emergencyPinsMatch
+                && derpCacheMatch && emergencySessionCleared && sessionNotPersisted
+            let cacheOnlyMatch: Bool = cacheOnlyResolved["api.example.com"] == ["1.1.1.1"]
+            let bootstrapMatch: Bool = bootstrapPins["api.example.com"] == ["1.1.1.1"]
+            let pinsAgree = cacheOnlyMatch && bootstrapMatch && rejectedUnrequestedPin
+            let hostsAgree = hosts.contains("1.1.1.1 api.example.com")
+                && !hosts.contains("localhost")
+                && installedHosts.contains(killSwitchHostsEndMarker)
+                && removedHosts.isEmpty
+            // Reported, not silently folded in: a skip must not read as a pass.
+            let armedParse = pfSyntaxAccepts(rules)
+            let bootstrapParse = pfSyntaxAccepts(cloudRules)
+            let pfParses: Bool
+            switch (armedParse, bootstrapParse) {
+            case (nil, _), (_, nil):
+                let warning = "warn: PF syntax check skipped (needs root); "
+                    + "run `sudo tono-core-helper --self-test` to include it\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+                pfParses = true
+            case let (armed?, bootstrap?):
+                pfParses = armed && bootstrap
+            }
+            return ruleShapesHold
+                && emergencyRules == emergencyExpected
+                && cloudShapesHold
+                && pfParses
+                && noStrayPermits
+                && statesAgree
+                && pinsAgree
+                && hostsAgree
+                && rejectedPrivateTarget
+                && rejectedUDPProxyTarget
         } catch {
             return false
         }

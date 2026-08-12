@@ -28,6 +28,24 @@ const json = (value: unknown, token?: string): RequestInit => ({
   headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
   body: JSON.stringify(value),
 });
+const routingResearchJson = async (
+  value: unknown,
+  token: string,
+  userId: string,
+): Promise<RequestInit> => {
+  const owner = Array.from(new Uint8Array(await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(userId),
+  ))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const init = json(value, token);
+  return {
+    ...init,
+    headers: {
+      ...init.headers as Record<string, string>,
+      'x-tono-routing-owner': owner,
+    },
+  };
+};
 const admin = (path: string, value?: unknown, method = 'POST') => api(`admin/${path}`, {
   ...(value === undefined ? {} : json(value)), method,
   headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
@@ -433,7 +451,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       schemaVersion: 1,
       channel: 'test',
       platforms: {
-        macos: { current: { build: 37 } },
+        macos: { current: { build: 42 } },
         windows: {
           current: {
             version: '2.5.4',
@@ -447,9 +465,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       },
     });
 
+    // Asserted against the file this deploy would publish, not against a build
+    // number. Pinning a number couples every release to this test, and it broke
+    // the moment the feed was corrected — which is the wrong thing to notice
+    // about a release: what matters here is that the subdomain serves the feed at
+    // all, and serves the one on disk.
     const appcast = await fetchRelease('/macos/appcast.xml');
     expect(appcast.status).toBe(200);
-    expect(await appcast.text()).toContain('<sparkle:version>37</sparkle:version>');
+    const servedFeed = await appcast.text();
+    expect(servedFeed).toContain('<rss');
+    expect(servedFeed).toContain('sparkle:version');
+    // The alias must serve the same document as the canonical path. That is the
+    // property worth holding: these two diverging is how a client updates from a
+    // feed nobody thinks is live, and it is what the cache-busting fix was for.
+    const canonicalFeed = await fetchRelease('/appcast.xml');
+    expect(canonicalFeed.status).toBe(200);
+    expect(await canonicalFeed.text()).toBe(servedFeed);
 
     expect((await fetchRelease('/api/v1/health')).status).toBe(404);
     const rejected = await fetchRelease('/manifest.json', { method: 'POST' });
@@ -862,15 +893,26 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('encrypts, versions, and serves the managed exit catalog only to authenticated users', async () => {
+    // Identities are placeholders now: one catalog served verbatim to everyone is
+    // how every account came to present the same identity at the exit, which is
+    // why the exit could count bytes and never say whose.
     const yaml = `proxies:
   - name: "Managed Test"
     type: vless
     server: 8.8.4.4
     port: 443
-    uuid: 11111111-1111-4111-8111-111111111111
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
 `;
     expect((await api('exit-catalog')).status).toBe(401);
+
+    const literalIdentity = await admin(
+      'exit-catalog',
+      { yaml: yaml.replace('{{TONO_CLIENT_UUID}}', '11111111-1111-4111-8111-111111111111'), expectedRevision: 0 },
+      'PUT',
+    );
+    expect(literalIdentity.status).toBe(400);
+    expect((await literalIdentity.json() as any).error.code).toBe('INVALID_CATALOG');
 
     const created = await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT');
     expect(created.status).toBe(200);
@@ -882,7 +924,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).first<any>();
     expect(stored.revision).toBe(1);
     expect(stored.ciphertext).not.toContain('Managed Test');
-    expect(stored.ciphertext).not.toContain('11111111-1111-4111-8111-111111111111');
+    expect(stored.ciphertext).not.toContain('TONO_CLIENT_UUID');
     expect(stored.nonce).not.toBe('');
 
     const adminFetched = await admin('exit-catalog', undefined, 'GET');
@@ -894,17 +936,46 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       updatedAt: createdBody.updatedAt,
     });
 
+    // An account is served its own identity, and the digest is recomputed over
+    // what it actually received — the template's digest would read as tampering
+    // to a client that verifies, and every client verifies.
     const account = await createAccount('managed-catalog');
     const fetched = await api('exit-catalog', {
       headers: { authorization: `Bearer ${account.accessToken}` },
     });
     expect(fetched.status).toBe(200);
-    expect(await fetched.json()).toEqual({
-      revision: 1,
-      yaml,
-      sha256: stored.content_sha256,
-      updatedAt: createdBody.updatedAt,
+    const servedBody = await fetched.json() as any;
+    expect(servedBody.revision).toBe(1);
+    expect(servedBody.yaml).not.toContain('TONO_CLIENT_UUID');
+    const issued = /uuid: ([0-9a-f-]{36})/.exec(servedBody.yaml)?.[1];
+    expect(issued).toBeTruthy();
+    expect(servedBody.sha256).not.toBe(stored.content_sha256);
+    // Same encoding the Worker uses (base64url, per src/crypto.ts), so this
+    // compares digests rather than encodings.
+    const digestOf = async (text: string) => btoa(
+      String.fromCharCode(...new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)),
+      )),
+    ).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    expect(servedBody.sha256).toBe(await digestOf(servedBody.yaml));
+
+    // Stable for this account: the client persists the digest and compares it, so
+    // a fresh identity per request would look tampered every time.
+    const refetched = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
     });
+    expect((await refetched.json() as any).yaml).toBe(servedBody.yaml);
+
+    // And distinct from another account's, which is the entire point.
+    const other = await createAccount('managed-catalog-two');
+    const otherFetched = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    const otherIssued = /uuid: ([0-9a-f-]{36})/.exec(
+      (await otherFetched.json() as any).yaml,
+    )?.[1];
+    expect(otherIssued).toBeTruthy();
+    expect(otherIssued).not.toBe(issued);
 
     const conflict = await admin(
       'exit-catalog',
@@ -937,19 +1008,19 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     type: vless
     server: 1.1.1.1
     port: 443
-    uuid: 11111111-1111-4111-8111-111111111111
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
   - name: "Home Residential A"
     type: vless
     server: 8.8.8.8
     port: 443
-    uuid: 22222222-2222-4222-8222-222222222222
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
   - name: "Home Residential B"
     type: vless
     server: 9.9.9.9
     port: 443
-    uuid: 33333333-3333-4333-8333-333333333333
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
@@ -1019,9 +1090,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(ownerBody.yaml).toContain('Shared JP');
     expect(ownerBody.yaml).toContain('Home Residential A');
     expect(ownerBody.yaml).not.toContain('Home Residential B');
-    // Home A credentials remain for the bound user; home B credentials must not leak.
-    expect(ownerBody.yaml).toContain('22222222-2222-4222-8222-222222222222');
-    expect(ownerBody.yaml).not.toContain('33333333-3333-4333-8333-333333333333');
+    const ownerIssued = /uuid: ([0-9a-f-]{36})/.exec(ownerBody.yaml)?.[1];
+    expect(ownerIssued).toBeTruthy();
+    expect(ownerBody.yaml).not.toContain('TONO_CLIENT_UUID');
     expect(ownerBody.sha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     const otherCatalog = await api('exit-catalog', {
@@ -1032,8 +1103,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(otherBody.yaml).toContain('Shared JP');
     expect(otherBody.yaml).not.toContain('Home Residential A');
     expect(otherBody.yaml).not.toContain('Home Residential B');
-    expect(otherBody.yaml).not.toContain('22222222-2222-4222-8222-222222222222');
-    expect(otherBody.yaml).not.toContain('33333333-3333-4333-8333-333333333333');
+    const otherIssued = /uuid: ([0-9a-f-]{36})/.exec(otherBody.yaml)?.[1];
+    expect(otherIssued).toBeTruthy();
+    expect(otherIssued).not.toBe(ownerIssued);
 
     // Admin catalog remains the full authority.
     const adminCatalog = await admin('exit-catalog', undefined, 'GET');
@@ -1042,6 +1114,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(adminBody.yaml).toContain('Home Residential A');
     expect(adminBody.yaml).toContain('Home Residential B');
     expect(adminBody.yaml).toContain('Shared JP');
+    expect(adminBody.yaml).toContain('{{TONO_CLIENT_UUID}}');
 
     const listed = await admin('home-bindings', undefined, 'GET');
     expect(listed.status).toBe(200);
@@ -1075,13 +1148,13 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     type: vless
     server: 1.1.1.1
     port: 443
-    uuid: 11111111-1111-4111-8111-111111111111
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
   - name: "Home Residential Route"
     type: vless
     server: 8.8.8.8
     port: 443
-    uuid: 22222222-2222-4222-8222-222222222222
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
@@ -1203,13 +1276,13 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     type: vless
     server: 1.1.1.1
     port: 443
-    uuid: 11111111-1111-4111-8111-111111111111
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
   - name: "Home Route"
     type: vless
     server: 8.8.8.8
     port: 443
-    uuid: 22222222-2222-4222-8222-222222222222
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
@@ -1318,7 +1391,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     type: vless
     server: 1.1.1.1
     port: 443
-    uuid: 11111111-1111-4111-8111-111111111111
+    uuid: {{TONO_CLIENT_UUID}}
     tls: true
 `;
     expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
@@ -1473,22 +1546,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
     });
 
-    const suffixPolicy = {
+    const nativeWeChatPolicy = {
       ...webPolicy,
-      version: 3,
-      directSuffixes: [
-        { host: 'zoom.us', ports: [443] },
-        { host: 'baidu.com', ports: [443, 80] },
+      version: 4,
+      directSuffixes: [{ host: 'edu.cn', ports: [443, 80] }],
+      tcpEndpoints: [
+        { address: '49.51.67.253', ports: [443, 80] },
       ],
     };
-    const suffixed = await admin(
+    const nativeUpdated = await admin(
       'traffic-policy',
-      { policy: suffixPolicy, expectedRevision: 2 },
+      { policy: nativeWeChatPolicy, expectedRevision: 2 },
       'PUT',
     );
-    expect(suffixed.status).toBe(200);
-    expect(JSON.parse((await suffixed.json() as any).json)).toEqual({
-      version: 3,
+    expect(nativeUpdated.status).toBe(200);
+    expect(JSON.parse((await nativeUpdated.json() as any).json)).toEqual({
+      version: 4,
       domains: [
         { host: 'res.wx.qq.com', ports: [443] },
         { host: 'wx.qlogo.cn', ports: [80, 443] },
@@ -1498,10 +1571,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         { host: 'www.bilibili.com', ports: [443] },
         { host: 'ykimg.alicdn.com', ports: [443] },
       ],
-      directSuffixes: [
-        { host: 'baidu.com', ports: [80, 443] },
-        { host: 'zoom.us', ports: [443] },
-      ],
+      directSuffixes: [{ host: 'edu.cn', ports: [80, 443] }],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [80, 443] }],
     });
 
     const invalidPolicies = [
@@ -1524,13 +1595,13 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       },
       // v3: the suffix must be an exact allowlist entry, never a host under
       // it, never protected, and ports must stay within [80, 443].
-      { ...suffixPolicy, directSuffixes: [{ host: 'example.com', ports: [443] }] },
-      { ...suffixPolicy, directSuffixes: [{ host: 'www.baidu.com', ports: [443] }] },
-      { ...suffixPolicy, directSuffixes: [{ host: 'anthropic.com', ports: [443] }] },
-      { ...suffixPolicy, directSuffixes: [{ host: 'baidu.com', ports: [8080] }] },
-      { ...suffixPolicy, directSuffixes: [{ host: 'baidu.com', ports: [] }] },
+      { ...nativeWeChatPolicy, directSuffixes: [{ host: 'example.com', ports: [443] }] },
+      { ...nativeWeChatPolicy, directSuffixes: [{ host: 'www.baidu.com', ports: [443] }] },
+      { ...nativeWeChatPolicy, directSuffixes: [{ host: 'anthropic.com', ports: [443] }] },
+      { ...nativeWeChatPolicy, directSuffixes: [{ host: 'baidu.com', ports: [8080] }] },
+      { ...nativeWeChatPolicy, directSuffixes: [{ host: 'baidu.com', ports: [] }] },
       {
-        ...suffixPolicy,
+        ...nativeWeChatPolicy,
         directSuffixes: [{ host: 'baidu.com', ports: [443] }, { host: 'baidu.com', ports: [80] }],
       },
     ];
@@ -1539,6 +1610,301 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(response.status).toBe(400);
       expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
     }
+  });
+
+  // Private half of the test-only keypair whose public half is bound as
+  // TRAFFIC_POLICY_PUBLIC_KEY in vitest.config.ts. Signing here rather than
+  // pasting fixed signatures means these tests still hold if the canonical byte
+  // layout changes: they sign whatever the endpoint says it will serve.
+  const TEST_POLICY_PKCS8 =
+    'MC4CAQAwBQYDK2VwBCIEIAIwT13QKhcJliAMcXcFnjUys571THcVvHLBTICbjKzy';
+  const signPolicy = async (json: string) => {
+    const key = await crypto.subtle.importKey(
+      'pkcs8',
+      Uint8Array.from(atob(TEST_POLICY_PKCS8), (c) => c.charCodeAt(0)),
+      { name: 'Ed25519' },
+      false,
+      ['sign'],
+    );
+    const signature = await crypto.subtle.sign(
+      'Ed25519',
+      key,
+      new TextEncoder().encode(`tono-traffic-policy-v1\n${json}`),
+    );
+    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+  };
+  // A host no allowlist in this Worker contains, which is the whole point: a
+  // signature is what makes adding one a remote-only change.
+  const unlistedPolicy = {
+    version: 4,
+    domains: [],
+    mediaEndpoints: [],
+    webDomains: [{ host: 'www.dianping.com', ports: [443] }],
+    directSuffixes: [],
+    tcpEndpoints: [],
+  };
+
+  it('signs a policy over the bytes it will serve, not over the bytes submitted', async () => {
+    // The document served is this endpoint's canonicalised output — reordered,
+    // sorted, ports normalised. A signature over the operator's input would not
+    // cover it, so the tool asks what it would be signing first.
+    const submitted = {
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [
+        { ports: [443], host: 'www.dianping.com' },
+        { host: 'shop.dianping.com', ports: [443] },
+      ],
+      directSuffixes: [],
+      tcpEndpoints: [],
+    };
+    const preview = await admin('traffic-policy', { policy: submitted, dryRun: true }, 'PUT');
+    expect(preview.status).toBe(200);
+    const previewed = await preview.json() as any;
+    expect(previewed.dryRun).toBe(true);
+    expect(previewed.signatureRequired).toBe(true);
+    expect(previewed.signatureContext).toBe('tono-traffic-policy-v1\n');
+    // Canonical, and demonstrably not what was submitted.
+    expect(previewed.json).not.toBe(JSON.stringify(submitted));
+    expect(JSON.parse(previewed.json).webDomains.map((d: any) => d.host))
+      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+    // A dry run stores nothing.
+    expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
+
+    const published = await admin('traffic-policy', {
+      policy: submitted,
+      expectedRevision: 0,
+      signature: await signPolicy(previewed.json),
+    }, 'PUT');
+    expect(published.status).toBe(200);
+    const body = await published.json() as any;
+    expect(body.json).toBe(previewed.json);
+
+    // And the client is handed the signature so it can make the same decision.
+    const account = await createAccount('signed-policy-delivery');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    const delivered = await fetched.json() as any;
+    expect(delivered.signature).toBe(body.signature);
+    expect(JSON.parse(delivered.json).webDomains.map((d: any) => d.host))
+      .toEqual(['shop.dianping.com', 'www.dianping.com']);
+  });
+
+  it('refuses an unlisted host that arrives without a valid signature', async () => {
+    // Unsigned: the allowlist is still the only authority, exactly as before.
+    const unsigned = await admin(
+      'traffic-policy', { policy: unlistedPolicy, expectedRevision: 0 }, 'PUT',
+    );
+    expect(unsigned.status).toBe(400);
+    expect((await unsigned.json() as any).error.code).toBe('VALIDATION_ERROR');
+
+    // A well-formed signature over a *different* document. This is the attack the
+    // dry-run flow could otherwise enable: capture a signature, reuse it.
+    const other = await admin('traffic-policy', {
+      policy: { version: 4, domains: [], mediaEndpoints: [], webDomains: [{ host: 'www.bilibili.com', ports: [443] }], directSuffixes: [], tcpEndpoints: [] },
+      dryRun: true,
+    }, 'PUT');
+    const replayed = await admin('traffic-policy', {
+      policy: unlistedPolicy,
+      expectedRevision: 0,
+      signature: await signPolicy((await other.json() as any).json),
+    }, 'PUT');
+    expect(replayed.status).toBe(400);
+    expect((await replayed.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    // Signed by the wrong key, right shape.
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const foreign = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']) as CryptoKeyPair;
+    const forged = await crypto.subtle.sign(
+      'Ed25519', foreign.privateKey,
+      new TextEncoder().encode(`tono-traffic-policy-v1\n${(await preview.json() as any).json}`),
+    );
+    const impostor = await admin('traffic-policy', {
+      policy: unlistedPolicy,
+      expectedRevision: 0,
+      signature: btoa(String.fromCharCode(...new Uint8Array(forged))),
+    }, 'PUT');
+    expect(impostor.status).toBe(400);
+    expect((await impostor.json() as any).error.code).toBe('TRAFFIC_POLICY_SIGNATURE_INVALID');
+
+    // Nothing above was stored.
+    expect((await (await admin('traffic-policy', undefined, 'GET')).json() as any).revision).toBe(0);
+  });
+
+  it('will not let a signature pull a protected host out of the tunnel', async () => {
+    // The invariant that must survive a leaked key. A signature relaxes which
+    // hosts may route direct; it must never relax which hosts may not. If this
+    // ever passes, one stolen key exposes this control plane and Claude traffic
+    // — strictly worse than the allowlist the signature replaces.
+    for (const field of ['domains', 'webDomains', 'directSuffixes'] as const) {
+      for (const host of ['api.anthropic.com', 'claude.ai', 'api.afk.ccwu.cc'.replace('api.afk.ccwu.cc', 'tono.app')]) {
+        const attempt = { ...unlistedPolicy, webDomains: [], [field]: [{ host, ports: [443] }] };
+        // Even the dry run, which canonicalises as trusted, must refuse.
+        const preview = await admin('traffic-policy', { policy: attempt, dryRun: true }, 'PUT');
+        expect(preview.status, `${field}/${host}`).toBe(400);
+      }
+    }
+  });
+
+  it('clears a stored signature when an unsigned policy replaces a signed one', async () => {
+    // Otherwise the old signature ships alongside new bytes and every client
+    // that verifies rejects the whole policy — managed direct routing off,
+    // fleet-wide, from a republish that looked like it worked.
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const signed = await admin('traffic-policy', {
+      policy: unlistedPolicy,
+      expectedRevision: 0,
+      signature: await signPolicy((await preview.json() as any).json),
+    }, 'PUT');
+    expect(signed.status).toBe(200);
+    expect((await signed.json() as any).signature).toBeTruthy();
+
+    const listedOnly = {
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+      directSuffixes: [],
+      tcpEndpoints: [],
+    };
+    const unsigned = await admin(
+      'traffic-policy', { policy: listedOnly, expectedRevision: 1 }, 'PUT',
+    );
+    expect(unsigned.status).toBe(200);
+    expect((await unsigned.json() as any).signature).toBeUndefined();
+    expect(await env.DB.prepare(
+      'SELECT signature FROM managed_traffic_policy WHERE singleton_id = 1',
+    ).first<any>()).toEqual({ signature: null });
+
+    // And the policy is still served, rather than 503-ing on a signature that
+    // no longer covers anything.
+    const account = await createAccount('signature-cleared');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(200);
+    expect((await fetched.json() as any).signature).toBeUndefined();
+  });
+
+  it('refuses to serve a signed policy whose stored row was altered', async () => {
+    const preview = await admin('traffic-policy', { policy: unlistedPolicy, dryRun: true }, 'PUT');
+    const canonical = (await preview.json() as any).json;
+    expect((await admin('traffic-policy', {
+      policy: unlistedPolicy, expectedRevision: 0, signature: await signPolicy(canonical),
+    }, 'PUT')).status).toBe(200);
+
+    // Substitute a signature of the right shape that does not cover these bytes,
+    // the way a compromised database would.
+    await env.DB.prepare(
+      'UPDATE managed_traffic_policy SET signature = ? WHERE singleton_id = 1',
+    ).bind(await signPolicy(`${canonical} `)).run();
+    const account = await createAccount('policy-row-altered');
+    const fetched = await api('traffic-policy', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(fetched.status).toBe(503);
+    expect((await fetched.json() as any).error.code).toBe('TRAFFIC_POLICY_UNAVAILABLE');
+  });
+
+  it('tells the operator when a policy needs no signature at all', async () => {
+    // Adding a host the allowlists already cover must not start requiring a key
+    // ceremony. Most republishes are this case.
+    const preview = await admin('traffic-policy', {
+      policy: {
+        version: 4,
+        domains: [],
+        mediaEndpoints: [],
+        webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+        directSuffixes: [],
+        tcpEndpoints: [],
+      },
+      dryRun: true,
+    }, 'PUT');
+    expect(preview.status).toBe(200);
+    expect((await preview.json() as any).signatureRequired).toBe(false);
+  });
+
+  it('accepts the Feishu family as direct suffixes instead of exact pins', async () => {
+    // Shape produced by tooling/scripts/retarget-direct-suffixes.rb. An exact
+    // pin only ever covers the apex, so CDN traffic on *.feishucdn.com was
+    // never matched; DOMAIN-SUFFIX entries need no DNS answer at all.
+    const retargeted = {
+      version: 4,
+      domains: [{ host: 'res.wx.qq.com', ports: [443] }],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443] }],
+      webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+      directSuffixes: [
+        { host: 'feishu.cn', ports: [80, 443] },
+        { host: 'feishucdn.com', ports: [80, 443] },
+        { host: 'larkoffice.com', ports: [443] },
+        { host: 'larksuite.com', ports: [443] },
+      ],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [443] }],
+    };
+    const written = await admin('traffic-policy', { policy: retargeted, expectedRevision: 0 }, 'PUT');
+    expect(written.status).toBe(200);
+    const stored = JSON.parse((await written.json() as any).json);
+    expect(stored.directSuffixes.map((entry: any) => entry.host)).toEqual([
+      'feishu.cn', 'feishucdn.com', 'larkoffice.com', 'larksuite.com',
+    ]);
+    expect(stored.webDomains).toEqual([{ host: 'www.bilibili.com', ports: [443] }]);
+
+    // A www. form cannot be a suffix entry, which is why the script folds those
+    // ports into the apex rather than carrying the host across.
+    const wwwSuffix = await admin('traffic-policy', {
+      policy: { ...retargeted, directSuffixes: [{ host: 'www.feishu.cn', ports: [443] }] },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(wwwSuffix.status).toBe(400);
+
+    // 8080 is why the script refuses to fold non-80/443 ports into a suffix.
+    const oddPort = await admin('traffic-policy', {
+      policy: { ...retargeted, directSuffixes: [{ host: 'feishucdn.com', ports: [8080] }] },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(oddPort.status).toBe(400);
+
+    // A repeated suffix must be refused at this boundary. The client rejects the
+    // whole revision when it sees one, so accepting it here silently disables
+    // managed direct routing on every device until someone republishes.
+    const duplicateSuffix = await admin('traffic-policy', {
+      policy: {
+        ...retargeted,
+        directSuffixes: [
+          { host: 'feishu.cn', ports: [80] },
+          { host: 'feishu.cn', ports: [443] },
+        ],
+      },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(duplicateSuffix.status).toBe(400);
+    expect((await duplicateSuffix.json() as any).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects unexpected top-level fields on the managed policy and catalog writes', async () => {
+    const policy = {
+      version: 1,
+      domains: [{ host: 'res.wx.qq.com', ports: [443] }],
+      mediaEndpoints: [],
+    };
+    const strayPolicyKey = await admin(
+      'traffic-policy',
+      { policy, expectedRevision: 0, revision: 9 },
+      'PUT',
+    );
+    expect(strayPolicyKey.status).toBe(400);
+    expect((await strayPolicyKey.json() as any).error.code).toBe('VALIDATION_ERROR');
+
+    const strayCatalogKey = await admin(
+      'exit-catalog',
+      { yaml: 'proxies: []\n', expectedRevision: 0, revision: 9 },
+      'PUT',
+    );
+    expect(strayCatalogKey.status).toBe(400);
+    expect((await strayCatalogKey.json() as any).error.code).toBe('VALIDATION_ERROR');
   });
 
   it('creates an account directly from a verified email and consumes one code winner atomically', async () => {
@@ -2213,6 +2579,62 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await login.json() as any).enrollment.authKey).toMatch(/^tskey-mock-/);
   });
 
+  it('serves an exit identity roster that excludes accounts an exit must drop', async () => {
+    const yaml = `proxies:
+  - name: "Metered"
+    type: vless
+    server: 8.8.4.4
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    // A roster entry only exists once an account has been issued an identity,
+    // which happens on its first catalog fetch.
+    const active = await createAccount('roster-active');
+    const capped = await createAccount('roster-capped');
+    for (const account of [active, capped]) {
+      expect((await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      })).status).toBe(200);
+    }
+
+    expect((await api('home/exit-identities')).status).toBe(401);
+
+    const listed = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect(listed.status).toBe(200);
+    const roster = await listed.json() as any;
+    expect(typeof roster.observedAt).toBe('number');
+    const identities = roster.identities as Array<{ userId: string; clientUUID: string }>;
+    expect(identities.map((entry) => entry.userId).sort())
+      .toEqual([active.user.id, capped.user.id].sort());
+    // Two accounts, two identities: a roster that repeated one would put both on
+    // the same counter and make usage unattributable again.
+    expect(new Set(identities.map((entry) => entry.clientUUID)).size).toBe(2);
+
+    // Passing the quota removes the account from the roster, because removal is
+    // what stops traffic — an enforcement that only stops counting stops nothing.
+    await env.DB.prepare(
+      'UPDATE users SET quota_bytes = 100, usage_bytes = 100 WHERE id = ?',
+    ).bind(capped.user.id).run();
+    const afterQuota = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect((await afterQuota.json() as any).identities.map((e: any) => e.userId))
+      .toEqual([active.user.id]);
+
+    // So does being disabled.
+    await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ?")
+      .bind(active.user.id).run();
+    const afterSuspend = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect((await afterSuspend.json() as any).identities).toEqual([]);
+  });
+
   it('revokes sessions and devices as soon as a usage report reaches quota', async () => {
     const account = await createAccount('quota');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -2366,6 +2788,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await api(`device-actions/${command.id}/result`, json({
       outcome: 'succeeded', snapshot: { lastErrorCategory: '/Users/customer/private' },
     }, owner.accessToken))).status).toBe(400);
+    expect((await api(`device-actions/${command.id}/result`, json({
+      outcome: 'succeeded', snapshot: { lastCrashLabel: '/Users/customer/private' },
+    }, owner.accessToken))).status).toBe(400);
     expect((await api(`device-actions/${command.id}/result`, json(null, owner.accessToken))).status).toBe(400);
     expect((await api(`device-actions/${command.id}/result`, json({
       outcome: 'succeeded', snapshot: { connected: true, reconnectAttempt: 2 },
@@ -2373,7 +2798,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const result = {
       outcome: 'succeeded',
-      snapshot: { connected: true, reconnectAttempt: 2, lastErrorCategory: 'data_plane' },
+      snapshot: {
+        connected: true, reconnectAttempt: 2, lastErrorCategory: 'data_plane',
+        lastCrashLabel: 'SIGSEGV',
+      },
     };
     expect((await api(`device-actions/${command.id}/result`, json(result, owner.accessToken))).status).toBe(200);
     expect((await api(`device-actions/${command.id}/result`, json(result, owner.accessToken))).status).toBe(200);
@@ -2512,6 +2940,571 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await api('device-actions', {
       headers: { authorization: `Bearer ${owner.accessToken}` },
     })).status).toBe(401);
+  });
+
+  const routingResearchPayload = (overrides: Record<string, unknown> = {}) => {
+    const observedUntil = Math.floor(Date.now() / 1000) - 60;
+    return {
+      schemaVersion: 1,
+      snapshotId: crypto.randomUUID(),
+      observedSince: observedUntil - 6 * 60 * 60,
+      observedUntil,
+      appVersion: '0.0.1',
+      build: '40',
+      osVersion: '26.4',
+      architecture: 'arm64',
+      observedConnectionCount: 3,
+      identifiedAppConnectionCount: 2,
+      connectionLimitReached: false,
+      entries: [
+        {
+          app: 'other', connectionCount: 1, directConnectionCount: 0,
+          proxiedConnectionCount: 1, blockedConnectionCount: 0,
+          trafficVolume: 'under_1_mib',
+        },
+        {
+          app: 'wechat', connectionCount: 2, directConnectionCount: 1,
+          proxiedConnectionCount: 1, blockedConnectionCount: 0,
+          trafficVolume: '10_to_100_mib',
+        },
+      ],
+      ...overrides,
+    };
+  };
+
+  const routingResearchV2Payload = (overrides: Record<string, unknown> = {}) => ({
+    ...routingResearchPayload(),
+    schemaVersion: 2,
+    bundleComponents: [
+      {
+        app: 'wechat', bundleComponent: 'main_executable',
+        connectionCount: 1, directConnectionCount: 1,
+        proxiedConnectionCount: 0, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      },
+      {
+        app: 'wechat', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      },
+    ],
+    ...overrides,
+  });
+
+  it('upgrades the routing-research table from the 4 KiB v1 constraint', async () => {
+    const definition = await env.DB.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'routing_research_snapshots'",
+    ).first<any>();
+    expect(definition.sql).toContain('length(aggregate_json) <= 8192');
+
+    const account = await createAccount('routing-research-migration');
+    const observedUntil = Math.floor(Date.now() / 1000) - 60;
+    await expect(env.DB.prepare(
+      `INSERT INTO routing_research_snapshots(
+         id, snapshot_id, user_id, device_id, received_at, observed_since,
+         observed_until, app_version, build, os_version, architecture,
+         aggregate_json
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(
+      crypto.randomUUID(), crypto.randomUUID(), account.user.id,
+      account.device.id, observedUntil, observedUntil - 6 * 60 * 60,
+      observedUntil, '0.0.1', '40', '26.4', 'arm64', 'x'.repeat(5_000),
+    ).run()).resolves.toBeDefined();
+  });
+
+  it('stores only a canonical authenticated routing-research aggregate and replays it idempotently', async () => {
+    const account = await createAccount('routing-research-happy');
+    const payload = routingResearchPayload();
+    expect((await api('routing-research/snapshots', json(payload))).status).toBe(401);
+    expect((await api(
+      'routing-research/snapshots',
+      json(payload, account.accessToken),
+    )).status).toBe(409);
+    const mismatchedOwner = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, 'a-different-account',
+      ),
+    );
+    expect(mismatchedOwner.status).toBe(409);
+    expect((await mismatchedOwner.json() as any).error.code).toBe(
+      'ROUTING_RESEARCH_OWNER_MISMATCH',
+    );
+
+    const accepted = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect(accepted.status).toBe(201);
+    const receipt = await accepted.json() as any;
+    expect(Object.keys(receipt).sort()).toEqual(['receivedAt', 'snapshotId']);
+    expect(receipt.snapshotId).toBe(payload.snapshotId);
+
+    const stored = await env.DB.prepare(
+      'SELECT * FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    expect(stored.user_id).toBe(account.user.id);
+    expect(stored.device_id).toBe(account.device.id);
+    expect(stored.app_version).toBe('0.0.1');
+    expect(stored.build).toBe('40');
+    expect(JSON.parse(stored.aggregate_json)).toEqual({
+      ...payload,
+      snapshotId: payload.snapshotId.toLowerCase(),
+      entries: [...payload.entries].sort((left, right) => left.app.localeCompare(right.app)),
+    });
+
+    const replay = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(receipt);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(1);
+
+    const conflict = routingResearchPayload({
+      snapshotId: payload.snapshotId,
+      observedConnectionCount: 4,
+      identifiedAppConnectionCount: 3,
+      entries: [
+        payload.entries[0],
+        {
+          ...payload.entries[1], connectionCount: 3,
+          proxiedConnectionCount: 2,
+        },
+      ],
+    });
+    // Keep the immutable window fields identical so this tests ID reuse rather
+    // than an unrelated timestamp difference.
+    conflict.observedSince = payload.observedSince;
+    conflict.observedUntil = payload.observedUntil;
+    const rejectedConflict = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        conflict, account.accessToken, account.user.id,
+      ),
+    );
+    expect(rejectedConflict.status).toBe(409);
+    expect((await rejectedConflict.json() as any).error.code).toBe('SNAPSHOT_ID_CONFLICT');
+
+    await expect(env.DB.prepare(
+      'UPDATE routing_research_snapshots SET build = ? WHERE snapshot_id = ?',
+    ).bind('41', payload.snapshotId).run()).rejects.toThrow(
+      /ROUTING_RESEARCH_SNAPSHOT_IMMUTABLE/,
+    );
+  });
+
+  it('accepts only fixed schema-v2 native bundle component categories', async () => {
+    const account = await createAccount('routing-research-components');
+    const payload = routingResearchV2Payload({
+      bundleComponents: [
+        {
+          app: 'wechat', bundleComponent: 'main_executable',
+          connectionCount: 1, directConnectionCount: 1,
+          proxiedConnectionCount: 0, blockedConnectionCount: 0,
+          trafficVolume: 'under_1_mib',
+        },
+        {
+          app: 'wechat', bundleComponent: 'framework_helper',
+          connectionCount: 1, directConnectionCount: 0,
+          proxiedConnectionCount: 1, blockedConnectionCount: 0,
+          trafficVolume: '10_to_100_mib',
+        },
+      ],
+    });
+    const response = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect(response.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT aggregate_json FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    expect(JSON.parse(stored.aggregate_json).bundleComponents).toEqual([
+      payload.bundleComponents[1], payload.bundleComponents[0],
+    ]);
+  });
+
+  it('accepts the expanded reviewed app families and keeps snapshots bounded', async () => {
+    const account = await createAccount('routing-research-expanded-apps');
+    const apps = [
+      'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge',
+      'safari', 'firefox', 'arc', 'brave', 'claude', 'wecom',
+      'tencent_meeting', 'wps', 'baidu_netdisk', 'alipan', 'douyin',
+      'bilibili',
+    ];
+    const entries = apps.map((app) => ({
+      app, connectionCount: 1, directConnectionCount: 0,
+      proxiedConnectionCount: 1, blockedConnectionCount: 0,
+      trafficVolume: 'under_1_mib',
+    }));
+    const payload = routingResearchV2Payload({
+      observedConnectionCount: entries.length,
+      identifiedAppConnectionCount: entries.length,
+      connectionLimitReached: true,
+      entries,
+      bundleComponents: [{
+        app: 'tencent_meeting', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      }],
+    });
+    const accepted = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect(accepted.status).toBe(201);
+    const stored = await env.DB.prepare(
+      'SELECT aggregate_json FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    const canonical = JSON.parse(stored.aggregate_json);
+    expect(canonical.entries).toHaveLength(20);
+    expect(canonical.bundleComponents).toEqual(payload.bundleComponents);
+  });
+
+  it('rejects raw metadata, covert strings, malformed totals, timestamps, and oversized research bodies', async () => {
+    const account = await createAccount('routing-research-validation');
+    const submit = async (payload: unknown) => api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    );
+    expect((await submit({
+      ...routingResearchPayload(),
+      processPath: '/Users/customer/Applications/Private.app',
+    })).status).toBe(400);
+    expect((await submit({
+      ...routingResearchPayload(),
+      bundleComponents: [],
+    })).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        app: 'wechat', bundleComponent: '/Users/customer/WeChat.app',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'none',
+      }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        app: 'chrome', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'none',
+      }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        app: 'wechat', bundleComponent: 'customer_named_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'none',
+      }],
+    }))).status).toBe(400);
+    const duplicateComponent = routingResearchV2Payload().bundleComponents[0];
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [duplicateComponent, duplicateComponent],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{
+        ...duplicateComponent,
+        connectionCount: 3, directConnectionCount: 1,
+        proxiedConnectionCount: 2,
+      }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      bundleComponents: [{ ...duplicateComponent, executable: 'WeChat' }],
+    }))).status).toBe(400);
+    expect((await submit(routingResearchV2Payload({
+      entries: [
+        routingResearchPayload().entries[0],
+        { ...routingResearchPayload().entries[1], trafficVolume: 'none' },
+      ],
+      bundleComponents: [duplicateComponent],
+    }))).status).toBe(400);
+    const rawEntry = routingResearchPayload();
+    rawEntry.entries = [{ ...rawEntry.entries[0], host: 'private.example.com' } as any];
+    rawEntry.observedConnectionCount = 1;
+    rawEntry.identifiedAppConnectionCount = 0;
+    expect((await submit(rawEntry)).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      entries: [{
+        app: 'private-editor', connectionCount: 3, directConnectionCount: 0,
+        proxiedConnectionCount: 3, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      }],
+      identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    const tooManyFixedApps = [
+      'wechat', 'qq', 'feishu', 'lark', 'dingtalk', 'trae', 'chrome', 'edge',
+      'safari', 'firefox', 'arc', 'brave', 'claude', 'wecom',
+      'tencent_meeting', 'wps', 'baidu_netdisk', 'alipan', 'douyin',
+      'bilibili', 'netease_music',
+    ].map((app) => ({
+      app, connectionCount: 1, directConnectionCount: 0,
+      proxiedConnectionCount: 1, blockedConnectionCount: 0,
+      trafficVolume: 'under_1_mib',
+    }));
+    expect((await submit(routingResearchPayload({
+      observedConnectionCount: tooManyFixedApps.length,
+      identifiedAppConnectionCount: tooManyFixedApps.length,
+      connectionLimitReached: true,
+      entries: tooManyFixedApps,
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      appVersion: '/Users/customer/Documents',
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      build: 'private.example.com',
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      observedConnectionCount: 4,
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      entries: [{
+        app: 'wechat', connectionCount: 3, directConnectionCount: 1,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      }],
+      identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    expect((await submit(routingResearchPayload({
+      entries: [{
+        app: 'wechat', connectionCount: 3, directConnectionCount: 1,
+        proxiedConnectionCount: 2, blockedConnectionCount: 0,
+        trafficVolume: 'exactly_123_bytes',
+      }],
+      identifiedAppConnectionCount: 3,
+    }))).status).toBe(400);
+    const fiveHourUntil = Math.floor(Date.now() / 1000) - 60;
+    expect((await submit(routingResearchPayload({
+      observedSince: fiveHourUntil - 5 * 60 * 60,
+      observedUntil: fiveHourUntil,
+    }))).status).toBe(400);
+    const staleUntil = Math.floor(Date.now() / 1000) - 91 * 24 * 60 * 60;
+    expect((await submit(routingResearchPayload({
+      observedSince: staleUntil - 6 * 60 * 60,
+      observedUntil: staleUntil,
+    }))).status).toBe(400);
+    expect((await submit({
+      ...routingResearchPayload(),
+      padding: 'x'.repeat(9 * 1024),
+    })).status).toBe(413);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(0);
+  });
+
+  it('caps distinct routing-research snapshots per device without blocking an exact retry', async () => {
+    const account = await createAccount('routing-research-rate');
+    const accepted: Record<string, unknown>[] = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const payload = routingResearchPayload();
+      accepted.push(payload);
+      expect((await api(
+        'routing-research/snapshots',
+        await routingResearchJson(
+          payload, account.accessToken, account.user.id,
+        ),
+      )).status).toBe(201);
+    }
+    const limited = await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        routingResearchPayload(), account.accessToken, account.user.id,
+      ),
+    );
+    expect(limited.status).toBe(429);
+    expect((await limited.json() as any).error.code).toBe('RATE_LIMITED');
+    expect((await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        accepted[0], account.accessToken, account.user.id,
+      ),
+    )).status).toBe(200);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(4);
+  });
+
+  it('suppresses all routing-research metadata below the cohort minimum', async () => {
+    const accounts = await Promise.all([
+      createAccount('routing-suppressed-one'),
+      createAccount('routing-suppressed-two'),
+    ]);
+    for (const account of accounts) {
+      const payload = routingResearchV2Payload();
+      expect((await api(
+        'routing-research/snapshots',
+        await routingResearchJson(
+          payload, account.accessToken, account.user.id,
+        ),
+      )).status).toBe(201);
+    }
+    const response = await admin(
+      'routing-research/summary?days=30', undefined, 'GET',
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      days: 30,
+      cohortMinimum: 3,
+      suppressed: true,
+      byApp: [],
+      byBundleComponent: [],
+      byBuild: [],
+    });
+  });
+
+  it('returns only cohort-safe app, route, volume, and build research summaries', async () => {
+    const accounts = await Promise.all([
+      createAccount('routing-summary-one'),
+      createAccount('routing-summary-two'),
+      createAccount('routing-summary-three'),
+    ]);
+    for (const [index, account] of accounts.entries()) {
+      const entries = [{
+        app: 'wechat', connectionCount: 2, directConnectionCount: 1,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      }];
+      if (index === 0) entries.push({
+        app: 'safari', connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      });
+      const bundleComponents = [{
+        app: 'wechat', bundleComponent: 'main_executable',
+        connectionCount: 1, directConnectionCount: 1,
+        proxiedConnectionCount: 0, blockedConnectionCount: 0,
+        trafficVolume: 'under_1_mib',
+      }];
+      if (index === 0) bundleComponents.push({
+        app: 'wechat', bundleComponent: 'framework_helper',
+        connectionCount: 1, directConnectionCount: 0,
+        proxiedConnectionCount: 1, blockedConnectionCount: 0,
+        trafficVolume: '10_to_100_mib',
+      });
+      const payload = routingResearchV2Payload({
+        observedConnectionCount: index === 0 ? 3 : 2,
+        identifiedAppConnectionCount: index === 0 ? 3 : 2,
+        entries,
+        bundleComponents,
+      });
+      expect((await api(
+        'routing-research/snapshots',
+        await routingResearchJson(
+          payload, account.accessToken, account.user.id,
+        ),
+      )).status).toBe(201);
+    }
+
+    expect((await api('admin/routing-research/summary?days=30')).status).toBe(401);
+    const response = await admin(
+      'routing-research/summary?days=30',
+      undefined,
+      'GET',
+    );
+    expect(response.status).toBe(200);
+    const summary = await response.json() as any;
+    expect(summary).toMatchObject({
+      days: 30,
+      cohortMinimum: 3,
+      participantCount: 3,
+      deviceCount: 3,
+      snapshotCount: 3,
+      byApp: [{
+        app: 'wechat', participantCount: 3, deviceCount: 3,
+        snapshotCount: 3, connectionCount: 6,
+        directConnectionCount: 3, proxiedConnectionCount: 3,
+        blockedConnectionCount: 0,
+        trafficVolumes: { '10_to_100_mib': 3 },
+      }],
+      byBundleComponent: [{
+        app: 'wechat', bundleComponent: 'main_executable',
+        participantCount: 3, deviceCount: 3, snapshotCount: 3,
+        connectionCount: 3, directConnectionCount: 3,
+        proxiedConnectionCount: 0, blockedConnectionCount: 0,
+        trafficVolumes: { under_1_mib: 3 },
+      }],
+      byBuild: [{
+        appVersion: '0.0.1', build: '40', participantCount: 3,
+        deviceCount: 3, snapshotCount: 3,
+      }],
+    });
+    const encoded = JSON.stringify(summary);
+    for (const account of accounts) {
+      expect(encoded).not.toContain(account.user.id);
+      expect(encoded).not.toContain(account.device.id);
+    }
+    expect(encoded).not.toContain('snapshotId');
+    expect(encoded).not.toContain('aggregate_json');
+    expect((await admin(
+      'routing-research/summary?days=91', undefined, 'GET',
+    )).status).toBe(400);
+    expect((await admin(
+      'routing-research/summary?days=30&deviceId=secret', undefined, 'GET',
+    )).status).toBe(400);
+  });
+
+  it('deletes routing research at retention and with its account', async () => {
+    const account = await createAccount('routing-research-retention');
+    const payload = routingResearchPayload();
+    expect((await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        payload, account.accessToken, account.user.id,
+      ),
+    )).status).toBe(201);
+    const row = await env.DB.prepare(
+      'SELECT * FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).first<any>();
+    await env.DB.prepare(
+      'DELETE FROM routing_research_snapshots WHERE snapshot_id = ?',
+    ).bind(payload.snapshotId).run();
+    const oldUntil = Math.floor(Date.now() / 1000) - 91 * 24 * 60 * 60;
+    await env.DB.prepare(
+      `INSERT INTO routing_research_snapshots(
+         id, snapshot_id, user_id, device_id, received_at, observed_since,
+         observed_until, app_version, build, os_version, architecture,
+         aggregate_json
+       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(
+      crypto.randomUUID(), crypto.randomUUID(), account.user.id,
+      account.device.id, oldUntil, oldUntil - 6 * 60 * 60, oldUntil,
+      row.app_version, row.build, row.os_version, row.architecture,
+      row.aggregate_json,
+    ).run();
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(0);
+
+    const fresh = routingResearchPayload();
+    expect((await api(
+      'routing-research/snapshots',
+      await routingResearchJson(
+        fresh, account.accessToken, account.user.id,
+      ),
+    )).status).toBe(201);
+    await env.DB.prepare('DELETE FROM users WHERE id = ?')
+      .bind(account.user.id).run();
+    expect(Number((await env.DB.prepare(
+      'SELECT COUNT(*) total FROM routing_research_snapshots',
+    ).first<any>()).total)).toBe(0);
   });
 
   // Pinned verbatim from the client's single definition of the wire contract

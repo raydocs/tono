@@ -783,14 +783,14 @@ nonisolated enum SubscriptionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL: "订阅链接无效"
-        case .downloadFailed: "下载订阅失败（网络错误）"
-        case .downloadHTTPError(let code): "订阅服务器返回 HTTP \(code)"
-        case .invalidContent: "订阅内容不是有效文本"
-        case .noNodesFound: "订阅中未找到代理节点"
-        case .blockedByServer: "订阅源拒绝访问。请先通过「从 Clash Verge 导入」或「文件导入」获取节点，连接代理后再更新订阅。"
-        case .serverReturnedHTML: "订阅服务器返回了 HTML 页面而非配置文件，请检查链接"
-        case .parseFailed: "无法解析订阅内容，请检查订阅格式"
+        case .invalidURL: String(localized: "Subscription URL is invalid")
+        case .downloadFailed: String(localized: "Failed to download subscription (network error)")
+        case .downloadHTTPError(let code): String(localized: "Subscription server returned HTTP \(code)")
+        case .invalidContent: String(localized: "Subscription content is not valid text")
+        case .noNodesFound: String(localized: "No proxy nodes found in subscription")
+        case .blockedByServer: String(localized: "Subscription source refused access. Import nodes via \"Import from Clash Verge\" or \"Import File\" first, then update the subscription after connecting the proxy.")
+        case .serverReturnedHTML: String(localized: "Subscription server returned an HTML page instead of a config file. Please check the link.")
+        case .parseFailed: String(localized: "Could not parse subscription content. Please check the subscription format.")
         }
     }
 }

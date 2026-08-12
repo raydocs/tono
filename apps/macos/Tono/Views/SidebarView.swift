@@ -4,9 +4,15 @@ struct SidebarView: View {
     @Binding var selectedPage: AppPage
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
 
-    // 主导航项（排除 settings），根据 logsEnabled 动态过滤
+    // Keep the primary flow focused on connection, servers, and diagnostics.
+    // Catalog synchronization is part of Nodes; it is not a separate user
+    // destination.
     private var mainPages: [AppPage] {
-        [.dashboard, .subscriptions, .proxies, .rules, .activity, .logs].filter { page in
+        // Routing rules are deployed from the control plane, identically for
+        // every user, so there is nothing here for a user to manage. The page
+        // and its enum case are kept for internal builds; they are simply not
+        // reachable destinations.
+        [.dashboard, .proxies, .activity, .logs].filter { page in
             if page == .logs { return logsEnabled }
             return true
         }
@@ -33,7 +39,8 @@ struct SidebarView: View {
 
             Spacer()
 
-            // Settings 推至底部
+            // Support 与 Settings 推至底部
+            navigationItem(for: .support)
             navigationItem(for: .settings)
         }
         .padding(.bottom, 12)

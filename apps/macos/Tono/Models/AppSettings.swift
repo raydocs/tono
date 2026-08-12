@@ -17,6 +17,8 @@ enum SettingsKey {
     static let remoteDiagnosticsEnabled = "remoteDiagnosticsEnabled"
     nonisolated static let claudeTrafficResearchEnabled =
         "claudeTrafficResearchEnabled"
+    nonisolated static let aggregatedAppRoutingResearchEnabled =
+        "aggregatedAppRoutingResearchEnabled"
     nonisolated static let localTrafficAuditEnabled =
         "localTrafficAuditEnabled"
     static let hasCompletedOnboarding = "hasCompletedOnboarding"

@@ -42,8 +42,14 @@ run_case() {
   expected=$1
   identifier=$2
   signing_identity=$3
-  socket_path="$temporary_dir/$expected-$identifier.sock"
-  codesign --force --sign "$signing_identity" --identifier "$identifier" "$client"
+  entitlements=${4:-}
+  socket_path="$temporary_dir/$expected-$identifier-$(printf %s "$entitlements" | wc -c | tr -d ' ').sock"
+  if [ -n "$entitlements" ]; then
+    codesign --force --sign "$signing_identity" --identifier "$identifier" \
+      --entitlements "$entitlements" "$client"
+  else
+    codesign --force --sign "$signing_identity" --identifier "$identifier" "$client"
+  fi
   "$server" "$socket_path" "$expected" &
   server_pid=$!
   attempts=0
@@ -64,4 +70,24 @@ run_case() {
 run_case allow com.raydocs.tono "$identity"
 run_case reject com.raydocs.tono -
 run_case reject com.raydocs.not-tono "$identity"
+
+# A correct identity is not sufficient. A build carrying get-task-allow can be
+# attached to and injected into by any process running as the same user, so an
+# attacker never has to satisfy the requirement themselves — they borrow a
+# process that already does, and with it the ability to arm and disarm PF and to
+# start the privileged core. Apple Development certificates carry this team's OU
+# exactly like Developer ID ones, so only the entitlement separates a debuggable
+# local build from a shipped one.
+debuggable_entitlements="$temporary_dir/debuggable.plist"
+cat >"$debuggable_entitlements" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.get-task-allow</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+run_case reject com.raydocs.tono "$identity" "$debuggable_entitlements"
 echo "helper peer authorization tests passed"

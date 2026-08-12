@@ -34,7 +34,7 @@ git checkout main          # 交接基线 HEAD: 0eb6879
 
 产品在 **`tono-win/`** 目录下，自成一体。仓库里还有 macOS 的东西（`LiquidClash/` 的 Xcode 工程、`Tono/` 的 macOS 应用），**跟你无关，别动**。
 
-`Tono/reports/` 是文档目录，值得看的：
+`docs/reports/` 是文档目录，值得看的：
 
 | 文件 | 内容 |
 |---|---|

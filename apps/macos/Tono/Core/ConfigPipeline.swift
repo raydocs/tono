@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import Darwin
 import AppKit
+import Security
 
 /// Produces runtime.yaml from subscription YAML + minimal overlay.
 /// Follows Verge's principle: subscription config is immutable, overlay only control fields.
@@ -22,13 +23,13 @@ nonisolated struct ConfigPipeline {
         var selectedNodeName: String = "Home-US"
         /// Present only after Tono reports a healthy, exit-node-pinned SOCKS endpoint.
         var tonoTransport: TonoTransportDescriptor? = nil
-        /// Control-plane-pinned home-broadband exit. When it names a validated
-        /// catalog node, Claude process/domain traffic splits onto a dedicated
-        /// `Tono-Claude-Home` selector instead of `Tono-Exit`.
+        /// Optional managed route for Claude traffic. The control plane may
+        /// omit this until the corresponding home/default node is published.
         var claudeHomeNodeName: String? = nil
-        /// Administrator-pinned default VPS exit, ordered directly after the
-        /// committed selection inside `Tono-Exit`.
         var defaultNodeName: String? = nil
+        /// Optional cloud-assigned residential SOCKS5 upstream. It is chained
+        /// through `Tono-Exit`, so its host is not a direct PF exception.
+        var claudeHomeSocks5: TonoExitCatalogHomeSocks5? = nil
     }
 
     struct DialEndpoint: Equatable, Sendable {
@@ -49,28 +50,60 @@ nonisolated struct ConfigPipeline {
         let ports: [UInt16]
     }
 
+    /// An exact, allowlisted suffix route. Unlike a resolved domain pin, a
+    /// suffix route intentionally carries no IP addresses or PF endpoints.
+    struct DirectDomainSuffix: Equatable, Sendable {
+        let host: String
+        let ports: [UInt16]
+    }
+
+    /// One exact WeChat hostname/port route with its own reachability decision.
+    /// Keeping this descriptor in ConfigPipeline gives runtime generation and
+    /// tests one canonical mapping from a validated pin to its fallback group.
+    struct ManagedDirectFallbackTarget: Equatable, Sendable {
+        let host: String
+        let port: UInt16
+        let groupName: String
+        let testURL: String
+    }
+
     struct ManagedDirectRuntimePolicy: Equatable, Sendable {
         let physicalInterface: String
         let domainPins: [DirectDomainPin]
         let webDomainPins: [DirectDomainPin]
+        let webDomainSuffixes: [DirectDomainSuffix]
         let mediaEndpoints: [DirectEndpoint]
+        /// Exact reviewed TCP IP endpoints used by native WeChat HTTPDNS.
+        /// These receive TCP rules and per-endpoint health fallbacks; UDP
+        /// media endpoints remain isolated in `mediaEndpoints`.
+        let tcpEndpoints: [DirectEndpoint]
         /// Policy hostnames (pre-resolution) that must resolve through the
         /// interface-bound direct outbound via the China DoH resolvers, so the
         /// pinned answers are region-correct instead of exit-geolocated.
         let directResolverHosts: [String]
+        /// True only when the source traffic-policy signature verified. This
+        /// runtime metadata is what lets a signed policy carry a new reviewed
+        /// hostname through every validation layer, not merely the decoder.
+        let trusted: Bool
 
         init(
             physicalInterface: String,
             domainPins: [DirectDomainPin],
             webDomainPins: [DirectDomainPin] = [],
+            webDomainSuffixes: [DirectDomainSuffix] = [],
             mediaEndpoints: [DirectEndpoint],
-            directResolverHosts: [String] = []
+            tcpEndpoints: [DirectEndpoint] = [],
+            directResolverHosts: [String] = [],
+            trusted: Bool = false
         ) {
             self.physicalInterface = physicalInterface
             self.domainPins = domainPins
             self.webDomainPins = webDomainPins
+            self.webDomainSuffixes = webDomainSuffixes
             self.mediaEndpoints = mediaEndpoints
+            self.tcpEndpoints = tcpEndpoints
             self.directResolverHosts = directResolverHosts
+            self.trusted = trusted
         }
 
         var sessionEndpoints: [DirectEndpoint] {
@@ -91,7 +124,8 @@ nonisolated struct ConfigPipeline {
                 ? []
                 : ConfigPipeline.managedDirectResolverEndpoints
             return Array(Set(
-                domainEndpoints + mediaEndpoints + resolverEndpoints
+                domainEndpoints + tcpEndpoints + mediaEndpoints
+                    + resolverEndpoints
             )).sorted {
                 ($0.transport, $0.port, $0.address)
                     < ($1.transport, $1.port, $1.address)
@@ -100,15 +134,164 @@ nonisolated struct ConfigPipeline {
 
         var isEmpty: Bool {
             domainPins.isEmpty && webDomainPins.isEmpty
-                && mediaEndpoints.isEmpty && directResolverHosts.isEmpty
+                && webDomainSuffixes.isEmpty && mediaEndpoints.isEmpty
+                && tcpEndpoints.isEmpty
+                && directResolverHosts.isEmpty
         }
     }
 
     static let homeNodeName = "Home-US"
     static let exitGroupName = "Tono-Exit"
     static let claudeHomeGroupName = "Tono-Claude-Home"
+    static let homeResidentialProxyName = "Tono-Home-Residential"
     static let directProxyName = "Tono-China-Direct"
     static let webDirectProxyName = "Tono-China-Web-Direct"
+    /// Wraps the interface-bound web direct outbound so a China path that is
+    /// unreachable from where the user actually sits degrades to the tunnel
+    /// instead of killing the flow. A bare `direct` outbound has no failover:
+    /// that is why suffix routes were withheld even after PF stopped being the
+    /// obstacle. The probe is class-level, not per destination — mihomo scores
+    /// fallback members by URL — which answers "can this machine reach China
+    /// directly at all", the question that actually distinguishes the two
+    /// members.
+    static let webDirectGroupName = "Tono-China-Web"
+    /// Same failover the web routes got, for the reviewed bundle's own direct
+    /// path. Without it the bundle-wide process rule pointed at a bare `direct`
+    /// outbound, so a destination unreachable from where the user sits died
+    /// there instead of retreating to the tunnel — observed as six retries to
+    /// one address with bytes sent and nothing received, while other direct
+    /// flows in the same session moved 13 MB.
+    static let appDirectGroupName = "Tono-China-App"
+    /// Reachable over plain HTTP from inside China and answers 204, so the
+    /// probe measures the direct path rather than a TLS handshake. Port 80 is
+    /// inside the reviewed-bundle permit, so the probe itself is not blocked.
+    static let chinaDirectHealthURL = "http://connect.rom.miui.com/generate_204"
+    static let managedDirectFallbackGroupPrefix = "Tono-WeChat-TCP-"
+    static let managedDirectHealthIntervalSeconds = 60
+    /// Steady-state budget written into the runtime fallback groups. Kept
+    /// generous so a congested but usable direct path is not flapped away.
+    static let managedDirectHealthTimeoutMilliseconds = 3_500
+    /// Budget for the one prime that runs inside the connect transaction. The
+    /// probe is a bare `GET /` against CDN hosts that frequently never answer
+    /// it, so with the steady-state budget the slowest of ~60 member probes set
+    /// the floor for the whole "Applying secure app routing" stage at over five
+    /// seconds. A member that cannot answer within this budget is simply not
+    /// primed here; mihomo's own `lazy: false` check re-evaluates it against the
+    /// full budget within one interval, so nothing is permanently misjudged.
+    static let managedDirectPrimeTimeoutMilliseconds = 1_200
+    /// Liveness probe for the chained Claude route. Deliberately not an
+    /// Anthropic endpoint: this fires every interval on every client, and a
+    /// generic 204 already distinguishes a stalled hop from a healthy one.
+    static let claudeHomeHealthURL = "https://www.gstatic.com/generate_204"
+
+    /// Assistant providers that must egress through the residential hop. They
+    /// score datacenter ranges as abuse, so a shared cloud exit invites
+    /// challenges and blocks that a residential identity avoids.
+    ///
+    /// Emitted before every direct rule, which also guarantees none of this
+    /// traffic can be captured by a China-direct exception later in the chain.
+    /// Deliberately excluded: `x.com`, which is Twitter at large rather than
+    /// Grok, and Gemini, which lives under `google.com`/`googleapis.com` and
+    /// cannot be separated by suffix without dragging all of Google along.
+    /// Only first-party provider domains belong here. Shared infrastructure the
+    /// public AI rule lists bundle in — auth0, stripe, sentry, statsig, datadog,
+    /// segment, cloudflare.net, googleapis.com, gstatic.com — is used by
+    /// thousands of unrelated apps, so routing it here would push ordinary
+    /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
+    /// it is this group's own liveness probe, and sending the probe through the
+    /// hop it is meant to test would mask exactly the stalls we check for.
+    static let assistantHomeDomainSuffixes = [
+        // Anthropic
+        "anthropic.com",
+        "claude.ai",
+        "claude.com",
+        "claude.app",
+        "claude.site",
+        "claudestudio.com",
+        "claudeusercontent.com",
+        // OpenAI, including Codex. `chat.com` and `ai.com` are OpenAI-owned
+        // entry points that redirect into ChatGPT.
+        "chatgpt.com",
+        "openai.com",
+        "chat.com",
+        "ai.com",
+        "oaistatic.com",
+        "oaiusercontent.com",
+        // xAI. `grok.x.com` is listed on its own so Grok-on-X is covered
+        // without routing the whole of x.com through the residential hop.
+        "grok.com",
+        "grok.x.com",
+        "grokipedia.com",
+        "x.ai",
+    ]
+
+    /// Assistant clients pinned by process, for the case where a desktop app or
+    /// CLI reaches an endpoint that is not covered by the suffix list.
+    /// Both cases and the `.exe` forms are listed because mihomo matches the
+    /// complete basename: the npm-distributed Claude Code launcher is observed
+    /// as `claude.exe` even on macOS, and the Codex and ChatGPT CLIs ship under
+    /// inconsistent capitalisation.
+    static let assistantHomeProcessNames = [
+        "Claude",
+        "claude",
+        "claude.exe",
+        "ChatGPT",
+        "chatgpt",
+        "ChatGPT.exe",
+        "Codex",
+        "codex",
+        "Codex.exe",
+    ]
+    /// Basename matching misses two shapes that matter, so these are matched by
+    /// install path instead.
+    ///
+    /// Claude Code's launcher is the version directory's own file, so its
+    /// process name is a version string — `2.1.223` on this machine. No entry in
+    /// the list above could ever match it, which left every endpoint outside the
+    /// assistant suffix list leaving through the datacenter exit while the API
+    /// calls used the residential hop: one account, two networks. It was found
+    /// by noticing Claude Code's telemetry upload on the wrong path, and
+    /// chasing telemetry hostnames one at a time is the enumeration approach
+    /// that already failed for WeChat's rotating addresses.
+    ///
+    /// The desktop apps are Electron, so they spawn helpers like
+    /// `Claude Helper (Renderer)`. A bundle prefix covers the whole bundle the
+    /// way the reviewed-bundle rule does.
+    ///
+    /// Unlike the reviewed-bundle direct permit, these paths need no signature
+    /// review: the target is a protected residential hop, not the physical
+    /// interface, so a process that matched one it should not still leaves
+    /// through the tunnel and still fails closed.
+    static let assistantHomeProcessPathRegexes = [
+        "^/Users/[^/]+/\\.local/share/claude/versions/",
+        "^/Applications/Claude\\.app/",
+        "^/Applications/ChatGPT\\.app/",
+    ]
+    /// Exact suffixes accepted by traffic-policy v3. They are rendered only
+    /// as TCP DOMAIN-SUFFIX rules; the control plane and client both reject
+    /// arbitrary suffixes and subdomain-shaped entries here.
+    static let managedWebDirectSuffixAllowlist = [
+        "bilibili.com", "biliapi.net", "bilivideo.com", "hdslb.com",
+        "qq.com", "gtimg.cn", "gtimg.com", "iqiyi.com", "qiyi.com",
+        "qiyipic.com", "iqiyipic.com", "youku.com", "ykimg.com",
+        "xiaohongshu.com", "xhslink.com", "xhscdn.com",
+        "feishu.cn", "feishucdn.com", "larksuite.com", "larkoffice.com",
+        "baidu.com", "baidupcs.com", "bcebos.com", "baidubcs.com",
+        "bdstatic.com", "bdimg.com", "aliyuncs.com", "10jqka.com.cn",
+        "iwencai.com", "eastmoney.com", "dfcfw.com", "sina.com.cn",
+        "sinajs.cn", "legulegu.com", "optbbs.com", "100ppi.com",
+        // `ccxe.com.cn` is live in published policy revision 7. Removing it here
+        // made this client reject the *entire* policy — every WeChat direct pin
+        // and every web acceleration route with it — because one unrecognised
+        // suffix fails the whole document. The client allowlist must therefore be
+        // a superset of what published policy actually uses; it is never safe to
+        // narrow it against the Worker source alone, since the deployed Worker
+        // may still accept entries this checkout no longer lists.
+        "awtmt.com", "cls.cn", "cninfo.com.cn", "ccxe.com.cn",
+        "pushplus.plus", "baostock.com", "sse.com.cn", "szse.cn",
+        "zoom.us", "zoom.com", "zoomgov.com", "oray.com", "sunlogin.com",
+        "edu.cn",
+    ]
     /// AliDNS DoH over TCP/443 with IP-literal certificates. Managed-direct
     /// domains resolve through these upstreams via the interface-bound direct
     /// outbound (nameserver-policy `#Tono-China-Direct`), which keeps pinned
@@ -145,11 +328,71 @@ nonisolated struct ConfigPipeline {
                   path.unicodeScalars.allSatisfy({
                       $0.isASCII && $0.value > 0x20 && $0.value < 0x7F
                   }),
-                  !paths.contains(path) else { continue }
+                  !paths.contains(path),
+                  isSignedWeChatBundle(at: url) else { continue }
             paths.append(path)
         }
         return paths
     }()
+
+    /// Path shape is not an identity. Launch Services returns whatever bundle
+    /// currently claims `com.tencent.xinWeChat`, and any process running as the
+    /// user can register `~/Applications/WeChat.app` — a location it can write —
+    /// to have its own executables matched by the PROCESS-PATH-REGEX rules and
+    /// so reach the pinned Tencent endpoints outside the tunnel. Requiring an
+    /// Apple-anchored signature that claims WeChat's identifier raises that from
+    /// "drop a binary anywhere you can write" to holding a revocable Apple
+    /// signing identity and signing under someone else's identifier.
+    ///
+    /// Basic validation only: this is an identity question, not an integrity
+    /// audit of a multi-hundred-megabyte bundle, and deep validation here would
+    /// hash every resource on the connect path. `/Applications/WeChat.app` is
+    /// unconditionally trusted as before — it is the reviewed location and is not
+    /// writable without administrator rights.
+    ///
+    /// Tencent's Developer ID team, so adoption is pinned to Tencent rather than
+    /// to any Apple-issued signature that merely claims WeChat's identifier
+    /// (`identifier` is not namespaced per team — anyone can sign code with it).
+    /// Read from a known-good install rather than from documentation:
+    ///
+    ///     $ codesign -dv --verbose=2 /Applications/WeChat.app
+    ///     Identifier=com.tencent.xinWeChat
+    ///     Authority=Developer ID Application: Tencent Mobile International
+    ///               Limited (5A4RE8SF68)
+    ///     TeamIdentifier=5A4RE8SF68
+    ///
+    /// If Tencent ever ships under a second team, adoption fails closed: the
+    /// bundle is skipped, WeChat routes through the tunnel, and nothing leaks.
+    static let reviewedWeChatTeamIdentifier: String? = "5A4RE8SF68"
+
+    private static func isSignedWeChatBundle(at url: URL) -> Bool {
+        var requirementText =
+            #"anchor apple generic and identifier "com.tencent.xinWeChat""#
+        if let team = reviewedWeChatTeamIdentifier,
+           team.unicodeScalars.allSatisfy({
+               $0.isASCII && ($0.properties.isAlphabetic
+                   || CharacterSet.decimalDigits.contains($0))
+           }), !team.isEmpty {
+            requirementText += #" and certificate leaf[subject.OU] = ""# + team + #"""#
+        }
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            url as CFURL,
+            SecCSFlags(rawValue: 0),
+            &code
+        ) == errSecSuccess, let code else { return false }
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(
+            requirementText as CFString,
+            SecCSFlags(rawValue: 0),
+            &requirement
+        ) == errSecSuccess, let requirement else { return false }
+        return SecStaticCodeCheckValidity(
+            code,
+            SecCSFlags(rawValue: kSecCSBasicValidateOnly),
+            requirement
+        ) == errSecSuccess
+    }
 
     /// Anchored RE2 patterns for Mihomo PROCESS-PATH-REGEX sub-rules, derived
     /// from the reviewed bundle prefixes so the two can never drift apart.
@@ -165,6 +408,53 @@ nonisolated struct ConfigPipeline {
                 "managed direct bundle path unsafe for rule emission"
             )
             return pattern
+        }
+    }
+
+    /// Deterministic, bounded group names avoid exposing long policy hostnames
+    /// as Mihomo object identifiers. A separate group per port ensures an HTTPS
+    /// success cannot incorrectly mark TCP/80 direct as usable (or vice versa).
+    static func managedDirectFallbackTargets(
+        for policy: ManagedDirectRuntimePolicy?
+    ) -> [ManagedDirectFallbackTarget] {
+        guard let policy else { return [] }
+        func target(host: String, port: UInt16, probeHost: String? = nil)
+            -> ManagedDirectFallbackTarget {
+            let identity = "\(host):\(port)"
+            let digest = SHA256.hash(data: Data(identity.utf8))
+                .prefix(8)
+                .map { String(format: "%02x", $0) }
+                .joined()
+            let scheme = port == 443 ? "https" : "http"
+            return ManagedDirectFallbackTarget(
+                host: host,
+                port: port,
+                groupName: managedDirectFallbackGroupPrefix + digest,
+                testURL: "\(scheme)://\(probeHost ?? host)/"
+            )
+        }
+        let domainTargets = policy.domainPins.flatMap { pin in
+            pin.ports.map { target(host: pin.host, port: $0) }
+        }
+        let tcpTargets = policy.tcpEndpoints.map { endpoint in
+            // Native WeChat HTTPDNS opens a socket to a raw Tencent address,
+            // but those addresses commonly reject a generic HTTP HEAD when
+            // the URL host is the IP literal. Probe a stable WeChat hostname
+            // through the same direct member instead; the actual application
+            // rule still matches only the pinned IP:port pair. This prevents a
+            // false-negative health result from silently sending a valid raw
+            // WeChat endpoint through Tono-Exit.
+            let probeHost = endpoint.port == 443
+                ? "mp.weixin.qq.com"
+                : "mmbiz.qpic.cn"
+            return target(
+                host: endpoint.address,
+                port: endpoint.port,
+                probeHost: probeHost
+            )
+        }
+        return (domainTargets + tcpTargets).sorted {
+            ($0.host, $0.port) < ($1.host, $1.port)
         }
     }
 
@@ -542,15 +832,19 @@ nonisolated struct ConfigPipeline {
                 nodes.contains(where: { $0.name == selected }) else {
             throw TonoInjectionError.missingSelection
         }
-        // Routing pins are control-plane hints: adopt them only while they
-        // still name a validated catalog node, and never fail the build over
-        // a stale or unknown pin.
-        let claudeHome = overlay.claudeHomeNodeName
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .flatMap { name in nodes.contains(where: { $0.name == name }) ? name : nil }
+        let claudeHomeSocks5 = validatedHomeSocks5(overlay.claudeHomeSocks5)
+        let claudeHome = claudeHomeSocks5 == nil
+            ? overlay.claudeHomeNodeName
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { name in
+                    nodes.contains(where: { $0.name == name }) ? name : nil
+                }
+            : nil
         let preferredDefault = overlay.defaultNodeName
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .flatMap { name in nodes.contains(where: { $0.name == name }) ? name : nil }
+            .flatMap { name in
+                nodes.contains(where: { $0.name == name }) ? name : nil
+            }
 
         var proxyBlock = "proxies:\n"
         if let transport {
@@ -565,10 +859,28 @@ nonisolated struct ConfigPipeline {
         for node in nodes {
             proxyBlock += try ownedNodeYAML(node)
         }
+        if let claudeHomeSocks5 {
+            proxyBlock += """
+              - name: "\(homeResidentialProxyName)"
+                type: socks5
+                server: "\(yamlScalar(claudeHomeSocks5.host))"
+                port: \(claudeHomeSocks5.port)
+                username: "\(yamlScalar(claudeHomeSocks5.username))"
+                password: "\(yamlScalar(claudeHomeSocks5.password))"
+                dialer-proxy: "\(exitGroupName)"
+                udp: false
+
+            """
+        }
         if let directPolicy,
            !directPolicy.domainPins.isEmpty
             || !directPolicy.mediaEndpoints.isEmpty
-            || !directPolicy.directResolverHosts.isEmpty {
+            || !directPolicy.tcpEndpoints.isEmpty
+            || !directPolicy.directResolverHosts.isEmpty
+            // Suffix routes resolve through this outbound too, so a
+            // suffix-only policy must still define it or `nameserver-policy`
+            // would reference a proxy that does not exist.
+            || !directPolicy.webDomainSuffixes.isEmpty {
             proxyBlock += """
               - name: "\(directProxyName)"
                 type: direct
@@ -577,7 +889,12 @@ nonisolated struct ConfigPipeline {
 
             """
         }
-        if let directPolicy, !directPolicy.webDomainPins.isEmpty {
+        // Referenced by both exact web pins and suffix routes now that the
+        // reviewed-bundle port permit lets a root-originated direct dial leave
+        // without an exact-address PF entry.
+        if let directPolicy,
+           !directPolicy.webDomainPins.isEmpty
+            || !directPolicy.webDomainSuffixes.isEmpty {
             proxyBlock += """
               - name: "\(webDirectProxyName)"
                 type: direct
@@ -592,10 +909,6 @@ nonisolated struct ConfigPipeline {
             choices.remove(at: index)
             choices.insert(selected, at: 0)
         }
-        // The committed selection stays first: with store-selected disabled
-        // mihomo adopts the first member on every reload, so the
-        // administrator default ranks second and can never silently override
-        // a deliberate user selection.
         if let preferredDefault, preferredDefault != selected,
            let index = choices.firstIndex(of: preferredDefault) {
             choices.remove(at: index)
@@ -614,6 +927,7 @@ nonisolated struct ConfigPipeline {
         secret: "\(yamlScalar(overlay.secret))"
         allow-lan: false
         ipv6: false
+        udp: true
         mode: rule
         log-level: \(overlay.logLevel)
         unified-delay: true
@@ -638,7 +952,9 @@ nonisolated struct ConfigPipeline {
             yaml += "\n"
         }
         yaml += tonoDNS + "\n"
-        if let directPolicy, !directPolicy.directResolverHosts.isEmpty {
+        if let directPolicy,
+           !directPolicy.directResolverHosts.isEmpty
+            || !directPolicy.webDomainSuffixes.isEmpty {
             // Managed-direct hostnames resolve via China DoH through the
             // interface-bound direct outbound so /dns/query returns
             // region-correct answers for pinning. Client-facing answers for
@@ -647,7 +963,19 @@ nonisolated struct ConfigPipeline {
                 .map { "\"\($0)#\(directProxyName)\"" }
                 .joined(separator: ", ")
             yaml += "  nameserver-policy:\n"
-            for host in directPolicy.directResolverHosts.sorted() {
+            var policyKeys: [String] = directPolicy.directResolverHosts
+            // A suffix route is only as good as the answer behind it. Resolved
+            // through the exit, a China CDN hands back the node nearest the
+            // exit, so the "direct" hop would then cross the Pacific twice.
+            // These wildcards keep the whole matched subtree resolving through
+            // China DoH over the interface-bound direct outbound, which is the
+            // same mechanism that kept pinned answers region-correct — and it
+            // never needed the pin to work.
+            for suffix in directPolicy.webDomainSuffixes {
+                policyKeys.append(suffix.host)
+                policyKeys.append("+.\(suffix.host)")
+            }
+            for host in Set(policyKeys).sorted() {
                 yaml += "    \"\(yamlScalar(host))\": [\(upstreams)]\n"
             }
         }
@@ -690,14 +1018,102 @@ nonisolated struct ConfigPipeline {
         \(choiceLines)
 
         """
-        if let claudeHome {
-            // Single-member selector: the split target is pinned by the
-            // control plane, not user-switchable in the owned runtime UI.
+        // The residential hop is a consumer uplink behind NAT and is itself
+        // dialed through the protected exit (dialer-proxy), so a stall there
+        // used to kill every Claude connection mid-response with nowhere to go:
+        // a one-member `select` group has no failover and no health check, and
+        // the exit probe only ever tested the exit, never this chained path.
+        // Keep the residential hop first so a healthy session is unchanged, and
+        // fall back to the protected exit rather than stranding the request.
+        // Both members are protected exits, so fail-closed is unaffected —
+        // only the egress identity changes while the residential hop is down.
+        if claudeHomeSocks5 != nil {
             yaml += """
               - name: "\(claudeHomeGroupName)"
-                type: select
+                type: fallback
+                proxies:
+                  - "\(homeResidentialProxyName)"
+                  - "\(exitGroupName)"
+                url: "\(claudeHomeHealthURL)"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+
+            """
+        } else if let claudeHome {
+            yaml += """
+              - name: "\(claudeHomeGroupName)"
+                type: fallback
                 proxies:
                   - "\(yamlScalar(claudeHome))"
+                  - "\(exitGroupName)"
+                url: "\(claudeHomeHealthURL)"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+
+            """
+        }
+        if directPolicy != nil, !managedDirectProcessPathRegexes.isEmpty {
+            yaml += """
+              - name: "\(appDirectGroupName)"
+                type: fallback
+                proxies:
+                  - "\(directProxyName)"
+                  - "\(exitGroupName)"
+                url: "\(chinaDirectHealthURL)"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+
+            """
+        }
+        if let directPolicy,
+           !directPolicy.webDomainPins.isEmpty
+            || !directPolicy.webDomainSuffixes.isEmpty {
+            yaml += """
+              - name: "\(webDirectGroupName)"
+                type: fallback
+                proxies:
+                  - "\(webDirectProxyName)"
+                  - "\(exitGroupName)"
+                url: "\(chinaDirectHealthURL)"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+
+            """
+        }
+        // Each exact WeChat host/port gets an independent DIRECT → protected
+        // exit decision. REJECT is deliberately first: Mihomo fallback groups
+        // choose their first member before the initial health result and when
+        // every member is down. The sentinel turns both windows into a fast,
+        // fail-closed error; after the immediate check it is unhealthy, so a
+        // reachable China DIRECT path wins and Tono-Exit is the safe fallback.
+        let directFallbackTargets = managedDirectFallbackTargets(for: directPolicy)
+        precondition(
+            Set(directFallbackTargets.map(\.groupName)).count
+                == directFallbackTargets.count,
+            "managed direct fallback group collision"
+        )
+        let directFallbackGroups = Dictionary(uniqueKeysWithValues:
+            directFallbackTargets.map {
+                ("\($0.host):\($0.port)", $0.groupName)
+            }
+        )
+        for target in directFallbackTargets {
+            yaml += """
+              - name: "\(target.groupName)"
+                type: fallback
+                proxies:
+                  - REJECT
+                  - "\(directProxyName)"
+                  - "\(exitGroupName)"
+                url: "\(yamlScalar(target.testURL))"
+                interval: \(managedDirectHealthIntervalSeconds)
+                timeout: \(managedDirectHealthTimeoutMilliseconds)
+                lazy: false
+                hidden: true
 
             """
         }
@@ -706,36 +1122,106 @@ nonisolated struct ConfigPipeline {
         // exception. The native WeChat rules below additionally require an
         // executable inside the reviewed /Applications/WeChat.app bundle; the
         // separate web rules remain bounded to an exact reviewed hostname and
-        // TCP/443. Neither rule family carries an IP-CIDR sub-rule: under
-        // fake-ip DNS Mihomo strips DstIP whenever Host is known (and vice
-        // versa for IP-literal dials), so DOMAIN+IP-CIDR can never match
-        // together. The pinned addresses still bound egress via the hosts:
-        // entries (use-hosts resolves the direct dial to exactly those IPs)
-        // and the PF session allowlist.
-        if claudeHome != nil {
-            // With a bound home-broadband exit, both the Claude processes and
-            // the Anthropic service domains (any process, e.g. browsers) take
-            // the pinned home route; everything else still falls to Tono-Exit.
-            yaml += "  - PROCESS-NAME,Claude,\(claudeHomeGroupName)\n"
-            yaml += "  - PROCESS-NAME,claude,\(claudeHomeGroupName)\n"
-            yaml += "  - DOMAIN-SUFFIX,claude.ai,\(claudeHomeGroupName)\n"
-            yaml += "  - DOMAIN-SUFFIX,claude.com,\(claudeHomeGroupName)\n"
-            yaml += "  - DOMAIN-SUFFIX,anthropic.com,\(claudeHomeGroupName)\n"
-            yaml += "  - DOMAIN-SUFFIX,claudeusercontent.com,\(claudeHomeGroupName)\n"
-        } else {
-            yaml += "  - PROCESS-NAME,Claude,\(exitGroupName)\n"
-            yaml += "  - PROCESS-NAME,claude,\(exitGroupName)\n"
+        // TCP/443. Native WeChat rules emit DOMAIN and separate IP-literal
+        // variants, never an impossible DOMAIN+IP-CIDR conjunction. The
+        // pinned addresses still bound egress via the hosts: entries
+        // (use-hosts resolves the direct dial to exactly those IPs) and the
+        // PF session allowlist.
+        let hasResidentialHop = claudeHome != nil || claudeHomeSocks5 != nil
+        let assistantTarget = hasResidentialHop ? claudeHomeGroupName : exitGroupName
+        for process in Self.assistantHomeProcessNames {
+            yaml += "  - AND,((NETWORK,TCP),(PROCESS-NAME,\(process))),\(assistantTarget)\n"
+        }
+        for pathRegex in Self.assistantHomeProcessPathRegexes {
+            // Commas and parentheses would break out of the AND payload.
+            precondition(
+                !pathRegex.contains(",") && !pathRegex.contains("(")
+                    && !pathRegex.contains(")"),
+                "assistant process path regex unsafe for rule emission"
+            )
+            yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(pathRegex))),\(assistantTarget)\n"
+        }
+        // Domain rules exist only to divert assistant traffic onto the
+        // residential hop. Without that hop they would be pure noise — MATCH
+        // already sends these to the protected exit — and emitting them anyway
+        // would put DOMAIN-SUFFIX into a runtime whose direct exceptions are
+        // deliberately exact-host only.
+        if hasResidentialHop {
+            for suffix in Self.assistantHomeDomainSuffixes {
+                yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
+            }
         }
         if transport != nil {
             yaml += "  - PROCESS-NAME,tailscaled,DIRECT\n"
             yaml += "  - PROCESS-NAME,tailscale,DIRECT\n"
         }
         if let directPolicy {
+            // WeChat resolves its message channel through its own HTTPDNS and
+            // dials raw addresses, so the pinned DOMAIN rules below can only
+            // ever match its CDN traffic: 84% of observed dials carried no
+            // hostname at all, across six different /16 ranges that Tencent
+            // rotates. Enumerating addresses cannot converge on that, and every
+            // attempt to keep the enumeration fresh reloads the runtime and
+            // severs unrelated long-lived connections. Route the whole reviewed
+            // bundle direct instead and let the pins below stay as a redundant
+            // narrower match. Everything else still reaches `MATCH,Tono-Exit`,
+            // so this changes what WeChat does, not what anything else does.
+            for processPathRegex in managedDirectProcessPathRegexes {
+                // Measured over two sessions: every TCP/80 dial this bundle made
+                // on the direct path returned nothing — 0 of 5 flows carried a
+                // single byte back, across two different destinations — while
+                // TCP/443 carried 8.8 MB over 6 of 6 flows and UDP/443 carried
+                // 13 MB in the same window. The class-level fallback cannot see
+                // this: its own probe is an HTTP/80 request that answers in
+                // ~200 ms, so the group stays on direct while these specific
+                // flows hang. WeChat retries for roughly half a minute before
+                // moving on, which is the spinning users see right after
+                // connecting.
+                //
+                // The mechanism is not established — the working probe argues
+                // against a plain port block — so this is shaped by the
+                // measurement rather than by a diagnosis. Sending only TCP/80
+                // back through the tunnel restores exactly what worked before
+                // the bundle was routed direct at all, and keeps the part that
+                // is demonstrably faster.
+                yaml += "  - AND,((NETWORK,TCP),(DST-PORT,80),(PROCESS-PATH-REGEX,\(processPathRegex))),\(exitGroupName)\n"
+                yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
+                yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
+            }
             for processPathRegex in managedDirectProcessPathRegexes {
                 for pin in directPolicy.domainPins {
                     for port in pin.ports {
-                        yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host)),(PROCESS-PATH-REGEX,\(processPathRegex))),\(directProxyName)\n"
+                        guard let groupName = directFallbackGroups[
+                            "\(pin.host):\(port)"
+                        ] else {
+                            throw TonoInjectionError.unsafeNode(
+                                "managed direct fallback target"
+                            )
+                        }
+                        yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host)),(PROCESS-PATH-REGEX,\(processPathRegex))),\(groupName)\n"
+                        // A native HTTPDNS dial may arrive without a Host or
+                        // SNI. The address is still safe to match because it
+                        // is a current, cloud-resolved pin for this exact
+                        // domain and remains constrained to the reviewed
+                        // WeChat bundle path.
+                        for address in pin.addresses {
+                            yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(IP-CIDR,\(address)/32,no-resolve),(PROCESS-PATH-REGEX,\(processPathRegex))),\(groupName)\n"
+                        }
                     }
+                }
+                // WeChat HTTPDNS also opens TCP directly to reviewed IP
+                // literals. The exact IP, port, and reviewed WeChat bundle
+                // path are all required; this cannot capture Claude's
+                // external helper, even when it runs in the same session.
+                for endpoint in directPolicy.tcpEndpoints {
+                    guard let groupName = directFallbackGroups[
+                        "\(endpoint.address):\(endpoint.port)"
+                    ] else {
+                        throw TonoInjectionError.unsafeNode(
+                            "managed TCP direct fallback target"
+                        )
+                    }
+                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(endpoint.port)),(IP-CIDR,\(endpoint.address)/32,no-resolve),(PROCESS-PATH-REGEX,\(processPathRegex))),\(groupName)\n"
                 }
                 // UDP media dials are raw-IP (no DNS step), so DstIP survives
                 // fake-ip preprocessing and the exact endpoint pin stays valid.
@@ -750,10 +1236,48 @@ nonisolated struct ConfigPipeline {
             // Claude's own process-name rules above still win first.
             for pin in directPolicy.webDomainPins {
                 for port in pin.ports {
-                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host))),\(webDirectProxyName)\n"
+                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN,\(pin.host))),\(webDirectGroupName)\n"
+                }
+            }
+            // Suffix routes were withheld for two reasons, and both have been
+            // answered rather than waived.
+            //
+            // The first was PF: a suffix route carries no resolved addresses,
+            // so it produced no `sessionEndpoints` and no exact-address permit,
+            // and `block drop out quick all` discarded every dial it sent to
+            // the interface-bound direct outbound. That is no longer how the
+            // ruleset works. The reviewed-bundle permit passes root-originated
+            // direct dials on the ports this policy uses, which is why WeChat's
+            // HTTPDNS addresses — never pinned, never PF-listed — moved 1.6 MB,
+            // 1.3 MB and 1.1 MB directly in a single measured session.
+            //
+            // The second was failover: a bare `direct` outbound cannot retreat
+            // to the tunnel, so an unreachable China path killed the flow. The
+            // route now targets a fallback group, which is a class-level answer
+            // to a class-level question ("can this machine reach China at all")
+            // rather than the per-destination scoring mihomo does not offer.
+            //
+            // What this does change is the managed-direct invariant: a suffix
+            // is a wildcard exception, so every subdomain of a listed host now
+            // takes the direct path. That is the point — enumerating exact
+            // hosts is what forced the pin refresh whose config reload severed
+            // every long-lived connection — but it widens the direct surface,
+            // and `MATCH,Tono-Exit` remains the only thing behind it.
+            for suffix in directPolicy.webDomainSuffixes {
+                for port in suffix.ports {
+                    yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectGroupName)\n"
+                    // Without this the browser's QUIC attempt reaches the
+                    // global UDP rejection, and every one of these sites pays a
+                    // failed handshake before falling back to TCP. The port set
+                    // is the same one the TCP route already uses and the same
+                    // one the PF permit covers, so this widens the protocol,
+                    // not the destination — and the terminal UDP rejection
+                    // still stands for everything not listed here.
+                    yaml += "  - AND,((NETWORK,UDP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectGroupName)\n"
                 }
             }
         }
+        yaml += "  - AND,((NETWORK,UDP)),REJECT\n"
         yaml += """
           - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
           - IP-CIDR6,::1/128,DIRECT,no-resolve
@@ -770,6 +1294,42 @@ nonisolated struct ConfigPipeline {
         ]
     }
 
+    /// Validate the credential-bearing residential upstream without ever
+    /// logging its username or password. Invalid optional routing degrades to
+    /// the normal full-tunnel runtime instead of rejecting the catalog.
+    static func validatedHomeSocks5(
+        _ upstream: TonoExitCatalogHomeSocks5?
+    ) -> TonoExitCatalogHomeSocks5? {
+        guard let upstream,
+              let host = try? normalizedHost(upstream.host, field: "homeSocks5 host"),
+              !host.contains(":"),
+              // `normalizedHost` returns IP literals unscreened. Every other
+              // policy-supplied address in this file is public-only; without the
+              // same gate here a catalog could point the residential hop at
+              // loopback or a LAN address. It is dialed through `dialer-proxy:
+              // Tono-Exit` today, so this is defence in depth rather than a live
+              // leak — but it is the one address that had no screening at all.
+              isPublicHostCandidate(host),
+              (1...65_535).contains(upstream.port),
+              !upstream.username.isEmpty,
+              !upstream.password.isEmpty,
+              upstream.username.utf8.count <= 255,
+              upstream.password.utf8.count <= 255,
+              upstream.username.unicodeScalars.allSatisfy({
+                  $0.value >= 0x20 && $0.value != 0x7F
+              }),
+              upstream.password.unicodeScalars.allSatisfy({
+                  $0.value >= 0x20 && $0.value != 0x7F
+              })
+        else { return nil }
+        return TonoExitCatalogHomeSocks5(
+            host: host,
+            port: upstream.port,
+            username: upstream.username,
+            password: upstream.password
+        )
+    }
+
     static func validatedOwnedNodes(_ nodes: [ProxyNode]) throws -> [ProxyNode] {
         guard nodes.count <= 200 else {
             throw TonoInjectionError.unsafeNode("node list")
@@ -778,12 +1338,28 @@ nonisolated struct ConfigPipeline {
             homeNodeName,
             exitGroupName,
             claudeHomeGroupName,
+            homeResidentialProxyName,
             directProxyName,
+            webDirectProxyName,
+            webDirectGroupName,
+            appDirectGroupName,
             "__tono_tailnet",
+            // Mihomo installs these adapters before parsing user proxies. A
+            // catalog collision would invalidate the entire owned runtime and
+            // can also corrupt the managed WeChat fallback member references.
+            "DIRECT",
+            "REJECT",
+            "REJECT-DROP",
+            "COMPATIBLE",
+            "PASS",
+            "PASS-RULE",
         ])
         var result: [ProxyNode] = []
         for node in nodes {
             let validated = try validatedOwnedNode(node)
+            guard !validated.name.hasPrefix(managedDirectFallbackGroupPrefix) else {
+                throw TonoInjectionError.duplicateNode(validated.name)
+            }
             guard names.insert(validated.name).inserted else {
                 throw TonoInjectionError.duplicateNode(validated.name)
             }
@@ -965,8 +1541,42 @@ nonisolated struct ConfigPipeline {
         try normalizedServerAddress(raw, field: field)
     }
 
-    static func validatedManagedDirectDomain(_ raw: String) throws -> String {
+    /// Hosts that must never be routed direct, whatever a policy says and
+    /// whoever signed it.
+    ///
+    /// A signature relaxes *which hosts may* leave the tunnel. It must never
+    /// relax which hosts may not. Folding these in would make one leaked signing
+    /// key sufficient to expose this product's own control plane and its users'
+    /// assistant traffic — strictly worse than the allowlist a signature
+    /// replaces, and the opposite of what signing is for.
+    ///
+    /// Mirrors `protectedSuffixes` in services/control-plane/src/index.ts. Until
+    /// a signature could relax an allowlist these were enforced only implicitly,
+    /// by never appearing on one; a trusted path needs them stated.
+    static let managedDirectProtectedSuffixes = [
+        "anthropic.com", "claude.ai", "tono.app", "tono.com",
+    ]
+
+    private static func isProtectedFromDirect(_ host: String) -> Bool {
+        managedDirectProtectedSuffixes.contains {
+            host == $0 || host.hasSuffix(".\($0)")
+        }
+    }
+
+    /// `trusted` is set only after an Ed25519 signature over the policy document
+    /// has verified against the compiled-in public key. It skips the allowlist
+    /// and nothing else: hostname syntax and the protected suffixes above are
+    /// still enforced, because a signature attests to authorship, not to the
+    /// document being well formed or safe.
+    static func validatedManagedDirectDomain(
+        _ raw: String,
+        trusted: Bool = false
+    ) throws -> String {
         let host = try normalizedHost(raw, field: "managed direct domain")
+        guard !isProtectedFromDirect(host) else {
+            throw TonoInjectionError.unsafeNode("managed direct domain")
+        }
+        if trusted { return host }
         let allowedSuffixes = [
             "qq.com", "qq.com.cn", "qpic.cn", "qlogo.cn", "gtimg.cn",
             "gtimg.com", "wechat.com", "weixin.com", "weixinbridge.com",
@@ -980,18 +1590,39 @@ nonisolated struct ConfigPipeline {
         return host
     }
 
-    static func validatedWebDirectDomain(_ raw: String) throws -> String {
+    static func validatedWebDirectDomain(
+        _ raw: String,
+        trusted: Bool = false
+    ) throws -> String {
         let host = try normalizedHost(raw, field: "managed web direct domain")
-        let allowedSuffixes = [
-            "bilibili.com", "biliapi.net", "bilivideo.com", "hdslb.com",
-            "qq.com", "gtimg.cn", "gtimg.com", "iqiyi.com", "qiyi.com",
-            "qiyipic.com", "iqiyipic.com", "youku.com", "ykimg.com",
-        ]
+        guard !isProtectedFromDirect(host) else {
+            throw TonoInjectionError.unsafeNode("managed web direct domain")
+        }
+        if trusted { return host }
+        let allowedSuffixes = managedWebDirectSuffixAllowlist
         let allowedExactHosts = ["ykimg.alicdn.com"]
         guard allowedExactHosts.contains(host) || allowedSuffixes.contains(where: {
             host == $0 || host.hasSuffix(".\($0)")
         }) else {
             throw TonoInjectionError.unsafeNode("managed web direct domain")
+        }
+        return host
+    }
+
+    /// Validate the exact suffix value used by traffic-policy v3. A host such
+    /// as `www.edu.cn` is valid for an exact web pin, but it is not itself an
+    /// admitted suffix rule; only `edu.cn` may be emitted here.
+    static func validatedManagedDirectSuffix(
+        _ raw: String,
+        trusted: Bool = false
+    ) throws -> String {
+        let host = try normalizedHost(raw, field: "managed direct suffix")
+        guard !isProtectedFromDirect(host) else {
+            throw TonoInjectionError.unsafeNode("managed direct suffix")
+        }
+        if trusted { return host }
+        guard managedWebDirectSuffixAllowlist.contains(host) else {
+            throw TonoInjectionError.unsafeNode("managed direct suffix")
         }
         return host
     }
@@ -1012,18 +1643,29 @@ nonisolated struct ConfigPipeline {
         if policy.isEmpty { return policy }
         let permanentlyProtected = protectedAddresses.union(["1.1.1.1", "8.8.8.8"])
         guard policy.domainPins.count <= 32,
-              policy.webDomainPins.count <= 16,
+              policy.webDomainPins.count <= 32,
+              policy.webDomainSuffixes.count <= 64,
               policy.mediaEndpoints.count <= 128,
+              policy.tcpEndpoints.count <= 128,
               policy.sessionEndpoints.count <= 256,
-              policy.directResolverHosts.count <= 48 else {
+              // Resolver hosts are one entry per managed or web direct policy
+              // hostname, so this must admit the control plane's own maxima
+              // (32 `domains` + 32 `webDomains`). A lower ceiling silently
+              // discarded the entire managed-direct policy — every WeChat and
+              // web direct route with it — as soon as the published policy grew
+              // past it, leaving only a local audit event behind.
+              policy.directResolverHosts.count <= 64 else {
             throw TonoInjectionError.unsafeOverlay
         }
         // Resolver hosts feed nameserver-policy emission; each must be a
         // cloud-reviewed managed or web direct hostname, unique after
         // normalization.
         let resolverHosts = try policy.directResolverHosts.map { raw -> String in
-            if let host = try? validatedManagedDirectDomain(raw) { return host }
-            return try validatedWebDirectDomain(raw)
+            if let host = try? validatedManagedDirectDomain(
+                raw,
+                trusted: policy.trusted
+            ) { return host }
+            return try validatedWebDirectDomain(raw, trusted: policy.trusted)
         }
         guard Set(resolverHosts).count == resolverHosts.count else {
             throw TonoInjectionError.unsafeOverlay
@@ -1031,7 +1673,10 @@ nonisolated struct ConfigPipeline {
 
         var seenHosts = Set<String>()
         let pins = try policy.domainPins.map { pin in
-            let host = try validatedManagedDirectDomain(pin.host)
+            let host = try validatedManagedDirectDomain(
+                pin.host,
+                trusted: policy.trusted
+            )
             guard seenHosts.insert(host).inserted,
                   !pin.addresses.isEmpty, pin.addresses.count <= 8,
                   !pin.ports.isEmpty,
@@ -1054,7 +1699,10 @@ nonisolated struct ConfigPipeline {
         }.sorted { $0.host < $1.host }
 
         let webPins = try policy.webDomainPins.map { pin in
-            let host = try validatedWebDirectDomain(pin.host)
+            let host = try validatedWebDirectDomain(
+                pin.host,
+                trusted: policy.trusted
+            )
             guard seenHosts.insert(host).inserted,
                   !pin.addresses.isEmpty, pin.addresses.count <= 8,
                   pin.ports == [443] else {
@@ -1072,6 +1720,23 @@ nonisolated struct ConfigPipeline {
                 addresses: addresses.sorted(),
                 ports: [443]
             )
+        }.sorted { $0.host < $1.host }
+
+        var seenSuffixes = Set<String>()
+        let webDomainSuffixes = try policy.webDomainSuffixes.map { suffix in
+            let host = try validatedManagedDirectSuffix(
+                suffix.host,
+                trusted: policy.trusted
+            )
+            guard host == suffix.host,
+                  seenSuffixes.insert(host).inserted,
+                  !suffix.ports.isEmpty,
+                  Set(suffix.ports).count == suffix.ports.count,
+                  suffix.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
+                throw TonoInjectionError.unsafeNode("managed direct suffix")
+            }
+            let ports = suffix.ports.sorted()
+            return DirectDomainSuffix(host: host, ports: ports)
         }.sorted { $0.host < $1.host }
 
         let media = try policy.mediaEndpoints.map { endpoint in
@@ -1093,13 +1758,47 @@ nonisolated struct ConfigPipeline {
         let uniqueMedia = Array(Set(media)).sorted {
             ($0.port, $0.address) < ($1.port, $1.address)
         }
+        let tcp = try policy.tcpEndpoints.map { endpoint in
+            let address = try validatedPublicIPv4(
+                endpoint.address,
+                field: "managed TCP address"
+            )
+            guard !permanentlyProtected.contains(address),
+                  endpoint.transport == "tcp",
+                  endpoint.port == 80 || endpoint.port == 443 else {
+                throw TonoInjectionError.unsafeNode("managed TCP endpoint")
+            }
+            return DirectEndpoint(
+                address: address,
+                port: endpoint.port,
+                transport: "tcp"
+            )
+        }
+        let uniqueTCP = Array(Set(tcp)).sorted {
+            ($0.port, $0.address) < ($1.port, $1.address)
+        }
         return ManagedDirectRuntimePolicy(
             physicalInterface: interface,
             domainPins: pins,
             webDomainPins: webPins,
+            webDomainSuffixes: webDomainSuffixes,
             mediaEndpoints: uniqueMedia,
-            directResolverHosts: resolverHosts.sorted()
+            tcpEndpoints: uniqueTCP,
+            directResolverHosts: resolverHosts.sorted(),
+            trusted: policy.trusted
         )
+    }
+
+    /// True when an already-normalized host is either a DNS name or a public
+    /// IPv4 literal. A normalized host that parses as an address but is not
+    /// public is rejected; hostnames are resolved later through the protected
+    /// resolver and are screened again there.
+    private static func isPublicHostCandidate(_ host: String) -> Bool {
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, host, &ipv4) == 1 { return isPublicIPv4(ipv4) }
+        var ipv6 = in6_addr()
+        if inet_pton(AF_INET6, host, &ipv6) == 1 { return false }
+        return true
     }
 
     private static func isPublicIPv4(_ address: in_addr) -> Bool {
@@ -1114,6 +1813,9 @@ nonisolated struct ConfigPipeline {
             !(bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 0) &&
             !(bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 2) &&
             !(bytes[0] == 192 && bytes[1] == 168) &&
+            // 6to4 relay anycast. The control plane rejects it too; without
+            // this the two sides disagreed about what "public" means.
+            !(bytes[0] == 192 && bytes[1] == 88 && bytes[2] == 99) &&
             !(bytes[0] == 198 && (18...19).contains(bytes[1])) &&
             !(bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100) &&
             !(bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113) &&
@@ -1188,15 +1890,22 @@ nonisolated struct ConfigPipeline {
     }
 
     /// Convert a ProxyNode to mihomo YAML proxy entry.
+    ///
+    /// Only the legacy (non-owned) runtime path reaches this. Every value here
+    /// comes from imported subscription YAML, so all of them are escaped: an
+    /// unescaped quote or newline in a node name, password, or relay label
+    /// injected arbitrary YAML — including rules — into the generated runtime.
+    /// The privileged helper refuses to run a runtime without the owned-config
+    /// banner, so this was a latent path rather than a live one.
     private static func nodeToYAML(_ node: ProxyNode, knownNames: [String] = []) -> String {
-        var y = "  - name: \"\(node.name)\"\n"
+        var y = "  - name: \"\(yamlScalar(node.name))\"\n"
         y += "    type: \(node.type.rawValue)\n"
-        y += "    server: \(node.server)\n"
+        y += "    server: \"\(yamlScalar(node.server))\"\n"
         y += "    port: \(node.port)\n"
-        if let user = node.username, !user.isEmpty { y += "    username: \"\(user)\"\n" }
-        if let pw = node.password, !pw.isEmpty { y += "    password: \"\(pw)\"\n" }
-        if let uuid = node.uuid, !uuid.isEmpty { y += "    uuid: \(uuid)\n" }
-        if let cipher = node.cipher, !cipher.isEmpty { y += "    cipher: \(cipher)\n" }
+        if let user = node.username, !user.isEmpty { y += "    username: \"\(yamlScalar(user))\"\n" }
+        if let pw = node.password, !pw.isEmpty { y += "    password: \"\(yamlScalar(pw))\"\n" }
+        if let uuid = node.uuid, !uuid.isEmpty { y += "    uuid: \"\(yamlScalar(uuid))\"\n" }
+        if let cipher = node.cipher, !cipher.isEmpty { y += "    cipher: \"\(yamlScalar(cipher))\"\n" }
         if let aid = node.alterId { y += "    alterId: \(aid)\n" }
         y += "    udp: \(node.udp)\n"
         if !node.relay.isEmpty && node.relay != "Direct" {
@@ -1206,20 +1915,22 @@ nonisolated struct ConfigPipeline {
                 ?? knownNames.first(where: { relay.contains($0) })   // relay "🇯🇵 Japan | 01" contains config name "Japan | 01"
                 ?? knownNames.first(where: { $0.contains(relay) })   // config name contains relay
                 ?? relay
-            y += "    dialer-proxy: \"\(resolved)\"\n"
+            y += "    dialer-proxy: \"\(yamlScalar(resolved))\"\n"
         }
         if let sni = node.sni, !sni.isEmpty {
             let key = node.type == .vless ? "servername" : "sni"
-            y += "    \(key): \(sni)\n"
+            y += "    \(key): \"\(yamlScalar(sni))\"\n"
         }
         if let scv = node.skipCertVerify, scv { y += "    skip-cert-verify: true\n" }
         if let tls = node.tls, tls { y += "    tls: true\n" }
         if let net = node.network, !net.isEmpty {
-            y += "    network: \(net)\n"
+            y += "    network: \"\(yamlScalar(net))\"\n"
             if net == "ws" {
                 y += "    ws-opts:\n"
-                if let path = node.wsPath, !path.isEmpty { y += "      path: \"\(path)\"\n" }
-                if let host = node.wsHost, !host.isEmpty { y += "      headers:\n        Host: \(host)\n" }
+                if let path = node.wsPath, !path.isEmpty { y += "      path: \"\(yamlScalar(path))\"\n" }
+                if let host = node.wsHost, !host.isEmpty {
+                    y += "      headers:\n        Host: \"\(yamlScalar(host))\"\n"
+                }
             }
         }
         return y

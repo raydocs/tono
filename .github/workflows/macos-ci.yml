@@ -1,0 +1,135 @@
+name: macOS CI
+
+on:
+  # Manual re-run, so a flake or an infrastructure hiccup does not need a
+  # pointless commit to retry.
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - apps/macos/**
+      - tooling/scripts/**
+      - .github/workflows/macos-ci.yml
+  # Every branch, not just the default one. This repository is a fork, and no
+  # `pull_request` event has ever produced a run here — PR #1 merged without one.
+  # Restricted to `main` and paired with a trigger that does not fire, this
+  # workflow could only ever have run after a merge, which is the wrong time to
+  # learn something is broken. It is also why `macos-ci.yml` existed for days and
+  # never executed once.
+  push:
+    paths:
+      - apps/macos/**
+      - tooling/scripts/**
+      - .github/workflows/macos-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The app uses macOS 26 APIs — `glassEffect` among them — so a macos-15 image
+    # cannot compile it. On that runner every job that builds the app failed with
+    # "value of type 'some View' has no member 'glassEffect'", which reads like a
+    # code error and is really a missing SDK.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build the macOS app without signing
+        run: |
+          xcodebuild \
+            -project apps/macos/LiquidClash.xcodeproj \
+            -scheme LiquidClash \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run the TonoTests unit tests
+        run: |
+          xcodebuild \
+            -project apps/macos/LiquidClash.xcodeproj \
+            -scheme LiquidClash \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+  policy-tests:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Subscription URL policy
+        run: tooling/scripts/test-subscription-url-policy.sh
+
+      - name: Helper peer authorization
+        run: tooling/scripts/test-helper-peer-authorization.sh
+
+      - name: Multi-exit policy
+        run: tooling/scripts/test-multi-exit-policy.sh "$GITHUB_WORKSPACE/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
+
+      - name: Policy signing contract
+        # Four implementations must agree on the signing key and the signed byte
+        # prefix. Drift is silent: signatures verify nowhere, every signed policy
+        # reads as untrustworthy, and managed direct routing stops fleet-wide.
+        run: tooling/scripts/test-policy-signing-contract.sh
+
+      - name: macOS incident regressions
+        run: tooling/scripts/test-macos-incident-regressions.sh
+
+      - name: Reload preserves established connections
+        run: tooling/scripts/test-reload-preserves-connections.sh
+
+      - name: Appcast publisher validation
+        run: node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
+
+  # Split out because these need root. Locally the helper's own self-test prints
+  # `PF syntax check skipped (needs root)` and the lifecycle test refuses
+  # outright, so the checks that matter most — does pfctl actually accept this
+  # ruleset, and does a re-arm withdraw a permit the session still needs — were
+  # the ones a developer was least likely to have run. Both faults they cover
+  # shipped, in consecutive builds. On a runner they run every time.
+  privileged-tests:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build the privileged helper
+        run: tooling/scripts/build-core-helper.sh
+
+      - name: Place what an install would place
+        # The core lifecycle test starts the privileged core, so it needs the two
+        # things an install puts on disk: the runtime directory and the core
+        # binary at its privileged path. Without them `CoreManager` cannot be
+        # constructed and the failure reads only as "could not construct the core
+        # manager".
+        #
+        # Done here rather than inside the self-test: fabricating an installation
+        # is the installer's job, and a test that quietly creates its own
+        # privileged paths hides what it depends on.
+        run: |
+          sudo /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
+          sudo /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+          sudo /usr/bin/install -o root -g wheel -m 0755 \
+            apps/macos/Tono/Resources/mihomo /Library/PrivilegedHelperTools/tono-mihomo
+
+      - name: Helper self-test including the PF parse
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --self-test
+
+      - name: Helper lifecycle self-test
+        # Loads into an anchor no parent ruleset references, so pfctl parses and
+        # installs it for real while no packet is ever evaluated against it.
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --lifecycle-self-test
+
+      - name: Helper core lifecycle self-test
+        # Starts the installed core against a config staged through the real
+        # digest check, in the `Tono-Dev` directory production already accepts, so
+        # no live configuration is involved and no tunnel is created.
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --core-lifecycle-self-test
+
+      - name: Helper staging refusal matrix
+        # Proves ownership, permission, and symlink enforcement by constructing
+        # the failing cases, which needs the ability to chown to another user.
+        run: sudo apps/macos/Tono/Resources/liquidclash-helper --staging-self-test

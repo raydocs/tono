@@ -29,6 +29,7 @@ nonisolated struct HelperManager {
         let wantArmed: Bool?
         let live: Bool?
         let healed: Bool?
+        let flushedStates: Bool?
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
@@ -40,6 +41,65 @@ nonisolated struct HelperManager {
 
     /// Installs or upgrades the daemon. The old unauthenticated `/tmp` helper is
     /// never considered current, even if it happens to answer `/version`.
+    /// The privileged install, as a value. It runs as root through
+    /// `osascript`, and until it was extracted here nothing tested any of it —
+    /// including the Developer ID requirement that is the only thing standing
+    /// between this daemon and an arbitrary binary. Build 42 shipped with the
+    /// helper's code-signing identifier derived from its filename instead of
+    /// its bundle id, which made every repair on every machine fail, and no
+    /// check anywhere noticed.
+    ///
+    /// Pure so it can be asserted on without installing anything. What the
+    /// string says is what root will run.
+    static func installScript(
+        helperSource: String,
+        mihomoSource: String,
+        uid: uid_t
+    ) -> String {
+        let helperSrc = helperSource.shellEscaped
+        let mihomoSrc = mihomoSource.shellEscaped
+        let plistB64 = Data(launchdPlistContents().utf8).base64EncodedString()
+        let helperTemporaryPath = "\(helperInstallPath).new"
+        let mihomoTemporaryPath = "\(mihomoInstallPath).new"
+        let plistTemporaryPath = "\(plistInstallPath).new"
+        let uidTempPath = "\(allowedUIDPath).new.\(uid)"
+        return """
+        set -e
+        /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
+        /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
+        /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
+        /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' '\(helperTemporaryPath)'
+        /usr/bin/install -o root -g wheel -m 0755 \(mihomoSrc) '\(mihomoTemporaryPath)'
+        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "mihomo" and certificate leaf[subject.OU] = "YY57758GS7"' '\(mihomoTemporaryPath)'
+        /usr/bin/printf '%s' '\(plistB64)' | /usr/bin/base64 -D > '\(plistTemporaryPath)'
+        /usr/sbin/chown root:wheel '\(plistTemporaryPath)'
+        /bin/chmod 0644 '\(plistTemporaryPath)'
+        /usr/bin/plutil -lint '\(plistTemporaryPath)' >/dev/null
+        /usr/bin/printf '%u\\n' \(uid) > '\(uidTempPath)'
+        /usr/sbin/chown root:wheel '\(uidTempPath)'
+        /bin/chmod 0600 '\(uidTempPath)'
+        /bin/launchctl bootout system/liquidclash.helper >/dev/null 2>&1 || true
+        /bin/rm -f /Library/LaunchDaemons/liquidclash.helper.plist
+        /bin/rm -f /Library/PrivilegedHelperTools/liquidclash-helper
+        /bin/rm -f /Library/PrivilegedHelperTools/mihomo
+        /bin/rm -f /tmp/liquidclash/service.sock
+        /bin/launchctl bootout system/com.raydocs.tono.killswitch >/dev/null 2>&1 || true
+        /bin/rm -f /Library/LaunchDaemons/com.raydocs.tono.killswitch.plist
+        /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
+        /bin/rm -f /var/run/tono-killswitch.sock
+        /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
+        /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
+        /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
+        /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
+        /bin/mv -f '\(uidTempPath)' '\(allowedUIDPath)'
+        # launchd can return EIO while replacing a daemon even though it has
+        # accepted and started the new job. Treat bootstrap as a request; the
+        # authenticated /version poll below is the authoritative result.
+        /bin/launchctl bootstrap system '\(plistInstallPath)' || true
+        """
+    }
+
     static func installIfNeeded() throws {
         let preparationStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
@@ -182,48 +242,11 @@ nonisolated struct HelperManager {
             throw HelperInstallError.installFailed("Refusing to bind the helper to root.")
         }
 
-        let helperSrc = helperSource.path.shellEscaped
-        let mihomoSrc = mihomoSource.path.shellEscaped
-        let plistB64 = Data(launchdPlistContents().utf8).base64EncodedString()
-        let helperTemporaryPath = "\(helperInstallPath).new"
-        let mihomoTemporaryPath = "\(mihomoInstallPath).new"
-        let plistTemporaryPath = "\(plistInstallPath).new"
-        let uidTempPath = "\(allowedUIDPath).new.\(uid)"
-        let script = """
-        set -e
-        /usr/bin/install -d -o root -g wheel -m 0755 /Library/PrivilegedHelperTools
-        /usr/bin/install -d -o root -g wheel -m 0755 /var/run/tono-core
-        /bin/rm -f '\(helperTemporaryPath)' '\(mihomoTemporaryPath)' '\(plistTemporaryPath)'
-        /usr/bin/install -o root -g wheel -m 0755 \(helperSrc) '\(helperTemporaryPath)'
-        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' '\(helperTemporaryPath)'
-        /usr/bin/install -o root -g wheel -m 0755 \(mihomoSrc) '\(mihomoTemporaryPath)'
-        /usr/bin/codesign --verify --strict --all-architectures -R='anchor apple generic and identifier "mihomo" and certificate leaf[subject.OU] = "YY57758GS7"' '\(mihomoTemporaryPath)'
-        /usr/bin/printf '%s' '\(plistB64)' | /usr/bin/base64 -D > '\(plistTemporaryPath)'
-        /usr/sbin/chown root:wheel '\(plistTemporaryPath)'
-        /bin/chmod 0644 '\(plistTemporaryPath)'
-        /usr/bin/plutil -lint '\(plistTemporaryPath)' >/dev/null
-        /usr/bin/printf '%u\\n' \(uid) > '\(uidTempPath)'
-        /usr/sbin/chown root:wheel '\(uidTempPath)'
-        /bin/chmod 0600 '\(uidTempPath)'
-        /bin/launchctl bootout system/liquidclash.helper >/dev/null 2>&1 || true
-        /bin/rm -f /Library/LaunchDaemons/liquidclash.helper.plist
-        /bin/rm -f /Library/PrivilegedHelperTools/liquidclash-helper
-        /bin/rm -f /Library/PrivilegedHelperTools/mihomo
-        /bin/rm -f /tmp/liquidclash/service.sock
-        /bin/launchctl bootout system/com.raydocs.tono.killswitch >/dev/null 2>&1 || true
-        /bin/rm -f /Library/LaunchDaemons/com.raydocs.tono.killswitch.plist
-        /bin/rm -f /Library/PrivilegedHelperTools/tono-killswitch
-        /bin/rm -f /var/run/tono-killswitch.sock
-        /bin/launchctl bootout system/\(plistLabel) >/dev/null 2>&1 || true
-        /bin/mv -f '\(helperTemporaryPath)' '\(helperInstallPath)'
-        /bin/mv -f '\(mihomoTemporaryPath)' '\(mihomoInstallPath)'
-        /bin/mv -f '\(plistTemporaryPath)' '\(plistInstallPath)'
-        /bin/mv -f '\(uidTempPath)' '\(allowedUIDPath)'
-        # launchd can return EIO while replacing a daemon even though it has
-        # accepted and started the new job. Treat bootstrap as a request; the
-        # authenticated /version poll below is the authoritative result.
-        /bin/launchctl bootstrap system '\(plistInstallPath)' || true
-        """
+        let script = installScript(
+            helperSource: helperSource.path,
+            mihomoSource: mihomoSource.path,
+            uid: uid
+        )
 
         let prompt = "Tono needs to install its signed network helper."
         let appleScript = "do shell script \"\(script.appleScriptEscaped)\" with administrator privileges with prompt \"\(prompt.appleScriptEscaped)\""
@@ -281,7 +304,16 @@ nonisolated struct HelperManager {
             throw HelperInstallError.installFailed(String(message.prefix(500)))
         }
 
-        for _ in 0..<30 {
+        // A cold `launchctl bootstrap` of a freshly installed daemon has been
+        // observed taking well over six seconds on a busy machine: the install
+        // itself succeeded, the socket appeared moments later, and the app had
+        // already surfaced a terminal "the authenticated helper did not start"
+        // that only a manual retry could clear. Poll densely at first so the
+        // common fast path stays immediate, then keep waiting far longer than
+        // launchd realistically needs before calling it a failure.
+        let startupDeadline = Date().addingTimeInterval(45)
+        var probeIntervalMicroseconds: UInt32 = 100_000
+        while true {
             if currentVersion() == helperVersion {
                 LocalTrafficAudit.shared.recordEvent(
                     "helper_install_succeeded",
@@ -294,7 +326,12 @@ nonisolated struct HelperManager {
                 )
                 return
             }
-            usleep(200_000)
+            guard Date() < startupDeadline else { break }
+            usleep(probeIntervalMicroseconds)
+            probeIntervalMicroseconds = min(
+                probeIntervalMicroseconds * 2,
+                1_000_000
+            )
         }
         LocalTrafficAudit.shared.recordEvent(
             "helper_install_startup_timed_out",
@@ -498,9 +535,13 @@ nonisolated struct HelperManager {
         sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]? = nil,
         tailscaleBootstrapEnabled: Bool? = nil,
         allowSystemResolution: Bool = false,
-        bootstrapPins: [String: [String]] = [:]
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) {
+        bootstrapPins: [String: [String]] = [:],
+        // No default: an omitted value silently revokes the permit while the
+        // rule engine still routes that bundle direct.
+        reviewedBundleDirect: Bool
+    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool) {
         var object: [String: Any] = [:]
+        if reviewedBundleDirect { object["reviewedBundleDirect"] = true }
         if let apiHosts { object["apiHosts"] = apiHosts }
         if let exitNodeHints { object["exitHints"] = exitNodeHints }
         if let tunnelInterfaces { object["tunnelInterfaces"] = tunnelInterfaces }
@@ -546,7 +587,11 @@ nonisolated struct HelperManager {
         armed: Bool, wanted: Bool, live: Bool, healed: Bool
     ) {
         let result = try sendRequest(method: "GET", path: "/killswitch/status")
-        return try requireKillSwitchSuccess(result, operation: "status")
+        let reply = try requireKillSwitchSuccess(result, operation: "status")
+        // A status query loads nothing, so it can never have flushed anything;
+        // dropping the field here keeps callers from reading a stale "no" as a
+        // statement about the last arm.
+        return (reply.armed, reply.wanted, reply.live, reply.healed)
     }
 
     /// Whether any daemon answered the socket at all, regardless of the reply's
@@ -590,6 +635,9 @@ nonisolated struct HelperManager {
         let result = try sendRequest(method: "GET", path: "/dns/status")
         if result.status == 404 {
             return false
+        }
+        if result.status == 403 {
+            throw HelperIPCError.forbidden
         }
         guard result.status == 200,
               let envelope = try? JSONDecoder().decode(
@@ -665,6 +713,12 @@ nonisolated struct HelperManager {
         _ result: (status: Int, body: Data),
         operation: String
     ) throws -> Envelope {
+        // Peer rejection is an identity/UID repair condition, not a transient
+        // command failure. Classify it from the authenticated HTTP boundary so
+        // even an empty or malformed 403 body cannot turn into invalidResponse.
+        if result.status == 403 {
+            throw HelperIPCError.forbidden
+        }
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body) else {
             throw HelperIPCError.invalidResponse
         }
@@ -678,16 +732,21 @@ nonisolated struct HelperManager {
     private static func requireKillSwitchSuccess(
         _ result: (status: Int, body: Data),
         operation: String
-    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool) {
+    ) throws -> (armed: Bool, wanted: Bool, live: Bool, healed: Bool, flushedStates: Bool) {
         let envelope = try requireSuccess(result, operation: operation)
         guard let armed = envelope.armed,
               let wanted = envelope.wantArmed,
               let live = envelope.live else {
             throw HelperIPCError.invalidResponse
         }
-        // Pre-3.5.0 daemons do not report heals; treating their status as
-        // unhealed preserves the old behavior.
-        return (armed, wanted, live, envelope.healed ?? false)
+        // Pre-3.5.0 daemons do not report heals, and pre-3.9.0 daemons do not
+        // report whether they flushed PF states. Absent means "did not", which
+        // preserves old behaviour and, for the flush, errs toward not claiming an
+        // event that may not have happened.
+        return (
+            armed, wanted, live, envelope.healed ?? false,
+            envelope.flushedStates ?? false
+        )
     }
 
     private static func verifyEmbeddedExecutable(
@@ -716,9 +775,11 @@ nonisolated struct HelperManager {
                 code,
                 SecCSFlags(rawValue: 0),
                 requirement
-              ) == errSecSuccess else {
+        ) == errSecSuccess else {
             throw HelperInstallError.installFailed(
-                "An embedded helper failed the Tono signing requirement."
+                "This Tono build is not signed with the Tono Developer ID identity. "
+                    + "Install a signed Tono package; an administrator repair "
+                    + "cannot fix an unsigned app."
             )
         }
     }
@@ -846,6 +907,7 @@ enum HelperIPCError: LocalizedError {
     case connectFailed
     case emptyResponse
     case invalidResponse
+    case forbidden
     case commandFailed(String)
 
     var errorDescription: String? {
@@ -854,6 +916,8 @@ enum HelperIPCError: LocalizedError {
         case .connectFailed: "The authenticated network helper is unavailable."
         case .emptyResponse: "The network helper closed the connection."
         case .invalidResponse: "The network helper returned an invalid response."
+        case .forbidden:
+            "The installed network helper rejected this copy of Tono."
         case .commandFailed(let message): message
         }
     }

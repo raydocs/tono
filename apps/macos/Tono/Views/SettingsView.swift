@@ -21,6 +21,14 @@ struct SettingsView: View {
     private var remoteDiagnosticsEnabled = false
     @AppStorage(SettingsKey.claudeTrafficResearchEnabled)
     private var claudeTrafficResearchEnabled = false
+    @AppStorage(
+        SettingsKey.aggregatedAppRoutingResearchEnabled,
+        store: AppProfile.defaults
+    // Its own row reads "Opt in to…", and every sibling collection toggle
+    // above defaults off. Shipping it on made the copy describe something the
+    // user had not done, and for a product used from China an opt-out default
+    // on any collection is the wrong side of the line to be guessing on.
+    ) private var aggregatedAppRoutingResearchEnabled = false
 
     // Proxy Engine. The field edits a local draft; only validated values are
     // committed to storage, so a half-typed "78" abandoned via focus loss can
@@ -159,6 +167,18 @@ struct SettingsView: View {
                 appState.setClaudeTrafficResearchEnabled(enabled)
             }
             .disabled(!remoteDiagnosticsEnabled)
+
+            settingDivider
+
+            SettingToggleRow(
+                label: "Aggregated App Routing Research",
+                subtitle: "On by default; you can turn it off at any time. Only while signed in and Ready, about every six hours Tono shares a reviewed fixed list of app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. The list covers WeChat, QQ, Feishu/Lark, DingTalk, WeCom, Tencent Meeting, WPS, Baidu Netdisk, Aliyun Drive, Douyin, bilibili, NetEase Music, QQMusic, Thunder, Jianying, Youdao, AweSun, major browsers, Claude and Trae. For reviewed native apps, absolute process paths are reduced on-device to five fixed bundle-component categories (main, framework helper, XPC, plugin or other bundle helper); unknown apps remain one aggregate “other” family, and no executable name or path text is sent. Turning this off immediately stops collection and deletes pending local research data. Reports are linked to your account and device for abuse prevention, deleted within 90 days, and shown to administrators only as cohort totals. No hostnames, IPs, ports, usernames, absolute paths, bundle IDs, user file paths, content or connection records leave this device. Results create human-review candidates only and never add DIRECT rules automatically.",
+                isOn: $aggregatedAppRoutingResearchEnabled
+            )
+            .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
+                appState.setAggregatedAppRoutingResearchEnabled(enabled)
+                accountSession.appRoutingResearchSettingChanged()
+            }
 
             SettingRow(
                 label: "Audit Log",

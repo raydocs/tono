@@ -27,11 +27,13 @@ final class AccountSession {
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     private let protectionBlockedConsumer: @MainActor () -> Bool
     private let protectedRetryConsumer: @MainActor () -> Void
+    private let appRoutingResearchActivationConsumer: @MainActor () -> Void
     private let exitNode: String
     private var runtimeMonitor: Task<Void, Never>?
     private var catalogSyncTask: Task<Void, Never>?
     private var deviceRefreshTask: Task<Void, Never>?
     private var deviceActionTask: Task<Void, Never>?
+    private var appRoutingResearchTask: Task<Void, Never>?
     private var systemSleeping = false
     private var lastCatalogFailureMessage: String?
     private var lastTrafficPolicyFailureMessage: String?
@@ -63,7 +65,7 @@ final class AccountSession {
                  killSwitchArmed: false, utunPresent: false,
                  protectedDNSConfigured: false, selectedExit: "unknown",
                  connectionStage: "unknown", reconnectAttempt: 0,
-                 lastErrorCategory: nil
+                 lastErrorCategory: nil, lastCrashLabel: nil
              )
          },
          claudeTrafficResearchConsumer: @escaping
@@ -100,7 +102,9 @@ final class AccountSession {
                 )
             },
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
-         protectedRetryConsumer: @escaping @MainActor () -> Void = {}) {
+         protectedRetryConsumer: @escaping @MainActor () -> Void = {},
+         appRoutingResearchActivationConsumer: @escaping
+            @MainActor () -> Void = {}) {
         self.api = api; self.keychain = keychain; self.sidecar = sidecar
         self.exitNode = exitNode
         self.descriptorConsumer = descriptorConsumer
@@ -113,6 +117,8 @@ final class AccountSession {
         self.claudeTrafficResearchConsumer = claudeTrafficResearchConsumer
         self.protectionBlockedConsumer = protectionBlockedConsumer
         self.protectedRetryConsumer = protectedRetryConsumer
+        self.appRoutingResearchActivationConsumer =
+            appRoutingResearchActivationConsumer
     }
 
     func restore() async {
@@ -126,6 +132,7 @@ final class AccountSession {
             shouldResumeProtection =
                 try await RuntimeCleanup.cleanupStaleRuntime()
             guard try keychain.string(for: .refreshToken) != nil else {
+                deactivateAppRoutingResearch()
                 // Signed out: never leave a previous session's kill switch armed.
                 if !AppProfile.homeExitEnabled {
                     // A force-quit of an older Home-US build may have left its
@@ -160,6 +167,7 @@ final class AccountSession {
                 // the first-screen critical path.
                 user = try await api.me().user
                 guard user?.suspended != true else {
+                    pauseAppRoutingResearch()
                     state = .suspended
                     return
                 }
@@ -178,7 +186,11 @@ final class AccountSession {
             )
             user = restoredUser
             devices = restoredDevices
-            guard user?.suspended != true else { state = .suspended; return }
+            guard user?.suspended != true else {
+                pauseAppRoutingResearch()
+                state = .suspended
+                return
+            }
             device = devices.first(where: { $0.current == true })
             await resumeOrEnrollRuntime()
         } catch is CancellationError {
@@ -310,6 +322,9 @@ final class AccountSession {
     #endif
 
     func logout() async {
+        // Purge before any suspension point so no pending aggregate can cross
+        // into a later account even when server logout is slow or unavailable.
+        deactivateAppRoutingResearch()
         await stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
         await api.logout(); clearAccount(); state = .signedOut
     }
@@ -436,7 +451,11 @@ final class AccountSession {
             device = response.device
             adoptEnrollment(response.enrollment)
             try await reloadDevices()
-            if response.user.suspended == true { state = .suspended; return }
+            if response.user.suspended == true {
+                pauseAppRoutingResearch()
+                state = .suspended
+                return
+            }
             if !AppProfile.homeExitEnabled {
                 // Managed Reality exits authenticate directly with the Tono
                 // control plane. They never consume or wait for a Tailscale
@@ -463,6 +482,7 @@ final class AccountSession {
 
     /// Stops transport. Kill switch is released only on intentional logout/user disconnect.
     func stopRuntime(logOutIdentity: Bool = false, releaseKillSwitch: Bool = false) async {
+        pauseAppRoutingResearch()
         runtimeMonitor?.cancel()
         runtimeMonitor = nil
         catalogSyncTask?.cancel()
@@ -471,6 +491,8 @@ final class AccountSession {
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
         deviceActionTask = nil
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
         // Clear descriptor first so Mihomo stops, while kill switch may remain armed.
         await descriptorConsumer(nil)
         if AppProfile.homeExitEnabled {
@@ -538,7 +560,10 @@ final class AccountSession {
                     && protectedDNSState.available
                     && !protectedDNSState.configured
                     && !protectedDNSState.snapshotPresent,
-            helperPrepared: true
+            helperPrepared: true,
+            // Pre-tunnel setup arm: no traffic policy has been reviewed or
+            // committed yet, so nothing may be permitted outside the tunnel.
+            reviewedBundleDirect: false
         )
 
         if confirm {
@@ -629,6 +654,7 @@ final class AccountSession {
                         try await activateCloudFallback()
                         state = .ready
                     } catch {
+                        pauseAppRoutingResearch()
                         state = .error(
                             "The Tono home transport stopped and no managed cloud exit is available. Internet remains blocked by the kill switch."
                         )
@@ -662,6 +688,12 @@ final class AccountSession {
 
     private func startCatalogSync(refreshImmediately: Bool = false) {
         guard !systemSleeping else { return }
+        guard state == .ready, let user else {
+            pauseAppRoutingResearch()
+            return
+        }
+        AppRoutingResearch.shared.activate(forAuthenticatedUser: user.id)
+        appRoutingResearchActivationConsumer()
         catalogSyncTask?.cancel()
         catalogSyncTask = Task { [weak self] in
             if refreshImmediately {
@@ -684,16 +716,29 @@ final class AccountSession {
             }
         }
         updateRemoteDiagnosticsPolling()
+        updateAppRoutingResearchUploading()
     }
 
     func remoteDiagnosticsSettingChanged() {
         updateRemoteDiagnosticsPolling()
     }
 
+    func appRoutingResearchSettingChanged() {
+        if state == .ready, !systemSleeping, let user {
+            AppRoutingResearch.shared.activate(forAuthenticatedUser: user.id)
+        } else {
+            AppRoutingResearch.shared.pause()
+        }
+        appRoutingResearchActivationConsumer()
+        updateAppRoutingResearchUploading()
+    }
+
     func prepareForSystemSleep() {
         systemSleeping = true
+        pauseAppRoutingResearch()
         catalogSyncTask?.cancel(); catalogSyncTask = nil
         deviceActionTask?.cancel(); deviceActionTask = nil
+        appRoutingResearchTask?.cancel(); appRoutingResearchTask = nil
     }
 
     func resumeAfterSystemWake() {
@@ -714,6 +759,50 @@ final class AccountSession {
                 guard let self, state == .ready, !systemSleeping else { return }
                 await pollDeviceActions()
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            }
+        }
+    }
+
+    private func updateAppRoutingResearchUploading() {
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
+        guard state == .ready, !systemSleeping,
+              AppRoutingResearch.isCollectionActive, user != nil else { return }
+        appRoutingResearchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, state == .ready, !systemSleeping,
+                      AppRoutingResearch.isCollectionActive else { return }
+                if let lease = await AppRoutingResearch.shared.readySnapshot() {
+                    do {
+                        guard !Task.isCancelled,
+                              AppRoutingResearch.shared.isCurrent(lease) else {
+                            return
+                        }
+                        let response = try await api.submitAppRoutingResearch(
+                            lease.snapshot,
+                            ownerHash: lease.ownerHash,
+                            isLeaseCurrent: {
+                                AppRoutingResearch.shared.isCurrent(lease)
+                            }
+                        )
+                        guard !Task.isCancelled,
+                              response.snapshotId == lease.snapshot.snapshotId,
+                              AppRoutingResearch.shared.isCurrent(lease) else {
+                            return
+                        }
+                        AppRoutingResearch.shared.acknowledge(lease)
+                    } catch TonoAPIClient.APIError.unauthorized {
+                        await fail(
+                            TonoAPIClient.APIError.unauthorized,
+                            signsOutOnUnauthorized: true
+                        )
+                        return
+                    } catch {
+                        // The single persisted idempotent pending snapshot is
+                        // retried on the next low-frequency check.
+                    }
+                }
+                do { try await Task.sleep(for: .seconds(3_600)) } catch { return }
             }
         }
     }
@@ -827,6 +916,16 @@ final class AccountSession {
         // control-plane failure. In particular, do not turn URLSession -999
         // into a login error or tear down an otherwise protected route.
         guard !(error is CancellationError) else { return }
+        let accountLost = signsOutOnUnauthorized
+            && error as? TonoAPIClient.APIError == .unauthorized
+        // Account loss purges synchronously before the first suspension point;
+        // a crash or actor reentrancy can never leave the old account's pending
+        // aggregate available to a later session.
+        if accountLost {
+            deactivateAppRoutingResearch()
+        } else {
+            pauseAppRoutingResearch()
+        }
         runtimeMonitor?.cancel()
         runtimeMonitor = nil
         catalogSyncTask?.cancel()
@@ -835,9 +934,11 @@ final class AccountSession {
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
         deviceActionTask = nil
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
         await descriptorConsumer(nil)
         // Health / runtime failures keep kill switch; only auth sign-out disarms.
-        if signsOutOnUnauthorized, error as? TonoAPIClient.APIError == .unauthorized {
+        if accountLost {
             await sidecar.stop()
             await releaseNetworkProtection()
             await api.logout(); clearAccount(); state = .signedOut
@@ -846,6 +947,21 @@ final class AccountSession {
             state = .error((error as? LocalizedError)?.errorDescription ?? "Something went wrong. Please try again.")
         }
     }
+
+    private func pauseAppRoutingResearch() {
+        AppRoutingResearch.shared.pause()
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
+        appRoutingResearchActivationConsumer()
+    }
+
+    private func deactivateAppRoutingResearch() {
+        AppRoutingResearch.shared.deactivateAndPurge()
+        appRoutingResearchTask?.cancel()
+        appRoutingResearchTask = nil
+        appRoutingResearchActivationConsumer()
+    }
+
     private func clearAccount() {
         shouldResumeProtection = false
         user = nil

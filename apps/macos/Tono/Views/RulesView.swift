@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct RulesView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var locale
     @State private var showingAddRule = false
     @State private var showingImporter = false
     @State private var showingExporter = false
@@ -89,7 +90,7 @@ struct RulesView: View {
                                     LazyVStack(spacing: 4) {
                                         let total = results.count
                                         if total > 200 {
-                                            Text("Showing 200 of \(Self.formatLargeNumber(total)) matches")
+                                            Text("Showing 200 of \(formatLargeNumber(total)) matches")
                                                 .font(.system(size: 11))
                                                 .foregroundStyle(.tertiary)
                                                 .padding(.vertical, 6)
@@ -180,7 +181,7 @@ struct RulesView: View {
 
                     let totalCount = appState.totalRuleCount
                     if totalCount > 0 {
-                        Text("\(Self.formatLargeNumber(totalCount)) rules")
+                        Text("\(formatLargeNumber(totalCount)) rules")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 8)
@@ -259,7 +260,7 @@ struct RulesView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
                 .foregroundStyle(.tertiary)
-            TextField("Search all \(Self.formatLargeNumber(appState.totalRuleCount)) rules…", text: $searchText)
+            TextField("Search all \(formatLargeNumber(appState.totalRuleCount)) rules…", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
             if !searchText.isEmpty {
@@ -376,10 +377,13 @@ struct RulesView: View {
 
     // MARK: - Helpers
 
-    private static func formatLargeNumber(_ n: Int) -> String {
+    private func formatLargeNumber(_ n: Int) -> String {
         if n >= 10000 {
-            let k = Double(n) / 10000
-            return String(format: "%.1f万", k)
+            return n.formatted(
+                .number.notation(.compactName)
+                    .precision(.fractionLength(0...1))
+                    .locale(locale)
+            )
         }
         return "\(n)"
     }
