@@ -71,7 +71,22 @@ nonisolated enum KillSwitchService {
         }
         do {
             let bootstrapPins = configuredBootstrapPins(for: apiHosts)
-            let status = try HelperManager.armKillSwitch(
+            // A superseded arm is retried once, here rather than in the caller.
+            //
+            // The daemon refuses an arm whose state generation moved while it was
+            // doing network work — another protection change committed first.
+            // That is not a failure the user can act on and not a state that
+            // leaves the machine less protected: the ruleset that won is itself a
+            // kill-switch state. Surfacing it cost one account 46 user-visible
+            // errors in five hours, 21 of them failing a connect outright, under
+            // a message that blamed their network.
+            //
+            // Retried inside `PrivilegedRuntimeCoordinator`'s serialized region,
+            // so the retry cannot itself race a queued arm, and bounded to one
+            // attempt: a second refusal means something is bumping the
+            // generation continuously and that must surface rather than spin.
+            let status = try Self.armWithOneSupersededRetry(
+                bootstrapPins: bootstrapPins,
                 apiHosts: apiHosts,
                 exitNodeHints: exitNodeHints,
                 tunnelInterfaces: tunnelInterfaces,
@@ -79,7 +94,6 @@ nonisolated enum KillSwitchService {
                 sessionDirectEndpoints: sessionDirectEndpoints,
                 tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
                 allowSystemResolution: allowSystemResolution,
-                bootstrapPins: bootstrapPins,
                 reviewedBundleDirect: reviewedBundleDirect
             )
             guard status.armed, status.wanted, status.live else {
@@ -135,6 +149,54 @@ nonisolated enum KillSwitchService {
     /// state erased its old control-plane resolution, to migrate without using
     /// the physical network's DNS. The helper independently validates that all
     /// pins are public and belong to an explicitly activated API host.
+    /// Issues the arm, retrying exactly once if the daemon says another
+    /// protection change superseded it.
+    ///
+    /// Recorded either way: a retry that succeeds is invisible to the user but is
+    /// the signal that says how often this is happening, and whether the source
+    /// is a sleep transition or a concurrent helper operation. Without it the
+    /// symptom would simply disappear from view, which is worse than the error.
+    private static func armWithOneSupersededRetry(
+        bootstrapPins: [String: [String]],
+        apiHosts: [String]?,
+        exitNodeHints: [String]?,
+        tunnelInterfaces: [String]?,
+        proxyEndpoints: [ConfigPipeline.DialEndpoint]?,
+        sessionDirectEndpoints: [ConfigPipeline.DirectEndpoint]?,
+        tailscaleBootstrapEnabled: Bool?,
+        allowSystemResolution: Bool,
+        reviewedBundleDirect: Bool
+    ) throws -> (
+        armed: Bool, wanted: Bool, live: Bool,
+        healed: Bool, flushedStates: Bool, killedHosts: Int
+    ) {
+        func attempt() throws -> (
+            armed: Bool, wanted: Bool, live: Bool,
+            healed: Bool, flushedStates: Bool, killedHosts: Int
+        ) {
+            try HelperManager.armKillSwitch(
+                apiHosts: apiHosts,
+                exitNodeHints: exitNodeHints,
+                tunnelInterfaces: tunnelInterfaces,
+                proxyEndpoints: proxyEndpoints,
+                sessionDirectEndpoints: sessionDirectEndpoints,
+                tailscaleBootstrapEnabled: tailscaleBootstrapEnabled,
+                allowSystemResolution: allowSystemResolution,
+                bootstrapPins: bootstrapPins,
+                reviewedBundleDirect: reviewedBundleDirect
+            )
+        }
+        do {
+            return try attempt()
+        } catch HelperIPCError.commandFailed(let message, "KILLSWITCH_ARM_SUPERSEDED") {
+            LocalTrafficAudit.shared.recordEvent(
+                "killswitch_arm_superseded_retry",
+                details: ["first_attempt": String(message.prefix(200))]
+            )
+            return try attempt()
+        }
+    }
+
     private static let pinCacheKey = "Tono_controlPlanePinCache"
     /// Learned addresses kept per host. Bounded because the helper rejects an
     /// oversized pin set outright, and a rotation that never repeats an address

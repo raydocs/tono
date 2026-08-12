@@ -31,11 +31,13 @@ nonisolated enum HelperProtocolVersion {
     ///   on the machine. The IPC contract is unchanged apart from an added
     ///   `killedHosts` counter, but the behaviour lives entirely in the daemon,
     ///   so without this bump no installed helper would ever stop flushing.
-    /// - 3.11.0 → 3.11.1: the arm commit guard reports which of its two
-    ///   conditions failed. Same contract, daemon-side text, so a stale daemon
-    ///   would keep emitting the message that misattributed a concurrency
-    ///   failure to the user's network.
-    static let current = "3.11.1"
+    /// - 3.11.0 → 3.11.2: the arm commit guard reports which of its two
+    ///   conditions failed, and a superseded arm carries the machine-readable
+    ///   `KILLSWITCH_ARM_SUPERSEDED` so the app can retry it instead of showing
+    ///   the user an error. Both live in the daemon, so a stale one would keep
+    ///   emitting the message that misattributed a concurrency failure to the
+    ///   user's network.
+    static let current = "3.11.2"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

@@ -34,6 +34,9 @@ nonisolated struct HelperManager {
         /// the machine. Absent from a pre-3.11.0 daemon, which only had the
         /// all-or-nothing choice.
         let killedHosts: Int?
+        /// Machine-readable refusal code, for the refusals whose correct handling
+        /// is a decision rather than a message. Absent from a pre-3.11.2 daemon.
+        let code: String?
         let configured: Bool?
         let snapshotPresent: Bool?
         let service: String?
@@ -659,7 +662,7 @@ nonisolated struct HelperManager {
         guard envelope.ok == true || snapshotPresent else {
             let message = envelope.error.map { String($0.prefix(300)) }
                 ?? "Helper inspect protected DNS failed."
-            throw HelperIPCError.commandFailed(message)
+            throw HelperIPCError.commandFailed(message, code: envelope.code)
         }
         guard configured || snapshotPresent else { return false }
         try restoreProtectedDNS()
@@ -728,7 +731,7 @@ nonisolated struct HelperManager {
         }
         guard (200..<300).contains(result.status), envelope.ok == true else {
             let message = envelope.error.map { String($0.prefix(300)) } ?? "Helper \(operation) failed."
-            throw HelperIPCError.commandFailed(message)
+            throw HelperIPCError.commandFailed(message, code: envelope.code)
         }
         return envelope
     }
@@ -913,7 +916,7 @@ enum HelperIPCError: LocalizedError {
     case emptyResponse
     case invalidResponse
     case forbidden
-    case commandFailed(String)
+    case commandFailed(String, code: String? = nil)
 
     var errorDescription: String? {
         switch self {
@@ -923,7 +926,7 @@ enum HelperIPCError: LocalizedError {
         case .invalidResponse: "The network helper returned an invalid response."
         case .forbidden:
             "The installed network helper rejected this copy of Tono."
-        case .commandFailed(let message): message
+        case .commandFailed(let message, _): message
         }
     }
 }

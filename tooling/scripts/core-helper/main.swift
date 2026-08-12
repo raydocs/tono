@@ -37,10 +37,26 @@ private let killSwitchArmFields = Set([
 enum HelperFailure: Error {
     case invalid(String)
     case system(String)
+    /// A refusal the caller can act on programmatically.
+    ///
+    /// Everything else is prose, which is right for a message a person reads and
+    /// wrong for a decision a program makes: the app needs to tell "another
+    /// protection change superseded this one, retry" apart from "this request
+    /// was malformed", and matching on English text to do it is how a later
+    /// wording change becomes a behaviour change.
+    case coded(code: String, message: String)
 
     var message: String {
         switch self {
         case .invalid(let message), .system(let message): message
+        case .coded(_, let message): message
+        }
+    }
+
+    var code: String? {
+        switch self {
+        case .coded(let code, _): code
+        default: nil
         }
     }
 }
@@ -1593,7 +1609,9 @@ private final class SocketServer {
             }
         } catch let failure as HelperFailure {
             let status = failure.message.contains("already running") ? 409 : 400
-            sendResponse(client, status: status, object: ["ok": false, "error": failure.message])
+            var body: [String: Any] = ["ok": false, "error": failure.message]
+            if let code = failure.code { body["code"] = code }
+            sendResponse(client, status: status, object: body)
         } catch {
             sendResponse(client, status: 500, object: ["ok": false, "error": "Internal helper error."])
         }

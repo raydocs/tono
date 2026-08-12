@@ -260,9 +260,14 @@ final class KillSwitchManager {
         // "a concurrent helper operation superseded this arm" from "the machine
         // went to sleep mid-arm"; the two have completely different fixes.
         if stateGeneration != startingGeneration {
-            throw HelperFailure.invalid(
-                "Kill Switch preparation was superseded by another protection change; "
-                + "protection remains fail-closed."
+            // Coded, because the caller's correct response is to retry rather
+            // than to tell the user anything: the state that superseded this one
+            // is itself a protection change, so the machine is not less
+            // protected — this attempt simply lost a race with it.
+            throw HelperFailure.coded(
+                code: "KILLSWITCH_ARM_SUPERSEDED",
+                message: "Kill Switch preparation was superseded by another protection change; "
+                    + "protection remains fail-closed."
             )
         }
         guard commitAllowed() else {
