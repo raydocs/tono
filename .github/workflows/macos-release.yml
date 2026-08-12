@@ -59,7 +59,14 @@ jobs:
       release_link: ${{ steps.release-version.outputs.release_link }}
     env:
       TONO_MACOS_NOTARY_PROFILE: tono-macos-release
-      KEYCHAIN_PATH: ${{ runner.temp }}/tono-macos-release.keychain-db
+      # Not `${{ runner.temp }}`: the runner context is unavailable in a job-level
+      # env, so referencing it there is an invalid expression and the workflow
+      # fails at startup — before its own trigger is even evaluated. That is why
+      # this ran, and failed, on every branch push while claiming to watch tags
+      # only, and why it has never completed once. `$RUNNER_TEMP` is the same
+      # directory and is a plain environment variable, which is what the rest of
+      # this file already uses.
+      KEYCHAIN_PATH: ${RUNNER_TEMP}/tono-macos-release.keychain-db
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
