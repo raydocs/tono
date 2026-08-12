@@ -446,7 +446,8 @@ private actor ManagedTrafficPolicyProcessor {
             mediaEndpoints: media,
             tcpEndpoints: tcp,
             webDomains: webDomains,
-            directSuffixes: directSuffixes
+            directSuffixes: directSuffixes,
+            trusted: trusted
         )
     }
 
@@ -467,9 +468,22 @@ private actor ManagedTrafficPolicyProcessor {
                persisted.sha256 != cache.sha256 {
                 throw TonoAPIClient.APIError.invalidResponse
             }
-            if persisted.revision == cache.revision,
-               persisted.signature != cache.signature {
-                signatureIsNew = true
+            if persisted.revision == cache.revision {
+                switch ManagedTrafficPolicySignature.sameRevisionTransition(
+                    from: persisted.signature,
+                    to: cache.signature
+                ) {
+                case .unchanged:
+                    break
+                case .upgradeToTrusted:
+                    signatureIsNew = true
+                case .downgradeAttempt:
+                    // An unsigned response cannot erase authorship already
+                    // established for these exact bytes.
+                    return
+                case .replacementAttempt:
+                    throw TonoAPIClient.APIError.invalidResponse
+                }
             }
         }
         if cache.revision < persistedRevision { return }
@@ -3718,24 +3732,60 @@ final class AppState {
         // mode-0600 disk cache may contain a newer policy than a delayed or
         // stale control-plane response. Never let that response downgrade
         // the active policy (or overwrite the newer cache) during startup.
-        if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy(),
-           persisted.revision > cache.revision {
-            if persisted.revision > managedTrafficPolicyRevision {
-                try await installManagedTrafficPolicy(
-                    persisted,
-                    persistCache: false,
-                    allowRuntimeTransition: allowRuntimeTransition
-                )
+        if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy() {
+            if persisted.revision > cache.revision {
+                if persisted.revision > managedTrafficPolicyRevision {
+                    try await installManagedTrafficPolicy(
+                        persisted,
+                        persistCache: false,
+                        allowRuntimeTransition: allowRuntimeTransition
+                    )
+                }
+                return
             }
-            return
+            if persisted.revision == cache.revision {
+                guard persisted.sha256 == cache.sha256 else {
+                    throw TonoAPIClient.APIError.invalidResponse
+                }
+                switch ManagedTrafficPolicySignature.sameRevisionTransition(
+                    from: persisted.signature,
+                    to: cache.signature
+                ) {
+                case .unchanged, .upgradeToTrusted:
+                    break
+                case .downgradeAttempt:
+                    LocalTrafficAudit.shared.recordEvent(
+                        "managed_direct_policy_signature_downgrade_ignored",
+                        details: ["revision": String(cache.revision)]
+                    )
+                    return
+                case .replacementAttempt:
+                    throw TonoAPIClient.APIError.invalidResponse
+                }
+            }
         }
         if cache.revision < managedTrafficPolicyRevision { return }
-        if cache.revision == managedTrafficPolicyRevision,
-           managedTrafficPolicySignature == cache.signature {
+        if cache.revision == managedTrafficPolicyRevision {
             guard managedTrafficPolicyDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
-            return
+            switch ManagedTrafficPolicySignature.sameRevisionTransition(
+                from: managedTrafficPolicySignature,
+                to: cache.signature
+            ) {
+            case .unchanged:
+                return
+            case .upgradeToTrusted:
+                break
+            case .downgradeAttempt:
+                LocalTrafficAudit.shared.recordEvent(
+                    "managed_direct_policy_signature_downgrade_ignored",
+                    details: ["revision": String(cache.revision)]
+                )
+                return
+            case .replacementAttempt:
+                throw TonoAPIClient.APIError.invalidResponse
+            }
         }
         // Same revision, same bytes, different signature is not "already
         // installed". It is the upgrade case: a build that predates signature
@@ -3754,22 +3804,44 @@ final class AppState {
         // was validating. A document includes its signature, so an unsigned copy of
         // the same revision does not count as having installed the signed one.
         if cache.revision < managedTrafficPolicyRevision { return }
-        if cache.revision == managedTrafficPolicyRevision,
-           managedTrafficPolicySignature == cache.signature {
+        if cache.revision == managedTrafficPolicyRevision {
             guard managedTrafficPolicyDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
-            return
+            switch ManagedTrafficPolicySignature.sameRevisionTransition(
+                from: managedTrafficPolicySignature,
+                to: cache.signature
+            ) {
+            case .unchanged:
+                return
+            case .upgradeToTrusted:
+                break
+            case .downgradeAttempt:
+                return
+            case .replacementAttempt:
+                throw TonoAPIClient.APIError.invalidResponse
+            }
         }
         if persistCache {
             try await managedTrafficPolicyProcessor.persistIfNewest(cache)
             if cache.revision < managedTrafficPolicyRevision { return }
-            if cache.revision == managedTrafficPolicyRevision,
-               managedTrafficPolicySignature == cache.signature {
+            if cache.revision == managedTrafficPolicyRevision {
                 guard managedTrafficPolicyDigest == cache.sha256 else {
                     throw TonoAPIClient.APIError.invalidResponse
                 }
-                return
+                switch ManagedTrafficPolicySignature.sameRevisionTransition(
+                    from: managedTrafficPolicySignature,
+                    to: cache.signature
+                ) {
+                case .unchanged:
+                    return
+                case .upgradeToTrusted:
+                    break
+                case .downgradeAttempt:
+                    return
+                case .replacementAttempt:
+                    throw TonoAPIClient.APIError.invalidResponse
+                }
             }
         }
 
@@ -3834,7 +3906,10 @@ final class AppState {
             }
         }
         let directSuffixes = try policy.directSuffixes.map { entry in
-            let host = try ConfigPipeline.validatedManagedDirectSuffix(entry.host)
+            let host = try ConfigPipeline.validatedManagedDirectSuffix(
+                entry.host,
+                trusted: policy.trusted
+            )
             guard host == entry.host,
                   !entry.ports.isEmpty,
                   Set(entry.ports).count == entry.ports.count,
@@ -3865,7 +3940,8 @@ final class AppState {
             mediaEndpoints: [],
             tcpEndpoints: [],
             directResolverHosts: (policy.domains + policy.webDomains)
-                .map(\.host)
+                .map(\.host),
+            trusted: policy.trusted
         )
         return try ConfigPipeline.validatedManagedDirectPolicy(
             runtime,
@@ -4120,7 +4196,8 @@ final class AppState {
             webDomainSuffixes: current.webDomainSuffixes,
             mediaEndpoints: current.mediaEndpoints,
             tcpEndpoints: current.tcpEndpoints,
-            directResolverHosts: current.directResolverHosts
+            directResolverHosts: current.directResolverHosts,
+            trusted: current.trusted
         )
         return merged == current ? nil : merged
     }
@@ -4210,7 +4287,8 @@ final class AppState {
             mediaEndpoints: [],
             tcpEndpoints: [],
             directResolverHosts: base?.directResolverHosts
-                ?? (policy.domains + policy.webDomains).map(\.host)
+                ?? (policy.domains + policy.webDomains).map(\.host),
+            trusted: policy.trusted
         )
         do {
             return try ConfigPipeline.validatedManagedDirectPolicy(

@@ -206,6 +206,12 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
     /// resolve or pin IPs; the runtime emits exact allowlisted
     /// DOMAIN-SUFFIX rules instead.
     let directSuffixes: [TonoTrafficPolicyDomain]
+    /// Runtime-only authorship state. This is deliberately not part of the
+    /// server JSON: it becomes true only after the detached Ed25519 signature
+    /// over those exact bytes verifies locally. Carrying it with the sanitized
+    /// policy prevents later runtime validation from accidentally applying the
+    /// unsigned, compiled-in allowlist a second time.
+    let trusted: Bool
 
     init(
         version: Int,
@@ -213,7 +219,8 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
         mediaEndpoints: [TonoTrafficPolicyMediaEndpoint],
         tcpEndpoints: [TonoTrafficPolicyMediaEndpoint] = [],
         webDomains: [TonoTrafficPolicyDomain] = [],
-        directSuffixes: [TonoTrafficPolicyDomain] = []
+        directSuffixes: [TonoTrafficPolicyDomain] = [],
+        trusted: Bool = false
     ) {
         self.version = version
         self.domains = domains
@@ -221,6 +228,7 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
         self.tcpEndpoints = tcpEndpoints
         self.webDomains = webDomains
         self.directSuffixes = directSuffixes
+        self.trusted = trusted
     }
 
     init(from decoder: Decoder) throws {
@@ -246,6 +254,9 @@ nonisolated struct TonoTrafficPolicy: Codable, Sendable, Equatable {
             [TonoTrafficPolicyDomain].self,
             forKey: .directSuffixes
         ) ?? []
+        // Trust is never accepted from the document itself. The processor sets
+        // it only after verifying the detached signature over the source JSON.
+        trusted = false
     }
 
     private enum CodingKeys: String, CodingKey {

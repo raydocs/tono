@@ -1165,6 +1165,55 @@ struct MultiExitPolicyTests {
             throw TestFailure("trust did not open the suffix path, or the allowlist never closed it")
         }
 
+        // Trust must survive the complete runtime-policy validator. The old
+        // implementation passed the checks above, then silently reapplied the
+        // unsigned allowlist here and discarded every newly signed hostname.
+        let signedRuntime = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0",
+            domainPins: [],
+            webDomainPins: [
+                .init(
+                    host: "www.dianping.com",
+                    addresses: ["9.9.9.9"],
+                    ports: [443]
+                ),
+            ],
+            webDomainSuffixes: [
+                .init(host: "dianping.com", ports: [80, 443]),
+            ],
+            mediaEndpoints: [],
+            directResolverHosts: ["www.dianping.com"],
+            trusted: true
+        )
+        guard let validatedRuntime = try ConfigPipeline.validatedManagedDirectPolicy(
+            signedRuntime
+        ), validatedRuntime.trusted,
+              validatedRuntime.webDomainPins.map(\.host) == ["www.dianping.com"],
+              validatedRuntime.webDomainSuffixes.map(\.host) == ["dianping.com"],
+              validatedRuntime.directResolverHosts == ["www.dianping.com"] else {
+            throw TestFailure("a signed new hostname lost trust during runtime validation")
+        }
+
+        let transitions: [(
+            String?, String?, ManagedTrafficPolicySignature.SameRevisionTransition
+        )] = [
+            (nil, nil, .unchanged),
+            ("", nil, .unchanged),
+            (nil, "signed", .upgradeToTrusted),
+            ("signed", nil, .downgradeAttempt),
+            ("signed", "", .downgradeAttempt),
+            ("signed", "signed", .unchanged),
+            ("signed-a", "signed-b", .replacementAttempt),
+        ]
+        for (current, candidate, expected) in transitions {
+            guard ManagedTrafficPolicySignature.sameRevisionTransition(
+                from: current,
+                to: candidate
+            ) == expected else {
+                throw TestFailure("same-revision signature trust moved in the wrong direction")
+            }
+        }
+
         // What a signature must never buy. If this ever passes, one leaked key
         // exposes this product's own control plane and its users' assistant
         // traffic — strictly worse than the allowlist trust replaces.

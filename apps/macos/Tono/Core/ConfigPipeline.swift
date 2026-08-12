@@ -81,6 +81,10 @@ nonisolated struct ConfigPipeline {
         /// interface-bound direct outbound via the China DoH resolvers, so the
         /// pinned answers are region-correct instead of exit-geolocated.
         let directResolverHosts: [String]
+        /// True only when the source traffic-policy signature verified. This
+        /// runtime metadata is what lets a signed policy carry a new reviewed
+        /// hostname through every validation layer, not merely the decoder.
+        let trusted: Bool
 
         init(
             physicalInterface: String,
@@ -89,7 +93,8 @@ nonisolated struct ConfigPipeline {
             webDomainSuffixes: [DirectDomainSuffix] = [],
             mediaEndpoints: [DirectEndpoint],
             tcpEndpoints: [DirectEndpoint] = [],
-            directResolverHosts: [String] = []
+            directResolverHosts: [String] = [],
+            trusted: Bool = false
         ) {
             self.physicalInterface = physicalInterface
             self.domainPins = domainPins
@@ -98,6 +103,7 @@ nonisolated struct ConfigPipeline {
             self.mediaEndpoints = mediaEndpoints
             self.tcpEndpoints = tcpEndpoints
             self.directResolverHosts = directResolverHosts
+            self.trusted = trusted
         }
 
         var sessionEndpoints: [DirectEndpoint] {
@@ -1655,8 +1661,11 @@ nonisolated struct ConfigPipeline {
         // cloud-reviewed managed or web direct hostname, unique after
         // normalization.
         let resolverHosts = try policy.directResolverHosts.map { raw -> String in
-            if let host = try? validatedManagedDirectDomain(raw) { return host }
-            return try validatedWebDirectDomain(raw)
+            if let host = try? validatedManagedDirectDomain(
+                raw,
+                trusted: policy.trusted
+            ) { return host }
+            return try validatedWebDirectDomain(raw, trusted: policy.trusted)
         }
         guard Set(resolverHosts).count == resolverHosts.count else {
             throw TonoInjectionError.unsafeOverlay
@@ -1664,7 +1673,10 @@ nonisolated struct ConfigPipeline {
 
         var seenHosts = Set<String>()
         let pins = try policy.domainPins.map { pin in
-            let host = try validatedManagedDirectDomain(pin.host)
+            let host = try validatedManagedDirectDomain(
+                pin.host,
+                trusted: policy.trusted
+            )
             guard seenHosts.insert(host).inserted,
                   !pin.addresses.isEmpty, pin.addresses.count <= 8,
                   !pin.ports.isEmpty,
@@ -1687,7 +1699,10 @@ nonisolated struct ConfigPipeline {
         }.sorted { $0.host < $1.host }
 
         let webPins = try policy.webDomainPins.map { pin in
-            let host = try validatedWebDirectDomain(pin.host)
+            let host = try validatedWebDirectDomain(
+                pin.host,
+                trusted: policy.trusted
+            )
             guard seenHosts.insert(host).inserted,
                   !pin.addresses.isEmpty, pin.addresses.count <= 8,
                   pin.ports == [443] else {
@@ -1709,7 +1724,10 @@ nonisolated struct ConfigPipeline {
 
         var seenSuffixes = Set<String>()
         let webDomainSuffixes = try policy.webDomainSuffixes.map { suffix in
-            let host = try validatedManagedDirectSuffix(suffix.host)
+            let host = try validatedManagedDirectSuffix(
+                suffix.host,
+                trusted: policy.trusted
+            )
             guard host == suffix.host,
                   seenSuffixes.insert(host).inserted,
                   !suffix.ports.isEmpty,
@@ -1766,7 +1784,8 @@ nonisolated struct ConfigPipeline {
             webDomainSuffixes: webDomainSuffixes,
             mediaEndpoints: uniqueMedia,
             tcpEndpoints: uniqueTCP,
-            directResolverHosts: resolverHosts.sorted()
+            directResolverHosts: resolverHosts.sorted(),
+            trusted: policy.trusted
         )
     }
 

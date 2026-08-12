@@ -39,6 +39,35 @@ nonisolated enum ManagedTrafficPolicySignature {
         case untrustworthy
     }
 
+    /// Allowed trust movement for two copies of the same revision and digest.
+    /// Revision monotonicity alone is insufficient: accepting any signature
+    /// difference made a later unsigned response able to overwrite a trusted
+    /// cache. Trust may move forward exactly once, never backward or sideways.
+    enum SameRevisionTransition: Equatable {
+        case unchanged
+        case upgradeToTrusted
+        case downgradeAttempt
+        case replacementAttempt
+    }
+
+    static func sameRevisionTransition(
+        from current: String?,
+        to candidate: String?
+    ) -> SameRevisionTransition {
+        let current = normalized(current)
+        let candidate = normalized(candidate)
+        switch (current, candidate) {
+        case (nil, nil):
+            return .unchanged
+        case (nil, .some):
+            return .upgradeToTrusted
+        case (.some, nil):
+            return .downgradeAttempt
+        case let (.some(current), .some(candidate)):
+            return current == candidate ? .unchanged : .replacementAttempt
+        }
+    }
+
     /// `publicKeyBase64` is a parameter with the production key as its default so
     /// the verification logic can be exercised against a throwaway keypair. Every
     /// caller in the app uses the default; passing another key does not weaken
@@ -58,5 +87,10 @@ nonisolated enum ManagedTrafficPolicySignature {
             return .untrustworthy
         }
         return key.isValidSignature(signatureData, for: message) ? .trusted : .untrustworthy
+    }
+
+    private static func normalized(_ signature: String?) -> String? {
+        guard let signature, !signature.isEmpty else { return nil }
+        return signature
     }
 }
