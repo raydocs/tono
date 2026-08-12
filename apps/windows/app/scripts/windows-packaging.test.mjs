@@ -491,10 +491,16 @@ test('release TLS gate requires proxy-free pinning and rejects verification bypa
 })
 
 test('Windows release stops when a native preflight command fails', () => {
-  const block = windowsReleaseWorkflowSource.match(
-    /- name: Prepare and validate the Windows payload inputs\n\s+run: \|([\s\S]*?)\n\s+- name:/,
-  )?.[1]
+  const payloadInputGatePattern =
+    /- name: Prepare and validate the Windows payload inputs\r?\n\s+run: \|([\s\S]*?)\r?\n\s+- name:/
+  const block = windowsReleaseWorkflowSource.match(payloadInputGatePattern)?.[1]
   assert.ok(block, 'release workflow is missing the payload-input gate')
+  assert.ok(
+    windowsReleaseWorkflowSource
+      .replace(/\r?\n/g, '\r\n')
+      .match(payloadInputGatePattern)?.[1],
+    'release workflow payload-input gate must survive a Windows CRLF checkout',
+  )
   const firstNativeCommandAt = block.indexOf('pnpm prebuild')
   assert.ok(firstNativeCommandAt >= 0, 'release workflow is missing prebuild')
   assert.ok(
