@@ -12,6 +12,7 @@ import {
   WINDOWS_RESOURCE_BUNDLE_ENTRIES,
   parseNsisListing,
   validateExternalBin,
+  validateEmbeddedCoreDigestPin,
   validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
@@ -54,10 +55,7 @@ const tonoTransportPath = path.resolve(
   appRoot,
   'src-tauri/src/tono/transport.rs',
 )
-const webdavClientPath = path.resolve(
-  appRoot,
-  'src-tauri/src/core/backup.rs',
-)
+const webdavClientPath = path.resolve(appRoot, 'src-tauri/src/core/backup.rs')
 const mediaUnlockPath = path.resolve(
   appRoot,
   'src-tauri/src/cmd/media_unlock_checker/mod.rs',
@@ -86,6 +84,12 @@ const sha256 = (file) => {
   return hash.digest('hex')
 }
 
+const sha256Bytes = (bytes) => {
+  const hash = createHash('sha256')
+  hash.update(bytes)
+  return hash.digest('hex')
+}
+
 const requireFile = (label, file) => {
   try {
     if (!statSync(file).isFile()) fail(`${label} is not a file: ${file}`)
@@ -107,7 +111,9 @@ export const assertPackagingConfig = () => {
   const externalError = validateExternalBin(tauriConfig.bundle?.externalBin)
   if (externalError) fail(externalError)
 
-  const resourcesError = validateResourcesWhitelist(tauriConfig.bundle?.resources)
+  const resourcesError = validateResourcesWhitelist(
+    tauriConfig.bundle?.resources,
+  )
   if (resourcesError) fail(resourcesError)
 
   const nsisSource = readFileSync(nsisTemplatePath, 'utf8')
@@ -139,7 +145,9 @@ export const assertPackagingConfig = () => {
       WINDOWS_RESOURCE_ALLOWLIST.includes(name),
   )
   if (unexpectedAllowed.length) {
-    fail(`allowlist incorrectly includes forbidden names: ${unexpectedAllowed.join(', ')}`)
+    fail(
+      `allowlist incorrectly includes forbidden names: ${unexpectedAllowed.join(', ')}`,
+    )
   }
 
   const leftovers = onDisk.filter(
@@ -245,6 +253,42 @@ export const listNsisEntries = (sevenZip, installer) => {
   return entries
 }
 
+const readNsisEntry = (sevenZip, installer, entry) => {
+  try {
+    return execFileSync(sevenZip, ['e', '-so', installer, entry], {
+      encoding: null,
+      maxBuffer: 128 * 1024 * 1024,
+    })
+  } catch (error) {
+    fail(
+      `failed to extract ${entry} from the NSIS payload with ${sevenZip}: ${error instanceof Error ? error.message : error}`,
+    )
+  }
+}
+
+const assertNsisCoreIntegrityPins = (sevenZip, installer, entries) => {
+  const entryFor = (base) =>
+    entries.find((entry) => entry.base.toLowerCase() === base.toLowerCase())
+  const coreEntry = entryFor('verge-mihomo.exe.next')
+  if (!coreEntry) fail('NSIS payload has no staged Mihomo to hash')
+
+  const coreDigest = sha256Bytes(
+    readNsisEntry(sevenZip, installer, coreEntry.name),
+  )
+  for (const name of ['tono-service.exe', 'tono-service-install.exe']) {
+    const serviceEntry = entryFor(name)
+    if (!serviceEntry)
+      fail(`NSIS payload has no ${name} to inspect for its Core pin`)
+    const pinError = validateEmbeddedCoreDigestPin(
+      readNsisEntry(sevenZip, installer, serviceEntry.name),
+      coreDigest,
+      name,
+    )
+    if (pinError) fail(pinError)
+  }
+  return coreDigest
+}
+
 const assertNsisPayload = (installer) => {
   const sevenZip = findSevenZip()
   if (!sevenZip) {
@@ -259,15 +303,20 @@ const assertNsisPayload = (installer) => {
     fail(
       `${payloadError}\nSample entries: ${entries
         .map((entry) => entry.name)
-        .filter((name) => /mihomo|tono-service|resources|Tono\.exe|clash|dns/i.test(name))
+        .filter((name) =>
+          /mihomo|tono-service|resources|Tono\.exe|clash|dns/i.test(name),
+        )
         .slice(0, 40)
         .join(' | ')}`,
     )
   }
 
+  const coreSha256 = assertNsisCoreIntegrityPins(sevenZip, installer, entries)
+
   return {
     sevenZip,
     entryCount: entries.length,
+    coreSha256,
     mihomo: [
       ...new Set(
         entries
