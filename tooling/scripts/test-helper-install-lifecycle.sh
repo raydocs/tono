@@ -26,10 +26,17 @@ script_path=${0:A}
 usage() {
   print "usage: sudo $script_path --app /path/to/signed/Tono.app [--script emitted.sh] [--expect-version x.y.z]" >&2
   print "  the bundle must carry a Developer ID signature; the install verifies it" >&2
-  print "  --script skips emitting, which needs xcodebuild and so needs to run as you:" >&2
-  print "    TONO_EMIT_INSTALL_SCRIPT=/tmp/i.sh TONO_EMIT_INSTALL_APP=<app> \\" >&2
-  print "    TONO_EMIT_INSTALL_UID=\$(id -u) xcodebuild test -project … \\" >&2
+  print "  --script skips emitting, which needs xcodebuild and so needs to run as you." >&2
+  print "  Emit it first, as yourself, from the repository root:" >&2
+  print "    TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT=/tmp/i.sh \\" >&2
+  print "    TEST_RUNNER_TONO_EMIT_INSTALL_APP=<app> \\" >&2
+  print "    TEST_RUNNER_TONO_EMIT_INSTALL_UID=\$(id -u) \\" >&2
+  print "    xcodebuild test -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \\" >&2
+  print "      -destination 'platform=macOS,arch=arm64' \\" >&2
   print "      -only-testing:TonoTests/HelperInstallScriptTests/testEmitInstallScriptWhenRequested" >&2
+  print "  The TEST_RUNNER_ prefix is required: xcodebuild forwards only prefixed" >&2
+  print "  variables into the test host, and without it the emit test skips while" >&2
+  print "  reporting success." >&2
 }
 
 app=""
@@ -191,10 +198,32 @@ if [[ -n $prebuilt_script ]]; then
   /bin/cp "$prebuilt_script" "$script"
   print "using the install script emitted at $prebuilt_script"
 else
+# xcodebuild as root fails on this machine class — DerivedData, the signing
+# keychain and TCC all belong to the console user — so refuse with the two
+# commands that work instead of letting it fail three minutes in.
+print "xcodebuild cannot emit the install script as root: DerivedData, the" >&2
+print "signing keychain and TCC all belong to the console user. Emit it as" >&2
+print "yourself first, then pass it with --script:" >&2
+print "" >&2
+print "  TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT=/tmp/tono-install.sh \\" >&2
+print "  TEST_RUNNER_TONO_EMIT_INSTALL_APP=$app \\" >&2
+print "  TEST_RUNNER_TONO_EMIT_INSTALL_UID=$trusted_uid \\" >&2
+print "  xcodebuild test -project ${script_path:h:h:h}/apps/macos/LiquidClash.xcodeproj \\" >&2
+print "    -scheme LiquidClash -destination 'platform=macOS,arch=arm64' \\" >&2
+print "    -only-testing:TonoTests/HelperInstallScriptTests/testEmitInstallScriptWhenRequested" >&2
+print "" >&2
+print "  sudo $script_path --app $app --script /tmp/tono-install.sh" >&2
+exit 2
 print "generating the production install script from HelperManager"
-if ! TONO_EMIT_INSTALL_SCRIPT=$script \
-     TONO_EMIT_INSTALL_APP=$app \
-     TONO_EMIT_INSTALL_UID=$trusted_uid \
+# `TEST_RUNNER_` prefixed variables are forwarded to the test host with the
+# prefix stripped; unprefixed ones stay in xcodebuild's own environment and never
+# reach the test. Without the prefix the emit test hit its `XCTSkip`, xcodebuild
+# reported TEST SUCCEEDED — a skip is a pass — and no file was written. This step
+# had therefore never once produced a script, which is worse than failing: the
+# release notes tell an operator to run this gate before publishing.
+if ! TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT=$script \
+     TEST_RUNNER_TONO_EMIT_INSTALL_APP=$app \
+     TEST_RUNNER_TONO_EMIT_INSTALL_UID=$trusted_uid \
      DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} \
      /usr/bin/xcodebuild test \
        -project "${script_path:h:h:h}/apps/macos/LiquidClash.xcodeproj" \

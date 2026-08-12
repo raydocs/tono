@@ -162,13 +162,28 @@ final class HelperInstallScriptTests: XCTestCase {
     /// runtime lookups — so what lands in the file is byte-for-byte what the
     /// installed app would run.
     func testEmitInstallScriptWhenRequested() throws {
+        // Read both spellings. `xcodebuild test` forwards only `TEST_RUNNER_`
+        // prefixed variables into the test host, so the unprefixed name is what
+        // a person sets by hand while the prefixed one is what the lifecycle
+        // script must use. Accepting both is what stops the next caller from
+        // getting a silent skip reported as a pass, which is how this went
+        // unnoticed: the emit step had never produced a file.
         guard let destination = ProcessInfo.processInfo
-            .environment["TONO_EMIT_INSTALL_SCRIPT"] else {
-            throw XCTSkip("set TONO_EMIT_INSTALL_SCRIPT to a path to emit the script")
+            .environment["TONO_EMIT_INSTALL_SCRIPT"]
+            ?? ProcessInfo.processInfo
+                .environment["TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT"] else {
+            throw XCTSkip(
+                "set TONO_EMIT_INSTALL_SCRIPT (or TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT "
+                + "when invoking xcodebuild test) to a path to emit the script"
+            )
         }
-        let app = ProcessInfo.processInfo.environment["TONO_EMIT_INSTALL_APP"]
+        let app = (ProcessInfo.processInfo.environment["TONO_EMIT_INSTALL_APP"]
+            ?? ProcessInfo.processInfo
+                .environment["TEST_RUNNER_TONO_EMIT_INSTALL_APP"])
             ?? "/Applications/Tono.app"
-        let uidText = ProcessInfo.processInfo.environment["TONO_EMIT_INSTALL_UID"] ?? "501"
+        let uidText = (ProcessInfo.processInfo.environment["TONO_EMIT_INSTALL_UID"]
+            ?? ProcessInfo.processInfo
+                .environment["TEST_RUNNER_TONO_EMIT_INSTALL_UID"]) ?? "501"
         guard let uid = uid_t(uidText), uid > 0 else {
             return XCTFail("TONO_EMIT_INSTALL_UID must be a non-root uid")
         }
