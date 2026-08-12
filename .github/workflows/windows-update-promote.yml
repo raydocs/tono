@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   promote:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/release/windows'
     environment: windows-update-channel
     runs-on: ubuntu-24.04
     env:

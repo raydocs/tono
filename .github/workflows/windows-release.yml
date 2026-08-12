@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build-draft:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/release/windows'
     environment: windows-release
     runs-on: windows-2025
     defaults:
