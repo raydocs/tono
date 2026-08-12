@@ -448,26 +448,7 @@ pub fn protected_dns_unhealthy(status: Option<&DnsProtectionStatus>) -> bool {
 /// Connected. The new process still has to create a fresh Service session/controller secret and
 /// pass every ordinary DNS, WFP, exit, and real-data-plane verification stage.
 pub fn startup_runtime_is_resume_candidate(snapshot: &ServiceStatusSnapshot, dns: &DnsProtectionStatus) -> bool {
-    let protected_runtime = snapshot.kill_switch.as_ref().is_some_and(|status| {
-        status.wanted
-            && status.live
-            && status.verified
-            && status.mode == KillSwitchStatusMode::Locked
-            && status.tunnel_permit_rendered
-            && status.last_error.is_none()
-    });
-    snapshot.active_operation.is_none()
-        && snapshot.is_active
-        && snapshot.active_generation.is_some()
-        && snapshot.service_state == ServiceLifecycleState::Running
-        && snapshot.core_pid.is_some()
-        && snapshot.desired_core_should_be_running
-        && !snapshot.desired_state_unknown
-        && protected_runtime
-        && dns.enabled
-        && dns.snapshot_present
-        && dns.adapters > 0
-        && dns.last_error.is_none()
+    clash_verge_service_ipc::is_protected_startup_replacement_candidate(snapshot, dns)
 }
 
 /// Re-prove the complete current-owner runtime immediately before either scheduling or admitting
@@ -901,22 +882,20 @@ async fn run_stages(
     transaction.check("preparing service")?;
     set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
 
-    // Revision 11 closes the ordering hole in the old orphan-Core reaper. The Service already
-    // knew how to terminate only untracked copies of Tono's canonical installed Core, but that
-    // happened inside StartClash — after the App's loopback:53 availability test. An interrupted
-    // upgrade could therefore leave a Tono Core holding DNS and make the preflight fail forever,
-    // preventing the safe reaper from ever being reached. Reconcile under the authenticated
-    // Service lifecycle lock first; third-party DNS software is never touched and still fails the
-    // ordinary bind proof below with an actionable error.
-    let terminated_orphans = transaction
+    // Revision 12 closes both DNS-owner ordering holes. Reconcile under the authenticated Service
+    // lifecycle lock before the App's loopback:53 availability test: orphaned installed cores and
+    // a still-supervised/recorded core whose WFP+DNS protection is no longer fully proven are
+    // stopped here. A completely protected runtime stays alive until StartClash replaces it;
+    // third-party DNS software is never touched and still fails the bind proof below.
+    let reconciled_cores = transaction
         .wait("preparing Tono Core ownership", service::tono_prepare_core_start())
         .await?
         .map_err(StageFailure::error)?;
-    if terminated_orphans > 0 {
+    if reconciled_cores > 0 {
         logging!(
             warn,
             Type::Service,
-            "Tono: Service reconciled {terminated_orphans} orphaned Core process(es) before DNS preflight"
+            "Tono: Service stopped/reconciled {reconciled_cores} stale Core process(es) before DNS preflight"
         );
     }
 

@@ -16,7 +16,9 @@ use crate::core::paths::service_paths;
 use crate::core::runtime_generation::{PreparedRuntime, prepare_runtime, stage_runtime};
 use crate::core::state::{set_core_lifecycle_state, set_service_lifecycle_state};
 use crate::core::status::service_status_snapshot;
-use crate::core::structure::{OwnerSessionProof, Response, ServiceLifecycleState};
+use crate::core::structure::{
+    OwnerSessionProof, Response, ServiceLifecycleState, is_protected_startup_replacement_candidate,
+};
 use crate::core::windows_kill_switch;
 use crate::core::{apply_proxy, apply_proxy_or_direct, clear_proxy, dns, validate_proxy_config};
 use crate::{
@@ -1208,18 +1210,38 @@ fn create_ipc_router() -> Result<Router> {
                 };
             // No active session exists on a first connection, so this uses the same authenticated
             // owner gate as StartClash. The lifecycle lock prevents reconciliation from racing a
-            // start/stop; CoreManager exempts every process it currently vouches for, and the
-            // process module admits only Tono's canonical installed Core image.
+            // start/stop. CoreManager preserves a supervised process only with complete protected
+            // runtime proof; the fallback sweep admits only Tono's canonical installed image.
             let _lifecycle_guard =
                 match enter_owner_lifecycle(&owner, OwnerLifecycleGate::Unchecked).await {
                     ControlFlow::Continue(guard) => guard,
                     ControlFlow::Break(response) => return response,
                 };
+            // Decide under the lifecycle lock but before publishing this route's own operation:
+            // the shared proof requires a quiescent snapshot. A fully verified active runtime may
+            // keep serving DNS until StartClash replaces it; every weaker supervised runtime must
+            // be stopped now or it blocks the App's fixed-port bind before StartClash is reached.
+            let snapshot = match service_status_snapshot(&owner).await {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    return service_unavailable(format!(
+                        "Failed to prove existing Core state before DNS preflight: {error:#}"
+                    ));
+                }
+            };
+            let dns_status = dns::status().await;
+            let preserve_supervised_core =
+                is_protected_startup_replacement_candidate(&snapshot, &dns_status);
             let _operation_guard = OperationGuard::begin(
                 ServiceOperationKind::PrepareCoreStart,
                 IPC_HANDLER_TIMEOUT,
             );
-            match CORE_MANAGER.lock().await.prepare_start().await {
+            match CORE_MANAGER
+                .lock()
+                .await
+                .prepare_start(preserve_supervised_core)
+                .await
+            {
                 Ok(terminated) => ok_json(terminated),
                 Err(error) => service_unavailable(format!(
                     "Failed to reconcile Tono Core before DNS preflight: {error:#}"

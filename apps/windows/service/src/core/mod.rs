@@ -13,7 +13,8 @@ pub use structure::{
     SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
-    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest, owner_key,
+    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
+    is_protected_startup_replacement_candidate, owner_key,
 };
 
 pub mod paths;

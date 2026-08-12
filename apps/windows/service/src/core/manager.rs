@@ -377,6 +377,26 @@ async fn write_runtime_record_for_config(
     .with_context(|| format!("failed to write core runtime record {context}"))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrepareStartCoreAction {
+    NoCore,
+    Preserve(u32),
+    Stop(u32),
+}
+
+const fn prepare_start_core_action(
+    running_pid: u32,
+    preserve_supervised_core: bool,
+) -> PrepareStartCoreAction {
+    if running_pid == 0 {
+        PrepareStartCoreAction::NoCore
+    } else if preserve_supervised_core {
+        PrepareStartCoreAction::Preserve(running_pid)
+    } else {
+        PrepareStartCoreAction::Stop(running_pid)
+    }
+}
+
 pub struct CoreManager {
     running_pid: Arc<AtomicU32>,
     running_config: Mutex<Option<ClashConfig>>,
@@ -534,23 +554,55 @@ impl CoreManager {
     /// upgrade leaves an installed `verge-mihomo.exe` holding loopback port 53, the App's DNS
     /// preflight otherwise fails before `start_core` can reach this same safe process sweep.
     ///
-    /// The currently supervised PID and the runtime-record PID remain exempt inside the sweep.
-    /// Candidate identity is the canonical installed image path, never the process name alone, so
-    /// a third-party DNS server or a user-installed Mihomo is reported to the App and never killed.
-    pub async fn prepare_start(&self) -> Result<u32> {
+    /// A supervised Core is preserved only when the caller has just proved the complete active,
+    /// fail-closed runtime. Otherwise it is stopped here, before the DNS bind test. This matters
+    /// when a failed connection left the child/watchdog alive after WFP and protected DNS were
+    /// released: `start_core` would replace that child, but the fixed-port preflight prevented the
+    /// request from ever reaching `start_core`.
+    ///
+    /// Candidate identity in the fallback sweep is the canonical installed image path, never the
+    /// process name alone, so a third-party DNS server or user-installed Mihomo is still reported
+    /// to the App and never killed.
+    pub async fn prepare_start(&self, preserve_supervised_core: bool) -> Result<u32> {
         ensure_startup_reconciled().await?;
-        crate::core::process::sweep_orphan_core_processes(&[
-            self.running_pid.load(Ordering::Relaxed),
-        ])
-        .await
-        .context("orphaned core sweep failed before core start")
+        let action = prepare_start_core_action(
+            self.running_pid.load(Ordering::Acquire),
+            !cfg!(windows) || preserve_supervised_core,
+        );
+        let preserve_existing = matches!(action, PrepareStartCoreAction::Preserve(_));
+        let mut reconciled = 0_u32;
+
+        match action {
+            PrepareStartCoreAction::Stop(pid) => {
+                warn!(
+                    "Stopping supervised Core {pid} before DNS preflight because no fully protected runtime vouches for it"
+                );
+                self.stop_core()
+                    .await
+                    .with_context(|| format!("failed to stop stale supervised core {pid}"))?;
+                reconciled = 1;
+            }
+            PrepareStartCoreAction::NoCore | PrepareStartCoreAction::Preserve(_) => {}
+        }
+
+        let exempt = match action {
+            PrepareStartCoreAction::Preserve(pid) => vec![pid],
+            PrepareStartCoreAction::NoCore | PrepareStartCoreAction::Stop(_) => Vec::new(),
+        };
+        let swept = crate::core::process::sweep_orphan_core_processes(&exempt, preserve_existing)
+            .await
+            .context("orphaned core sweep failed before core start")?;
+        Ok(reconciled.saturating_add(swept))
     }
 
     pub async fn start_core(&self, config: ClashConfig, owner: OwnerIdentity) -> Result<()> {
         // Keep the final start gate even though revision-11 Apps call `prepare_start` before
         // their DNS preflight. The process table can change between IPC calls, and non-App
         // clients must receive the same ownership-safe cleanup.
-        self.prepare_start().await?;
+        // The next block replaces the supervised child under this same manager lock, so preserve
+        // it across this final process-table sweep. The earlier PrepareCoreStart route already
+        // stopped an unprotected child before the App's DNS bind proof.
+        self.prepare_start(true).await?;
         set_core_lifecycle_state(ServiceLifecycleState::Starting);
         if self.running_pid.load(Ordering::Relaxed) != 0 {
             info!("Core is already running, stopping existing instance");
@@ -1538,6 +1590,27 @@ pub(super) async fn set_running_core_identity_for_kill_switch_tests(identity: Op
 }
 
 pub static LOGGER_MANAGER: Lazy<Arc<AsyncLogger>> = Lazy::new(|| Arc::new(AsyncLogger::new()));
+
+#[cfg(test)]
+mod prepare_start_action_tests {
+    use super::{PrepareStartCoreAction, prepare_start_core_action};
+
+    #[test]
+    fn inactive_supervised_dns_owner_is_stopped_before_preflight() {
+        assert_eq!(
+            prepare_start_core_action(4860, false),
+            PrepareStartCoreAction::Stop(4860)
+        );
+        assert_eq!(
+            prepare_start_core_action(4860, true),
+            PrepareStartCoreAction::Preserve(4860)
+        );
+        assert_eq!(
+            prepare_start_core_action(0, false),
+            PrepareStartCoreAction::NoCore
+        );
+    }
+}
 
 #[cfg(all(test, unix))]
 mod tests {

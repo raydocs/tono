@@ -19,7 +19,8 @@ pub use core::{
     SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
-    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest, mihomo_ipc_path, owner_key,
+    WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
+    is_protected_startup_replacement_candidate, mihomo_ipc_path, owner_key,
 };
 pub use core::{OwnerPaths, ServicePaths, service_paths};
 
@@ -106,11 +107,14 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 11 adds an authenticated pre-start orphan-core reconciliation. It must run before
 /// the App probes loopback DNS so a Tono Core left by an interrupted upgrade cannot permanently
 /// squat `127.0.0.1:53` and prevent the Service's existing safe reaper from ever being reached.
-pub const PROTOCOL_REVISION: u16 = 11;
-/// Revisions 7 through 11 are wire/behaviour incompatible with older peers. Reject a mismatch at
+/// Revision 12 extends that contract to a Core the current Service still supervises or records:
+/// only a completely verified fail-closed runtime may survive the preflight; an inactive Core is
+/// stopped before its own DNS listener can strand every subsequent connection attempt.
+pub const PROTOCOL_REVISION: u16 = 12;
+/// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation.
-pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 11;
-pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 11;
+pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 12;
+pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 12;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;
 /// Revision that introduced `/clash/stage-runtime`.
 pub const MIN_SERVICE_REVISION_FOR_RUNTIME_STAGING: u16 = 2;
