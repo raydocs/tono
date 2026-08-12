@@ -63,11 +63,31 @@ label, and no `api`/`stats`/`policy` sections. Counters are keyed by the account
 label, so a client without one cannot be attributed — that is the whole reason
 usage has never been recorded.
 
-The inbound needs a client list rather than one client, `stats` enabled, per-user
-uplink/downlink counters switched on in `policy`, and an `api` inbound bound to
-localhost carrying `HandlerService` and `StatsService`, reachable at
-`TONO_XRAY_API_ADDRESS`. Localhost only: that interface can add and remove
-accounts.
+`tooling/scripts/remote/enable-tono-exit-metering.sh` does this. Copy it and
+`exit_metering_config.py` to the exit and run as root:
+
+    sudo ./enable-tono-exit-metering.sh
+
+It is additive and idempotent. The credential every current client holds is kept,
+so the fleet keeps working while accounts migrate to their own; a node that is
+already metered is detected and left alone without a restart.
+
+**One disconnection per exit, once.** Adding the management interface needs a
+restart, because the interface it would otherwise be added through does not exist
+yet. Run it one node at a time and let clients reconnect between them.
+
+It validates the generated configuration with the installed xray before replacing
+anything, keeps the previous configuration, puts it back if the service fails to
+start or does not stay running, and finally checks that the management API
+actually answers — configured-but-unreachable would otherwise surface later as an
+agent reporting nothing, which reads identically to an exit with no accounts on
+it.
+
+`test_exit_metering_config.py` covers the edit. The two cases worth the most:
+replacing the existing client instead of keeping it disconnects the whole fleet,
+and reporting work to do when there is none spends a restart to discover that.
+Both were checked to fail when broken, along with the API binding to a routable
+address — that interface can issue identities.
 
 ### 2. Accept the issued identities
 
