@@ -19,7 +19,10 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
-use tono_core::auth::{ApiError, ApiRequest, ApiResponse, HttpMethod, HttpTransport, TransportKind};
+use tono_core::auth::{
+    ApiError, ApiRequest, ApiResponse, HttpMethod, HttpTransport, TransportKind,
+    should_retry_transport,
+};
 
 use crate::tono::bootstrap;
 
@@ -30,17 +33,35 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Map a reqwest failure onto the retry-policy classification (§1).
-/// Ordering matters: `is_timeout()` first, then `is_connect()` — which on
-/// reqwest covers *both* DNS resolution and TCP connect (no finer split is
-/// available; in either phase HTTP bytes provably never went out, so the
-/// retry policy's Connect bucket is the correct home). TLS-layer failures
-/// surface only in the debug chain (handshake/certificate/rustls).
+///
+/// Ordering matters, and it is `is_connect()` first. reqwest sets *both*
+/// `is_connect()` and `is_timeout()` for a connect that timed out, so checking
+/// timeout first filed it as `Timeout` — a bucket the retry policy treats as "may
+/// already have been delivered" and therefore never retries for POST or DELETE.
+///
+/// That was wrong on its own terms. `Connect` covers DNS resolution and TCP
+/// connect, and in either phase no HTTP bytes have gone out; a connect that ran
+/// out of time delivered exactly as much as one that was refused, which is
+/// nothing. Verified against reqwest rather than assumed, and pinned by
+/// `a_connect_that_times_out_is_not_an_ambiguous_timeout`:
+///
+///   dropped packets   is_connect=true  is_timeout=true
+///   refused           is_connect=true  is_timeout=false
+///
+/// The distinction is not academic. Packets to a blocked address are dropped, not
+/// refused, so every user behind such a block produced the ambiguous kind — and
+/// the one request that matters on the sign-in screen is a POST.
+///
+/// A timeout *without* `is_connect()` is a genuine read/response timeout, where
+/// the request may well have arrived, and stays ambiguous.
+/// TLS-layer failures surface only in the debug chain
+/// (handshake/certificate/rustls).
 fn classify(err: &reqwest::Error) -> TransportKind {
-    if err.is_timeout() {
-        return TransportKind::Timeout;
-    }
     if err.is_connect() {
         return TransportKind::Connect;
+    }
+    if err.is_timeout() {
+        return TransportKind::Timeout;
     }
     let debug = format!("{err:?}").to_lowercase();
     if debug.contains("tls")
@@ -54,8 +75,71 @@ fn classify(err: &reqwest::Error) -> TransportKind {
     TransportKind::Other
 }
 
+/// The classification, as a word the operator can read.
+///
+/// `classify` already works this out to drive the retry policy, and until now it
+/// was discarded for reporting: the only text a user or a screenshot ever carried
+/// was reqwest's `error sending request for url (...)`, which is the same sentence
+/// whether the name did not resolve, the TCP connect was refused, or the
+/// certificate failed to validate. A support report built from it cannot be acted
+/// on, and one such report cost a full round of guessing.
+fn kind_label(kind: TransportKind) -> &'static str {
+    match kind {
+        TransportKind::Dns => "dns",
+        TransportKind::Connect => "connect",
+        TransportKind::Tls => "tls",
+        TransportKind::Timeout => "timeout",
+        TransportKind::Other => "other",
+    }
+}
+
+/// `reqwest`'s own `Display` stops at "error sending request for url"; the reason
+/// lives in the `source()` chain below it. Both are needed: the chain says *what*
+/// failed ("no such host", "connection refused", "certificate verify failed") and
+/// the label says which phase it failed in.
+fn describe(err: &reqwest::Error) -> String {
+    use std::error::Error as _;
+    let mut text = format!("{}: {err}", kind_label(classify(err)));
+    let mut source = err.source();
+    let mut depth = 0;
+    while let Some(cause) = source {
+        // Bounded: a source chain is short, and an error message is not a place
+        // to discover otherwise.
+        if depth >= 4 {
+            break;
+        }
+        let rendered = cause.to_string();
+        // Chains often repeat the layer above verbatim; repeating it in the UI
+        // buys nothing and pushes the useful end of the chain out of view.
+        if !text.contains(&rendered) {
+            text.push_str(" <- ");
+            text.push_str(&rendered);
+        }
+        source = cause.source();
+        depth += 1;
+    }
+    text
+}
+
 pub struct TonoTransport {
+    /// Reaches the control plane only at the pinned bootstrap addresses.
     client: reqwest::Client,
+    /// Reaches it through whatever the system resolver returns.
+    ///
+    /// The pins exist so a fully-armed kill switch cannot lock the client out of
+    /// its own control plane: with DNS blocked, literal addresses are the only way
+    /// back. But they were applied unconditionally and with no alternative, which
+    /// turned a recovery mechanism into the single point of failure — two
+    /// Cloudflare anycast addresses are the *whole* reachable set for every user,
+    /// and a network that drops those two can never sign in, while the same
+    /// machine's browser succeeds because DNS hands it a different edge.
+    ///
+    /// This client is tried only after the pinned one fails, and only when the
+    /// failure proves no bytes were delivered. When the kill switch really is
+    /// blocking, this attempt simply fails too: DNS is unavailable, and the WFP
+    /// permit covers the pinned addresses only. It can add a success; it cannot
+    /// take one away.
+    resolved: reqwest::Client,
 }
 
 impl TonoTransport {
@@ -64,7 +148,56 @@ impl TonoTransport {
             .into_iter()
             .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
             .collect();
-        let client = reqwest::Client::builder()
+        let resolved = Self::builder()
+            .build()
+            .context("failed to build the Tono HTTP fallback client")?;
+        let client = Self::builder()
+            // F1: resolve the API host to the pinned bootstrap IPs.
+            .resolve_to_addrs(bootstrap::API_HOST, &pinned)
+            .build()
+            .context("failed to build the Tono HTTP client")?;
+        Ok(Self { client, resolved })
+    }
+
+    /// Same wiring, with both clients' resolution supplied.
+    ///
+    /// The behaviour under test is "when the pinned client fails, is the other one
+    /// tried, and does its result stand" — so a test drives both sides. Leaving the
+    /// second client on the real system resolver would make the test depend on how
+    /// `localhost` happens to resolve on the host, which is how three earlier
+    /// versions of it ended up asserting nothing.
+    ///
+    /// A short connect timeout so a deliberately unroutable pinned address fails in
+    /// milliseconds instead of the production 30 s.
+    #[cfg(test)]
+    fn with_clients(
+        host: &str,
+        pinned: &[std::net::SocketAddr],
+        resolved: &[std::net::SocketAddr],
+    ) -> Result<Self> {
+        let quick = || {
+            Self::builder()
+                .connect_timeout(Duration::from_millis(700))
+                .timeout(Duration::from_millis(900))
+        };
+        Ok(Self {
+            client: quick()
+                .resolve_to_addrs(host, pinned)
+                .build()
+                .context("failed to build the pinned test client")?,
+            resolved: quick()
+                .resolve_to_addrs(host, resolved)
+                .build()
+                .context("failed to build the resolving test client")?,
+        })
+    }
+
+    /// Shared settings. Both clients must agree on everything except how the API
+    /// host is resolved; a fallback that also relaxed proxying or redirects would
+    /// be a second, weaker channel rather than the same channel resolved
+    /// differently.
+    fn builder() -> reqwest::ClientBuilder {
+        reqwest::Client::builder()
             // The control-plane recovery channel is DNS-pinned and must not
             // silently inherit HTTP(S)_PROXY, ALL_PROXY, or WinINET proxy
             // settings. The OS TUN still carries this socket when connected;
@@ -74,11 +207,6 @@ impl TonoTransport {
             .cookie_store(false)
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(TOTAL_TIMEOUT)
-            // F1: resolve the API host to the pinned bootstrap IPs.
-            .resolve_to_addrs(bootstrap::API_HOST, &pinned)
-            .build()
-            .context("failed to build the Tono HTTP client")?;
-        Ok(Self { client })
     }
 }
 
@@ -90,15 +218,19 @@ fn method_of(method: HttpMethod) -> reqwest::Method {
     }
 }
 
-#[async_trait]
-impl HttpTransport for TonoTransport {
-    async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
-        crate::tono::integration_profile::delay_remote_operation().await;
+impl TonoTransport {
+    /// One attempt over one client. Shared so the pinned and system-resolved
+    /// paths cannot drift in how they read a response.
+    async fn attempt(
+        &self,
+        client: &reqwest::Client,
+        request: &ApiRequest,
+    ) -> Result<ApiResponse, ApiError> {
         let transport = |err: &reqwest::Error| ApiError::Transport {
             kind: classify(err),
-            message: err.to_string(),
+            message: describe(err),
         };
-        let mut builder = self.client.request(method_of(request.method), &request.url);
+        let mut builder = client.request(method_of(request.method), &request.url);
         if let Some(bearer) = &request.bearer {
             builder = builder.bearer_auth(bearer);
         }
@@ -129,10 +261,311 @@ impl HttpTransport for TonoTransport {
     }
 }
 
+#[async_trait]
+impl HttpTransport for TonoTransport {
+    async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
+        crate::tono::integration_profile::delay_remote_operation().await;
+        let pinned = self.attempt(&self.client, &request).await;
+        let Err(ApiError::Transport { kind, message }) = pinned else {
+            return pinned;
+        };
+        // The fallback obeys the same rule as the retry policy rather than a
+        // looser one of its own: a POST or DELETE is re-sent only when the
+        // failure proves the request never reached the server. A timeout or a
+        // TLS failure may already have delivered the bytes, and re-sending a
+        // login code or a device deletion in that state is worse than failing.
+        if !should_retry_transport(request.method, kind) {
+            return Err(ApiError::Transport { kind, message });
+        }
+        match self.attempt(&self.resolved, &request).await {
+            Ok(response) => Ok(response),
+            // Both paths are named. Which one failed and how is the whole
+            // diagnostic: "pinned addresses unreachable, system DNS fine" and
+            // "nothing reachable at all" call for completely different actions,
+            // and a single merged message cannot tell them apart.
+            Err(ApiError::Transport {
+                kind: fallback_kind,
+                message: fallback_message,
+            }) => Err(ApiError::Transport {
+                kind: fallback_kind,
+                message: format!(
+                    "pinned[{message}]; system-dns[{fallback_message}]"
+                ),
+            }),
+            Err(other) => Err(other),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CONNECT_TIMEOUT, MAX_RESPONSE_BYTES, TOTAL_TIMEOUT, method_of};
-    use tono_core::auth::HttpMethod;
+    use super::{
+        CONNECT_TIMEOUT, Duration, MAX_RESPONSE_BYTES, TOTAL_TIMEOUT, TonoTransport, describe,
+        kind_label, method_of,
+    };
+    use tono_core::auth::{
+        ApiError, ApiRequest, ApiResponse, HttpMethod, HttpTransport, TransportKind,
+        should_retry_transport,
+    };
+
+
+    /// A connect that timed out must be classified as never-delivered.
+    ///
+    /// reqwest sets both flags for it, so the ordering inside `classify` decides
+    /// whether a POST may be re-sent. Packets to a blocked address are dropped
+    /// rather than refused, which is precisely the case where a user is stuck on
+    /// the sign-in screen — and signing in is a POST.
+    #[tokio::test]
+    async fn a_connect_that_times_out_is_not_an_ambiguous_timeout() {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(std::time::Duration::from_millis(700))
+            .build()
+            .expect("client");
+        // Unroutable RFC1918 address: packets are dropped, so the connect runs
+        // out of time instead of being refused.
+        let blackholed = client
+            .get("http://10.255.255.1/")
+            .send()
+            .await
+            .expect_err("an unroutable address must fail");
+        assert!(
+            blackholed.is_timeout() && blackholed.is_connect(),
+            "reqwest changed which flags it sets; the ordering in classify depends on this"
+        );
+        assert_eq!(
+            super::classify(&blackholed),
+            TransportKind::Connect,
+            "a connect-phase timeout delivered nothing and must be retryable"
+        );
+        assert!(
+            should_retry_transport(HttpMethod::Post, super::classify(&blackholed)),
+            "a blocked address must not strand a POST"
+        );
+
+        let refused = client
+            .get("http://127.0.0.1:1/")
+            .send()
+            .await
+            .expect_err("a closed port must fail");
+        assert_eq!(super::classify(&refused), TransportKind::Connect);
+    }
+
+    /// Every classification has a distinct word. A label that collided would put
+    /// two different faults under one name in every report.
+    #[test]
+    fn each_transport_kind_has_its_own_label() {
+        let kinds = [
+            TransportKind::Dns,
+            TransportKind::Connect,
+            TransportKind::Tls,
+            TransportKind::Timeout,
+            TransportKind::Other,
+        ];
+        let labels: Vec<&str> = kinds.iter().copied().map(kind_label).collect();
+        let mut unique = labels.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), labels.len(), "{labels:?}");
+    }
+
+    /// The reported message must say more than reqwest's own sentence.
+    ///
+    /// `error sending request for url (...)` is identical whether the name did not
+    /// resolve, the connection was refused, or the certificate failed — a report
+    /// containing only that cannot be acted on, and one such report cost a full
+    /// round of guessing before this existed.
+    #[tokio::test]
+    async fn the_message_names_the_phase_and_the_underlying_cause() {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("client");
+        // A port nothing listens on: a connect failure with a real source chain.
+        let err = client
+            .get("http://127.0.0.1:1/")
+            .send()
+            .await
+            .expect_err("a closed port must fail");
+        let described = describe(&err);
+        assert!(
+            described.starts_with("connect: "),
+            "the phase must lead the message: {described}"
+        );
+        assert!(
+            described.len() > err.to_string().len(),
+            "nothing was added to reqwest's own text: {described}"
+        );
+        assert!(
+            described.contains(" <- "),
+            "the source chain was dropped: {described}"
+        );
+    }
+
+    /// The point of the change: pinned addresses that cannot be reached no longer
+    /// end the attempt. Before this, `resolve_to_addrs` was the only resolution
+    /// path, so two unreachable addresses meant a client that could never sign in
+    /// while the same machine's browser worked.
+    #[tokio::test]
+    async fn an_unreachable_pinned_address_falls_back_to_the_system_resolver() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        // Serves every connection, not one: an earlier version stopped after the
+        // first, and the pinned attempt consumed it — the fallback then saw
+        // "connection refused" and the test blamed the code for its own setup.
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                use std::io::{BufRead as _, BufReader, Write as _};
+                let Ok(mut stream) = stream else { continue };
+                // The request is read to its blank line before anything is
+                // written. Replying immediately and dropping the socket resets the
+                // connection while the client is still sending, which reqwest
+                // reports as a cancelled request — the earlier version of this
+                // test did that and failed roughly one run in three, which reads
+                // as a flaky fallback rather than a flaky fixture.
+                let mut reader = BufReader::new(match stream.try_clone() {
+                    Ok(clone) => clone,
+                    Err(_) => continue,
+                });
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    line.clear();
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi",
+                );
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+
+        // An unroutable RFC1918 address: packets are dropped, so the pinned
+        // attempt times out during connect. That is the field case — a blocked
+        // address drops rather than refuses — and it reaches the fallback only
+        // because `classify` files a connect-phase timeout as never-delivered.
+        let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
+        let live = vec![std::net::SocketAddr::from(([127, 0, 0, 1], port))];
+        // A hostname, not an IP literal: `resolve_to_addrs` overrides name
+        // resolution and is not consulted for a literal address at all. Three
+        // earlier versions of this test pinned a literal and passed while the
+        // override did nothing — one of them passed with the fallback removed.
+        let url = format!("http://tono-fallback.test:{port}/");
+
+        // Proven, not assumed: a client restricted to the pinned address cannot
+        // reach this server.
+        let pinned_only = TonoTransport::builder()
+            .connect_timeout(Duration::from_millis(700))
+            .resolve_to_addrs("tono-fallback.test", &dead)
+            .build()
+            .expect("pinned-only client");
+        pinned_only
+            .get(&url)
+            .send()
+            .await
+            .expect_err("the pinned address must be unreachable for this test to mean anything");
+
+        let transport =
+            TonoTransport::with_clients("tono-fallback.test", &dead, &live).expect("transport");
+        let response: ApiResponse = transport
+            .send(ApiRequest {
+                method: HttpMethod::Get,
+                url: url.clone(),
+                bearer: None,
+                json_body: None,
+            })
+            .await
+            .expect("the fallback must carry the request");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"hi");
+    }
+
+    /// A POST is not re-sent when the failure might already have delivered it.
+    ///
+    /// The fallback deliberately reuses `should_retry_transport` rather than a
+    /// looser rule of its own. A response that never arrives is not proof the
+    /// request did not: re-sending here would issue a second login code, or repeat
+    /// a device deletion, on every stalled connection.
+    #[tokio::test]
+    async fn a_stalled_post_is_not_re_sent_to_the_second_client() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&connections);
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            for stream in listener.incoming() {
+                let Ok(stream) = stream else { continue };
+                counter.fetch_add(1, Ordering::SeqCst);
+                // Accepted and never answered: the connect succeeds, so the
+                // failure is a read timeout rather than a connect timeout.
+                held.push(stream);
+            }
+        });
+
+        let live = vec![std::net::SocketAddr::from(([127, 0, 0, 1], port))];
+        let transport =
+            TonoTransport::with_clients("tono-stall.test", &live, &live).expect("transport");
+        let error = transport
+            .send(ApiRequest {
+                method: HttpMethod::Post,
+                url: format!("http://tono-stall.test:{port}/"),
+                bearer: None,
+                json_body: Some("{}".to_string()),
+            })
+            .await
+            .expect_err("a server that never answers must fail");
+        let ApiError::Transport { kind, .. } = error else {
+            panic!("expected a transport error");
+        };
+        assert_eq!(
+            kind,
+            TransportKind::Timeout,
+            "a completed connect that never answers is the ambiguous case"
+        );
+        assert_eq!(
+            connections.load(Ordering::SeqCst),
+            1,
+            "the POST was sent twice; a stalled request may already have been delivered"
+        );
+    }
+
+    /// And when neither path works, the failure says so about both. "Pinned
+    /// unreachable, system DNS fine" and "nothing reachable at all" need opposite
+    /// responses, and a merged sentence cannot separate them.
+    #[tokio::test]
+    async fn a_total_failure_reports_both_paths() {
+        let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
+        let transport = TonoTransport::with_clients("tono-nowhere.test", &dead, &dead)
+            .expect("transport");
+        let error = transport
+            .send(ApiRequest {
+                method: HttpMethod::Get,
+                url: "http://tono-nowhere.test/".to_string(),
+                bearer: None,
+                json_body: None,
+            })
+            .await
+            .expect_err("both paths are dead");
+        let ApiError::Transport { message, .. } = error else {
+            panic!("expected a transport error");
+        };
+        assert!(message.contains("pinned["), "{message}");
+        assert!(message.contains("system-dns["), "{message}");
+        // Not only that both were tried: each half must still say which phase
+        // failed and why. Asserting the merge markers alone passed even when the
+        // message fell back to reqwest's bare sentence.
+        assert!(
+            message.contains("connect:"),
+            "the phase is missing from the reported message: {message}"
+        );
+    }
 
     #[test]
     fn http_method_mapping() {
