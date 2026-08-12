@@ -21,9 +21,13 @@ on:
       - apps/windows/crates/**
       - apps/windows/service/**
       - .github/workflows/windows-ci.yml
+  # Every branch, not just the default one. This repository is a fork, and no
+  # `pull_request` event has ever produced a run here — PR #1 merged without one.
+  # Restricted to `main` and paired with a trigger that does not fire, this
+  # workflow could only ever have run after a merge, which is the wrong time to
+  # learn something is broken. It is also why `macos-ci.yml` existed for days and
+  # never executed once.
   push:
-    branches:
-      - main
     paths:
       - apps/windows/crates/**
       - apps/windows/service/**
