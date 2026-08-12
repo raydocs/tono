@@ -285,30 +285,42 @@ private actor ManagedTrafficPolicyProcessor {
                 TonoTrafficPolicy.self,
                 from: data
               ),
-              policy.version == 1 || policy.version == 2
-                || policy.version == 3 || policy.version == 4,
-              policy.version == 2 || policy.version == 3
-                || policy.version == 4 || policy.webDomains.isEmpty,
-              policy.version == 3 || policy.version == 4
-                || policy.directSuffixes.isEmpty,
-              policy.version == 4 || policy.tcpEndpoints.isEmpty,
-              policy.domains.count <= 32,
-              policy.mediaEndpoints.count <= 64,
-              policy.tcpEndpoints.count <= 64,
-              policy.webDomains.count <= 32,
-              policy.directSuffixes.count <= 64 else {
+              // Forward compatible. Pinning the accepted versions meant a revision
+              // this build had not heard of discarded the whole document, so every
+              // policy change needed a client release — and a missed release looks
+              // exactly like an empty policy. The Windows client sat in that state
+              // for days without a symptom anyone could name. A newer revision is
+              // read as the newest shape this build knows; fields a declared
+              // version does not promise are ignored below rather than required to
+              // be absent.
+              policy.version >= 1 else {
             throw TonoAPIClient.APIError.invalidResponse
         }
+        // Trimmed rather than refused. A published list longer than this build's
+        // limit means the limit is stale, and answering that by routing nothing at
+        // all is worse than routing the part that fits.
+        let declaredWeb = policy.version >= 2 ? Array(policy.webDomains.prefix(32)) : []
+        let declaredSuffixes = policy.version >= 3 ? Array(policy.directSuffixes.prefix(64)) : []
+        let declaredTCP = policy.version >= 4 ? Array(policy.tcpEndpoints.prefix(64)) : []
+        let policyDomains = Array(policy.domains.prefix(32))
+        let policyMedia = Array(policy.mediaEndpoints.prefix(64))
 
+        // Dropped, not fatal, from here down. An entry this build will not honour is
+        // still not routed — the safety property is unchanged — but it no longer
+        // takes every other route in the document with it. Every drop is named in
+        // `dropped` and recorded by the caller: replacing "silently discarded
+        // everything" with "silently discarded some" would be the same fault.
+        var dropped: [String] = []
         var seenHosts = Set<String>()
-        let domains = try policy.domains.map { entry in
-            let host = try ConfigPipeline.validatedManagedDirectDomain(entry.host)
-            guard host == entry.host,
+        let domains = policyDomains.compactMap { entry -> TonoTrafficPolicyDomain? in
+            guard let host = try? ConfigPipeline.validatedManagedDirectDomain(entry.host),
+                  host == entry.host,
                   seenHosts.insert(host).inserted,
                   !entry.ports.isEmpty,
                   Set(entry.ports).count == entry.ports.count,
                   entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
-                throw TonoAPIClient.APIError.invalidResponse
+                dropped.append(entry.host)
+                return nil
             }
             return TonoTrafficPolicyDomain(
                 host: host,
@@ -317,18 +329,19 @@ private actor ManagedTrafficPolicyProcessor {
         }.sorted { $0.host < $1.host }
 
         var seenAddresses = Set<String>()
-        let media = try policy.mediaEndpoints.map { entry in
-            let address = try ConfigPipeline.validatedPublicIPv4(
-                entry.address,
-                field: "managed media address"
-            )
-            guard address == entry.address,
+        let media = policyMedia.compactMap { entry -> TonoTrafficPolicyMediaEndpoint? in
+            guard let address = try? ConfigPipeline.validatedPublicIPv4(
+                    entry.address,
+                    field: "managed media address"
+                  ),
+                  address == entry.address,
                   !protectedAddresses.contains(address),
                   seenAddresses.insert(address).inserted,
                   !entry.ports.isEmpty,
                   Set(entry.ports).count == entry.ports.count,
                   entry.ports.allSatisfy({ $0 == 443 || $0 == 8000 }) else {
-                throw TonoAPIClient.APIError.invalidResponse
+                dropped.append(entry.address)
+                return nil
             }
             return TonoTrafficPolicyMediaEndpoint(
                 address: address,
@@ -337,18 +350,19 @@ private actor ManagedTrafficPolicyProcessor {
         }.sorted { $0.address < $1.address }
 
         var seenTCPAddresses = Set<String>()
-        let tcp = try policy.tcpEndpoints.map { entry in
-            let address = try ConfigPipeline.validatedPublicIPv4(
-                entry.address,
-                field: "managed TCP address"
-            )
-            guard address == entry.address,
+        let tcp = declaredTCP.compactMap { entry -> TonoTrafficPolicyMediaEndpoint? in
+            guard let address = try? ConfigPipeline.validatedPublicIPv4(
+                    entry.address,
+                    field: "managed TCP address"
+                  ),
+                  address == entry.address,
                   !protectedAddresses.contains(address),
                   seenTCPAddresses.insert(address).inserted,
                   !entry.ports.isEmpty,
                   Set(entry.ports).count == entry.ports.count,
                   entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
-                throw TonoAPIClient.APIError.invalidResponse
+                dropped.append(entry.address)
+                return nil
             }
             return TonoTrafficPolicyMediaEndpoint(
                 address: address,
@@ -356,25 +370,27 @@ private actor ManagedTrafficPolicyProcessor {
             )
         }.sorted { $0.address < $1.address }
 
-        let webDomains = try policy.webDomains.map { entry in
-            let host = try ConfigPipeline.validatedWebDirectDomain(entry.host)
-            guard host == entry.host,
+        let webDomains = declaredWeb.compactMap { entry -> TonoTrafficPolicyDomain? in
+            guard let host = try? ConfigPipeline.validatedWebDirectDomain(entry.host),
+                  host == entry.host,
                   seenHosts.insert(host).inserted,
                   entry.ports == [443] else {
-                throw TonoAPIClient.APIError.invalidResponse
+                dropped.append(entry.host)
+                return nil
             }
             return TonoTrafficPolicyDomain(host: host, ports: [443])
         }.sorted { $0.host < $1.host }
 
         var seenSuffixes = Set<String>()
-        let directSuffixes = try policy.directSuffixes.map { entry in
-            let host = try ConfigPipeline.validatedManagedDirectSuffix(entry.host)
-            guard host == entry.host,
+        let directSuffixes = declaredSuffixes.compactMap { entry -> TonoTrafficPolicyDomain? in
+            guard let host = try? ConfigPipeline.validatedManagedDirectSuffix(entry.host),
+                  host == entry.host,
                   seenSuffixes.insert(host).inserted,
                   !entry.ports.isEmpty,
                   Set(entry.ports).count == entry.ports.count,
                   entry.ports.allSatisfy({ $0 == 80 || $0 == 443 }) else {
-                throw TonoAPIClient.APIError.invalidResponse
+                dropped.append(entry.host)
+                return nil
             }
             return TonoTrafficPolicyDomain(
                 host: host,
@@ -382,6 +398,23 @@ private actor ManagedTrafficPolicyProcessor {
             )
         }.sorted { $0.host < $1.host }
 
+        if !dropped.isEmpty || policy.version > 4 {
+            // Recorded because degrading is only an improvement while it is visible.
+            // Hosts are named: which entry a build does not understand is the whole
+            // diagnostic, and a count alone would have said nothing useful about the
+            // Windows client running for days with no policy.
+            LocalTrafficAudit.shared.recordEvent(
+                "managed_direct_policy_entries_dropped",
+                details: [
+                    "revision": String(cache.revision),
+                    "policy_version": String(policy.version),
+                    "dropped": String(dropped.count),
+                    // Bounded: a report is a diagnostic, not a copy of the document.
+                    "hosts": dropped.sorted().prefix(12).joined(separator: ","),
+                    "newer_than_known": String(policy.version > 4),
+                ]
+            )
+        }
         return TonoTrafficPolicy(
             version: policy.version,
             domains: domains,
