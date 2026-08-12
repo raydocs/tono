@@ -47,6 +47,9 @@ export default defineConfig({
           RATE_LIMIT_OIDC_VERIFY_CHALLENGE: '3',
         },
         d1Databases: { DB: 'test-db' },
+        // Local in-memory R2 for the raw-log pipeline, so the upload path is
+        // exercised against a real bucket API rather than a stub.
+        r2Buckets: ['DIAGNOSTICS_LOGS'],
       },
     }),
   ],

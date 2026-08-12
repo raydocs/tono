@@ -31,6 +31,13 @@
     "binding": "DB", "database_name": "tono-control-plane",
     "database_id": "caf9b9fb-b4d5-498d-a1ad-7d5cdbb4237c", "migrations_dir": "migrations"
   }],
+  // Raw audit-log segments uploaded by running clients. Megabytes per hour per
+  // device, so they cannot live in D1 (the whole database is single-digit MB);
+  // D1 keeps only the index in `diagnostics_log_objects`. Objects are deleted by
+  // the scheduled cleanup at the same retention as their index rows.
+  "r2_buckets": [{
+    "binding": "DIAGNOSTICS_LOGS", "bucket_name": "tono-diagnostics-logs"
+  }],
   "vars": {
     "ALLOWED_ORIGIN": "https://api.afk.ccwu.cc",
     // Public half of the traffic-policy signing key. A var, not a secret: it is
@@ -63,6 +70,13 @@
     "RATE_LIMIT_DIAGNOSTICS_USER_HOUR": "5",
     "RATE_LIMIT_DIAGNOSTICS_USER_DAY": "20",
     "DIAGNOSTICS_RETENTION_SECONDS": "2592000",
+    // Raw logs are far larger than reports and are re-uploaded continuously, so
+    // they expire much sooner: 14 days is longer than any triage cycle so far.
+    "DIAGNOSTICS_LOG_RETENTION_SECONDS": "1209600",
+    // One segment per minute per device, with a daily backstop. A client that
+    // loses its cursor and replays cannot spend more than a day's budget.
+    "RATE_LIMIT_DIAGNOSTICS_LOG_USER_HOUR": "80",
+    "RATE_LIMIT_DIAGNOSTICS_LOG_USER_DAY": "800",
     "RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY": "100",
     "RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY": "4",
     "ROUTING_RESEARCH_RETENTION_SECONDS": "7776000",

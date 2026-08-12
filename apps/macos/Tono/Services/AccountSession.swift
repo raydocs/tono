@@ -34,6 +34,10 @@ final class AccountSession {
     private var deviceRefreshTask: Task<Void, Never>?
     private var deviceActionTask: Task<Void, Never>?
     private var appRoutingResearchTask: Task<Void, Never>?
+    /// Test-programme raw-log upload. Built lazily on first use so a signed-out
+    /// launch never touches the audit directory, and kept for the process
+    /// lifetime so its upload cursor survives sign-out and sleep.
+    private var diagnosticsLogUploader: DiagnosticsLogUploader?
     private var systemSleeping = false
     private var lastCatalogFailureMessage: String?
     private var lastTrafficPolicyFailureMessage: String?
@@ -493,6 +497,11 @@ final class AccountSession {
         deviceActionTask = nil
         appRoutingResearchTask?.cancel()
         appRoutingResearchTask = nil
+        if let uploader = diagnosticsLogUploader {
+            // Stop, but keep the instance: its cursor is what stops the next
+            // sign-in from re-uploading everything already accepted.
+            await uploader.stop()
+        }
         // Clear descriptor first so Mihomo stops, while kill switch may remain armed.
         await descriptorConsumer(nil)
         if AppProfile.homeExitEnabled {
@@ -717,6 +726,7 @@ final class AccountSession {
         }
         updateRemoteDiagnosticsPolling()
         updateAppRoutingResearchUploading()
+        updateDiagnosticsLogUploading()
     }
 
     func remoteDiagnosticsSettingChanged() {
@@ -739,12 +749,16 @@ final class AccountSession {
         catalogSyncTask?.cancel(); catalogSyncTask = nil
         deviceActionTask?.cancel(); deviceActionTask = nil
         appRoutingResearchTask?.cancel(); appRoutingResearchTask = nil
+        if let uploader = diagnosticsLogUploader {
+            Task { await uploader.stop() }
+        }
     }
 
     func resumeAfterSystemWake() {
         systemSleeping = false
         guard state == .ready else { return }
         startCatalogSync(refreshImmediately: false)
+        updateDiagnosticsLogUploading()
         // startCatalogSync resumes opted-in actions immediately, while its
         // catalog request waits for the normal timer and cannot race wake protection.
     }
@@ -761,6 +775,55 @@ final class AccountSession {
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
             }
         }
+    }
+
+    /// Starts or stops the raw-log upload loop.
+    ///
+    /// Deliberately not gated on `remoteDiagnosticsEnabled`: that switch governs
+    /// the four fixed remote actions and the compact protection snapshot, and
+    /// borrowing it here would make one consent cover a pipeline it never
+    /// described. This has its own switch and its own Settings copy.
+    private func updateDiagnosticsLogUploading() {
+        let enabled = AppProfile.defaults
+            .object(forKey: SettingsKey.networkLogUploadEnabled) == nil
+            ? true
+            : AppProfile.defaults.bool(forKey: SettingsKey.networkLogUploadEnabled)
+        guard state == .ready, !systemSleeping, user != nil, enabled else {
+            if let uploader = diagnosticsLogUploader {
+                Task { await uploader.stop() }
+            }
+            return
+        }
+        if diagnosticsLogUploader == nil {
+            let api = self.api
+            diagnosticsLogUploader = DiagnosticsLogUploader(
+                upload: { payload, sessionID, sequence, lineCount, clientVersion, osVersion in
+                    _ = try await api.uploadDiagnosticsLogSegment(
+                        payload: payload,
+                        sessionID: sessionID,
+                        sequence: sequence,
+                        lineCount: lineCount,
+                        clientVersion: clientVersion,
+                        osVersion: osVersion
+                    )
+                }
+            )
+        }
+        if let uploader = diagnosticsLogUploader {
+            Task { await uploader.start() }
+        }
+    }
+
+    func networkLogUploadSettingChanged() {
+        updateDiagnosticsLogUploading()
+    }
+
+    /// Sends whatever is unsent right now, for the Support page's button. Returns
+    /// nothing: the button reports "queued", because a segment can legitimately
+    /// be empty when the log has not advanced since the last sweep.
+    func uploadDiagnosticsLogNow() async {
+        updateDiagnosticsLogUploading()
+        await diagnosticsLogUploader?.sweep()
     }
 
     private func updateAppRoutingResearchUploading() {

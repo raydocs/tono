@@ -10,6 +10,7 @@ struct SupportView: View {
 
     @State private var probe: RuntimeProbe?
     @State private var isProbing = false
+    @State private var isUploadingLog = false
     @State private var copiedTarget: CopyTarget?
 
     private static let recoveryCommand =
@@ -203,7 +204,7 @@ struct SupportView: View {
 
     private var logsCard: some View {
         SupportCard(icon: "doc.text.magnifyingglass", title: String(localized: "Local Logs")) {
-            Text(String(localized: "Tono keeps one local, redacted log file. Support may call it the audit log or the diagnostics log — it is the same file. Credentials and URL queries are removed before anything is written."))
+            Text(String(localized: "Tono keeps one redacted log file. Support may call it the audit log or the diagnostics log — it is the same file. Credentials and URL queries are removed before anything is written, and TLS bodies are never observed. In this test build the file is also uploaded to Tono support so routing bugs can be diagnosed without asking you for it; it carries the hostnames you connected to, the process that opened each connection, and which rule and route it matched. Settings › Privacy turns the upload off."))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -229,6 +230,32 @@ struct SupportView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([logsFolderURL])
                 }
             )
+
+            supportDivider
+
+            // The upload already runs on a timer; this exists for the support
+            // conversation, where waiting two minutes for the tick is the
+            // difference between diagnosing a live symptom and losing it.
+            HStack(spacing: 8) {
+                Text(String(localized: "Send the newest log segment to support now"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button(isUploadingLog
+                    ? String(localized: "Sending…")
+                    : String(localized: "Upload now")) {
+                    guard !isUploadingLog, let accountSession else { return }
+                    isUploadingLog = true
+                    Task {
+                        await accountSession.uploadDiagnosticsLogNow()
+                        isUploadingLog = false
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tint)
+                .disabled(isUploadingLog || accountSession == nil)
+            }
         }
     }
 
@@ -236,7 +263,7 @@ struct SupportView: View {
 
     private func diagnosticsCard(report: String) -> some View {
         SupportCard(icon: "shield.lefthalf.filled", title: String(localized: "Redacted Diagnostics Report")) {
-            Text(String(localized: "This is exactly what Tono reports when support requests a diagnostic snapshot. It carries no hostnames, IP addresses, process names or account tokens."))
+            Text(String(localized: "This is exactly what Tono reports when support requests a diagnostic snapshot. It carries no hostnames, IP addresses, process names or account tokens. It is a separate, smaller report than the audit log above, which in this test build is uploaded in full."))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

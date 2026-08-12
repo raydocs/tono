@@ -21,6 +21,12 @@ enum SettingsKey {
         "aggregatedAppRoutingResearchEnabled"
     nonisolated static let localTrafficAuditEnabled =
         "localTrafficAuditEnabled"
+    /// Test-programme network-log upload. Distinct key from the research
+    /// toggles: those upload aggregates with no hostnames, this uploads the
+    /// audit log verbatim, and conflating them would let one consent stand in
+    /// for the other.
+    nonisolated static let networkLogUploadEnabled =
+        "networkLogUploadEnabled"
     static let hasCompletedOnboarding = "hasCompletedOnboarding"
     static let selectedProxyTargetName = "selectedProxyTargetName"
     static let cloudExitDefaultPolicyVersion = "cloudExitDefaultPolicyVersion"
