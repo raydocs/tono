@@ -29,6 +29,14 @@ const tauriLibSource = readFileSync(
   new URL('../src-tauri/src/lib.rs', import.meta.url),
   'utf8',
 )
+const tonoTransportSource = readFileSync(
+  new URL('../src-tauri/src/tono/transport.rs', import.meta.url),
+  'utf8',
+)
+const windowsReleaseWorkflowSource = readFileSync(
+  new URL('../../../../.github/workflows/windows-release.yml', import.meta.url),
+  'utf8',
+)
 const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
   'utf8',
@@ -431,11 +439,42 @@ test('release TLS gate requires proxy-free pinning and rejects verification bypa
     legacyNetwork: 'Client::builder().tls_backend_rustls().build()',
   }
   assert.equal(validateTlsPolicySources(safe), null)
+  assert.equal(
+    validateTlsPolicySources({ ...safe, transport: tonoTransportSource }),
+    null,
+    'the gate must accept the real shared proxy-free transport builder',
+  )
+  assert.equal(
+    validateTlsPolicySources({
+      ...safe,
+      transport: `
+        fn builder() -> reqwest::ClientBuilder {
+          reqwest::Client::builder().no_proxy()
+        }
+        let client = Self::builder()
+          .resolve_to_addrs(bootstrap::API_HOST, &pinned);
+      `,
+    }),
+    null,
+  )
   assert.match(
     validateTlsPolicySources({
       ...safe,
       transport:
         'reqwest::Client::builder()\n.resolve_to_addrs(bootstrap::API_HOST, &pinned)',
+    }),
+    /disable application-level proxy discovery/,
+  )
+  assert.match(
+    validateTlsPolicySources({
+      ...safe,
+      transport: `
+        fn builder() -> reqwest::ClientBuilder {
+          reqwest::Client::builder()
+        }
+        let client = Self::builder()
+          .resolve_to_addrs(bootstrap::API_HOST, &pinned);
+      `,
     }),
     /disable application-level proxy discovery/,
   )
@@ -449,6 +488,29 @@ test('release TLS gate requires proxy-free pinning and rejects verification bypa
       /disables TLS certificate or hostname verification/,
     )
   }
+})
+
+test('Windows release stops when a native preflight command fails', () => {
+  const block = windowsReleaseWorkflowSource.match(
+    /- name: Prepare and validate the Windows payload inputs\n\s+run: \|([\s\S]*?)\n\s+- name:/,
+  )?.[1]
+  assert.ok(block, 'release workflow is missing the payload-input gate')
+  const firstNativeCommandAt = block.indexOf('pnpm prebuild')
+  assert.ok(firstNativeCommandAt >= 0, 'release workflow is missing prebuild')
+  assert.ok(
+    block.indexOf("$ErrorActionPreference = 'Stop'") < firstNativeCommandAt,
+    'PowerShell errors must stop the release before native commands run',
+  )
+  assert.ok(
+    block.indexOf('$PSNativeCommandUseErrorActionPreference = $true') <
+      firstNativeCommandAt,
+    'native command exit codes must stop the release workflow',
+  )
+  assert.match(
+    windowsReleaseWorkflowSource,
+    /- name: Inspect the built NSIS payload[\s\S]*pnpm release:preflight --payload-only/,
+    'the signed draft must be inspected as a real NSIS package',
+  )
 })
 
 test('release Tauri handler excludes unused native probes and secret-bearing reads', () => {
