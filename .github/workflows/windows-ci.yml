@@ -1,0 +1,64 @@
+name: Windows CI
+
+# `windows-release.yml` builds the service but never tests it, so nothing ran
+# these on a change: 157 unit tests in `tono-core` and ten integration tests
+# covering the service's lifecycle — start, stop, permissions, ownership, kill
+# switch release. Having them and not running them is how the macOS side spent a
+# day rediscovering faults its own suite could have caught.
+#
+# Two jobs on purpose. `tono-core` is platform-independent and passes on any
+# runner, so a failure there is a real regression. The service's integration tests
+# touch Windows service control and may need privileges a runner does not grant;
+# keeping them separate means such a failure is diagnosable instead of turning the
+# whole of Windows CI red for a reason nobody can locate.
+
+on:
+  pull_request:
+    paths:
+      - apps/windows/crates/**
+      - apps/windows/service/**
+      - .github/workflows/windows-ci.yml
+  push:
+    branches:
+      - main
+    paths:
+      - apps/windows/crates/**
+      - apps/windows/service/**
+      - .github/workflows/windows-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    # Platform-independent, and verified passing outside Windows: 157 tests over
+    # config, catalog, connection, auth, node, policy, and credentials. Running it
+    # on Linux keeps the cheap half of the coverage fast and unconditional.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Test tono-core
+        # Run from the workspace root: the lockfile lives there, so `--locked`
+        # from the crate directory would look for one that does not exist.
+        working-directory: apps/windows
+        run: cargo test --locked -p tono-core
+
+  service:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Build the service the way the release does
+        working-directory: apps/windows/service
+        run: cargo build --locked --features standalone,client --bins
+
+      - name: Test the service lifecycle
+        working-directory: apps/windows/service
+        # The suite is gated behind these features; without them the files compile
+        # to nothing and the job would pass having tested nothing at all.
+        run: cargo test --locked --features standalone,client,test
