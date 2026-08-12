@@ -107,7 +107,7 @@ const ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS = 3;
 // Release-host aliases rewrite to the same static asset path. Include an
 // explicit revision in the inner asset request so a previously cached alias
 // cannot keep serving an older Sparkle feed after an asset-only deployment.
-const RELEASE_ASSET_REVISION = 'macos-build42-20260807';
+const RELEASE_ASSET_REVISION = 'macos-build62-20260812';
 const deviceActions = ['diagnostic_snapshot', 'claude_traffic_snapshot', 'refresh_catalog', 'retry_protection'] as const;
 /** Failure vocabulary for device-action snapshots. (Diagnostics uploads carry
  *  the client's own free-text `error`/`failedStage` instead; see
