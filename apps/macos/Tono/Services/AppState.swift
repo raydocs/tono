@@ -455,15 +455,25 @@ private actor ManagedTrafficPolicyProcessor {
         // authenticated cache before writing so a late old response cannot
         // replace a newer policy just because the actor's in-memory revision
         // floor was reset to -1.
+        // A signature arriving for a revision already on disk is a write worth
+        // making, not a no-op. A build predating verification cached this revision
+        // without one, and skipping the write here would leave every upgraded
+        // install permanently reading it as unsigned — so the first policy that
+        // needs a signature would be dropped on exactly those machines.
+        var signatureIsNew = false
         if let persisted = ConfigStorage.shared.loadManagedTrafficPolicy() {
             if persisted.revision > cache.revision { return }
             if persisted.revision == cache.revision,
                persisted.sha256 != cache.sha256 {
                 throw TonoAPIClient.APIError.invalidResponse
             }
+            if persisted.revision == cache.revision,
+               persisted.signature != cache.signature {
+                signatureIsNew = true
+            }
         }
         if cache.revision < persistedRevision { return }
-        if cache.revision == persistedRevision {
+        if cache.revision == persistedRevision, !signatureIsNew {
             guard persistedDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
@@ -705,6 +715,9 @@ final class AppState {
     )
     private var managedTrafficPolicyRevision = -1
     private var managedTrafficPolicyDigest: String?
+    /// Signature of the revision currently installed, so an unsigned copy of a
+    /// revision the server has since signed is not mistaken for already applied.
+    private var managedTrafficPolicySignature: String?
     private var activeDirectPolicy: ConfigPipeline.ManagedDirectRuntimePolicy?
     private var catalogSelectionRequiresChoice = false
     private let initialDataLoader = InitialDataLoader()
@@ -3717,19 +3730,32 @@ final class AppState {
             return
         }
         if cache.revision < managedTrafficPolicyRevision { return }
-        if cache.revision == managedTrafficPolicyRevision {
+        if cache.revision == managedTrafficPolicyRevision,
+           managedTrafficPolicySignature == cache.signature {
             guard managedTrafficPolicyDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
             return
         }
+        // Same revision, same bytes, different signature is not "already
+        // installed". It is the upgrade case: a build that predates signature
+        // verification cached this revision without its signature, so the copy
+        // applied at startup was validated against the compiled-in allowlist and
+        // dropped any host that allowlist does not name. Returning here would leave
+        // it dropped until the *next* revision is published — which is exactly the
+        // revision that first carries a new domain, so the feature would appear not
+        // to work for every user who upgraded rather than installed fresh.
 
         let policy = try await managedTrafficPolicyProcessor.validate(
             cache,
             protectedAddresses: managedDirectProtectedAddresses()
         )
+        // These two ask whether another task installed this document while this one
+        // was validating. A document includes its signature, so an unsigned copy of
+        // the same revision does not count as having installed the signed one.
         if cache.revision < managedTrafficPolicyRevision { return }
-        if cache.revision == managedTrafficPolicyRevision {
+        if cache.revision == managedTrafficPolicyRevision,
+           managedTrafficPolicySignature == cache.signature {
             guard managedTrafficPolicyDigest == cache.sha256 else {
                 throw TonoAPIClient.APIError.invalidResponse
             }
@@ -3738,7 +3764,8 @@ final class AppState {
         if persistCache {
             try await managedTrafficPolicyProcessor.persistIfNewest(cache)
             if cache.revision < managedTrafficPolicyRevision { return }
-            if cache.revision == managedTrafficPolicyRevision {
+            if cache.revision == managedTrafficPolicyRevision,
+               managedTrafficPolicySignature == cache.signature {
                 guard managedTrafficPolicyDigest == cache.sha256 else {
                     throw TonoAPIClient.APIError.invalidResponse
                 }
@@ -3750,6 +3777,7 @@ final class AppState {
         managedTrafficPolicy = policy
         managedTrafficPolicyRevision = cache.revision
         managedTrafficPolicyDigest = cache.sha256
+        managedTrafficPolicySignature = cache.signature
 
         guard allowRuntimeTransition, behaviorChanged,
               isConnected || isConnecting else { return }
@@ -5507,6 +5535,7 @@ final class AppState {
                 )
                 managedTrafficPolicyRevision = -1
                 managedTrafficPolicyDigest = nil
+                managedTrafficPolicySignature = nil
             }
         }
         print("[Tono] loadInitialData: \(proxyRegions.count) regions, \(rules.count) rules from disk")
