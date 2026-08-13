@@ -5516,11 +5516,12 @@ final class AppState {
 
         connections = apiConnections.prefix(50).map { conn in
             let type: ConnectionType
-            if conn.chains.contains("REJECT") || conn.rule == "REJECT" {
+            switch AppTrafficLedger.routeClass(for: conn) {
+            case .blocked:
                 type = .rejected
-            } else if conn.chains.contains("DIRECT") || conn.rule == "DIRECT" {
+            case .direct:
                 type = .direct
-            } else {
+            case .residential, .tunnel:
                 type = .proxied
             }
 
@@ -5546,7 +5547,10 @@ final class AppState {
                 network: conn.metadata.network.uppercased(),
                 destination: destination,
                 processName: conn.metadata.process?.isEmpty == false
-                    ? conn.metadata.process
+                    ? AppTrafficLedger.groupedProcessName(
+                        process: conn.metadata.process ?? "",
+                        processPath: conn.metadata.processPath
+                    )
                     : nil,
                 route: conn.chains.isEmpty
                     ? "Direct"

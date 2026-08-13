@@ -203,8 +203,9 @@ nonisolated struct ConfigPipeline {
     /// Emitted before every direct rule, which also guarantees none of this
     /// traffic can be captured by a China-direct exception later in the chain.
     /// Deliberately excluded: `x.com`, which is Twitter at large rather than
-    /// Grok, and Gemini, which lives under `google.com`/`googleapis.com` and
-    /// cannot be separated by suffix without dragging all of Google along.
+    /// Grok, and `google.com` / `googleapis.com` / `gstatic.com` at large.
+    /// Gemini is pinned by its product hostnames so Search, YouTube, and
+    /// Tono's own home-group probe stay off the residential hop.
     /// Only first-party provider domains belong here. Shared infrastructure the
     /// public AI rule lists bundle in — auth0, stripe, sentry, statsig, datadog,
     /// segment, cloudflare.net, googleapis.com, gstatic.com — is used by
@@ -219,7 +220,10 @@ nonisolated struct ConfigPipeline {
         "claude.com",
         "claude.app",
         "claude.site",
+        "clau.de",
         "claudestudio.com",
+        "claudemcpclient.com",
+        "claudemcpcontent.com",
         "claudeusercontent.com",
         // OpenAI, including Codex. `chat.com` and `ai.com` are OpenAI-owned
         // entry points that redirect into ChatGPT.
@@ -235,6 +239,27 @@ nonisolated struct ConfigPipeline {
         "grok.x.com",
         "grokipedia.com",
         "x.ai",
+        // Perplexity
+        "perplexity.ai",
+        "perplexity.com",
+        "pplx.ai",
+        // Gemini product hosts only. Not google.com / googleapis.com / gstatic.com.
+        "gemini.google.com",
+        "bard.google.com",
+        "aistudio.google.com",
+        "generativelanguage.googleapis.com",
+        "notebooklm.google.com",
+    ]
+    /// Anthropic's own unicast (ARIN AP-2440). Claude Code has been seen
+    /// dialing `160.79.104.10` by raw IP, which no DOMAIN-SUFFIX can catch.
+    /// `1.1.1.1` / `8.8.8.8` stay off this list: they are Tono's exit probe.
+    static let assistantHomeIPv4Cidrs = [
+        "160.79.104.0/21",
+    ]
+    /// AS399358 IPv6. `a-api.anthropic.com` answers `2607:6bc0::10`.
+    static let assistantHomeIPv6Cidrs = [
+        "2607:6bc0::/48",
+        "2607:6bc0:11::/48",
     ]
 
     /// Assistant clients pinned by process, for the case where a desktop app or
@@ -247,6 +272,10 @@ nonisolated struct ConfigPipeline {
         "Claude",
         "claude",
         "claude.exe",
+        // Electron's main helper has no parentheses. GPU/Renderer helpers
+        // still cannot be named here — `,()` would break the AND payload —
+        // so `/Claude\.app/` below covers those.
+        "Claude Helper",
         "ChatGPT",
         "chatgpt",
         "ChatGPT.exe",
@@ -301,7 +330,28 @@ nonisolated struct ConfigPipeline {
         "/node_modules/@anthropic-ai/claude-code/",
         "/Claude\\.app/",
         "/ChatGPT\\.app/",
+        "/\\.local/share/codex/",
+        "/node_modules/@openai/codex/",
     ]
+
+    /// Claude Code's versioned launcher is named `2.1.223`, not `claude`.
+    static func isClaudeCodeIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        // Desktop is `Claude`; the CLI is `claude` / `claude.exe`. Do not
+        // lowercase the desktop name into the CLI bucket.
+        if process == "claude" || process == "claude.exe" { return true }
+        if path.contains("/.local/share/claude/versions/") { return true }
+        if path.contains("/node_modules/@anthropic-ai/claude-code/") { return true }
+        return false
+    }
+
+    static func isClaudeAppIdentity(process: String, processPath: String) -> Bool {
+        let name = process
+        let path = processPath.lowercased()
+        if path.contains("/claude.app/") { return true }
+        if name == "Claude" || name.hasPrefix("Claude Helper") { return true }
+        return false
+    }
     /// Exact suffixes accepted by traffic-policy v3. They are rendered only
     /// as TCP DOMAIN-SUFFIX rules; the control plane and client both reject
     /// arbitrary suffixes and subdomain-shaped entries here.
@@ -1262,6 +1312,12 @@ nonisolated struct ConfigPipeline {
         if hasResidentialHop {
             for suffix in Self.assistantHomeDomainSuffixes {
                 yaml += "  - AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(suffix))),\(assistantTarget)\n"
+            }
+            for cidr in Self.assistantHomeIPv4Cidrs {
+                yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
+            }
+            for cidr in Self.assistantHomeIPv6Cidrs {
+                yaml += "  - AND,((NETWORK,TCP),(IP-CIDR6,\(cidr),no-resolve)),\(assistantTarget)\n"
             }
         }
         if transport != nil {

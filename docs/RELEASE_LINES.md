@@ -33,9 +33,18 @@ format and the release script passes and verifies the exact source commit.
 ## Current source and published state
 
 - `release/macos` contains the post-Build-62 trust-monotonicity and exact-source
-  release fixes. Build 62 remains the latest notarized artifact; these source
-  fixes require a future Mac build and do not rewrite Build 62.
-- `release/windows` contains Windows 0.0.31 / Service 2.6.7 / protocol 2.12.
+  release fixes. Build 64 is the latest notarized customer candidate
+  (`Tono-macOS-0.0.64-build64.zip`): Claude first-party IPv4/IPv6 and
+  assistant product hosts ride the catalog home hop, Activity groups Claude
+  Code / WeChat helpers, and a healthy home route is no longer unclassified
+  in the traffic log. Build 62 remains the latest published Sparkle artifact.
+- `release/windows` contains Windows 0.0.32 (source) on top of the 0.0.31
+  Service pin fix. 0.0.32 adds a pin file at install, proactive token
+  refresh, learned control-plane addresses (Service ProgramData via
+  `/bootstrap-pins`, mid-session HTTP refresh, NSIS `core-sha256.txt`),
+  optional Authenticode publisher thumbprint, broader WeChat/Claude/ChatGPT
+  process matching, signed traffic-policy acceptance, a per-app Activity
+  view, and human-readable connect errors.
   It retains the stale-runtime repair from 0.0.30: startup replaces an inactive
   but still supervised Tono Core that owns DNS TCP/UDP `127.0.0.1:53`, while
   leaving third-party owners untouched. The 0.0.30 draft is superseded because
