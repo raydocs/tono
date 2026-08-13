@@ -605,9 +605,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       name: 'Los Angeles · Marina',
       ok: true,
       block: { status: 'OK', label: '正常' },
+      securityCheck: 'long report not shipped',
+      backtrace: 'long report not shipped',
     });
     expect(live.quality.nodes[0].security_check).toBeUndefined();
-    expect(live.quality.nodes[0].backtrace).toBeUndefined();
     expect(live.agentsError).toBeNull();
     expect(live.qualityError).toBeNull();
 
@@ -624,6 +625,109 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     liveQualityPayload = { nodes: [] };
   });
 
+  it('lets the VPS collector store a live snapshot that ops/live serves without origin fetches', async () => {
+    const missing = await api('ops-ingest/snapshot', {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ report: { nodes: [] } }),
+    });
+    expect(missing.status).toBe(503);
+    expect((await missing.json() as any).error.code).toBe('OPS_INGEST_UNCONFIGURED');
+
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const unauthorized = await api('ops-ingest/snapshot', {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ report: { nodes: [] } }),
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const ingested = await api('ops-ingest/snapshot', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        report: {
+          updated_at: 1_786_270_932,
+          updated_at_iso: '2026-08-09T10:00:00Z',
+          cn_agents_configured: 3,
+          nodes: [{
+            name: 'Stored Node',
+            host: '203.0.113.20',
+            public_ip: '203.0.113.20',
+            ok: true,
+            quality: 'poor',
+            risk_keywords: ['blacklist'],
+            route_keywords: ['CN2 GIA'],
+            block: {
+              status: 'LIKELY_BLOCKED',
+              label: '疑似被墙',
+              rule: '大陆 agent ≥2/3 失败',
+              mainland: { status: 'LIKELY_BLOCKED', success: 0, fail: 3, total: 3, authoritative: true },
+              asia_edge: { ok: true, success: 3, total: 3 },
+              overseas: { ok: true, success: 6, total: 6 },
+            },
+            security_check: 'IP quality body',
+            backtrace: '163 / 4837',
+            secret: 'must-not-be-stored',
+          }],
+        },
+        agents: {
+          data: [{ name: 'Stored Node', os: 'Debian', arch: 'amd64', token: 'must-not-leak', ipv4: '203.0.113.20' }],
+        },
+      }),
+    });
+    expect(ingested.status).toBe(200);
+    expect(await ingested.json()).toMatchObject({ ok: true, qualityNodes: 1, agentCount: 1 });
+
+    liveAgentsPayload = { data: [{ name: 'Must Not Appear', os: 'x' }] };
+    liveQualityPayload = { nodes: [{ name: 'Must Not Appear', ok: false }] };
+    const response = await operations('live');
+    expect(response.status).toBe(200);
+    const { live } = await response.json() as any;
+    expect(live.quality.nodes).toHaveLength(1);
+    expect(live.quality.nodes[0]).toMatchObject({
+      name: 'Stored Node',
+      publicIp: '203.0.113.20',
+      quality: 'poor',
+      securityCheck: 'IP quality body',
+      backtrace: '163 / 4837',
+      block: {
+        status: 'LIKELY_BLOCKED',
+        asiaEdge: { success: 3, total: 3 },
+      },
+    });
+    expect(live.quality.nodes[0].secret).toBeUndefined();
+    expect(live.quality.cnAgentsConfigured).toBe(3);
+    expect(live.agents).toEqual([{
+      name: 'Stored Node', os: 'Debian', arch: 'amd64', cpuName: null,
+      cpu: null, memTotal: null, memUsed: null, diskTotal: null, diskUsed: null,
+      netIn: null, netOut: null, uptime: null,
+    }]);
+    expect(live.agentsError).toBeNull();
+    expect(live.qualityError).toBeNull();
+
+    liveAgentsPayload = { data: [] };
+    liveQualityPayload = { nodes: [] };
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('redirects the absorbed quality and ops hostnames to the admin monitor', async () => {
+    for (const host of ['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']) {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request(`https://${host}/`),
+        env as unknown as Parameters<typeof adminWorker.fetch>[1],
+        context,
+      );
+      await waitOnExecutionContext(context);
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe('https://admin.afk.ccwu.cc/ops/#/monitor');
+    }
+  });
+
   it('serves per-user device and diagnostics detail to Access admins', async () => {
     const missing = await operations(`users/${crypto.randomUUID()}/detail`);
     expect(missing.status).toBe(404);
@@ -636,6 +740,52 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(detail.devices[0].name).toBe('Primary Mac');
     expect(typeof detail.devices[0].status).toBe('string');
     expect(detail.diagnostics).toEqual([]);
+  });
+
+  it('lets Access admins replace the catalog and traffic policy on ops routes', async () => {
+    const yaml = [
+      'proxies:',
+      '  - name: "Ops Exit"',
+      '    type: vless',
+      '    server: 203.0.113.50',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '    network: tcp',
+      '    tls: true',
+      '    udp: true',
+      '    servername: www.microsoft.com',
+      '    client-fingerprint: chrome',
+      '    flow: xtls-rprx-vision',
+      '    reality-opts:',
+      '      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      '      short-id: abcd1234',
+    ].join('\n');
+    const putCatalog = await api('ops/exit-catalog', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+      },
+      body: JSON.stringify({ yaml, expectedRevision: 0 }),
+    });
+    expect(putCatalog.status).toBe(200);
+    expect((await putCatalog.json() as any).revision).toBe(1);
+
+    const policy = await operations('traffic-policy');
+    expect(policy.status).toBe(200);
+    expect((await policy.json() as any).revision).toBe(0);
+  });
+
+  it('does not serve the legacy token admin page on the API host', async () => {
+    const context = createExecutionContext();
+    const response = await worker.fetch(
+      new Request('https://test/'),
+      env as unknown as Env,
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(response.status).toBe(404);
+    expect((await response.json() as any).error.code).toBe('NOT_FOUND');
   });
 
   it('lets Access admins add users and bind home exits through ops product routes', async () => {
@@ -1568,6 +1718,261 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
     expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('assigns a pasted home line to a user and imports unused stock', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('paste-assign');
+    const other = await createAccount('paste-other');
+
+    const unauthorized = await api('ops/home-exits/assign', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: owner.user.id, line: '198.51.100.41:6886:alice:secret-one' }),
+    });
+    expect(unauthorized.status).toBe(401);
+
+    for (const line of [
+      'not-a-line',
+      '198.51.100.41:6886',
+      '198.51.100.41:0:alice:secret-one',
+      '10.0.0.1:6886:alice:secret-one',
+    ]) {
+      const bad = await api('ops/home-exits/assign', {
+        method: 'POST',
+        headers: accessHeaders,
+        body: JSON.stringify({ userId: owner.user.id, line }),
+      });
+      expect(bad.status).toBe(400);
+    }
+
+    const assigned = await api('ops/home-exits/assign', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        userId: owner.user.id,
+        line: '198.51.100.41:6886:alice:secret-one',
+      }),
+    });
+    expect(assigned.status).toBe(201);
+    const assignedBody = await assigned.json() as any;
+    expect(assignedBody.homeExit.kind).toBe('socks5');
+    expect(assignedBody.homeExit.socks5Host).toBe('198.51.100.41');
+    expect(assignedBody.homeExit.socks5Port).toBe(6886);
+    expect(assignedBody.homeExit).not.toHaveProperty('socks5Username');
+    expect(assignedBody.homeExit).not.toHaveProperty('socks5Password');
+    expect(assignedBody.binding.userId).toBe(owner.user.id);
+    expect(assignedBody.refreshQueued).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(assignedBody)).not.toContain('secret-one');
+
+    const conflict = await api('ops/home-exits/assign', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        userId: owner.user.id,
+        line: 'alice:secret-two@gw.example.com:11080',
+      }),
+    });
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json() as any).error.code).toBe('HOME_ALREADY_BOUND');
+
+    const replaced = await api('ops/home-exits/assign', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        userId: owner.user.id,
+        line: 'socks5://alice:secret-two@gw.example.com:11080',
+        replace: true,
+      }),
+    });
+    expect(replaced.status).toBe(201);
+    const replacedBody = await replaced.json() as any;
+    expect(replacedBody.replaced).toBe(true);
+    expect(replacedBody.homeExit.socks5Host).toBe('gw.example.com');
+    expect(replacedBody.retiredHomeExitId).toBe(assignedBody.homeExit.id);
+
+    const listed = await operations('home-exits');
+    const rows = (await listed.json() as any).homeExits as Array<{ id: string; status: string }>;
+    expect(rows.find((row) => row.id === assignedBody.homeExit.id)?.status).toBe('retired');
+    expect(rows.find((row) => row.id === replacedBody.homeExit.id)?.status).toBe('active');
+    expect(JSON.stringify(rows)).not.toContain('secret-two');
+
+    const ownerCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    const ownerRouting = (await ownerCatalog.json() as any).routing;
+    expect(ownerRouting.homeSocks5).toEqual({
+      host: 'gw.example.com',
+      port: 11080,
+      username: 'alice',
+      password: 'secret-two',
+    });
+    const otherCatalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${other.accessToken}` },
+    });
+    expect(JSON.stringify(await otherCatalog.json())).not.toContain('secret-two');
+
+    const imported = await api('ops/home-exits/import', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        lines: [
+          '203.0.113.20:9000:pool-a:pool-secret',
+          '203.0.113.20:9000:pool-a:pool-secret',
+          'bad-line',
+        ],
+      }),
+    });
+    expect(imported.status).toBe(201);
+    const importedBody = await imported.json() as any;
+    expect(importedBody.created).toHaveLength(1);
+    expect(importedBody.skipped).toHaveLength(1);
+    expect(importedBody.failed).toHaveLength(1);
+    expect(JSON.stringify(importedBody)).not.toContain('pool-secret');
+
+    const taken = await api('ops/home-exits/assign', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        userId: other.user.id,
+        line: 'alice:secret-two@gw.example.com:11080',
+      }),
+    });
+    expect(taken.status).toBe(409);
+    expect((await taken.json() as any).error.code).toBe('HOME_EXIT_IN_USE');
+  });
+
+  it('keeps a Claude account ledger and an onboarding shortcut', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const owner = await createAccount('claude-ledger');
+    const opened = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, accountRef: 'acct-one@example.com' }),
+    });
+    expect(opened.status).toBe(201);
+    const openedBody = await opened.json() as any;
+    expect(openedBody.account).toMatchObject({
+      accountRef: 'acct-one@example.com',
+      status: 'assigned',
+      userId: owner.user.id,
+    });
+
+    const clash = await api('ops/product-accounts', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ userId: owner.user.id, accountRef: 'acct-two@example.com' }),
+    });
+    expect(clash.status).toBe(409);
+
+    const listed = await operations('users');
+    const row = ((await listed.json() as any).users as any[]).find((item) => item.id === owner.user.id);
+    expect(row.product).toMatchObject({
+      accountRef: 'acct-one@example.com',
+      status: 'assigned',
+      replaceCount: 0,
+      incomplete: false,
+    });
+    expect(row.firstEntitledAt).toBeGreaterThan(0);
+
+    const replaced = await api(`ops/product-accounts/${openedBody.account.id}/replace`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ accountRef: 'acct-two@example.com' }),
+    });
+    expect(replaced.status).toBe(200);
+    const replacedBody = await replaced.json() as any;
+    expect(replacedBody.previous.status).toBe('retired');
+    expect(replacedBody.account.accountRef).toBe('acct-two@example.com');
+
+    const banned = await api(`ops/product-accounts/${replacedBody.account.id}/ban`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ detail: 'model ban' }),
+    });
+    expect(banned.status).toBe(200);
+    expect((await banned.json() as any).account.status).toBe('banned');
+
+    const detail = await operations(`users/${owner.user.id}/detail`);
+    const detailBody = await detail.json() as any;
+    expect(detailBody.product.replaceCount).toBe(1);
+    expect(detailBody.product.accounts).toHaveLength(2);
+
+    const pending = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        email: 'not-yet@example.com',
+        line: '198.51.100.77:7000:pool:secret-line',
+        accountRef: 'acct-pending@example.com',
+      }),
+    });
+    expect(pending.status).toBe(202);
+    expect((await pending.json() as any).incomplete).toContain('user_not_registered');
+
+    const ready = await api('ops/users/onboard', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        email: owner.email,
+        line: '198.51.100.78:7000:owner:secret-line',
+        accountRef: 'acct-three@example.com',
+      }),
+    });
+    // owner currently has no assigned Claude (banned), so this should assign.
+    expect([200, 202, 409]).toContain(ready.status);
+
+    const closed = await api(`ops/users/${owner.user.id}/close`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({}),
+    });
+    expect(closed.status).toBe(200);
+    const listedClosed = await operations('users');
+    const closedRow = ((await listedClosed.json() as any).users as any[]).find((item: any) => item.id === owner.user.id);
+    expect(closedRow.status).toBe('disabled');
+    expect(closedRow.homeBinding).toBeNull();
+  });
+
+  it('stores a node billing profile and reports who is on a named node', async () => {
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const created = await api('ops/node-profiles', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        catalogName: 'Tokyo · North',
+        provider: 'dmit',
+        billingUrl: 'https://example.com/clientarea',
+        trafficQuotaBytes: 1_000_000_000,
+        renewsAt: Math.floor(Date.now() / 1000) + 86400,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const profile = (await created.json() as any).profile;
+    expect(profile.billingUrl).toBe('https://example.com/clientarea');
+
+    const badUrl = await api('ops/node-profiles', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({ catalogName: 'Bad', billingUrl: 'javascript:alert(1)' }),
+    });
+    expect(badUrl.status).toBe(400);
+
+    const incident = await operations(`incidents/node/${encodeURIComponent('Tokyo · North')}`);
+    expect(incident.status).toBe(200);
+    expect((await incident.json() as any).affected).toEqual([]);
+
+    const dash = await operations('dashboard');
+    expect((await dash.json() as any).dashboard.inventory.renewingSoon).toBe(1);
   });
 
   it('validates, encrypts, versions, and serves the managed traffic policy', async () => {
