@@ -44,8 +44,10 @@ impl ConnectStage {
         match self {
             ConnectStage::Preparing => "Preparing protection…",
             ConnectStage::PreparingService => "Preparing secure service…",
-            ConnectStage::StartingKillSwitch => "Starting Kill Switch…",
-            ConnectStage::StartingTunnel => "Starting protected tunnel…",
+            ConnectStage::StartingKillSwitch => {
+                "Enabling protection and installing the tunnel adapter…"
+            }
+            ConnectStage::StartingTunnel => "Starting the protected tunnel…",
             ConnectStage::LockingTraffic => "Locking traffic to tunnel…",
             ConnectStage::ApplyingCloudPolicy => "Applying cloud routing policy…",
             ConnectStage::SecuringDns => "Securing DNS…",
@@ -374,8 +376,8 @@ mod tests {
             [
                 "Preparing protection…",
                 "Preparing secure service…",
-                "Starting Kill Switch…",
-                "Starting protected tunnel…",
+                "Enabling protection and installing the tunnel adapter…",
+                "Starting the protected tunnel…",
                 "Locking traffic to tunnel…",
                 "Applying cloud routing policy…",
                 "Securing DNS…",

@@ -22,8 +22,9 @@ use crate::core::structure::{
 use crate::core::windows_kill_switch;
 use crate::core::{apply_proxy, apply_proxy_or_direct, clear_proxy, dns, validate_proxy_config};
 use crate::{
-    AuthenticatedRequest, AuthenticatedSessionRequest, FinalizeDirectRuntimeReloadRequest,
-    IpcCommand, KillSwitchLockRequest, MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig,
+    AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins,
+    FinalizeDirectRuntimeReloadRequest, IpcCommand, KillSwitchLockRequest,
+    MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig,
     OwnerSessionHandle, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeBundle,
     SERVICE_PROTOCOL_HEADER, ServiceOperationKind, StartClashRequest, StartClashResult,
@@ -1201,6 +1202,36 @@ fn create_ipc_router() -> Result<Router> {
             // Authenticated and lock-free: the DNS watchdog/mutations publish this snapshot.
             ok_json(dns::status().await)
         })
+        .get(IpcCommand::BootstrapPins.as_ref(), |ctx| async move {
+            trace!("Received GetBootstrapPins command");
+            let (_request, _owner) =
+                match authenticate_request::<AuthenticatedRequest<()>>(&ctx).await {
+                    ControlFlow::Continue(authenticated) => authenticated,
+                    ControlFlow::Break(response) => return response,
+                };
+            ok_json(crate::core::bootstrap_pins::load())
+        })
+        .post(IpcCommand::BootstrapPins.as_ref(), |ctx| async move {
+            trace!("Received SetBootstrapPins command");
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<BootstrapPins>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            // Session-gated so a same-user process cannot persist poisoned IPs without a live
+            // Tono session. The file write does not mutate WFP, so it does not take the
+            // lifecycle writer as a privileged network operation.
+            if let Err(error) = require_active_session(&owner, &request.session).await {
+                return service_error(error);
+            }
+            match crate::core::bootstrap_pins::remember(request.payload).await {
+                Ok(pins) => ok_json(pins),
+                Err(error) => service_unavailable(format!("Failed to persist bootstrap pins: {error:#}")),
+            }
+        })
         .post(IpcCommand::PrepareCoreStart.as_ref(), |ctx| async move {
             trace!("Received PrepareCoreStart command");
             let (_request, owner) =
@@ -1273,6 +1304,9 @@ fn create_ipc_router() -> Result<Router> {
             if start_request.windows_kill_switch.is_some() && !cfg!(windows) {
                 return bad_request("Windows kill switch is unsupported on this platform");
             }
+            // Snapshot before waiting for the lifecycle lock: a Disconnect that
+            // wins the lock first must make this StartClash retract after it arms.
+            let release_epoch = windows_kill_switch::release_epoch();
             if cfg!(all(windows, not(feature = "test")))
                 && start_request.windows_kill_switch.is_none()
             {
@@ -1318,6 +1352,16 @@ fn create_ipc_router() -> Result<Router> {
                     return service_unavailable(format!(
                         "Failed to arm Windows kill switch: {error:#}"
                     ));
+                }
+                if windows_kill_switch::release_superseded(release_epoch) {
+                    if let Err(error) = windows_kill_switch::release().await {
+                        return service_unavailable(format!(
+                            "StartClash was superseded by Disconnect, but the late arm could not be released: {error:#}"
+                        ));
+                    }
+                    return service_unavailable(
+                        "StartClash was superseded by an explicit Disconnect",
+                    );
                 }
             }
             let mut transition = StartOwnerTransition {
@@ -2181,6 +2225,11 @@ mod owner_goodbye_tests {
             crate::IpcCommand::OwnerGoodbye.as_ref(),
             "/lifecycle/owner-goodbye"
         );
+    }
+
+    #[test]
+    fn bootstrap_pins_route_is_the_documented_literal() {
+        assert_eq!(crate::IpcCommand::BootstrapPins.as_ref(), "/bootstrap-pins");
     }
 
     /// Goodbye is accepted only when the machine no longer needs the daemon: nothing armed and

@@ -286,6 +286,19 @@ const assertNsisCoreIntegrityPins = (sevenZip, installer, entries) => {
     )
     if (pinError) fail(pinError)
   }
+  const pinFile = entryFor('core-sha256.txt')
+  if (!pinFile) {
+    fail('NSIS payload has no resources/core-sha256.txt')
+  }
+  const shippedPin = Buffer.from(readNsisEntry(sevenZip, installer, pinFile.name))
+    .toString('utf8')
+    .trim()
+    .toLowerCase()
+  if (shippedPin !== coreDigest) {
+    fail(
+      `NSIS core-sha256.txt (${shippedPin}) does not match staged Mihomo ${coreDigest}`,
+    )
+  }
   return coreDigest
 }
 

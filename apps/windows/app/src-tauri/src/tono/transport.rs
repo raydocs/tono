@@ -123,7 +123,10 @@ fn describe(err: &reqwest::Error) -> String {
 
 pub struct TonoTransport {
     /// Reaches the control plane only at the pinned bootstrap addresses.
-    client: reqwest::Client,
+    ///
+    /// Behind a lock so a protected learn can rebuild the pin set mid-session
+    /// without replacing the whole `ApiClient`.
+    client: tokio::sync::RwLock<reqwest::Client>,
     /// Reaches it through whatever the system resolver returns.
     ///
     /// The pins exist so a fully-armed kill switch cannot lock the client out of
@@ -144,19 +147,31 @@ pub struct TonoTransport {
 
 impl TonoTransport {
     pub fn new() -> Result<Self> {
-        let pinned: Vec<std::net::SocketAddr> = bootstrap::pinned_bootstrap_ips()
-            .into_iter()
-            .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
-            .collect();
         let resolved = Self::builder()
             .build()
             .context("failed to build the Tono HTTP fallback client")?;
-        let client = Self::builder()
-            // F1: resolve the API host to the pinned bootstrap IPs.
+        Ok(Self {
+            client: tokio::sync::RwLock::new(Self::build_pinned_client()?),
+            resolved,
+        })
+    }
+
+    /// Rebuild the pinned client from the current compiled + learned set.
+    pub async fn refresh_control_plane_pins(&self) -> Result<()> {
+        let client = Self::build_pinned_client()?;
+        *self.client.write().await = client;
+        Ok(())
+    }
+
+    fn build_pinned_client() -> Result<reqwest::Client> {
+        let pinned: Vec<std::net::SocketAddr> = bootstrap::control_plane_http_pins()
+            .into_iter()
+            .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), 443))
+            .collect();
+        Self::builder()
             .resolve_to_addrs(bootstrap::API_HOST, &pinned)
             .build()
-            .context("failed to build the Tono HTTP client")?;
-        Ok(Self { client, resolved })
+            .context("failed to build the Tono HTTP client")
     }
 
     /// Same wiring, with both clients' resolution supplied.
@@ -181,10 +196,12 @@ impl TonoTransport {
                 .timeout(Duration::from_millis(900))
         };
         Ok(Self {
-            client: quick()
-                .resolve_to_addrs(host, pinned)
-                .build()
-                .context("failed to build the pinned test client")?,
+            client: tokio::sync::RwLock::new(
+                quick()
+                    .resolve_to_addrs(host, pinned)
+                    .build()
+                    .context("failed to build the pinned test client")?,
+            ),
             resolved: quick()
                 .resolve_to_addrs(host, resolved)
                 .build()
@@ -275,7 +292,10 @@ impl TonoTransport {
 impl HttpTransport for TonoTransport {
     async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
         crate::tono::integration_profile::delay_remote_operation().await;
-        let pinned = self.attempt(&self.client, &request).await;
+        let pinned = {
+            let client = self.client.read().await;
+            self.attempt(&client, &request).await
+        };
         let Err(ApiError::Transport { kind, message }) = pinned else {
             return pinned;
         };

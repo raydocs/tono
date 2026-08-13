@@ -42,6 +42,14 @@ const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
   'utf8',
 )
+const windowsReleaseShSource = readFileSync(
+  new URL('../../../../tooling/scripts/build-windows-release.sh', import.meta.url),
+  'utf8',
+)
+const windowsReleasePs1Source = readFileSync(
+  new URL('../../../../tooling/scripts/build-windows-release.ps1', import.meta.url),
+  'utf8',
+)
 const canonicalGuiLaunchLine =
   '  nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe" "$MainBinaryArgs"'
 
@@ -375,6 +383,17 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   )
 })
 
+test('NSIS uninstall removes leftover user control-plane pins', () => {
+  assert.match(
+    installerSource,
+    /Delete \/REBOOTOK "\$APPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
+  )
+  assert.match(
+    installerSource,
+    /Delete \/REBOOTOK "\$LOCALAPPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
+  )
+})
+
 test('NSIS removes every known old payload on upgrade and uninstall', () => {
   const cleanup = [
     ...KNOWN_LEGACY_WINDOWS_PAYLOAD,
@@ -556,9 +575,29 @@ test('Windows release stops when a native preflight command fails', () => {
   )
   assert.match(serviceBlock, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
   assert.match(serviceBlock, /GITHUB_ENV/)
+  assert.match(serviceBlock, /core-sha256\.txt/)
   assert.match(serviceBlock, /tono-service\.exe/)
   assert.match(serviceBlock, /tono-service-install\.exe/)
   assert.match(serviceBlock, /\.Contains\(\$coreSha256\)/)
+})
+
+test('local Windows release scripts write core-sha256.txt from the hashed sidecar', () => {
+  assert.match(
+    windowsReleaseShSource,
+    /core-sha256\.txt/,
+  )
+  assert.match(
+    windowsReleaseShSource,
+    /TONO_CORE_SHA256=/,
+  )
+  assert.match(
+    windowsReleasePs1Source,
+    /core-sha256\.txt/,
+  )
+  assert.match(
+    windowsReleasePs1Source,
+    /\$env:TONO_CORE_SHA256 = \$coreSha256/,
+  )
 })
 
 test('packaging rejects a Service that lacks the exact packaged Core pin', () => {
@@ -617,6 +656,17 @@ test('externalBin accepts only the stable sidecar', () => {
   assert.match(validateExternalBin([]), /exactly one/)
 })
 
+test('tauri.conf.json resources match the Windows allowlist', () => {
+  const tauri = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.equal(validateResourcesWhitelist(tauri.bundle.resources), null)
+  assert.ok(WINDOWS_RESOURCE_ALLOWLIST.includes('core-sha256.txt'))
+})
+
 test('resources whitelist rejects whole-directory packaging', () => {
   assert.equal(
     validateResourcesWhitelist([...WINDOWS_RESOURCE_BUNDLE_ENTRIES]),
@@ -643,6 +693,7 @@ test('payload validator requires staged executables and rejects legacy junk', ()
     { name: 'resources/tono-service.exe' },
     { name: 'resources/tono-service-install.exe' },
     { name: 'resources/tono-service-uninstall.exe' },
+    { name: 'resources/core-sha256.txt' },
     { name: 'resources/Country.mmdb' },
   ]
   assert.equal(validatePayloadEntries(good), null)
@@ -667,6 +718,12 @@ test('payload validator requires staged executables and rejects legacy junk', ()
       good.filter((entry) => entry.name !== 'verge-mihomo.exe.next'),
     ),
     /missing stable Mihomo/,
+  )
+  assert.match(
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'resources/core-sha256.txt'),
+    ),
+    /core-sha256\.txt/,
   )
   assert.match(
     validatePayloadEntries(

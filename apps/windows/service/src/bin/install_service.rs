@@ -692,6 +692,48 @@ const RESTORE_SUFFIX: &str = ".restore";
 const PUBLISH_SUFFIX: &str = ".publish";
 #[cfg(windows)]
 const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
+#[cfg(windows)]
+const CORE_DIGEST_PIN_FILE_NAME: &str = "core-sha256.txt";
+
+/// Persist the Mihomo digest next to the Service so a later build that forgot
+/// `TONO_CORE_SHA256` still has a pin file to fail-closed against.
+///
+/// The compile-time pin wins. If it is absent, the installer copies a valid
+/// `core-sha256.txt` from the same resources directory as this helper. A
+/// placeholder (the committed file before prebuild) is ignored.
+#[cfg(windows)]
+fn publish_core_digest_pin(install_dir: &Path) -> Result<(), Error> {
+    let normalized = if let Some(pin) = COMPILED_IN_CORE_SHA256 {
+        let Some(normalized) = normalize_core_digest_pin(pin) else {
+            bail!("the compiled Mihomo SHA-256 pin is missing or malformed");
+        };
+        normalized
+    } else {
+        let bundled = std::env::current_exe()
+            .ok()
+            .and_then(|helper| helper.parent().map(|dir| dir.join(CORE_DIGEST_PIN_FILE_NAME)))
+            .and_then(|path| std::fs::read_to_string(path).ok());
+        let Some(normalized) = bundled.as_deref().and_then(normalize_core_digest_pin) else {
+            return Ok(());
+        };
+        normalized
+    };
+    let path = install_dir.join(CORE_DIGEST_PIN_FILE_NAME);
+    let tmp = path.with_extension("txt.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::write(&tmp, format!("{normalized}\n"))
+        .with_context(|| format!("failed to write core digest pin {tmp:?}"))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to publish core digest pin {path:?}"))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn normalize_core_digest_pin(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    (normalized.len() == 64 && normalized.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then_some(normalized)
+}
 
 #[cfg(windows)]
 fn path_with_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -1401,6 +1443,7 @@ fn main() -> anyhow::Result<()> {
     let _gate = enter_repair_gate()?;
     let source = bundled_service_binary()?;
     let install_dir = clash_verge_service_ipc::prepare_service_install_directory()?;
+    publish_core_digest_pin(&install_dir)?;
     let target = install_dir.join("tono-service.exe");
     if install_mode == WindowsInstallMode::ReplaceRuntime {
         // Discover stale recovery state before stopping a healthy Service. The coordinated

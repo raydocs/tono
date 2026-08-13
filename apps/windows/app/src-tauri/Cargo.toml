@@ -1,6 +1,6 @@
 [package]
 name = "clash-verge"
-version = "0.0.31"
+version = "0.0.32"
 description = "clash verge"
 authors = ["zzzgydi", "Tunglies", "wonfen", "MystiPanda"]
 license = "GPL-3.0-only"
@@ -155,6 +155,7 @@ objc2-app-kit = { version = "0.3.2", features = [
 ] }
 
 [target.'cfg(windows)'.dependencies]
+tono-authenticode = { path = "../../crates/tono-authenticode" }
 deelevate = { workspace = true }
 runas = "=1.2.0"
 winreg = "0.56.0"

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { MihomoWebSocket } from 'tauri-plugin-mihomo-api'
 
 const MAX_CLOSED_CONNS_NUM = 500
+const MAX_ACTIVE_CONNS_NUM = 2_000
 const CONNECTION_UPDATE_THROTTLE_MS = 500
 const CONNECTION_RECONNECT_DELAY_MS = 1_000
 
@@ -150,7 +151,10 @@ const mergeConnectionSnapshot = (
   payload: IConnections,
   previous: ConnectionMonitorData = initConnData,
 ): ConnectionMonitorData => {
-  const nextConnections = payload.connections ?? []
+  const nextConnections = (payload.connections ?? []).slice(
+    0,
+    MAX_ACTIVE_CONNS_NUM,
+  )
   const previousActive = previous.activeConnections ?? []
   const previousClosed = previous.closedConnections ?? []
   const previousActiveById = new Map<string, IConnectionsItem>()

@@ -14,6 +14,7 @@ pub mod connection;
 pub mod credentials;
 pub mod node;
 pub mod policy;
+pub mod policy_signature;
 
 pub use catalog::{
     CatalogError, CatalogHomeSocks5, CatalogRouting, CatalogTracker, ExitCatalogResponse,

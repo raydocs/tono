@@ -118,6 +118,7 @@ pub struct TaskRegistry {
     /// Authenticated renewal for the Service-owned committed DIRECT lease. It is deliberately
     /// separate from the health monitor so a slow data-plane probe cannot starve liveness.
     pub direct_lease_heartbeat: Option<JoinHandle<()>>,
+    pub pin_refresh: Option<JoinHandle<()>>,
     pub switch: Option<JoinHandle<()>>,
 }
 
@@ -144,6 +145,10 @@ impl TaskRegistry {
         Self::abort(&mut self.direct_lease_heartbeat);
     }
 
+    pub fn abort_pin_refresh(&mut self) {
+        Self::abort(&mut self.pin_refresh);
+    }
+
     pub fn abort_switch(&mut self) {
         Self::abort(&mut self.switch);
     }
@@ -155,6 +160,7 @@ impl TaskRegistry {
         self.abort_reconnect();
         self.abort_network_monitor();
         self.abort_direct_lease_heartbeat();
+        self.abort_pin_refresh();
         self.abort_switch();
     }
 }
@@ -272,6 +278,20 @@ pub struct TonoInner {
     /// and safety checks (`managed-traffic-policy.json`).
     pub policy_tracker: tono_core::policy::PolicyTracker,
     pub traffic_policy: Option<tono_core::policy::TonoTrafficPolicy>,
+    /// Signed WeChat PROCESS-PATH-REGEX rows last committed with the optional
+    /// DIRECT overlay. `None` means the overlay is not active, so a later
+    /// discovery must not force a reconnect.
+    pub applied_wechat_path_regexes: Option<Vec<String>>,
+    /// Optional WeChat/web DIRECT overlay after a successful connect.
+    /// `None` = not active; `Some(None)` = active; `Some(Some(reason))` is unused.
+    /// `optional_direct_skip` is the redacted skip reason when the overlay
+    /// was not installed on an otherwise successful connect.
+    pub optional_direct_active: bool,
+    pub optional_direct_skip: Option<String>,
+    /// Display-only exit identity from the last successful lookup.
+    pub exit_ip: Option<String>,
+    pub exit_org: Option<String>,
+    pub exit_location: Option<String>,
     pub tasks: TaskRegistry,
 }
 
@@ -425,6 +445,12 @@ impl TonoState {
                 next_retry_at_ms: None,
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
+                applied_wechat_path_regexes: None,
+                optional_direct_active: false,
+                optional_direct_skip: None,
+                exit_ip: None,
+                exit_org: None,
+                exit_location: None,
                 tasks: TaskRegistry::default(),
             }),
             audit,

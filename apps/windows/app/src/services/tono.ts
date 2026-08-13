@@ -94,6 +94,11 @@ export interface TonoStatus {
   catalogRequiresChoice: boolean
   /** Monotonic owner token for the current managed controller endpoint. */
   controllerGeneration: number
+  exitIp?: string | null
+  exitOrg?: string | null
+  exitLocation?: string | null
+  /** `off` | `on` | `skipped` — optional WeChat/web DIRECT overlay. */
+  directOverlay?: string
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
@@ -143,6 +148,25 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_DIAG_FAILED', key: 'tono.progress.upload.errors.failed' },
 ]
 
+const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
+  {
+    match: /no SHA-256 digest is pinned|cannot be verified \(measured/i,
+    key: 'tono.dashboard.errors.coreUnpinned',
+  },
+  {
+    match: /does not match the SHA-256 digest|pinned core digest is not/i,
+    key: 'tono.dashboard.errors.coreMismatch',
+  },
+  {
+    match: /DNS port 127\.0\.0\.1:53 is unavailable|Another DNS or proxy process/i,
+    key: 'tono.dashboard.errors.dnsPortBusy',
+  },
+  {
+    match: /reinstall Tono|install the latest Tono/i,
+    key: 'tono.dashboard.errors.coreUnpinned',
+  },
+]
+
 /**
  * Map backend error strings (including stable `TONO_*` prefixes) to a UI message.
  * Pass `t` from `useTranslation` when available; falls back to the raw string.
@@ -159,6 +183,11 @@ export const formatTonoActionError = (
         : String(error)
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
+      return t ? t(key) : raw
+    }
+  }
+  for (const { match, key } of MESSAGE_ERROR_KEYS) {
+    if (match.test(raw)) {
       return t ? t(key) : raw
     }
   }

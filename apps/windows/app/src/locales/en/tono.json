@@ -19,26 +19,40 @@
     "closeFailed": "Could not close the connection.",
     "closeAllFailed": "Could not close all connections.",
     "connectionCount": "{{count}} active connections shown",
+    "appCount": "{{count}} apps this session",
+    "view": "Activity view",
+    "views": {
+      "apps": "Apps",
+      "connections": "Connections"
+    },
+    "splitHint": "{{direct}} direct · {{home}} home · {{proxied}} exit · {{rejected}} rejected",
     "limitNotice": "display limited to {{count}} connections",
     "filters": {
       "all": "All",
-      "proxied": "Proxied",
+      "proxied": "Exit",
+      "home": "Home",
       "direct": "Direct",
       "rejected": "Rejected",
       "local": "Local"
     },
     "routes": {
-      "proxied": "Proxied",
+      "proxied": "Exit",
+      "home": "Home",
       "direct": "Direct",
       "rejected": "Rejected",
       "local": "Local"
+    },
+    "apps": {
+      "wechat": "WeChat"
     },
     "columns": {
       "process": "Process",
       "target": "Domain or target",
       "protocol": "Protocol",
       "route": "Route",
-      "rule": "Rule"
+      "rule": "Rule",
+      "count": "Conns",
+      "split": "Route split"
     }
   },
   "login": {
@@ -114,6 +128,8 @@
     },
     "taglineIdle": "One click routes every app through your selected Tono cloud.",
     "taglineConnected": "All traffic is protected. Tono will block leaks if the route drops.",
+    "directOn": "WeChat and reviewed China sites can go direct. Everything else stays in the tunnel.",
+    "directSkipped": "China-direct is off this session. WeChat and the rest stay in the tunnel.",
     "pickServer": "Choose a server to get started",
     "errorRetry": "Try again",
     "errorSwitchServer": "Switch server",
@@ -124,11 +140,17 @@
       "serviceBusy": "Tono Service is installing or repairing. Approve any pending admin prompt, or restart Tono.",
       "releaseReconciling": "Network protection is still releasing. Wait a moment, then connect again.",
       "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced.",
-      "nodeUnreachable": "This server could not be reached. Try again, or switch to another server."
+      "nodeUnreachable": "This server could not be reached. Try again, or switch to another server.",
+      "coreUnpinned": "This Tono install is missing its kernel check. Install the latest Tono — reinstalling the same copy will not help.",
+      "coreMismatch": "The Tono kernel does not match this install. Install the latest Tono.",
+      "dnsPortBusy": "Another app is using local DNS port 53. Close that app and try again.",
+      "sendDiagnostics": "Send to support"
     },
     "info": {
       "protection": "Traffic protection",
       "dns": "Secure DNS",
+      "operator": "Operator",
+      "country": "Country",
       "upload": "Upload",
       "download": "Download"
     }
@@ -173,8 +195,8 @@
     "steps": {
       "preparing": "Preparing protection…",
       "preparingService": "Preparing Windows Service…",
-      "startingKillSwitch": "Enabling WFP Kill Switch…",
-      "startingTunnel": "Starting mihomo/WinTUN…",
+      "startingKillSwitch": "Enabling protection and installing the tunnel adapter…",
+      "startingTunnel": "Starting the protected tunnel…",
       "lockingTraffic": "Locking traffic to protected interface…",
       "applyingCloudPolicy": "Applying cloud routing policy…",
       "securingDNS": "Securing and verifying DNS…",

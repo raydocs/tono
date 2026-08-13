@@ -484,6 +484,16 @@ async fn protected_routes_reject_protocol_mismatch_before_deserialization() -> R
             .json_body(&invalid)
             .send()
             .await?,
+        client
+            .get(IpcCommand::BootstrapPins.as_ref())
+            .json_body(&invalid)
+            .send()
+            .await?,
+        client
+            .post(IpcCommand::BootstrapPins.as_ref())
+            .json_body(&invalid)
+            .send()
+            .await?,
     ];
     for response in responses {
         let response = response.json::<WireResponse<()>>()?;

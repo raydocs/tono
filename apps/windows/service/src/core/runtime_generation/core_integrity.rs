@@ -8,13 +8,10 @@
 //! to write inside one of those directories needs it to say.
 //!
 //! The pin is a digest rather than a signature because a digest is checkable with what this crate
-//! already depends on. Authenticode is the other half of the promise and is deliberately not
-//! implemented here: `WinVerifyTrust` lives behind a `windows-sys` feature this crate does not
-//! enable (`Win32_Security_WinTrust`), so it cannot be added without touching `Cargo.toml`, and a
-//! signature check is only as good as the publisher pin that goes with it — accepting "any
-//! Authenticode-signed executable" would accept most of the malware on the internet. The
-//! replacement for this module is `WinVerifyTrust` plus a pinned subject/thumbprint, checked in
-//! addition to the digest, never instead of it.
+//! already depends on. Authenticode is checked *after* the digest matches: an unsigned official
+//! sidecar is allowed unless `TONO_CORE_AUTHENTICODE_THUMBPRINT` is compiled in. A signature that
+//! is present but untrusted is always a refusal. When the thumbprint pin is set, the signer must
+//! match it.
 
 use crate::ServiceErrorCode;
 use crate::core::auth::ServiceError;
@@ -29,6 +26,13 @@ use std::path::Path;
 /// waiver. Release builds set `TONO_CORE_SHA256` to the digest of the `verge-mihomo.exe` the
 /// installer ships.
 const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
+/// Publisher thumbprint of a signed core. Absent on official unsigned Mihomo builds.
+///
+/// SHA-1 (40 hex) or SHA-256 (64 hex), with optional colons/spaces. Set only when the shipped
+/// sidecar is signed; leaving it unset keeps the unsigned-official-core path working.
+#[cfg_attr(not(windows), allow(dead_code))]
+const COMPILED_IN_CORE_AUTHENTICODE_THUMBPRINT: Option<&str> =
+    option_env!("TONO_CORE_AUTHENTICODE_THUMBPRINT");
 
 /// Where an installer may instead record the digest of the core it just installed.
 ///
@@ -36,6 +40,53 @@ const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
 /// `ensure_private_installer_directory` — SYSTEM and Administrators only. A pin an unprivileged
 /// user could rewrite would prove nothing, so the location matters as much as the content.
 pub(super) const CORE_DIGEST_PIN_FILE_NAME: &str = "core-sha256.txt";
+
+/// What a compiled publisher pin says about a core that already matched its digest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PublisherPinVerdict {
+    /// No thumbprint was compiled in, so Authenticode identity is not required.
+    Unpinned,
+    /// A pin exists and one of the embedded certificates matches it.
+    Matched,
+    /// A pin exists but is not a SHA-1 or SHA-256 thumbprint.
+    PinMalformed,
+    /// A pin exists and the binary carries no signature.
+    Unsigned,
+    /// A pin exists, the binary is signed, but no embedded certificate matches.
+    Mismatched,
+}
+
+/// The publisher-pin rule, pure so it is testable without WinVerifyTrust.
+pub(super) fn classify_publisher_pin(
+    pin: Option<&str>,
+    signed: bool,
+    thumbprints: &[String],
+) -> PublisherPinVerdict {
+    let Some(pin) = pin else {
+        return PublisherPinVerdict::Unpinned;
+    };
+    let Some(expected) = normalize_thumbprint(pin) else {
+        return PublisherPinVerdict::PinMalformed;
+    };
+    if !signed {
+        return PublisherPinVerdict::Unsigned;
+    }
+    if thumbprints.iter().any(|thumbprint| thumbprint == &expected) {
+        PublisherPinVerdict::Matched
+    } else {
+        PublisherPinVerdict::Mismatched
+    }
+}
+
+/// SHA-1 (40) or SHA-256 (64) hex, ignoring separators and case.
+fn normalize_thumbprint(value: &str) -> Option<String> {
+    let hex: String = value
+        .bytes()
+        .filter(|byte| byte.is_ascii_hexdigit())
+        .map(|byte| (byte as char).to_ascii_lowercase())
+        .collect();
+    matches!(hex.len(), 40 | 64).then_some(hex)
+}
 
 /// What the measured digest of a core binary amounts to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,8 +160,40 @@ pub(super) fn sha256_hex(path: &Path) -> std::io::Result<String> {
 /// The compile-time pin wins: it is part of the build that also decides which core is shipped, and
 /// it cannot be edited on the machine at all. The pin file is the fallback for a build that ships
 /// the core and the service separately.
+fn publish_compiled_pin_file() {
+    let Some(pin) = COMPILED_IN_CORE_SHA256.and_then(normalize_digest) else {
+        return;
+    };
+    let path = crate::service_paths()
+        .install_dir()
+        .join(CORE_DIGEST_PIN_FILE_NAME);
+    if let Ok(existing) = std::fs::read_to_string(&path)
+        && normalize_digest(&existing).as_deref() == Some(pin.as_str())
+    {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("txt.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    if std::fs::write(&tmp, format!("{pin}\n")).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    if std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    #[cfg(all(windows, feature = "standalone"))]
+    {
+        let _ = crate::core::platform_security::secure_private_service_file_if_exists(&path);
+    }
+}
+
 fn pinned_core_digest() -> Option<String> {
     if let Some(pin) = COMPILED_IN_CORE_SHA256 {
+        publish_compiled_pin_file();
         return Some(pin.to_owned());
     }
     let path = crate::service_paths()
@@ -147,6 +230,58 @@ pub(super) fn verify_core_binary(core_path: &Path) -> Result<(), ServiceError> {
     match classify_core_digest(pinned_core_digest().as_deref(), &measured) {
         CoreDigestVerdict::Verified => {
             tracing::debug!(core_path = ?core_path, "Core binary matches its pinned digest");
+            #[cfg(windows)]
+            {
+                let signed = match super::authenticode::verify_authenticode(core_path) {
+                    super::authenticode::AuthenticodeVerdict::Signed => true,
+                    super::authenticode::AuthenticodeVerdict::Unsigned => false,
+                    super::authenticode::AuthenticodeVerdict::Invalid => {
+                        return Err(refused(format!(
+                            "core binary {core_path:?} has an untrusted Authenticode signature"
+                        )));
+                    }
+                };
+                let thumbprints = if signed {
+                    super::authenticode::authenticode_thumbprints(core_path)
+                } else {
+                    Vec::new()
+                };
+                match classify_publisher_pin(
+                    COMPILED_IN_CORE_AUTHENTICODE_THUMBPRINT,
+                    signed,
+                    &thumbprints,
+                ) {
+                    PublisherPinVerdict::Unpinned => {
+                        if !signed {
+                            tracing::warn!(
+                                core_path = ?core_path,
+                                "Core binary matches its pin but carries no Authenticode signature"
+                            );
+                        }
+                    }
+                    PublisherPinVerdict::Matched => {
+                        tracing::debug!(
+                            core_path = ?core_path,
+                            "Core Authenticode publisher matches its compiled thumbprint"
+                        );
+                    }
+                    PublisherPinVerdict::PinMalformed => {
+                        return Err(refused(
+                            "the compiled Authenticode thumbprint is not a SHA-1 or SHA-256 hex digest",
+                        ));
+                    }
+                    PublisherPinVerdict::Unsigned => {
+                        return Err(refused(format!(
+                            "core binary {core_path:?} is unsigned; this build requires a signed publisher"
+                        )));
+                    }
+                    PublisherPinVerdict::Mismatched => {
+                        return Err(refused(format!(
+                            "core binary {core_path:?} is not signed by the pinned Authenticode publisher"
+                        )));
+                    }
+                }
+            }
             Ok(())
         }
         CoreDigestVerdict::Mismatched => Err(refused(format!(
@@ -154,10 +289,10 @@ pub(super) fn verify_core_binary(core_path: &Path) -> Result<(), ServiceError> {
         ))),
         CoreDigestVerdict::Unpinned => Err(refused(format!(
             "no SHA-256 digest is pinned for the core binary, so {core_path:?} cannot be verified \
-             (measured {measured}); reinstall Tono"
+             (measured {measured}); install the latest Tono"
         ))),
         CoreDigestVerdict::PinMalformed => Err(refused(
-            "the pinned core digest is not a SHA-256 hex digest; reinstall Tono",
+            "the pinned core digest is not a SHA-256 hex digest; install the latest Tono",
         )),
     }
 }
@@ -171,7 +306,8 @@ fn refused(message: impl Into<String>) -> ServiceError {
 #[cfg(test)]
 mod tests {
     use super::{
-        CoreDigestVerdict, classify_core_digest, normalize_digest, sha256_hex, verify_core_binary,
+        CoreDigestVerdict, PublisherPinVerdict, classify_core_digest, classify_publisher_pin,
+        normalize_digest, normalize_thumbprint, sha256_hex, verify_core_binary,
     };
 
     /// The published SHA-256 of "abc", so the hashing is checked against something outside itself.
@@ -255,6 +391,53 @@ mod tests {
         assert!(verify_core_binary(&path).is_err());
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_publisher_pin_is_optional_until_compiled_in() {
+        assert_eq!(
+            classify_publisher_pin(None, false, &[]),
+            PublisherPinVerdict::Unpinned
+        );
+        assert_eq!(
+            classify_publisher_pin(None, true, &["aabb".repeat(20).to_string()]),
+            PublisherPinVerdict::Unpinned
+        );
+    }
+
+    #[test]
+    fn a_compiled_publisher_pin_refuses_unsigned_and_foreign_signers() {
+        let pin = "aa".repeat(20);
+        assert_eq!(
+            classify_publisher_pin(Some(&pin), false, &[]),
+            PublisherPinVerdict::Unsigned
+        );
+        assert_eq!(
+            classify_publisher_pin(Some(&pin), true, &["bb".repeat(20)]),
+            PublisherPinVerdict::Mismatched
+        );
+        assert_eq!(
+            classify_publisher_pin(Some(&format!("AA:{}", "bb".repeat(19))), true, &[pin.clone()]),
+            PublisherPinVerdict::Mismatched
+        );
+        assert_eq!(
+            classify_publisher_pin(Some(&format!("AA {}", "aa".repeat(19))), true, &[pin]),
+            PublisherPinVerdict::Matched
+        );
+    }
+
+    #[test]
+    fn a_publisher_pin_accepts_sha256_thumbprints() {
+        let pin = "ab".repeat(32);
+        assert_eq!(
+            classify_publisher_pin(Some(&pin), true, &[pin.clone()]),
+            PublisherPinVerdict::Matched
+        );
+        assert!(normalize_thumbprint("not-a-thumbprint").is_none());
+        assert_eq!(
+            classify_publisher_pin(Some("short"), true, &[]),
+            PublisherPinVerdict::PinMalformed
+        );
     }
 
     #[test]

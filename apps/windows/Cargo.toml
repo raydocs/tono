@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/tono-core",
+  "crates/tono-authenticode",
 ]
 # The vendored IPC library keeps its own edition, lint table and toolchain floor, so it is
 # excluded rather than made a member — but it must be listed, or cargo refuses to build it

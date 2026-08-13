@@ -112,6 +112,12 @@ pub fn is_permanently_protected(address: Ipv4Addr) -> bool {
     address == Ipv4Addr::new(1, 1, 1, 1) || address == Ipv4Addr::new(8, 8, 8, 8)
 }
 
+fn is_protected_from_direct(host: &str) -> bool {
+    ["anthropic.com", "claude.ai", "tono.app", "tono.com"]
+        .iter()
+        .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
+}
+
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the
 /// exit catalog: SHA-256 of the JSON's UTF-8 bytes, base64url, no padding).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -121,6 +127,9 @@ pub struct TonoTrafficPolicyResponse {
     pub sha256: String,
     #[serde(rename = "updatedAt", default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<i64>,
+    /// Detached Ed25519 signature over `tono-traffic-policy-v1\n` + `json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 /// The validated policy document.
@@ -256,12 +265,20 @@ fn sorted_unique_ports(ports: &[u16], allowed: [u16; 2]) -> Option<Vec<u16>> {
 }
 
 /// Full document validation (Mac `validate` parity): envelope checks, then
-/// per-entry admission. `protected` carries the currently protected
-/// addresses (the selected node's IP at sync time); media endpoints must
-/// also avoid the permanently protected resolvers.
+/// per-entry admission. Unknown keys and entries this build will not honour
+/// are skipped rather than discarding the whole document. `trusted` skips
+/// the compiled host allowlist after a verified signature.
 pub fn validate_policy(
     response: &TonoTrafficPolicyResponse,
     protected: &BTreeSet<Ipv4Addr>,
+) -> Result<TonoTrafficPolicy, PolicyError> {
+    validate_policy_with_trust(response, protected, false)
+}
+
+pub fn validate_policy_with_trust(
+    response: &TonoTrafficPolicyResponse,
+    protected: &BTreeSet<Ipv4Addr>,
+    trusted: bool,
 ) -> Result<TonoTrafficPolicy, PolicyError> {
     if response.revision < 0 || response.json.len() > MAX_POLICY_JSON_BYTES {
         return Err(PolicyError::InvalidResponse);
@@ -277,121 +294,136 @@ pub fn validate_policy(
         .and_then(|value| value.as_u64())
         .and_then(|value| u32::try_from(value).ok())
         .ok_or(PolicyError::InvalidResponse)?;
-    let expected: BTreeSet<&str> = if version == POLICY_VERSION_V1 {
-        ["version", "domains", "mediaEndpoints"]
-            .into_iter()
-            .collect()
-    } else if version == POLICY_VERSION_V2 {
-        ["version", "domains", "mediaEndpoints", "webDomains"]
-            .into_iter()
-            .collect()
-    } else if version == POLICY_VERSION_V3 {
-        ["version", "domains", "mediaEndpoints", "webDomains", "directSuffixes"]
-            .into_iter()
-            .collect()
-    } else {
-        return Err(PolicyError::InvalidResponse);
-    };
-    if object.keys().map(String::as_str).collect::<BTreeSet<_>>() != expected {
+    if version < POLICY_VERSION_V1 {
         return Err(PolicyError::InvalidResponse);
     }
     let document: TonoTrafficPolicy =
         serde_json::from_str(&response.json).map_err(|_| PolicyError::InvalidResponse)?;
-    if document.domains.len() > MAX_POLICY_DOMAINS
-        || document.media_endpoints.len() > MAX_POLICY_MEDIA
-        || document.web_domains.len() > MAX_POLICY_WEB_DOMAINS
-        || document.direct_suffixes.len() > MAX_POLICY_DIRECT_SUFFIXES
-    {
-        return Err(PolicyError::InvalidResponse);
-    }
+    let policy_domains: Vec<PolicyDomain> = document
+        .domains
+        .into_iter()
+        .take(MAX_POLICY_DOMAINS)
+        .collect();
+    let policy_media: Vec<PolicyMedia> = document
+        .media_endpoints
+        .into_iter()
+        .take(MAX_POLICY_MEDIA)
+        .collect();
+    let policy_web: Vec<PolicyDomain> = if version >= POLICY_VERSION_V2 {
+        document
+            .web_domains
+            .into_iter()
+            .take(MAX_POLICY_WEB_DOMAINS)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let policy_suffixes: Vec<PolicyDomain> = if version >= POLICY_VERSION_V3 {
+        document
+            .direct_suffixes
+            .into_iter()
+            .take(MAX_POLICY_DIRECT_SUFFIXES)
+            .collect()
+    } else {
+        Vec::new()
+    };
 
-    let mut domains: Vec<PolicyDomain> = Vec::with_capacity(document.domains.len());
-    for entry in &document.domains {
-        // Mac parity: the entry must already be in canonical form
-        // (lowercase, no trailing dot) — normalization is not repair.
+    let mut domains: Vec<PolicyDomain> = Vec::new();
+    for entry in policy_domains {
         let normalized = entry.host.trim().to_lowercase();
         let normalized = normalized.strip_suffix('.').unwrap_or(&normalized);
         if normalized != entry.host {
-            return Err(PolicyError::InvalidResponse);
+            continue;
         }
-        if !is_allowed_direct_domain(&entry.host) {
-            return Err(PolicyError::Domain(entry.host.clone()));
+        if is_protected_from_direct(&entry.host) {
+            continue;
         }
-        let ports =
-            sorted_unique_ports(&entry.ports, [80, 443]).ok_or(PolicyError::InvalidResponse)?;
+        if !trusted && !is_allowed_direct_domain(&entry.host) {
+            continue;
+        }
+        let Some(ports) = sorted_unique_ports(&entry.ports, [80, 443]) else {
+            continue;
+        };
+        if domains.iter().any(|domain| domain.host == normalized) {
+            continue;
+        }
         domains.push(PolicyDomain {
             host: normalized.to_string(),
             ports,
         });
     }
     domains.sort_by(|left, right| left.host.cmp(&right.host));
-    let before = domains.len();
-    domains.dedup_by(|left, right| left.host == right.host);
-    if domains.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
 
-    let mut web_domains = Vec::with_capacity(document.web_domains.len());
-    for entry in &document.web_domains {
-        if !is_allowed_web_domain(&entry.host) || entry.ports != [443] {
-            return Err(PolicyError::InvalidResponse);
+    let mut web_domains = Vec::new();
+    for entry in policy_web {
+        if is_protected_from_direct(&entry.host) {
+            continue;
         }
-        if domains.iter().any(|domain| domain.host == entry.host) {
-            return Err(PolicyError::InvalidResponse);
+        if !trusted && !is_allowed_web_domain(&entry.host) {
+            continue;
         }
-        web_domains.push(entry.clone());
+        if !trusted && entry.ports != [443] {
+            continue;
+        }
+        if trusted && sorted_unique_ports(&entry.ports, [80, 443]).is_none() {
+            continue;
+        }
+        if domains.iter().any(|domain| domain.host == entry.host)
+            || web_domains.iter().any(|domain: &PolicyDomain| domain.host == entry.host)
+        {
+            continue;
+        }
+        web_domains.push(entry);
     }
     web_domains.sort_by(|a, b| a.host.cmp(&b.host));
-    let before = web_domains.len();
-    web_domains.dedup_by(|a, b| a.host == b.host);
-    if web_domains.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
 
-    let mut direct_suffixes = Vec::with_capacity(document.direct_suffixes.len());
-    for entry in &document.direct_suffixes {
-        if !is_allowed_direct_suffix(&entry.host) {
-            return Err(PolicyError::InvalidResponse);
+    let mut direct_suffixes = Vec::new();
+    for entry in policy_suffixes {
+        if is_protected_from_direct(&entry.host) {
+            continue;
         }
-        let ports =
-            sorted_unique_ports(&entry.ports, [80, 443]).ok_or(PolicyError::InvalidResponse)?;
+        if !trusted && !is_allowed_direct_suffix(&entry.host) {
+            continue;
+        }
+        let Some(ports) = sorted_unique_ports(&entry.ports, [80, 443]) else {
+            continue;
+        };
+        if direct_suffixes
+            .iter()
+            .any(|domain: &PolicyDomain| domain.host == entry.host)
+        {
+            continue;
+        }
         direct_suffixes.push(PolicyDomain {
-            host: entry.host.clone(),
+            host: entry.host,
             ports,
         });
     }
     direct_suffixes.sort_by(|a, b| a.host.cmp(&b.host));
-    let before = direct_suffixes.len();
-    direct_suffixes.dedup_by(|a, b| a.host == b.host);
-    if direct_suffixes.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
 
-    let mut media: Vec<PolicyMedia> = Vec::with_capacity(document.media_endpoints.len());
-    for entry in &document.media_endpoints {
-        let address: Ipv4Addr = entry
-            .address
-            .parse()
-            .map_err(|_| PolicyError::Address(entry.address.clone()))?;
+    let mut media: Vec<PolicyMedia> = Vec::new();
+    for entry in policy_media {
+        let Ok(address) = entry.address.parse::<Ipv4Addr>() else {
+            continue;
+        };
         if !is_public_ipv4(address)
             || is_permanently_protected(address)
             || protected.contains(&address)
         {
-            return Err(PolicyError::Address(entry.address.clone()));
+            continue;
         }
-        let ports =
-            sorted_unique_ports(&entry.ports, [443, 8000]).ok_or(PolicyError::InvalidResponse)?;
+        let Some(ports) = sorted_unique_ports(&entry.ports, [443, 8000]) else {
+            continue;
+        };
+        if media.iter().any(|item| item.address == address.to_string()) {
+            continue;
+        }
         media.push(PolicyMedia {
             address: address.to_string(),
             ports,
         });
     }
     media.sort_by(|left, right| left.address.cmp(&right.address));
-    let before = media.len();
-    media.dedup_by(|left, right| left.address == right.address);
-    if media.len() != before {
-        return Err(PolicyError::InvalidResponse);
-    }
 
     Ok(TonoTrafficPolicy {
         version,
@@ -418,6 +450,7 @@ pub enum PolicyInstallOutcome {
 pub struct PolicyTracker {
     current_revision: i64,
     current_digest: Option<String>,
+    current_signature: Option<String>,
 }
 
 impl Default for PolicyTracker {
@@ -432,15 +465,25 @@ impl PolicyTracker {
         Self {
             current_revision: -1,
             current_digest: None,
+            current_signature: None,
         }
     }
 
     /// Seed from a previously verified cache so a download can never roll
     /// back across restarts.
     pub fn from_installed(revision: i64, digest: String) -> Self {
+        Self::from_installed_with_signature(revision, digest, None)
+    }
+
+    pub fn from_installed_with_signature(
+        revision: i64,
+        digest: String,
+        signature: Option<String>,
+    ) -> Self {
         Self {
             current_revision: revision,
             current_digest: Some(digest),
+            current_signature: signature,
         }
     }
 
@@ -460,19 +503,45 @@ impl PolicyTracker {
         response: &TonoTrafficPolicyResponse,
         protected: &BTreeSet<Ipv4Addr>,
     ) -> Result<PolicyInstallOutcome, PolicyError> {
-        let policy = validate_policy(response, protected)?;
+        match crate::policy_signature::verdict(&response.json, response.signature.as_deref()) {
+            crate::policy_signature::SignatureVerdict::Untrustworthy => {
+                return Err(PolicyError::InvalidResponse);
+            }
+            crate::policy_signature::SignatureVerdict::Unsigned => {}
+            crate::policy_signature::SignatureVerdict::Trusted => {}
+        }
+        let trusted = crate::policy_signature::verdict(
+            &response.json,
+            response.signature.as_deref(),
+        ) == crate::policy_signature::SignatureVerdict::Trusted;
+        let policy = validate_policy_with_trust(response, protected, trusted)?;
         if response.revision < self.current_revision {
             return Err(PolicyError::StaleRevision);
         }
         if response.revision == self.current_revision {
-            return if self.current_digest.as_deref() == Some(response.sha256.as_str()) {
-                Ok(PolicyInstallOutcome::Unchanged)
-            } else {
-                Err(PolicyError::InvalidResponse)
+            if self.current_digest.as_deref() != Some(response.sha256.as_str()) {
+                return Err(PolicyError::InvalidResponse);
+            }
+            return match crate::policy_signature::same_revision_transition(
+                self.current_signature.as_deref(),
+                response.signature.as_deref(),
+            ) {
+                crate::policy_signature::SameRevisionTransition::Unchanged => {
+                    Ok(PolicyInstallOutcome::Unchanged)
+                }
+                crate::policy_signature::SameRevisionTransition::UpgradeToTrusted => {
+                    self.current_signature = response.signature.clone();
+                    Ok(PolicyInstallOutcome::Installed(policy))
+                }
+                crate::policy_signature::SameRevisionTransition::DowngradeAttempt
+                | crate::policy_signature::SameRevisionTransition::ReplacementAttempt => {
+                    Ok(PolicyInstallOutcome::Unchanged)
+                }
             };
         }
         self.current_revision = response.revision;
         self.current_digest = Some(response.sha256.clone());
+        self.current_signature = response.signature.clone();
         Ok(PolicyInstallOutcome::Installed(policy))
     }
 }
@@ -516,7 +585,16 @@ impl PolicyCache {
             .read_to_string(&mut body)
             .ok()?;
         let response: TonoTrafficPolicyResponse = serde_json::from_str(&body).ok()?;
-        let policy = validate_policy(&response, protected).ok()?;
+        let trusted = crate::policy_signature::verdict(
+            &response.json,
+            response.signature.as_deref(),
+        ) == crate::policy_signature::SignatureVerdict::Trusted;
+        if crate::policy_signature::verdict(&response.json, response.signature.as_deref())
+            == crate::policy_signature::SignatureVerdict::Untrustworthy
+        {
+            return None;
+        }
+        let policy = validate_policy_with_trust(&response, protected, trusted).ok()?;
         Some(CachedPolicy { response, policy })
     }
 
@@ -527,7 +605,16 @@ impl PolicyCache {
         response: &TonoTrafficPolicyResponse,
         protected: &BTreeSet<Ipv4Addr>,
     ) -> Result<(), PolicyError> {
-        validate_policy(response, protected)?;
+        let trusted = crate::policy_signature::verdict(
+            &response.json,
+            response.signature.as_deref(),
+        ) == crate::policy_signature::SignatureVerdict::Trusted;
+        if crate::policy_signature::verdict(&response.json, response.signature.as_deref())
+            == crate::policy_signature::SignatureVerdict::Untrustworthy
+        {
+            return Err(PolicyError::InvalidResponse);
+        }
+        validate_policy_with_trust(response, protected, trusted)?;
         let body =
             serde_json::to_string(response).map_err(|err| PolicyError::Io(err.to_string()))?;
         if body.len() as u64 > MAX_POLICY_CACHE_BYTES {
@@ -594,6 +681,7 @@ mod tests {
             json: json.to_string(),
             sha256: catalog_digest(json),
             updated_at: None,
+            signature: None,
         }
     }
 
@@ -648,11 +736,8 @@ mod tests {
         assert!(is_allowed_direct_domain("Qpic.CN."));
         for host in ["Qpic.CN", "qpic.cn.", " qpic.cn"] {
             let doc = policy_json(&format!(r#"{{"host":"{host}","ports":[443]}}"#), "");
-            assert_eq!(
-                validate_policy(&response(0, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{host}"
-            );
+            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            assert!(policy.domains.is_empty(), "{host}");
         }
     }
 
@@ -684,9 +769,10 @@ mod tests {
         assert_eq!(policy.version, 2);
         assert_eq!(policy.web_domains.len(), 2);
         let v1_web = v2.replace("\"version\":2", "\"version\":1");
-        assert_eq!(
-            validate_policy(&response(1, &v1_web), &no_protected()),
-            Err(PolicyError::InvalidResponse)
+        let v1_policy = validate_policy(&response(1, &v1_web), &no_protected()).unwrap();
+        assert!(
+            v1_policy.web_domains.is_empty(),
+            "v1 ignores webDomains rather than discarding the document"
         );
     }
 
@@ -702,13 +788,10 @@ mod tests {
         assert_eq!(policy.direct_suffixes[1].host, "zoom.us");
         // v2 documents must not carry the suffix list.
         let v2_suffix = v3.replace("\"version\":3", "\"version\":2");
-        assert_eq!(
-            validate_policy(&response(1, &v2_suffix), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        let v2_policy = validate_policy(&response(1, &v2_suffix), &no_protected()).unwrap();
+        assert!(v2_policy.direct_suffixes.is_empty());
 
-        // The suffix must be an exact allowlist entry: no hosts under a
-        // suffix, no unlisted or protected names, canonical form only.
+        // Bad suffix entries are skipped, not fatal.
         for host in [
             "example.com",
             "www.baidu.com",
@@ -720,27 +803,19 @@ mod tests {
             let doc = format!(
                 r#"{{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{{"host":"{host}","ports":[443]}}]}}"#
             );
-            assert_eq!(
-                validate_policy(&response(1, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{host}"
-            );
+            let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+            assert!(policy.direct_suffixes.is_empty(), "{host}");
         }
         for ports in ["[]", "[8080]", "[443,443]", "[80,8000]"] {
             let doc = format!(
                 r#"{{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{{"host":"baidu.com","ports":{ports}}}]}}"#
             );
-            assert_eq!(
-                validate_policy(&response(1, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{ports}"
-            );
+            let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+            assert!(policy.direct_suffixes.is_empty(), "{ports}");
         }
         let duplicate = r#"{"version":3,"domains":[],"mediaEndpoints":[],"webDomains":[],"directSuffixes":[{"host":"baidu.com","ports":[443]},{"host":"baidu.com","ports":[80]}]}"#;
-        assert_eq!(
-            validate_policy(&response(1, duplicate), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        let policy = validate_policy(&response(1, duplicate), &no_protected()).unwrap();
+        assert_eq!(policy.direct_suffixes.len(), 1);
     }
 
     #[test]
@@ -756,37 +831,28 @@ mod tests {
             let doc = format!(
                 r#"{{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{{"host":"{host}","ports":[443]}}]}}"#
             );
-            assert_eq!(
-                validate_policy(&response(1, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{host}"
-            );
+            let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+            assert!(policy.web_domains.is_empty(), "{host}");
         }
         for ports in ["[]", "[80]", "[443,443]"] {
             let doc = format!(
                 r#"{{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{{"host":"bilibili.com","ports":{ports}}}]}}"#
             );
-            assert_eq!(
-                validate_policy(&response(1, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse)
-            );
+            let policy = validate_policy(&response(1, &doc), &no_protected()).unwrap();
+            assert!(policy.web_domains.is_empty());
         }
         let duplicate = r#"{"version":2,"domains":[{"host":"qq.com","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"qq.com","ports":[443]}]}"#;
-        assert_eq!(
-            validate_policy(&response(1, duplicate), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        let policy = validate_policy(&response(1, duplicate), &no_protected()).unwrap();
+        assert_eq!(policy.domains.len(), 1);
+        assert!(policy.web_domains.is_empty());
     }
 
     #[test]
     fn rejects_domain_port_violations() {
         for ports in ["[80,80]", "[8080]", "[]", "[443,8000]"] {
             let doc = policy_json(&format!(r#"{{"host":"qq.com","ports":{ports}}}"#), "");
-            assert_eq!(
-                validate_policy(&response(0, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{ports}"
-            );
+            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            assert!(policy.domains.is_empty(), "{ports}");
         }
     }
 
@@ -794,42 +860,30 @@ mod tests {
     fn rejects_media_port_and_duplicate_violations() {
         for ports in ["[443,443]", "[80]", "[]"] {
             let doc = policy_json("", &format!(r#"{{"address":"9.0.0.9","ports":{ports}}}"#));
-            assert_eq!(
-                validate_policy(&response(0, &doc), &no_protected()),
-                Err(PolicyError::InvalidResponse),
-                "{ports}"
-            );
+            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            assert!(policy.media_endpoints.is_empty(), "{ports}");
         }
         let dup_domain = policy_json(
             r#"{"host":"qq.com","ports":[80]},{"host":"QQ.com","ports":[80]}"#,
             "",
         );
-        assert_eq!(
-            validate_policy(&response(0, &dup_domain), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        let policy = validate_policy(&response(0, &dup_domain), &no_protected()).unwrap();
+        assert_eq!(policy.domains.len(), 1);
     }
 
     #[test]
     fn rejects_disallowed_and_protected_addresses() {
         for address in ["10.0.0.1", "198.18.0.1", "1.1.1.1", "8.8.8.8", "not-an-ip"] {
             let doc = policy_json("", &format!(r#"{{"address":"{address}","ports":[443]}}"#));
-            assert!(
-                matches!(
-                    validate_policy(&response(0, &doc), &no_protected()),
-                    Err(PolicyError::Address(_)) | Err(PolicyError::InvalidResponse),
-                ),
-                "{address}"
-            );
+            let policy = validate_policy(&response(0, &doc), &no_protected()).unwrap();
+            assert!(policy.media_endpoints.is_empty(), "{address}");
         }
         // The selected node's IP is protected at sync time.
         let mut protected = BTreeSet::new();
         protected.insert(Ipv4Addr::new(9, 0, 0, 7));
         let doc = policy_json("", r#"{"address":"9.0.0.7","ports":[443]}"#);
-        assert_eq!(
-            validate_policy(&response(0, &doc), &protected),
-            Err(PolicyError::Address("9.0.0.7".to_string()))
-        );
+        let policy = validate_policy(&response(0, &doc), &protected).unwrap();
+        assert!(policy.media_endpoints.is_empty());
     }
 
     #[test]
@@ -846,12 +900,9 @@ mod tests {
             validate_policy(&tampered, &no_protected()),
             Err(PolicyError::InvalidResponse)
         );
-        // Wrong version.
-        let wrong_version = policy_json("", "").replace(r#""version":1"#, r#""version":2"#);
-        assert_eq!(
-            validate_policy(&response(1, &wrong_version), &no_protected()),
-            Err(PolicyError::InvalidResponse)
-        );
+        // A newer declared version is read as the newest shape this build knows.
+        let newer_version = policy_json("", "").replace(r#""version":1"#, r#""version":4"#);
+        assert!(validate_policy(&response(1, &newer_version), &no_protected()).is_ok());
         // Oversize JSON.
         let big = format!("{}//{}", good_document(), "x".repeat(MAX_POLICY_JSON_BYTES));
         assert_eq!(

@@ -51,7 +51,7 @@ pub struct TonoStatus {
     pub ui_state: String,
     /// ConnectStage key (e.g. "startingKillSwitch") while connecting.
     pub stage: Option<String>,
-    /// macOS-parity stage text ("Starting Kill Switch…").
+    /// Backend stage text shown on the connect pill.
     pub stage_label: Option<String>,
     pub selected_server: Option<String>,
     pub protection_blocked: bool,
@@ -60,6 +60,15 @@ pub struct TonoStatus {
     pub catalog_requires_choice: bool,
     /// Monotonic owner token for controller/WebSocket data. Never expose the controller secret.
     pub controller_generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_org: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_location: Option<String>,
+    /// `off` | `on` | `skipped` — whether the optional WeChat/web DIRECT overlay
+    /// is live. `skipped` means the tunnel is up but China-direct was not installed.
+    pub direct_overlay: String,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -199,6 +208,16 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         catalog_revision: (revision >= 0).then_some(revision),
         catalog_requires_choice: inner.catalog_requires_choice,
         controller_generation: inner.controller_generation,
+        exit_ip: inner.exit_ip.clone(),
+        exit_org: inner.exit_org.clone(),
+        exit_location: inner.exit_location.clone(),
+        direct_overlay: if inner.optional_direct_active {
+            "on".to_string()
+        } else if inner.optional_direct_skip.is_some() {
+            "skipped".to_string()
+        } else {
+            "off".to_string()
+        },
     }
 }
 
@@ -1276,6 +1295,11 @@ pub async fn restore_session_guarded(app: AppHandle, state: Arc<TonoState>) {
     use futures::FutureExt as _;
 
     load_credentials(&state).await;
+    crate::tono::bootstrap::hydrate_learned_pins_from_service().await;
+    {
+        let inner = state.lock().await;
+        let _ = inner.client.transport().refresh_control_plane_pins().await;
+    }
     let outcome = std::panic::AssertUnwindSafe(restore_session(app.clone(), state.clone()))
         .catch_unwind()
         .await;

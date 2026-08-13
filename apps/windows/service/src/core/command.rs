@@ -33,6 +33,8 @@ pub enum IpcCommand {
     RestoreProtectedDns,
     #[strum(serialize = "/dns/status")]
     GetProtectedDnsStatus,
+    #[strum(serialize = "/bootstrap-pins")]
+    BootstrapPins,
     // #[strum(serialize = "/clash")]
     // GetClash,
 

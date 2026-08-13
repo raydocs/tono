@@ -45,6 +45,7 @@ fi
 TONO_CORE_SHA256=$(/usr/bin/shasum -a 256 "$core_sidecar" | /usr/bin/cut -d' ' -f1)
 export TONO_CORE_SHA256
 echo "pinning core digest for the Service: $TONO_CORE_SHA256"
+printf '%s\n' "$TONO_CORE_SHA256" > "$app_root/src-tauri/resources/core-sha256.txt"
 
 (
   cd "$windows_root"

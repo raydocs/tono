@@ -1217,6 +1217,14 @@ Section Uninstall
     DeleteRegKey HKCU "${UNINSTKEY}"
   !endif
 
+  ; Learned control-plane pins used to live in user AppData. They are no longer
+  ; trusted; delete the leftover even when the user keeps the rest of AppData.
+  ${If} $UpdateMode <> 1
+    SetShellVarContext current
+    Delete /REBOOTOK "$APPDATA\${BUNDLEID}\tono\control-plane-pins.json"
+    Delete /REBOOTOK "$LOCALAPPDATA\${BUNDLEID}\tono\control-plane-pins.json"
+  ${EndIf}
+
   ; Removes the Autostart entry for ${PRODUCTNAME} from the HKCU Run key if it exists.
   ; This ensures the program does not launch automatically after uninstallation if it exists.
   ; If it doesn't exist, it does nothing.

@@ -808,7 +808,26 @@ async function assertWindowsPackagingConfig() {
   )
 }
 
+async function writeCoreDigestPin() {
+  if (platform !== 'win32') return
+  const sidecar = path.join(SIDECAR_DIR, `verge-mihomo-${SIDECAR_HOST}.exe`)
+  if (!fs.existsSync(sidecar)) {
+    throw new Error(`cannot write core-sha256.txt: missing ${sidecar}`)
+  }
+  const digest = createHash('sha256')
+    .update(await fsp.readFile(sidecar))
+    .digest('hex')
+  await fsp.mkdir(RESOURCES_DIR, { recursive: true })
+  await fsp.writeFile(
+    path.join(RESOURCES_DIR, 'core-sha256.txt'),
+    `${digest}\n`,
+    'utf8',
+  )
+  log_success(`wrote resources/core-sha256.txt (${digest})`)
+}
+
 runTask()
+  .then(() => writeCoreDigestPin())
   .then(() => assertWindowsPackagingConfig())
   .catch((error) => {
     log_error(error.message || error)

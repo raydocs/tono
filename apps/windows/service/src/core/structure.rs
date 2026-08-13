@@ -102,6 +102,21 @@ impl ProtocolInfo {
         self.protocol.epoch == ProtocolVersion::current().epoch
             && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD
     }
+
+    /// Whether the Service persists learned control-plane addresses in ProgramData.
+    pub const fn supports_bootstrap_pins(&self) -> bool {
+        self.protocol.epoch == ProtocolVersion::current().epoch
+            && self.protocol.revision >= crate::MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS
+    }
+}
+
+/// Learned control-plane addresses persisted by GET/POST `/bootstrap-pins`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BootstrapPins {
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub addresses: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1094,6 +1109,17 @@ mod tests {
         assert!(info.supports_direct_runtime_reload());
         info.protocol.epoch = info.protocol.epoch.saturating_add(1);
         assert!(!info.supports_direct_runtime_reload());
+    }
+
+    #[test]
+    fn bootstrap_pins_require_revision_thirteen_in_the_current_epoch() {
+        let mut info = ProtocolInfo::current();
+        info.protocol.revision = 12;
+        assert!(!info.supports_bootstrap_pins());
+        info.protocol.revision = 13;
+        assert!(info.supports_bootstrap_pins());
+        info.protocol.epoch = info.protocol.epoch.saturating_add(1);
+        assert!(!info.supports_bootstrap_pins());
     }
 
     #[test]

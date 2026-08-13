@@ -18,6 +18,7 @@ export const WINDOWS_RESOURCE_ALLOWLIST = Object.freeze([
   'tono-service.exe',
   'tono-service-install.exe',
   'tono-service-uninstall.exe',
+  'core-sha256.txt',
 ])
 
 export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
@@ -830,6 +831,7 @@ export function validatePayloadEntries(entries) {
     'tono-service.exe',
     'tono-service-install.exe',
     'tono-service-uninstall.exe',
+    'core-sha256.txt',
   ]) {
     if (!bases.some((base) => base.toLowerCase() === required.toLowerCase())) {
       return `installer payload is missing required file basename: ${required}`

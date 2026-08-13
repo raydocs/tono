@@ -24,7 +24,46 @@ pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// Reviewed WeChat product executables. Keep this list narrow: WFP remains
 /// the exact IP:port security boundary for each generated DIRECT rule.
-pub const WECHAT_PROCESS_NAMES: [&str; 3] = ["WeChat.exe", "Weixin.exe", "WeChatAppEx.exe"];
+pub const WECHAT_PROCESS_NAMES: [&str; 9] = [
+    "WeChat.exe",
+    "Weixin.exe",
+    "xwechat.exe",
+    "WeChatAppEx.exe",
+    "WeChatPlayer.exe",
+    "WeixinPlay.exe",
+    "WeChatApp.exe",
+    "WeixinApp.exe",
+    "WeChatBrowser.exe",
+];
+/// Desktop assistants that should share Claude's residential (or exit) path.
+/// Command-line `node.exe` is deliberately absent: it would capture every
+/// Node process on the machine.
+pub const HOME_PROCESS_NAMES: [&str; 7] = [
+    "Claude.exe",
+    "claude.exe",
+    "Claude Helper.exe",
+    "ChatGPT.exe",
+    "chatgpt.exe",
+    "Codex.exe",
+    "codex.exe",
+];
+/// Windows install-tree fragments whose helpers should share the home (or
+/// exit) hop. These are contains-matches, not identity: a mistaken hit still
+/// leaves through the tunnel. The AND payload cannot contain `,` or `()`.
+/// `claude\versions` covers Claude Code's versioned launcher (`2.1.223`),
+/// whose process name is not `claude.exe`.
+const HOME_PROCESS_PATH_FRAGMENTS: [&str; 7] = [
+    "AnthropicClaude",
+    r"claude\versions",
+    r".local\share\claude",
+    "claude-code",
+    r"@anthropic-ai\claude-code",
+    "ChatGPT",
+    r"openai\codex",
+];
+/// Signed WeChat install prefixes that may join a DirectPlan. Discovery is
+/// bounded so a poisoned registry cannot grow the rule table without limit.
+pub const MAX_WECHAT_PROCESS_PATH_REGEXES: usize = 8;
 /// Name of the Claude→home-broadband select group, present only when the
 /// catalog carries a verified `homeProxy` or `homeSocks5` routing directive.
 pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
@@ -33,14 +72,52 @@ pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
 /// (`dialer-proxy`), so the chain hop follows the user's node selection and
 /// the VPS needs no change.
 pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
-/// Claude/Anthropic domains pinned to the home-broadband exit alongside the
-/// two Claude process names when `homeProxy` routing is in force.
-pub const CLAUDE_HOME_DOMAINS: [&str; 4] = [
+/// First-party assistant domains pinned to the home-broadband exit when
+/// `homeProxy` / `homeSocks5` is in force. These are DOMAIN-SUFFIX rules
+/// with no process constraint, so Chrome / Edge / Arc count the same as
+/// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
+/// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
+/// exit probe. Gemini is pinned by its product hostnames instead.
+pub const CLAUDE_HOME_DOMAINS: [&str; 28] = [
+    "anthropic.com",
     "claude.ai",
     "claude.com",
-    "anthropic.com",
+    "claude.app",
+    "claude.site",
+    "clau.de",
+    "claudestudio.com",
+    "claudemcpclient.com",
+    "claudemcpcontent.com",
     "claudeusercontent.com",
+    "chatgpt.com",
+    "openai.com",
+    "chat.com",
+    "ai.com",
+    "oaistatic.com",
+    "oaiusercontent.com",
+    "grok.com",
+    "grok.x.com",
+    "grokipedia.com",
+    "x.ai",
+    "perplexity.ai",
+    "perplexity.com",
+    "pplx.ai",
+    "gemini.google.com",
+    "bard.google.com",
+    "aistudio.google.com",
+    "generativelanguage.googleapis.com",
+    "notebooklm.google.com",
 ];
+/// Anthropic's own unicast range (ARIN AP-2440 / AS399358). Customer audits
+/// only ever show `160.79.104.10:443` as a raw dest, which skips every
+/// DOMAIN-SUFFIX pin. The ARIN block is first-party only — unlike `1.1.1.1` /
+/// `8.8.8.8`, which Tono itself uses as the exit probe and must stay on
+/// `Tono-Exit`. `no-resolve` keeps the match on the packet address.
+pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
+/// Same ASN's advertised IPv6 prefixes. `a-api.anthropic.com` answers
+/// `2607:6bc0::10`; a dual-stack client that dials the AAAA by IP would
+/// otherwise miss every DOMAIN-SUFFIX pin the same way IPv4 did.
+pub const CLAUDE_HOME_IPV6_CIDRS: [&str; 2] = ["2607:6bc0::/48", "2607:6bc0:11::/48"];
 /// DoH resolvers pinned through the exit group; the `#Tono-Exit` fragment
 /// routes the lookups through the tunnel.
 pub const DOH_NAMESERVERS: [&str; 2] = [
@@ -100,6 +177,9 @@ impl Default for RuntimePorts {
 ///   direct rules — no pinned IP, TCP only, sorted by (suffix, port).
 /// - `udp_wechat_rules`: exact (IP, port) tuples for the WeChat media UDP
 ///   rules (ports ⊆ {443, 8000}).
+/// - `wechat_process_path_regexes`: extra PROCESS-PATH-REGEX rows for signed
+///   WeChat install trees. Empty keeps name-only matching. Each pattern is
+///   re-checked at build time so a bad payload cannot ship.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectPlan {
     pub physical_interface: String,
@@ -108,6 +188,7 @@ pub struct DirectPlan {
     pub tcp_web_rules: Vec<(String, std::net::Ipv4Addr, u16)>,
     pub web_suffix_rules: Vec<(String, u16)>,
     pub udp_wechat_rules: Vec<(std::net::Ipv4Addr, u16)>,
+    pub wechat_process_path_regexes: Vec<String>,
 }
 
 impl DirectPlan {
@@ -132,6 +213,147 @@ impl DirectPlan {
         }
         Ok(())
     }
+}
+
+/// Whether a PROCESS-PATH-REGEX payload can be embedded in a Mihomo AND rule
+/// without changing how that rule parses. Commas split sub-rules and
+/// parentheses delimit them; a pattern that contains either is refused.
+pub fn is_rule_payload_safe(pattern: &str) -> bool {
+    !pattern.is_empty()
+        && pattern.len() <= 2_048
+        && !pattern.contains([',', '(', ')'])
+        && pattern.chars().all(|character| {
+            let value = character as u32;
+            value >= 0x20 && value != 0x7F && value != 0x85 && value != 0x2028 && value != 0x2029
+        })
+}
+
+/// Kind of Windows process-path regex to emit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowsPathRegexKind {
+    /// `^prefix` — every executable under a signed WeChat install tree.
+    AnchoredPrefix,
+    /// `^file$` — one verified portable executable, no directory grant.
+    ExactFile,
+    /// Unanchored contains-match for a home-assistant folder fragment.
+    ContainsFragment,
+}
+
+/// Build a Mihomo PROCESS-PATH-REGEX payload from a Windows path or fragment.
+///
+/// `(?i)` cannot be used: parentheses would break the AND splitter. ASCII
+/// letters become `[Xx]` classes instead, and `\` / `/` both match so Mihomo's
+/// reported separator cannot miss the rule.
+pub fn windows_path_regex(path: &str, kind: WindowsPathRegexKind) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.len() > 1_024 {
+        return None;
+    }
+    let mut pattern = String::new();
+    if matches!(
+        kind,
+        WindowsPathRegexKind::AnchoredPrefix | WindowsPathRegexKind::ExactFile
+    ) {
+        pattern.push('^');
+    }
+    for character in trimmed.chars() {
+        push_windows_path_regex_char(&mut pattern, character);
+    }
+    if kind == WindowsPathRegexKind::ExactFile {
+        pattern.push('$');
+    }
+    is_rule_payload_safe(&pattern).then_some(pattern)
+}
+
+/// Anchored prefix regex for a signed WeChat install directory. The directory
+/// must already end with a separator so helpers under it match and a sibling
+/// folder does not.
+pub fn wechat_prefix_path_regex(prefix: &str) -> Option<String> {
+    let normalized = normalize_windows_prefix(prefix)?;
+    windows_path_regex(&normalized, WindowsPathRegexKind::AnchoredPrefix)
+}
+
+/// Exact-file regex for a verified portable WeChat executable.
+pub fn wechat_file_path_regex(path: &str) -> Option<String> {
+    let normalized = normalize_windows_file(path)?;
+    windows_path_regex(&normalized, WindowsPathRegexKind::ExactFile)
+}
+
+/// Home-assistant folder fragments, already encoded for AND-rule emission.
+pub fn home_process_path_regexes() -> Vec<String> {
+    HOME_PROCESS_PATH_FRAGMENTS
+        .iter()
+        .filter_map(|fragment| windows_path_regex(fragment, WindowsPathRegexKind::ContainsFragment))
+        .collect()
+}
+
+fn normalize_windows_prefix(prefix: &str) -> Option<String> {
+    let mut value = prefix.trim().replace('/', "\\");
+    if value.is_empty() {
+        return None;
+    }
+    if !value.ends_with('\\') {
+        value.push('\\');
+    }
+    is_windows_path_shape(&value).then_some(value)
+}
+
+fn normalize_windows_file(path: &str) -> Option<String> {
+    let value = path.trim().replace('/', "\\");
+    if value.ends_with('\\') || !is_windows_path_shape(&value) {
+        return None;
+    }
+    Some(value)
+}
+
+fn is_windows_path_shape(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'\\'
+        && !path.contains("..")
+        && path.chars().all(|character| {
+            let value = character as u32;
+            value >= 0x20 && value != 0x7F
+        })
+}
+
+fn push_windows_path_regex_char(pattern: &mut String, character: char) {
+    match character {
+        '/' | '\\' => pattern.push_str(r"[\\/]"),
+        ',' => pattern.push_str(r"\x2c"),
+        '(' => pattern.push_str(r"\x28"),
+        ')' => pattern.push_str(r"\x29"),
+        letter if letter.is_ascii_alphabetic() => {
+            pattern.push('[');
+            pattern.push(letter.to_ascii_uppercase());
+            pattern.push(letter.to_ascii_lowercase());
+            pattern.push(']');
+        }
+        special @ ('.' | '^' | '$' | '*' | '+' | '?' | '{' | '}' | '[' | ']' | '|') => {
+            pattern.push('\\');
+            pattern.push(special);
+        }
+        other => pattern.push(other),
+    }
+}
+
+fn validate_wechat_process_path_regexes(patterns: &[String]) -> Result<(), ConfigError> {
+    if patterns.len() > MAX_WECHAT_PROCESS_PATH_REGEXES {
+        return Err(ConfigError::DirectPlan(format!(
+            "too many WeChat process-path regexes: {}",
+            patterns.len()
+        )));
+    }
+    for pattern in patterns {
+        if !pattern.starts_with('^') || !is_rule_payload_safe(pattern) {
+            return Err(ConfigError::DirectPlan(format!(
+                "WeChat process-path regex is not safe to emit: {pattern:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// 32 random bytes, base64-encoded — the per-start controller secret (§5).
@@ -207,6 +429,7 @@ pub fn build_owned_runtime_with_ports(
 
     if let Some(plan) = direct {
         DirectPlan::validate_physical_interface(&plan.physical_interface)?;
+        validate_wechat_process_path_regexes(&plan.wechat_process_path_regexes)?;
         // A DIRECT rule that targets the selected node's own IP would pull
         // the tunnel's control socket out of the tunnel.
         let hits_node = plan
@@ -237,7 +460,39 @@ pub fn build_owned_runtime_with_ports(
         ports,
     ))
     .map_err(|err| ConfigError::Node(NodeRejection::Malformed(err.to_string())))?;
-    Ok(OwnedRuntime { yaml })
+    Ok(OwnedRuntime {
+        yaml: quote_block_sequence_scalars_with_flow_indicators(&yaml),
+    })
+}
+
+/// serde_yaml_ng emits PROCESS-PATH-REGEX character classes unquoted
+/// (`[Aa][Nn]…`). go-yaml, which Mihomo uses, treats `[` as a flow
+/// sequence. Quote those block-sequence scalars so the sidecar loads the
+/// rule as one string.
+fn quote_block_sequence_scalars_with_flow_indicators(yaml: &str) -> String {
+    let mut lines: Vec<String> = yaml
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let Some(scalar) = trimmed.strip_prefix("- ") else {
+                return line.to_string();
+            };
+            if scalar.starts_with('\'') || scalar.starts_with('"') {
+                return line.to_string();
+            }
+            if !(scalar.contains('[') || scalar.contains(']') || scalar.contains('{') || scalar.contains('}'))
+            {
+                return line.to_string();
+            }
+            let indent = &line[..line.len() - trimmed.len()];
+            let escaped = scalar.replace('\'', "''");
+            format!("{indent}- '{escaped}'")
+        })
+        .collect();
+    if yaml.ends_with('\n') {
+        lines.push(String::new());
+    }
+    lines.join("\n")
 }
 
 /// A freshly built owned runtime.
@@ -271,7 +526,8 @@ pub fn redact_secret(runtime_yaml: &str) -> String {
             mapping.insert(key, Value::String(String::new()));
         }
     }
-    serde_yaml_ng::to_string(&value).unwrap_or_else(|_| runtime_yaml.to_string())
+    let yaml = serde_yaml_ng::to_string(&value).unwrap_or_else(|_| runtime_yaml.to_string());
+    quote_block_sequence_scalars_with_flow_indicators(&yaml)
 }
 
 fn string(value: &str) -> Value {
@@ -530,15 +786,33 @@ fn runtime_value(
         // ruleless DIRECT dial, leaking Claude's UDP to the physical egress.
         // With TCP scope, Claude UDP falls through to REJECT and the app
         // retries over TCP, through the tunnel.
-        rules.push(format!(
-            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),{CLAUDE_HOME_GROUP_NAME}"
-        ));
-        rules.push(format!(
-            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),{CLAUDE_HOME_GROUP_NAME}"
-        ));
+        for process in HOME_PROCESS_NAMES {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for regex in home_process_path_regexes() {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        // No PROCESS-NAME here: a Chrome tab to ChatGPT / Claude / Grok /
+        // Perplexity / Gemini takes the same residential hop as the apps.
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        // Raw Anthropic unicast. Claude Code has dialed this range by IP,
+        // which no DOMAIN-SUFFIX can see.
+        for cidr in CLAUDE_HOME_IPV4_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV6_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(IP-CIDR6,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
     } else if let Some(plan) = direct {
@@ -547,20 +821,34 @@ fn runtime_value(
             || !plan.web_suffix_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
         {
-            rules.push("AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit".to_string());
-            rules.push("AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit".to_string());
+            for process in HOME_PROCESS_NAMES {
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-Exit"
+                ));
+            }
+            for regex in home_process_path_regexes() {
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),Tono-Exit"
+                ));
+            }
         }
     }
     if let Some(plan) = direct {
         // WeChat TCP is process-scoped, not per-domain: the clients dial Tencent's
         // file/CDN transfer endpoints by raw IP (no SNI), so domain pins can never
         // cover file transfer and large sends die hairpinned through the exit node.
-        // The process names are the trust boundary — WeChat only talks to Tencent.
-        // UDP stays pinned to the reviewed media endpoints.
+        // PROCESS-NAME covers the reviewed product names; PROCESS-PATH-REGEX
+        // covers helpers inside a signature-verified install tree. WFP remains
+        // the exact IP:port boundary. UDP stays pinned to reviewed media.
         if !plan.tcp_wechat_rules.is_empty() {
             for process in WECHAT_PROCESS_NAMES {
                 rules.push(format!(
                     "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
+                ));
+            }
+            for regex in &plan.wechat_process_path_regexes {
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{DIRECT_GROUP_NAME}"
                 ));
             }
         }
@@ -568,6 +856,11 @@ fn runtime_value(
             for process in WECHAT_PROCESS_NAMES {
                 rules.push(format!(
                     "AND,((NETWORK,UDP),(DST-PORT,{port}),(IP-CIDR,{address}/32,no-resolve),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
+                ));
+            }
+            for regex in &plan.wechat_process_path_regexes {
+                rules.push(format!(
+                    "AND,((NETWORK,UDP),(DST-PORT,{port}),(IP-CIDR,{address}/32,no-resolve),(PROCESS-PATH-REGEX,{regex})),{DIRECT_GROUP_NAME}"
                 ));
             }
         }
@@ -992,7 +1285,92 @@ reality-opts:
             )],
             web_suffix_rules: vec![("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)],
             udp_wechat_rules: vec![(std::net::Ipv4Addr::new(9, 0, 0, 20), 443)],
+            wechat_process_path_regexes: Vec::new(),
         }
+    }
+
+    fn expected_home_process_rules(group: &str) -> Vec<String> {
+        let mut rules: Vec<String> = HOME_PROCESS_NAMES
+            .iter()
+            .map(|process| format!("AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{group}"))
+            .collect();
+        for regex in home_process_path_regexes() {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{group}"
+            ));
+        }
+        rules
+    }
+
+    fn expected_wechat_direct_rules() -> Vec<String> {
+        let mut rules: Vec<String> = WECHAT_PROCESS_NAMES
+            .iter()
+            .map(|process| {
+                format!("AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-China-Direct")
+            })
+            .collect();
+        for process in WECHAT_PROCESS_NAMES {
+            rules.push(format!(
+                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"
+            ));
+        }
+        rules
+    }
+
+    fn expected_home_only_rules() -> Vec<String> {
+        let mut rules = vec![
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
+            "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
+        ];
+        rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
+        for domain in CLAUDE_HOME_DOMAINS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV4_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV6_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(IP-CIDR6,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        rules.push("MATCH,Tono-Exit".to_string());
+        rules
+    }
+
+    fn expected_home_with_direct_rules() -> Vec<String> {
+        let mut rules = vec![
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
+            "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
+        ];
+        rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
+        for domain in CLAUDE_HOME_DOMAINS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV4_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for cidr in CLAUDE_HOME_IPV6_CIDRS {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(IP-CIDR6,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        rules.extend(expected_wechat_direct_rules());
+        rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
+        rules.push("AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
+        rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
+        rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
+        rules.push("MATCH,Tono-Exit".to_string());
+        rules
     }
 
     #[test]
@@ -1112,9 +1490,8 @@ reality-opts:
         let mut expected = vec![
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
-            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit".to_string(),
-            "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit".to_string(),
         ];
+        expected.extend(expected_home_process_rules("Tono-Exit"));
         for process in WECHAT_PROCESS_NAMES {
             expected.push(format!("AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-China-Direct"));
         }
@@ -1130,12 +1507,13 @@ reality-opts:
             rules,
             expected.iter().map(String::as_str).collect::<Vec<_>>()
         );
+        let home_rules = expected_home_process_rules("Tono-Exit");
         assert_eq!(
-            &rules[2..4],
-            [
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Exit",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit"
-            ]
+            &rules[2..2 + home_rules.len()],
+            home_rules
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
         );
         // MATCH remains the only fallback.
         assert_eq!(rules.last(), Some(&"MATCH,Tono-Exit"));
@@ -1216,6 +1594,7 @@ reality-opts:
             tcp_web_rules: Vec::new(),
             web_suffix_rules: Vec::new(),
             udp_wechat_rules: Vec::new(),
+            wechat_process_path_regexes: Vec::new(),
         };
         let runtime =
             build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)).unwrap();
@@ -1237,6 +1616,202 @@ reality-opts:
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert_eq!(rules, [RULES[0], RULES[1], "AND,((NETWORK,UDP)),REJECT", RULES[2]]);
+    }
+
+    #[test]
+    fn windows_path_regex_is_case_insensitive_and_payload_safe() {
+        let prefix = wechat_prefix_path_regex(r"C:\Users\foo\AppData\Local\Tencent\WeChat").unwrap();
+        assert!(prefix.starts_with('^'), "{prefix}");
+        assert!(is_rule_payload_safe(&prefix), "{prefix}");
+        assert!(prefix.contains(r"[\\/]"), "{prefix}");
+        assert!(prefix.contains("[Ww][Ee][Cc][Hh][Aa][Tt]"), "{prefix}");
+        assert!(!prefix.contains('(') && !prefix.contains(')'), "{prefix}");
+        assert_eq!(
+            wechat_prefix_path_regex(r"C:/Users/foo/AppData/Local/Tencent/WeChat/").as_deref(),
+            Some(prefix.as_str())
+        );
+
+        let file = wechat_file_path_regex(r"D:\Apps\WeChat.exe").unwrap();
+        assert!(file.starts_with('^') && file.ends_with('$'), "{file}");
+        assert!(is_rule_payload_safe(&file), "{file}");
+        assert!(file.contains(r"[Ww][Ee][Cc][Hh][Aa][Tt]\.[Ee][Xx][Ee]$"), "{file}");
+
+        assert!(wechat_prefix_path_regex("").is_none());
+        assert!(wechat_prefix_path_regex(r"WeChat").is_none());
+        assert!(wechat_prefix_path_regex(r"C:\Users\foo\..\Tencent\WeChat").is_none());
+        assert!(wechat_file_path_regex(r"C:\Tencent\WeChat\").is_none());
+    }
+
+    #[test]
+    fn process_path_regex_rules_are_quoted_yaml_scalars() {
+        let runtime = build_with_home(Some("US Reality 01"));
+        let yaml = runtime.yaml();
+        let mut saw_path_regex = false;
+        for line in yaml.lines() {
+            if !line.contains("PROCESS-PATH-REGEX") {
+                continue;
+            }
+            saw_path_regex = true;
+            let trimmed = line.trim_start();
+            assert!(
+                trimmed.starts_with("- \"")
+                    || trimmed.starts_with("- '")
+                    || trimmed.contains(": \"")
+                    || trimmed.contains(": '"),
+                "go-yaml treats an unquoted [ as a flow sequence: {line}"
+            );
+        }
+        assert!(saw_path_regex, "home routing must emit PROCESS-PATH-REGEX rows");
+    }
+
+    #[test]
+    fn home_domains_cover_reviewed_assistants_without_google_at_large() {
+        for required in [
+            "openai.com",
+            "chatgpt.com",
+            "anthropic.com",
+            "claude.ai",
+            "claude.com",
+            "claude.app",
+            "claude.site",
+            "clau.de",
+            "claudestudio.com",
+            "claudemcpclient.com",
+            "claudemcpcontent.com",
+            "claudeusercontent.com",
+            "x.ai",
+            "grok.com",
+            "perplexity.ai",
+            "perplexity.com",
+            "gemini.google.com",
+            "bard.google.com",
+            "generativelanguage.googleapis.com",
+        ] {
+            assert!(
+                CLAUDE_HOME_DOMAINS.contains(&required),
+                "{required} must leave through the home hop"
+            );
+        }
+        for forbidden in ["google.com", "googleapis.com", "gstatic.com", "youtube.com"] {
+            assert!(
+                !CLAUDE_HOME_DOMAINS.contains(&forbidden),
+                "{forbidden} would pull unrelated traffic onto the home hop"
+            );
+        }
+        assert!(
+            CLAUDE_HOME_IPV4_CIDRS.contains(&"160.79.104.0/21"),
+            "Anthropic's first-party unicast must ride the home hop by IP"
+        );
+        for required in ["2607:6bc0::/48", "2607:6bc0:11::/48"] {
+            assert!(
+                CLAUDE_HOME_IPV6_CIDRS.contains(&required),
+                "{required} must ride the home hop by IP"
+            );
+        }
+        for forbidden in ["1.1.1.1/32", "8.8.8.8/32", "8.8.4.4/32", "0.0.0.0/0"] {
+            assert!(
+                !CLAUDE_HOME_IPV4_CIDRS.contains(&forbidden),
+                "{forbidden} is Tono's own probe or a wildcard, not Claude"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_home_covers_desktop_helpers_and_versioned_code_launcher() {
+        for process in ["Claude.exe", "claude.exe", "Claude Helper.exe"] {
+            assert!(
+                HOME_PROCESS_NAMES.contains(&process),
+                "{process} must share the home hop"
+            );
+        }
+        for fragment in [
+            "AnthropicClaude",
+            r"claude\versions",
+            r".local\share\claude",
+            "claude-code",
+            r"@anthropic-ai\claude-code",
+        ] {
+            assert!(
+                HOME_PROCESS_PATH_FRAGMENTS.contains(&fragment),
+                "{fragment} must share the home hop"
+            );
+        }
+        let regexes = home_process_path_regexes();
+        for sample in [
+            r"C:\Users\me\AppData\Local\AnthropicClaude\app-1.0.0\Claude.exe",
+            r"C:\Users\me\AppData\Local\AnthropicClaude\app-1.0.0\Claude Helper (Renderer).exe",
+            r"C:\Users\me\.local\share\claude\versions\2.1.223",
+            r"C:\Users\me\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js",
+        ] {
+            let encoded = windows_path_regex(sample, WindowsPathRegexKind::ContainsFragment)
+                .expect(sample);
+            assert!(
+                regexes.iter().any(|regex| encoded.contains(regex.as_str())),
+                "{sample} must match a home path fragment"
+            );
+        }
+    }
+
+    #[test]
+    fn home_process_path_regexes_are_payload_safe_contains_matches() {
+        let regexes = home_process_path_regexes();
+        assert_eq!(regexes.len(), HOME_PROCESS_PATH_FRAGMENTS.len());
+        for regex in &regexes {
+            assert!(is_rule_payload_safe(regex), "{regex}");
+            assert!(!regex.starts_with('^'), "{regex}");
+            assert!(!regex.ends_with('$'), "{regex}");
+        }
+        assert!(
+            regexes
+                .iter()
+                .any(|regex| regex.contains("[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc][Cc][Ll][Aa][Uu][Dd][Ee]"))
+        );
+    }
+
+    #[test]
+    fn signed_wechat_path_regexes_join_the_direct_rules() {
+        let mut plan = direct_plan();
+        let prefix = wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").unwrap();
+        plan.wechat_process_path_regexes = vec![prefix.clone()];
+        let runtime =
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", Some(&plan)).unwrap();
+        let parsed_runtime = parsed(&runtime);
+        let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        assert!(rules.contains(&format!(
+            "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{prefix})),Tono-China-Direct"
+        ).as_str()));
+        assert!(rules.contains(&format!(
+            "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-PATH-REGEX,{prefix})),Tono-China-Direct"
+        ).as_str()));
+        // Name rules stay so a standard-named helper still matches without discovery.
+        assert!(rules.iter().any(|rule| rule.contains("PROCESS-NAME,WeChat.exe")));
+    }
+
+    #[test]
+    fn unsafe_wechat_path_regexes_are_refused() {
+        let mut plan = direct_plan();
+        plan.wechat_process_path_regexes = vec!["^C:\\Apps (2)\\WeChat\\".to_string()];
+        assert!(matches!(
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)),
+            Err(ConfigError::DirectPlan(_))
+        ));
+        plan.wechat_process_path_regexes = vec!["not-anchored".to_string()];
+        assert!(matches!(
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)),
+            Err(ConfigError::DirectPlan(_))
+        ));
+        plan.wechat_process_path_regexes = (0..=MAX_WECHAT_PROCESS_PATH_REGEXES)
+            .map(|index| format!("^C:\\\\WeChat{index}\\\\"))
+            .collect();
+        assert!(matches!(
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)),
+            Err(ConfigError::DirectPlan(_))
+        ));
     }
 
     // ---- Claude→home-exit split routing ----
@@ -1320,18 +1895,10 @@ reality-opts:
             .collect();
         assert_eq!(
             rules,
-            [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
-                "AND,((NETWORK,UDP)),REJECT",
-                "MATCH,Tono-Exit",
-            ]
+            expected_home_only_rules()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
         );
 
         // Both Reality sockets stay out of the tunnel: selected (1.1.1.1)
@@ -1380,27 +1947,10 @@ reality-opts:
         // pins; no Claude rule may keep targeting Tono-Exit.
         assert_eq!(
             rules,
-            [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
-                "AND,((NETWORK,UDP)),REJECT",
-                "MATCH,Tono-Exit",
-            ]
+            expected_home_with_direct_rules()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1465,18 +2015,10 @@ reality-opts:
             .collect();
         assert_eq!(
             rules,
-            [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
-                "AND,((NETWORK,UDP)),REJECT",
-                "MATCH,Tono-Exit",
-            ]
+            expected_home_only_rules()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
         );
 
         // The upstream dials through the tunnel: only the selected node is
@@ -1542,27 +2084,10 @@ reality-opts:
             .collect();
         assert_eq!(
             rules,
-            [
-                "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
-                "IP-CIDR6,::1/128,DIRECT,no-resolve",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),Tono-Claude-Home",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChat.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,Weixin.exe)),Tono-China-Direct",
-                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,WeChatAppEx.exe)),Tono-China-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
-                "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct",
-                "AND,((NETWORK,UDP)),REJECT",
-                "MATCH,Tono-Exit",
-            ]
+            expected_home_with_direct_rules()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
         );
     }
 

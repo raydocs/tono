@@ -104,6 +104,8 @@ jobs:
           }
           $env:TONO_CORE_SHA256 = $coreSha256
           "TONO_CORE_SHA256=$coreSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force ../app/src-tauri/resources | Out-Null
+          Set-Content -LiteralPath ../app/src-tauri/resources/core-sha256.txt -Value "$coreSha256" -Encoding ascii
           cargo build --locked --release --features standalone,client --bins
           # resources/ is gitignored locally (built artifacts), so a fresh CI checkout lacks it.
           New-Item -ItemType Directory -Force ../app/src-tauri/resources | Out-Null
