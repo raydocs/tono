@@ -110,14 +110,11 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 28] = [
 ];
 /// Anthropic's own unicast range (ARIN AP-2440 / AS399358). Customer audits
 /// only ever show `160.79.104.10:443` as a raw dest, which skips every
-/// DOMAIN-SUFFIX pin. The ARIN block is first-party only — unlike `1.1.1.1` /
-/// `8.8.8.8`, which Tono itself uses as the exit probe and must stay on
-/// `Tono-Exit`. `no-resolve` keeps the match on the packet address.
+/// DOMAIN-SUFFIX pin. IPv6 prefixes stay off: the runtime is `ipv6: false`,
+/// so AAAA never reaches TUN. The ARIN block is first-party only — unlike
+/// `1.1.1.1` / `8.8.8.8`, which Tono itself uses as the exit probe and must
+/// stay on `Tono-Exit`. `no-resolve` keeps the match on the packet address.
 pub const CLAUDE_HOME_IPV4_CIDRS: [&str; 1] = ["160.79.104.0/21"];
-/// Same ASN's advertised IPv6 prefixes. `a-api.anthropic.com` answers
-/// `2607:6bc0::10`; a dual-stack client that dials the AAAA by IP would
-/// otherwise miss every DOMAIN-SUFFIX pin the same way IPv4 did.
-pub const CLAUDE_HOME_IPV6_CIDRS: [&str; 2] = ["2607:6bc0::/48", "2607:6bc0:11::/48"];
 /// DoH resolvers pinned through the exit group; the `#Tono-Exit` fragment
 /// routes the lookups through the tunnel.
 pub const DOH_NAMESERVERS: [&str; 2] = [
@@ -601,6 +598,7 @@ fn runtime_value(
     // must never become reachable from another machine after a future Mihomo default changes.
     put(&mut root, "bind-address", string("127.0.0.1"));
     put(&mut root, "allow-lan", Value::Bool(false));
+    // IPv6 would be a second data plane. AAAA dials fail-close and retry IPv4.
     put(&mut root, "ipv6", Value::Bool(false));
     put(&mut root, "mode", string("rule"));
     put(&mut root, "log-level", string("info"));
@@ -808,11 +806,6 @@ fn runtime_value(
         for cidr in CLAUDE_HOME_IPV4_CIDRS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
-            ));
-        }
-        for cidr in CLAUDE_HOME_IPV6_CIDRS {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(IP-CIDR6,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
     } else if let Some(plan) = direct {
@@ -1333,11 +1326,6 @@ reality-opts:
                 "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
-        for cidr in CLAUDE_HOME_IPV6_CIDRS {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(IP-CIDR6,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
-            ));
-        }
         rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
         rules.push("MATCH,Tono-Exit".to_string());
         rules
@@ -1357,11 +1345,6 @@ reality-opts:
         for cidr in CLAUDE_HOME_IPV4_CIDRS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
-            ));
-        }
-        for cidr in CLAUDE_HOME_IPV6_CIDRS {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(IP-CIDR6,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
         rules.extend(expected_wechat_direct_rules());
@@ -1702,18 +1685,23 @@ reality-opts:
             CLAUDE_HOME_IPV4_CIDRS.contains(&"160.79.104.0/21"),
             "Anthropic's first-party unicast must ride the home hop by IP"
         );
-        for required in ["2607:6bc0::/48", "2607:6bc0:11::/48"] {
-            assert!(
-                CLAUDE_HOME_IPV6_CIDRS.contains(&required),
-                "{required} must ride the home hop by IP"
-            );
-        }
         for forbidden in ["1.1.1.1/32", "8.8.8.8/32", "8.8.4.4/32", "0.0.0.0/0"] {
             assert!(
                 !CLAUDE_HOME_IPV4_CIDRS.contains(&forbidden),
                 "{forbidden} is Tono's own probe or a wildcard, not Claude"
             );
         }
+        let socks5 = home_socks5();
+        let runtime = build_with_home_socks5(Some(&socks5));
+        let yaml = runtime.yaml();
+        assert!(
+            yaml.contains("AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Claude-Home"),
+            "Anthropic IPv4 must ride the home hop by IP"
+        );
+        assert!(
+            !yaml.contains("2607:6bc0"),
+            "IPv6 home CIDRs must not ship while the runtime is ipv6: false"
+        );
     }
 
     #[test]

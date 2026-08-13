@@ -3992,9 +3992,7 @@ fn controller_direct_graph_is_active(
     let home_path_regexes = config::home_process_path_regexes();
     let mut home_rows = config::HOME_PROCESS_NAMES.len() + home_path_regexes.len();
     if claude_home {
-        home_rows += config::CLAUDE_HOME_DOMAINS.len()
-            + config::CLAUDE_HOME_IPV4_CIDRS.len()
-            + config::CLAUDE_HOME_IPV6_CIDRS.len();
+        home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
     }
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
     let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
@@ -4041,18 +4039,6 @@ fn controller_direct_graph_is_active(
             index += 1;
         }
         for cidr in config::CLAUDE_HOME_IPV4_CIDRS {
-            expect_rule(
-                rules.get(index),
-                index,
-                "AND",
-                &format!("((Network,tcp) && (IPCIDR,{cidr}))"),
-                config::CLAUDE_HOME_GROUP_NAME,
-            )?;
-            index += 1;
-        }
-        for cidr in config::CLAUDE_HOME_IPV6_CIDRS {
-            // IP-CIDR6 is a config alias; Mihomo's RuleType.String() is IPCIDR
-            // for both families, same as the ::1/128 loopback row above.
             expect_rule(
                 rules.get(index),
                 index,
@@ -6530,13 +6516,6 @@ mod tests {
                 }));
             }
             for cidr in tono_core::config::CLAUDE_HOME_IPV4_CIDRS {
-                rules.push(serde_json::json!({
-                    "type": "AND",
-                    "payload": format!("((Network,tcp) && (IPCIDR,{cidr}))"),
-                    "proxy": proxy,
-                }));
-            }
-            for cidr in tono_core::config::CLAUDE_HOME_IPV6_CIDRS {
                 rules.push(serde_json::json!({
                     "type": "AND",
                     "payload": format!("((Network,tcp) && (IPCIDR,{cidr}))"),

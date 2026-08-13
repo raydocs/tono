@@ -2648,7 +2648,7 @@ const optionalNumber = (value: unknown) => value === null || value === undefined
 
 async function operationsDashboard(e: Env) {
   const week = now() + 7 * 86_400;
-  const [users, devices, servers, nodes, deployments, catalog, unusedHomes, unusedAccounts, bannedOpen, incomplete, renewing] = await Promise.all([
+  const [users, devices, servers, nodes, deployments, catalog, unusedHomes, unusedAccounts, bannedOpen, incomplete, renewing, usersWithoutHome] = await Promise.all([
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM users").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM devices").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_servers").first<Row>(),
@@ -2679,6 +2679,16 @@ async function operationsDashboard(e: Env) {
       `SELECT COUNT(*) total FROM ops_node_profiles
        WHERE status = 'active' AND renews_at IS NOT NULL AND renews_at <= ?`,
     ).bind(week).first<Row>(),
+    e.DB.prepare(
+      `SELECT COUNT(*) total FROM users
+       WHERE status = 'active'
+         AND NOT EXISTS (
+           SELECT 1 FROM user_home_bindings
+           JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+           WHERE user_home_bindings.user_id = users.id
+             AND home_exits.status = 'active'
+         )`,
+    ).first<Row>(),
   ]);
   const counts = (row: Row | null) => ({ total: Number(row?.total ?? 0), active: Number(row?.active ?? 0) });
   return {
@@ -2696,6 +2706,7 @@ async function operationsDashboard(e: Env) {
       bannedUnreplaced: Number(bannedOpen?.total ?? 0),
       incompleteUsers: Number(incomplete?.total ?? 0),
       renewingSoon: Number(renewing?.total ?? 0),
+      usersWithoutHome: Number(usersWithoutHome?.total ?? 0),
     },
   };
 }

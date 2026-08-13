@@ -1447,6 +1447,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(otherCatalog.status).toBe(200);
     expect((await otherCatalog.json() as any)).not.toHaveProperty('routing');
 
+    const dashAfterBind = await operations('dashboard');
+    expect((await dashAfterBind.json() as any).dashboard.inventory.usersWithoutHome).toBe(1);
+
     // The admin full catalog never carries routing metadata.
     const adminCatalog = await admin('exit-catalog', undefined, 'GET');
     expect(adminCatalog.status).toBe(200);

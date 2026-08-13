@@ -16,6 +16,7 @@ export interface DashboardDto {
     bannedUnreplaced: number;
     incompleteUsers: number;
     renewingSoon: number;
+    usersWithoutHome: number;
   };
 }
 

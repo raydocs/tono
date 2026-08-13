@@ -308,6 +308,12 @@ function Dashboard() {
     }
     const inventory = data.inventory;
     if (inventory) {
+      if (inventory.usersWithoutHome > 0) {
+        alerts.push({
+          tone: 'warn',
+          text: `${inventory.usersWithoutHome} 个在用客户未绑家宽，Claude 会走机房出口`,
+        });
+      }
       if (inventory.unusedHomes === 0) alerts.push({ tone: 'warn', text: '家宽库存见底' });
       if (inventory.unusedAccounts === 0) alerts.push({ tone: 'warn', text: 'Claude 号池见底' });
       if (inventory.bannedUnreplaced > 0) {
@@ -354,12 +360,13 @@ function Dashboard() {
         <article className={`metric${inventory && inventory.incompleteUsers ? ' metric-warn' : ''}`}>
           <div className="metric-label"><span>未开 Claude</span></div>
           <div className="metric-value">{inventory ? inventory.incompleteUsers : '—'}</div>
-          <div className="metric-hint">家宽可选，有号才算开通</div>
+          <div className="metric-hint">Claude 家宽靠绑定，不是靠客户端默认</div>
         </article>
       </div>
 
       {inventory && (
         <div className="inventory-bar">
+          <a href="#/users" className={`inv-chip${inventory.usersWithoutHome ? ' inv-warn' : ''}`}>客户未绑家宽 {inventory.usersWithoutHome}</a>
           <a href="#/users" className={`inv-chip${inventory.unusedHomes === 0 ? ' inv-warn' : ''}`}>未派家宽 {inventory.unusedHomes}</a>
           <a href="#/users" className={`inv-chip${inventory.unusedAccounts === 0 ? ' inv-warn' : ''}`}>未派 Claude {inventory.unusedAccounts}</a>
           <span className={`inv-chip${inventory.bannedUnreplaced ? ' inv-alert' : ''}`}>封号未换 {inventory.bannedUnreplaced}</span>

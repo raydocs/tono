@@ -157,7 +157,7 @@ struct SupportView: View {
         let total = steps.reduce(0) { $0 + $1.milliseconds }
         let slowest = steps.max { $0.milliseconds < $1.milliseconds }?.id
         let timingReport = (["Tono connect timing"]
-            + steps.map { "\($0.stage.rawValue): \(durationText($0.milliseconds))" }
+            + steps.map { "\($0.stage.localizedTitle): \(durationText($0.milliseconds))" }
             + ["Total: \(durationText(total))"]).joined(separator: "\n")
         return SupportCard(
             icon: "timer",
@@ -172,8 +172,8 @@ struct SupportView: View {
             ForEach(steps) { step in
                 SupportRow(
                     label: step.id == slowest
-                        ? "\(step.stage.rawValue)  ●"
-                        : step.stage.rawValue,
+                        ? "\(step.stage.localizedTitle)  ●"
+                        : step.stage.localizedTitle,
                     value: durationText(step.milliseconds),
                     monospaced: true
                 )
@@ -482,7 +482,7 @@ struct SupportView: View {
     private var lastErrorText: String {
         if let message = appState.errorMessage { return message }
         if let failure = appState.lastConnectionFailure {
-            return "\(failure.stage.rawValue): \(failure.message)"
+            return "\(failure.stage.localizedTitle): \(failure.message)"
         }
         return String(localized: "None")
     }
