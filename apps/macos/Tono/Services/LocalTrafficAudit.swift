@@ -330,6 +330,12 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                     " using \(ConfigPipeline.directProxyName)"
                 ) || entry.message.contains(
                     " using \(ConfigPipeline.webDirectProxyName)"
+                ) || entry.message.contains(
+                    " using \(ConfigPipeline.appDirectGroupName)"
+                ) || entry.message.contains(
+                    " using \(ConfigPipeline.webDirectGroupName)"
+                ) || entry.message.contains(
+                    " using \(ConfigPipeline.managedDirectFallbackGroupPrefix)"
                 ) {
                     routeClassification = "MANAGED_DIRECT"
                 } else if entry.message.contains(" using DIRECT") {
@@ -338,7 +344,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                     // exported audit instead of being hidden from connection
                     // snapshots that do not include ICMP.
                     routeClassification = "DIRECT_ATTEMPT"
-                } else if entry.message.contains(" using Tono-Exit[") {
+                } else if entry.message.contains(
+                    " using \(ConfigPipeline.claudeHomeGroupName)"
+                ) || entry.message.contains(
+                    " using \(ConfigPipeline.homeResidentialProxyName)"
+                ) || entry.message.contains(" using Tono-Exit[") {
                     routeClassification = "PROXIED"
                 } else {
                     routeClassification = "UNCLASSIFIED"
@@ -667,20 +677,34 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         return suffixes.contains { host == $0 || host.hasSuffix(".\($0)") }
     }
 
+    private static func isOfficialClaudeHost(_ host: String) -> Bool {
+        let suffixes = [
+            "claude.ai", "claude.com", "anthropic.com",
+            "claudeusercontent.com", "clau.de", "claude.app",
+            "claude.site", "claudestudio.com",
+            "claudemcpclient.com", "claudemcpcontent.com",
+        ]
+        return suffixes.contains { host == $0 || host.hasSuffix(".\($0)") }
+    }
+
     private static func isProtectedClaudeConnection(
         _ connection: APIConnection
     ) -> Bool {
         let host = connection.metadata.host.lowercased().trimmingCharacters(
             in: CharacterSet(charactersIn: ".")
         )
-        if host == "claude.ai" || host.hasSuffix(".claude.ai")
-            || host == "anthropic.com" || host.hasSuffix(".anthropic.com") {
+        if isOfficialClaudeHost(host) {
             return true
         }
-        let process = (connection.metadata.process ?? "").lowercased()
-        let processPath = (connection.metadata.processPath ?? "").lowercased()
-        return Self.isClaudeCodeProcess(process: process, processPath: processPath)
-            || processPath.contains("/claude.app/")
+        let process = connection.metadata.process ?? ""
+        let processPath = connection.metadata.processPath ?? ""
+        return ConfigPipeline.isClaudeCodeIdentity(
+            process: process,
+            processPath: processPath
+        ) || ConfigPipeline.isClaudeAppIdentity(
+            process: process,
+            processPath: processPath
+        )
     }
 
     private func recordClaudeTrafficResearch(_ connection: APIConnection) {
@@ -765,12 +789,18 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
               let port = Int(connection.metadata.destinationPort ?? ""),
               (1...65_535).contains(port) else { return nil }
 
-        let process = (connection.metadata.process ?? "").lowercased()
-        let processPath = (connection.metadata.processPath ?? "").lowercased()
+        let process = connection.metadata.process ?? ""
+        let processPath = connection.metadata.processPath ?? ""
         let client: String
-        if processPath.contains("/claude.app/") {
+        if ConfigPipeline.isClaudeAppIdentity(
+            process: process,
+            processPath: processPath
+        ) {
             client = "app"
-        } else if isClaudeCodeProcess(process: process, processPath: processPath) {
+        } else if ConfigPipeline.isClaudeCodeIdentity(
+            process: process,
+            processPath: processPath
+        ) {
             client = "code"
         } else if [
             "safari", "google chrome", "chromium", "arc", "firefox",
@@ -784,7 +814,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         }
 
         let service: String
-        if host == "claude.ai" || host.hasSuffix(".claude.ai") {
+        if host == "claude.ai" || host.hasSuffix(".claude.ai")
+            || host == "claude.com" || host.hasSuffix(".claude.com")
+            || host == "clau.de" || host.hasSuffix(".clau.de")
+            || host == "claudeusercontent.com"
+            || host.hasSuffix(".claudeusercontent.com") {
             service = "claude"
         } else if host == "anthropic.com"
                     || host.hasSuffix(".anthropic.com") {
@@ -816,15 +850,6 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             port: port,
             route: routeClassification(connection)
         )
-    }
-
-    private static func isClaudeCodeProcess(
-        process: String,
-        processPath: String
-    ) -> Bool {
-        process == "claude" || process == "claude.exe"
-            || processPath.hasSuffix("/claude")
-            || processPath.hasSuffix("/claude.exe")
     }
 
     private static func isResearchHostname(_ host: String) -> Bool {

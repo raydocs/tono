@@ -260,10 +260,17 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude Helper)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,clau.de)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudemcpclient.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudemcpcontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0::/48,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0:11::/48,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
         ]
         guard claudeHomeRequired.allSatisfy(claudeHomeRuntime.contains),
               !claudeHomeRuntime.contains("PROCESS-NAME,Claude)),Tono-Exit") else {
@@ -305,6 +312,20 @@ struct MultiExitPolicyTests {
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(provider))),\(ConfigPipeline.claudeHomeGroupName)"
             ) else {
                 throw TestFailure("assistant provider \(provider) was not routed to the residential hop")
+            }
+        }
+        for cidr in ConfigPipeline.assistantHomeIPv4Cidrs {
+            guard claudeSocks5Runtime.contains(
+                "AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(ConfigPipeline.claudeHomeGroupName)"
+            ) else {
+                throw TestFailure("Anthropic unicast \(cidr) was not routed to the residential hop")
+            }
+        }
+        for cidr in ConfigPipeline.assistantHomeIPv6Cidrs {
+            guard claudeSocks5Runtime.contains(
+                "AND,((NETWORK,TCP),(IP-CIDR6,\(cidr),no-resolve)),\(ConfigPipeline.claudeHomeGroupName)"
+            ) else {
+                throw TestFailure("Anthropic IPv6 \(cidr) was not routed to the residential hop")
             }
         }
         for shared in ["gstatic.com", "auth0.com", "stripe.com", "sentry.io", "statsig.com", "googleapis.com", "x.com"] {
@@ -448,6 +469,7 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),Tono-Exit",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),Tono-Exit",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Exit",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude Helper)),Tono-Exit",
         ]
         let claudeRulesPrecedeDirect = claudeRules.allSatisfy { rule in
             guard let claudeRange = managedDirectRuntime.range(of: rule),
@@ -460,8 +482,13 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude Helper)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,clau.de)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0::/48,no-resolve)),Tono-Claude-Home",
+            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0:11::/48,no-resolve)),Tono-Claude-Home",
         ] + assistantPathRules
         let claudeProtectedRulesPrecedeDirect = claudeProtectedRules.allSatisfy { rule in
             guard let claudeRange = claudeProtectedRuntime.range(of: rule),
@@ -613,6 +640,8 @@ struct MultiExitPolicyTests {
             ("/Users/lys/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", true),
             ("/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", true),
             ("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", true),
+            ("/Users/x/.local/share/codex/versions/0.5.0", true),
+            ("/opt/homebrew/lib/node_modules/@openai/codex/bin/codex", true),
             // Must not swallow unrelated processes.
             ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", false),
             ("/Applications/WeChat.app/Contents/MacOS/WeChat", false),
@@ -621,6 +650,28 @@ struct MultiExitPolicyTests {
         let assistantPathVerdictsHold = assistantPathCases.allSatisfy { path, expected in
             assistantMatches(path) == expected
         }
+        let claudeCodeIdentitiesHold =
+            ConfigPipeline.isClaudeCodeIdentity(
+                process: "2.1.225",
+                processPath: "/Users/x/.local/share/claude/versions/2.1.225"
+            )
+            && ConfigPipeline.isClaudeCodeIdentity(
+                process: "claude.exe",
+                processPath: "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+            )
+            && !ConfigPipeline.isClaudeCodeIdentity(
+                process: "Claude",
+                processPath: "/Applications/Claude.app/Contents/MacOS/Claude"
+            )
+        let claudeAppIdentitiesHold =
+            ConfigPipeline.isClaudeAppIdentity(
+                process: "Claude Helper (Renderer)",
+                processPath: "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)"
+            )
+            && !ConfigPipeline.isClaudeAppIdentity(
+                process: "2.1.225",
+                processPath: "/Users/x/.local/share/claude/versions/2.1.225"
+            )
 
         let managedDirectChecks = [
             ("proxy", managedDirectRuntime.contains("\n  - name: \"Tono-China-Direct\"\n")),
@@ -647,6 +698,8 @@ struct MultiExitPolicyTests {
             ("udp-443-rule", managedDirectRuntime.contains(mediaRule443)),
             ("udp-8000-rule", managedDirectRuntime.contains(mediaRule8000)),
             ("rule-order", directRulePrecedesMatch),
+            ("claude-code-identity", claudeCodeIdentitiesHold),
+            ("claude-app-identity", claudeAppIdentitiesHold),
             ("claude-process-rules", claudeRulesPrecedeDirect),
             ("claude-protected-before-all-direct-rules", claudeProtectedRulesPrecedeDirect),
             ("claude-protected-never-direct", claudeProtectedRulesHaveNoDirectTarget),

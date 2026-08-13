@@ -15,14 +15,28 @@ private enum ClientAppIconCache {
     static func icon(for processName: String) -> NSImage? {
         if let cached = cache[processName] { return cached }
         var resolved: NSImage?
-        for app in NSWorkspace.shared.runningApplications {
-            let executable = app.executableURL?.lastPathComponent
-            guard executable == processName
-                    || app.localizedName == processName else { continue }
-            if let bundleURL = app.bundleURL {
-                resolved = NSWorkspace.shared.icon(forFile: bundleURL.path)
+        if processName == "Claude" || processName == "Claude Code" {
+            let candidates = [
+                "/Applications/Claude.app",
+                NSHomeDirectory() + "/Applications/Claude.app",
+            ]
+            if let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) {
+                resolved = NSWorkspace.shared.icon(forFile: path)
             }
-            break
+        }
+        if resolved == nil {
+            for app in NSWorkspace.shared.runningApplications {
+                let executable = app.executableURL?.lastPathComponent
+                guard executable == processName
+                        || app.localizedName == processName
+                        || (processName == "Claude Code" && (executable == "Claude"
+                            || app.localizedName == "Claude"))
+                else { continue }
+                if let bundleURL = app.bundleURL {
+                    resolved = NSWorkspace.shared.icon(forFile: bundleURL.path)
+                }
+                break
+            }
         }
         cache[processName] = resolved
         return resolved

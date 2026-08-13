@@ -33,8 +33,25 @@ struct APIConnection: Codable, Sendable {
 
 enum ConfigPipeline {
     static let homeResidentialProxyName = "Tono-Home-Residential"
+    static let claudeHomeGroupName = "Tono-Claude-Home"
+    static let exitGroupName = "Tono-Exit"
     static let directProxyName = "Tono-China-Direct"
     static let webDirectProxyName = "Tono-China-Web-Direct"
+
+    static func isClaudeCodeIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if process == "claude" || process == "claude.exe" { return true }
+        if path.contains("/.local/share/claude/versions/") { return true }
+        if path.contains("/node_modules/@anthropic-ai/claude-code/") { return true }
+        return false
+    }
+
+    static func isClaudeAppIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/claude.app/") { return true }
+        if process == "Claude" || process.hasPrefix("Claude Helper") { return true }
+        return false
+    }
 }
 
 func connection(
@@ -43,12 +60,13 @@ func connection(
     up: Int64,
     down: Int64,
     chains: [String],
-    rule: String = "Match"
+    rule: String = "Match",
+    processPath: String? = nil
 ) -> APIConnection {
     APIConnection(
         id: id,
         metadata: APIConnectionMetadata(
-            network: "tcp", type: "Tun", process: process, processPath: nil,
+            network: "tcp", type: "Tun", process: process, processPath: processPath,
             sourceIP: "198.18.0.1", destinationIP: "203.0.113.7",
             sourcePort: "1", destinationPort: "443", host: "example.test"
         ),
@@ -81,6 +99,10 @@ struct AppTrafficLedgerTests {
             // carries the exit too; the more specific class must win.
             ("residential over exit",
              ["Tono-Home-Residential", "Tono-Exit", "Tono-Claude-Home"], "Match", .residential),
+            // homeProxy names a catalog node, not Tono-Home-Residential.
+            ("homeProxy node", ["US-Home-Broadband", "Tono-Claude-Home"], "Match", .residential),
+            ("homeProxy failed over",
+             ["US-VLESS-Reality", "Tono-Exit", "Tono-Claude-Home"], "Match", .tunnel),
             ("reject by rule", ["REJECT"], "REJECT", .blocked),
             ("empty chain", [], "Match", .direct),
         ]
@@ -143,6 +165,39 @@ struct AppTrafficLedgerTests {
               split.overall.total == 6_007, "got \(split.overall.total)")
         check("busiest app sorts first", split.apps.first?.id == "Claude",
               "got \(split.apps.first?.id ?? "nil")")
+
+        let grouped = AppTrafficLedger()
+        grouped.ingest([
+            connection(
+                "v", process: "2.1.225", up: 0, down: 100,
+                chains: ["US-Home-Broadband", "Tono-Claude-Home"],
+                processPath: "/Users/x/.local/share/claude/versions/2.1.225"
+            ),
+            connection(
+                "h", process: "Claude Helper", up: 0, down: 40,
+                chains: ["US-Home-Broadband", "Tono-Claude-Home"],
+                processPath: "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"
+            ),
+        ])
+        check("versioned Claude Code groups under Claude Code",
+              app(grouped, "Claude Code")?.total == 100,
+              "got \(app(grouped, "Claude Code")?.total ?? -1)")
+        check("desktop helper groups under Claude",
+              app(grouped, "Claude")?.total == 40,
+              "got \(app(grouped, "Claude")?.total ?? -1)")
+        let wechat = AppTrafficLedger()
+        wechat.ingest([
+            connection(
+                "wx", process: "WeChatAppEx", up: 0, down: 70,
+                chains: ["Tono-China-Direct", "Tono-China-App"],
+                processPath: "/Applications/WeChat.app/Contents/Frameworks/WeChatAppEx.framework/Helpers/WeChatAppEx"
+            ),
+        ])
+        check("WeChat helper groups under WeChat",
+              app(wechat, "WeChat")?.total == 70,
+              "got \(app(wechat, "WeChat")?.total ?? -1)")
+        check("homeProxy node bytes are residential",
+              app(grouped, "Claude Code")?.split.residential == 100)
 
         // --- reset --------------------------------------------------------
         split.reset()

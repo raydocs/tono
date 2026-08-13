@@ -146,11 +146,56 @@ final class AppTrafficLedger {
         guard let process = connection.metadata.process, !process.isEmpty else {
             return Self.unattributed
         }
-        if totals[process] != nil { return process }
+        let grouped = Self.groupedProcessName(
+            process: process,
+            processPath: connection.metadata.processPath
+        )
+        if totals[grouped] != nil { return grouped }
         guard totals.count < Self.maximumTrackedProcesses else {
             return Self.unattributed
         }
+        return grouped
+    }
+
+    /// Collapse Claude desktop helpers and Claude Code's versioned launcher
+    /// (`2.1.223`) so Activity does not grow one row per helper and per
+    /// upgrade. A miss still keeps the raw process name.
+    static func groupedProcessName(process: String, processPath: String?) -> String {
+        let path = processPath ?? ""
+        if ConfigPipeline.isClaudeCodeIdentity(process: process, processPath: path) {
+            return "Claude Code"
+        }
+        if ConfigPipeline.isClaudeAppIdentity(process: process, processPath: path) {
+            return "Claude"
+        }
+        if Self.isWeChatIdentity(process: process, processPath: path) {
+            return "WeChat"
+        }
+        if Self.isChatGPTIdentity(process: process, processPath: path) {
+            return "ChatGPT"
+        }
         return process
+    }
+
+    private static func isWeChatIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/wechat.app/") || path.contains("/微信.app/") {
+            return true
+        }
+        switch process.lowercased() {
+        case "wechat", "weixin", "wechatappex", "wechathelper",
+             "wechat helper", "wechat networkservice", "wxplayer", "wxocr":
+            return true
+        default:
+            return process.hasPrefix("WeChat")
+        }
+    }
+
+    private static func isChatGPTIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/chatgpt.app/") { return true }
+        return process == "ChatGPT" || process.hasPrefix("ChatGPT Helper")
+            || process == "chatgpt" || process == "ChatGPT.exe"
     }
 
     /// Classifies a connection by the path its bytes actually took.
@@ -169,6 +214,14 @@ final class AppTrafficLedger {
         // every residential byte would be filed as ordinary tunnel traffic and
         // the exit the customer is paying for would be invisible.
         if connection.chains.contains(ConfigPipeline.homeResidentialProxyName) {
+            return .residential
+        }
+        // homeProxy (a catalog node, not the chained SOCKS5) never names
+        // Tono-Home-Residential. The healthy chain is `HomeNode →
+        // Tono-Claude-Home`. Failover inserts Tono-Exit, and those bytes
+        // really did leave through the datacenter, so they stay tunnel.
+        if connection.chains.contains(ConfigPipeline.claudeHomeGroupName)
+            && !connection.chains.contains(ConfigPipeline.exitGroupName) {
             return .residential
         }
         if connection.chains.contains(ConfigPipeline.directProxyName)

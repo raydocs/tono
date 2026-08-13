@@ -31,6 +31,16 @@ private struct AppRoutingResearchClassifierTests {
             ),
             ("NeteaseMusic", nil, "netease_music"),
             ("claude", nil, "claude"),
+            (
+                "2.1.225",
+                "/Users/x/.local/share/claude/versions/2.1.225",
+                "claude"
+            ),
+            (
+                "Claude Helper",
+                "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+                "claude"
+            ),
         ]
         for (process, path, expected) in positiveFamilies {
             let actual = AppRoutingResearchClassifier.family(

@@ -33,14 +33,30 @@ format and the release script passes and verifies the exact source commit.
 ## Current source and published state
 
 - `release/macos` contains the post-Build-62 trust-monotonicity and exact-source
-  release fixes. Build 62 remains the latest notarized artifact; these source
-  fixes require a future Mac build and do not rewrite Build 62.
-- `release/windows` contains Windows 0.0.30 / Service 2.6.6 / protocol 2.12.
-  It fixes the 0.0.29 failure where an inactive but still supervised Tono Core
-  owned DNS TCP/UDP `127.0.0.1:53`: startup now replaces that stale Tono-owned
-  runtime before the fixed-port preflight, while leaving third-party owners
-  untouched. Windows 0.0.27 remains the latest published installer; 0.0.30
-  stays a draft until its signed build and real-machine release gates pass.
+  release fixes. Build 64 is the latest notarized customer candidate
+  (`Tono-macOS-0.0.64-build64.zip`): Claude first-party IPv4/IPv6 and
+  assistant product hosts ride the catalog home hop, Activity groups Claude
+  Code / WeChat helpers, and a healthy home route is no longer unclassified
+  in the traffic log. Build 62 remains the latest published Sparkle artifact.
+- `release/windows` contains Windows 0.0.32 (source) on top of the 0.0.31
+  Service pin fix. 0.0.32 adds a pin file at install, proactive token
+  refresh, learned control-plane addresses (Service ProgramData via
+  `/bootstrap-pins`, mid-session HTTP refresh, NSIS `core-sha256.txt`),
+  optional Authenticode publisher thumbprint, broader WeChat/Claude/ChatGPT
+  process matching, signed traffic-policy acceptance, a per-app Activity
+  view, and human-readable connect errors.
+  It retains the stale-runtime repair from 0.0.30: startup replaces an inactive
+  but still supervised Tono Core that owns DNS TCP/UDP `127.0.0.1:53`, while
+  leaving third-party owners untouched. The 0.0.30 draft is superseded because
+  its release workflow compiled Service before the packaged Mihomo was known,
+  so neither privileged Service binary carried the required Core SHA-256 pin.
+  The 0.0.31 workflow prepares the exact Core first, injects its digest into
+  Service 2.6.7 and the install helper, then extracts the final NSIS package and
+  verifies both binaries against the packaged Core. The signed customer-candidate
+  installer comes from `2fba985` and has SHA-256
+  `ce8bacef927d3b44e737a5deff61f0c985d4d03cf037091851153cca2bbc4c37`.
+  Windows 0.0.27 remains the latest published installer; 0.0.31 remains a draft
+  until one real Windows install/connect/disconnect/reconnect gate passes.
 - `main` integrates both lines and is the only source allowed to deploy the
   shared control plane.
 

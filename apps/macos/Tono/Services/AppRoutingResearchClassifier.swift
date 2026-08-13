@@ -89,7 +89,7 @@ nonisolated enum AppRoutingResearchClassifier {
         "firefox": ["firefox"],
         "arc": ["arc"],
         "brave": ["brave browser"],
-        "claude": ["claude"],
+        "claude": ["claude", "claude.exe", "claude helper"],
     ]
 
     private struct StandardBundlePath {
@@ -112,6 +112,17 @@ nonisolated enum AppRoutingResearchClassifier {
                 if bundleRoots[family]?.contains(bundleRoot) == true {
                     return family
                 }
+            }
+        }
+        // Official Claude Code installers do not live under /Applications.
+        // The versioned launcher is named `2.1.223`, so process-name fallback
+        // cannot recover it.
+        if let path {
+            let lower = path.lowercased()
+            if lower.contains("/.local/share/claude/versions/")
+                || lower.contains("/node_modules/@anthropic-ai/claude-code/")
+                || lower.contains("/claude.app/") {
+                return "claude"
             }
         }
 
