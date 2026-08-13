@@ -37,7 +37,7 @@ use crate::{
     process::AsyncHandler,
     tono::{
         audit::{self, AuditEvent},
-        bootstrap, commands,
+        bootstrap, commands, signed_apps,
         state::{AccountState, TonoInner, TonoState},
     },
 };
@@ -643,6 +643,8 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.connect_error = None;
         inner.connect_error_at_ms = None;
         inner.next_retry_at_ms = None;
+        inner.optional_direct_active = false;
+        inner.optional_direct_skip = None;
         commands::emit_status(app, &commands::status_of(&inner));
     }
 
@@ -824,6 +826,48 @@ pub fn is_retryable_lock_error(message: &str) -> bool {
     false
 }
 
+/// Fail fast when BFE is known stopped. A query failure is not a refusal —
+/// StartClash still diagnoses a wedged or missing engine. StartPending is
+/// allowed through so a machine that is bringing BFE up is not rejected.
+async fn preflight_bfe() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        match tokio::task::spawn_blocking(query_bfe_state).await {
+            Ok(Ok((running, state))) => classify_bfe_state(running, &state),
+            Ok(Err(_)) | Err(_) => Ok(()),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
+fn classify_bfe_state(running: bool, state: &str) -> Result<(), String> {
+    if running || state.eq_ignore_ascii_case("StartPending") {
+        Ok(())
+    } else {
+        Err(format!("{BFE_NOT_RUNNING_PREFIX}: state {state}"))
+    }
+}
+
+#[cfg(windows)]
+fn query_bfe_state() -> Result<(bool, String), String> {
+    use windows_service::service::{ServiceAccess, ServiceState};
+    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .map_err(|error| format!("cannot connect to the service control manager: {error}"))?;
+    let service = manager
+        .open_service("BFE", ServiceAccess::QUERY_STATUS)
+        .map_err(|error| format!("cannot open the Base Filtering Engine: {error}"))?;
+    let state = service
+        .query_status()
+        .map_err(|error| format!("cannot query the Base Filtering Engine: {error}"))?
+        .current_state;
+    Ok((state == ServiceState::Running, format!("{state:?}")))
+}
+
 /// Tono has no sidecar: the Service must be Ready and speak the kill switch
 /// protocol (rev 5 arm/lock + rev 6 release, C1).
 async fn ensure_service_ready() -> Result<(), String> {
@@ -934,9 +978,10 @@ async fn run_stages(
     //    TUN endpoint at 198.18.0.2. Prove both listener sockets are available before installing
     //    WFP rather than timing out after the arm.
     //  - The Service-side core binary path validation.
-    let (bootstrap_api_hosts, physical_interface_probe, runtime_ports, dns_preflight, active_runtime_resume, core_path) =
+    let (bootstrap_api_hosts, physical_interface_probe, runtime_ports, dns_preflight, active_runtime_resume, core_path, bfe_preflight) =
         transaction
             .wait("preparing service", async {
+                refresh_control_plane_pins_from_service(state).await;
                 tokio::join!(
                     bootstrap_hosts(),
                     async {
@@ -950,10 +995,12 @@ async fn run_stages(
                     preflight_dns_listener(),
                     active_runtime_resume_status(),
                     service::tono_core_binary_path(),
+                    preflight_bfe(),
                 )
             })
             .await?;
     let runtime_ports = runtime_ports.map_err(StageFailure::error)?;
+    bfe_preflight.map_err(StageFailure::error)?;
     let controller_port = runtime_ports.controller_port;
     let mixed_port = runtime_ports.mixed_port;
     if let Err(error) = dns_preflight {
@@ -1133,6 +1180,7 @@ async fn run_stages(
     // and the full existing verification barrier. Only now install the exact endpoint permits,
     // then re-prove the ordinary tunnel before the durable verified-session latch can commit.
     if let Some(pending) = pending_direct {
+        let applied_wechat_paths = pending.wechat_process_path_regexes.clone();
         let (committed_status, heartbeat) = transaction
             .wait(
                 "committing exact DIRECT endpoints",
@@ -1141,6 +1189,17 @@ async fn run_stages(
             .await??;
         kill_status = committed_status;
         direct_lease_heartbeat = Some(heartbeat);
+        let mut inner = state.lock().await;
+        if inner.connect_generation == generation {
+            inner.applied_wechat_path_regexes = Some(applied_wechat_paths);
+            inner.optional_direct_active = true;
+            inner.optional_direct_skip = None;
+        }
+    } else {
+        let mut inner = state.lock().await;
+        if inner.connect_generation == generation {
+            inner.applied_wechat_path_regexes = None;
+        }
     }
 
     // The durable logical-session latch is committed only after every existing check and a
@@ -1172,6 +1231,9 @@ async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        inner.exit_ip = None;
+        inner.exit_org = None;
+        inner.exit_location = None;
         // M4 seeds must reset on *every* success, not only on disconnect: a
         // reconnect's own StartClash always changes the core pid and bumps
         // the netmon counter, so comparing against pre-reconnect values made
@@ -1204,7 +1266,203 @@ async fn run_stages(
         spawn_direct_lease_heartbeat(state, generation, heartbeat).await;
     }
     spawn_network_monitor(state, app).await;
+    spawn_exit_identity_lookup(state, app, generation);
+    spawn_control_plane_pin_refresh(state, app, generation).await;
     Ok(())
+}
+
+/// Remember control-plane addresses only from the protected resolver.
+///
+/// `bootstrap_hosts` still uses the system resolver so a first connect can
+/// widen WFP for this session, but those answers must not be persisted: a
+/// poisoned physical DNS would otherwise become tomorrow's recovery pin.
+///
+/// Runs once immediately, then every 15 minutes while this generation stays
+/// connected, so a rotated anycast edge is learned without waiting for the
+/// next reconnect.
+const CONTROL_PLANE_PIN_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+/// WeChat path rediscovery. File identity (path/size/mtime) is cached, so a
+/// miss only re-runs WinVerifyTrust when an install actually changes.
+const WECHAT_PATH_REFRESH_INTERVAL: Duration = Duration::from_secs(2 * 60);
+
+async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let task_state = Arc::clone(state);
+    let task_app = app.clone();
+    let handle = AsyncHandler::spawn(move || async move {
+        let mut pin_interval = tokio::time::interval(CONTROL_PLANE_PIN_REFRESH_INTERVAL);
+        pin_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
+        wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut skip_first_wechat = true;
+        loop {
+            tokio::select! {
+                _ = pin_interval.tick() => {
+                    if !refresh_control_plane_pins_once(&task_state, generation).await {
+                        return;
+                    }
+                }
+                _ = wechat_interval.tick() => {
+                    if skip_first_wechat {
+                        skip_first_wechat = false;
+                        continue;
+                    }
+                    if signed_wechat_paths_require_reconnect(&task_state, generation).await {
+                        handle_network_change(&task_state, &task_app).await;
+                        return;
+                    }
+                }
+            }
+        }
+    });
+    let mut inner = state.lock().await;
+    if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+        handle.abort();
+        return;
+    }
+    inner.tasks.abort_pin_refresh();
+    inner.tasks.pin_refresh = Some(handle);
+}
+
+async fn refresh_control_plane_pins_once(state: &Arc<TonoState>, generation: u64) -> bool {
+    let (secret, port) = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+            return false;
+        }
+        match (inner.controller_secret.clone(), inner.controller_port) {
+            (Some(secret), Some(port)) => (secret, port),
+            // Still connected: the controller endpoint is mid-replace. Keep
+            // the 15-minute loop instead of aborting it forever.
+            _ => return true,
+        }
+    };
+    let Ok(client) = controller_client(CONTROLLER_HTTP_TIMEOUT) else {
+        return true;
+    };
+    let Ok(addresses) = dns_query_a(&client, &secret, port, bootstrap::API_HOST).await else {
+        return true;
+    };
+    let learned: Vec<String> = addresses
+        .into_iter()
+        .filter(|ip| tono_core::node::is_public_ipv4(*ip))
+        .map(|ip| ip.to_string())
+        .collect();
+    if learned.is_empty() {
+        return true;
+    }
+    bootstrap::remember_control_plane_addresses(&learned);
+    bootstrap::persist_learned_pins_to_service().await;
+    let inner = state.lock().await;
+    if inner.connect_generation != generation {
+        return false;
+    }
+    if let Err(error) = inner.client.transport().refresh_control_plane_pins().await {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: failed to refresh control-plane HTTP pins: {error:#}"
+        );
+    }
+    true
+}
+
+fn wechat_paths_changed(applied: Option<&[String]>, discovered: &[String]) -> bool {
+    let Some(applied) = applied else {
+        return false;
+    };
+    applied != discovered
+}
+
+async fn signed_wechat_paths_require_reconnect(state: &Arc<TonoState>, generation: u64) -> bool {
+    let applied = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+            return false;
+        }
+        inner.applied_wechat_path_regexes.clone()
+    };
+    if applied.is_none() {
+        return false;
+    }
+    let discovered = tokio::task::spawn_blocking(signed_apps::discover_signed_wechat_path_regexes)
+        .await
+        .unwrap_or_default();
+    let inner = state.lock().await;
+    if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+        return false;
+    }
+    if wechat_paths_changed(applied.as_deref(), &discovered) {
+        logging!(
+            info,
+            Type::Service,
+            "Tono: signed WeChat install paths changed; scheduling a protected reconnect"
+        );
+        true
+    } else {
+        false
+    }
+}
+
+fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    AsyncHandler::spawn(move || async move {
+        let Ok(client) = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(4))
+            .build()
+        else {
+            return;
+        };
+        let Ok(response) = client.get("https://api.ipapi.is").send().await else {
+            return;
+        };
+        let Ok(json) = response.json::<serde_json::Value>().await else {
+            return;
+        };
+        if json.get("error").is_some() {
+            return;
+        }
+        let ip = json.get("ip").and_then(|value| value.as_str()).unwrap_or("");
+        if ip.is_empty() {
+            return;
+        }
+        let nested_location = json.get("location").and_then(|value| value.as_object());
+        let nested_asn = json.get("asn").and_then(|value| value.as_object());
+        let country = json
+            .get("cc")
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                nested_location
+                    .and_then(|location| location.get("country_code"))
+                    .and_then(|value| value.as_str())
+            })
+            .unwrap_or("");
+        let org = json
+            .get("asn_org")
+            .and_then(|value| value.as_str())
+            .or_else(|| json.get("company_name").and_then(|value| value.as_str()))
+            .or_else(|| {
+                nested_asn
+                    .and_then(|asn| asn.get("org"))
+                    .and_then(|value| value.as_str())
+            })
+            .unwrap_or("");
+        let location = if country.is_empty() {
+            None
+        } else {
+            Some(country.to_string())
+        };
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+            return;
+        }
+        inner.exit_ip = Some(ip.to_string());
+        inner.exit_org = (!org.is_empty()).then(|| org.to_string());
+        inner.exit_location = location;
+        commands::emit_status(&app, &commands::status_of(&inner));
+    });
 }
 
 /// C3 — the post-lock verification group: an advisory controller delay check followed by the
@@ -2425,6 +2683,8 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
                 "Tono: Windows reported a network change, but the locked TUN data plane remains healthy; keeping Connected"
             );
             legs.observe_probe(false);
+            let generation = state.lock().await.connect_generation;
+            let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
         if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed) {
             handle_network_change(&state, &app).await;
@@ -2506,6 +2766,18 @@ pub fn proxy_endpoint_of(node: &ValidatedNode) -> ProxyEndpoint {
         ip: node.server.to_string(),
         port: node.port,
         protocol: ProxyProtocol::Tcp,
+    }
+}
+
+async fn refresh_control_plane_pins_from_service(state: &TonoState) {
+    bootstrap::hydrate_learned_pins_from_service().await;
+    let inner = state.lock().await;
+    if let Err(error) = inner.client.transport().refresh_control_plane_pins().await {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: failed to apply learned control-plane HTTP pins: {error:#}"
+        );
     }
 }
 
@@ -3078,14 +3350,14 @@ const MAX_ADDRESSES_PER_DOMAIN: usize = 8;
 /// A cloud policy can currently carry dozens of names. Launching all DoH
 /// lookups at once overloaded otherwise healthy distant Reality exits on
 /// real mainland-like links, so keep a small, deterministic in-flight cap.
-const CLOUD_DNS_QUERY_CONCURRENCY: usize = 4;
+const CLOUD_DNS_QUERY_CONCURRENCY: usize = 8;
 /// One transient controller/DoH failure must not tear down a protected
 /// connection. Permanent controller errors still fail immediately.
-const CLOUD_DNS_QUERY_ATTEMPTS: u32 = 3;
-const CLOUD_DNS_QUERY_RETRY_DELAY: Duration = Duration::from_millis(350);
+const CLOUD_DNS_QUERY_ATTEMPTS: u32 = 2;
+const CLOUD_DNS_QUERY_RETRY_DELAY: Duration = Duration::from_millis(200);
 /// Both WeChat and web-domain sets share this one deadline. The enclosing
 /// connect transaction remains the final fail-closed ceiling.
-const CLOUD_POLICY_RESOLUTION_TIMEOUT: Duration = Duration::from_secs(35);
+const CLOUD_POLICY_RESOLUTION_TIMEOUT: Duration = Duration::from_secs(20);
 
 const DIRECT_CONFIG_RELOAD_ATTEMPTS: u32 = 2;
 const DIRECT_CONFIG_RELOAD_RETRY_DELAY: Duration = Duration::from_millis(350);
@@ -3122,6 +3394,13 @@ struct ControllerDirectRuleProof {
     payload: String,
 }
 
+/// Mihomo v1.19.29 `/rules` AND child type for `PROCESS-PATH-REGEX`.
+///
+/// The packaged sidecar's `/rules` payload uses `RuleType.String()`. The
+/// captured PROCESS-NAME rows are `(ProcessName,…)`; this is the same table's
+/// `ProcessPathRegex` entry, not a guessed alias.
+const MIHOMO_PROCESS_PATH_REGEX_TYPE: &str = "ProcessPathRegex";
+
 /// Exact v1.19.29 `/rules` serialization for the trusted `DirectPlan` handed to the runtime
 /// builder. Mihomo preserves top-level rule order and one API row per AND rule; `no-resolve` is an
 /// internal child option and intentionally does not appear in `Payload()`.
@@ -3134,6 +3413,12 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
                 payload: format!("((Network,tcp) && (ProcessName,{process}))"),
             });
         }
+        for regex in &plan.wechat_process_path_regexes {
+            expected.push(ControllerDirectRuleProof {
+                proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                payload: format!("((Network,tcp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
+            });
+        }
     }
     for (address, port) in &plan.udp_wechat_rules {
         for process in tono_core::config::WECHAT_PROCESS_NAMES {
@@ -3141,6 +3426,14 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
                 proxy: config::DIRECT_GROUP_NAME.to_owned(),
                 payload: format!(
                     "((Network,udp) && (DstPort,{port}) && (IPCIDR,{address}/32) && (ProcessName,{process}))"
+                ),
+            });
+        }
+        for regex in &plan.wechat_process_path_regexes {
+            expected.push(ControllerDirectRuleProof {
+                proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                payload: format!(
+                    "((Network,udp) && (DstPort,{port}) && (IPCIDR,{address}/32) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"
                 ),
             });
         }
@@ -3184,6 +3477,7 @@ struct PendingDirectCommit {
     wechat_tcp: usize,
     web_tcp: usize,
     udp: usize,
+    wechat_process_path_regexes: Vec<String>,
 }
 
 /// The applyingCloudPolicy stage. Discovery is optional and occurs while the proven full-tunnel
@@ -3219,7 +3513,8 @@ async fn apply_cloud_policy(
         skip_optional_direct_policy(
             state,
             "optional Windows DIRECT policy is disabled; retaining the proven full-tunnel runtime".to_string(),
-        );
+        )
+        .await;
         return Ok(None);
     }
 
@@ -3227,12 +3522,15 @@ async fn apply_cloud_policy(
         skip_optional_direct_policy(
             state,
             "cloud DIRECT policy has no pre-TUN physical interface snapshot".to_string(),
-        );
+        ).await;
         return Ok(None);
     };
 
     // Resolve through a small bounded pool. WeChat and web sets run in
     // sequence so their separate batches cannot double the global cap.
+    // Signed-app discovery is local and independent of controller DNS, so
+    // it overlaps the resolution budget instead of adding a serial wait.
+    let wechat_path_regexes = tokio::task::spawn_blocking(signed_apps::discover_signed_wechat_path_regexes);
     let resolution = tokio::time::timeout(CLOUD_POLICY_RESOLUTION_TIMEOUT, async {
         let wechat = resolve_direct_domains(original_secret, controller_port, &policy.document.domains, node).await?;
         let web = resolve_direct_domains(original_secret, controller_port, &policy.document.web_domains, node).await?;
@@ -3249,10 +3547,11 @@ async fn apply_cloud_policy(
     let (wechat_pins, web_pins) = match classify_optional_direct_resolution(resolution) {
         OptionalDirectResolution::Ready(pins) => pins,
         OptionalDirectResolution::Skip(reason) => {
-            skip_optional_direct_policy(state, reason);
+            skip_optional_direct_policy(state, reason).await;
             return Ok(None);
         }
     };
+    let wechat_path_regexes = wechat_path_regexes.await.unwrap_or_default();
     let (plan, direct_endpoints) = match build_direct_plan(
         interface,
         &wechat_pins,
@@ -3260,10 +3559,11 @@ async fn apply_cloud_policy(
         &policy.document.media_endpoints,
         &policy.document.direct_suffixes,
         node,
+        wechat_path_regexes,
     ) {
         Ok(plan) => plan,
         Err(reason) => {
-            skip_optional_direct_policy(state, reason);
+            skip_optional_direct_policy(state, reason).await;
             return Ok(None);
         }
     };
@@ -3281,7 +3581,7 @@ async fn apply_cloud_policy(
     // Build the staged bundle before the irreversible bracket. The controller secret and ports
     // stay byte-identical: this is an in-place reload, not a replacement Core generation.
     ensure_fresh(state, generation).await?;
-    let runtime = build_owned_runtime_with_ports(
+    let runtime = match build_owned_runtime_with_ports(
         nodes,
         &node.name,
         original_secret,
@@ -3292,19 +3592,46 @@ async fn apply_cloud_policy(
             mixed_port,
             controller_port,
         },
-    )
-    .map_err(StageFailure::error)?;
+    ) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            // The full-tunnel runtime is already proven. A bad optional overlay
+            // must not tear that tunnel down.
+            skip_optional_direct_policy(
+                state,
+                format!("optional DIRECT runtime could not be built: {error}"),
+            ).await;
+            return Ok(None);
+        }
+    };
     write_redacted_copy(state, &runtime.redacted_yaml()).await;
     ensure_fresh(state, generation).await?;
-    let core_path = service::tono_core_binary_path().await.map_err(StageFailure::error)?;
+    let core_path = match service::tono_core_binary_path().await {
+        Ok(path) => path,
+        Err(error) => {
+            skip_optional_direct_policy(
+                state,
+                format!("optional DIRECT staging could not resolve the core path: {error}"),
+            ).await;
+            return Ok(None);
+        }
+    };
     let bundle = RuntimeBundle {
         yaml: runtime.yaml().to_string(),
         assets: Vec::new(),
         remote_providers: Vec::new(),
         core_path: core_path.to_string_lossy().into_owned(),
     };
-    let endpoint_digest =
-        clash_verge_service_ipc::direct_endpoint_digest(&direct_endpoints).map_err(StageFailure::error)?;
+    let endpoint_digest = match clash_verge_service_ipc::direct_endpoint_digest(&direct_endpoints) {
+        Ok(digest) => digest,
+        Err(error) => {
+            skip_optional_direct_policy(
+                state,
+                format!("optional DIRECT endpoint digest could not be calculated: {error}"),
+            ).await;
+            return Ok(None);
+        }
+    };
 
     // Serialize the final snapshot check against policy sync, then retain the owned read guard in
     // `PendingDirectCommit` until exact endpoint commit finishes.
@@ -3314,7 +3641,8 @@ async fn apply_cloud_policy(
         skip_optional_direct_policy(
             state,
             "cloud DIRECT policy changed before activation; retaining the full-tunnel runtime".to_owned(),
-        );
+        )
+        .await;
         return Ok(None);
     }
     let active_session = service::active_direct_runtime_reload_session().map_err(StageFailure::error)?;
@@ -3344,6 +3672,7 @@ async fn apply_cloud_policy(
         plan.tcp_wechat_rules.len(),
         plan.tcp_web_rules.len(),
         plan.udp_wechat_rules.len(),
+        plan.wechat_process_path_regexes.clone(),
     )
     .await
 }
@@ -3643,11 +3972,12 @@ fn controller_direct_graph_is_active(
         Ok(())
     }
 
-    // The owned runtime has no user-supplied rules: two loopback exceptions, the exact Claude
-    // exits, one row per staged AND selector, and a single final MATCH. Requiring the
-    // complete cardinality/order rejects broad, missing, duplicated, or stale DIRECT selectors.
-    // With home-broadband split routing the Claude block is six rows (two process names plus
-    // CLAUDE_HOME_DOMAINS) pointing at Tono-Claude-Home instead of two process pins at Tono-Exit.
+    // The owned runtime has no user-supplied rules: two loopback exceptions, the
+    // exact home-process pins (names plus path fragments), one row per staged
+    // AND selector, and a single final MATCH. Requiring the complete
+    // cardinality/order rejects broad, missing, duplicated, or stale DIRECT
+    // selectors. With home-broadband split routing the home block also carries
+    // CLAUDE_HOME_DOMAINS pointing at Tono-Claude-Home.
     let claude_target = if claude_home {
         config::CLAUDE_HOME_GROUP_NAME
     } else {
@@ -3659,13 +3989,13 @@ fn controller_direct_graph_is_active(
             config::CLAUDE_HOME_GROUP_NAME
         ));
     }
-    let claude_rows = if claude_home {
-        2 + config::CLAUDE_HOME_DOMAINS.len()
-    } else {
-        2
-    };
+    let home_path_regexes = config::home_process_path_regexes();
+    let mut home_rows = config::HOME_PROCESS_NAMES.len() + home_path_regexes.len();
+    if claude_home {
+        home_rows += config::CLAUDE_HOME_DOMAINS.len() + config::CLAUDE_HOME_IPV4_CIDRS.len();
+    }
     // + 4 = two loopback rows, the UDP REJECT row, and the final MATCH.
-    let expected_len = expected_direct_rules.len() + 3 + claude_rows + 1;
+    let expected_len = expected_direct_rules.len() + 3 + home_rows + 1;
     if rules.len() != expected_len {
         return Err(format!(
             "controller runtime returned {} rules, expected the exact {expected_len}-rule graph",
@@ -3674,25 +4004,31 @@ fn controller_direct_graph_is_active(
     }
     expect_rule(rules.first(), 0, "IPCIDR", "127.0.0.0/8", "DIRECT")?;
     expect_rule(rules.get(1), 1, "IPCIDR", "::1/128", "DIRECT")?;
-    // Claude pins are TCP-scoped ANDs so Claude UDP falls through to the REJECT row
-    // instead of matching a group that cannot carry it and leaking DIRECT.
-    expect_rule(
-        rules.get(2),
-        2,
-        "AND",
-        "((Network,tcp) && (ProcessName,Claude.exe))",
-        claude_target,
-    )?;
-    expect_rule(
-        rules.get(3),
-        3,
-        "AND",
-        "((Network,tcp) && (ProcessName,claude.exe))",
-        claude_target,
-    )?;
+    // Home pins are TCP-scoped ANDs so assistant UDP falls through to the REJECT
+    // row instead of matching a group that cannot carry it and leaking DIRECT.
+    let mut index = 2;
+    for process in config::HOME_PROCESS_NAMES {
+        expect_rule(
+            rules.get(index),
+            index,
+            "AND",
+            &format!("((Network,tcp) && (ProcessName,{process}))"),
+            claude_target,
+        )?;
+        index += 1;
+    }
+    for regex in &home_path_regexes {
+        expect_rule(
+            rules.get(index),
+            index,
+            "AND",
+            &format!("((Network,tcp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
+            claude_target,
+        )?;
+        index += 1;
+    }
     if claude_home {
-        for (offset, domain) in config::CLAUDE_HOME_DOMAINS.iter().enumerate() {
-            let index = 4 + offset;
+        for domain in config::CLAUDE_HOME_DOMAINS {
             expect_rule(
                 rules.get(index),
                 index,
@@ -3700,15 +4036,26 @@ fn controller_direct_graph_is_active(
                 &format!("((Network,tcp) && (DomainSuffix,{domain}))"),
                 config::CLAUDE_HOME_GROUP_NAME,
             )?;
+            index += 1;
+        }
+        for cidr in config::CLAUDE_HOME_IPV4_CIDRS {
+            expect_rule(
+                rules.get(index),
+                index,
+                "AND",
+                &format!("((Network,tcp) && (IPCIDR,{cidr}))"),
+                config::CLAUDE_HOME_GROUP_NAME,
+            )?;
+            index += 1;
         }
     }
     for (offset, expected) in expected_direct_rules.iter().enumerate() {
-        let index = 2 + claude_rows + offset;
-        expect_rule(rules.get(index), index, "AND", &expected.payload, &expected.proxy)?;
+        let rule_index = index + offset;
+        expect_rule(rules.get(rule_index), rule_index, "AND", &expected.payload, &expected.proxy)?;
     }
     // Vision cannot carry UDP; unpinned UDP must die here, never fall through to a
     // ruleless DIRECT dial.
-    let udp_reject = 2 + claude_rows + expected_direct_rules.len();
+    let udp_reject = index + expected_direct_rules.len();
     expect_rule(
         rules.get(udp_reject),
         udp_reject,
@@ -3793,6 +4140,7 @@ async fn activate_direct_runtime_cancellation_safe(
     wechat_tcp: usize,
     web_tcp: usize,
     udp: usize,
+    wechat_process_path_regexes: Vec<String>,
 ) -> Result<Option<PendingDirectCommit>, StageFailure> {
     let mutation_guard = state.begin_connect_mutation().await;
     if !direct_context_is_current(state, generation, &selected_node, &policy).await {
@@ -3930,6 +4278,7 @@ async fn activate_direct_runtime_cancellation_safe(
                 wechat_tcp,
                 web_tcp,
                 udp,
+                wechat_process_path_regexes,
             })
         }
         .await;
@@ -4101,14 +4450,19 @@ fn classify_optional_direct_resolution<T>(result: Result<T, String>) -> Optional
     }
 }
 
-fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: String) {
+async fn skip_optional_direct_policy(state: &Arc<TonoState>, reason: String) {
     let reason = audit::redact(&reason);
     logging!(
         warn,
         Type::Service,
         "Tono: optional cloud DIRECT policy skipped; all traffic remains tunneled: {reason}"
     );
-    state.audit().log(AuditEvent::PolicyActivationSkipped { reason });
+    state.audit().log(AuditEvent::PolicyActivationSkipped {
+        reason: reason.clone(),
+    });
+    let mut inner = state.lock().await;
+    inner.optional_direct_active = false;
+    inner.optional_direct_skip = Some(reason);
 }
 
 /// One (host, usable addresses, ports) pin per policy domain, resolved via
@@ -4309,6 +4663,7 @@ pub fn build_direct_plan(
     media: &[tono_core::policy::PolicyMedia],
     suffixes: &[tono_core::policy::PolicyDomain],
     node: &ValidatedNode,
+    wechat_process_path_regexes: Vec<String>,
 ) -> Result<(tono_core::config::DirectPlan, Vec<ProxyEndpoint>), String> {
     let mut hosts: Vec<(String, String)> = Vec::new();
     let mut wechat_tcp = Vec::new();
@@ -4382,6 +4737,14 @@ pub fn build_direct_plan(
         })
         .collect();
 
+    let mut wechat_process_path_regexes: Vec<String> = wechat_process_path_regexes
+        .into_iter()
+        .filter(|pattern| pattern.starts_with('^') && config::is_rule_payload_safe(pattern))
+        .collect();
+    wechat_process_path_regexes.sort();
+    wechat_process_path_regexes.dedup();
+    wechat_process_path_regexes.truncate(config::MAX_WECHAT_PROCESS_PATH_REGEXES);
+
     let plan = tono_core::config::DirectPlan {
         physical_interface: interface,
         hosts,
@@ -4389,6 +4752,7 @@ pub fn build_direct_plan(
         tcp_web_rules: web_tcp,
         web_suffix_rules,
         udp_wechat_rules: udp,
+        wechat_process_path_regexes,
     };
     Ok((plan, endpoints))
 }
@@ -4675,6 +5039,7 @@ async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
 mod tests {
     use super::{
         BFE_NOT_RUNNING_PREFIX, CATALOG_NOT_READY_REJECTION, CLOUD_POLICY_RESOLUTION_TIMEOUT, CONNECT_BUDGET_LEGS,
+        classify_bfe_state, wechat_paths_changed,
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
@@ -5145,6 +5510,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wechat_path_changes_only_reconnect_when_the_overlay_is_active() {
+        assert!(!wechat_paths_changed(None, &["a".to_string()]));
+        assert!(!wechat_paths_changed(Some(&[]), &[]));
+        assert!(wechat_paths_changed(Some(&[]), &["a".to_string()]));
+        assert!(wechat_paths_changed(
+            Some(&["a".to_string()][..]),
+            &["b".to_string()]
+        ));
+        assert!(!wechat_paths_changed(
+            Some(&["a".to_string()][..]),
+            &["a".to_string()]
+        ));
+    }
+
     fn node() -> ValidatedNode {
         ValidatedNode {
             name: "US Reality 01".to_string(),
@@ -5176,6 +5556,11 @@ mod tests {
         .expect("stopped BFE is mapped");
         assert!(bfe.starts_with(BFE_NOT_RUNNING_PREFIX));
         assert!(bfe.contains("sc start BFE"));
+        assert!(classify_bfe_state(true, "Running").is_ok());
+        assert!(classify_bfe_state(false, "StartPending").is_ok());
+        let stopped = classify_bfe_state(false, "Stopped").expect_err("stopped BFE is a refusal");
+        assert!(stopped.starts_with(BFE_NOT_RUNNING_PREFIX));
+        assert!(stopped.contains("Stopped"));
 
         assert!(map_wfp_engine_error("kill switch lock failed: owner mismatch").is_none());
     }
@@ -5913,7 +6298,7 @@ mod tests {
         assert_eq!(
             super::classify_optional_direct_resolution::<()>(Err(error)),
             super::OptionalDirectResolution::Skip(
-                "dns query for mmbiz.qpic.cn failed after 3 attempts: dns query for mmbiz.qpic.cn answered 500 Internal Server Error: context deadline exceeded".to_string()
+                "dns query for mmbiz.qpic.cn failed after 2 attempts: dns query for mmbiz.qpic.cn answered 500 Internal Server Error: context deadline exceeded".to_string()
             )
         );
         assert_eq!(
@@ -6106,11 +6491,63 @@ mod tests {
         );
     }
 
+    fn home_controller_rules(proxy: &str, include_domains: bool) -> Vec<serde_json::Value> {
+        let mut rules = Vec::new();
+        for process in tono_core::config::HOME_PROCESS_NAMES {
+            rules.push(serde_json::json!({
+                "type": "AND",
+                "payload": format!("((Network,tcp) && (ProcessName,{process}))"),
+                "proxy": proxy,
+            }));
+        }
+        for regex in tono_core::config::home_process_path_regexes() {
+            rules.push(serde_json::json!({
+                "type": "AND",
+                "payload": format!("((Network,tcp) && ({},{regex}))", super::MIHOMO_PROCESS_PATH_REGEX_TYPE),
+                "proxy": proxy,
+            }));
+        }
+        if include_domains {
+            for domain in tono_core::config::CLAUDE_HOME_DOMAINS {
+                rules.push(serde_json::json!({
+                    "type": "AND",
+                    "payload": format!("((Network,tcp) && (DomainSuffix,{domain}))"),
+                    "proxy": proxy,
+                }));
+            }
+            for cidr in tono_core::config::CLAUDE_HOME_IPV4_CIDRS {
+                rules.push(serde_json::json!({
+                    "type": "AND",
+                    "payload": format!("((Network,tcp) && (IPCIDR,{cidr}))"),
+                    "proxy": proxy,
+                }));
+            }
+        }
+        rules
+    }
+
+    fn controller_rules_graph(
+        home_proxy: &str,
+        include_home_domains: bool,
+        extra: Vec<serde_json::Value>,
+    ) -> serde_json::Value {
+        let mut rules = vec![
+            serde_json::json!({"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"}),
+            serde_json::json!({"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"}),
+        ];
+        rules.extend(home_controller_rules(home_proxy, include_home_domains));
+        rules.extend(extra);
+        rules.push(serde_json::json!({"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"}));
+        rules.push(serde_json::json!({"type": "Match", "payload": "", "proxy": "Tono-Exit"}));
+        serde_json::json!({ "rules": rules })
+    }
+
     #[test]
     fn controller_readback_requires_the_exact_direct_graph_and_exit_order() {
         // Captured from the packaged Mihomo Meta v1.19.29 `/rules` and `/proxies` APIs. In
         // particular, Network payload values are lowercase and `no-resolve` is not returned by
-        // IPCIDR.Payload(). Keep this fixture independent from the YAML formatter above.
+        // IPCIDR.Payload(). Home process/path rows are generated from the same constants the
+        // runtime emits so this proof cannot drift from HOME_PROCESS_NAMES again.
         let expected = vec![
             ControllerDirectRuleProof {
                 proxy: "Tono-China-Direct".to_owned(),
@@ -6140,20 +6577,13 @@ mod tests {
                 "Tono-China-Web-Direct": {"type": "Direct", "interface": "Ethernet 2"}
             }
         });
-        let rules = serde_json::json!({
-            "rules": [
-                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
-                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Exit"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Exit"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
-                {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
-                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"},
-                {"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (DomainSuffix,baidu.com))", "proxy": "Tono-China-Web-Direct"},
-                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
-                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
-            ]
-        });
+        let extra = vec![
+            serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"}),
+            serde_json::json!({"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"}),
+            serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (Domain,www.bilibili.com) && (IPCIDR,9.0.0.30/32))", "proxy": "Tono-China-Web-Direct"}),
+            serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (DstPort,443) && (DomainSuffix,baidu.com))", "proxy": "Tono-China-Web-Direct"}),
+        ];
+        let rules = controller_rules_graph("Tono-Exit", false, extra);
         controller_direct_graph_is_active(&rules, &proxies, &expected, "Ethernet 2", true, true, false).unwrap();
 
         let wechat_only_proxies = serde_json::json!({
@@ -6162,18 +6592,14 @@ mod tests {
                 "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
             }
         });
-        let wechat_only_rules = serde_json::json!({
-            "rules": [
-                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
-                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Exit"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Exit"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
-                {"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"},
-                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
-                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
-            ]
-        });
+        let wechat_only_rules = controller_rules_graph(
+            "Tono-Exit",
+            false,
+            vec![
+                serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"}),
+                serde_json::json!({"type": "AND", "payload": "((Network,udp) && (DstPort,8000) && (IPCIDR,9.0.0.20/32) && (ProcessName,WeChat.exe))", "proxy": "Tono-China-Direct"}),
+            ],
+        );
         controller_direct_graph_is_active(
             &wechat_only_rules,
             &wechat_only_proxies,
@@ -6189,15 +6615,18 @@ mod tests {
             "a stale web DIRECT proxy/rule must make read-back fail"
         );
 
+        let home_len = home_controller_rules("Tono-Exit", false).len();
+        let first_direct = 2 + home_len;
+        let last = rules["rules"].as_array().unwrap().len() - 1;
         let mut wrong_order = rules.clone();
-        wrong_order["rules"].as_array_mut().unwrap().swap(3, 4);
+        wrong_order["rules"].as_array_mut().unwrap().swap(first_direct - 1, first_direct);
         assert!(
             controller_direct_graph_is_active(&wrong_order, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
-            "Claude must remain exit-first"
+            "home process pins must remain ahead of DIRECT selectors"
         );
 
         let mut broad_selector = rules.clone();
-        broad_selector["rules"][4]["payload"] =
+        broad_selector["rules"][first_direct]["payload"] =
             serde_json::json!("((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com))");
         assert!(
             controller_direct_graph_is_active(&broad_selector, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
@@ -6219,15 +6648,15 @@ mod tests {
         );
 
         let mut stale_rule = rules.clone();
-        let duplicate = stale_rule["rules"][4].clone();
-        stale_rule["rules"].as_array_mut().unwrap().insert(7, duplicate);
+        let duplicate = stale_rule["rules"][first_direct].clone();
+        stale_rule["rules"].as_array_mut().unwrap().insert(last - 1, duplicate);
         assert!(
             controller_direct_graph_is_active(&stale_rule, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "an extra stale or duplicated DIRECT rule must fail exact cardinality"
         );
 
         let mut wrong_fallback = rules.clone();
-        wrong_fallback["rules"][9]["proxy"] = serde_json::json!("DIRECT");
+        wrong_fallback["rules"][last]["proxy"] = serde_json::json!("DIRECT");
         assert!(
             controller_direct_graph_is_active(&wrong_fallback, &proxies, &expected, "Ethernet 2", true, true, false,).is_err(),
             "the final fallback must remain exact Tono-Exit"
@@ -6236,8 +6665,9 @@ mod tests {
 
     #[test]
     fn controller_readback_accepts_the_claude_home_split_graph() {
-        // With homeProxy routing the Claude block is six rows (two process names + four
-        // domains) into Tono-Claude-Home, sitting between loopback and the DIRECT pins.
+        // With homeProxy routing the home block (process names, path fragments,
+        // and CLAUDE_HOME_DOMAINS) points at Tono-Claude-Home, sitting between
+        // loopback and the DIRECT pins.
         let expected = vec![ControllerDirectRuleProof {
             proxy: "Tono-China-Direct".to_owned(),
             payload: "((Network,tcp) && (ProcessName,Weixin.exe))"
@@ -6250,21 +6680,11 @@ mod tests {
                 "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
             }
         });
-        let split_rules = serde_json::json!({
-            "rules": [
-                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
-                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.ai))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,anthropic.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claudeusercontent.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
-                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
-                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
-            ]
-        });
+        let split_rules = controller_rules_graph(
+            "Tono-Claude-Home",
+            true,
+            vec![serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"})],
+        );
         controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
             .expect("the exact split graph must pass");
 
@@ -6282,8 +6702,9 @@ mod tests {
             "split rules without the Tono-Claude-Home group must fail"
         );
 
+        let domain_index = 2 + home_controller_rules("Tono-Claude-Home", false).len();
         let mut wrong_target = split_rules.clone();
-        wrong_target["rules"][4]["proxy"] = serde_json::json!("Tono-Exit");
+        wrong_target["rules"][domain_index]["proxy"] = serde_json::json!("Tono-Exit");
         assert!(
             controller_direct_graph_is_active(&wrong_target, &proxies, &expected, "Ethernet 2", true, false, true).is_err(),
             "a Claude domain leaking to Tono-Exit must fail"
@@ -6309,21 +6730,11 @@ mod tests {
                 "Tono-China-Direct": {"type": "Direct", "interface": "Ethernet 2"}
             }
         });
-        let split_rules = serde_json::json!({
-            "rules": [
-                {"type": "IPCIDR", "payload": "127.0.0.0/8", "proxy": "DIRECT"},
-                {"type": "IPCIDR", "payload": "::1/128", "proxy": "DIRECT"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Claude.exe))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,claude.exe))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.ai))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claude.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,anthropic.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (DomainSuffix,claudeusercontent.com))", "proxy": "Tono-Claude-Home"},
-                {"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"},
-                {"type": "AND", "payload": "((Network,udp))", "proxy": "REJECT"},
-                {"type": "Match", "payload": "", "proxy": "Tono-Exit"}
-            ]
-        });
+        let split_rules = controller_rules_graph(
+            "Tono-Claude-Home",
+            true,
+            vec![serde_json::json!({"type": "AND", "payload": "((Network,tcp) && (ProcessName,Weixin.exe))", "proxy": "Tono-China-Direct"})],
+        );
         controller_direct_graph_is_active(&split_rules, &proxies, &expected, "Ethernet 2", true, false, true)
             .expect("the exact socks5 split graph must pass");
     }
@@ -6387,7 +6798,7 @@ mod tests {
                 ports: vec![443],
             },
         ];
-        let (plan, endpoints) = build_direct_plan("Ethernet 2".to_string(), &pins, &web_pins, &media, &suffixes, &node).unwrap();
+        let (plan, endpoints) = build_direct_plan("Ethernet 2".to_string(), &pins, &web_pins, &media, &suffixes, &node, Vec::new()).unwrap();
         // WeChat TCP tuples deduped: (9.0.0.10, 80|443) +
         // (9.0.0.11, 80|443) = 4; exact web remains separate by host.
         assert_eq!(plan.tcp_wechat_rules.len(), 4);
@@ -6464,6 +6875,47 @@ mod tests {
                 .iter()
                 .all(|rule| { !rule.payload.contains("Network,TCP") && !rule.payload.contains("Network,UDP") })
         );
+        assert!(plan.wechat_process_path_regexes.is_empty());
+    }
+
+    #[test]
+    fn direct_plan_keeps_only_safe_signed_wechat_path_regexes() {
+        let node = node();
+        let pins = vec![(
+            "wxs.qq.com".to_string(),
+            vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
+            vec![443],
+        )];
+        let prefix = tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
+            .expect("reviewed prefix");
+        let (plan, _) = build_direct_plan(
+            "Ethernet 2".to_string(),
+            &pins,
+            &[],
+            &[],
+            &[],
+            &node,
+            vec![
+                prefix.clone(),
+                "not-anchored".to_string(),
+                "AND,((NETWORK,TCP))".to_string(),
+                prefix.clone(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(plan.wechat_process_path_regexes, vec![prefix.clone()]);
+        let controller = expected_controller_direct_rules(&plan);
+        assert!(
+            controller
+                .iter()
+                .any(|rule| {
+                    rule.payload
+                        == format!(
+                            "((Network,tcp) && ({},{prefix}))",
+                            super::MIHOMO_PROCESS_PATH_REGEX_TYPE
+                        )
+                })
+        );
     }
 
     #[test]
@@ -6479,7 +6931,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let error = build_direct_plan("Ethernet 2".to_string(), &pins, &[], &[], &[], &node)
+        let error = build_direct_plan("Ethernet 2".to_string(), &pins, &[], &[], &[], &node, Vec::new())
             .expect_err("a partial WFP permit set must never be emitted");
 
         assert!(error.contains("257 unique endpoints"));

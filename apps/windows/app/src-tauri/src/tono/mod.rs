@@ -12,6 +12,7 @@ pub mod credentials;
 pub mod diagnostics;
 mod integration_profile;
 pub mod policy_sync;
+mod signed_apps;
 pub mod state;
 pub mod steps;
 pub mod log_upload;

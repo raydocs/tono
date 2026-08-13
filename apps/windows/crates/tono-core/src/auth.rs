@@ -11,7 +11,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -87,6 +87,42 @@ pub fn should_retry_transport(method: HttpMethod, kind: TransportKind) -> bool {
 /// Interval between a failed attempt and its single retry (500 ms; there
 /// is no `waitsForConnectivity` equivalent — this partially covers it).
 pub const TRANSPORT_RETRY_DELAY: Duration = Duration::from_millis(500);
+/// Renew an access token this many seconds before its JWT `exp`. A token
+/// whose payload cannot be read keeps the 401-after-expiry path instead of
+/// guessing a lifetime.
+pub const ACCESS_TOKEN_RENEWAL_WINDOW_SECS: i64 = 60;
+
+/// `exp` from a JWT payload, or `None` when the token is not a readable JWT.
+pub fn access_token_expiry_unix(token: &str) -> Option<i64> {
+    let mut parts = token.split('.');
+    let header = parts.next()?;
+    let payload = parts.next()?;
+    let signature = parts.next()?;
+    if header.is_empty() || payload.is_empty() || signature.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    use base64::Engine as _;
+    let mut padded = payload.replace('-', "+").replace('_', "/");
+    while padded.len() % 4 != 0 {
+        padded.push('=');
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(padded)
+        .ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let exp = json.get("exp")?;
+    let value = exp
+        .as_i64()
+        .or_else(|| exp.as_u64().and_then(|n| i64::try_from(n).ok()))?;
+    (value > 0).then_some(value)
+}
+
+fn unix_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
 
 /// Parity with the macOS `TonoAPIClient.APIError`, plus `InvalidInput` for
 /// client-side validation and `Credentials` for store failures.
@@ -668,9 +704,17 @@ impl<T: HttpTransport + ?Sized> HttpTransport for Arc<T> {
 
 // ---- Client ----
 
+enum CurrentToken {
+    Use { token: String, epoch: u64 },
+    RefreshSoon { token: String, epoch: u64 },
+    RefreshExpired { epoch: u64 },
+}
+
 #[derive(Debug, Default)]
 struct AuthState {
     access_token: Option<String>,
+    /// JWT `exp` of `access_token`, when the payload is readable.
+    access_token_expiry: Option<i64>,
     /// Bumped on every successful refresh so a waiter can tell a fresh
     /// token from the one its request failed with.
     epoch: u64,
@@ -698,6 +742,10 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         })
     }
 
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+
     /// Install tokens from a completed sign-in (§2). The refresh token, when
     /// present, is persisted; the access token lives in memory only.
     pub async fn adopt(&self, auth: &AuthResponse) -> Result<(), ApiError> {
@@ -706,8 +754,67 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         }
         let mut state = self.state.lock().await;
         state.access_token = Some(auth.access_token.clone());
+        state.access_token_expiry = access_token_expiry_unix(&auth.access_token);
         state.epoch += 1;
         Ok(())
+    }
+
+    /// The token to send, renewed first when it is about to expire.
+    async fn current_access_token(&self) -> Result<(String, u64), ApiError> {
+        let decision = {
+            let state = self.state.lock().await;
+            match &state.access_token {
+                Some(token) => match state.access_token_expiry {
+                    None => CurrentToken::Use {
+                        token: token.clone(),
+                        epoch: state.epoch,
+                    },
+                    Some(expiry) => {
+                        let now = unix_now_secs();
+                        if expiry <= now {
+                            CurrentToken::RefreshExpired { epoch: state.epoch }
+                        } else if expiry - now <= ACCESS_TOKEN_RENEWAL_WINDOW_SECS {
+                            CurrentToken::RefreshSoon {
+                                token: token.clone(),
+                                epoch: state.epoch,
+                            }
+                        } else {
+                            CurrentToken::Use {
+                                token: token.clone(),
+                                epoch: state.epoch,
+                            }
+                        }
+                    }
+                },
+                None => CurrentToken::RefreshExpired {
+                    epoch: state.epoch,
+                },
+            }
+        };
+        match decision {
+            CurrentToken::Use { token, epoch } => Ok((token, epoch)),
+            CurrentToken::RefreshSoon { token, epoch } => {
+                match self.refresh_access_token(epoch).await {
+                    Ok(renewed) => {
+                        let epoch = self.state.lock().await.epoch;
+                        Ok((renewed, epoch))
+                    }
+                    Err(_) => Ok((token, epoch)),
+                }
+            }
+            CurrentToken::RefreshExpired { epoch } => {
+                {
+                    let mut state = self.state.lock().await;
+                    if state.epoch == epoch {
+                        state.access_token = None;
+                        state.access_token_expiry = None;
+                    }
+                }
+                let token = self.refresh_access_token(epoch).await?;
+                let epoch = self.state.lock().await.epoch;
+                Ok((token, epoch))
+            }
+        }
     }
 
     pub async fn auth_methods(&self) -> Result<AuthMethodsResponse, ApiError> {
@@ -953,6 +1060,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         {
             let mut state = self.state.lock().await;
             state.access_token = None;
+            state.access_token_expiry = None;
             // Invalidate any in-flight refresh so its stale result is
             // discarded instead of resurrecting the wiped session (L3).
             state.epoch += 1;
@@ -968,25 +1076,14 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         path: &str,
         body: Option<String>,
     ) -> Result<Vec<u8>, ApiError> {
-        let (token, epoch) = {
-            let state = self.state.lock().await;
-            match &state.access_token {
-                Some(token) => (token.clone(), state.epoch),
-                None => {
-                    let epoch = state.epoch;
-                    drop(state);
-                    let token = self.refresh_access_token(epoch).await?;
-                    let epoch = self.state.lock().await.epoch;
-                    (token, epoch)
-                }
-            }
-        };
+        let (token, epoch) = self.current_access_token().await?;
         match self.call(method, path, body.clone(), Some(&token)).await {
             Err(ApiError::Unauthorized) => {
                 // Drop the stale token only if nobody refreshed meanwhile.
                 let mut state = self.state.lock().await;
                 if state.epoch == epoch {
                     state.access_token = None;
+                    state.access_token_expiry = None;
                 }
                 drop(state);
                 let renewed = self.refresh_access_token(epoch).await?;
@@ -1010,19 +1107,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         body: BinaryBody,
         headers: Vec<(String, String)>,
     ) -> Result<Vec<u8>, ApiError> {
-        let (token, epoch) = {
-            let state = self.state.lock().await;
-            match &state.access_token {
-                Some(token) => (token.clone(), state.epoch),
-                None => {
-                    let epoch = state.epoch;
-                    drop(state);
-                    let token = self.refresh_access_token(epoch).await?;
-                    let epoch = self.state.lock().await.epoch;
-                    (token, epoch)
-                }
-            }
-        };
+        let (token, epoch) = self.current_access_token().await?;
         let build = |bearer: &str| ApiRequest {
             method: HttpMethod::Post,
             url: format!("{}/{API_PREFIX}{path}", self.base_url),
@@ -1036,6 +1121,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
                 let mut state = self.state.lock().await;
                 if state.epoch == epoch {
                     state.access_token = None;
+                    state.access_token_expiry = None;
                 }
                 drop(state);
                 let renewed = self.refresh_access_token(epoch).await?;
@@ -1082,6 +1168,7 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
         // token is replaced atomically by the store implementation (§2).
         self.credentials.set_refresh_token(&tokens.refresh_token)?;
         state.access_token = Some(tokens.access_token.clone());
+        state.access_token_expiry = access_token_expiry_unix(&tokens.access_token);
         state.epoch += 1;
         Ok(tokens.access_token)
     }
@@ -1548,6 +1635,51 @@ mod tests {
             decode_auth_response(b"{\"nope\":true}").unwrap_err(),
             ApiError::InvalidResponse
         );
+    }
+
+    #[test]
+    fn jwt_expiry_is_read_only_from_a_three_part_token() {
+        // {"exp":1700000000} in base64url, with dummy header/signature.
+        let token = "eyJhbGciOiJub25lIn0.eyJleHAiOjE3MDAwMDAwMDB9.sig";
+        assert_eq!(access_token_expiry_unix(token), Some(1_700_000_000));
+        assert_eq!(access_token_expiry_unix("not-a-jwt"), None);
+        assert_eq!(access_token_expiry_unix("a.b"), None);
+        assert_eq!(access_token_expiry_unix("access"), None);
+    }
+
+    #[tokio::test]
+    async fn authorized_refreshes_an_already_expired_jwt_before_the_request() {
+        let now = unix_now_secs();
+        use base64::Engine as _;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(format!(r#"{{"exp":{}}}"#, now - 10));
+        let expired = format!("eyJhbGciOiJub25lIn0.{payload}.sig");
+        let store = Arc::new(MemoryCredentialStore::default());
+        store.set_refresh_token("refresh").unwrap();
+        let mock = MockTransport::new({
+            let expired = expired.clone();
+            move |request| {
+                if request.url.ends_with("auth/refresh") {
+                    return json(
+                        200,
+                        r#"{"accessToken":"fresh","refreshToken":"refresh-2"}"#,
+                    );
+                }
+                if request.bearer.as_deref() == Some("fresh") {
+                    return json(200, r#"{"user":{"id":"u","email":"e@x.co"}}"#);
+                }
+                if request.bearer.as_deref() == Some(expired.as_str()) {
+                    panic!("expired token was sent");
+                }
+                json(401, r#"{"error":{"code":"UNAUTHORIZED","message":"no"}}"#)
+            }
+        });
+        let client = ApiClient::new(DEFAULT_BASE_URL, mock.clone(), store).unwrap();
+        client
+            .adopt(&auth_response(&expired, Some("refresh")))
+            .await
+            .unwrap();
+        client.me().await.unwrap();
     }
 
     #[test]

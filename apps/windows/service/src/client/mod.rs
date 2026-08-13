@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 mod windows_identity;
 
 use crate::{
-    AuthenticatedRequest, AuthenticatedSessionRequest, DirectRuntimeReloadResult,
+    AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, DirectRuntimeReloadResult,
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
     KillSwitchLockRequest, KillSwitchStatus, MIN_REQUIRED_SERVICE_REVISION, MacosProxyConfig,
     OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
@@ -623,6 +623,36 @@ pub async fn get_protected_dns_status(
         credentials,
         None,
         (),
+        Some(STATUS_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn get_bootstrap_pins(
+    credentials: &OwnerCredentials,
+) -> Result<Response<BootstrapPins>> {
+    protected_call(
+        Verb::Get,
+        IpcCommand::BootstrapPins,
+        credentials,
+        None,
+        (),
+        Some(STATUS_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn remember_bootstrap_pins(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: &BootstrapPins,
+) -> Result<Response<BootstrapPins>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::BootstrapPins,
+        credentials,
+        Some(session),
+        body.clone(),
         Some(STATUS_TIMEOUT),
     )
     .await

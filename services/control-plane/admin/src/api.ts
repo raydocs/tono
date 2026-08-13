@@ -10,6 +10,14 @@ export interface DashboardDto {
   logicalNodes: CountSummary;
   deployments: CountSummary;
   catalog: { revision: number; updatedAt: number | null };
+  inventory?: {
+    unusedHomes: number;
+    unusedAccounts: number;
+    bannedUnreplaced: number;
+    incompleteUsers: number;
+    renewingSoon: number;
+    usersWithoutHome: number;
+  };
 }
 
 export interface ServerDto {
@@ -60,6 +68,16 @@ export interface UserDto {
   suspended: boolean;
   status: string;
   createdAt: number;
+  notes?: string;
+  contact?: string;
+  firstEntitledAt?: number;
+  product?: {
+    accountRef: string | null;
+    status: string | null;
+    openedAt: number | null;
+    replaceCount: number;
+    incomplete: boolean;
+  };
   homeBinding: {
     homeExitId: string;
     proxyName: string;
@@ -78,6 +96,50 @@ export interface AllowlistEntry {
   createdAt: number;
 }
 
+export interface ProductAccountDto {
+  id: string;
+  userId: string | null;
+  email?: string;
+  product: string;
+  accountRef: string;
+  status: string;
+  openedAt: number | null;
+  closedAt: number | null;
+  closeReason: string | null;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProductEventDto {
+  id: string;
+  accountId: string;
+  userId: string | null;
+  type: string;
+  at: number;
+  detail?: string;
+  replacedByAccountId?: string;
+}
+
+export interface NodeProfileDto {
+  id: string;
+  catalogName: string;
+  publicIp?: string;
+  provider?: string;
+  billingUrl?: string;
+  trafficQuotaBytes: number | null;
+  trafficUsedBytes: number | null;
+  trafficCycleStart: number | null;
+  trafficCycleEnd: number | null;
+  cycleNetIn: number | null;
+  cycleNetOut: number | null;
+  renewsAt: number | null;
+  notes?: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface UserDetailDto {
   devices: Array<{
     id: string;
@@ -93,6 +155,18 @@ export interface UserDetailDto {
     osVersion: string;
     reportJson: string;
   }>;
+  product?: {
+    accounts: ProductAccountDto[];
+    events: ProductEventDto[];
+    replaceCount: number;
+  };
+  heartbeat?: {
+    lastSeenAt: number;
+    clientVersion: string;
+    osVersion: string;
+    selectedServer: string | null;
+    uiState: string | null;
+  } | null;
 }
 
 export interface HomeExitDto {
@@ -105,6 +179,9 @@ export interface HomeExitDto {
   socks5Port?: number;
   status: string;
   notes?: string;
+  bindCount?: number;
+  lastProbedAt?: number;
+  probeStatus?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -137,18 +214,46 @@ export interface LiveAgentDto {
   os: string | null;
   arch: string | null;
   cpuName: string | null;
+  cpu: number | null;
   memTotal: number | null;
+  memUsed: number | null;
   diskTotal: number | null;
+  diskUsed: number | null;
+  netIn: number | null;
+  netOut: number | null;
+  uptime: number | null;
+}
+
+export interface LiveProbeDto {
+  ok?: boolean;
+  success?: number;
+  fail?: number;
+  total?: number;
+  rate?: number;
+  status?: string;
+  source?: string;
+  note?: string;
+  authoritative?: boolean;
 }
 
 export interface LiveQualityNodeDto {
   name: string;
   host: string | null;
+  publicIp: string | null;
   ok: boolean;
   quality: string | null;
   riskKeywords: string[];
   routeKeywords: string[];
-  block: { status: string | null; label: string | null } | null;
+  block: {
+    status: string | null;
+    label: string | null;
+    rule: string | null;
+    mainland: LiveProbeDto | null;
+    asiaEdge: LiveProbeDto | null;
+    overseas: LiveProbeDto | null;
+  } | null;
+  securityCheck: string | null;
+  backtrace: string | null;
 }
 
 export interface LiveDto {
@@ -158,6 +263,7 @@ export interface LiveDto {
   quality: {
     updatedAt: number | null;
     updatedAtIso: string | null;
+    cnAgentsConfigured: number | null;
     nodes: LiveQualityNodeDto[] | null;
   } | null;
   qualityError: string | null;
@@ -223,6 +329,27 @@ const del = <T>(path: string, body?: unknown) => request<T>(path, {
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
+export interface TrafficPolicyDto {
+  revision: number;
+  json: string;
+  sha256: string;
+  updatedAt?: number;
+  signature?: string;
+}
+
+export interface DeviceActionDto {
+  id: string;
+  userId: string;
+  deviceId: string;
+  action: string;
+  status: string;
+  createdAt: number;
+  expiresAt: number;
+  deliveredAt: number | null;
+  completedAt: number | null;
+  result: unknown;
+}
+
 export const operationsApi = {
   dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
   live: async () => (await get<{ live: LiveDto }>('live')).live,
@@ -241,6 +368,25 @@ export const operationsApi = {
   ),
   removeSignupEmail: async (email: string) => del<void>('signup-allowlist', { email }),
   homeExits: async () => (await get<{ homeExits: HomeExitDto[] }>('home-exits')).homeExits,
+  assignHomeLine: async (input: {
+    userId: string;
+    line: string;
+    displayName?: string;
+    defaultProxyName?: string | null;
+    replace?: boolean;
+  }) => post<{
+    homeExit: HomeExitDto;
+    binding: HomeBindingDto;
+    created: boolean;
+    replaced: boolean;
+    retiredHomeExitId?: string;
+    refreshQueued: number;
+  }>('home-exits/assign', input),
+  importHomeLines: async (lines: string[]) => post<{
+    created: HomeExitDto[];
+    skipped: Array<{ host?: string; port?: number; username?: string; message: string }>;
+    failed: Array<{ message: string }>;
+  }>('home-exits/import', { lines }),
   createHomeExit: async (input: {
     proxyName: string;
     displayName: string;
@@ -279,7 +425,84 @@ export const operationsApi = {
   setUserStatus: async (userId: string, status: 'active' | 'disabled') => (
     await patch<{ ok: boolean }>(`users/${userId}`, { status })
   ),
+  closeUser: async (userId: string) => post<{ ok: boolean; email: string; status: string }>(`users/${userId}/close`, {}),
   setUserExpiry: async (userId: string, expiresAt: number | null) => (
     await patch<{ ok: boolean }>(`users/${userId}`, { expiresAt })
   ),
+  replaceCatalog: async (yaml: string, expectedRevision: number) =>
+    put<{ revision: number; sha256: string; updatedAt: number }>('exit-catalog', { yaml, expectedRevision }),
+  trafficPolicy: async () => get<TrafficPolicyDto>('traffic-policy'),
+  replaceTrafficPolicy: async (policy: unknown, expectedRevision: number) =>
+    put<TrafficPolicyDto>('traffic-policy', { policy, expectedRevision }),
+  enqueueDeviceAction: async (deviceId: string, action: string) =>
+    post<{ action: DeviceActionDto }>('device-actions', { deviceId, action }),
+  deviceActions: async (deviceId?: string) => (
+    await get<{ actions: DeviceActionDto[] }>(
+      deviceId ? `device-actions?deviceId=${encodeURIComponent(deviceId)}` : 'device-actions',
+    )
+  ).actions,
+  revokeDevice: async (deviceId: string) => del<void>(`devices/${deviceId}`),
+  onboardUser: async (input: {
+    email: string;
+    line?: string;
+    homeExitId?: string;
+    accountRef?: string;
+    productAccountId?: string;
+    openedAt?: number;
+    notes?: string;
+    contact?: string;
+  }) => post<{
+    email: string;
+    userId: string | null;
+    allowlisted: boolean;
+    binding: HomeBindingDto | null;
+    account: ProductAccountDto | null;
+    incomplete: string[];
+  }>('users/onboard', input),
+  patchUser: async (userId: string, input: {
+    status?: 'active' | 'disabled';
+    expiresAt?: number | null;
+    notes?: string | null;
+    contact?: string | null;
+    plan?: string | null;
+  }) => patch<{ ok: boolean }>(`users/${userId}`, input),
+  productAccounts: async (status?: string) => (
+    await get<{ accounts: ProductAccountDto[] }>(
+      status ? `product-accounts?status=${encodeURIComponent(status)}` : 'product-accounts',
+    )
+  ).accounts,
+  createProductAccount: async (input: {
+    accountRef: string;
+    userId?: string;
+    openedAt?: number;
+    notes?: string;
+  }) => (await post<{ account: ProductAccountDto }>('product-accounts', input)).account,
+  banProductAccount: async (id: string, detail?: string) =>
+    (await post<{ account: ProductAccountDto }>(`product-accounts/${id}/ban`, { detail })).account,
+  replaceProductAccount: async (id: string, accountRef: string, notes?: string) =>
+    (await post<{ previous: ProductAccountDto; account: ProductAccountDto }>(
+      `product-accounts/${id}/replace`,
+      { accountRef, notes },
+    )),
+  nodeProfiles: async () => (await get<{ profiles: NodeProfileDto[] }>('node-profiles')).profiles,
+  createNodeProfile: async (input: Partial<NodeProfileDto> & { catalogName: string }) =>
+    (await post<{ profile: NodeProfileDto }>('node-profiles', input)).profile,
+  updateNodeProfile: async (id: string, input: Partial<NodeProfileDto>) =>
+    (await put<{ profile: NodeProfileDto }>(`node-profiles/${id}`, input)).profile,
+  nodeIncident: async (name: string) => get<{
+    node: string;
+    onlineWindowSeconds: number;
+    affected: ActivityUserDto[];
+  }>(`incidents/node/${encodeURIComponent(name)}`),
+  audit: async () => (await get<{
+    entries: Array<{
+      id: string;
+      at: number;
+      actorEmail: string;
+      action: string;
+      targetType: string;
+      targetId: string | null;
+      summary: string;
+    }>;
+  }>('audit')).entries,
 };

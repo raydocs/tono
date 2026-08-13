@@ -19,26 +19,40 @@
     "closeFailed": "无法关闭该连接。",
     "closeAllFailed": "无法关闭全部连接。",
     "connectionCount": "当前显示 {{count}} 条活动连接",
+    "appCount": "本会话 {{count}} 个应用",
+    "view": "活动视图",
+    "views": {
+      "apps": "应用",
+      "connections": "连接"
+    },
+    "splitHint": "{{direct}} 直连 · {{home}} 住宅 · {{proxied}} 出口 · {{rejected}} 拒绝",
     "limitNotice": "最多显示 {{count}} 条连接",
     "filters": {
       "all": "全部",
-      "proxied": "已代理",
+      "proxied": "出口",
+      "home": "住宅",
       "direct": "直连",
       "rejected": "已拒绝",
       "local": "本地"
     },
     "routes": {
-      "proxied": "已代理",
+      "proxied": "出口",
+      "home": "住宅",
       "direct": "直连",
       "rejected": "已拒绝",
       "local": "本地"
+    },
+    "apps": {
+      "wechat": "微信"
     },
     "columns": {
       "process": "进程",
       "target": "域名或目标",
       "protocol": "协议",
       "route": "路由",
-      "rule": "规则"
+      "rule": "规则",
+      "count": "连接",
+      "split": "路径拆分"
     }
   },
   "login": {
@@ -114,6 +128,8 @@
     },
     "taglineIdle": "一键让所有应用通过你选择的 Tono 云节点。",
     "taglineConnected": "所有流量均受保护；线路中断时 Tono 会阻止泄漏。",
+    "directOn": "微信和已审核的国内站点可以直连，其余仍走隧道。",
+    "directSkipped": "本次未启用国内直连，微信和其他应用都走隧道。",
     "pickServer": "选择节点以开始使用",
     "errorRetry": "重试",
     "errorSwitchServer": "切换节点",
@@ -124,11 +140,17 @@
       "serviceBusy": "Tono 服务正在安装或修复。请批准待处理的管理员提示，或重启 Tono。",
       "releaseReconciling": "网络保护仍在释放中。请稍候再连接，避免拆掉新连接。",
       "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。",
-      "nodeUnreachable": "无法连接此节点。请重试，或切换到其他节点。"
+      "nodeUnreachable": "无法连接此节点。请重试，或切换到其他节点。",
+      "coreUnpinned": "此安装缺少内核校验。请安装最新版 Tono，重装同一份安装包无效。",
+      "coreMismatch": "内核与此安装不匹配。请安装最新版 Tono。",
+      "dnsPortBusy": "本机 53 端口已被其他程序占用。请关闭该程序后重试。",
+      "sendDiagnostics": "发给支持"
     },
     "info": {
       "protection": "流量保护",
       "dns": "安全 DNS",
+      "operator": "运营商",
+      "country": "国家",
       "upload": "上传",
       "download": "下载"
     }
@@ -173,8 +195,8 @@
     "steps": {
       "preparing": "正在准备保护…",
       "preparingService": "正在准备 Windows 服务…",
-      "startingKillSwitch": "正在启用 WFP Kill Switch…",
-      "startingTunnel": "正在启动 mihomo/WinTUN…",
+      "startingKillSwitch": "正在启用保护并安装隧道网卡…",
+      "startingTunnel": "正在启动受保护隧道…",
       "lockingTraffic": "正在将流量锁定到受保护接口…",
       "applyingCloudPolicy": "应用云端路由策略…",
       "securingDNS": "正在保护并验证 DNS…",

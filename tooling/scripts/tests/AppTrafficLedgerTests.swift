@@ -196,6 +196,17 @@ struct AppTrafficLedgerTests {
         check("WeChat helper groups under WeChat",
               app(wechat, "WeChat")?.total == 70,
               "got \(app(wechat, "WeChat")?.total ?? -1)")
+        let codex = AppTrafficLedger()
+        codex.ingest([
+            connection(
+                "cx", process: "codex", up: 0, down: 30,
+                chains: ["US-Home-Broadband", "Tono-Claude-Home"],
+                processPath: "/Users/x/.local/share/codex/0.1.0/codex"
+            ),
+        ])
+        check("Codex CLI groups under Codex",
+              app(codex, "Codex")?.total == 30,
+              "got \(app(codex, "Codex")?.total ?? -1)")
         check("homeProxy node bytes are residential",
               app(grouped, "Claude Code")?.split.residential == 100)
 

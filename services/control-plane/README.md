@@ -1,14 +1,24 @@
 # Tono Cloudflare control plane 0.0.1
 
-## Phase 1 read-only operations console
+## Operations console
 
-The React/Vite console source is in `admin/` and is built to the Worker assets
-path `/ops/` by `npm run admin:build`. It has Dashboard, Users, Homes, Servers,
-Nodes, and Catalog views. Product writes (signup allowlist, home-exit registry,
-user↔home binding, user enable/disable) go through same-origin
-`/api/v1/ops/*` under Cloudflare Access — the browser never stores or sends
-`ADMIN_API_TOKEN`. Token-authenticated `/api/v1/admin/*` remains for CLI/automation.
-Node quality UI lives at `https://quality.afk.ccwu.cc/` (VPS static panel).
+The only ops URL is `https://admin.afk.ccwu.cc/ops/`. Source is `admin/`, built
+to Worker assets `/ops/` by `npm run admin:build`. Four pages:
+
+- **总览** — live nodes, online users, quota/expiry alerts
+- **用户与家宽** — signup allowlist, enable/disable, home-exit registry, bind
+- **节点质量** — Komari ingest / block verdicts
+- **目录与策略** — replace Clash catalog and traffic policy
+
+Product writes go through same-origin `/api/v1/ops/*` under Cloudflare Access —
+the browser never stores or sends `ADMIN_API_TOKEN`. Token-authenticated
+`/api/v1/admin/*` remains for CLI/automation. Node quality is ingested into D1
+by `ops-panel/collect.py` (`PUT /api/v1/ops-ingest/snapshot`).
+`quality.afk.ccwu.cc` / `ops.afk.ccwu.cc` 302 to the admin monitor.
+
+`operations_servers` / `operations_logical_nodes` (migration `0016`) are unused
+read-only inventory. Real nodes live in the Clash catalog, Komari snapshot, and
+`home_exits`. The API host does not serve a website.
 
 The console and its API fail closed unless all of these non-secret Worker vars
 are configured from the same Cloudflare Access application:
@@ -41,7 +51,7 @@ npm run typecheck
 npm test
 ```
 
-完全独立的 Cloudflare Worker + Static Assets + D1 子项目。所有 API 位于 `/api/v1`，管理页面位于 `/`。没有 secret 会被发送到客户端或写入日志。
+完全独立的 Cloudflare Worker + Static Assets + D1 子项目。所有 API 位于 `/api/v1`，运维台位于 `/ops/`。没有 secret 会被发送到客户端或写入日志。
 
 ## 部署
 

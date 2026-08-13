@@ -13,6 +13,7 @@ import {
   tonoConnect,
   tonoDisconnect,
   tonoRetryNow,
+  tonoUploadDiagnostics,
 } from '@/services/tono'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
@@ -56,9 +57,13 @@ const hex = (color: string, alpha: number) =>
 const ActiveNodeCard = ({
   serverName,
   connected,
+  exitOrg,
+  exitLocation,
 }: {
   serverName: string
   connected: boolean
+  exitOrg?: string | null
+  exitLocation?: string | null
 }) => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -123,6 +128,24 @@ const ActiveNodeCard = ({
           {t('tono.node.switch')}
         </button>
       </div>
+      {connected && (exitOrg || exitLocation) && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 16,
+            padding: '0 16px 10px',
+            color: text.secondary,
+            fontSize: 12,
+          }}
+        >
+          <span>
+            {t('tono.dashboard.info.operator')}: {exitOrg || '—'}
+          </span>
+          <span>
+            {t('tono.dashboard.info.country')}: {exitLocation || '—'}
+          </span>
+        </div>
+      )}
 
       <div style={{ padding: '0 10px 10px' }}>
         <div
@@ -257,6 +280,7 @@ const DashboardPage = () => {
   const [actionError, setActionError] = useState<DashboardActionError | null>(
     null,
   )
+  const [sendingDiagnostics, setSendingDiagnostics] = useState(false)
 
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
@@ -442,7 +466,11 @@ const DashboardPage = () => {
             }}
           >
             {connected
-              ? t('tono.dashboard.taglineConnected')
+              ? status?.directOverlay === 'on'
+                ? t('tono.dashboard.directOn')
+                : status?.directOverlay === 'skipped'
+                  ? t('tono.dashboard.directSkipped')
+                  : t('tono.dashboard.taglineConnected')
               : t('tono.dashboard.taglineIdle')}
           </p>
         )}
@@ -494,7 +522,7 @@ const DashboardPage = () => {
         <div style={{ transition: `all 0.5s ${TONO_SPRING}` }}>
           <ConnectPill
             uiState={uiState}
-            stageLabel={status?.stageLabel}
+            stage={status?.stage}
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
           />
@@ -559,6 +587,42 @@ const DashboardPage = () => {
               >
                 {t('tono.dashboard.errorRetry')}
               </button>
+              <button
+                type="button"
+                className="tono-button"
+                disabled={sendingDiagnostics}
+                onClick={() => {
+                  setSendingDiagnostics(true)
+                  void tonoUploadDiagnostics()
+                    .then((receipt) => {
+                      setSendingDiagnostics(false)
+                      setActionError((current) =>
+                        current
+                          ? {
+                              ...current,
+                              message: `${current.message}\n${receipt.referenceCode}`,
+                            }
+                          : current,
+                      )
+                    })
+                    .catch(() => setSendingDiagnostics(false))
+                }}
+                style={{
+                  minHeight: 32,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 9,
+                  border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+                  cursor: 'pointer',
+                  color: dark ? '#A9B7FF' : '#3453D5',
+                  background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+                }}
+              >
+                {sendingDiagnostics
+                  ? t('tono.progress.upload.uploading')
+                  : t('tono.dashboard.errors.sendDiagnostics')}
+              </button>
               {actionError.retry !== 'disconnect' &&
                 actionError.suggestsSwitch && (
                   <button
@@ -592,6 +656,8 @@ const DashboardPage = () => {
           <ActiveNodeCard
             serverName={status.selectedServer}
             connected={connected}
+            exitOrg={status.exitOrg}
+            exitLocation={status.exitLocation}
           />
         )}
         {!status?.selectedServer && !busy && (

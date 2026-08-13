@@ -40,18 +40,7 @@ const tonoPeriodicTelemetryEnabledQueryKey = [
 
 const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
-  ru: 'Русский',
   zh: '简体中文',
-  fa: 'فارسی',
-  tt: 'Татар',
-  id: 'Bahasa Indonesia',
-  ar: 'العربية',
-  ko: '한국어',
-  tr: 'Türkçe',
-  de: 'Deutsch',
-  es: 'Español',
-  jp: '日本語',
-  zhtw: '繁體中文',
 }
 
 const CardHeader = ({
@@ -307,53 +296,6 @@ const GeneralCard = () => {
   )
 }
 
-const ProxyEngineCard = () => {
-  const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
-  const text = tonoText(dark)
-
-  return (
-    <GlassCard>
-      <CardHeader
-        icon="🛡️"
-        title={t('tono.settings.proxyEngine.title')}
-        tint={`${TONO_COLORS.connected}26`}
-      />
-      <Row
-        label={t('tono.settings.proxyEngine.tun')}
-        subtitle={t('tono.settings.proxyEngine.tunSubtitle')}
-      >
-        <TonoToggle
-          checked
-          disabled
-          label={t('tono.settings.proxyEngine.tun')}
-        />
-      </Row>
-      <Row
-        label={t('tono.settings.proxyEngine.allowLan')}
-        subtitle={t('tono.settings.proxyEngine.allowLanSubtitle')}
-      >
-        <TonoToggle
-          checked={false}
-          disabled
-          label={t('tono.settings.proxyEngine.allowLan')}
-        />
-      </Row>
-      <Row label={t('tono.settings.proxyEngine.mixedPort')}>
-        <span
-          style={{
-            fontSize: 12,
-            fontFamily: TONO_MONO_STACK,
-            color: text.secondary,
-          }}
-        >
-          {t('tono.settings.proxyEngine.disabled')}
-        </span>
-      </Row>
-    </GlassCard>
-  )
-}
-
 const AppearanceCard = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -538,7 +480,6 @@ const SettingPage = () => {
         }}
       >
         <GeneralCard />
-        <ProxyEngineCard />
         <AppearanceCard />
         <AboutCard />
       </div>

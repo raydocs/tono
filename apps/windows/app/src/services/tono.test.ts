@@ -195,4 +195,23 @@ describe('connectErrorSuggestsServerSwitch', () => {
       ),
     ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
   })
+
+  it('maps kernel pin and DNS-port failures to user-facing keys', () => {
+    expect(
+      formatTonoActionError(
+        new Error(
+          'no SHA-256 digest is pinned for the core binary, so "x" cannot be verified; reinstall Tono',
+        ),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.dashboard.errors.coreUnpinned')
+    expect(
+      formatTonoActionError(
+        new Error(
+          'DNS port 127.0.0.1:53 is unavailable (TCP: os error 10048)',
+        ),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.dashboard.errors.dnsPortBusy')
+  })
 })

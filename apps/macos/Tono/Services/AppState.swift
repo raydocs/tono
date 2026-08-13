@@ -147,6 +147,10 @@ enum ConnectionStage: String, CaseIterable, Hashable {
     case securingDNS = "Securing DNS…"
     case checkingExit = "Checking secure exit…"
     case verifyingTraffic = "Verifying traffic protection…"
+
+    var localizedTitle: String {
+        String(localized: String.LocalizationValue(rawValue))
+    }
 }
 
 enum DisconnectionStage: String {
@@ -155,6 +159,10 @@ enum DisconnectionStage: String {
     case preservingProtection = "Keeping direct traffic blocked…"
     case restoringDNS = "Restoring system DNS…"
     case restoringNetwork = "Restoring network access…"
+
+    var localizedTitle: String {
+        String(localized: String.LocalizationValue(rawValue))
+    }
 }
 
 struct ConnectionFailure: Equatable {
@@ -1312,7 +1320,14 @@ final class AppState {
         let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
         LocalTrafficAudit.shared.recordEvent(
             "connect_requested",
-            details: ["selected_exit": selectedExitName]
+            details: [
+                "selected_exit": selectedExitName,
+                "claude_home_route": managedCatalogRouting?.homeSocks5 != nil
+                    ? "homeSocks5"
+                    : managedCatalogRouting?.homeProxy != nil
+                        ? "homeProxy"
+                        : "absent",
+            ]
         )
 
         let overlay = ConfigPipeline.OverlayConfig(
@@ -5779,11 +5794,19 @@ final class AppState {
 // MARK: - Helpers
 
 private func formatBytes(_ bytes: Int64) -> String {
-    if bytes < 1024 { return "\(bytes) B" }
-    let kb = Double(bytes) / 1024
-    if kb < 1024 { return String(format: "%.1f KB", kb) }
-    let mb = kb / 1024
-    if mb < 1024 { return String(format: "%.1f MB", mb) }
-    let gb = mb / 1024
-    return String(format: "%.2f GB", gb)
+    ConnectionByteFormat.string(bytes)
+}
+
+private enum ConnectionByteFormat {
+    static func string(_ bytes: Int64) -> String {
+        formatter.string(fromByteCount: bytes)
+    }
+
+    private static let formatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        formatter.countStyle = .binary
+        formatter.allowsNonnumericFormatting = false
+        return formatter
+    }()
 }

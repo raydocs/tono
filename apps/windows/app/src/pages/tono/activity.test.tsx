@@ -65,8 +65,11 @@ vi.mock('@/components/base/virtual-list', () => ({
 import ActivityPage from './activity'
 import {
   classifyActivityRoute,
+  isWeChatActivityProcess,
   sanitizeActivityValue,
   toActivityRow,
+  WECHAT_ACTIVITY_PROCESS,
+  aggregateActivityApps,
 } from './activity-model'
 
 void i18n.use(initReactI18next).init({
@@ -175,6 +178,18 @@ describe('Activity connection presentation', () => {
         }),
       ).route,
     ).toBe('direct')
+    expect(
+      toActivityRow(
+        connection('claude', {
+          chains: ['Tono-Home-Residential', 'Tono-Claude-Home'],
+        }),
+      ).route,
+    ).toBe('home')
+    expect(
+      classifyActivityRoute(
+        connection('node', { chains: ['Home Residential', 'Tono-Claude-Home'] }),
+      ),
+    ).toBe('home')
   })
 
   it('does not expose URL credentials, query strings, fragments, or full process paths', () => {
@@ -199,6 +214,47 @@ describe('Activity connection presentation', () => {
     expect(row.rule).toBe('DOMAIN-SUFFIX (rules.example)')
     expect(JSON.stringify(row)).not.toContain('secret')
     expect(JSON.stringify(row)).not.toContain('private-user')
+  })
+
+  it('groups WeChat helpers as one WeChat app and rejects WeCom', () => {
+    expect(isWeChatActivityProcess('WeChatAppEx.exe')).toBe(true)
+    expect(isWeChatActivityProcess('xwechat.exe')).toBe(true)
+    expect(
+      isWeChatActivityProcess(
+        'helper.exe',
+        'C:\\Program Files\\Tencent\\WeChat\\helper.exe',
+      ),
+    ).toBe(true)
+    expect(isWeChatActivityProcess('WeChatWork.exe')).toBe(false)
+    expect(isWeChatActivityProcess('WXWork.exe')).toBe(false)
+
+    const rows = [
+      toActivityRow(
+        connection('main', {
+          metadata: {
+            ...connection('main').metadata,
+            process: 'WeChat.exe',
+            processPath: 'C:\\Program Files\\Tencent\\WeChat\\WeChat.exe',
+          },
+        }),
+      ),
+      toActivityRow(
+        connection('helper', {
+          metadata: {
+            ...connection('helper').metadata,
+            process: 'WeChatAppEx.exe',
+            processPath:
+              'C:\\Program Files\\Tencent\\WeChat\\WeChatAppEx.exe',
+          },
+        }),
+      ),
+    ]
+    expect(rows.every((row) => row.process === WECHAT_ACTIVITY_PROCESS)).toBe(
+      true,
+    )
+    expect(aggregateActivityApps(rows)).toHaveLength(1)
+    expect(aggregateActivityApps(rows)[0]?.total).toBe(2)
+    expect(rows[1]?.searchText).toContain('wechatappex.exe')
   })
 })
 
@@ -227,6 +283,7 @@ describe('ActivityPage', () => {
 
   it('filters route results and closes one or all live connections', async () => {
     render(<ActivityPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
 
     expect(screen.getByText('proxy.example.com:443')).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'Direct' }))

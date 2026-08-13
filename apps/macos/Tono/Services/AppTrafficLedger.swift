@@ -174,6 +174,9 @@ final class AppTrafficLedger {
         if Self.isChatGPTIdentity(process: process, processPath: path) {
             return "ChatGPT"
         }
+        if Self.isCodexIdentity(process: process, processPath: path) {
+            return "Codex"
+        }
         return process
     }
 
@@ -196,6 +199,13 @@ final class AppTrafficLedger {
         if path.contains("/chatgpt.app/") { return true }
         return process == "ChatGPT" || process.hasPrefix("ChatGPT Helper")
             || process == "chatgpt" || process == "ChatGPT.exe"
+    }
+
+    private static func isCodexIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/.local/share/codex/") { return true }
+        if path.contains("/node_modules/@openai/codex/") { return true }
+        return process == "Codex" || process == "codex" || process == "Codex.exe"
     }
 
     /// Classifies a connection by the path its bytes actually took.

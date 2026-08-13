@@ -4,10 +4,20 @@
   "main": "src/admin-worker.ts",
   "compatibility_date": "2025-09-02",
   "workers_dev": false,
-  "routes": [{
-    "pattern": "admin.afk.ccwu.cc",
-    "custom_domain": true
-  }],
+  "routes": [
+    {
+      "pattern": "admin.afk.ccwu.cc",
+      "custom_domain": true
+    },
+    {
+      "pattern": "quality.afk.ccwu.cc/*",
+      "zone_name": "afk.ccwu.cc"
+    },
+    {
+      "pattern": "ops.afk.ccwu.cc/*",
+      "zone_name": "afk.ccwu.cc"
+    }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

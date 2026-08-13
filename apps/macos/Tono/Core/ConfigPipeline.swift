@@ -252,14 +252,11 @@ nonisolated struct ConfigPipeline {
     ]
     /// Anthropic's own unicast (ARIN AP-2440). Claude Code has been seen
     /// dialing `160.79.104.10` by raw IP, which no DOMAIN-SUFFIX can catch.
-    /// `1.1.1.1` / `8.8.8.8` stay off this list: they are Tono's exit probe.
+    /// IPv6 prefixes stay off this list: the runtime is `ipv6: false`, so
+    /// AAAA never reaches TUN. `1.1.1.1` / `8.8.8.8` stay off too: they are
+    /// Tono's exit probe.
     static let assistantHomeIPv4Cidrs = [
         "160.79.104.0/21",
-    ]
-    /// AS399358 IPv6. `a-api.anthropic.com` answers `2607:6bc0::10`.
-    static let assistantHomeIPv6Cidrs = [
-        "2607:6bc0::/48",
-        "2607:6bc0:11::/48",
     ]
 
     /// Assistant clients pinned by process, for the case where a desktop app or
@@ -1080,6 +1077,8 @@ nonisolated struct ConfigPipeline {
         let choiceLines = choices.map { "      - \"\(yamlScalar($0))\"" }
             .joined(separator: "\n")
 
+        // IPv6 is a second data plane (TUN, fake-ip6, PF inet6). Leave it
+        // off: AAAA dials fail-close at PF and the client retries IPv4.
         var yaml = """
         # Tono owned runtime — imported YAML is parsed, validated, and re-serialized
         port: 0
@@ -1315,9 +1314,6 @@ nonisolated struct ConfigPipeline {
             }
             for cidr in Self.assistantHomeIPv4Cidrs {
                 yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
-            }
-            for cidr in Self.assistantHomeIPv6Cidrs {
-                yaml += "  - AND,((NETWORK,TCP),(IP-CIDR6,\(cidr),no-resolve)),\(assistantTarget)\n"
             }
         }
         if transport != nil {

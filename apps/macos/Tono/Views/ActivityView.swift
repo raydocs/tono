@@ -69,12 +69,21 @@ private struct ClientAppIcon: View {
 /// sides of the view boundary and a shared helper would be one file holding one
 /// function; if a third caller appears, promote it then.
 private func activityBytes(_ bytes: Int64) -> String {
-    if bytes < 1024 { return "\(bytes) B" }
-    let kb = Double(bytes) / 1024
-    if kb < 1024 { return String(format: "%.1f KB", kb) }
-    let mb = kb / 1024
-    if mb < 1024 { return String(format: "%.1f MB", mb) }
-    return String(format: "%.2f GB", mb / 1024)
+    ActivityByteFormat.string(bytes)
+}
+
+private enum ActivityByteFormat {
+    static func string(_ bytes: Int64) -> String {
+        formatter.string(fromByteCount: bytes)
+    }
+
+    private static let formatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        formatter.countStyle = .binary
+        formatter.allowsNonnumericFormatting = false
+        return formatter
+    }()
 }
 
 /// One colour per path class, used by every split bar and legend on this page so
@@ -250,13 +259,13 @@ struct ActivityView: View {
 
                 ActivityCard(title: "Upload") {
                     rateValue(appState.trafficStats.uploadSpeed, tint: Color(hex: "64D2FF"))
-                    Text(activityBytes(appState.trafficStats.totalUpload) + " total")
+                    Text("\(activityBytes(appState.trafficStats.totalUpload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
 
                 ActivityCard(title: "Download") {
                     rateValue(appState.trafficStats.downloadSpeed, tint: Color(hex: "2ED573"))
-                    Text(activityBytes(appState.trafficStats.totalDownload) + " total")
+                    Text("\(activityBytes(appState.trafficStats.totalDownload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
             }
@@ -509,7 +518,9 @@ private struct AppTrafficRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Text(app.id)
+                    Text(app.id == AppTrafficLedger.unattributed
+                         ? String(localized: "Unattributed")
+                         : app.id)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                     if app.liveConnections > 0 {

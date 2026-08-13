@@ -32,12 +32,14 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-- `release/macos` contains the post-Build-62 trust-monotonicity and exact-source
-  release fixes. Build 64 is the latest notarized customer candidate
-  (`Tono-macOS-0.0.64-build64.zip`): Claude first-party IPv4/IPv6 and
-  assistant product hosts ride the catalog home hop, Activity groups Claude
-  Code / WeChat helpers, and a healthy home route is no longer unclassified
-  in the traffic log. Build 62 remains the latest published Sparkle artifact.
+- `release/macos` contains the post-Build-62 product line. Build 64 is the
+  Sparkle successor to 62 (`Tono-macOS-0.0.64-build64.zip`): WeChat stays on
+  the China-direct path and is found by signature; Claude, ChatGPT, Perplexity
+  and Gemini product hosts ride the catalog home hop, including Anthropic's
+  first-party IPv4 (`160.79.104.0/21`); IPv6 stays off; Activity is a per-app
+  route split with Chinese chrome; connecting no longer drops every connection
+  or fails a superseded arm. Build 62 remains the latest published Sparkle
+  artifact until 64 is notarised from a clean `release/macos` commit.
 - `release/windows` contains Windows 0.0.32 (source) on top of the 0.0.31
   Service pin fix. 0.0.32 adds a pin file at install, proactive token
   refresh, learned control-plane addresses (Service ProgramData via

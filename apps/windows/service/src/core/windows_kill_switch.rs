@@ -24,6 +24,24 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 /// Whether the live WFP engine is behind this build (real Windows service binary).
 const ENGINE_LIVE: bool = cfg!(all(windows, not(feature = "test")));
 
+/// Bumped after a successful explicit release. A StartClash that began before
+/// this release must not leave the machine armed once the user has disconnected.
+static RELEASE_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot before waiting for the StartClash lifecycle lock.
+pub(crate) fn release_epoch() -> u64 {
+    RELEASE_EPOCH.load(Ordering::SeqCst)
+}
+
+/// True when an explicit release completed after `captured`.
+pub(crate) fn release_superseded(captured: u64) -> bool {
+    RELEASE_EPOCH.load(Ordering::SeqCst) != captured
+}
+
+fn note_explicit_release() {
+    RELEASE_EPOCH.fetch_add(1, Ordering::SeqCst);
+}
+
 /// The fail-closed intent record in the service state directory. Written atomically before
 /// any WFP mutation, exactly like the macOS helper's `macos-kill-switch.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -992,6 +1010,28 @@ fn record_startup_reconciliation(persist: Result<()>, install: Result<()>) -> Re
 ///
 /// Order is the caller's, so the sanitizer's first-wins dedup and cap keep favouring earlier
 /// hosts; everything is funnelled through the model's public-only, bounded sanitizer.
+/// Union persisted learned control-plane addresses into a restored intent.
+///
+/// The last StartClash may predate this session's protected learn. On reboot the
+/// WFP recovery channel should still include those ProgramData pins, or a
+/// rotated anycast edge is unreachable until the App connects again.
+fn apply_learned_bootstrap_pins(intent: &mut IntentRecord) {
+    let learned = crate::core::bootstrap_pins::load();
+    if learned.addresses.is_empty() {
+        return;
+    }
+    intent.api_host_ips = union_api_hosts(&intent.api_host_ips, &learned.addresses);
+}
+
+fn union_api_hosts(existing: &[String], learned: &[String]) -> Vec<String> {
+    let mut hosts = existing.to_vec();
+    hosts.extend(learned.iter().cloned());
+    admit_api_host_ips(&hosts)
+        .into_iter()
+        .map(|ip| ip.to_string())
+        .collect()
+}
+
 fn admit_api_host_ips(hosts: &[String]) -> Vec<IpAddr> {
     let mut literals = Vec::new();
     for host in hosts.iter().take(16) {
@@ -1370,6 +1410,10 @@ async fn transition_direct_to_blocked_unlocked(
 ) -> Result<()> {
     let mut retry_state = armed.clone();
     let mut blocked = armed;
+    // Protected Offline's recovery channel must include addresses learned
+    // after StartClash. The HTTP client already pins them; without this
+    // union WFP would still only permit the connect-time set.
+    apply_learned_bootstrap_pins(&mut blocked.intent);
     blocked.direct_endpoints.clear();
     blocked.direct_reload = next_lease;
     blocked.tun_luid = None;
@@ -1958,6 +2002,7 @@ pub(crate) async fn release() -> Result<KillSwitchStatus> {
     {
         let _operation = WFP_OPERATION.lock().await;
         disarm_unlocked().await?;
+        note_explicit_release();
     }
     Ok(status().await)
 }
@@ -2027,6 +2072,8 @@ pub async fn restore_on_service_start() -> Result<()> {
                     // owner, proves DNS restoration, and only then removes WFP. Keeping a strict
                     // Blocked snapshot here closes the old Core/WFP ordering window and preserves
                     // the DNS-before-disarm invariant when recovery itself fails.
+                    let mut intent = intent;
+                    apply_learned_bootstrap_pins(&mut intent);
                     let mut armed = Armed {
                         intent,
                         tun_luid: None,
@@ -2049,6 +2096,8 @@ pub async fn restore_on_service_start() -> Result<()> {
                     }
                     return reconciled;
                 }
+                let mut intent = intent;
+                apply_learned_bootstrap_pins(&mut intent);
                 let mut armed = Armed {
                     intent,
                     tun_luid: None,
@@ -3432,6 +3481,62 @@ mod tests {
         assert!(!status().await.wanted);
         cleanup().await;
         Ok(())
+    }
+
+    #[test]
+    fn a_release_supersedes_a_startclash_that_began_before_it() {
+        let captured = release_epoch();
+        assert!(!release_superseded(captured));
+        note_explicit_release();
+        assert!(release_superseded(captured));
+        let later = release_epoch();
+        assert!(!release_superseded(later));
+    }
+
+    #[test]
+    fn restore_unions_learned_public_pins_after_existing_hosts() {
+        let merged = union_api_hosts(
+            &["104.20.26.170".to_owned(), "10.0.0.1".to_owned()],
+            &[
+                "9.9.9.9".to_owned(),
+                "198.18.0.2".to_owned(),
+                "104.20.26.170".to_owned(),
+            ],
+        );
+        assert_eq!(merged[0], "104.20.26.170");
+        assert!(merged.contains(&"9.9.9.9".to_owned()));
+        assert!(!merged.iter().any(|ip| ip == "10.0.0.1"));
+        assert!(!merged.iter().any(|ip| ip == "198.18.0.2"));
+        assert!(merged.len() <= wfp_model::MAX_API_HOST_IPS);
+    }
+
+    #[test]
+    #[serial]
+    fn apply_learned_bootstrap_pins_reads_the_programdata_file() {
+        let dir = crate::service_paths().install_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("control-plane-pins.json");
+        std::fs::write(
+            &path,
+            r#"{"host":"api.afk.ccwu.cc","addresses":["9.9.9.9","198.18.0.1"]}"#,
+        )
+        .expect("write learned pins");
+        let mut intent = IntentRecord {
+            wanted: true,
+            mode: KillSwitchStatusMode::Locked,
+            verified: Some(true),
+            tunnel_interface: "Tono".to_owned(),
+            app_path: r"C:\Program Files\Tono\verge-mihomo.exe".to_owned(),
+            endpoints: Vec::new(),
+            api_host_ips: vec!["104.20.26.170".to_owned()],
+            updated_at: 0,
+            owner_key: None,
+        };
+        apply_learned_bootstrap_pins(&mut intent);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(intent.api_host_ips[0], "104.20.26.170");
+        assert!(intent.api_host_ips.contains(&"9.9.9.9".to_owned()));
+        assert!(!intent.api_host_ips.iter().any(|ip| ip == "198.18.0.1"));
     }
 
     /// The bootstrap channel's destinations are whatever the *client* pinned, never whatever a

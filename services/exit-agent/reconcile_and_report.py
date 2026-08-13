@@ -49,6 +49,14 @@ MAX_USERS_PER_REQUEST = 100
 MAX_SAFE_INTEGER = (1 << 53) - 1
 MAX_RESPONSE_BYTES = 512 * 1024
 STATE_MODE = 0o600
+# Label written by enable-tono-exit-metering.sh for the credential every
+# current client still holds. Removing it would drop the fleet.
+LEGACY_CLIENT_EMAIL = "shared-legacy"
+REQUEST_HEADERS = {
+    "accept": "application/json",
+    # Zone browser-integrity rejects a bare urllib UA with CF 403/1010.
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-exit-agent/1.0",
+}
 
 
 class Refusal(RuntimeError):
@@ -109,7 +117,9 @@ def supported_api_commands(binary: Path) -> set[str]:
     """
     result = run_xray(binary, ["api"])
     text = f"{result.stdout}\n{result.stderr}"
-    return set(re.findall(r"^\s{2,}([a-z][a-z0-9]*)\s", text, re.MULTILINE))
+    # Help is tab-indented on current Xray builds (`\tadu  Add users…`).
+    # Requiring two spaces missed every command except accidental matches.
+    return set(re.findall(r"^\s+([a-z][a-z0-9]+)\s+", text, re.MULTILINE))
 
 
 def require_commands(binary: Path) -> dict[str, str]:
@@ -143,7 +153,7 @@ def require_commands(binary: Path) -> dict[str, str]:
 def fetch_roster(base: str, token: str) -> tuple[int, list[dict[str, str]]]:
     request = urllib.request.Request(
         f"{base}/api/v1/home/exit-identities",
-        headers={"authorization": f"Bearer {token}", "accept": "application/json"},
+        headers={"authorization": f"Bearer {token}", **REQUEST_HEADERS},
         method="GET",
     )
     with urllib.request.urlopen(request, timeout=20) as response:
@@ -226,6 +236,11 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     """
     wanted = {entry["userId"]: entry["clientUUID"] for entry in roster}
     present = set(counters)
+    # An empty roster is the common case until accounts have fetched a
+    # placeholder catalog. Treating it as "remove everyone" would delete the
+    # shared-legacy client and disconnect the fleet.
+    if not wanted:
+        return 0, 0
     added = 0
     for user_id, client_uuid in wanted.items():
         if user_id in present:
@@ -241,6 +256,8 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         added += 1
     removed = 0
     for user_id in sorted(present - set(wanted)):
+        if user_id == LEGACY_CLIENT_EMAIL:
+            continue
         result = run_xray(binary, [
             "api", commands["remove_user"], f"--server={address}",
             f"--tag={tag}", f"--email={user_id}",
@@ -283,6 +300,7 @@ def deliver(base: str, token: str, reports: list[dict]) -> None:
         headers={
             "authorization": f"Bearer {token}",
             "content-type": "application/json",
+            **REQUEST_HEADERS,
         },
         method="POST",
     )
@@ -303,11 +321,16 @@ def main() -> None:
     # A batch the server accepted but that was never acknowledged here is replayed
     # before anything else, because reports are idempotent by reportId and a lost
     # acknowledgement must not become lost usage.
+    pending = [
+        report for report in state["pendingReports"]
+        if isinstance(report, dict) and report.get("userId") != LEGACY_CLIENT_EMAIL
+    ]
+    if pending:
+        deliver(base, token, pending)
+        print("replayed a pending usage batch")
     if state["pendingReports"]:
-        deliver(base, token, state["pendingReports"])
         state["pendingReports"] = []
         save_state(path, state)
-        print("replayed a pending usage batch")
 
     observed_at, roster = fetch_roster(base, token)
     counters = read_counters(binary, commands["stats_query"], address)
@@ -322,6 +345,8 @@ def main() -> None:
     timestamp = int(time.time())
     reports: list[dict] = []
     for user_id in sorted(totals):
+        if user_id == LEGACY_CLIENT_EMAIL:
+            continue
         total = totals[user_id]
         previous = int(state["totals"].get(user_id, 0))
         if total < previous:

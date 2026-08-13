@@ -269,8 +269,6 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudemcpcontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
-            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0::/48,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
-            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0:11::/48,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
         ]
         guard claudeHomeRequired.allSatisfy(claudeHomeRuntime.contains),
               !claudeHomeRuntime.contains("PROCESS-NAME,Claude)),Tono-Exit") else {
@@ -321,12 +319,8 @@ struct MultiExitPolicyTests {
                 throw TestFailure("Anthropic unicast \(cidr) was not routed to the residential hop")
             }
         }
-        for cidr in ConfigPipeline.assistantHomeIPv6Cidrs {
-            guard claudeSocks5Runtime.contains(
-                "AND,((NETWORK,TCP),(IP-CIDR6,\(cidr),no-resolve)),\(ConfigPipeline.claudeHomeGroupName)"
-            ) else {
-                throw TestFailure("Anthropic IPv6 \(cidr) was not routed to the residential hop")
-            }
+        guard !claudeSocks5Runtime.contains("2607:6bc0") else {
+            throw TestFailure("IPv6 home CIDRs must not ship while the runtime is ipv6: false")
         }
         for shared in ["gstatic.com", "auth0.com", "stripe.com", "sentry.io", "statsig.com", "googleapis.com", "x.com"] {
             guard !claudeSocks5Runtime.contains(
@@ -487,8 +481,6 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,clau.de)),Tono-Claude-Home",
             "AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),Tono-Claude-Home",
-            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0::/48,no-resolve)),Tono-Claude-Home",
-            "AND,((NETWORK,TCP),(IP-CIDR6,2607:6bc0:11::/48,no-resolve)),Tono-Claude-Home",
         ] + assistantPathRules
         let claudeProtectedRulesPrecedeDirect = claudeProtectedRules.allSatisfy { rule in
             guard let claudeRange = claudeProtectedRuntime.range(of: rule),

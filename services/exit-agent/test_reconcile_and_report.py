@@ -129,5 +129,62 @@ class RosterValidation(unittest.TestCase):
             agent.urllib.request.urlopen = original
 
 
+class ReconcileSafety(unittest.TestCase):
+    def test_empty_roster_does_not_remove_anyone(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(_binary, arguments):
+            calls.append(arguments)
+
+            class Result:
+                returncode = 0
+                stderr = ""
+
+            return Result()
+
+        agent.run_xray = fake_run  # type: ignore[method-assign]
+        try:
+            added, removed = agent.reconcile(
+                Path("/unused"),
+                {"add_user": "adu", "remove_user": "rmu"},
+                "127.0.0.1:10085",
+                "tono-vless",
+                [],
+                {agent.LEGACY_CLIENT_EMAIL: 12},
+            )
+        finally:
+            pass
+        self.assertEqual((added, removed), (0, 0))
+        self.assertEqual(calls, [])
+
+
+class ApiHelpParsing(unittest.TestCase):
+    def test_tab_indented_xray_help_lists_handler_commands(self) -> None:
+        help_text = (
+            "xray api provides tools to manipulate Xray via its API.\n"
+            "Usage:\n"
+            "\txray api <command> [arguments]\n"
+            "The commands are:\n"
+            "\trestartlogger          Restart the logger\n"
+            "\tstatsquery             Query statistics\n"
+            "\tadu                    Add users to inbounds\n"
+            "\trmu                    Remove users from inbounds\n"
+        )
+        found = agent.supported_api_commands.__wrapped__ if False else None
+        import subprocess as sp
+        from unittest.mock import patch
+
+        class Result:
+            stdout = ""
+            stderr = help_text
+            returncode = 2
+
+        with patch.object(agent, "run_xray", return_value=Result()):
+            found = agent.supported_api_commands(Path("/unused"))
+        self.assertIn("adu", found)
+        self.assertIn("rmu", found)
+        self.assertIn("statsquery", found)
+
+
 if __name__ == "__main__":
     unittest.main()

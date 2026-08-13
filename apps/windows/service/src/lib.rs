@@ -9,7 +9,7 @@ pub use channel::{
     SERVICE_SLUG, WINDOWS_SERVICE_NAME, WINDOWS_STATE_DIR_NAME,
 };
 pub use core::{
-    AuthenticatedRequest, AuthenticatedSessionRequest, ClashConfig, CoreConfig,
+    AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IpcCommand,
     KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME,
@@ -110,11 +110,17 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 12 extends that contract to a Core the current Service still supervises or records:
 /// only a completely verified fail-closed runtime may survive the preflight; an inactive Core is
 /// stopped before its own DNS listener can strand every subsequent connection attempt.
-pub const PROTOCOL_REVISION: u16 = 12;
+/// Revision 13 adds GET/POST `/bootstrap-pins` so learned control-plane addresses persist under
+/// the Service's ProgramData ACL. MIN_REQUIRED stays 12: an older Service is still safe, and the
+/// App then keeps only the compiled pins.
+pub const PROTOCOL_REVISION: u16 = 13;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
-/// the protocol probe rather than failing later during a required mutation.
+/// the protocol probe rather than failing later during a required mutation. Revision 13 is
+/// additive: a revision-12 client may still pair.
 pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 12;
 pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 12;
+/// Revision that introduced GET/POST `/bootstrap-pins`.
+pub const MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS: u16 = 13;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;
 /// Revision that introduced `/clash/stage-runtime`.
 pub const MIN_SERVICE_REVISION_FOR_RUNTIME_STAGING: u16 = 2;

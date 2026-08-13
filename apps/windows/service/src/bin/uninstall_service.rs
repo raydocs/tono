@@ -691,15 +691,61 @@ fn windows_recovery_state_present() -> bool {
 /// re-ACL the install directory just to look inside it.
 #[cfg(windows)]
 fn remove_windows_service_binary() -> Result<(), Error> {
-    let target = clash_verge_service_ipc::service_paths()
-        .install_dir()
-        .join("tono-service.exe");
+    let install_dir = clash_verge_service_ipc::service_paths().install_dir();
+    let target = install_dir.join("tono-service.exe");
     if target.exists() {
         std::fs::remove_file(&target).map_err(|error| {
             anyhow::anyhow!("Failed to remove service binary {target:?}: {error}")
         })?;
     }
+    for name in [
+        "core-sha256.txt",
+        "core-sha256.txt.tmp",
+        "control-plane-pins.json",
+        "control-plane-pins.json.tmp",
+    ] {
+        let leftover = install_dir.join(name);
+        if leftover.try_exists().unwrap_or(true) {
+            let _ = std::fs::remove_file(&leftover);
+        }
+    }
+    remove_leftover_user_control_plane_pins();
     Ok(())
+}
+
+/// Older apps wrote learned pins into the user's AppData. That file is no
+/// longer read, but it must not survive uninstall either.
+#[cfg(windows)]
+fn remove_leftover_user_control_plane_pins() {
+    const RELATIVE: &str = r"com.raydocs.tono\tono\control-plane-pins.json";
+    for folder in [
+        windows_sys::Win32::UI::Shell::FOLDERID_RoamingAppData,
+        windows_sys::Win32::UI::Shell::FOLDERID_LocalAppData,
+    ] {
+        if let Some(root) = known_folder(folder) {
+            let _ = std::fs::remove_file(root.join(RELATIVE));
+        }
+    }
+}
+
+#[cfg(windows)]
+fn known_folder(id: windows_sys::core::GUID) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt as _;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
+
+    let mut raw = std::ptr::null_mut();
+    let status = unsafe { SHGetKnownFolderPath(&id, 0, std::ptr::null_mut(), &mut raw) };
+    if status < 0 || raw.is_null() {
+        return None;
+    }
+    let mut length = 0;
+    while unsafe { *raw.add(length) } != 0 {
+        length += 1;
+    }
+    let path = std::ffi::OsString::from_wide(unsafe { std::slice::from_raw_parts(raw, length) });
+    unsafe { CoTaskMemFree(raw.cast()) };
+    Some(std::path::PathBuf::from(path))
 }
 
 #[cfg(test)]

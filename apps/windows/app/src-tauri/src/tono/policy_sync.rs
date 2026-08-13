@@ -42,7 +42,11 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
     let Some(cached) = inner.policy_cache().load(&protected) else {
         return;
     };
-    inner.policy_tracker = PolicyTracker::from_installed(cached.response.revision, cached.response.sha256.clone());
+    inner.policy_tracker = PolicyTracker::from_installed_with_signature(
+        cached.response.revision,
+        cached.response.sha256.clone(),
+        cached.response.signature.clone(),
+    );
     inner.traffic_policy = Some(cached.policy);
 }
 
@@ -188,6 +192,7 @@ mod tests {
             sha256: catalog_digest(&json),
             json,
             updated_at: None,
+            signature: None,
         }
     }
 

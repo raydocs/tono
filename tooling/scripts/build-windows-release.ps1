@@ -63,6 +63,8 @@ if ($coreSha256 -notmatch '^[0-9a-f]{64}$') {
     throw "Invalid Mihomo SHA-256: $coreSha256"
 }
 $env:TONO_CORE_SHA256 = $coreSha256
+New-Item -ItemType Directory -Force $resourceRoot | Out-Null
+Set-Content -LiteralPath (Join-Path $resourceRoot 'core-sha256.txt') -Value $coreSha256 -Encoding ascii
 
 $serviceBins = @('tono-service', 'tono-service-install', 'tono-service-uninstall')
 $cargoArguments = @(

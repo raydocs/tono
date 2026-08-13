@@ -17,24 +17,40 @@ import {
   tonoText,
 } from '@/tono-ui/theme'
 
-import { type ActivityRoute, toActivityRow } from './activity-model'
+import {
+  aggregateActivityApps,
+  type ActivityRoute,
+  WECHAT_ACTIVITY_PROCESS,
+  toActivityRow,
+} from './activity-model'
 
 type ActivityFilter = 'all' | ActivityRoute
+type ActivityView = 'apps' | 'connections'
 
 const MAX_ACTIVITY_CONNECTIONS = 2_000
 const EMPTY_CONNECTIONS: IConnectionsItem[] = []
-const FILTERS: ActivityFilter[] = ['all', 'proxied', 'direct', 'rejected']
+const FILTERS: ActivityFilter[] = ['all', 'proxied', 'home', 'direct', 'rejected']
 const ACTIVITY_GRID_COLUMNS =
   'minmax(120px, 1.1fr) minmax(150px, 1.4fr) 90px 88px minmax(110px, 1fr) 34px'
+
+const activityProcessLabel = (
+  process: string,
+  translate: (key: string) => string,
+) =>
+  process === WECHAT_ACTIVITY_PROCESS
+    ? translate('tono.activity.apps.wechat')
+    : process
 
 const RouteBadge = ({ route }: { route: ActivityRoute }) => {
   const { t } = useTranslation()
   const color =
     route === 'proxied'
       ? TONO_COLORS.accent
-      : route === 'direct'
-        ? TONO_COLORS.connected
-        : TONO_COLORS.error
+      : route === 'home'
+        ? TONO_COLORS.accentWarm
+        : route === 'direct'
+          ? TONO_COLORS.connected
+          : TONO_COLORS.error
   return (
     <span
       style={{
@@ -60,6 +76,7 @@ const ActivityPage = () => {
   const connected = status?.uiState === 'connected'
   const generation = status?.controllerGeneration
   const [filter, setFilter] = useState<ActivityFilter>('all')
+  const [view, setView] = useState<ActivityView>('apps')
   const [query, setQuery] = useState('')
   const [closingId, setClosingId] = useState<string | null>(null)
   const [closingAll, setClosingAll] = useState(false)
@@ -74,6 +91,18 @@ const ActivityPage = () => {
   )
   const rows = useMemo(() => capped.map(toActivityRow), [capped])
   const normalizedQuery = query.trim().toLowerCase()
+  const appRows = useMemo(() => aggregateActivityApps(rows), [rows])
+  const visibleApps = useMemo(
+    () =>
+      appRows.filter((row) => {
+        if (normalizedQuery && !row.searchText.includes(normalizedQuery)) {
+          return false
+        }
+        if (filter === 'all') return row.total > 0
+        return row[filter] > 0
+      }),
+    [appRows, filter, normalizedQuery],
+  )
   const visibleRows = useMemo(
     () =>
       rows.filter(
@@ -135,7 +164,7 @@ const ActivityPage = () => {
         >
           <span style={{ minWidth: 0 }}>
             <strong
-              title={row.process}
+              title={activityProcessLabel(row.process, t)}
               style={{
                 display: 'block',
                 overflow: 'hidden',
@@ -144,7 +173,7 @@ const ActivityPage = () => {
                 fontSize: 13,
               }}
             >
-              {row.process}
+              {activityProcessLabel(row.process, t)}
             </strong>
           </span>
           <span
@@ -309,6 +338,35 @@ const ActivityPage = () => {
           </label>
           <div
             role="group"
+            aria-label={t('tono.activity.view')}
+            style={{ display: 'flex', gap: 4 }}
+          >
+            {(['apps', 'connections'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                className="tono-button"
+                aria-pressed={view === value}
+                onClick={() => setView(value)}
+                style={{
+                  minHeight: 34,
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  color: view === value ? '#fff' : text.secondary,
+                  background:
+                    view === value
+                      ? TONO_COLORS.accent
+                      : dark
+                        ? 'rgba(255,255,255,0.06)'
+                        : 'rgba(30,42,70,0.06)',
+                }}
+              >
+                {t(`tono.activity.views.${value}`)}
+              </button>
+            ))}
+          </div>
+          <div
+            role="group"
             aria-label={t('tono.activity.routeFilter')}
             style={{ display: 'flex', gap: 4 }}
           >
@@ -349,7 +407,8 @@ const ActivityPage = () => {
           >
             {t('tono.activity.disconnected')}
           </div>
-        ) : visibleRows.length === 0 ? (
+        ) : (view === 'apps' ? visibleApps.length : visibleRows.length) ===
+          0 ? (
           <div
             style={{
               margin: 'auto',
@@ -366,34 +425,114 @@ const ActivityPage = () => {
           </div>
         ) : (
           <>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: ACTIVITY_GRID_COLUMNS,
-                gap: 12,
-                padding: '9px 14px',
-                color: text.tertiary,
-                fontSize: 10,
-                fontWeight: 650,
-                letterSpacing: 0.25,
-                textTransform: 'uppercase',
-              }}
-            >
-              <span>{t('tono.activity.columns.process')}</span>
-              <span>{t('tono.activity.columns.target')}</span>
-              <span>{t('tono.activity.columns.protocol')}</span>
-              <span>{t('tono.activity.columns.route')}</span>
-              <span>{t('tono.activity.columns.rule')}</span>
-              <span />
-            </div>
-            <VirtualList
-              count={visibleRows.length}
-              estimateSize={74}
-              overscan={8}
-              getItemKey={(index) => visibleRows[index].id}
-              renderItem={renderRow}
-              style={{ flex: 1, minHeight: 0 }}
-            />
+            {view === 'apps' ? (
+              <>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'minmax(140px, 1.2fr) 72px minmax(160px, 1.6fr)',
+                    gap: 12,
+                    padding: '9px 14px',
+                    color: text.tertiary,
+                    fontSize: 10,
+                    fontWeight: 650,
+                    letterSpacing: 0.25,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  <span>{t('tono.activity.columns.process')}</span>
+                  <span>{t('tono.activity.columns.count')}</span>
+                  <span>{t('tono.activity.columns.split')}</span>
+                </div>
+                <VirtualList
+                  count={visibleApps.length}
+                  estimateSize={64}
+                  overscan={8}
+                  getItemKey={(index) => visibleApps[index].process}
+                  renderItem={(index) => {
+                    const app = visibleApps[index]
+                    const bar = (count: number, color: string) => (
+                      <span
+                        style={{
+                          height: 6,
+                          flex: Math.max(count, 0),
+                          background: color,
+                          borderRadius: 99,
+                        }}
+                      />
+                    )
+                    return (
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns:
+                            'minmax(140px, 1.2fr) 72px minmax(160px, 1.6fr)',
+                          gap: 12,
+                          alignItems: 'center',
+                          padding: '10px 14px',
+                          color: text.primary,
+                          fontSize: 13,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>
+                          {activityProcessLabel(app.process, t)}
+                        </span>
+                        <span style={{ fontFamily: TONO_MONO_STACK }}>
+                          {app.total}
+                        </span>
+                        <span
+                          style={{ display: 'flex', gap: 3, minWidth: 0 }}
+                          title={t('tono.activity.splitHint', {
+                            direct: app.direct,
+                            home: app.home,
+                            proxied: app.proxied,
+                            rejected: app.rejected,
+                          })}
+                        >
+                          {bar(app.direct, TONO_COLORS.connected)}
+                          {bar(app.home, TONO_COLORS.accentWarm)}
+                          {bar(app.proxied, TONO_COLORS.accent)}
+                          {bar(app.rejected, TONO_COLORS.error)}
+                        </span>
+                      </div>
+                    )
+                  }}
+                  style={{ flex: 1, minHeight: 0 }}
+                />
+              </>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: ACTIVITY_GRID_COLUMNS,
+                    gap: 12,
+                    padding: '9px 14px',
+                    color: text.tertiary,
+                    fontSize: 10,
+                    fontWeight: 650,
+                    letterSpacing: 0.25,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  <span>{t('tono.activity.columns.process')}</span>
+                  <span>{t('tono.activity.columns.target')}</span>
+                  <span>{t('tono.activity.columns.protocol')}</span>
+                  <span>{t('tono.activity.columns.route')}</span>
+                  <span>{t('tono.activity.columns.rule')}</span>
+                  <span />
+                </div>
+                <VirtualList
+                  count={visibleRows.length}
+                  estimateSize={74}
+                  overscan={8}
+                  getItemKey={(index) => visibleRows[index].id}
+                  renderItem={renderRow}
+                  style={{ flex: 1, minHeight: 0 }}
+                />
+              </>
+            )}
           </>
         )}
         <div
@@ -404,7 +543,9 @@ const ActivityPage = () => {
             fontSize: 11,
           }}
         >
-          {t('tono.activity.connectionCount', { count: visibleRows.length })}
+          {view === 'apps'
+            ? t('tono.activity.appCount', { count: visibleApps.length })
+            : t('tono.activity.connectionCount', { count: visibleRows.length })}
           {activeConnections.length > MAX_ACTIVITY_CONNECTIONS &&
             ` · ${t('tono.activity.limitNotice', { count: MAX_ACTIVITY_CONNECTIONS })}`}
         </div>

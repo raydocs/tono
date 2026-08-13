@@ -14,6 +14,7 @@ import http.cookiejar
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.error
@@ -28,6 +29,8 @@ SECRETS = BASE / "nodes.secrets.json"
 LOG = Path("/var/log/tono-ops-collect.log")
 KOMARI = "http://127.0.0.1:25774"
 CREDS = Path("/root/komari-admin.txt")
+TOKEN_FILE = Path("/opt/tono-ops/collector.token")
+API_BASE = os.environ.get("TONO_API_BASE", "https://api.afk.ccwu.cc").rstrip("/")
 
 SC_URL = "https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
 BT_URL = "https://github.com/oneclickvirt/backtrace/releases/download/output/backtrace-linux-amd64"
@@ -470,6 +473,115 @@ def komari_tag(nodes: list[dict]) -> None:
         log(f"komari_tag_error {e}")
 
 
+def collector_token() -> str:
+    env_token = os.environ.get("TONO_OPS_COLLECTOR_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    if TOKEN_FILE.exists():
+        return TOKEN_FILE.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def komari_nodes() -> list[dict] | None:
+    if not CREDS.exists():
+        return None
+    creds = {}
+    for line in CREDS.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            creds[k.strip()] = v.strip()
+    jar = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    def call(method: str, path: str, body=None):
+        data = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(
+            KOMARI + path,
+            data=data,
+            method=method,
+            headers={
+                "Accept": "application/json",
+                **({"Content-Type": "application/json"} if body is not None else {}),
+            },
+        )
+        with op.open(req, timeout=30) as r:
+            return json.loads(r.read().decode() or "{}")
+
+    try:
+        call("POST", "/api/login", {"username": creds.get("username"), "password": creds.get("password")})
+        payload = call("GET", "/api/nodes")
+        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+            return payload["data"]
+        if isinstance(payload, list):
+            return payload
+    except Exception as e:
+        log(f"komari_nodes_error {e}")
+    return None
+
+
+def probe_home_lines(token: str) -> list[dict]:
+    req = urllib.request.Request(
+        f"{API_BASE}/api/v1/ops-ingest/home-targets",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-ops-collector/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode() or "{}")
+    except Exception as exc:
+        log(f"home_targets_error {exc}")
+        return []
+    probes = []
+    for target in payload.get("targets") or []:
+        host = target.get("host")
+        port = target.get("port")
+        target_id = target.get("id")
+        if not host or not port or not target_id:
+            continue
+        status = "dead"
+        try:
+            with socket.create_connection((str(host), int(port)), timeout=5):
+                status = "alive"
+        except OSError:
+            status = "dead"
+        probes.append({"id": target_id, "status": status})
+    return probes
+
+
+def push_control_plane(report: dict) -> None:
+    token = collector_token()
+    if not token:
+        log("skip ingest: missing TONO_OPS_COLLECTOR_TOKEN or /opt/tono-ops/collector.token")
+        return
+    body = {"report": report}
+    agents = komari_nodes()
+    if agents is not None:
+        body["agents"] = {"data": agents}
+    probes = probe_home_lines(token)
+    if probes:
+        body["homeProbes"] = probes
+    req = urllib.request.Request(
+        f"{API_BASE}/api/v1/ops-ingest/snapshot",
+        data=json.dumps(body, ensure_ascii=False).encode(),
+        method="PUT",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            # Zone browser-integrity rejects a bare collector UA with CF 1010.
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-ops-collector/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            log(f"ingest {response.status} {response.read().decode()[:200]}")
+    except Exception as e:
+        log(f"ingest_error {e}")
+
+
 def load_config() -> tuple[list[dict], list[dict]]:
     raw = json.loads(SECRETS.read_text(encoding="utf-8"))
     if isinstance(raw, list):
@@ -533,6 +645,7 @@ def main() -> None:
     REPORT.chmod(0o600)
     WWW_REPORT.write_text(text, encoding="utf-8")
     komari_tag(out_nodes)
+    push_control_plane(report)
     log("done")
 
 

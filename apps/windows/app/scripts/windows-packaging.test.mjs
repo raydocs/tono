@@ -11,6 +11,7 @@ import {
   WINDOWS_RUNTIME_REPAIR_ARTIFACTS,
   partitionReleaseResources,
   validateExternalBin,
+  validateEmbeddedCoreDigestPin,
   validateNsisAutomaticUpgradeFlow,
   validateNsisLegacyCleanup,
   validatePayloadEntries,
@@ -39,6 +40,14 @@ const windowsReleaseWorkflowSource = readFileSync(
 )
 const windowsServiceInstallerSource = readFileSync(
   new URL('../../service/src/bin/install_service.rs', import.meta.url),
+  'utf8',
+)
+const windowsReleaseShSource = readFileSync(
+  new URL('../../../../tooling/scripts/build-windows-release.sh', import.meta.url),
+  'utf8',
+)
+const windowsReleasePs1Source = readFileSync(
+  new URL('../../../../tooling/scripts/build-windows-release.ps1', import.meta.url),
   'utf8',
 )
 const canonicalGuiLaunchLine =
@@ -352,7 +361,10 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
   assert.match(
     validateWindowsReplacementHelperSource(
       windowsServiceInstallerSource
-        .replace('app_replacement.publish()?;', '// final GUI publication omitted')
+        .replace(
+          'app_replacement.publish()?;',
+          '// final GUI publication omitted',
+        )
         .replace(
           'runtime_replacement.publish()?;',
           'app_replacement.publish()?;\n        runtime_replacement.publish()?;',
@@ -368,6 +380,17 @@ test('privileged upgrade helper coordinates Service, Mihomo, and GUI publication
       ),
     ),
     /recovery suppressed/,
+  )
+})
+
+test('NSIS uninstall removes leftover user control-plane pins', () => {
+  assert.match(
+    installerSource,
+    /Delete \/REBOOTOK "\$APPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
+  )
+  assert.match(
+    installerSource,
+    /Delete \/REBOOTOK "\$LOCALAPPDATA\\\$\{BUNDLEID\}\\tono\\control-plane-pins\.json"/,
   )
 })
 
@@ -522,6 +545,83 @@ test('Windows release stops when a native preflight command fails', () => {
     /Get-ChildItem -LiteralPath 'src-tauri\/target\/release\/bundle\/nsis'/,
     'the NSIS inspection path must follow the Cargo workspace target directory',
   )
+
+  const prepareCoreAt = windowsReleaseWorkflowSource.indexOf(
+    '- name: Prepare the exact stable Mihomo and Windows resources',
+  )
+  const buildServiceAt = windowsReleaseWorkflowSource.indexOf(
+    '- name: Build Tono Windows Service from the same commit',
+  )
+  assert.ok(
+    prepareCoreAt >= 0,
+    'release workflow must prepare Mihomo before Service',
+  )
+  assert.ok(
+    prepareCoreAt < buildServiceAt,
+    'release workflow must know the packaged Mihomo before compiling Service',
+  )
+  assert.match(
+    windowsReleaseWorkflowSource,
+    /pnpm prebuild -- x86_64-pc-windows-msvc --skip-windows-service/,
+  )
+  const serviceBlock = windowsReleaseWorkflowSource
+    .slice(buildServiceAt)
+    .split(/\r?\n\s+- name:/, 1)[0]
+  const hashAt = serviceBlock.indexOf('Get-FileHash')
+  const buildAt = serviceBlock.indexOf('cargo build')
+  assert.ok(
+    hashAt >= 0 && hashAt < buildAt,
+    'Service build must hash Mihomo first',
+  )
+  assert.match(serviceBlock, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
+  assert.match(serviceBlock, /GITHUB_ENV/)
+  assert.match(serviceBlock, /core-sha256\.txt/)
+  assert.match(serviceBlock, /tono-service\.exe/)
+  assert.match(serviceBlock, /tono-service-install\.exe/)
+  assert.match(serviceBlock, /\.Contains\(\$coreSha256\)/)
+})
+
+test('local Windows release scripts write core-sha256.txt from the hashed sidecar', () => {
+  assert.match(
+    windowsReleaseShSource,
+    /core-sha256\.txt/,
+  )
+  assert.match(
+    windowsReleaseShSource,
+    /TONO_CORE_SHA256=/,
+  )
+  assert.match(
+    windowsReleasePs1Source,
+    /core-sha256\.txt/,
+  )
+  assert.match(
+    windowsReleasePs1Source,
+    /\$env:TONO_CORE_SHA256 = \$coreSha256/,
+  )
+})
+
+test('packaging rejects a Service that lacks the exact packaged Core pin', () => {
+  const digest = '98'.repeat(32)
+  assert.equal(
+    validateEmbeddedCoreDigestPin(
+      Buffer.from(`prefix:${digest}:suffix`, 'ascii'),
+      digest,
+      'tono-service.exe',
+    ),
+    null,
+  )
+  assert.match(
+    validateEmbeddedCoreDigestPin(
+      Buffer.from(`prefix:${'97'.repeat(32)}:suffix`, 'ascii'),
+      digest,
+      'tono-service.exe',
+    ),
+    /tono-service\.exe does not embed.*SHA-256 pin/,
+  )
+  assert.match(
+    validateEmbeddedCoreDigestPin(Buffer.from('anything'), 'not-a-digest'),
+    /missing or malformed/,
+  )
 })
 
 test('release Tauri handler excludes unused native probes and secret-bearing reads', () => {
@@ -556,6 +656,17 @@ test('externalBin accepts only the stable sidecar', () => {
   assert.match(validateExternalBin([]), /exactly one/)
 })
 
+test('tauri.conf.json resources match the Windows allowlist', () => {
+  const tauri = JSON.parse(
+    readFileSync(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
+  )
+  assert.equal(validateResourcesWhitelist(tauri.bundle.resources), null)
+  assert.ok(WINDOWS_RESOURCE_ALLOWLIST.includes('core-sha256.txt'))
+})
+
 test('resources whitelist rejects whole-directory packaging', () => {
   assert.equal(
     validateResourcesWhitelist([...WINDOWS_RESOURCE_BUNDLE_ENTRIES]),
@@ -582,6 +693,7 @@ test('payload validator requires staged executables and rejects legacy junk', ()
     { name: 'resources/tono-service.exe' },
     { name: 'resources/tono-service-install.exe' },
     { name: 'resources/tono-service-uninstall.exe' },
+    { name: 'resources/core-sha256.txt' },
     { name: 'resources/Country.mmdb' },
   ]
   assert.equal(validatePayloadEntries(good), null)
@@ -608,7 +720,15 @@ test('payload validator requires staged executables and rejects legacy junk', ()
     /missing stable Mihomo/,
   )
   assert.match(
-    validatePayloadEntries(good.filter((entry) => entry.name !== 'Tono.exe.next')),
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'resources/core-sha256.txt'),
+    ),
+    /core-sha256\.txt/,
+  )
+  assert.match(
+    validatePayloadEntries(
+      good.filter((entry) => entry.name !== 'Tono.exe.next'),
+    ),
     /exactly one staged GUI basename Tono\.exe\.next/,
   )
   assert.match(

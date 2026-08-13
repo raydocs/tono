@@ -76,6 +76,10 @@ export interface Env {
   ACCESS_ADMIN_EMAILS?: string;
   OPS_ACCESS_CLIENT_ID?: string;
   OPS_ACCESS_CLIENT_SECRET?: string;
+  // VPS collector (`ops-panel/collect.py`) pushes the quality report + Komari
+  // inventory here. Optional: unset means ingest returns 503 and /ops/live
+  // still falls back to the legacy Access-protected hostnames.
+  OPS_COLLECTOR_TOKEN?: string;
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY?: string;
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY?: string;
   ROUTING_RESEARCH_RETENTION_SECONDS?: string;
@@ -824,6 +828,9 @@ function publicHomeExit(row: Row) {
     socks5Port: row.socks5_port == null ? undefined : Number(row.socks5_port),
     status: String(row.status),
     notes: row.notes == null || row.notes === '' ? undefined : String(row.notes),
+    bindCount: row.bind_count === undefined || row.bind_count === null ? undefined : Number(row.bind_count),
+    lastProbedAt: row.last_probed_at == null ? undefined : Number(row.last_probed_at),
+    probeStatus: row.probe_status == null ? undefined : String(row.probe_status),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -847,6 +854,466 @@ function publicHomeBinding(row: Row) {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+type ParsedHomeLine = {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  notes: string | null;
+};
+
+function parseHomeLine(raw: unknown): ParsedHomeLine {
+  if (typeof raw !== 'string') {
+    throw new ApiError(400, 'INVALID_HOME_LINE', 'Home line must be a string');
+  }
+  const line = raw.trim().replace(/^\uFEFF/, '').replace(/^['"]|['"]$/g, '').trim();
+  if (!line || line.length > 2_000) {
+    throw new ApiError(400, 'INVALID_HOME_LINE', 'Home line is empty or too long');
+  }
+
+  let host = '';
+  let port = 0;
+  let username = '';
+  let password = '';
+  let notes: string | null = null;
+
+  if (/^socks5:\/\//i.test(line)) {
+    let url: URL;
+    try {
+      url = new URL(line);
+    } catch {
+      throw new ApiError(400, 'INVALID_HOME_LINE', 'Invalid socks5 URL');
+    }
+    host = url.hostname;
+    port = Number(url.port);
+    try {
+      username = decodeURIComponent(url.username);
+      password = decodeURIComponent(url.password);
+    } catch {
+      throw new ApiError(400, 'INVALID_HOME_LINE', 'Invalid socks5 URL credentials');
+    }
+  } else if (line.includes('@')) {
+    const at = line.lastIndexOf('@');
+    const auth = line.slice(0, at);
+    const hostport = line.slice(at + 1);
+    const colon = auth.indexOf(':');
+    const hp = hostport.lastIndexOf(':');
+    if (colon < 1 || hp < 1) {
+      throw new ApiError(400, 'INVALID_HOME_LINE', 'Expected user:pass@host:port');
+    }
+    username = auth.slice(0, colon);
+    password = auth.slice(colon + 1);
+    host = hostport.slice(0, hp);
+    port = Number(hostport.slice(hp + 1));
+  } else {
+    const parts = line.split(':');
+    if (parts.length !== 4 && parts.length !== 5) {
+      throw new ApiError(400, 'INVALID_HOME_LINE', 'Expected host:port:user:pass');
+    }
+    host = parts[0];
+    port = Number(parts[1]);
+    username = parts[2];
+    password = parts[3];
+    notes = parts[4] !== undefined && parts[4] !== '' ? parts[4] : null;
+  }
+
+  if (!username || !password) {
+    throw new ApiError(400, 'INVALID_HOME_LINE', 'Username and password are required');
+  }
+  host = socks5HostField(host);
+  const octets = host.split('.').map(Number);
+  const isIpv4 = octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
+    && /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  if (isIpv4) {
+    const [a, b] = octets;
+    if (
+      a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 100 && b >= 64 && b <= 127)
+    ) {
+      throw new ApiError(400, 'INVALID_HOME_LINE', 'Home line host must be a public address');
+    }
+  }
+  if (!Number.isSafeInteger(port)) {
+    throw new ApiError(400, 'INVALID_HOME_LINE', 'Invalid port');
+  }
+  port = socks5PortField(port);
+  username = str(username, 'socks5Username', 1, 255);
+  password = str(password, 'socks5Password', 1, 255);
+  if (notes !== null) notes = str(notes, 'notes', 1, 1000);
+  return { host, port, username, password, notes };
+}
+
+function socks5ProxyName() {
+  return `home-socks5-${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+}
+
+const HOME_BINDING_SELECT = `
+  SELECT
+    user_home_bindings.user_id,
+    users.email,
+    user_home_bindings.home_exit_id,
+    user_home_bindings.default_proxy_name,
+    home_exits.proxy_name,
+    home_exits.display_name,
+    home_exits.kind,
+    home_exits.socks5_host,
+    home_exits.socks5_port,
+    home_exits.egress_ipv4,
+    home_exits.status AS home_status,
+    user_home_bindings.created_at,
+    user_home_bindings.updated_at
+  FROM user_home_bindings
+  JOIN users ON users.id = user_home_bindings.user_id
+  JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+`;
+
+async function loadHomeBinding(e: Env, userId: string) {
+  return e.DB.prepare(`${HOME_BINDING_SELECT} WHERE user_home_bindings.user_id = ?`).bind(userId).first<Row>();
+}
+
+async function findSocks5Home(e: Env, host: string, port: number, username: string) {
+  return e.DB.prepare(
+    `SELECT * FROM home_exits
+     WHERE kind = 'socks5' AND socks5_host = ? AND socks5_port = ? AND socks5_username = ?`,
+  ).bind(host, port, username).first<Row>();
+}
+
+async function insertSocks5HomeExit(
+  e: Env,
+  parsed: ParsedHomeLine,
+  displayName: string,
+): Promise<Row> {
+  const existing = await findSocks5Home(e, parsed.host, parsed.port, parsed.username);
+  if (existing) {
+    throw new ApiError(409, 'HOME_LINE_EXISTS', 'A home exit with this host, port and username already exists');
+  }
+  const homeId = id();
+  const t = now();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const proxyName = socks5ProxyName();
+    try {
+      const egressIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.host) ? parsed.host : null;
+      await e.DB.prepare(
+        `INSERT INTO home_exits(
+           id, proxy_name, display_name, egress_ipv4, kind,
+           socks5_host, socks5_port, socks5_username, socks5_password,
+           status, notes, created_at, updated_at
+         ) VALUES(?, ?, ?, ?, 'socks5', ?, ?, ?, ?, 'active', ?, ?, ?)`,
+      ).bind(
+        homeId, proxyName, displayName, egressIpv4,
+        parsed.host, parsed.port, parsed.username, parsed.password,
+        parsed.notes, t, t,
+      ).run();
+      const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
+      if (!row) throw new ApiError(500, 'INTERNAL_ERROR', 'Home exit insert failed');
+      return row;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      if (attempt === 4) {
+        throw new ApiError(409, 'HOME_EXIT_CONFLICT', 'A home exit with this proxyName already exists');
+      }
+    }
+  }
+  throw new ApiError(500, 'INTERNAL_ERROR', 'Home exit insert failed');
+}
+
+async function upsertHomeBinding(
+  e: Env,
+  userId: string,
+  homeExitId: string,
+  defaultProxyName: string | null,
+) {
+  const t = now();
+  const existing = await e.DB.prepare(
+    'SELECT created_at FROM user_home_bindings WHERE user_id = ?',
+  ).bind(userId).first<Row>();
+  if (existing) {
+    await e.DB.prepare(
+      `UPDATE user_home_bindings
+       SET home_exit_id = ?, default_proxy_name = ?, updated_at = ?
+       WHERE user_id = ?`,
+    ).bind(homeExitId, defaultProxyName, t, userId).run();
+    return { created: false };
+  }
+  await e.DB.prepare(
+    `INSERT INTO user_home_bindings(user_id, home_exit_id, default_proxy_name, created_at, updated_at)
+     VALUES(?, ?, ?, ?, ?)`,
+  ).bind(userId, homeExitId, defaultProxyName, t, t).run();
+  return { created: true };
+}
+
+async function enqueueRefreshCatalogForUser(e: Env, userId: string) {
+  const devices = await e.DB.prepare(
+    "SELECT id FROM devices WHERE user_id = ? AND status != 'revoked'",
+  ).bind(userId).all<Row>();
+  const t = now();
+  let queued = 0;
+  for (const device of devices.results) {
+    await e.DB.prepare(
+      "INSERT INTO device_actions(id,user_id,device_id,action,status,created_at,expires_at) VALUES(?,?,?,?, 'pending', ?, ?)",
+    ).bind(id(), userId, device.id, 'refresh_catalog', t, t + 300).run();
+    queued += 1;
+  }
+  return queued;
+}
+
+const PRODUCT_CLAUDE = 'claude_20x';
+
+function accountRefField(value: unknown): string {
+  const raw = str(value, 'accountRef', 1, 200).trim();
+  if (/[\r\n\0]/.test(raw)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid accountRef');
+  return raw.includes('@') ? raw.toLowerCase() : raw;
+}
+
+function optionalNotes(value: unknown, name = 'notes', max = 2000): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  return str(value, name, 1, max);
+}
+
+function httpsUrlField(value: unknown, name: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const url = str(value, name, 8, 500).trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ApiError(400, 'VALIDATION_ERROR', `${name} must be https`);
+  }
+  return parsed.toString();
+}
+
+function optionalUnix(value: unknown, name: string): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+  }
+  return value as number;
+}
+
+function optionalByteCount(value: unknown, name: string): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+  }
+  return value as number;
+}
+
+function publicProductAccount(row: Row) {
+  return {
+    id: String(row.id),
+    userId: row.user_id == null ? null : String(row.user_id),
+    email: row.email == null ? undefined : String(row.email),
+    product: String(row.product),
+    accountRef: String(row.account_ref),
+    status: String(row.status),
+    openedAt: row.opened_at == null ? null : Number(row.opened_at),
+    closedAt: row.closed_at == null ? null : Number(row.closed_at),
+    closeReason: row.close_reason == null ? null : String(row.close_reason),
+    notes: row.notes == null || row.notes === '' ? undefined : String(row.notes),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function publicProductEvent(row: Row) {
+  return {
+    id: String(row.id),
+    accountId: String(row.account_id),
+    userId: row.user_id == null ? null : String(row.user_id),
+    type: String(row.type),
+    at: Number(row.at),
+    detail: row.detail == null ? undefined : String(row.detail),
+    replacedByAccountId: row.replaced_by_account_id == null ? undefined : String(row.replaced_by_account_id),
+  };
+}
+
+function publicNodeProfile(row: Row) {
+  return {
+    id: String(row.id),
+    catalogName: String(row.catalog_name),
+    publicIp: row.public_ip == null ? undefined : String(row.public_ip),
+    provider: row.provider == null ? undefined : String(row.provider),
+    billingUrl: row.billing_url == null ? undefined : String(row.billing_url),
+    trafficQuotaBytes: row.traffic_quota_bytes == null ? null : Number(row.traffic_quota_bytes),
+    trafficUsedBytes: row.traffic_used_bytes == null ? null : Number(row.traffic_used_bytes),
+    trafficCycleStart: row.traffic_cycle_start == null ? null : Number(row.traffic_cycle_start),
+    trafficCycleEnd: row.traffic_cycle_end == null ? null : Number(row.traffic_cycle_end),
+    cycleNetIn: row.cycle_net_in == null ? null : Number(row.cycle_net_in),
+    cycleNetOut: row.cycle_net_out == null ? null : Number(row.cycle_net_out),
+    renewsAt: row.renews_at == null ? null : Number(row.renews_at),
+    notes: row.notes == null || row.notes === '' ? undefined : String(row.notes),
+    status: String(row.status),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+async function writeOpsAudit(
+  e: Env,
+  actorEmail: string | undefined,
+  action: string,
+  targetType: string,
+  targetId: string | null,
+  summary: string,
+) {
+  try {
+    await e.DB.prepare(
+      'INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary) VALUES(?, ?, ?, ?, ?, ?, ?)',
+    ).bind(
+      id(),
+      now(),
+      (actorEmail || 'unknown').slice(0, 254),
+      action.slice(0, 80),
+      targetType.slice(0, 80),
+      targetId,
+      summary.slice(0, 500),
+    ).run();
+  } catch {
+    // Audit must never fail the operator action; the table may be mid-migration.
+  }
+}
+
+async function markFirstEntitled(e: Env, userId: string, at: number) {
+  await e.DB.prepare(
+    `UPDATE users
+     SET first_entitled_at = COALESCE(first_entitled_at, ?),
+         plan = COALESCE(plan, ?),
+         updated_at = ?
+     WHERE id = ?`,
+  ).bind(at, PRODUCT_CLAUDE, at, userId).run();
+}
+
+async function recordProductEvent(
+  e: Env,
+  accountId: string,
+  userId: string | null,
+  type: string,
+  detail: string | null,
+  replacedBy: string | null = null,
+) {
+  await e.DB.prepare(
+    `INSERT INTO product_account_events(
+       id, account_id, user_id, type, at, detail, replaced_by_account_id
+     ) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id(), accountId, userId, type, now(), detail, replacedBy).run();
+}
+
+async function assignedProductForUser(e: Env, userId: string) {
+  return e.DB.prepare(
+    "SELECT * FROM product_accounts WHERE user_id = ? AND status = 'assigned'",
+  ).bind(userId).first<Row>();
+}
+
+async function replaceCountForUser(e: Env, userId: string) {
+  const row = await e.DB.prepare(
+    "SELECT COUNT(*) total FROM product_account_events WHERE user_id = ? AND type = 'replaced'",
+  ).bind(userId).first<Row>();
+  return Number(row?.total ?? 0);
+}
+
+async function createAssignedProductAccount(
+  e: Env,
+  userId: string,
+  accountRef: string,
+  openedAt: number,
+  notes: string | null,
+  actorEmail: string | undefined,
+) {
+  const current = await assignedProductForUser(e, userId);
+  if (current) {
+    throw new ApiError(409, 'PRODUCT_ALREADY_ASSIGNED', 'User already has an assigned Claude account; replace it instead');
+  }
+  const clash = await e.DB.prepare(
+    'SELECT id, status FROM product_accounts WHERE account_ref = ?',
+  ).bind(accountRef).first<Row>();
+  const t = now();
+  if (clash) {
+    if (String(clash.status) !== 'pooled') {
+      throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+    }
+    await e.DB.prepare(
+      `UPDATE product_accounts
+       SET user_id = ?, status = 'assigned', opened_at = COALESCE(opened_at, ?), notes = COALESCE(?, notes), updated_at = ?
+       WHERE id = ? AND status = 'pooled'`,
+    ).bind(userId, openedAt, notes, t, clash.id).run();
+    await recordProductEvent(e, String(clash.id), userId, 'assigned', null);
+    await markFirstEntitled(e, userId, openedAt);
+    await writeOpsAudit(e, actorEmail, 'product.assign', 'product_account', String(clash.id), `assigned ${accountRef}`);
+    const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(clash.id).first<Row>();
+    return row!;
+  }
+  const accountId = id();
+  try {
+    await e.DB.prepare(
+      `INSERT INTO product_accounts(
+         id, user_id, product, account_ref, status, opened_at, closed_at, close_reason, notes, created_at, updated_at
+       ) VALUES(?, ?, ?, ?, 'assigned', ?, NULL, NULL, ?, ?, ?)`,
+    ).bind(accountId, userId, PRODUCT_CLAUDE, accountRef, openedAt, notes, t, t).run();
+  } catch {
+    throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+  }
+  await recordProductEvent(e, accountId, userId, 'opened', null);
+  await recordProductEvent(e, accountId, userId, 'assigned', null);
+  await markFirstEntitled(e, userId, openedAt);
+  await writeOpsAudit(e, actorEmail, 'product.open', 'product_account', accountId, `opened ${accountRef}`);
+  const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>();
+  return row!;
+}
+
+async function banProductAccount(e: Env, accountId: string, detail: string | null, actorEmail: string | undefined) {
+  const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>();
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
+  if (String(row.status) !== 'assigned' && String(row.status) !== 'pooled') {
+    throw new ApiError(409, 'ACCOUNT_NOT_ACTIVE', 'Only assigned or pooled accounts can be banned');
+  }
+  const t = now();
+  await e.DB.prepare(
+    `UPDATE product_accounts
+     SET status = 'banned', closed_at = ?, close_reason = 'banned', updated_at = ?
+     WHERE id = ?`,
+  ).bind(t, t, accountId).run();
+  await recordProductEvent(e, accountId, row.user_id == null ? null : String(row.user_id), 'banned', detail);
+  await writeOpsAudit(
+    e, actorEmail, 'product.ban', 'product_account', accountId,
+    `banned ${row.account_ref}`,
+  );
+  return (await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>())!;
+}
+
+async function replaceProductAccount(
+  e: Env,
+  accountId: string,
+  nextRef: string,
+  notes: string | null,
+  actorEmail: string | undefined,
+) {
+  const current = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>();
+  if (!current) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
+  if (String(current.status) !== 'assigned' || current.user_id == null) {
+    throw new ApiError(409, 'ACCOUNT_NOT_ASSIGNED', 'Only an assigned account can be replaced');
+  }
+  const userId = String(current.user_id);
+  const t = now();
+  await e.DB.prepare(
+    `UPDATE product_accounts
+     SET status = 'retired', closed_at = ?, close_reason = 'rotated', updated_at = ?
+     WHERE id = ?`,
+  ).bind(t, t, accountId).run();
+  const next = await createAssignedProductAccount(e, userId, nextRef, t, notes, actorEmail);
+  await recordProductEvent(e, accountId, userId, 'replaced', null, String(next.id));
+  await writeOpsAudit(
+    e, actorEmail, 'product.replace', 'product_account', String(next.id),
+    `replaced ${current.account_ref}`,
+  );
+  return { previous: (await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>())!, current: next };
 }
 
 const CLIENT_UUID_PLACEHOLDER = '{{TONO_CLIENT_UUID}}';
@@ -874,6 +1341,52 @@ async function exitClientUUID(e: Env, userId: string): Promise<string> {
   return String(row.client_uuid);
 }
 
+type CatalogRouting = {
+  homeProxy?: string;
+  defaultProxy?: string;
+  // Full upstream credentials appear only here — inside the bound user's
+  // own catalog. The ops/admin plaintext catalogs never carry them.
+  homeSocks5?: { host: string; port: number; username: string; password: string };
+};
+
+async function homeRoutingForUser(e: Env, userId: string) {
+  const homes = await e.DB.prepare(
+    "SELECT proxy_name FROM home_exits WHERE status = 'active' AND kind = 'catalog'",
+  ).all<Row>();
+  const restricted = new Set(homes.results.map((item) => String(item.proxy_name)));
+  const binding = await e.DB.prepare(
+    `SELECT home_exits.proxy_name, home_exits.kind,
+            home_exits.socks5_host, home_exits.socks5_port,
+            home_exits.socks5_username, home_exits.socks5_password,
+            user_home_bindings.default_proxy_name
+     FROM user_home_bindings
+     JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+     WHERE user_home_bindings.user_id = ?
+       AND home_exits.status = 'active'`,
+  ).bind(userId).first<Row>();
+  const allowed = new Set<string>();
+  let routing: CatalogRouting | undefined;
+  if (binding) {
+    allowed.add(String(binding.proxy_name));
+    const directives: CatalogRouting = {};
+    if (String(binding.kind ?? 'catalog') === 'socks5') {
+      directives.homeSocks5 = {
+        host: String(binding.socks5_host),
+        port: Number(binding.socks5_port),
+        username: String(binding.socks5_username),
+        password: String(binding.socks5_password),
+      };
+    } else {
+      directives.homeProxy = String(binding.proxy_name);
+    }
+    if (binding.default_proxy_name != null && binding.default_proxy_name !== '') {
+      directives.defaultProxy = String(binding.default_proxy_name);
+    }
+    routing = directives;
+  }
+  return { routing, restricted, allowed };
+}
+
 async function publicManagedCatalog(
   e: Env,
   options?: { userId?: string; filterHomeExits?: boolean },
@@ -881,28 +1394,26 @@ async function publicManagedCatalog(
   const row = await e.DB.prepare(
     'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
   ).first<Row>();
-  if (!row) {
-    const yaml = 'proxies: []\n';
-    return {
-      revision: 0,
-      yaml,
-      sha256: await sha256(yaml),
-      updatedAt: undefined,
-    };
-  }
-  let yaml: string;
-  try {
-    yaml = await decryptCatalog(
-      String(row.ciphertext),
-      String(row.nonce),
-      requiredCatalogKey(e),
-    );
-  } catch {
-    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog is unavailable');
-  }
-  const digest = await sha256(yaml);
-  if (digest !== row.content_sha256) {
-    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog failed integrity validation');
+  let yaml = 'proxies: []\n';
+  let digest = await sha256(yaml);
+  let updatedAt: number | undefined;
+  let revision = 0;
+  if (row) {
+    try {
+      yaml = await decryptCatalog(
+        String(row.ciphertext),
+        String(row.nonce),
+        requiredCatalogKey(e),
+      );
+    } catch {
+      throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog is unavailable');
+    }
+    digest = await sha256(yaml);
+    if (digest !== row.content_sha256) {
+      throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog failed integrity validation');
+    }
+    revision = Number(row.revision);
+    updatedAt = Number(row.updated_at);
   }
   let served = yaml;
   // The stored digest authenticates the catalog template. Authenticated clients
@@ -912,62 +1423,19 @@ async function publicManagedCatalog(
     const issued = await exitClientUUID(e, options.userId);
     served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
   }
-  let routing:
-    | {
-        homeProxy?: string;
-        defaultProxy?: string;
-        // Full upstream credentials appear only here — inside the bound user's
-        // own catalog. The ops/admin plaintext catalogs never carry them.
-        homeSocks5?: { host: string; port: number; username: string; password: string };
-      }
-    | undefined;
+  let routing: CatalogRouting | undefined;
   if (options?.filterHomeExits && options.userId) {
-    // Only catalog-kind home exits name a node in the encrypted catalog;
-    // a socks5-kind exit lives outside the catalog and filters nothing.
-    const homes = await e.DB.prepare(
-      "SELECT proxy_name FROM home_exits WHERE status = 'active' AND kind = 'catalog'",
-    ).all<Row>();
-    const restricted = new Set(homes.results.map((item) => String(item.proxy_name)));
-    const binding = await e.DB.prepare(
-      `SELECT home_exits.proxy_name, home_exits.kind,
-              home_exits.socks5_host, home_exits.socks5_port,
-              home_exits.socks5_username, home_exits.socks5_password,
-              user_home_bindings.default_proxy_name
-       FROM user_home_bindings
-       JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-       WHERE user_home_bindings.user_id = ?
-         AND home_exits.status = 'active'`,
-    ).bind(options.userId).first<Row>();
-    const allowed = new Set<string>();
-    if (binding) {
-      allowed.add(String(binding.proxy_name));
-      const directives: NonNullable<typeof routing> = {};
-      if (String(binding.kind ?? 'catalog') === 'socks5') {
-        // Cloud-assigned residential exit: the client chains the user's
-        // selected VPS node into this SOCKS5 upstream (dialer-proxy).
-        directives.homeSocks5 = {
-          host: String(binding.socks5_host),
-          port: Number(binding.socks5_port),
-          username: String(binding.socks5_username),
-          password: String(binding.socks5_password),
-        };
-      } else {
-        directives.homeProxy = String(binding.proxy_name);
-      }
-      if (binding.default_proxy_name != null && binding.default_proxy_name !== '') {
-        directives.defaultProxy = String(binding.default_proxy_name);
-      }
-      routing = directives;
-    }
-    if (restricted.size > 0) {
-      served = filterCatalogYamlForUser(served, restricted, allowed);
+    const home = await homeRoutingForUser(e, options.userId);
+    routing = home.routing;
+    if (home.restricted.size > 0) {
+      served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
     }
   }
   return {
-    revision: Number(row.revision),
+    revision,
     yaml: served,
     sha256: served === yaml ? digest : await sha256(served),
-    updatedAt: Number(row.updated_at),
+    updatedAt,
     ...(routing ? { routing } : {}),
   };
 }
@@ -1341,11 +1809,15 @@ async function sharedAdministrativeResource(
   e: Env,
   resource: string,
   m: string,
+  actorEmail?: string,
 ): Promise<Response | null> {
   let mt: RegExpMatchArray | null;
   if (resource === 'home-exits' && m === 'GET') {
     const q = await e.DB.prepare(
-      'SELECT * FROM home_exits ORDER BY status ASC, display_name ASC, created_at ASC',
+      `SELECT home_exits.*,
+              (SELECT COUNT(*) FROM user_home_bindings WHERE home_exit_id = home_exits.id) AS bind_count
+       FROM home_exits
+       ORDER BY status ASC, display_name ASC, created_at ASC`,
     ).all<Row>();
     return Response.json({ homeExits: q.results.map(publicHomeExit) });
   }
@@ -1398,6 +1870,117 @@ async function sharedAdministrativeResource(
     const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
     await bumpCatalogRevision(e);
     return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
+  }
+  if (resource === 'home-exits/assign' && m === 'POST') {
+    const b = await body(req, 8 * 1024);
+    rejectUnexpectedKeys(b, ['userId', 'line', 'displayName', 'defaultProxyName', 'replace']);
+    const userId = str(b.userId, 'userId', 1, 100);
+    const parsed = parseHomeLine(b.line);
+    if (b.replace !== undefined && typeof b.replace !== 'boolean') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid replace');
+    }
+    const replace = b.replace === true;
+    const user = await e.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(userId).first<Row>();
+    if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    const current = await loadHomeBinding(e, userId);
+    if (current && !replace) {
+      throw new ApiError(409, 'HOME_ALREADY_BOUND', 'User already has a home exit; pass replace=true to swap it');
+    }
+    const defaultProxyName = b.defaultProxyName === undefined && current
+      ? (current.default_proxy_name == null || current.default_proxy_name === ''
+        ? null
+        : String(current.default_proxy_name))
+      : await defaultProxyNameField(e, b.defaultProxyName);
+    const emailLocal = String(user.email).split('@')[0] || 'user';
+    const displayName = b.displayName === undefined || b.displayName === null || b.displayName === ''
+      ? `家宽 · ${emailLocal}`
+      : str(b.displayName, 'displayName', 1, 200).trim();
+
+    let home = await findSocks5Home(e, parsed.host, parsed.port, parsed.username);
+    let createdHome = false;
+    if (home) {
+      const owner = await e.DB.prepare(
+        'SELECT user_id FROM user_home_bindings WHERE home_exit_id = ?',
+      ).bind(home.id).first<Row>();
+      if (owner && String(owner.user_id) !== userId) {
+        throw new ApiError(409, 'HOME_EXIT_IN_USE', 'This home line is already assigned to another user');
+      }
+      if (String(home.status) !== 'active') {
+        await e.DB.prepare(
+          'UPDATE home_exits SET status = ?, display_name = ?, notes = ?, updated_at = ? WHERE id = ?',
+        ).bind('active', displayName, parsed.notes ?? home.notes, now(), home.id).run();
+        home = (await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(home.id).first<Row>())!;
+      }
+    } else {
+      home = await insertSocks5HomeExit(e, parsed, displayName);
+      createdHome = true;
+    }
+
+    const previousHomeId = current ? String(current.home_exit_id) : null;
+    const bound = await upsertHomeBinding(e, userId, String(home.id), defaultProxyName);
+    let retiredHomeExitId: string | undefined;
+    if (previousHomeId && previousHomeId !== String(home.id)) {
+      const stillUsed = await e.DB.prepare(
+        'SELECT 1 FROM user_home_bindings WHERE home_exit_id = ? LIMIT 1',
+      ).bind(previousHomeId).first<Row>();
+      if (!stillUsed) {
+        await e.DB.prepare(
+          "UPDATE home_exits SET status = 'retired', updated_at = ? WHERE id = ?",
+        ).bind(now(), previousHomeId).run();
+        retiredHomeExitId = previousHomeId;
+      }
+    }
+    await bumpCatalogRevision(e);
+    const binding = await loadHomeBinding(e, userId);
+    const refreshQueued = await enqueueRefreshCatalogForUser(e, userId);
+    const swapped = Boolean(previousHomeId && previousHomeId !== String(home.id));
+    await writeOpsAudit(
+      e, actorEmail, swapped ? 'home.replace' : 'home.assign', 'user', userId,
+      swapped ? `replaced home for ${user.email}` : `assigned home for ${user.email}`,
+    );
+    return Response.json({
+      homeExit: publicHomeExit(home),
+      binding: publicHomeBinding(binding!),
+      created: createdHome,
+      replaced: swapped,
+      retiredHomeExitId,
+      refreshQueued,
+    }, { status: createdHome || bound.created ? 201 : 200 });
+  }
+  if (resource === 'home-exits/import' && m === 'POST') {
+    const b = await body(req, 32 * 1024);
+    rejectUnexpectedKeys(b, ['lines']);
+    if (!Array.isArray(b.lines) || b.lines.length === 0 || b.lines.length > 50) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'lines must be an array of 1–50 strings');
+    }
+    const created: ReturnType<typeof publicHomeExit>[] = [];
+    const skipped: Array<{ host?: string; port?: number; username?: string; message: string }> = [];
+    const failed: Array<{ message: string }> = [];
+    for (const raw of b.lines) {
+      try {
+        const parsed = parseHomeLine(raw);
+        const existing = await findSocks5Home(e, parsed.host, parsed.port, parsed.username);
+        if (existing) {
+          skipped.push({
+            host: parsed.host,
+            port: parsed.port,
+            username: parsed.username,
+            message: 'already exists',
+          });
+          continue;
+        }
+        const displayName = parsed.notes && parsed.notes.length <= 200
+          ? parsed.notes
+          : `家宽 · ${parsed.host}`;
+        const row = await insertSocks5HomeExit(e, parsed, displayName);
+        created.push(publicHomeExit(row));
+      } catch (error) {
+        const message = error instanceof ApiError ? error.message : 'Invalid home line';
+        failed.push({ message });
+      }
+    }
+    if (created.length > 0) await bumpCatalogRevision(e);
+    return Response.json({ created, skipped, failed }, { status: created.length > 0 ? 201 : 200 });
   }
   mt = resource.match(/^home-exits\/([^/]+)$/);
   if (mt && m === 'PATCH') {
@@ -1594,6 +2177,40 @@ async function sharedAdministrativeResource(
     }
     return new Response(null, { status: 204 });
   }
+  mt = resource.match(/^users\/([^/]+)\/close$/);
+  if (mt && m === 'POST') {
+    if (req.headers.get('content-length') && Number(req.headers.get('content-length')) > 0) {
+      const b = await body(req, 4 * 1024);
+      rejectUnexpectedKeys(b, ['reason']);
+    }
+    const user = await e.DB.prepare('SELECT * FROM users WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+    const t = now();
+    const unbound = await e.DB.prepare(
+      'DELETE FROM user_home_bindings WHERE user_id = ?',
+    ).bind(mt[1]).run();
+    if (unbound.meta.changes) await bumpCatalogRevision(e);
+    const assigned = await assignedProductForUser(e, mt[1]);
+    if (assigned) {
+      await e.DB.prepare(
+        `UPDATE product_accounts
+         SET status = 'retired', closed_at = ?, close_reason = 'other', updated_at = ?
+         WHERE id = ? AND status = 'assigned'`,
+      ).bind(t, t, assigned.id).run();
+      await recordProductEvent(e, String(assigned.id), mt[1], 'note', 'refund close');
+    }
+    await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(user.email).run();
+    await e.DB.prepare(
+      `UPDATE users
+       SET status = 'disabled',
+           notes = CASE WHEN notes IS NULL OR notes = '' THEN '退款销户' ELSE notes END,
+           updated_at = ?
+       WHERE id = ?`,
+    ).bind(t, mt[1]).run();
+    await enforceUser(e, mt[1]);
+    await writeOpsAudit(e, actorEmail, 'user.close', 'user', mt[1], `closed ${user.email}`);
+    return Response.json({ ok: true, email: String(user.email), status: 'disabled' });
+  }
   if (resource === 'signup-allowlist' && m === 'POST') {
     const b = await body(req, 4 * 1024);
     const address = email(b.email);
@@ -1613,6 +2230,393 @@ async function sharedAdministrativeResource(
       { status: inserted.meta.changes === 1 ? 201 : 200 },
     );
   }
+  if (resource === 'exit-catalog' && m === 'GET') {
+    return Response.json(await publicManagedCatalog(e));
+  }
+  if (resource === 'exit-catalog' && m === 'PUT') {
+    const b = await body(req, 2 * 1024 * 1024);
+    rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
+    const yaml = managedCatalogYAML(b.yaml);
+    const expectedRevision = b.expectedRevision;
+    if (
+      expectedRevision !== undefined &&
+      (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+    ) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
+    }
+    const current = await e.DB.prepare(
+      'SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1',
+    ).first<Row>();
+    const currentRevision = Number(current?.revision ?? 0);
+    if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+      throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; reload before replacing it');
+    }
+    const revision = currentRevision + 1;
+    const encrypted = await encryptCatalog(yaml, requiredCatalogKey(e));
+    const digest = await sha256(yaml);
+    const t = now();
+    const changed = current
+      ? await e.DB.prepare(
+        `UPDATE managed_exit_catalog
+         SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
+         WHERE singleton_id = 1 AND revision = ?`,
+      ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, currentRevision).run()
+      : await e.DB.prepare(
+        `INSERT OR IGNORE INTO managed_exit_catalog(
+           singleton_id, revision, ciphertext, nonce, content_sha256, updated_at
+         ) VALUES(1, ?, ?, ?, ?, ?)`,
+      ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t).run();
+    if (!changed.meta.changes) {
+      throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; reload before replacing it');
+    }
+    return Response.json({ revision, sha256: digest, updatedAt: t });
+  }
+  if (resource === 'traffic-policy' && m === 'GET') {
+    return Response.json(await publicTrafficPolicy(e));
+  }
+  if (resource === 'traffic-policy' && m === 'PUT') {
+    const b = await body(req, 64 * 1024);
+    rejectUnexpectedKeys(b, ['policy', 'expectedRevision', 'signature', 'dryRun']);
+    if (b.signature !== undefined && (typeof b.signature !== 'string' || !b.signature.length || b.signature.length > 128)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid signature');
+    }
+    if (b.dryRun !== undefined && typeof b.dryRun !== 'boolean') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid dryRun');
+    }
+    const signature = b.signature as string | undefined;
+    const dryRun = b.dryRun === true;
+    const policy = canonicalTrafficPolicy(b.policy, dryRun || Boolean(signature));
+    const json = JSON.stringify(policy);
+    if (signature) {
+      const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
+      if (!publicKey) {
+        throw new ApiError(409, 'TRAFFIC_POLICY_KEY_UNCONFIGURED', 'This deployment has no policy signing public key, so a signed policy cannot be accepted');
+      }
+      if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
+        throw new ApiError(400, 'TRAFFIC_POLICY_SIGNATURE_INVALID', 'The signature does not cover the canonical policy this would serve');
+      }
+    }
+    if (dryRun) {
+      let signatureRequired = false;
+      try {
+        canonicalTrafficPolicy(b.policy, false);
+      } catch {
+        signatureRequired = true;
+      }
+      return Response.json({
+        dryRun: true,
+        json,
+        sha256: await sha256(json),
+        signatureRequired,
+        signatureContext: TRAFFIC_POLICY_SIGNATURE_CONTEXT,
+      });
+    }
+    const expectedRevision = b.expectedRevision;
+    if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
+    }
+    const current = await e.DB.prepare(
+      'SELECT revision FROM managed_traffic_policy WHERE singleton_id = 1',
+    ).first<Row>();
+    const currentRevision = Number(current?.revision ?? 0);
+    if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+      throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
+    }
+    const revision = currentRevision + 1;
+    const encrypted = await encryptTrafficPolicy(json, requiredCatalogKey(e));
+    const digest = await sha256(json);
+    const t = now();
+    const storedSignature = signature ?? null;
+    const changed = current
+      ? await e.DB.prepare(
+        `UPDATE managed_traffic_policy
+         SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?, signature = ?
+         WHERE singleton_id = 1 AND revision = ?`,
+      ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature, currentRevision).run()
+      : await e.DB.prepare(
+        `INSERT OR IGNORE INTO managed_traffic_policy(
+           singleton_id, revision, ciphertext, nonce, content_sha256, updated_at, signature
+         ) VALUES(1, ?, ?, ?, ?, ?, ?)`,
+      ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature).run();
+    if (!changed.meta.changes) {
+      throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
+    }
+    return Response.json({
+      revision, json, sha256: digest, updatedAt: t,
+      ...(signature ? { signature } : {}),
+    });
+  }
+  if (resource === 'device-actions' && m === 'POST') {
+    const b = await body(req, 8 * 1024);
+    rejectUnexpectedKeys(b, ['deviceId', 'action', 'ttlSeconds']);
+    const deviceId = str(b.deviceId, 'deviceId', 1, 200);
+    const action = fixedAction(b.action);
+    const ttl = b.ttlSeconds ?? 300;
+    if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 3600) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid ttlSeconds');
+    const device = await e.DB.prepare("SELECT * FROM devices WHERE id = ? AND status != 'revoked'").bind(deviceId).first<Row>();
+    if (!device) throw new ApiError(404, 'NOT_FOUND', 'Active device not found');
+    const t = now();
+    const commandId = id();
+    await e.DB.prepare(
+      'INSERT INTO device_actions(id,user_id,device_id,action,status,created_at,expires_at) VALUES(?,?,?,?,\'pending\',?,?)',
+    ).bind(commandId, device.user_id, device.id, action, t, t + ttl).run();
+    const row = await e.DB.prepare('SELECT * FROM device_actions WHERE id = ?').bind(commandId).first<Row>();
+    return Response.json({ action: publicAction(row!) }, { status: 201 });
+  }
+  if (resource === 'device-actions' && m === 'GET') {
+    const t = now();
+    await e.DB.prepare("UPDATE device_actions SET status = 'expired' WHERE status IN ('pending','delivered') AND expires_at <= ?").bind(t).run();
+    const deviceId = new URL(req.url).searchParams.get('deviceId');
+    if (deviceId !== null && (deviceId.length < 1 || deviceId.length > 200)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid deviceId');
+    const q = deviceId
+      ? await e.DB.prepare('SELECT * FROM device_actions WHERE device_id = ? ORDER BY created_at DESC LIMIT 100').bind(deviceId).all<Row>()
+      : await e.DB.prepare('SELECT * FROM device_actions ORDER BY created_at DESC LIMIT 100').all<Row>();
+    return Response.json({ actions: q.results.map(publicAction) });
+  }
+  if (resource === 'devices' && m === 'GET') {
+    const q = await e.DB.prepare(
+      'SELECT devices.*, users.email FROM devices JOIN users ON users.id = devices.user_id ORDER BY devices.created_at DESC',
+    ).all<Row>();
+    return Response.json({
+      devices: q.results.map((x) => ({ ...publicDevice(x), userId: x.user_id, email: x.email })),
+    });
+  }
+  mt = resource.match(/^devices\/([^/]+)$/);
+  if (mt && m === 'DELETE') {
+    const d = await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!d) throw new ApiError(404, 'NOT_FOUND', 'Device not found');
+    await revokeDevice(e, d);
+    await processRevocations(e);
+    return new Response(null, { status: 204 });
+  }
+
+  if (resource === 'product-accounts' && m === 'GET') {
+    const status = new URL(req.url).searchParams.get('status');
+    if (status !== null && !['pooled', 'assigned', 'banned', 'retired'].includes(status)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+    }
+    const q = status
+      ? await e.DB.prepare(
+        `SELECT product_accounts.*, users.email
+         FROM product_accounts
+         LEFT JOIN users ON users.id = product_accounts.user_id
+         WHERE product_accounts.status = ?
+         ORDER BY product_accounts.updated_at DESC`,
+      ).bind(status).all<Row>()
+      : await e.DB.prepare(
+        `SELECT product_accounts.*, users.email
+         FROM product_accounts
+         LEFT JOIN users ON users.id = product_accounts.user_id
+         ORDER BY product_accounts.updated_at DESC
+         LIMIT 500`,
+      ).all<Row>();
+    return Response.json({ accounts: q.results.map(publicProductAccount) });
+  }
+  if (resource === 'product-accounts' && m === 'POST') {
+    const b = await body(req, 8 * 1024);
+    rejectUnexpectedKeys(b, ['accountRef', 'userId', 'openedAt', 'notes']);
+    const accountRef = accountRefField(b.accountRef);
+    const notes = optionalNotes(b.notes);
+    const openedAt = optionalUnix(b.openedAt, 'openedAt') ?? now();
+    if (b.userId !== undefined && b.userId !== null && b.userId !== '') {
+      const userId = str(b.userId, 'userId', 1, 100);
+      const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first<Row>();
+      if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      const row = await createAssignedProductAccount(e, userId, accountRef, openedAt, notes, actorEmail);
+      return Response.json({ account: publicProductAccount(row) }, { status: 201 });
+    }
+    const existing = await e.DB.prepare(
+      'SELECT id FROM product_accounts WHERE account_ref = ?',
+    ).bind(accountRef).first<Row>();
+    if (existing) throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+    const accountId = id();
+    const t = now();
+    await e.DB.prepare(
+      `INSERT INTO product_accounts(
+         id, user_id, product, account_ref, status, opened_at, closed_at, close_reason, notes, created_at, updated_at
+       ) VALUES(?, NULL, ?, ?, 'pooled', NULL, NULL, NULL, ?, ?, ?)`,
+    ).bind(accountId, PRODUCT_CLAUDE, accountRef, notes, t, t).run();
+    await recordProductEvent(e, accountId, null, 'opened', 'pooled');
+    await writeOpsAudit(e, actorEmail, 'product.pool', 'product_account', accountId, `pooled ${accountRef}`);
+    const row = await e.DB.prepare('SELECT * FROM product_accounts WHERE id = ?').bind(accountId).first<Row>();
+    return Response.json({ account: publicProductAccount(row!) }, { status: 201 });
+  }
+  mt = resource.match(/^product-accounts\/([^/]+)\/ban$/);
+  if (mt && m === 'POST') {
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['detail']);
+    const row = await banProductAccount(e, mt[1], optionalNotes(b.detail, 'detail', 1000), actorEmail);
+    return Response.json({ account: publicProductAccount(row) });
+  }
+  mt = resource.match(/^product-accounts\/([^/]+)\/replace$/);
+  if (mt && m === 'POST') {
+    const b = await body(req, 8 * 1024);
+    rejectUnexpectedKeys(b, ['accountRef', 'notes']);
+    const result = await replaceProductAccount(
+      e, mt[1], accountRefField(b.accountRef), optionalNotes(b.notes), actorEmail,
+    );
+    return Response.json({
+      previous: publicProductAccount(result.previous),
+      account: publicProductAccount(result.current),
+    });
+  }
+  mt = resource.match(/^product-accounts\/([^/]+)$/);
+  if (mt && m === 'GET') {
+    const row = await e.DB.prepare(
+      `SELECT product_accounts.*, users.email
+       FROM product_accounts
+       LEFT JOIN users ON users.id = product_accounts.user_id
+       WHERE product_accounts.id = ?`,
+    ).bind(mt[1]).first<Row>();
+    if (!row) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
+    const events = await e.DB.prepare(
+      'SELECT * FROM product_account_events WHERE account_id = ? ORDER BY at DESC LIMIT 50',
+    ).bind(mt[1]).all<Row>();
+    return Response.json({ account: publicProductAccount(row), events: events.results.map(publicProductEvent) });
+  }
+
+  if (resource === 'node-profiles' && m === 'GET') {
+    const q = await e.DB.prepare(
+      'SELECT * FROM ops_node_profiles ORDER BY status ASC, catalog_name ASC',
+    ).all<Row>();
+    return Response.json({ profiles: q.results.map(publicNodeProfile) });
+  }
+  if (resource === 'node-profiles' && m === 'POST') {
+    const b = await body(req, 16 * 1024);
+    rejectUnexpectedKeys(b, [
+      'catalogName', 'publicIp', 'provider', 'billingUrl',
+      'trafficQuotaBytes', 'trafficUsedBytes', 'trafficCycleStart', 'trafficCycleEnd',
+      'cycleNetIn', 'cycleNetOut', 'renewsAt', 'notes', 'status',
+    ]);
+    const catalogName = str(b.catalogName, 'catalogName', 1, 200).trim();
+    const publicIp = b.publicIp === undefined || b.publicIp === null || b.publicIp === ''
+      ? null
+      : optionalIpv4(b.publicIp, 'publicIp');
+    const provider = optionalNotes(b.provider, 'provider', 80);
+    const billingUrl = httpsUrlField(b.billingUrl, 'billingUrl');
+    const profileId = id();
+    const t = now();
+    const status = b.status === undefined ? 'active' : str(b.status, 'status', 1, 20);
+    if (!['active', 'retired'].includes(status)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+    }
+    try {
+      await e.DB.prepare(
+        `INSERT INTO ops_node_profiles(
+           id, catalog_name, public_ip, provider, billing_url,
+           traffic_quota_bytes, traffic_used_bytes, traffic_cycle_start, traffic_cycle_end,
+           cycle_net_in, cycle_net_out, renews_at, notes, status, created_at, updated_at
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        profileId, catalogName, publicIp, provider, billingUrl,
+        optionalByteCount(b.trafficQuotaBytes, 'trafficQuotaBytes'),
+        optionalByteCount(b.trafficUsedBytes, 'trafficUsedBytes'),
+        optionalUnix(b.trafficCycleStart, 'trafficCycleStart'),
+        optionalUnix(b.trafficCycleEnd, 'trafficCycleEnd'),
+        optionalByteCount(b.cycleNetIn, 'cycleNetIn'),
+        optionalByteCount(b.cycleNetOut, 'cycleNetOut'),
+        optionalUnix(b.renewsAt, 'renewsAt'),
+        optionalNotes(b.notes),
+        status, t, t,
+      ).run();
+    } catch {
+      throw new ApiError(409, 'NODE_PROFILE_EXISTS', 'A profile with this catalog name already exists');
+    }
+    await writeOpsAudit(e, actorEmail, 'node.create', 'node_profile', profileId, catalogName);
+    const row = await e.DB.prepare('SELECT * FROM ops_node_profiles WHERE id = ?').bind(profileId).first<Row>();
+    return Response.json({ profile: publicNodeProfile(row!) }, { status: 201 });
+  }
+  mt = resource.match(/^node-profiles\/([^/]+)$/);
+  if (mt && m === 'PUT') {
+    const b = await body(req, 16 * 1024);
+    rejectUnexpectedKeys(b, [
+      'catalogName', 'publicIp', 'provider', 'billingUrl',
+      'trafficQuotaBytes', 'trafficUsedBytes', 'trafficCycleStart', 'trafficCycleEnd',
+      'cycleNetIn', 'cycleNetOut', 'renewsAt', 'notes', 'status',
+    ]);
+    const existing = await e.DB.prepare('SELECT * FROM ops_node_profiles WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Node profile not found');
+    const catalogName = b.catalogName === undefined
+      ? String(existing.catalog_name)
+      : str(b.catalogName, 'catalogName', 1, 200).trim();
+    const status = b.status === undefined ? String(existing.status) : str(b.status, 'status', 1, 20);
+    if (!['active', 'retired'].includes(status)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
+    }
+    try {
+      await e.DB.prepare(
+        `UPDATE ops_node_profiles SET
+           catalog_name = ?, public_ip = ?, provider = ?, billing_url = ?,
+           traffic_quota_bytes = ?, traffic_used_bytes = ?,
+           traffic_cycle_start = ?, traffic_cycle_end = ?,
+           cycle_net_in = ?, cycle_net_out = ?, renews_at = ?,
+           notes = ?, status = ?, updated_at = ?
+         WHERE id = ?`,
+      ).bind(
+        catalogName,
+        b.publicIp === undefined
+          ? (existing.public_ip == null ? null : String(existing.public_ip))
+          : (b.publicIp === null || b.publicIp === '' ? null : optionalIpv4(b.publicIp, 'publicIp')),
+        b.provider === undefined
+          ? (existing.provider == null ? null : String(existing.provider))
+          : optionalNotes(b.provider, 'provider', 80),
+        b.billingUrl === undefined
+          ? (existing.billing_url == null ? null : String(existing.billing_url))
+          : httpsUrlField(b.billingUrl, 'billingUrl'),
+        b.trafficQuotaBytes === undefined
+          ? (existing.traffic_quota_bytes == null ? null : Number(existing.traffic_quota_bytes))
+          : optionalByteCount(b.trafficQuotaBytes, 'trafficQuotaBytes'),
+        b.trafficUsedBytes === undefined
+          ? (existing.traffic_used_bytes == null ? null : Number(existing.traffic_used_bytes))
+          : optionalByteCount(b.trafficUsedBytes, 'trafficUsedBytes'),
+        b.trafficCycleStart === undefined
+          ? (existing.traffic_cycle_start == null ? null : Number(existing.traffic_cycle_start))
+          : optionalUnix(b.trafficCycleStart, 'trafficCycleStart'),
+        b.trafficCycleEnd === undefined
+          ? (existing.traffic_cycle_end == null ? null : Number(existing.traffic_cycle_end))
+          : optionalUnix(b.trafficCycleEnd, 'trafficCycleEnd'),
+        b.cycleNetIn === undefined
+          ? (existing.cycle_net_in == null ? null : Number(existing.cycle_net_in))
+          : optionalByteCount(b.cycleNetIn, 'cycleNetIn'),
+        b.cycleNetOut === undefined
+          ? (existing.cycle_net_out == null ? null : Number(existing.cycle_net_out))
+          : optionalByteCount(b.cycleNetOut, 'cycleNetOut'),
+        b.renewsAt === undefined
+          ? (existing.renews_at == null ? null : Number(existing.renews_at))
+          : optionalUnix(b.renewsAt, 'renewsAt'),
+        b.notes === undefined
+          ? (existing.notes == null ? null : String(existing.notes))
+          : optionalNotes(b.notes),
+        status,
+        now(),
+        mt[1],
+      ).run();
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(409, 'NODE_PROFILE_EXISTS', 'A profile with this catalog name already exists');
+    }
+    await writeOpsAudit(e, actorEmail, 'node.update', 'node_profile', mt[1], catalogName);
+    const row = await e.DB.prepare('SELECT * FROM ops_node_profiles WHERE id = ?').bind(mt[1]).first<Row>();
+    return Response.json({ profile: publicNodeProfile(row!) });
+  }
+
+  if (resource === 'audit' && m === 'GET') {
+    const q = await e.DB.prepare(
+      'SELECT * FROM ops_audit ORDER BY at DESC LIMIT 100',
+    ).all<Row>();
+    return Response.json({
+      entries: q.results.map((row) => ({
+        id: String(row.id),
+        at: Number(row.at),
+        actorEmail: String(row.actor_email),
+        action: String(row.action),
+        targetType: String(row.target_type),
+        targetId: row.target_id == null ? null : String(row.target_id),
+        summary: String(row.summary),
+      })),
+    });
+  }
+
   return null;
 }
 
@@ -1643,13 +2647,48 @@ const optionalText = (value: unknown) => value === null || value === undefined ?
 const optionalNumber = (value: unknown) => value === null || value === undefined ? null : Number(value);
 
 async function operationsDashboard(e: Env) {
-  const [users, devices, servers, nodes, deployments, catalog] = await Promise.all([
+  const week = now() + 7 * 86_400;
+  const [users, devices, servers, nodes, deployments, catalog, unusedHomes, unusedAccounts, bannedOpen, incomplete, renewing, usersWithoutHome] = await Promise.all([
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM users").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM devices").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_servers").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_logical_nodes").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_deployments").first<Row>(),
     e.DB.prepare('SELECT revision, updated_at FROM managed_exit_catalog WHERE singleton_id = 1').first<Row>(),
+    e.DB.prepare(
+      `SELECT COUNT(*) total FROM home_exits
+       WHERE status = 'active' AND kind = 'socks5'
+         AND id NOT IN (SELECT home_exit_id FROM user_home_bindings)`,
+    ).first<Row>(),
+    e.DB.prepare("SELECT COUNT(*) total FROM product_accounts WHERE status = 'pooled'").first<Row>(),
+    e.DB.prepare(
+      `SELECT COUNT(DISTINCT product_accounts.user_id) total
+       FROM product_accounts
+       WHERE product_accounts.status = 'banned' AND product_accounts.user_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM product_accounts live
+           WHERE live.user_id = product_accounts.user_id AND live.status = 'assigned'
+         )`,
+    ).first<Row>(),
+    e.DB.prepare(
+      `SELECT COUNT(*) total FROM users
+       WHERE status = 'active'
+         AND NOT EXISTS (SELECT 1 FROM product_accounts WHERE user_id = users.id AND status = 'assigned')`,
+    ).first<Row>(),
+    e.DB.prepare(
+      `SELECT COUNT(*) total FROM ops_node_profiles
+       WHERE status = 'active' AND renews_at IS NOT NULL AND renews_at <= ?`,
+    ).bind(week).first<Row>(),
+    e.DB.prepare(
+      `SELECT COUNT(*) total FROM users
+       WHERE status = 'active'
+         AND NOT EXISTS (
+           SELECT 1 FROM user_home_bindings
+           JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+           WHERE user_home_bindings.user_id = users.id
+             AND home_exits.status = 'active'
+         )`,
+    ).first<Row>(),
   ]);
   const counts = (row: Row | null) => ({ total: Number(row?.total ?? 0), active: Number(row?.active ?? 0) });
   return {
@@ -1661,6 +2700,14 @@ async function operationsDashboard(e: Env) {
     catalog: catalog
       ? { revision: Number(catalog.revision), updatedAt: Number(catalog.updated_at) }
       : { revision: 0, updatedAt: null },
+    inventory: {
+      unusedHomes: Number(unusedHomes?.total ?? 0),
+      unusedAccounts: Number(unusedAccounts?.total ?? 0),
+      bannedUnreplaced: Number(bannedOpen?.total ?? 0),
+      incompleteUsers: Number(incomplete?.total ?? 0),
+      renewingSoon: Number(renewing?.total ?? 0),
+      usersWithoutHome: Number(usersWithoutHome?.total ?? 0),
+    },
   };
 }
 
@@ -1714,16 +2761,16 @@ async function operationsNodes(e: Env) {
   }));
 }
 
-// Live node telemetry aggregated from the two ops panels (Komari agent
-// inventory + mainland quality/block report). Both hostnames sit behind
-// Cloudflare Access; when OPS_ACCESS_CLIENT_ID/SECRET are configured the
-// Worker authenticates with that service token. Read-only GETs; the response
-// is sanitized to descriptive fields only and served behind the same
-// Cloudflare Access boundary as every other /api/v1/ops/ route.
+// Live node telemetry for the admin monitor. The collector on the ops VPS
+// pushes a sanitized snapshot (`PUT /api/v1/ops-ingest/snapshot`). Until that
+// row exists, /ops/live still falls back to the legacy Access-protected
+// hostnames so a half-cutover does not blank the console.
 const OPS_LIVE_SOURCES = {
   agents: 'https://ops.afk.ccwu.cc/api/nodes',
   quality: 'https://quality.afk.ccwu.cc/report.json',
 } as const;
+const OPS_LIVE_MAX_NODES = 64;
+const OPS_LIVE_TEXT_LIMIT = 12_000;
 
 async function opsLiveFetch(url: string, e: Env) {
   const headers: Record<string, string> = {
@@ -1745,58 +2792,191 @@ async function opsLiveFetch(url: string, e: Env) {
   return (await response.json()) as Record<string, any>;
 }
 
+function liveKeywordList(value: unknown, limit = 12): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+    .slice(0, limit)
+    .map((entry) => entry.slice(0, 40));
+}
+
+function liveProbeSummary(value: unknown): Row | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Row;
+  const summary: Row = {};
+  if (typeof raw.ok === 'boolean') summary.ok = raw.ok;
+  for (const key of ['success', 'fail', 'total'] as const) {
+    if (Number.isSafeInteger(raw[key]) && raw[key] >= 0) summary[key] = raw[key];
+  }
+  if (typeof raw.rate === 'number' && Number.isFinite(raw.rate)) summary.rate = raw.rate;
+  if (typeof raw.status === 'string' && raw.status) summary.status = raw.status.slice(0, 40);
+  if (typeof raw.source === 'string' && raw.source) summary.source = raw.source.slice(0, 80);
+  if (typeof raw.note === 'string' && raw.note) summary.note = raw.note.slice(0, 240);
+  if (raw.authoritative === true) summary.authoritative = true;
+  return Object.keys(summary).length ? summary : null;
+}
+
+function liveBoundedText(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  return value.length > OPS_LIVE_TEXT_LIMIT ? value.slice(0, OPS_LIVE_TEXT_LIMIT) : value;
+}
+
+function liveQualityNode(raw: unknown): Row | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const node = raw as Row;
+  const name = optionalText(node.name);
+  if (!name) return null;
+  const blockRaw = node.block && typeof node.block === 'object' && !Array.isArray(node.block)
+    ? node.block as Row
+    : null;
+  return {
+    name,
+    host: optionalText(node.host),
+    publicIp: optionalText(node.publicIp ?? node.public_ip),
+    ok: node.ok === true,
+    quality: optionalText(node.quality),
+    riskKeywords: liveKeywordList(node.riskKeywords ?? node.risk_keywords),
+    routeKeywords: liveKeywordList(node.routeKeywords ?? node.route_keywords),
+    block: blockRaw
+      ? {
+          status: optionalText(blockRaw.status),
+          label: optionalText(blockRaw.label),
+          rule: liveBoundedText(blockRaw.rule),
+          mainland: liveProbeSummary(blockRaw.mainland),
+          asiaEdge: liveProbeSummary(blockRaw.asiaEdge ?? blockRaw.asia_edge),
+          overseas: liveProbeSummary(blockRaw.overseas),
+        }
+      : null,
+    securityCheck: liveBoundedText(node.securityCheck ?? node.security_check),
+    backtrace: liveBoundedText(node.backtrace),
+  };
+}
+
+function liveQualityReport(value: unknown): { updatedAt: number | null; updatedAtIso: string | null; cnAgentsConfigured: number | null; nodes: Row[] } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Row;
+  const sourceNodes = Array.isArray(raw.nodes) ? raw.nodes : null;
+  if (!sourceNodes) return null;
+  const nodes = sourceNodes.slice(0, OPS_LIVE_MAX_NODES).map(liveQualityNode).filter((node): node is Row => node !== null);
+  return {
+    updatedAt: optionalNumber(raw.updatedAt ?? raw.updated_at),
+    updatedAtIso: optionalText(raw.updatedAtIso ?? raw.updated_at_iso),
+    cnAgentsConfigured: optionalNumber(raw.cnAgentsConfigured ?? raw.cn_agents_configured),
+    nodes,
+  };
+}
+
+function liveAgents(value: unknown): Row[] | null {
+  if (value === null || value === undefined) return null;
+  const rows = Array.isArray(value)
+    ? value
+    : (value && typeof value === 'object' && Array.isArray((value as Row).data) ? (value as Row).data : null);
+  if (!rows) return null;
+  return rows.slice(0, OPS_LIVE_MAX_NODES).map((raw: unknown) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const node = raw as Row;
+    const name = optionalText(node.name);
+    if (!name) return null;
+    return {
+      name,
+      os: optionalText(node.os),
+      arch: optionalText(node.arch),
+      cpuName: optionalText(node.cpuName ?? node.cpu_name),
+      cpu: optionalNumber(node.cpu ?? node.cpu_used ?? node.cpuUsed),
+      memTotal: optionalNumber(node.memTotal ?? node.mem_total),
+      memUsed: optionalNumber(node.memUsed ?? node.mem_used),
+      diskTotal: optionalNumber(node.diskTotal ?? node.disk_total),
+      diskUsed: optionalNumber(node.diskUsed ?? node.disk_used),
+      netIn: optionalNumber(node.netIn ?? node.net_in ?? node.net_in_transfer),
+      netOut: optionalNumber(node.netOut ?? node.net_out ?? node.net_out_transfer),
+      uptime: optionalNumber(node.uptime),
+    };
+  }).filter((node: Row | null): node is Row => node !== null);
+}
+
+async function storedLiveSnapshot(e: Env) {
+  try {
+    return await e.DB.prepare(
+      'SELECT quality_json, agents_json, quality_updated_at, agents_updated_at FROM operations_live_snapshot WHERE singleton_id = 1',
+    ).first<Row>();
+  } catch (error) {
+    // Migration 0022 may not have been applied yet; keep the legacy origin fetch.
+    if (String(error).includes('no such table')) return null;
+    throw error;
+  }
+}
+
+async function storeLiveSnapshot(e: Env, input: { quality?: ReturnType<typeof liveQualityReport>; agents?: Row[] }) {
+  const t = now();
+  const current = await storedLiveSnapshot(e);
+  const quality = input.quality === undefined
+    ? (current?.quality_json ? JSON.parse(String(current.quality_json)) : null)
+    : input.quality;
+  const agents = input.agents === undefined
+    ? (current?.agents_json ? JSON.parse(String(current.agents_json)) : null)
+    : input.agents;
+  const qualityUpdatedAt = input.quality === undefined
+    ? optionalNumber(current?.quality_updated_at)
+    : t;
+  const agentsUpdatedAt = input.agents === undefined
+    ? optionalNumber(current?.agents_updated_at)
+    : t;
+  await e.DB.prepare(
+    `INSERT INTO operations_live_snapshot(
+       singleton_id, quality_json, agents_json, quality_updated_at, agents_updated_at, updated_at
+     ) VALUES(1, ?, ?, ?, ?, ?)
+     ON CONFLICT(singleton_id) DO UPDATE SET
+       quality_json = excluded.quality_json,
+       agents_json = excluded.agents_json,
+       quality_updated_at = excluded.quality_updated_at,
+       agents_updated_at = excluded.agents_updated_at,
+       updated_at = excluded.updated_at`,
+  ).bind(
+    quality ? JSON.stringify(quality) : null,
+    agents ? JSON.stringify(agents) : null,
+    qualityUpdatedAt,
+    agentsUpdatedAt,
+    t,
+  ).run();
+  return { qualityUpdatedAt, agentsUpdatedAt, updatedAt: t };
+}
+
 async function operationsLive(e: Env) {
-  const [agents, quality] = await Promise.allSettled([
-    opsLiveFetch(OPS_LIVE_SOURCES.agents, e),
-    opsLiveFetch(OPS_LIVE_SOURCES.quality, e),
-  ]);
-  const errorMessage = (result: PromiseSettledResult<unknown>) =>
-    result.status === 'rejected'
-      ? String(result.reason instanceof Error ? result.reason.message : result.reason)
-      : null;
-
-  const agentRows = agents.status === 'fulfilled' && Array.isArray(agents.value?.data)
-    ? agents.value.data
-        .map((n: any) => ({
-          name: optionalText(n.name),
-          os: optionalText(n.os),
-          arch: optionalText(n.arch),
-          cpuName: optionalText(n.cpu_name),
-          memTotal: optionalNumber(n.mem_total),
-          diskTotal: optionalNumber(n.disk_total),
-        }))
-        .filter((n: { name: string | null }) => n.name)
+  const stored = await storedLiveSnapshot(e);
+  let quality = stored?.quality_json
+    ? liveQualityReport(JSON.parse(String(stored.quality_json)))
     : null;
-
-  const report = quality.status === 'fulfilled' ? quality.value : null;
-  const qualityNodes = report && Array.isArray(report.nodes)
-    ? report.nodes
-        .map((n: any) => ({
-          name: optionalText(n.name),
-          host: optionalText(n.host),
-          ok: n.ok === true,
-          quality: optionalText(n.quality),
-          riskKeywords: Array.isArray(n.risk_keywords) ? n.risk_keywords.map(String) : [],
-          routeKeywords: Array.isArray(n.route_keywords) ? n.route_keywords.map(String) : [],
-          block: n.block && typeof n.block === 'object'
-            ? { status: optionalText(n.block.status), label: optionalText(n.block.label) }
-            : null,
-        }))
-        .filter((n: { name: string | null }) => n.name)
+  let agents = stored?.agents_json
+    ? liveAgents(JSON.parse(String(stored.agents_json)))
     : null;
+  let qualityError: string | null = quality ? null : 'no quality snapshot';
+  let agentsError: string | null = agents ? null : 'no agent snapshot';
+
+  if (!quality || !agents) {
+    const [fetchedAgents, fetchedQuality] = await Promise.allSettled([
+      agents ? Promise.resolve(null) : opsLiveFetch(OPS_LIVE_SOURCES.agents, e),
+      quality ? Promise.resolve(null) : opsLiveFetch(OPS_LIVE_SOURCES.quality, e),
+    ]);
+    if (!agents && fetchedAgents.status === 'fulfilled') {
+      agents = liveAgents(fetchedAgents.value);
+      agentsError = agents ? null : 'no agent data';
+    } else if (!agents && fetchedAgents.status === 'rejected') {
+      agentsError = String(fetchedAgents.reason instanceof Error ? fetchedAgents.reason.message : fetchedAgents.reason);
+    }
+    if (!quality && fetchedQuality.status === 'fulfilled') {
+      quality = liveQualityReport(fetchedQuality.value);
+      qualityError = quality ? null : 'no quality data';
+    } else if (!quality && fetchedQuality.status === 'rejected') {
+      qualityError = String(fetchedQuality.reason instanceof Error ? fetchedQuality.reason.message : fetchedQuality.reason);
+    }
+  }
 
   return {
     fetchedAt: now(),
-    agents: agentRows,
-    agentsError: agentRows === null ? errorMessage(agents) ?? 'no agent data' : null,
-    quality: report
-      ? {
-          updatedAt: optionalNumber(report.updated_at),
-          updatedAtIso: optionalText(report.updated_at_iso),
-          nodes: qualityNodes,
-        }
-      : null,
-    qualityError: qualityNodes === null ? errorMessage(quality) ?? 'no quality data' : null,
+    agents,
+    agentsError,
+    quality,
+    qualityError,
   };
 }
 
@@ -1891,24 +3071,57 @@ async function operationsUsers(e: Env) {
      ORDER BY users.created_at DESC
      LIMIT 2000`,
   ).all<Row>();
-  return rows.results.map((row) => ({
-    ...publicUser(row),
-    homeBinding: row.home_exit_id
-      ? {
-        homeExitId: String(row.home_exit_id),
-        proxyName: String(row.home_proxy_name),
-        displayName: String(row.home_display_name),
-        egressIpv4: row.home_egress_ipv4 == null ? undefined : String(row.home_egress_ipv4),
-        kind: row.home_kind == null ? undefined : String(row.home_kind),
-        socks5Host: row.home_socks5_host == null ? undefined : String(row.home_socks5_host),
-        socks5Port: row.home_socks5_port == null ? undefined : Number(row.home_socks5_port),
-        defaultProxyName: row.home_default_proxy_name == null || row.home_default_proxy_name === ''
-          ? undefined
-          : String(row.home_default_proxy_name),
-        status: String(row.home_status),
-      }
-      : null,
-  }));
+  const userIds = rows.results.map((row) => String(row.id));
+  const productByUser = new Map<string, Row>();
+  const replaceByUser = new Map<string, number>();
+  if (userIds.length > 0) {
+    const placeholders = userIds.map(() => '?').join(',');
+    const assigned = await e.DB.prepare(
+      `SELECT product_accounts.*, users.id AS owner_id
+       FROM product_accounts
+       JOIN users ON users.id = product_accounts.user_id
+       WHERE product_accounts.status = 'assigned' AND product_accounts.user_id IN (${placeholders})`,
+    ).bind(...userIds).all<Row>();
+    for (const account of assigned.results) {
+      productByUser.set(String(account.user_id), account);
+    }
+    const replaced = await e.DB.prepare(
+      `SELECT user_id, COUNT(*) total FROM product_account_events
+       WHERE type = 'replaced' AND user_id IN (${placeholders})
+       GROUP BY user_id`,
+    ).bind(...userIds).all<Row>();
+    for (const row of replaced.results) {
+      replaceByUser.set(String(row.user_id), Number(row.total));
+    }
+  }
+  return rows.results.map((row) => {
+    const account = productByUser.get(String(row.id));
+    return {
+      ...publicUser(row),
+      homeBinding: row.home_exit_id
+        ? {
+          homeExitId: String(row.home_exit_id),
+          proxyName: String(row.home_proxy_name),
+          displayName: String(row.home_display_name),
+          egressIpv4: row.home_egress_ipv4 == null ? undefined : String(row.home_egress_ipv4),
+          kind: row.home_kind == null ? undefined : String(row.home_kind),
+          socks5Host: row.home_socks5_host == null ? undefined : String(row.home_socks5_host),
+          socks5Port: row.home_socks5_port == null ? undefined : Number(row.home_socks5_port),
+          defaultProxyName: row.home_default_proxy_name == null || row.home_default_proxy_name === ''
+            ? undefined
+            : String(row.home_default_proxy_name),
+          status: String(row.home_status),
+        }
+        : null,
+      product: {
+        accountRef: account ? String(account.account_ref) : null,
+        status: account ? String(account.status) : null,
+        openedAt: account && account.opened_at != null ? Number(account.opened_at) : null,
+        replaceCount: replaceByUser.get(String(row.id)) ?? 0,
+        incomplete: !account,
+      },
+    };
+  });
 }
 
 async function operationsCatalogRevisions(e: Env) {
@@ -1953,9 +3166,12 @@ const publicUser = (u: Row) => ({
   email: u.email,
   name: u.name ?? undefined,
   plan: u.plan ?? undefined,
+  notes: u.notes == null || u.notes === '' ? undefined : String(u.notes),
+  contact: u.contact == null || u.contact === '' ? undefined : String(u.contact),
+  firstEntitledAt: u.first_entitled_at == null ? undefined : Number(u.first_entitled_at),
   deviceLimit: Number(u.device_limit ?? 2),
   quotaBytes: u.quota_bytes,
-  usageBytes: u.usage_bytes,
+  usageBytes: Number(u.usage_bytes ?? 0),
   expiresAt: u.expires_at ?? undefined,
   suspended: u.status !== 'active',
   status: u.status,
@@ -4523,10 +5739,85 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json({ device });
   }
 
+  if (p === '/api/v1/ops-ingest/home-targets' && m === 'GET') {
+    if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
+      throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
+    }
+    await privileged(req, e.OPS_COLLECTOR_TOKEN);
+    const q = await e.DB.prepare(
+      `SELECT id, socks5_host, socks5_port FROM home_exits
+       WHERE kind = 'socks5' AND status = 'active' AND socks5_host IS NOT NULL AND socks5_port IS NOT NULL
+       LIMIT 200`,
+    ).all<Row>();
+    return Response.json({
+      targets: q.results.map((row) => ({
+        id: String(row.id),
+        host: String(row.socks5_host),
+        port: Number(row.socks5_port),
+      })),
+    });
+  }
+
+  if (p === '/api/v1/ops-ingest/snapshot' && m === 'PUT') {
+    if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
+      throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
+    }
+    await privileged(req, e.OPS_COLLECTOR_TOKEN);
+    const payload = await body(req, 768 * 1024);
+    rejectUnexpectedKeys(payload, ['report', 'agents', 'homeProbes']);
+    if (payload.report === undefined && payload.agents === undefined && payload.homeProbes === undefined) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'report, agents or homeProbes is required');
+    }
+    const quality = payload.report === undefined ? undefined : liveQualityReport(payload.report);
+    if (payload.report !== undefined && !quality) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid quality report');
+    }
+    const agents = payload.agents === undefined ? undefined : liveAgents(payload.agents);
+    if (payload.agents !== undefined && !agents) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid agent inventory');
+    }
+    let probesUpdated = 0;
+    if (payload.homeProbes !== undefined) {
+      if (!Array.isArray(payload.homeProbes) || payload.homeProbes.length > 200) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid homeProbes');
+      }
+      const t = now();
+      for (const raw of payload.homeProbes) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid homeProbes');
+        }
+        const probe = raw as Row;
+        const probeId = str(probe.id, 'id', 1, 100);
+        const status = str(probe.status, 'status', 1, 20);
+        if (status !== 'alive' && status !== 'dead') {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid home probe status');
+        }
+        const updated = await e.DB.prepare(
+          `UPDATE home_exits SET last_probed_at = ?, probe_status = ?, updated_at = updated_at
+           WHERE id = ? AND kind = 'socks5'`,
+        ).bind(t, status, probeId).run();
+        if (updated.meta.changes) probesUpdated += 1;
+      }
+    }
+    const stored = payload.report === undefined && payload.agents === undefined
+      ? { qualityUpdatedAt: null, agentsUpdatedAt: null, updatedAt: now() }
+      : await storeLiveSnapshot(e, {
+        quality: quality ?? undefined,
+        agents: agents ?? undefined,
+      });
+    return Response.json({
+      ok: true,
+      qualityNodes: quality?.nodes.length ?? null,
+      agentCount: agents?.length ?? null,
+      homeProbesUpdated: probesUpdated,
+      ...stored,
+    });
+  }
+
   if (p.startsWith('/api/v1/ops/')) {
-    await operationsAdmin(req, e);
+    const actor = await operationsAdmin(req, e);
     const shared = await sharedAdministrativeResource(
-      req, e, p.slice('/api/v1/ops/'.length), m,
+      req, e, p.slice('/api/v1/ops/'.length), m, actor.email,
     );
     if (shared) return shared;
 
@@ -4560,10 +5851,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             createdAt: Number(entry.created_at),
           })),
         });
-      }
-      if (p === '/api/v1/ops/exit-catalog') {
-        // Ops console receives the full plaintext catalog, unfiltered.
-        return Response.json(await publicManagedCatalog(e));
       }
       if (p === '/api/v1/ops/live') {
         return Response.json({ live: await operationsLive(e) });
@@ -4608,6 +5895,32 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           `SELECT reference_code, received_at, client_version, os_version, report_json
            FROM diagnostics_reports WHERE user_id = ? ORDER BY received_at DESC LIMIT 20`,
         ).bind(mt[1]).all<Row>();
+        const accounts = await e.DB.prepare(
+          'SELECT * FROM product_accounts WHERE user_id = ? ORDER BY created_at DESC',
+        ).bind(mt[1]).all<Row>();
+        const events = await e.DB.prepare(
+          'SELECT * FROM product_account_events WHERE user_id = ? ORDER BY at DESC LIMIT 50',
+        ).bind(mt[1]).all<Row>();
+        const activity = await e.DB.prepare(
+          `SELECT received_at, client_version, os_version, payload_json
+           FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 1`,
+        ).bind(mt[1]).first<Row>();
+        let heartbeat: Row | null = null;
+        if (activity) {
+          let payload: Row = {};
+          try {
+            payload = JSON.parse(String(activity.payload_json));
+          } catch {
+            payload = {};
+          }
+          heartbeat = {
+            lastSeenAt: Number(activity.received_at),
+            clientVersion: String(activity.client_version),
+            osVersion: String(activity.os_version),
+            selectedServer: typeof payload.selectedServer === 'string' ? payload.selectedServer : null,
+            uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
+          };
+        }
         return Response.json({
           devices: devices.results.map((d) => ({
             id: String(d.id),
@@ -4623,6 +5936,24 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             osVersion: String(r.os_version),
             reportJson: String(r.report_json),
           })),
+          product: {
+            accounts: accounts.results.map(publicProductAccount),
+            events: events.results.map(publicProductEvent),
+            replaceCount: await replaceCountForUser(e, mt[1]),
+          },
+          heartbeat,
+        });
+      }
+      mt = p.match(/^\/api\/v1\/ops\/incidents\/node\/([^/]+)$/);
+      if (mt) {
+        const name = decodeURIComponent(mt[1]);
+        if (!name || name.length > 200) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid node name');
+        const activity = await operationsActivity(e);
+        const affected = activity.users.filter((user) => user.selectedServer === name);
+        return Response.json({
+          node: name,
+          onlineWindowSeconds: activity.onlineWindowSeconds,
+          affected,
         });
       }
       throw new ApiError(404, 'NOT_FOUND', 'Route not found');
@@ -4633,6 +5964,93 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const b = await body(req, 4 * 1024);
       await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(email(b.email)).run();
       return new Response(null, { status: 204 });
+    }
+    if (p === '/api/v1/ops/users/onboard' && m === 'POST') {
+      const b = await body(req, 16 * 1024);
+      rejectUnexpectedKeys(b, [
+        'email', 'line', 'homeExitId', 'accountRef', 'productAccountId', 'openedAt', 'notes', 'contact',
+      ]);
+      const address = email(b.email);
+      const createdAt = now();
+      await e.DB.prepare(
+        'INSERT OR IGNORE INTO signup_allowlist(email, created_at) VALUES(?, ?)',
+      ).bind(address, createdAt).run();
+      const user = await e.DB.prepare('SELECT * FROM users WHERE email = ?').bind(address).first<Row>();
+      const incomplete: string[] = [];
+      if (!user) incomplete.push('user_not_registered');
+      let binding = null;
+      let account = null;
+      if (user) {
+        if (b.notes !== undefined || b.contact !== undefined) {
+          await e.DB.prepare(
+            `UPDATE users SET
+               notes = CASE WHEN ? THEN ? ELSE notes END,
+               contact = CASE WHEN ? THEN ? ELSE contact END,
+               updated_at = ?
+             WHERE id = ?`,
+          ).bind(
+            b.notes !== undefined, optionalNotes(b.notes),
+            b.contact !== undefined, optionalNotes(b.contact, 'contact', 200),
+            now(), user.id,
+          ).run();
+        }
+        if (b.line !== undefined && b.line !== null && b.line !== '') {
+          const assigned = await sharedAdministrativeResource(
+            new Request(req.url, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                userId: user.id,
+                line: b.line,
+                replace: true,
+              }),
+            }),
+            e, 'home-exits/assign', 'POST', actor.email,
+          );
+          if (!assigned || !assigned.ok) {
+            throw new ApiError(assigned?.status ?? 400, 'HOME_ASSIGN_FAILED', 'Could not assign the pasted home line');
+          }
+        } else if (b.homeExitId) {
+          const homeExitId = str(b.homeExitId, 'homeExitId', 1, 100);
+          const existing = await loadHomeBinding(e, String(user.id));
+          await upsertHomeBinding(
+            e, String(user.id), homeExitId,
+            existing?.default_proxy_name == null ? null : String(existing.default_proxy_name),
+          );
+          await bumpCatalogRevision(e);
+          await enqueueRefreshCatalogForUser(e, String(user.id));
+        }
+        binding = await loadHomeBinding(e, String(user.id));
+        if (b.accountRef) {
+          account = await createAssignedProductAccount(
+            e, String(user.id), accountRefField(b.accountRef),
+            optionalUnix(b.openedAt, 'openedAt') ?? now(),
+            optionalNotes(b.notes), actor.email,
+          );
+        } else if (b.productAccountId) {
+          const pooled = await e.DB.prepare(
+            'SELECT account_ref FROM product_accounts WHERE id = ?',
+          ).bind(str(b.productAccountId, 'productAccountId', 1, 100)).first<Row>();
+          if (!pooled) throw new ApiError(404, 'NOT_FOUND', 'Product account not found');
+          account = await createAssignedProductAccount(
+            e, String(user.id), String(pooled.account_ref),
+            optionalUnix(b.openedAt, 'openedAt') ?? now(),
+            optionalNotes(b.notes), actor.email,
+          );
+        } else {
+          account = await assignedProductForUser(e, String(user.id));
+        }
+        if (!account) incomplete.push('claude');
+      }
+      await writeOpsAudit(e, actor.email, 'user.onboard', 'user', user ? String(user.id) : null, address);
+      return Response.json({
+        email: address,
+        userId: user ? String(user.id) : null,
+        allowlisted: true,
+        binding: binding ? publicHomeBinding(binding) : null,
+        account: account ? publicProductAccount(account) : null,
+        incomplete,
+      }, { status: user && incomplete.length === 0 ? 200 : 202 });
     }
     mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)$/);
     if (mt && m === 'PATCH') {
@@ -4649,8 +6067,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       ) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
       }
-      if (status === undefined && expiresAt === undefined) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'status or expiresAt is required');
+      if (
+        status === undefined && expiresAt === undefined
+        && b.notes === undefined && b.contact === undefined && b.plan === undefined
+      ) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact or plan is required');
       }
       if (status === 'active') {
         const residual = await e.DB.prepare(
@@ -4671,16 +6092,28 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           throw new ApiError(409, 'REVOCATION_PENDING', 'Wait for tailnet device revocation before re-enabling this user');
         }
       }
+      if (b.plan !== undefined && b.plan !== null && b.plan !== '' && b.plan !== PRODUCT_CLAUDE) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid plan');
+      }
       const updated = await e.DB.prepare(
         `UPDATE users SET
            status = COALESCE(?, status),
            expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           notes = CASE WHEN ? THEN ? ELSE notes END,
+           contact = CASE WHEN ? THEN ? ELSE contact END,
+           plan = CASE WHEN ? THEN ? ELSE plan END,
            updated_at = ?
          WHERE id = ?`,
       ).bind(
         status ?? null,
         expiresAt !== undefined,
         expiresAt ?? null,
+        b.notes !== undefined,
+        b.notes === undefined ? null : optionalNotes(b.notes),
+        b.contact !== undefined,
+        b.contact === undefined ? null : optionalNotes(b.contact, 'contact', 200),
+        b.plan !== undefined,
+        b.plan === undefined || b.plan === null || b.plan === '' ? null : PRODUCT_CLAUDE,
         now(),
         mt[1],
       ).run();
@@ -4698,7 +6131,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   if (p.startsWith('/api/v1/admin/')) {
     await privileged(req, e.ADMIN_API_TOKEN);
     const shared = await sharedAdministrativeResource(
-      req, e, p.slice('/api/v1/admin/'.length), m,
+      req, e, p.slice('/api/v1/admin/'.length), m, 'token-admin',
     );
     if (shared) return shared;
     if (p === '/api/v1/admin/routing-research/summary' && m === 'GET') {
@@ -4868,33 +6301,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         })),
       });
     }
-    if (p === '/api/v1/admin/device-actions' && m === 'POST') {
-      const b = await body(req, 8 * 1024);
-      rejectUnexpectedKeys(b, ['deviceId', 'action', 'ttlSeconds']);
-      const deviceId = str(b.deviceId, 'deviceId', 1, 200);
-      const action = fixedAction(b.action);
-      const ttl = b.ttlSeconds ?? 300;
-      if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 3600) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid ttlSeconds');
-      const device = await e.DB.prepare("SELECT * FROM devices WHERE id = ? AND status != 'revoked'").bind(deviceId).first<Row>();
-      if (!device) throw new ApiError(404, 'NOT_FOUND', 'Active device not found');
-      const t = now();
-      const commandId = id();
-      await e.DB.prepare(
-        'INSERT INTO device_actions(id,user_id,device_id,action,status,created_at,expires_at) VALUES(?,?,?,?,\'pending\',?,?)',
-      ).bind(commandId, device.user_id, device.id, action, t, t + ttl).run();
-      const row = await e.DB.prepare('SELECT * FROM device_actions WHERE id = ?').bind(commandId).first<Row>();
-      return Response.json({ action: publicAction(row!) }, { status: 201 });
-    }
-    if (p === '/api/v1/admin/device-actions' && m === 'GET') {
-      const t = now();
-      await e.DB.prepare("UPDATE device_actions SET status = 'expired' WHERE status IN ('pending','delivered') AND expires_at <= ?").bind(t).run();
-      const deviceId = url.searchParams.get('deviceId');
-      if (deviceId !== null && (deviceId.length < 1 || deviceId.length > 200)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid deviceId');
-      const q = deviceId
-        ? await e.DB.prepare('SELECT * FROM device_actions WHERE device_id = ? ORDER BY created_at DESC LIMIT 100').bind(deviceId).all<Row>()
-        : await e.DB.prepare('SELECT * FROM device_actions ORDER BY created_at DESC LIMIT 100').all<Row>();
-      return Response.json({ actions: q.results.map(publicAction) });
-    }
+
     mt = p.match(/^\/api\/v1\/admin\/diagnostics\/reports\/([^/]+)$/);
     if (mt && m === 'GET') {
       const row = await e.DB.prepare(
@@ -4966,150 +6373,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           'cache-control': 'no-store',
         },
       });
-    }
-    if (p === '/api/v1/admin/traffic-policy' && m === 'GET') {
-      return Response.json(await publicTrafficPolicy(e));
-    }
-    if (p === '/api/v1/admin/traffic-policy' && m === 'PUT') {
-      const b = await body(req, 64 * 1024);
-      rejectUnexpectedKeys(b, ['policy', 'expectedRevision', 'signature', 'dryRun']);
-      if (b.signature !== undefined && (typeof b.signature !== 'string' || !b.signature.length || b.signature.length > 128)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid signature');
-      }
-      if (b.dryRun !== undefined && typeof b.dryRun !== 'boolean') {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid dryRun');
-      }
-      const signature = b.signature as string | undefined;
-      const dryRun = b.dryRun === true;
-      // A dry run exists because a signature has to cover the document this
-      // endpoint will serve, byte for byte, and that document is this function's
-      // output — not the operator's input. Rather than reimplement
-      // canonicalisation in the signing tool and let the two drift, the tool asks
-      // for the canonical bytes, signs those, and sends them back. The real PUT
-      // re-canonicalises and re-verifies, so if anything differed between the two
-      // calls the signature fails and nothing is stored.
-      //
-      // Canonicalised as trusted: an operator asking what they would be signing
-      // is by definition about to sign it. Nothing is stored on this path.
-      const policy = canonicalTrafficPolicy(b.policy, dryRun || Boolean(signature));
-      const json = JSON.stringify(policy);
-      if (signature) {
-        const publicKey = e.TRAFFIC_POLICY_PUBLIC_KEY;
-        if (!publicKey) {
-          throw new ApiError(409, 'TRAFFIC_POLICY_KEY_UNCONFIGURED', 'This deployment has no policy signing public key, so a signed policy cannot be accepted');
-        }
-        if (!await verifyTrafficPolicySignature(json, signature, publicKey)) {
-          throw new ApiError(400, 'TRAFFIC_POLICY_SIGNATURE_INVALID', 'The signature does not cover the canonical policy this would serve');
-        }
-      }
-      if (dryRun) {
-        // Whether publishing this document actually needs a signature: if the
-        // allowlists already cover every host in it, they do not, and the
-        // operator can skip signing entirely.
-        let signatureRequired = false;
-        try {
-          canonicalTrafficPolicy(b.policy, false);
-        } catch {
-          signatureRequired = true;
-        }
-        return Response.json({
-          dryRun: true,
-          json,
-          sha256: await sha256(json),
-          signatureRequired,
-          signatureContext: TRAFFIC_POLICY_SIGNATURE_CONTEXT,
-        });
-      }
-      const expectedRevision = b.expectedRevision;
-      if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
-      }
-      const current = await e.DB.prepare(
-        'SELECT revision FROM managed_traffic_policy WHERE singleton_id = 1',
-      ).first<Row>();
-      const currentRevision = Number(current?.revision ?? 0);
-      if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
-        throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
-      }
-      const revision = currentRevision + 1;
-      const encrypted = await encryptTrafficPolicy(json, requiredCatalogKey(e));
-      const digest = await sha256(json);
-      const t = now();
-      // `signature` is written on both paths, including as NULL. Leaving a
-      // previous signature in place while replacing the document it covers would
-      // ship bytes and a signature that disagree, and every client that verifies
-      // would reject the whole policy — an unsigned republish must clear it.
-      const storedSignature = signature ?? null;
-      const changed = current
-        ? await e.DB.prepare(
-          `UPDATE managed_traffic_policy
-           SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?, signature = ?
-           WHERE singleton_id = 1 AND revision = ?`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature, currentRevision).run()
-        : await e.DB.prepare(
-          `INSERT OR IGNORE INTO managed_traffic_policy(
-             singleton_id, revision, ciphertext, nonce, content_sha256, updated_at, signature
-           ) VALUES(1, ?, ?, ?, ?, ?, ?)`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t, storedSignature).run();
-      if (!changed.meta.changes) {
-        throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
-      }
-      return Response.json({
-        revision, json, sha256: digest, updatedAt: t,
-        ...(signature ? { signature } : {}),
-      });
-    }
-    if (p === '/api/v1/admin/exit-catalog' && m === 'GET') {
-      // Admin always receives the full encrypted catalog authority, unfiltered.
-      return Response.json(await publicManagedCatalog(e));
-    }
-    if (p === '/api/v1/admin/exit-catalog' && m === 'PUT') {
-      const b = await body(req, 2 * 1024 * 1024);
-      rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
-      const yaml = managedCatalogYAML(b.yaml);
-      const expectedRevision = b.expectedRevision;
-      if (
-        expectedRevision !== undefined &&
-        (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
-      ) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
-      }
-      const current = await e.DB.prepare(
-        'SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1',
-      ).first<Row>();
-      const currentRevision = Number(current?.revision ?? 0);
-      if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
-        throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; reload before replacing it');
-      }
-      const revision = currentRevision + 1;
-      const encrypted = await encryptCatalog(yaml, requiredCatalogKey(e));
-      const digest = await sha256(yaml);
-      const t = now();
-      let changed: D1Result;
-      if (current) {
-        changed = await e.DB.prepare(
-          `UPDATE managed_exit_catalog
-           SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
-           WHERE singleton_id = 1 AND revision = ?`,
-        ).bind(
-          revision,
-          encrypted.ciphertext,
-          encrypted.nonce,
-          digest,
-          t,
-          currentRevision,
-        ).run();
-      } else {
-        changed = await e.DB.prepare(
-          `INSERT OR IGNORE INTO managed_exit_catalog(
-             singleton_id, revision, ciphertext, nonce, content_sha256, updated_at
-           ) VALUES(1, ?, ?, ?, ?, ?)`,
-        ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, t).run();
-      }
-      if (!changed.meta.changes) {
-        throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; reload before replacing it');
-      }
-      return Response.json({ revision, sha256: digest, updatedAt: t });
     }
     if (p === '/api/v1/admin/signup-allowlist' && m === 'GET') {
       const q = await e.DB.prepare(
@@ -5224,22 +6487,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
       await enforceUser(e, mt[1]);
       return Response.json({ ok: true });
-    }
-    if (p === '/api/v1/admin/devices' && m === 'GET') {
-      const q = await e.DB.prepare(
-        'SELECT devices.*, users.email FROM devices JOIN users ON users.id = devices.user_id ORDER BY devices.created_at DESC',
-      ).all<Row>();
-      return Response.json({
-        devices: q.results.map((x) => ({ ...publicDevice(x), userId: x.user_id, email: x.email })),
-      });
-    }
-    mt = p.match(/^\/api\/v1\/admin\/devices\/([^/]+)$/);
-    if (mt && m === 'DELETE') {
-      const d = await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(mt[1]).first<Row>();
-      if (!d) throw new ApiError(404, 'NOT_FOUND', 'Device not found');
-      await revokeDevice(e, d);
-      await processRevocations(e);
-      return new Response(null, { status: 204 });
     }
   }
 
@@ -5456,11 +6703,10 @@ export default {
     const secure = (r: Response, includeCors = true) => {
       const h = new Headers(r.headers);
       const isOpsUi = path === '/ops' || path.startsWith('/ops/');
-      // Ops admin UI may load Inter from Google Fonts (shadcn-admin look).
       h.set(
         'content-security-policy',
         isOpsUi
-          ? "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:"
+          ? "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'"
           : "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'none'; object-src 'none'; script-src 'self'; style-src 'self'",
       );
       h.set('permissions-policy', 'camera=(), geolocation=(), microphone=()');
@@ -5525,6 +6771,17 @@ export default {
           ? new Request(new URL('/ops/', req.url), req)
           : req;
         return secure(await e.ASSETS.fetch(assetRequest));
+      }
+      if (
+        path === '/' ||
+        path === '/index.html' ||
+        path === '/admin.js' ||
+        path === '/style.css'
+      ) {
+        return secure(Response.json(
+          { error: { code: 'NOT_FOUND', message: 'This host is the Tono API' } },
+          { status: 404 },
+        ), false);
       }
       return secure(
         path.startsWith('/api/')

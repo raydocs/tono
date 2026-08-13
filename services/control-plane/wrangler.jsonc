@@ -26,6 +26,8 @@
       "RESEND_API_KEY",
       "CATALOG_ENCRYPTION_KEY"
     ]
+    // Optional: OPS_COLLECTOR_TOKEN — VPS collector PUT /api/v1/ops-ingest/snapshot.
+    // Unset keeps /ops/live on the legacy ops/quality host fetch.
   },
   "d1_databases": [{
     "binding": "DB", "database_name": "tono-control-plane",

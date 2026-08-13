@@ -13,13 +13,13 @@ import { ConnectPill } from './ConnectPill'
 // No resources loaded: t() returns the key, which is what we assert on.
 void i18n.use(initReactI18next).init({ resources: {}, lng: 'en' })
 
-const renderPill = (uiState: TonoUiState, stageLabel?: string | null) => {
+const renderPill = (uiState: TonoUiState, stage?: string | null) => {
   const onConnect = vi.fn()
   const onDisconnect = vi.fn()
   render(
     <ConnectPill
       uiState={uiState}
-      stageLabel={stageLabel}
+      stage={stage}
       onConnect={onConnect}
       onDisconnect={onDisconnect}
     />,
@@ -44,14 +44,14 @@ describe('ConnectPill five states', () => {
     expect(onDisconnect).not.toHaveBeenCalled()
   })
 
-  it('connecting: title, backend stage label as subtitle, disabled', () => {
+  it('connecting: title, translated stage key as subtitle, disabled', () => {
     const { onConnect, onDisconnect } = renderPill(
       'connecting',
-      'Locking traffic…',
+      'lockingTraffic',
     )
 
     expect(screen.getByText('tono.pill.title.connecting')).toBeDefined()
-    expect(screen.getByText('Locking traffic…')).toBeDefined()
+    expect(screen.getByText('tono.progress.steps.lockingTraffic')).toBeDefined()
     expect((pillButton() as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.click(pillButton())

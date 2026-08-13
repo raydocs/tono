@@ -1,4 +1,6 @@
-export type ActivityRoute = 'proxied' | 'direct' | 'rejected' | 'local'
+export type ActivityRoute = 'proxied' | 'home' | 'direct' | 'rejected' | 'local'
+
+const HOME_CHAIN_HOPS = new Set(['Tono-Home-Residential', 'Tono-Claude-Home'])
 
 export interface ActivityRow {
   id: string
@@ -46,10 +48,67 @@ export const sanitizeActivityValue = (raw?: string) => {
   return limitText(value.trim(), 180)
 }
 
+/** Stable Activity group for native WeChat and its helpers. The UI translates this. */
+export const WECHAT_ACTIVITY_PROCESS = 'WeChat'
+
+const WECHAT_PROCESS_STEMS = new Set([
+  'wechat',
+  'weixin',
+  'xwechat',
+  'wechatappex',
+  'wechatplayer',
+  'weixinplay',
+  'wechatapp',
+  'weixinapp',
+  'wechatbrowser',
+  'wxplayer',
+  'wxocr',
+])
+
+const fileStem = (value: string) =>
+  (value.split(/[\\/]/).pop() || '')
+    .replace(/\.exe$/i, '')
+    .trim()
+    .toLowerCase()
+
+/** Native WeChat product processes, not WeCom / WeChat Work. */
+export const isWeChatActivityProcess = (process?: string, processPath?: string) => {
+  const stem = fileStem(process || processPath || '')
+  if (!stem) return false
+  if (
+    stem.includes('work') ||
+    stem.includes('wecom') ||
+    stem.includes('wxwork')
+  ) {
+    return false
+  }
+  if (
+    WECHAT_PROCESS_STEMS.has(stem) ||
+    stem.startsWith('wechat') ||
+    stem.startsWith('weixin') ||
+    stem.startsWith('xwechat') ||
+    stem.startsWith('wxplayer') ||
+    stem.startsWith('wxocr')
+  ) {
+    return true
+  }
+  const path = (processPath || '').replace(/\//g, '\\').toLowerCase()
+  return (
+    path.includes('\\tencent\\wechat\\') ||
+    path.includes('\\tencent\\weixin\\') ||
+    path.includes('\\tencent\\xwechat\\') ||
+    path.includes('\\wechatapp\\')
+  )
+}
+
 const processName = (metadata: IConnectionsItem['metadata']) => {
   const value = metadata.process || metadata.processPath || ''
+  const file = value.split(/[\\/]/).pop() || ''
+  if (isWeChatActivityProcess(metadata.process, metadata.processPath)) {
+    return WECHAT_ACTIVITY_PROCESS
+  }
   // A full executable path can expose the Windows account name and private directory names.
-  return limitText(value.split(/[\\/]/).pop() || '', 100)
+  return limitText(file, 100)
 }
 
 export const classifyActivityRoute = (
@@ -59,7 +118,8 @@ export const classifyActivityRoute = (
   // are user/catalog data and must not be interpreted as built-in route actions. The two
   // Tono direct groups (mirrors DIRECT_GROUP_NAME/WEB_DIRECT_GROUP_NAME in tono-core config.rs)
   // terminate on the physical interface — that IS a direct route, not a proxy hop.
-  const terminal = connection.chains[0]?.trim()
+  const hops = connection.chains.map((hop) => hop.trim())
+  const terminal = hops[0]
   if (terminal === 'REJECT' || terminal === 'REJECT-DROP') return 'rejected'
   if (
     terminal === 'DIRECT' ||
@@ -67,6 +127,9 @@ export const classifyActivityRoute = (
     terminal === 'Tono-China-Web-Direct'
   ) {
     return 'direct'
+  }
+  if (hops.some((hop) => HOME_CHAIN_HOPS.has(hop))) {
+    return 'home'
   }
   return 'proxied'
 }
@@ -99,6 +162,10 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     ? ('local' as const)
     : classifyActivityRoute(connection)
 
+  const originalProcess = limitText(
+    (metadata.process || metadata.processPath || '').split(/[\\/]/).pop() || '',
+    100,
+  )
   return {
     id: connection.id,
     process: process || '—',
@@ -106,6 +173,41 @@ export const toActivityRow = (connection: IConnectionsItem): ActivityRow => {
     protocol: protocol || '—',
     route,
     rule,
-    searchText: `${process} ${target} ${protocol} ${rule}`.toLowerCase(),
+    searchText:
+      `${process} ${originalProcess} wechat weixin 微信 ${target} ${protocol} ${rule}`.toLowerCase(),
   }
+}
+
+export interface ActivityAppRow {
+  process: string
+  total: number
+  direct: number
+  home: number
+  proxied: number
+  rejected: number
+  local: number
+  searchText: string
+}
+
+export const aggregateActivityApps = (rows: ActivityRow[]): ActivityAppRow[] => {
+  const byProcess = new Map<string, ActivityAppRow>()
+  for (const row of rows) {
+    const current = byProcess.get(row.process) ?? {
+      process: row.process,
+      total: 0,
+      direct: 0,
+      home: 0,
+      proxied: 0,
+      rejected: 0,
+      local: 0,
+      searchText: row.process.toLowerCase(),
+    }
+    current.total += 1
+    current[row.route] += 1
+    byProcess.set(row.process, current)
+  }
+  return [...byProcess.values()].sort((left, right) => {
+    if (right.total !== left.total) return right.total - left.total
+    return left.process.localeCompare(right.process)
+  })
 }

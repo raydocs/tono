@@ -1,6 +1,6 @@
 [package]
 name = "clash_verge_service_ipc"
-version = "2.6.6"
+version = "2.6.7"
 edition = "2024"
 authors = ["Tunglies"]
 license = "GPL-3.0"
@@ -140,6 +140,7 @@ platform_lib = { package = "libc", version = "0.2", optional = true }
 nix = { version = "0.31", features = ["user"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
+tono-authenticode = { path = "../crates/tono-authenticode" }
 platform_lib = { package = "windows-service", version = "0.8", optional = true }
 windows-sys = { version = "0.61.2", features = [
     "Wdk_Foundation",
@@ -147,6 +148,8 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_WinTrust",
+    "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Diagnostics_ToolHelp",

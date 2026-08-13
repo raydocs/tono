@@ -58,9 +58,11 @@ const ARCH_MAP = {
 // pnpm forwards a literal "--" separator on some shells (pwsh on Windows runners);
 // it is not a target triple.
 const cliArgs = process.argv.slice(2).filter((arg) => arg !== '--')
-const arg1 = cliArgs[0]
-const arg2 = cliArgs[1]
-const target = arg1 === '--force' || arg1 === '-f' ? arg2 : arg1
+const SKIP_WINDOWS_SERVICE = cliArgs.includes('--skip-windows-service')
+const target = cliArgs.find(
+  (arg) =>
+    arg !== '--force' && arg !== '-f' && arg !== '--skip-windows-service',
+)
 const { platform, arch } = target
   ? { platform: PLATFORM_MAP[target], arch: ARCH_MAP[target] }
   : process
@@ -717,6 +719,7 @@ const tasks = [
     name: 'service',
     func: resolveServiceBundle,
     retry: platform === 'win32' ? 1 : 5,
+    skipWindowsService: true,
   },
   { name: 'mmdb', func: resolveMmdb, retry: 5 },
   { name: 'geosite', func: resolveGeosite, retry: 5 },
@@ -752,6 +755,9 @@ async function runTask() {
   if (!task) return
   if (task.unixOnly && platform === 'win32') return runTask()
   if (task.skipWindows && platform === 'win32') return runTask()
+  if (task.skipWindowsService && platform === 'win32' && SKIP_WINDOWS_SERVICE) {
+    return runTask()
+  }
   if (task.winOnly && platform !== 'win32') return runTask()
   if (task.macosOnly && platform !== 'darwin') return runTask()
   if (task.linuxOnly && platform !== 'linux') return runTask()
@@ -783,7 +789,9 @@ async function assertWindowsPackagingConfig() {
   )
   const externalError = validateExternalBin(tauriConfig.bundle?.externalBin)
   if (externalError) throw new Error(externalError)
-  const resourcesError = validateResourcesWhitelist(tauriConfig.bundle?.resources)
+  const resourcesError = validateResourcesWhitelist(
+    tauriConfig.bundle?.resources,
+  )
   if (resourcesError) throw new Error(resourcesError)
 
   const alphaSidecar = path.join(
@@ -795,10 +803,31 @@ async function assertWindowsPackagingConfig() {
       `alpha sidecar exists on disk but is not in externalBin (will not be packaged): ${path.basename(alphaSidecar)}`,
     )
   }
-  log_success('Windows packaging config: stable-only Mihomo + resource whitelist')
+  log_success(
+    'Windows packaging config: stable-only Mihomo + resource whitelist',
+  )
+}
+
+async function writeCoreDigestPin() {
+  if (platform !== 'win32') return
+  const sidecar = path.join(SIDECAR_DIR, `verge-mihomo-${SIDECAR_HOST}.exe`)
+  if (!fs.existsSync(sidecar)) {
+    throw new Error(`cannot write core-sha256.txt: missing ${sidecar}`)
+  }
+  const digest = createHash('sha256')
+    .update(await fsp.readFile(sidecar))
+    .digest('hex')
+  await fsp.mkdir(RESOURCES_DIR, { recursive: true })
+  await fsp.writeFile(
+    path.join(RESOURCES_DIR, 'core-sha256.txt'),
+    `${digest}\n`,
+    'utf8',
+  )
+  log_success(`wrote resources/core-sha256.txt (${digest})`)
 }
 
 runTask()
+  .then(() => writeCoreDigestPin())
   .then(() => assertWindowsPackagingConfig())
   .catch((error) => {
     log_error(error.message || error)

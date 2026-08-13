@@ -18,6 +18,7 @@ thiserror = "2"
 rand = "0.9"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 # std has no safe API for the current process uid and this crate forbids
 # unsafe code; nix provides the safe getuid() wrapper used by the unix

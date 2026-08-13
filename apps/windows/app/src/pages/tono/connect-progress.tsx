@@ -21,6 +21,7 @@ import {
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
+import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 
 /**
@@ -30,18 +31,6 @@ import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
  * diagnostics. Visible while connecting / protectedOffline, or whenever an
  * uncleared failure record exists.
  */
-
-const STEP_LABEL_KEYS: Record<string, string> = {
-  preparing: 'tono.progress.steps.preparing',
-  preparingService: 'tono.progress.steps.preparingService',
-  startingKillSwitch: 'tono.progress.steps.startingKillSwitch',
-  startingTunnel: 'tono.progress.steps.startingTunnel',
-  lockingTraffic: 'tono.progress.steps.lockingTraffic',
-  applyingCloudPolicy: 'tono.progress.steps.applyingCloudPolicy',
-  securingDNS: 'tono.progress.steps.securingDNS',
-  checkingExit: 'tono.progress.steps.checkingExit',
-  verifyingTraffic: 'tono.progress.steps.verifyingTraffic',
-}
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -268,7 +257,7 @@ export const ConnectProgressCard = ({
       ? Math.max(0, Math.ceil((nextRetryAtMs - nowMs) / 1000))
       : null
   const failedStepLabel = progress?.failedStage
-    ? t(STEP_LABEL_KEYS[progress.failedStage] ?? 'tono.progress.unknownStage')
+    ? t(CONNECT_STAGE_LABEL_KEYS[progress.failedStage] ?? 'tono.progress.unknownStage')
     : null
 
   return (
@@ -363,7 +352,7 @@ export const ConnectProgressCard = ({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {t(STEP_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage')}
+                  {t(CONNECT_STAGE_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage')}
                 </span>
                 {(step.state === 'current' || step.state === 'failed') &&
                   step.elapsedMs != null && (

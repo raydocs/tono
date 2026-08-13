@@ -932,15 +932,21 @@ export interface TranslationResources {
         title: string
       }
       activity: {
+        appCount: string
+        apps: {
+          wechat: string
+        }
         closeAllFailed: string
         closeConnection: string
         closeFailed: string
         closingAll: string
         columns: {
+          count: string
           process: string
           protocol: string
           route: string
           rule: string
+          split: string
           target: string
         }
         connectionCount: string
@@ -949,6 +955,7 @@ export interface TranslationResources {
         filters: {
           all: string
           direct: string
+          home: string
           local: string
           proxied: string
           rejected: string
@@ -958,31 +965,46 @@ export interface TranslationResources {
         routeFilter: string
         routes: {
           direct: string
+          home: string
           local: string
           proxied: string
           rejected: string
         }
         search: string
+        splitHint: string
         subtitle: string
         title: string
+        view: string
+        views: {
+          apps: string
+          connections: string
+        }
       }
       dashboard: {
         catalogRequiresChoice: string
         connect: string
         connected: string
         connecting: string
+        directOn: string
+        directSkipped: string
         disconnecting: string
         errorRetry: string
         errors: {
+          coreMismatch: string
+          coreUnpinned: string
+          dnsPortBusy: string
           nodeUnreachable: string
           releaseReconciling: string
+          sendDiagnostics: string
           serviceBusy: string
           serviceTooOld: string
         }
         errorSwitchServer: string
         info: {
+          country: string
           dns: string
           download: string
+          operator: string
           protection: string
           upload: string
         }

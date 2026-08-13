@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useThemeMode } from '@/services/states'
 import type { TonoUiState } from '@/services/tono'
 
+import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
+
 import { TONO_COLORS, TONO_EASE, tonoText } from './theme'
 import { TonoLogo } from './TonoLogo'
 
@@ -79,15 +81,15 @@ const hex = (color: string, alpha: number) =>
 
 interface ConnectPillProps {
   uiState: TonoUiState
-  /** Backend stage text ("Locking traffic…") shown while connecting. */
-  stageLabel?: string | null
+  /** Connect FSM stage key (`startingKillSwitch`). Translated in the pill. */
+  stage?: string | null
   onConnect: () => void
   onDisconnect: () => void
 }
 
 export const ConnectPill = ({
   uiState,
-  stageLabel,
+  stage,
   onConnect,
   onDisconnect,
 }: ConnectPillProps) => {
@@ -95,10 +97,11 @@ export const ConnectPill = ({
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const spec = STATE_SPECS[uiState]
+  const stageKey = stage ? CONNECT_STAGE_LABEL_KEYS[stage] : undefined
 
   const subtitle =
     uiState === 'connecting'
-      ? (stageLabel ?? t('tono.pill.subtitle.starting'))
+      ? t(stageKey ?? 'tono.pill.subtitle.starting')
       : uiState === 'notConnected'
         ? t('tono.pill.subtitle.tapToConnect')
         : uiState === 'connected'

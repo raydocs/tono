@@ -3,7 +3,7 @@ pub use command::IpcCommand;
 
 pub mod structure;
 pub use structure::{
-    AuthenticatedRequest, AuthenticatedSessionRequest, ClashConfig, CoreConfig,
+    AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest,
     KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
     MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME,
@@ -24,6 +24,8 @@ pub use paths::{OwnerPaths, ServicePaths, mihomo_ipc_path, service_paths};
 
 #[cfg(feature = "standalone")]
 mod atomic_file;
+#[cfg(feature = "standalone")]
+mod bootstrap_pins;
 #[cfg(feature = "standalone")]
 mod auth;
 #[cfg(feature = "standalone")]

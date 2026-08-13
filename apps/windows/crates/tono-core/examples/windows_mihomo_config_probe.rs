@@ -44,6 +44,7 @@ reality-opts:
         )],
         udp_wechat_rules: vec![(Ipv4Addr::new(93, 184, 216, 36), 443)],
         web_suffix_rules: vec![("example.net".to_string(), 443)],
+        wechat_process_path_regexes: Vec::new(),
     };
     let runtime = build_owned_runtime(&[node], "Fixture Reality", "fixture-secret", Some(&direct))?;
     std::fs::write(&output, runtime.yaml())?;
