@@ -1954,6 +1954,37 @@ mod tests {
         }
         let prefixes = public_unicast_v4_prefixes();
         assert!(!prefixes.is_empty());
+
+        // Boundaries first, because an off-by-one in a CIDR split lives exactly there and a
+        // sampled sweep can step straight over it: every reserved range's first and last
+        // address plus or minus one, every emitted prefix's first and last plus or minus one,
+        // and the two ends of the space.
+        let mut probes: Vec<u32> = vec![0, 1, u32::MAX - 1, u32::MAX];
+        for (base, len) in RESERVED_V4 {
+            let start = u32::from_be_bytes(base);
+            let end = start + ((1u64 << (32 - len)) - 1) as u32;
+            for edge in [start, end] {
+                probes.extend([edge.saturating_sub(1), edge, edge.saturating_add(1)]);
+            }
+        }
+        for (base, len) in &prefixes {
+            let start = u32::from_be_bytes(*base);
+            let end = start.saturating_add(((1u64 << (32 - len)) - 1) as u32);
+            for edge in [start, end] {
+                probes.extend([edge.saturating_sub(1), edge, edge.saturating_add(1)]);
+            }
+        }
+        for addr in probes {
+            assert_eq!(
+                covered(&prefixes, addr),
+                !reserved(addr),
+                "boundary {}.{}.{}.{} disagrees with the reserved table",
+                addr >> 24,
+                (addr >> 16) & 255,
+                (addr >> 8) & 255,
+                addr & 255
+            );
+        }
         for a in 0..=255u8 {
             for b in 0..=255u8 {
                 // Third octet chosen to land inside every /24 the table names.
