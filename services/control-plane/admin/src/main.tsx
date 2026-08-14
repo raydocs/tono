@@ -1561,6 +1561,11 @@ function HomesPage() {
   </div>;
 }
 
+const RISK_SIGNAL_LABELS: Record<string, string> = {
+  attacker: '攻击者', abuser: '滥用者', threat: '威胁',
+  malicious: '恶意', spam: '垃圾邮件', spamhaus: 'SPAMHAUS 名单',
+};
+
 function NodeExpand({ node, agent, profile, onProfile }: {
   node: LiveQualityNodeDto;
   agent?: { os: string | null; arch: string | null; cpu: number | null; memUsed: number | null; memTotal: number | null; netIn: number | null; netOut: number | null };
@@ -1636,8 +1641,11 @@ function NodeExpand({ node, agent, profile, onProfile }: {
             </p>
             {node.riskSignals.map((signal) => (
               <p key={`sig-${signal.tag}`}>
-                {signal.tag}：{signal.yes} 家认为是，{signal.no} 家认为否
-                {signal.yes > signal.no ? '（多数）' : '（少数）'}
+                {RISK_SIGNAL_LABELS[signal.tag] ?? signal.tag}：
+                {signal.no === 0
+                  ? `${signal.yes} 个来源提出`
+                  : `${signal.yes} 家认为是，${signal.no} 家认为否`}
+                {node.riskKeywords.includes(signal.tag) ? '（已判定）' : '（证据不足，未判定）'}
               </p>
             ))}
           </>
@@ -1760,14 +1768,25 @@ function MonitorPage() {
       attacker: '攻击者', abuser: '滥用者', threat: '威胁',
       malicious: '恶意', spam: '垃圾邮件', spamhaus: 'SPAMHAUS',
     };
-    const riskChips = (node: LiveQualityNodeDto) => node.riskSignals
-      .filter((signal) => signal.yes > 0)
-      .slice(0, 4)
-      .map((signal) => ({
-        key: signal.tag,
-        label: `${RISK_LABELS[signal.tag] ?? signal.tag} ${signal.yes}/${signal.yes + signal.no}`,
-        majority: signal.yes > signal.no,
-      }));
+    //
+    // Colour follows `riskKeywords` — the collector's considered verdict —
+    // rather than a comparison done here. `spamhaus` is a presence claim, not a
+    // poll: nothing ever votes "no", so `yes > no` is true for a single source
+    // and would paint one database out of seventeen as a unanimous finding. For
+    // the same reason it is labelled by source count, not as a fraction.
+    const riskChips = (node: LiveQualityNodeDto) => {
+      const confirmed = new Set(node.riskKeywords);
+      return node.riskSignals
+        .filter((signal) => signal.yes > 0)
+        .slice(0, 4)
+        .map((signal) => ({
+          key: signal.tag,
+          label: signal.no === 0
+            ? `${RISK_LABELS[signal.tag] ?? signal.tag} ${signal.yes} 源`
+            : `${RISK_LABELS[signal.tag] ?? signal.tag} ${signal.yes}/${signal.yes + signal.no}`,
+          majority: confirmed.has(signal.tag),
+        }));
+    };
     // Absent is not clean. A node no collector run has looked at is exactly the
     // state the leaked panel lived in for weeks, so it reads as unknown.
     const exposureChip = (node: LiveQualityNodeDto) => {
