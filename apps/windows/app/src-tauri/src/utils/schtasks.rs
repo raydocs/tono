@@ -297,9 +297,23 @@ fn output_message(output: &Output) -> String {
 ///
 /// Blocking by construction — every caller is already off the main thread — but bounded:
 /// the child is polled to completion and killed if it overruns, so a wedged Task Scheduler
-/// surfaces as an error instead of an unkillable wait. `schtasks` output is a few hundred
-/// bytes, well inside the pipe buffer, so collecting it after the child exits cannot deadlock.
+/// surfaces as an error instead of an unkillable wait.
+///
+/// The pipes are drained while the wait runs, on their own threads, rather than read after
+/// the child exits. That ordering is not a style choice. A Windows anonymous pipe holds
+/// about 8 KiB; once the child has written that much it blocks in `WriteFile` and cannot
+/// exit, so a caller that only polls `try_wait` is waiting for something that can never
+/// happen and every call ends at the timeout. This function's comment used to say the
+/// output was "a few hundred bytes, well inside the pipe buffer" — true of the old
+/// `/Query /TN <name>` call, and no longer true once `task_exists` was changed to list every
+/// task on the machine, which is tens of kilobytes on a stock install. The reader was not
+/// updated when the writer was, and the visible symptom was that "launch at logon" could not
+/// be switched on at all: each attempt bounced back after ten seconds with a Task Scheduler
+/// error, leaving a rebooted machine fail-closed with no app running.
 fn schtasks_output(mut cmd: Command) -> Result<Output> {
+    // Nameable, not `as _`: the trait appears in `drain`'s signature below.
+    use std::io::Read;
+
     let mut child = cmd
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
@@ -308,10 +322,26 @@ fn schtasks_output(mut cmd: Command) -> Result<Output> {
         .spawn()
         .map_err(|e| anyhow!("failed to execute schtasks: {}", e))?;
 
+    fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buffer);
+            }
+            buffer
+        })
+    }
+    let stdout_reader = drain(child.stdout.take());
+    let stderr_reader = drain(child.stderr.take());
+
     let deadline = Instant::now() + SCHTASKS_TIMEOUT;
+    let status;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(exit)) => {
+                status = exit;
+                break;
+            }
             Ok(None) => {}
             Err(e) => return Err(anyhow!("failed to wait for schtasks: {}", e)),
         }
@@ -319,6 +349,10 @@ fn schtasks_output(mut cmd: Command) -> Result<Output> {
             let _ = child.kill();
             // Reap it: a killed child left unwaited stays a zombie handle for the process life.
             let _ = child.wait();
+            // Killing the child closes the write ends, so the readers see EOF and finish.
+            // Joining them keeps this from leaking two threads per timed-out call.
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
             return Err(anyhow!(
                 "schtasks did not answer within {:?}; the Task Scheduler service may be stopped or busy",
                 SCHTASKS_TIMEOUT
@@ -327,9 +361,13 @@ fn schtasks_output(mut cmd: Command) -> Result<Output> {
         std::thread::sleep(SCHTASKS_POLL_INTERVAL);
     }
 
-    child
-        .wait_with_output()
-        .map_err(|e| anyhow!("failed to read schtasks output: {}", e))
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow!("failed to read schtasks output: the reader thread panicked"))?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("failed to read schtasks output: the reader thread panicked"))?;
+    Ok(Output { status, stdout, stderr })
 }
 
 /// Whether `line` of `schtasks /Query /FO CSV /NH` names the task `name`.

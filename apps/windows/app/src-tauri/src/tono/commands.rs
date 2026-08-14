@@ -308,6 +308,9 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         inner.credentials_loaded = true;
         return;
     }
+    // A fresh attempt must not inherit the previous verdict. Retry re-enters
+    // here, and a stale error would outlive the condition that produced it.
+    inner.credential_error = None;
     let Ok((refresh, id)) = outcome else {
         // A timeout is not an answer. Reading it as "no credentials" turned a slow Credential
         // Manager into a signed-out user, and latching the gate made that verdict stick until
@@ -319,15 +322,9 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         ));
         return;
     };
-    match refresh {
-        Ok(Some(token)) => {
-            // Hydrate memory only — writing the same bytes back would
-            // risk another prompting vault call.
-            let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
-        }
-        Ok(None) => {}
-        Err(err) => inner.credential_error = Some(err.to_string()),
-    }
+    // The installation id is independent of the refresh token and is handled
+    // first, so the early return below cannot cost a persisted id — losing it
+    // means the next sign-in presents a new device.
     match id {
         Ok(Some(persisted)) => {
             if let Ok(persisted) = normalize_installation_id(&persisted) {
@@ -343,6 +340,25 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         }
         Err(_) => {
             // The id is not auth-critical: keep the ephemeral one.
+        }
+    }
+    match refresh {
+        Ok(Some(token)) => {
+            // Hydrate memory only — writing the same bytes back would
+            // risk another prompting vault call.
+            let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            // The same reasoning as the timeout branch above, which this one was
+            // not updated to match. A store error is not an answer about whether
+            // credentials exist, and opening the gate on it made the verdict
+            // stick for the life of the process: `tono_retry_restore` re-enters
+            // here, returns immediately on `credentials_loaded`, and re-emits the
+            // identical error — so the Retry button the account-error screen
+            // offers provably could not succeed, even after the vault recovered.
+            inner.credential_error = Some(err.to_string());
+            return;
         }
     }
     // The vault answered — including "there is nothing stored", which is a real answer. The
