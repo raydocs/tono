@@ -49,7 +49,19 @@ nonisolated enum HelperProtocolVersion {
     ///   refused because a core is already running now carries
     ///   `CORE_ALREADY_RUNNING`, so the app's orphaned-core recovery stops
     ///   depending on the wording of an English sentence.
-    static let current = "3.12.1"
+    /// - 3.12.1 → 3.12.2: Every rendered PF rule carries a class `label`
+    ///   (`tono-exit`, `tono-bundle`, `tono-control`, …). pfctl was collapsing
+    ///   each exact permit into the reviewed-bundle permit that subsumes it: on
+    ///   a live armed machine the rendered file held 58 exact permits and the
+    ///   kernel held 13 rules with none of them, so nothing about the boundary
+    ///   could be measured from a counter. Labels make the rules
+    ///   non-interchangeable, so they survive and `pfctl -s labels` attributes
+    ///   packets per class. No traffic decision changes — pins render before the
+    ///   bundle permits, every rule is `quick`, and a pin permits a subset of
+    ///   what the bundle permits. Bumped because the daemon's rule text changed:
+    ///   a 3.12.1 daemon renders unlabelled rules and the boundary stays
+    ///   unmeasurable while every gate above it passes.
+    static let current = "3.12.2"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

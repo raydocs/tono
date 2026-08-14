@@ -1341,15 +1341,50 @@ final class KillSwitchManager {
             // defaults to floating states; without this, a state established
             // on a TUN that disappears could continue matching after the
             // kernel reroutes the same flow to a physical interface.
-            "pass in quick on lo0 all keep state (if-bound)",
-            "pass out quick on lo0 all keep state (if-bound)",
+            // Every rule carries a class `label`, and that is load-bearing rather
+            // than cosmetic.
+            //
+            // pfctl merges rules it considers interchangeable. An exact permit
+            // (`to 198.12.84.154 port 443 user root`) is a strict subset of the
+            // reviewed-bundle permit (`from any to any port { 80, 443, 8000, 8080 }
+            // user root`), so the optimizer collapsed it away entirely: measured on
+            // a live armed machine, `pf.tono.conf` held 58 exact permits and the
+            // kernel held 13 rules with *zero* of them. The pins were unmeasurable
+            // because they did not exist — every question about what the boundary
+            // actually permits had to be answered by egress probing instead of by
+            // reading a counter.
+            //
+            // Two rules with different labels are no longer interchangeable, because
+            // collapsing them would lose the accounting, so the optimizer keeps
+            // both. `pfctl -a tono.killswitch -s labels` then attributes packets per
+            // class: whether the exit pin is carrying traffic or the bundle permit is
+            // absorbing it becomes a number instead of an inference.
+            //
+            // No traffic decision changes. Pins render before the bundle permits and
+            // every rule is `quick`, so first match wins; a pin permits a subset of
+            // what the bundle permits, and both verdicts are `pass`. What changes is
+            // which rule gets the credit.
+            //
+            // Position matters: `label` goes last, after `keep state (if-bound)`.
+            // Verified against pfctl on macOS 25.4 for all eight rendered forms —
+            // interface rules, `user { 0, uid }` (which expands per uid and keeps the
+            // label on each), inet6, udp, `port { ... }` (expands per port), and the
+            // terminating `block drop`. A bad position is a parse error that takes
+            // the whole ruleset down and leaves the session unable to arm at all,
+            // which is why this was proven on a real machine before shipping.
+            "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+            "pass out quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
         ]
         for interface in state.tunnelInterfaces.sorted() {
             // Host packets leave through the TUN while proxied replies return
             // through it. Keep both directions explicit: macOS PF can otherwise
             // accept the route while silently starving Mihomo's packet path.
-            lines.append("pass in quick on \(interface) all keep state (if-bound)")
-            lines.append("pass out quick on \(interface) all keep state (if-bound)")
+            lines.append(
+                "pass in quick on \(interface) all keep state (if-bound) label \"tono-tunnel\""
+            )
+            lines.append(
+                "pass out quick on \(interface) all keep state (if-bound) label \"tono-tunnel\""
+            )
         }
 
         var controlEndpoints = Set<KillSwitchEndpoint>()
@@ -1377,7 +1412,7 @@ final class KillSwitchManager {
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +
                 "to \(endpoint.address) port \(endpoint.port) " +
-                "user { 0, \(allowedUID) } keep state (if-bound)"
+                "user { 0, \(allowedUID) } keep state (if-bound) label \"tono-control\""
             )
         }
         for endpoint in state.derpEndpoints.sorted(by: {
@@ -1391,7 +1426,7 @@ final class KillSwitchManager {
             lines.append(
                 "pass out quick \(family) proto \(endpoint.transport) " +
                 "to \(endpoint.address) port \(endpoint.port) user root " +
-                "keep state (if-bound)"
+                "keep state (if-bound) label \"tono-derp\""
             )
         }
         for target in state.proxyTargets.sorted(by: {
@@ -1401,14 +1436,16 @@ final class KillSwitchManager {
                 let family = address.contains(":") ? "inet6" : "inet"
                 lines.append(
                     "pass out quick \(family) proto \(target.transport) " +
-                    "to \(address) port \(target.port) user root keep state (if-bound)"
+                    "to \(address) port \(target.port) user root keep state (if-bound) " +
+                    "label \"tono-exit\""
                 )
             }
         }
         for endpoint in state.sessionDirectEndpoints {
             lines.append(
                 "pass out quick inet proto \(endpoint.transport) " +
-                "to \(endpoint.address) port \(endpoint.port) user root keep state (if-bound)"
+                "to \(endpoint.address) port \(endpoint.port) user root keep state (if-bound) " +
+                "label \"tono-direct\""
             )
         }
         if state.reviewedBundleDirectEnabled {
@@ -1429,11 +1466,11 @@ final class KillSwitchManager {
                 lines.append(
                     "pass out quick inet proto \(transport) from any to any " +
                     "port { \(reviewedBundleDirectPorts.map(String.init).joined(separator: ", ")) } " +
-                    "user root keep state (if-bound)"
+                    "user root keep state (if-bound) label \"tono-bundle\""
                 )
             }
         }
-        lines.append("block drop out quick all")
+        lines.append("block drop out quick all label \"tono-block\"")
         return lines.joined(separator: "\n") + "\n"
     }
 
@@ -2011,6 +2048,15 @@ final class KillSwitchManager {
         }()
         check("permit-precedes-catch-all", permitBeforeCatchAll)
         check("armed-keeps-tunnel", armed.contains("utun199"))
+        // Captured here, not at the end: later steps overwrite the anchor, and the
+        // emergency ruleset in step 6 legitimately has only loopback and the
+        // catch-all — querying labels after it reports two classes and says nothing
+        // about the armed set.
+        let armedLabels: String? = {
+            guard let out = try? run("/sbin/pfctl", ["-a", testAnchor, "-s", "labels"]),
+                  out.status == 0 else { return nil }
+            return String(data: out.output, encoding: .utf8)
+        }()
 
         // 2. A re-arm that omits the flag must revoke it. This is the shipped
         //    bug from the other direction: the convergence arm dropped the
@@ -2119,6 +2165,41 @@ final class KillSwitchManager {
         check("emergency-drops-tunnel", !emergencyShown.contains("utun199"))
         check("emergency-fails-closed", emergencyShown.contains("block drop out quick all"))
 
+        // 7. The boundary has to be measurable, which means the exact permits
+        //    have to exist in the kernel.
+        //
+        //    pfctl merges rules it considers interchangeable, and an exact permit
+        //    is a strict subset of the reviewed-bundle permit that subsumes it.
+        //    Measured on a live armed machine: 58 exact permits in the rendered
+        //    file, 13 rules in the kernel, none of them exact. Every question
+        //    about what the boundary permits had to be answered by probing egress
+        //    because there was no counter to read.
+        //
+        //    `armed` above is rendered from a state whose only proxy target is
+        //    8.8.4.4:443/tcp, with the reviewed-bundle permit on — so tcp/443 for
+        //    root is exactly the subsumption case. Without the class labels the
+        //    renderer emits, the assertion below reads 0.
+        check("exact-permit-survives-the-load", armed.contains("to 8.8.4.4"))
+        check(
+            "every-rendered-rule-is-labelled",
+            armedRules
+                .split(separator: "\n")
+                .filter { $0.hasPrefix("pass") || $0.hasPrefix("block") }
+                .allSatisfy { $0.contains(#"label ""#) }
+        )
+        //    And the measurement surface itself: `-s labels` is what makes "is the
+        //    exit pin carrying traffic, or is the bundle permit absorbing it" a
+        //    number rather than an inference. Read from the armed set captured in
+        //    step 1.
+        if let labelText = armedLabels {
+            for expected in ["tono-loopback", "tono-tunnel", "tono-control", "tono-exit",
+                             "tono-bundle", "tono-block"] {
+                check("labels-report-\(expected)", labelText.contains(expected))
+            }
+        } else {
+            check("labels-are-queryable", false)
+        }
+
         if failures.isEmpty { return true }
         FileHandle.standardError.write(Data(
             "lifecycle self-test failed: \(failures.joined(separator: ", "))\n".utf8
@@ -2146,19 +2227,24 @@ final class KillSwitchManager {
             // they passed by never executing, and two mutations of the function
             // they cover went undetected. They live here because this is the
             // function `--self-test` actually calls.
+            // Carry the class labels the renderer now emits: the reducer has to
+            // find the address in the rule text that actually reaches it, and a
+            // trailing `label "..."` sits after the `port` clause the pattern
+            // anchors on. Unlabelled inputs would test a shape no longer produced.
             let exitPermit =
                 "pass out quick inet proto tcp to 198.12.84.154 port 443 "
-                + "user { 0, 501 } keep state (if-bound)"
+                + "user { 0, 501 } keep state (if-bound) label \"tono-control\""
             let otherPermit =
                 "pass out quick inet proto udp to 43.146.27.19 port 8000 "
-                + "user { 0, 501 } keep state (if-bound)"
+                + "user { 0, 501 } keep state (if-bound) label \"tono-derp\""
             let sixPermit =
                 "pass out quick inet6 proto tcp to 2606:4700::1111 port 443 "
-                + "user { 0, 501 } keep state (if-bound)"
-            let interfaceRule = "pass in quick on utun199 all keep state (if-bound)"
+                + "user { 0, 501 } keep state (if-bound) label \"tono-control\""
+            let interfaceRule =
+                "pass in quick on utun199 all keep state (if-bound) label \"tono-tunnel\""
             let anyRule =
                 "pass out quick inet proto tcp from any to any port 443 "
-                + "user { 0, 501 } keep state (if-bound)"
+                + "user { 0, 501 } keep state (if-bound) label \"tono-bundle\""
             // Same address on a second port. This is where de-duplication is
             // reachable at all: the parameter is a Set, so identical rules are
             // already collapsed before this function sees them, and only two
@@ -2167,7 +2253,7 @@ final class KillSwitchManager {
             // nothing — a mutation that dropped de-duplication survived it.
             let exitPermitPort80 =
                 "pass out quick inet proto tcp to 198.12.84.154 port 80 "
-                + "user { 0, 501 } keep state (if-bound)"
+                + "user { 0, 501 } keep state (if-bound) label \"tono-control\""
             guard withdrawnHosts([exitPermit]) == ["198.12.84.154"],
                   // Membership and de-duplication, not order: the hosts are
                   // iterated to run one kill each, so order is not a behaviour.
@@ -2391,14 +2477,25 @@ final class KillSwitchManager {
                 "to 1.1.1.1 port 443 keep state (if-bound)",
                 "to 8.8.8.8 port 443 keep state (if-bound)",
                 "proto tcp to any",
+                // An unlabelled rule is a rule pfctl is free to merge away. The
+                // exact permits are a strict subset of the reviewed-bundle permit,
+                // so without a label the optimizer collapses them and the boundary
+                // stops being readable from a counter — measured on a live machine
+                // as 58 rendered permits against 13 kernel rules, none of them
+                // exact. `keep state (if-bound)` followed by a line break is the
+                // shape of a rule that lost its label.
+                "keep state (if-bound)\n",
             ]
             let ruleShapesHold = required.allSatisfy(rules.contains)
                 && !forbidden.contains(where: rules.contains)
+            // Whole-string equality, so the class labels belong here too: this is
+            // the one assertion that pins the emergency ruleset exactly, and it is
+            // what caught the label change before it shipped.
             let emergencyExpected = [
                 "# Managed by Tono Kill Switch — do not edit",
-                "pass in quick on lo0 all keep state (if-bound)",
-                "pass out quick on lo0 all keep state (if-bound)",
-                "block drop out quick all",
+                "pass in quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "pass out quick on lo0 all keep state (if-bound) label \"tono-loopback\"",
+                "block drop out quick all label \"tono-block\"",
                 "",
             ].joined(separator: "\n")
             let cloudRequired = [
