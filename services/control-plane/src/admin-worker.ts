@@ -44,6 +44,20 @@ export default {
       url.pathname = '/ops/';
       request = new Request(url, request);
     }
+
+    // The console routes on the hash, so `/ops/monitor` names no asset and the
+    // asset binding answered it with a bare 404 — which is what someone typing
+    // or sharing the obvious URL for a page actually gets. Send them to the
+    // page they meant instead. A segment containing a dot is a real file
+    // (`index.html`, `assets/index-*.js`) and is left alone.
+    const deepLink = /^\/ops\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname);
+    if (deepLink) {
+      return new Response(null, {
+        status: 302,
+        headers: { ...closedHeaders, location: `/ops/#/${deepLink[1]}` },
+      });
+    }
+
     return controlPlane.fetch(request, env as Env, context);
   },
 } satisfies ExportedHandler<AdminEnv>;

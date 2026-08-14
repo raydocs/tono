@@ -718,6 +718,36 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('sends a path-style console link to the page it names instead of a 404', async () => {
+    for (const [path, hash] of [
+      ['/ops/monitor', '/ops/#/monitor'],
+      ['/ops/users/', '/ops/#/users'],
+      ['/ops/dashboard', '/ops/#/dashboard'],
+    ] as const) {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request(`https://admin.afk.ccwu.cc${path}`),
+        env as unknown as Parameters<typeof adminWorker.fetch>[1],
+        context,
+      );
+      await waitOnExecutionContext(context);
+      expect(response.status).toBe(302);
+      expect(response.headers.get('location')).toBe(hash);
+    }
+
+    // A real file must still be served rather than bounced.
+    for (const path of ['/ops/assets/index-abc123.js', '/ops/index.html', '/ops/']) {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request(`https://admin.afk.ccwu.cc${path}`),
+        env as unknown as Parameters<typeof adminWorker.fetch>[1],
+        context,
+      );
+      await waitOnExecutionContext(context);
+      expect(response.status).not.toBe(302);
+    }
+  });
+
   it('redirects the absorbed quality and ops hostnames to the admin monitor', async () => {
     for (const host of ['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']) {
       const context = createExecutionContext();
