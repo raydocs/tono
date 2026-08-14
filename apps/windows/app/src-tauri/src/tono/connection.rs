@@ -793,8 +793,8 @@ pub fn map_wfp_engine_error(text: &str) -> Option<String> {
 /// Everything else keeps the original detail for diagnostics.
 pub fn map_service_ready_error(err: &anyhow::Error) -> String {
     let text = format!("{err:#}");
-    if text.contains("service operation already running")
-        || text.contains("previous privileged service operation may still be running")
+    if text.contains(crate::core::runstate::SERVICE_OPERATION_BUSY)
+        || text.contains(crate::core::runstate::PRIVILEGED_OUTCOME_UNCERTAIN)
     {
         return format!(
             "{SERVICE_BUSY_PREFIX}: Tono Service 正在安装/修复中，请检查是否有待授权的管理员提示；若无反应请重启 Tono"
@@ -6056,8 +6056,8 @@ mod tests {
     #[test]
     fn service_busy_maps_to_a_stable_prefixed_message() {
         for detail in [
-            "service operation already running",
-            "the previous privileged service operation may still be running; restart Tono before retrying",
+            crate::core::runstate::SERVICE_OPERATION_BUSY,
+            crate::core::runstate::PRIVILEGED_OUTCOME_UNCERTAIN,
         ] {
             let busy = anyhow::anyhow!(detail);
             let mapped = map_service_ready_error(&busy);
