@@ -713,6 +713,16 @@ fn remove_windows_service_binary() -> Result<(), Error> {
         "core-sha256.txt.tmp",
         "control-plane-pins.json",
         "control-plane-pins.json.tmp",
+        // Update scratch. A coordinated replacement that fails past the publish point can
+        // leave these behind deliberately, and `ensure_update_scratch_absent` then refuses
+        // every subsequent `--replace-runtime` upgrade before it does any other work. If the
+        // uninstall does not sweep them, uninstalling is not a way out either: the fresh
+        // install that follows runs in ServiceOnly mode and skips the guard, so the dead end
+        // only reappears at the next upgrade. The suffixes mirror install_service.rs:686-692.
+        "tono-service.exe.next",
+        "tono-service.exe.rollback",
+        "tono-service.exe.restore",
+        "tono-service.exe.publish",
     ] {
         let leftover = install_dir.join(name);
         if leftover.try_exists().unwrap_or(true) {
