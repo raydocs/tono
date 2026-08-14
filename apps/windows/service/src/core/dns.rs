@@ -468,6 +468,25 @@ fn adapter_contains_current_protected_dns(adapter: &AdapterDnsSnapshot) -> bool 
         || contains_current_protected_v4(adapter.ipv4_profile_name_server.as_deref())
 }
 
+/// Whether this adapter reads, right now, as pointed at a Tono-owned resolver — the current
+/// `198.18.0.2` or a legacy `127.0.0.1` / `::1` left by an older build — in any of the four
+/// values.
+///
+/// One predicate on purpose, shared by the two halves of the snapshot-less restore: the half
+/// that *selects* which adapters to reset, and [`engine::any_loopback`], the half that *proves*
+/// the reset worked. They were written separately and drifted: the proof was updated when the
+/// redirect target moved from loopback to the TUN endpoint, and the selection was not. It kept
+/// asking [`is_loopback_value`], which deliberately excludes `198.18.0.2`, so on every machine
+/// protected by a current build it selected nothing — and an empty selection proved itself
+/// trivially. Asking one question in one place is what stops that from recurring.
+#[cfg_attr(any(not(windows), feature = "test"), allow(dead_code))]
+fn adapter_reads_as_tono_dns(adapter: &AdapterDnsSnapshot) -> bool {
+    is_tono_dns_value(adapter.ipv4_name_server.as_deref())
+        || is_tono_dns_value(adapter.ipv4_profile_name_server.as_deref())
+        || is_tono_dns_value(adapter.ipv6_name_server.as_deref())
+        || is_tono_dns_value(adapter.ipv6_profile_name_server.as_deref())
+}
+
 fn is_current_tunnel_adapter(
     adapter: &AdapterDnsSnapshot,
     current_tunnel_luid: Option<u64>,
@@ -2094,12 +2113,15 @@ async fn uninstall_reset_targets() -> Result<Vec<String>> {
             .map(|saved| saved.interface_guid.clone())
             .collect());
     }
-    // `saved_dns_was_loopback` is just "any of the four values is a loopback resolver"; here it
-    // is asked of a *live* read rather than of saved originals.
+    // The live read must use the predicate that recognises *Tono-owned* resolvers, not the
+    // narrower "legacy loopback" one used for saved originals. `saved_dns_was_loopback` answers
+    // "was this adapter's original configuration already a local resolver, so DHCP would be the
+    // wrong answer for it" — a question about the past, deliberately blind to `198.18.0.2`.
+    // Asked of a live read it selected nothing on every machine a current build had protected.
     Ok(collect_dns_adapters()
         .await?
         .iter()
-        .filter(|adapter| saved_dns_was_loopback(adapter))
+        .filter(|adapter| adapter_reads_as_tono_dns(adapter))
         .map(|adapter| adapter.interface_guid.clone())
         .collect())
 }
@@ -2173,14 +2195,34 @@ pub(crate) async fn restore_for_uninstall() -> Result<UninstallDnsRestore> {
         };
     // Ask only about the adapters we redirected. "Is *anything* on loopback?" would refuse for
     // ever on a machine running its own local resolver on an adapter we never touched.
-    let live_loopback = match engine_any_loopback(&automatic.adapters).await {
-        Ok(any_loopback) => Some(any_loopback),
-        Err(error) => {
-            tracing::warn!(
-                "dns: the live DNS state could not be read after the automatic (DHCP) \
-                 fallback: {error:#}"
-            );
-            None
+    //
+    // Except when we redirected nothing, where that scoping stops being a safeguard and becomes
+    // the hole: `any_loopback` over an empty list answers `false` without reading a single
+    // adapter, so a selection that wrongly came back empty proved itself. Fall back to the one
+    // value that cannot belong to anybody else — the TUN endpoint — across every live adapter.
+    // The broader predicate cannot be used here: a machine running its own Pi-hole reads as
+    // `127.0.0.1` on an adapter Tono never touched, and would refuse uninstall for ever.
+    let live_loopback = if automatic.adapters.is_empty() {
+        match collect_dns_adapters().await {
+            Ok(adapters) => Some(adapters.iter().any(adapter_contains_current_protected_dns)),
+            Err(error) => {
+                tracing::warn!(
+                    "dns: nothing was selected for the automatic (DHCP) fallback and the live \
+                     DNS state could not be read to confirm that is correct: {error:#}"
+                );
+                None
+            }
+        }
+    } else {
+        match engine_any_loopback(&automatic.adapters).await {
+            Ok(any_loopback) => Some(any_loopback),
+            Err(error) => {
+                tracing::warn!(
+                    "dns: the live DNS state could not be read after the automatic (DHCP) \
+                     fallback: {error:#}"
+                );
+                None
+            }
         }
     };
 
@@ -2281,10 +2323,31 @@ pub async fn initialize_status_cache() {
     let _operation = DNS_OPERATION.lock().await;
     match status_unlocked().await {
         Ok(status) => {
-            // A snapshot on disk at service start means protection was in force when this
-            // machine last ran: keep repairing drift for it. Anything else (including a snapshot
-            // this build cannot read) leaves reconciliation disarmed until an explicit enable.
-            PROTECTION_WANTED.store(status.snapshot_present, Ordering::Release);
+            // A snapshot on disk is *not* on its own evidence that protection is wanted.
+            //
+            // Every restore that cannot prove itself deliberately keeps the file — it is the only
+            // record of the user's original resolvers — so a machine that was emergency-disarmed
+            // still has one after the barrier is provably gone. Reading presence alone as intent
+            // meant the next service start armed DNS reconciliation on it: the watchdog found the
+            // adapters no longer on the protected resolver, called that drift, and wrote
+            // 198.18.0.2 back onto every adapter with no core listening and no WFP armed. The
+            // machine then looks online and resolves nothing, every two seconds, with no way out
+            // inside the product — and the recovery CLI had just told the user to reboot, which is
+            // what triggers it.
+            //
+            // Cross-check it against the barrier's own restored intent. Both start paths restore
+            // the kill switch before this runs, so `wanted` is settled by now, and reading it is a
+            // clone of an in-memory value: no IO, no queue, nothing that can deadlock under
+            // `DNS_OPERATION`.
+            let barrier_wanted = crate::core::windows_kill_switch::status().await.wanted;
+            let protection_wanted = status.snapshot_present && barrier_wanted;
+            if status.snapshot_present && !barrier_wanted {
+                tracing::warn!(
+                    "dns: a protected-DNS snapshot survived a disarm; leaving reconciliation off \
+                     rather than re-pointing adapters at a resolver with no barrier behind it"
+                );
+            }
+            PROTECTION_WANTED.store(protection_wanted, Ordering::Release);
             publish_status(&status);
         }
         Err(error) => publish_status_error(&error),
@@ -3312,11 +3375,7 @@ function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
     pub(super) fn any_loopback(guids: &[String]) -> Result<bool> {
         for guid in guids {
             let adapter = read_adapter(guid, None)?;
-            if is_tono_dns_value(adapter.ipv4_name_server.as_deref())
-                || is_tono_dns_value(adapter.ipv4_profile_name_server.as_deref())
-                || is_tono_dns_value(adapter.ipv6_name_server.as_deref())
-                || is_tono_dns_value(adapter.ipv6_profile_name_server.as_deref())
-            {
+            if super::adapter_reads_as_tono_dns(&adapter) {
                 return Ok(true);
             }
         }
@@ -3595,6 +3654,52 @@ mod tests {
             "evidence that could not be gathered (a wedged engine, a timed-out call) is \
              unproven; the degraded exit is the only way past it"
         );
+    }
+
+    /// The snapshot-less uninstall path selects adapters with one predicate and proves the reset
+    /// with another. They must agree, and for one release they did not: the proof was updated
+    /// when the redirect target moved from `127.0.0.1` to the TUN endpoint `198.18.0.2`, and the
+    /// selection kept asking `saved_dns_was_loopback`, which excludes `198.18.0.2` on purpose.
+    /// Every machine a current build had protected therefore selected zero adapters, and an
+    /// empty selection proved itself: the uninstaller reported "verified off Tono's protected
+    /// DNS" having reset nothing, leaving the machine pointed at a resolver that was about to
+    /// stop existing.
+    #[test]
+    fn selection_and_proof_agree_about_what_tono_owns() {
+        let on_current = adapter("{REDIRECTED}", Some(PROTECTED_DNS_V4));
+        let on_legacy = adapter("{OLD-BUILD}", Some(LOOPBACK_V4));
+        let untouched = adapter("{NORMAL}", Some("1.1.1.1"));
+
+        // The proof side has always recognised both Tono targets.
+        assert!(adapter_reads_as_tono_dns(&on_current));
+        assert!(adapter_reads_as_tono_dns(&on_legacy));
+        assert!(!adapter_reads_as_tono_dns(&untouched));
+
+        // The predicate the selection used to call answers a different question — "were this
+        // adapter's *originals* already a local resolver, so DHCP would be the wrong answer" —
+        // and is blind to the current target by design. Keeping the assertion pins why the two
+        // must not be swapped for each other again.
+        assert!(!saved_dns_was_loopback(&on_current));
+        assert!(saved_dns_was_loopback(&on_legacy));
+        assert!(!saved_dns_was_loopback(&untouched));
+    }
+
+    /// An empty selection must not be able to prove itself. `engine::any_loopback` over an empty
+    /// list answers `false` without reading anything, so the rung decision has to get its
+    /// evidence elsewhere when nothing was selected — from the one address that cannot belong to
+    /// anyone else.
+    #[test]
+    fn an_empty_selection_is_not_evidence_of_a_reset() {
+        // Vacuous: no adapters, so "is any of them still on Tono DNS" is false for free.
+        assert_eq!(uninstall_restore_rung(false, true, Some(false)), UninstallRung::Automatic);
+        // Which is why the caller substitutes a real question when the selection is empty. The
+        // unambiguous target is the one it may ask about across every live adapter.
+        let still_redirected = adapter("{REDIRECTED}", Some(PROTECTED_DNS_V4));
+        let users_own_resolver = adapter("{PI-HOLE}", Some(LOOPBACK_V4));
+        assert!(adapter_contains_current_protected_dns(&still_redirected));
+        // A machine running its own local resolver must not be mistaken for ours, or uninstall
+        // would refuse for ever on it.
+        assert!(!adapter_contains_current_protected_dns(&users_own_resolver));
     }
 
     /// A machine that ran its own local resolver before Tono started had `127.0.0.1` all along.
