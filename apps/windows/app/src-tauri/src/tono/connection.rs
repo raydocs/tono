@@ -2740,7 +2740,13 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
     // its next await; now both are protected on purpose.
     let generation = {
         let mut inner = state.lock().await;
-        if !inner.fsm.status().is_connected {
+        // `is_disconnecting` is redundant now that `begin_disconnect` clears
+        // `is_connected`, and it is written out anyway: this guard is the one
+        // that has to say "not while a release is in flight" out loud, because
+        // the generation captured below is the disconnect's own once one has
+        // started, and the exit guard then compares a value to itself.
+        let status = inner.fsm.status();
+        if !status.is_connected || status.is_disconnecting {
             return;
         }
         inner.fsm.tunnel_died();

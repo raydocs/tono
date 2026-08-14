@@ -339,9 +339,25 @@ impl ConnectionFsm {
 
     /// Explicit disconnect is allowed from Connected or Protected Offline
     /// and is one of the three causes that release the kill switch (§6).
+    ///
+    /// Clears `is_connected` as well as setting `is_disconnecting`. Leaving it
+    /// set meant every "is a tunnel up?" predicate read an in-flight release as
+    /// a live tunnel, and the Windows release runs for seconds — its DNS leg
+    /// alone budgets forty. Two handlers admitted themselves in that window,
+    /// captured the disconnect's *own* generation, queued behind the release on
+    /// the service's locks, and then passed their exit guards because the
+    /// release had already cleared `is_disconnecting` on its way out. Both went
+    /// on to run a full connect: WFP re-armed and the core restarted after
+    /// `disconnect()` had returned and the UI said Not Connected.
+    ///
+    /// Nothing needs the old value. `ui_state` tests `is_disconnecting` first,
+    /// `disconnect()` reads the status before calling this, the release
+    /// sequence never consults it, and every other predicate either carries its
+    /// own `is_disconnecting` term or becomes more conservative.
     pub fn begin_disconnect(&mut self) {
         self.status.is_disconnecting = true;
         self.status.is_connecting = false;
+        self.status.is_connected = false;
         self.status.stage = None;
     }
 
@@ -541,6 +557,39 @@ mod tests {
         assert!(fsm.kill_switch_armed());
         assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
         assert!(!fsm.status().is_connected);
+    }
+
+    /// An in-flight release must not read as a live tunnel.
+    ///
+    /// The Windows release runs for seconds — its DNS leg alone budgets forty —
+    /// and while `begin_disconnect` left `is_connected` set, two handlers
+    /// admitted themselves in that window on exactly this predicate, captured
+    /// the disconnect's own generation, queued behind the release, and then
+    /// passed their exit guards because the release had already cleared
+    /// `is_disconnecting` on its way out. Both went on to run a full connect:
+    /// the barrier re-armed and the core restarted after the user's Disconnect
+    /// had returned and the UI said Not Connected.
+    #[test]
+    fn a_release_in_flight_does_not_read_as_a_live_tunnel() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_session_verified();
+        fsm.connect_succeeded().unwrap();
+        assert!(fsm.status().is_connected);
+
+        fsm.begin_disconnect();
+        assert!(
+            !fsm.status().is_connected,
+            "every \"is a tunnel up?\" predicate reads this field"
+        );
+        assert!(fsm.status().is_disconnecting);
+        // The state the user is shown is unchanged: `ui_state` tests
+        // `is_disconnecting` first, so clearing the other flag is invisible.
+        assert_eq!(fsm.status().ui_state(), UiState::Disconnecting);
+        // And nothing may start a reconnect underneath the release.
+        assert!(!fsm.reconnect_permitted_now());
+        assert_eq!(fsm.next_reconnect_delay(), None);
     }
 
     /// Asking whether a reconnect may run must not cost a rung of the ladder.
