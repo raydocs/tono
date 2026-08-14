@@ -1210,6 +1210,10 @@ export interface TranslationResources {
         }
         title: string
       }
+      startup: {
+        stateInitFailed: string
+        stateInitRetrying: string
+      }
       support: {
         audit: {
           copyPath: string

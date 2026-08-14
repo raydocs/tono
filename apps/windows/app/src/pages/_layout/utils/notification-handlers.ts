@@ -109,6 +109,15 @@ export const handleNoticeMessage = (
         'settings.modals.clashPort.messages.automaticFallbackFailed',
         { error: msg },
       ),
+    // `TonoState::create()` failed, so `Arc<TonoState>` is never managed and every `tono_*`
+    // command is rejected at argument resolution — including `tono_status`, which leaves
+    // `resolveTonoGuard` on 'loading' and `TonoAuthGuard` rendering a bare spinner over the
+    // whole app. The Rust side emits these two on every retry and on final failure precisely
+    // so the user is told something; without an entry here they reached `console.warn` and
+    // the user watched an unexplained spinner instead.
+    tono_state_init_failed: () => showNotice.info('tono.startup.stateInitRetrying'),
+    tono_state_init_failed_permanently: () =>
+      showNotice.error('tono.startup.stateInitFailed', { error: msg }),
   }
 
   const handler = handlers[status]

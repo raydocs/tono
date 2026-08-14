@@ -800,6 +800,8 @@ export const translationKeys = [
   'tono.settings.about.title',
   'tono.settings.about.tagline',
   'tono.settings.about.description',
+  'tono.startup.stateInitRetrying',
+  'tono.startup.stateInitFailed',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]
