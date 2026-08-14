@@ -375,11 +375,107 @@ EOF
     "$deployment_id" "$version" "$port" "$uuid" "$public_key" "$short_id"
 }
 
+# Network tuning, as a separate reviewable stage.
+#
+# Deliberately only two settings. Every "VPS optimisation" guide adds a block of
+# buffer and queue sysctls; the provisioning notes already refuse those, because
+# without measurement they are cargo cult and several of them make a landing node
+# worse. `fq` plus `bbr` is the one change with a defensible mechanism for this
+# workload — a TCP relay whose flows are long-lived and whose bottleneck is the
+# path, not the host — and it is what the notes already sanction.
+#
+# Nothing here touches MTU, buffer sizes, qdisc classes, or offloads. If a node
+# needs those, it needs measurement first, not a default.
+tune_network() {
+  require_root
+  local backup_root="/root/tono-network-backups"
+  local stamp
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  local backup="$backup_root/$stamp"
+  local profile="/etc/sysctl.d/99-tono-landing.conf"
+
+  # Refuse rather than overwrite. A second run must not silently replace a
+  # profile an operator tuned by hand, and must not bury the original baseline
+  # under a backup of our own settings.
+  if [[ -e $profile ]]; then
+    printf '{"tuned":false,"reason":"existing-tono-profile","profile":"%s"}\n' "$profile"
+    return 0
+  fi
+
+  # Availability is checked, never assumed: a kernel without tcp_bbr would take
+  # the congestion control setting and silently keep cubic.
+  local available current_cc current_qdisc
+  available=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || printf '')
+  if [[ $available != *bbr* ]]; then
+    modprobe tcp_bbr >/dev/null 2>&1 || true
+    available=$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || printf '')
+  fi
+  if [[ $available != *bbr* ]]; then
+    printf '{"tuned":false,"reason":"bbr-unavailable","available":"%s"}\n' "$available"
+    return 0
+  fi
+
+  current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')
+  current_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')
+
+  mkdir -p "$backup"
+  chmod 0700 "$backup_root" "$backup"
+  [[ -e /etc/sysctl.conf ]] && cp -a /etc/sysctl.conf "$backup/" || true
+  [[ -d /etc/sysctl.d ]] && cp -a /etc/sysctl.d "$backup/" || true
+  [[ -d /etc/modules-load.d ]] && cp -a /etc/modules-load.d "$backup/" || true
+
+  # The baseline is recorded before anything changes, because the rollback below
+  # restores these exact values rather than a guess at the distribution default.
+  cat >"$backup/baseline.json" <<BASELINE
+{"congestionControl":"$current_cc","defaultQdisc":"$current_qdisc","stamp":"$stamp"}
+BASELINE
+
+  cat >"$profile" <<'PROFILE'
+# Installed by Tono provisioning. Two settings, both with a stated mechanism:
+#   fq   - pacing, which BBR requires to shape its send rate
+#   bbr  - congestion control suited to a long-lived relay on a lossy path
+# Anything beyond these belongs to a measured change, not to a default.
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+PROFILE
+  chmod 0644 "$profile"
+  printf 'tcp_bbr\n' >/etc/modules-load.d/99-tono-bbr.conf
+  chmod 0644 /etc/modules-load.d/99-tono-bbr.conf
+
+  cat >"$backup/rollback.sh" <<ROLLBACK
+#!/bin/bash
+# Restores the exact values recorded before Tono tuning was applied.
+set -euo pipefail
+rm -f "$profile" /etc/modules-load.d/99-tono-bbr.conf
+sysctl -w net.core.default_qdisc="$current_qdisc" >/dev/null
+sysctl -w net.ipv4.tcp_congestion_control="$current_cc" >/dev/null
+sysctl --system >/dev/null
+printf 'restored qdisc=%s cc=%s\n' "$current_qdisc" "$current_cc"
+ROLLBACK
+  chmod 0700 "$backup/rollback.sh"
+
+  sysctl --system >/dev/null 2>&1 || fail "sysctl --system rejected the Tono profile"
+
+  # Verify the live values rather than trusting the write. A profile that loads
+  # without taking effect is the failure this whole stage exists to avoid.
+  local applied_cc applied_qdisc
+  applied_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || printf 'unknown')
+  applied_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || printf 'unknown')
+  if [[ $applied_cc != bbr || $applied_qdisc != fq ]]; then
+    bash "$backup/rollback.sh" >/dev/null 2>&1 || true
+    fail "tuning did not take effect (cc=$applied_cc qdisc=$applied_qdisc); rolled back"
+  fi
+
+  printf '{"tuned":true,"congestionControl":"%s","defaultQdisc":"%s","previousCongestionControl":"%s","previousDefaultQdisc":"%s","backup":"%s","rollback":"%s"}\n' \
+    "$applied_cc" "$applied_qdisc" "$current_cc" "$current_qdisc" "$backup" "$backup/rollback.sh"
+}
+
 mode=${1:-}
 shift || true
 case "$mode" in
   preflight) preflight "$@" ;;
   apply) apply_deployment "$@" ;;
   rollback) rollback_deployment "$@" ;;
-  *) fail "expected preflight, apply, or rollback mode" ;;
+  tune) tune_network "$@" ;;
+  *) fail "expected preflight, apply, rollback, or tune mode" ;;
 esac

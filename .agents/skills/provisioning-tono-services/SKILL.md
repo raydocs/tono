@@ -119,7 +119,9 @@ Treat a Reality node as a TCP landing/exit server. Before tuning, record OS/kern
 
 Run a DF-ping ladder to relevant reachable peers. Do not lower MTU when IPv4 payload 1472 succeeds on the real public path. Compare qdisc drop/backlog and retransmission counters as deltas; never add TBF/HTB or large buffers merely because a generic tutorial recommends them.
 
-When the operator explicitly requests BBR and the kernel exposes `tcp_bbr`, a conservative Tono profile changes only:
+The provisioner now applies this profile itself as a separate `tune` stage, ordered strictly after the node passes its data-plane verification, and on by default with `--no-tune` to refuse it. Running it after verification is what keeps a tuning fault from being mistaken for a broken install. It refuses rather than overwrites an existing Tono profile, skips when the kernel does not expose `tcp_bbr`, and rolls itself back if the live values do not change — the install is kept either way, because a node that verified is worth keeping even when its tuning has to be undone.
+
+The profile still changes only:
 
 ```text
 net.core.default_qdisc = fq

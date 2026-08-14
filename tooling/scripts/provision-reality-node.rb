@@ -221,6 +221,8 @@ parser = OptionParser.new do |flags|
   flags.on("--port PORT", Integer, "Reality TCP port (default: 443)") { |value| options[:port] = value }
   flags.on("--output PATH", "Private one-node YAML path (default: Tono Operations catalog.d)") { |value| options[:output] = value }
   flags.on("--apply", "Install, verify, and retain the node; publication remains a separate approval") { options[:apply] = true }
+  flags.on("--tune", "After the service passes its tests, apply the fq+bbr profile with backup and rollback") { options[:tune] = true }
+  flags.on("--no-tune", "Skip network tuning even when --apply is given") { options[:tune] = false }
 end
 
 begin
@@ -253,6 +255,11 @@ begin
   remote_script_path = File.join(repo_root, "tooling/scripts/remote/manage-tono-reality-node.sh")
   remote_script = File.binread(remote_script_path)
 
+  # Tuning is part of a standard build unless explicitly refused. It runs after
+  # the node has proven itself, so a tuning failure can never be confused with a
+  # broken install, and it rolls itself back if the values do not take.
+  options[:tune] = true if options[:tune].nil?
+
   preflight = run_remote(ssh_target, remote_script, "preflight", [options[:port], target])
   fail!("The selected TCP port is already in use; no changes were made.") if preflight["portInUse"]
   fail!("This VPS already has a Tono Xray installation; use a reviewed rotation workflow.") if preflight["existingTono"]
@@ -264,6 +271,20 @@ begin
   puts("Transport endpoint: #{server}:#{options[:port]}; Reality target: #{target}:443; expected final egress: #{expected_exit_ipv4 || "observe only"}.")
   puts("Plan: install pinned Xray #{XRAY_VERSION}, create an unprivileged Reality service, then test authenticated DNS/HTTPS/egress through #{node_name}.")
   puts("Firewall note: UFW is active; this tool will not alter firewall rules without separate approval.") if preflight["ufwActive"]
+  # Reported, never fatal. A fresh VPS is commonly provisioned before NTP
+  # settles, and Reality is TLS: a badly wrong clock breaks the handshake and
+  # presents as a dead node from every other vantage point.
+  case preflight["clockSynced"]
+  when "false" then puts("Clock note: this host reports NTP not synchronised. Reality is TLS; verify the clock before trusting a handshake failure.")
+  when "unknown" then puts("Clock note: synchronisation could not be determined (no timedatectl).")
+  end
+  # The service outbound is pinned to IPv4, so IPv6 presence is not a fault. It
+  # is reported because a node that has it is a node where an unpinned resolver
+  # would have egressed from an address no test validated.
+  puts("IPv6 note: this host has IPv6 egress; the Xray outbound is pinned to UseIPv4, so the validated IPv4 stays the egress identity.") if preflight["ipv6Egress"]
+  if options[:tune]
+    puts("Tuning plan: after the service passes its tests, set net.core.default_qdisc=fq and net.ipv4.tcp_congestion_control=bbr, with a timestamped backup, a recorded baseline, and a rollback script. No buffer, MTU, or qdisc-class changes.")
+  end
   unless options[:apply]
     puts("Dry run complete. Re-run with --apply after reviewing the host, target, endpoint, and firewall/provider rules.")
     exit(0)
@@ -323,6 +344,21 @@ begin
     output_written = true
     verify_installation(repo_root, output_path, node_name, expected_exit_ipv4)
     puts("Node installation and isolated authenticated data-plane verification passed.")
+
+    # Ordered strictly after verification. Tuning changes host-wide network
+    # behaviour, so running it before the node has proven itself would make a
+    # tuning fault and an install fault indistinguishable — and the rollback path
+    # above deliberately does not cover it, because a node that verified is a
+    # node worth keeping even if its tuning has to be undone by hand.
+    if options[:tune]
+      tuning = run_remote(ssh_target, remote_script, "tune", [])
+      if tuning["tuned"] == true
+        puts("Network tuning applied: qdisc #{tuning.fetch("previousDefaultQdisc")} -> #{tuning.fetch("defaultQdisc")}, congestion control #{tuning.fetch("previousCongestionControl")} -> #{tuning.fetch("congestionControl")}.")
+        puts("Tuning rollback: ssh #{ssh_target} 'bash #{tuning.fetch("rollback")}'")
+      else
+        puts("Network tuning skipped (#{tuning["reason"]}); the node is installed and verified regardless.")
+      end
+    end
     puts("Private catalog source saved with mode 0600 at #{output_path}.")
     puts("The managed catalog was not published; publication requires a separate explicit approval.")
   rescue StandardError, Interrupt => error
