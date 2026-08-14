@@ -1602,6 +1602,46 @@ function NodeExpand({ node, agent, profile, onProfile }: {
         <p>状态：{blockLabel(node)}</p>
         <p>质量：{node.quality === 'poor' ? '差' : '正常'}</p>
         {node.block?.rule ? <p className="muted">{node.block.rule}</p> : null}
+        <h4>对外暴露</h4>
+        {!node.exposure ? (
+          <p className="muted">尚未探测。这一栏空着不代表干净——泄露的面板正是在没人看的状态下开了几周。</p>
+        ) : (
+          <>
+            {node.exposure.unexpected.length === 0 ? (
+              <p>只对外开放 SSH（:{node.exposure.sshPorts.join('、:') || '—'}）与服务端口。</p>
+            ) : (
+              <p>
+                意外对外开放 {node.exposure.unexpected.length} 个端口：
+                {node.exposure.unexpected.map((listener) => (
+                  <span className="chip chip-risk" key={`exp-${listener.port}`}>
+                    :{listener.port}{listener.process ? ` ${listener.process}` : ''}
+                  </span>
+                ))}
+              </p>
+            )}
+            {node.exposure.acknowledged.map((listener) => (
+              <p className="muted" key={`ack-${listener.port}`}>
+                已具名豁免 :{listener.port}
+                {listener.process ? ` ${listener.process}` : ''}
+                {listener.reason ? ` —— ${listener.reason}` : ''}
+              </p>
+            ))}
+          </>
+        )}
+        {node.riskSignals.length > 0 && (
+          <>
+            <h4>IP 信誉</h4>
+            <p className="muted">
+              securityCheck 询问十七家数据库，下面是各自的答案；少数派不构成判定。
+            </p>
+            {node.riskSignals.map((signal) => (
+              <p key={`sig-${signal.tag}`}>
+                {signal.tag}：{signal.yes} 家认为是，{signal.no} 家认为否
+                {signal.yes > signal.no ? '（多数）' : '（少数）'}
+              </p>
+            ))}
+          </>
+        )}
         {agent ? (
           <p>
             CPU {agent.cpu == null ? '—' : `${Math.round(agent.cpu)}%`}
@@ -1707,10 +1747,40 @@ function MonitorPage() {
     const keyOf = (node: LiveQualityNodeDto) => node.publicIp || node.host || node.name;
     const routeChips = (node: LiveQualityNodeDto) =>
       node.routeKeywords.filter((keyword) => !['联通', '电信', '移动'].includes(keyword)).slice(0, 4);
-    // A listed exit is the failure customers report as "everything asks me for a
-    // captcha", and it is invisible from latency or reachability — the node
+    // A listed exit is the failure customers report as "everything asks me for
+    // a captcha", and it is invisible from latency or reachability — the node
     // answers probes perfectly while being useless for real browsing.
-    const riskChips = (node: LiveQualityNodeDto) => node.riskKeywords.slice(0, 4);
+    //
+    // Shown as a tally rather than a word. securityCheck asks seventeen
+    // databases; a node here was reported as attacker/abuser/threat/spamhaus
+    // when the evidence was a minority on each, and printing those four words
+    // would have sent someone chasing a reputation problem that sixteen
+    // databases said was absent. `1/3` cannot mislead in that direction.
+    const RISK_LABELS: Record<string, string> = {
+      attacker: '攻击者', abuser: '滥用者', threat: '威胁',
+      malicious: '恶意', spam: '垃圾邮件', spamhaus: 'SPAMHAUS',
+    };
+    const riskChips = (node: LiveQualityNodeDto) => node.riskSignals
+      .filter((signal) => signal.yes > 0)
+      .slice(0, 4)
+      .map((signal) => ({
+        key: signal.tag,
+        label: `${RISK_LABELS[signal.tag] ?? signal.tag} ${signal.yes}/${signal.yes + signal.no}`,
+        majority: signal.yes > signal.no,
+      }));
+    // Absent is not clean. A node no collector run has looked at is exactly the
+    // state the leaked panel lived in for weeks, so it reads as unknown.
+    const exposureChip = (node: LiveQualityNodeDto) => {
+      if (!node.exposure) return { label: '暴露面未探测', tone: 'muted' as const };
+      const { unexpected } = node.exposure;
+      if (!unexpected.length) return null;
+      const first = unexpected[0];
+      const rest = unexpected.length > 1 ? ` +${unexpected.length - 1}` : '';
+      return {
+        label: `对外 :${first.port}${first.process ? ` ${first.process}` : ''}${rest}`,
+        tone: 'risk' as const,
+      };
+    };
     return <div className="stack">
       {(live.agentsError || live.qualityError) && (
         <Banner
@@ -1843,8 +1913,21 @@ function MonitorPage() {
                     </td>
                     <td>
                       <div className="chip-list">
-                        {riskChips(node).map((keyword) => (
-                          <span className="chip chip-risk" key={`risk-${keyword}`}>{keyword}</span>
+                        {(() => {
+                          const chip = exposureChip(node);
+                          return chip ? (
+                            <span className={`chip chip-${chip.tone === 'risk' ? 'risk' : 'muted'}`}>
+                              {chip.label}
+                            </span>
+                          ) : null;
+                        })()}
+                        {riskChips(node).map((signal) => (
+                          <span
+                            className={`chip${signal.majority ? ' chip-risk' : ' chip-muted'}`}
+                            key={`risk-${signal.key}`}
+                          >
+                            {signal.label}
+                          </span>
                         ))}
                         {routeChips(node).map((keyword) => (
                           <span className={`chip${/9929|CMIN2|CN2|GIA/.test(keyword) ? ' chip-hot' : ''}`} key={keyword}>{keyword}</span>

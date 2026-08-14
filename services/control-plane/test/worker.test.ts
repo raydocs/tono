@@ -622,6 +622,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
             },
             security_check: 'IP quality body',
             backtrace: '163 / 4837',
+            risk_signals: [
+              { tag: 'attacker', yes: 1, no: 2 },
+              { tag: 'spamhaus', yes: 1, no: 0 },
+              { tag: '', yes: 9, no: 0 },
+              { tag: 'negative', yes: -1, no: 0 },
+            ],
+            exposure: {
+              clean: false,
+              sshPorts: [30022, 70000],
+              unexpected: [{ port: 25775, address: '0.0.0.0', process: 'python3' }],
+              acknowledged: [
+                { port: 8388, address: '0.0.0.0', process: 'ssserver', reason: 'family member' },
+              ],
+              expected: [{ port: 443, address: '*', process: 'xray' }],
+            },
             secret: 'must-not-be-stored',
           }],
         },
@@ -650,6 +665,18 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       },
     });
     expect(live.quality.nodes[0].secret).toBeUndefined();
+    // The tally travels, so the console can say "1 of 3 databases" rather than
+    // printing the word "attacker" as though it were settled.
+    expect(live.quality.nodes[0].riskSignals).toEqual([
+      { tag: 'attacker', yes: 1, no: 2 },
+      { tag: 'spamhaus', yes: 1, no: 0 },
+    ]);
+    expect(live.quality.nodes[0].exposure).toMatchObject({
+      clean: false,
+      sshPorts: [30022],
+      unexpected: [{ port: 25775, address: '0.0.0.0', process: 'python3' }],
+      acknowledged: [{ port: 8388, reason: 'family member' }],
+    });
     expect(live.quality.cnAgentsConfigured).toBe(3);
     expect(live.agents).toEqual([{
       name: 'Stored Node', os: 'Debian', arch: 'amd64', cpuName: null,
@@ -660,6 +687,28 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(live.qualityError).toBeNull();
     expect(absorbedHostFetches).toEqual([]);
 
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('does not let a collector that predates exposure look like a clean node', async () => {
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const ingested = await api('ops-ingest/snapshot', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ report: { nodes: [{ name: 'Old Collector', ok: true }] } }),
+    });
+    expect(ingested.status).toBe(200);
+
+    const response = await operations('live');
+    const { live } = await response.json() as any;
+    const node = live.quality.nodes.find((n: any) => n.name === 'Old Collector');
+    // Absent, not clean. A node nobody has looked at is precisely the state the
+    // leak lived in, and rendering it as clean would recreate that blind spot.
+    expect(node.exposure).toBeNull();
+    expect(node.riskSignals).toEqual([]);
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 

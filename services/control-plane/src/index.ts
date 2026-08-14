@@ -2827,8 +2827,71 @@ function liveQualityNode(raw: unknown): Row | null {
           overseas: liveProbeSummary(blockRaw.overseas),
         }
       : null,
+    riskSignals: liveRiskSignals(node.riskSignals ?? node.risk_signals),
+    exposure: liveExposure(node.exposure),
     securityCheck: liveBoundedText(node.securityCheck ?? node.security_check),
     backtrace: liveBoundedText(node.backtrace),
+  };
+}
+
+// How many of securityCheck's seventeen databases took each side.
+//
+// The collector used to report a tag whenever any single database said yes,
+// which put the word "attacker" beside a node that two of three databases
+// called clean. The tally is carried so the console can show what was actually
+// found rather than a verdict nothing supports.
+function liveRiskSignals(value: unknown): Row[] {
+  if (!Array.isArray(value)) return [];
+  const signals: Row[] = [];
+  for (const raw of value.slice(0, 12)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const signal = raw as Row;
+    const tag = optionalText(signal.tag);
+    if (!tag) continue;
+    const yes = optionalNumber(signal.yes);
+    const no = optionalNumber(signal.no);
+    if (yes === null || yes < 0) continue;
+    signals.push({ tag: tag.slice(0, 24), yes, no: no === null || no < 0 ? 0 : no });
+  }
+  return signals;
+}
+
+// What the node offers the internet. `null` when the collector predates this,
+// which the console must show as unknown rather than as clean: a node nobody
+// has looked at is exactly the state the leak lived in.
+function liveExposure(value: unknown): Row | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Row;
+  const listeners = (input: unknown, withReason: boolean): Row[] => {
+    if (!Array.isArray(input)) return [];
+    const rows: Row[] = [];
+    for (const entry of input.slice(0, 32)) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const listener = entry as Row;
+      const port = optionalNumber(listener.port);
+      if (port === null || port < 0 || port > 65535) continue;
+      const row: Row = {
+        port,
+        address: optionalText(listener.address),
+        process: optionalText(listener.process),
+      };
+      if (withReason) row.reason = liveBoundedText(listener.reason);
+      rows.push(row);
+    }
+    return rows;
+  };
+  const sshPorts = Array.isArray(raw.sshPorts)
+    ? raw.sshPorts
+        .map((port) => optionalNumber(port))
+        .filter((port): port is number => port !== null && port > 0 && port <= 65535)
+        .slice(0, 8)
+    : [];
+  return {
+    clean: raw.clean === true,
+    sshPorts,
+    unexpected: listeners(raw.unexpected, false),
+    acknowledged: listeners(raw.acknowledged, true),
+    expected: listeners(raw.expected, false),
   };
 }
 

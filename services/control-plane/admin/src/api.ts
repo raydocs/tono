@@ -236,6 +236,12 @@ export interface LiveProbeDto {
   authoritative?: boolean;
 }
 
+export interface LiveListenerDto {
+  port: number;
+  address: string | null;
+  process: string | null;
+}
+
 export interface LiveQualityNodeDto {
   name: string;
   host: string | null;
@@ -243,6 +249,18 @@ export interface LiveQualityNodeDto {
   ok: boolean;
   quality: string | null;
   riskKeywords: string[];
+  /** How many of securityCheck's databases took each side. A tag with more
+   *  `no` than `yes` is a minority opinion, not a finding. */
+  riskSignals: { tag: string; yes: number; no: number }[];
+  /** What the node offers the internet. `null` means no collector run has
+   *  looked yet — which must not be rendered as clean. */
+  exposure: {
+    clean: boolean;
+    sshPorts: number[];
+    unexpected: LiveListenerDto[];
+    acknowledged: (LiveListenerDto & { reason: string | null })[];
+    expected: LiveListenerDto[];
+  } | null;
   routeKeywords: string[];
   block: {
     status: string | null;
