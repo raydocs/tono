@@ -218,9 +218,13 @@ fn pinned_core_digest() -> Option<String> {
 /// Refuse to hand a core to the process launcher unless it is the one that was pinned.
 ///
 /// Fail-closed in every direction: an unreadable file, an absent pin and a wrong digest are all
-/// errors. The caller runs this before the core path reaches `start_core` — and, on Windows, before
-/// the WFP app-id permit is armed for it, so an unverified binary does not inherit the one
-/// executable-scoped hole in the kill switch either.
+/// errors.
+///
+/// Reached only from `validate_core_path`, i.e. from `prepare_runtime` and `stage_runtime` — the
+/// App-driven planning path. `CoreManager::start_core` does not call it, so neither the watchdog
+/// respawn nor the boot-time desired-state restore verifies the binary it spawns; both take the
+/// path out of persisted state and run it. Say "on the planning path" rather than "before every
+/// start", which is what this comment used to claim and what `SECURITY.md` repeated.
 pub(super) fn verify_core_binary(core_path: &Path) -> Result<(), ServiceError> {
     let measured = sha256_hex(core_path).map_err(|error| {
         refused(format!(
