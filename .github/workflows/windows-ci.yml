@@ -161,3 +161,16 @@ jobs:
         # The suite is gated behind these features; without them the files compile
         # to nothing and the job would pass having tested nothing at all.
         run: cargo test --locked --features standalone,client,test
+
+      # `mod wfp` is `not(feature = "test")`, so every invocation above compiles it out and
+      # the tests inside it have never run anywhere — including the one that predates this
+      # step. That is the one part of the kill switch no model can stand in for: whether the
+      # kernel accepts the filter shapes the service builds. This runner is Windows and
+      # administrator, so it can answer.
+      #
+      # Scoped to that module on purpose. Running the whole suite without the `test` feature
+      # would take stubs off code that talks to the SCM and the network, which is not what
+      # this step is for.
+      - name: Ask the real filtering engine
+        working-directory: apps/windows/service
+        run: cargo test --locked --features standalone,client core::wfp::real_engine_tests -- --nocapture

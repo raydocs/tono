@@ -1066,7 +1066,10 @@ fn validate_tunnel_luid(luid: u64) -> Result<()> {
 /// one `AleAppId`, one protocol, one port and 116 remote-address prefixes on a single filter.
 /// If the kernel refused a filter shaped like that, arming would fail for every user, and no
 /// test on any platform would have noticed: until now nothing ever called `install`.
-#[cfg(windows)]
+// The enclosing module is already `windows` and `not(feature = "test")`; this only adds the
+// test gate. Note what that means: with the `test` feature on — which is how the main CI step
+// and every local run invoke this crate — none of this compiles. That is why a dedicated CI
+// step runs it without that feature, and why the test above it had never executed anywhere.
 #[cfg(test)]
 mod real_engine_tests {
     use super::*;
