@@ -76,7 +76,23 @@ impl Decoder for HttpIpcCodec {
                     }
                 }
 
-                let total_len = headers_len + content_length;
+                // Checked, because `content_length` is attacker-controlled and
+                // `usize` addition wraps in release. A `Content-Length` chosen so
+                // that `headers_len + content_length` wraps to a small number
+                // walks straight past the size limit below, and `split_to` then
+                // yields a buffer shorter than `body_start` — so `slice` panics
+                // on an out-of-range start. The service is built with
+                // `panic = "abort"`, so that panic is the whole privileged
+                // process going away, taking the firewall and DNS ownership with
+                // it, on one unauthenticated request.
+                let total_len = match headers_len.checked_add(content_length) {
+                    Some(total) => total,
+                    None => {
+                        return Err(KodeBridgeError::validation(
+                            "Request size exceeds maximum allowed",
+                        ));
+                    }
+                };
 
                 if total_len > self.max_request_size {
                     return Err(KodeBridgeError::validation("Request size exceeds maximum allowed"));
@@ -113,6 +129,16 @@ impl Decoder for HttpIpcCodec {
                 // We have the full request. Split the buffer only after extracting owned metadata.
                 let data = src.split_to(total_len);
                 let bytes = data.freeze();
+                // Belt and braces for the same class of fault: `body_start` comes
+                // from the parser and `total_len` from a header, and `slice`
+                // panics rather than erroring when they disagree. In a process
+                // that aborts on panic, a decoder must never be the thing that
+                // decides the service stops running.
+                if body_start > bytes.len() {
+                    return Err(KodeBridgeError::validation(
+                        "Request body offset is outside the request",
+                    ));
+                }
                 let body = bytes.slice(body_start..);
 
                 Ok(Some(ParsedRequest {
@@ -172,5 +198,87 @@ impl Encoder<HttpResponse> for HttpIpcCodec {
             .map_err(|e| KodeBridgeError::connection(format!("Failed to flush: {}", e)))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn codec() -> HttpIpcCodec {
+        HttpIpcCodec::new(8 * 1024, 64 * 1024)
+    }
+
+    /// A `Content-Length` chosen to wrap `headers_len + content_length` must be
+    /// rejected, not wrapped into a small total that walks past the size limit.
+    ///
+    /// Before the checked add, the wrapped total made `split_to` produce a buffer
+    /// shorter than the parsed body offset, and `Bytes::slice` panics on an
+    /// out-of-range start. The privileged Windows service is built with
+    /// `panic = "abort"`, so this was one unauthenticated request away from
+    /// taking the process that owns the firewall and DNS with it.
+    #[test]
+    fn a_content_length_that_wraps_the_total_is_refused() {
+        let mut src = BytesMut::new();
+        let head = b"POST /x HTTP/1.1\r\nContent-Length: ";
+        let tail = b"\r\n\r\n";
+        // Enough to wrap: usize::MAX leaves no room for a single header byte.
+        let value = usize::MAX.to_string();
+        src.extend_from_slice(head);
+        src.extend_from_slice(value.as_bytes());
+        src.extend_from_slice(tail);
+        // Body bytes, so a wrapped small total would have found the buffer long
+        // enough and proceeded.
+        src.extend_from_slice(&[b'a'; 256]);
+
+        let err = match codec().decode(&mut src) {
+            Err(err) => err,
+            Ok(_) => panic!("a wrapping Content-Length must be an error, not a panic"),
+        };
+        assert!(
+            err.to_string().contains("Request size exceeds maximum allowed"),
+            "{err}"
+        );
+    }
+
+    /// The ordinary oversize case keeps behaving as before.
+    #[test]
+    fn an_oversize_content_length_is_still_refused() {
+        let mut src = BytesMut::new();
+        src.extend_from_slice(b"POST /x HTTP/1.1\r\nContent-Length: 999999999\r\n\r\n");
+        let err = match codec().decode(&mut src) {
+            Err(err) => err,
+            Ok(_) => panic!("oversize must be refused"),
+        };
+        assert!(
+            err.to_string().contains("Request size exceeds maximum allowed"),
+            "{err}"
+        );
+    }
+
+    /// And a well-formed request still decodes, so the guard did not cost the
+    /// ordinary path.
+    #[test]
+    fn a_well_formed_request_still_decodes() {
+        let mut src = BytesMut::new();
+        src.extend_from_slice(b"POST /clash/start HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello");
+        let parsed = match codec().decode(&mut src) {
+            Ok(Some(parsed)) => parsed,
+            other => panic!("expected a complete request, got {}", other.is_ok()),
+        };
+        assert_eq!(parsed.method, Method::POST);
+        assert_eq!(parsed.uri.path(), "/clash/start");
+        assert_eq!(&parsed.body[..], b"hello");
+    }
+
+    /// A request whose body has not arrived yet still parks rather than erroring.
+    #[test]
+    fn an_incomplete_body_waits_for_more_bytes() {
+        let mut src = BytesMut::new();
+        src.extend_from_slice(b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc");
+        assert!(
+            matches!(codec().decode(&mut src), Ok(None)),
+            "a partial body must wait, not error"
+        );
     }
 }
