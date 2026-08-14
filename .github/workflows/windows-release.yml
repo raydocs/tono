@@ -76,19 +76,23 @@ jobs:
             Write-Output "::error title=Release notes are missing::$notesPath"
             throw "apps/windows/release-notes/$env:RELEASE_VERSION.md does not exist. Update notes are shown to every user in the update dialog and must be reviewed in git."
           }
-          $notes = (Get-Content -LiteralPath $notesPath -Raw).Trim()
+          # Null-check before Trim(): Get-Content -Raw on an empty file returns $null, and
+          # $null.Trim() under ErrorActionPreference=Stop throws something unrelated to the
+          # actual problem.
+          $notes = Get-Content -LiteralPath $notesPath -Raw
           if ([string]::IsNullOrWhiteSpace($notes)) {
             throw "apps/windows/release-notes/$env:RELEASE_VERSION.md is empty"
           }
+          $notes = $notes.Trim()
           # A heredoc delimiter appearing inside the payload would let the notes file write
           # arbitrary further variables into the job environment.
           $delimiter = 'TONO_RELEASE_NOTES_EOF'
           if ($notes -match [regex]::Escape($delimiter)) {
             throw "release notes must not contain the literal $delimiter"
           }
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "RELEASE_NOTES<<$delimiter"
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value $notes
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value $delimiter
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value "RELEASE_NOTES<<$delimiter"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value $notes
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value $delimiter
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -216,4 +220,4 @@ jobs:
             "",
             "Until step 2 completes, ``windows-updates/latest.json`` keeps offering the previously promoted version to every installed client."
           )
-          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($lines -join "`n")
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Value ($lines -join "`n")
