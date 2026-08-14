@@ -391,7 +391,11 @@ fn registry_wechat_install_locations() -> Vec<PathBuf> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 
     let mut locations = Vec::new();
-    let hives: [(&str, isize); 3] = [
+    // No explicit element type: `winreg::HKEY` is `*mut c_void` in 0.56, not the
+    // `isize` this used to claim, and the annotation is what made the Tauri crate
+    // fail to compile for Windows — four of the five errors, all of them here.
+    // Inference cannot drift the way a hand-written alias does.
+    let hives = [
         (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", HKEY_LOCAL_MACHINE),
         (
             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
