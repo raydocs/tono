@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-12T09:18:36Z",
+ "generatedAt": "2026-08-14T13:30:00Z",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
   "baseURL": "https://api.afk.ccwu.cc",
@@ -18,16 +18,16 @@
   }
  },
  "releaseSet": {
-  "id": "2026-08-12-macos-build62-windows-0.0.29-candidate",
-  "status": "platform-lines-separated",
-  "reason": "macOS Build 62 is the current notarized Sparkle prerelease. Windows 0.0.27 remains the published stable installer, while the DNS port-owner fix is source-ready as 0.0.29 on release/windows and has not been represented as a published binary."
+  "id": "2026-08-14-macos-build65-windows-0.0.32",
+  "status": "both-lines-published-and-reachable",
+  "reason": "macOS Build 65 is published and served by the Sparkle feed; Windows 0.0.32 is published and the audited update channel now serves it. For the first time both platforms reach existing users automatically: the macOS feed had stood at Build 62 and the Windows channel at 0.0.25."
  },
  "platforms": {
   "macos": {
    "current": {
-    "releaseId": "macos-0.0.62-build62",
-    "version": "0.0.62",
-    "build": 62,
+    "releaseId": "macos-0.0.65-build65",
+    "version": "0.0.65",
+    "build": 65,
     "architecture": "arm64",
     "minimumOS": "26.3",
     "trafficPolicySchemas": [
@@ -43,29 +43,30 @@
      "automaticCheckSeconds": 21600,
      "silentInstall": false
     },
-    "availability": "sparkle-prerelease",
+    "availability": "sparkle-published",
     "provenance": {
      "releaseLine": "release/macos",
-     "reconstructedSourceCommit": "82d9a8a8b793a3af74d76ab594e862c1e9c07c7d",
-     "immutableTagCommit": "0cd038d7f3c48cb31e4f0884f7575605e3ee9071",
-     "tagStatus": "legacy-misdirected",
-     "audit": "The signed artifact is retained and verified. The immutable legacy tag was created at the Windows 0.0.27 commit because the old macOS release command omitted an explicit target."
+     "sourceCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
+     "immutableTagCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
+     "tagStatus": "exact",
+     "audit": "The publisher resolves the tag through the API and refuses to continue unless it points at the source commit, so the misdirection recorded against Build 62 cannot recur."
     },
     "artifact": {
-     "name": "Tono-0.0.62-build62-arm64.zip",
-     "url": "https://github.com/raydocs/tono/releases/download/tono-0.0.62-build62/Tono-0.0.62-build62-arm64.zip",
-     "size": 19791224,
-     "sha256": "270532664145511f031ced5930fa2c7eec147d199c6ab330c19a7236725de8ec",
-     "sparkleEdSignature": "KQjg0g2FinUq8F6Aqnvnqkoo8YK4lLqh97Uk+Dl/QxIkCYCm9jRWSlfOOvhK22QGCpzHGKLFDTqeoAdnwWbcCA=="
+     "name": "Tono-0.0.65-build65-arm64.zip",
+     "url": "https://github.com/raydocs/tono/releases/download/tono-macos-0.0.65-build65/Tono-0.0.65-build65-arm64.zip",
+     "size": 19895558,
+     "sha256": "9a53ad2e065538bfd41e51d4351d8a351d3003c2f73dd5cc2cfac393820950e8",
+     "sparkleEdSignature": "6yK6/SkqC8PtZy+GrSyC+oVeMM4UwOrN/NRErKByGp4+p8TP8ZdUpCFaDzOYcYTzpgACNJFnASgjvXqp/WwEAA=="
     },
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-0.0.62-build62"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65",
+    "helperContract": "3.12.2"
    }
   },
   "windows": {
    "current": {
-    "releaseId": "windows-0.0.27",
-    "version": "0.0.27",
-    "build": 27,
+    "releaseId": "windows-0.0.32",
+    "version": "0.0.32",
+    "build": 32,
     "architecture": "x86_64",
     "installer": "nsis",
     "trafficPolicySchemas": [
@@ -76,58 +77,70 @@
     "recommended": true,
     "availability": "published-stable",
     "update": {
-     "mechanism": "manual",
-     "automaticUpdaterEnabled": false,
-     "channelVersion": "0.0.25",
-     "reason": "0.0.27 is the current published installer; the signed automatic update channel has not yet been promoted beyond 0.0.25."
+     "mechanism": "tauri-updater-v2",
+     "automaticUpdaterEnabled": true,
+     "channelVersion": "0.0.32",
+     "reason": "The audited windows-updates channel was advanced to 0.0.32 on 2026-08-14. It had stood at 0.0.25 since 2026-08-10 because the promote job and its deployment environment named different branches, so the run reported success without moving the channel."
     },
-    "commit": "0cd038d7f3c48cb31e4f0884f7575605e3ee9071",
+    "commit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
     "releaseLine": "release/windows",
     "artifact": {
-     "name": "Tono_0.0.27_x64-setup.exe",
-     "url": "https://github.com/raydocs/tono/releases/download/v0.0.27/Tono_0.0.27_x64-setup.exe",
-     "size": 31275005,
-     "sha256": "fe29a3e2bc7aee24026f8bdb5e6c717555c16c2f32c7652a1aa6ee09090e8319",
-     "authenticodeSigned": null,
-     "authenticodeStatus": "not-recorded",
-     "tauriUpdaterSignature": null
+     "name": "Tono_0.0.32_x64-setup.exe",
+     "url": "https://github.com/raydocs/tono/releases/download/v0.0.32/Tono_0.0.32_x64-setup.exe",
+     "size": 31484627,
+     "sha256": "090c03606ff7b7bc31d4d75848a5b6137a7b0f375cd8c7f4cf4439cf4ba1a1ce",
+     "authenticodeSigned": false,
+     "authenticodeStatus": "not-signed",
+     "updaterSignatureVerified": true
     },
     "knownLimitations": [
-     "Automatic update users remain on 0.0.25 until the audited windows-updates channel is explicitly promoted.",
-     "The 0.0.28 release exists only as a draft and is not a customer release.",
-     "The 0.0.29 DNS port-owner fix is source-ready but remains unpublished until a signed Windows build and real-machine gate pass."
+     "The installer carries no Authenticode certificate, so Windows SmartScreen warns on a fresh install. The Tauri key signs the update payload only.",
+     "The App and the Service must ship together: this build requires service protocol revision 14, and the installer replaces both under one elevated transaction.",
+     "Users still on 0.0.25 cross six releases in one step, because every build between them was published without the channel being advanced."
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.27"
-   },
-   "candidate": {
-    "releaseId": "windows-0.0.29-source-candidate",
-    "version": "0.0.29",
-    "build": 29,
-    "architecture": "x86_64",
-    "availability": "source-ready-unpublished",
-    "releaseLine": "release/windows",
-    "commit": "4bed22bfc15bb7599fe517134a73311cf5016d00",
-    "serviceVersion": "2.6.5",
-    "serviceProtocol": "2.11",
-    "trafficPolicySchemas": [
-     1,
-     2,
-     3
-    ],
-    "fixes": [
-     "Reconciles a stale Tono-owned core through the authenticated Service before checking DNS TCP/UDP port 53.",
-     "Never terminates third-party DNS or proxy processes; an external owner still produces an actionable failure.",
-     "Reports TCP and UDP ownership consistently instead of showing contradictory diagnostics."
-    ],
-    "releaseGate": [
-     "Build and sign the Windows installer from release/windows.",
-     "Verify the 127.0.0.1:53 stale-owner recovery and third-party-owner refusal on Windows 11.",
-     "Publish v0.0.29 only after artifact and updater-channel checks pass."
-    ]
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.32",
+    "serviceProtocolRevision": 14,
+    "minimumServiceRevision": 14
    }
   }
  },
  "archive": [
+  {
+   "releaseId": "macos-0.0.65-build65",
+   "platform": "macos",
+   "version": "0.0.65",
+   "build": 65,
+   "publishedAt": "2026-08-14T13:00:48Z",
+   "status": "published-sparkle-current",
+   "sourceCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
+   "tagCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
+   "summary": [
+    "The first Sparkle update since Build 62, and the macOS rollback baseline. Builds 63 and 64 were assembled and never published, so everything they carried is here.",
+    "Every protection rule now carries a name. macOS was folding each specific rule into the broader one beside it — 66 written, 13 kept, none of the exact ones — so Tono could not report which route traffic took. Nothing leaked; the accounting simply did not exist.",
+    "WeChat is identified by its Apple-issued signature rather than the path /Applications/WeChat.app, so a copy elsewhere or named 微信.app is recognised. One account had 342 of 342 connections in the tunnel while the app reported China-direct as active.",
+    "WeChat’s main channel on port 80 went through the exit, making a round trip to the United States from China; two logs showed 82% and 72% of its connections leaving that way. Both now go direct, with the exit as fallback.",
+    "The privileged helper is 3.12.2, so the first launch asks for an administrator password once."
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65"
+  },
+  {
+   "releaseId": "windows-0.0.32",
+   "platform": "windows",
+   "version": "0.0.32",
+   "build": 32,
+   "publishedAt": "2026-08-14T12:51:35Z",
+   "status": "published-stable-channel-current",
+   "sourceCommit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
+   "tagCommit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
+   "summary": [
+    "WeChat's images, files and media finish again. The direct-path permit knew only the addresses looked up at the moment of connecting, and WeChat finds its own servers as it goes; everything found afterwards was sent and silently dropped. The permit stays bounded to four ports, to Tono's own routing engine, and never to a private address.",
+    "Signing in tries the same server on alternative ports before giving up, which reaches networks that filter 443 alone.",
+    "Disconnect and Restore Internet reach the Service when it is busy. They were given 150 milliseconds to connect while the security check inside that same step is allowed three seconds.",
+    "Tono no longer reports Connected while nothing can leave the tunnel, and turning protection off now stays off across a Wi-Fi hop or a wake from sleep.",
+    "The audited update channel was advanced to this version, the first time since 2026-08-10 that a Windows build reached existing users."
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.32"
+  },
   {
    "releaseId": "macos-0.0.62-build62",
    "platform": "macos",

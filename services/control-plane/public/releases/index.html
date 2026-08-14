@@ -26,30 +26,32 @@
       </div>
       <div class="grid">
         <article class="card current">
-          <div class="card-title"><span class="platform">macOS</span><span class="status good">可测试</span></div>
-          <h3>0.0.62 · Build 62</h3>
-          <p>Apple Silicon、macOS 26.3+。支持策略 v1–v4；安装包已完成 Developer ID、公证、Gatekeeper 与 Sparkle 签名验证。</p>
+          <div class="card-title"><span class="platform">macOS</span><span class="status good">已发布 · 自动更新</span></div>
+          <h3>0.0.65 · Build 65</h3>
+          <p>Apple Silicon、macOS 26.3+。Developer ID 签名、公证、装订票据与 Gatekeeper 校验均已通过；Sparkle feed 已指向本版。这是自 Build 62 以来的第一次自动更新，63 与 64 组装后从未发布，内容都并入本版。</p>
           <ul>
-            <li>微信 TCP/80 走 Tono-Exit，已审核的 443/8080 与 UDP/443 走应用直连</li>
-            <li>策略条目逐项降级，不再因一个未知条目丢弃整份策略</li>
-            <li>策略支持离线 Ed25519 签名并保护 Tono、Claude 与 Anthropic 域名</li>
-            <li>旧 tag 误指向 Windows commit 的事实保留在 Manifest 审计字段中；安装包本身校验通过</li>
+            <li>保护规则现在逐条带名字。此前 macOS 会把每条精确规则折叠进旁边更宽的那条——写入 66 条、内核只留 13 条、精确的一条不剩，所以 Tono 说不出流量走了哪条路。没有泄漏，只是这份账目此前并不存在</li>
+            <li>微信按 Apple 签发的签名识别，不再只认 <code>/Applications/WeChat.app</code>；放在别处或名为 微信.app 的副本同样生效。曾有账号 342 条连接全部走隧道，而界面显示国内直连正常</li>
+            <li>微信主通道走 80 端口，此前被送进受保护出口，从国内绕行美国往返；两份日志显示 82% 和 72% 的连接是这样出去的。现在一律直连，直连失败仍可回落出口</li>
+            <li>账户有 home 线路时，<code>claude.ai</code>、<code>claude.com</code>、<code>anthropic.com</code> 与 Anthropic 自有网段走住宅跳点；Claude Code 按安装路径识别，桌面端与命令行不会被拆到两个网络</li>
+            <li>活动页改为按应用展示：本次会话用过网络的每个应用，按流量排序，直连／住宅／隧道各一条</li>
+            <li>特权 helper 为 3.12.2，首次启动会要求输入一次管理员密码</li>
           </ul>
-          <a class="text-link" href="https://github.com/raydocs/tono/releases/download/tono-0.0.62-build62/Tono-0.0.62-build62-arm64.zip">下载 Build 62 ZIP →</a>
+          <a class="text-link" href="https://github.com/raydocs/tono/releases/download/tono-macos-0.0.65-build65/Tono-0.0.65-build65-arm64.zip">下载 Build 65 ZIP →</a>
         </article>
 
         <article class="card">
-          <div class="card-title"><span class="platform">Windows</span><span class="status warn">小范围验收</span></div>
-          <h3>0.0.27 · Stable / 0.0.29 · Source Candidate</h3>
-          <p>0.0.27 仍是当前已发布安装包。0.0.29 的 DNS 端口占用修复已进入 release/windows，但尚未生成或宣称为客户安装包；0.0.28 保留为 GitHub Draft。</p>
+          <div class="card-title"><span class="platform">Windows</span><span class="status good">已发布 · 自动更新</span></div>
+          <h3>0.0.32 · Stable</h3>
+          <p>x64、NSIS 安装包。已审计的更新通道已推进到本版——此前它停在 0.0.25，中间每一版都发布过却从未推进通道，所以仍在 0.0.25 的用户这一步会跨过六个版本。安装包未附 Authenticode 证书，全新安装时 SmartScreen 仍会告警。</p>
           <ul>
-            <li>兼容 VMware、VirtualBox、Hyper-V、WSL、Docker 等虚拟网卡</li>
-            <li>0.0.29 会先让已认证 Service 清理 Tono 自己遗留的 DNS 占用，再检查 TCP/UDP 53</li>
-            <li>不会结束第三方 DNS 或代理进程；第三方占用仍会明确报错</li>
-            <li>Service 2.6.5、协议 2.11；等待 Windows 11 真机和签名安装包门禁</li>
-            <li>Windows 发布只从 release/windows 发起</li>
+            <li>微信的图片、文件和语音能收发完了。直连放行此前只认连接那一刻查到的地址，而微信是边用边找服务器的——之后找到的全被发出去然后静默丢弃，表现就是一直转圈。放行仍有边界：四个端口、只给 Tono 自己的路由引擎、且永不放行内网地址</li>
+            <li>登录会在同一台服务器上改试备用端口再放弃，能穿过只封 443 的网络</li>
+            <li>服务繁忙时「断开」和「恢复上网」也能送达。此前建立连接只给 150 毫秒，而同一步里的安全校验却有三秒——保护开着、没有网、而唯一能解除它的按钮没反应</li>
+            <li>隧道出不去时不再显示「已连接」；关闭保护后不会因换 Wi-Fi 或睡眠唤醒而自行重新武装</li>
+            <li>App 与 Service 必须同版：本版要求服务协议 14，安装器在一次提权事务里同时替换两者</li>
           </ul>
-          <a class="text-link" href="https://github.com/raydocs/tono/releases/download/v0.0.27/Tono_0.0.27_x64-setup.exe">下载 Windows 0.0.27 →</a>
+          <a class="text-link" href="https://github.com/raydocs/tono/releases/download/v0.0.32/Tono_0.0.32_x64-setup.exe">下载 Windows 0.0.32 →</a>
         </article>
       </div>
     </section>
@@ -60,13 +62,12 @@
         <h2>每次发布必须一起核对</h2>
       </div>
       <div class="contract">
-        <div><strong>控制面</strong><span>策略 revision 8 · 当前 schema v3</span></div>
-        <div><strong>macOS</strong><span>Build 62 · 支持 v1–v4</span></div>
-        <div><strong>Windows 已发布包</strong><span>0.0.27 · 支持 v1–v3</span></div>
-        <div><strong>Windows 源码候选</strong><span>0.0.29 · DNS :53 修复 · 尚未发布</span></div>
-        <div><strong>Windows 更新通道</strong><span>0.0.25 · 与安装包发布独立推进</span></div>
+        <div><strong>macOS</strong><span>Build 65 · helper 3.12.2</span></div>
+        <div><strong>macOS 更新 feed</strong><span>0.0.65 · Sparkle 已指向</span></div>
+        <div><strong>Windows 已发布包</strong><span>0.0.32 · 服务协议 14</span></div>
+        <div><strong>Windows 更新通道</strong><span>0.0.32 · 与安装包首次一致</span></div>
       </div>
-      <p class="note">以后只有 Manifest 中 Mac、Windows、控制面三者兼容时，release set 才会标记为 complete。这样不会再出现只升级 Mac、Windows 被新策略拒绝的情况。</p>
+      <p class="note">两个平台现在都能自动送达既有用户。此前 macOS 的 feed 停在 Build 62、Windows 的通道停在 0.0.25，中间发布的每一版都只存在于 GitHub 上——「发布过」和「用户拿得到」在这里是两件事，判断依据是本页的 Manifest，不是 GitHub 的发布列表。</p>
     </section>
 
     <section>
@@ -75,6 +76,8 @@
         <h2>版本改动备份</h2>
       </div>
       <div class="timeline">
+        <article><time>2026-08-14</time><h3>macOS 0.0.65 · Build 65</h3><p>自 Build 62 以来第一次真正送达用户的更新，同时作为 macOS 的回滚基线：Sparkle 不会安装更低的 build，后续若出问题，应以更高 build 重新发布本份源码，而不是让用户降级。63 与 64 组装后从未发布，内容都在本版。保护规则改为逐条带名，此前内核会把 66 条折叠成 13 条且精确规则一条不剩；微信改按 Apple 签名识别并把 80 端口留在国内直连。</p></article>
+        <article><time>2026-08-14</time><h3>Windows 0.0.32</h3><p>修好微信图片与文件一直转圈：直连放行此前只认连接那一刻查到的地址，之后微信自行找到的服务器全被静默丢弃。同日把已审计的更新通道从 0.0.25 推进到 0.0.32——此前通道推进的工作流与其部署环境指定了不同的分支，从 main 触发会显示成功却什么都没做，这就是 0.0.26 至 0.0.31 发布后无人收到的原因。</p></article>
         <article><time>2026-08-12</time><h3>Windows 0.0.29（源码候选）</h3><p>修复 0.0.28 在 preparingService 阶段遇到 127.0.0.1:53 / Windows error 10048 的问题：连接前先通过已认证 Service 对账并清理 Tono 自己遗留的 Core，再统一检查 DNS TCP/UDP 53。第三方 DNS/代理占用不会被结束，仍会给出可操作提示。源码位于 release/windows，尚未发布安装包。</p></article>
         <article><time>2026-08-12</time><h3>macOS Build 62</h3><p>当前公证并经过 Sparkle 签名验证的 Apple Silicon 预发布包。微信实机路由、Kill Switch、TUN、受保护 DNS 与出口身份均验证正常。GitHub immutable tag 因旧脚本未指定 target 而误指向 Windows 0.0.27 commit；不改写历史，Manifest 明确记录该差异，后续 Mac tag 改用 tono-macos-* 并强制校验精确 SHA。</p></article>
         <article><time>2026-08-10</time><h3>Windows 0.0.27</h3><p>当前公开稳定安装包，改善 VMware、VirtualBox、Hyper-V、WSL、Docker 等虚拟网卡共存。Windows 0.0.28 仍为 Draft，自动更新通道当前为 0.0.25。</p></article>
