@@ -45,6 +45,8 @@ Use this only when the user explicitly asks to operate a fresh VPS and no key wo
 
 ### 2. Run read-only preflight
 
+Preflight also reports `clockSynced` and `ipv6Egress`. Neither refuses the install: a fresh VPS may be provisioned before NTP settles, and working IPv6 is not a fault now that the outbound is pinned to IPv4. Both are recorded because each one has produced a failure that reads as something else — a skewed clock breaks the Reality TLS handshake and looks like a dead node, and a host with broken IPv6 was where an unpinned resolver produced intermittent egress failures.
+
 Use the private provisioner for a fresh supported VPS. It performs this bounded preflight by default and makes no remote changes:
 
 ```sh
@@ -66,6 +68,9 @@ The automated installer intentionally refuses an existing Tono service or occupi
 - Use an official Xray release pinned to an explicit version and verified SHA-256. Never execute `curl | sh` or an unpinned container tag.
 - Run it as a dedicated unprivileged systemd user where the platform permits; grant only the bind capability needed for TCP/443.
 - Configure VLESS over TCP Reality with `decryption: none`, `flow: xtls-rprx-vision`, a bounded approved `target/serverNames`, and no unauthenticated fallback listener.
+- Pin the outbound to `domainStrategy: UseIPv4`. Tono disables IPv6 client-side, but an unpinned server resolver can still answer AAAA and egress over IPv6 — so the address a node actually leaves from stops matching the one its isolated data-plane test validated, which is the "transport endpoint is not the final egress" trap in a form no test catches.
+- Install the `stats`/`api`/`policy` trio and a loopback-only dokodemo API inbound on every node from the first deployment, with `email` set on each client. Nothing reads them yet; they cost nothing at runtime and cannot be added later without revisiting every machine, which is the position the existing fleet is already in. `statsUserUplink`/`statsUserDownlink` are per-level and are what make per-user accounting possible at all.
+- Emit `clients` as a list even while there is one entry. Per-user identity is the change these nodes are heading for, and the list shape is what lets it arrive without regenerating every node.
 - Generate a fresh UUID, X25519 Reality keypair, and random 8-byte short ID using the installed Xray/OpenSSL CSPRNG. Keep the Reality private key only on the VPS.
 - Restrict ingress to the existing management SSH port and the selected Reality TCP port. Do not enable a UDP listener for this Reality-only product.
 - Back up the current service/config with owner-only permissions and record the exact rollback command before replacement.

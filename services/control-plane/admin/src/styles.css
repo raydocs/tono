@@ -855,6 +855,8 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   white-space: pre-wrap;
   word-break: break-word;
 }
+.log-preview-wrap { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+.log-preview { max-height: 24rem; }
 
 /* —— Dashboard: node status grid (Komari-style at-a-glance) —— */
 .metric-alert .metric-value { color: hsl(0 90% 75%); }

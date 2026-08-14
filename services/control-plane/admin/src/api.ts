@@ -147,6 +147,7 @@ export interface UserDetailDto {
     status: string;
     createdAt: number;
     updatedAt: number;
+    lastSeenAt?: number | null;
   }>;
   diagnostics: Array<{
     referenceCode: string;
@@ -154,6 +155,18 @@ export interface UserDetailDto {
     clientVersion: string;
     osVersion: string;
     reportJson: string;
+  }>;
+  logSegments?: Array<{
+    id: string;
+    userId: string;
+    deviceId?: string;
+    sessionId: string;
+    sequence: number;
+    byteSize: number;
+    lineCount: number;
+    receivedAt: number;
+    clientVersion: string;
+    osVersion: string;
   }>;
   product?: {
     accounts: ProductAccountDto[];
@@ -291,6 +304,25 @@ export interface ActivityDto {
 
 interface ErrorEnvelope {
   error?: { code?: string; message?: string };
+}
+
+async function fetchLogSegmentResponse(id: string) {
+  const response = await fetch(`/api/v1/ops/diagnostics/logs/${encodeURIComponent(id)}`, {
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status})`);
+  }
+  return response;
+}
+
+async function gunzipText(buffer: ArrayBuffer) {
+  try {
+    const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return await new Response(stream).text();
+  } catch {
+    return new TextDecoder().decode(buffer);
+  }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -442,6 +474,24 @@ export const operationsApi = {
     )
   ).actions,
   revokeDevice: async (deviceId: string) => del<void>(`devices/${deviceId}`),
+  downloadLogSegment: async (id: string) => {
+    const response = await fetchLogSegmentResponse(id);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const disposition = response.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    link.href = url;
+    link.download = match?.[1] || `tono-log-${id}.jsonl.gz`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+  previewLogSegment: async (id: string) => {
+    const response = await fetchLogSegmentResponse(id);
+    return gunzipText(await response.arrayBuffer());
+  },
   onboardUser: async (input: {
     email: string;
     line?: string;

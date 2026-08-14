@@ -438,8 +438,11 @@ function Dashboard() {
                 <tr><th>用户</th><th>状态</th><th>在用节点</th><th>客户端</th><th>最后心跳</th></tr>
               </thead>
               <tbody>{activityRes.data.users.map((user) => (
-                <tr key={user.userId}>
-                  <td><strong>{user.email}</strong></td>
+                <tr key={`${user.userId}:${user.deviceId ?? 'none'}`}>
+                  <td>
+                    <strong>{user.email}</strong>
+                    {user.deviceId ? <small className="muted">{user.deviceId.slice(0, 8)}</small> : null}
+                  </td>
                   <td>
                     {user.online
                       ? <Status value="active" />
@@ -1221,6 +1224,114 @@ function ProductLedger({ user, detail, onChanged }: {
   );
 }
 
+function NetworkLogsPanel({
+  loading,
+  error,
+  segments,
+}: {
+  loading: boolean;
+  error: string | null;
+  segments: NonNullable<UserDetailDto['logSegments']>;
+}) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  async function openSegment(id: string) {
+    if (openId === id) {
+      setOpenId(null);
+      return;
+    }
+    setOpenId(id);
+    setBusy(true);
+    setPreviewError(null);
+    setText(null);
+    try {
+      setText(await operationsApi.previewLogSegment(id));
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : '无法读取日志');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const preview = useMemo(() => {
+    if (!text) return null;
+    const lines = text.split('\n').filter((line) => line.length > 0);
+    const needle = filter.trim().toLowerCase();
+    const matched = needle
+      ? lines.filter((line) => line.toLowerCase().includes(needle))
+      : lines;
+    const cap = 400;
+    return {
+      total: lines.length,
+      matched: matched.length,
+      shown: matched.slice(-cap),
+      truncated: matched.length > cap,
+    };
+  }, [text, filter]);
+
+  return (
+    <div className="detail-block">
+      <h3>网络日志{segments.length > 0 ? `（${segments.length}）` : ''}</h3>
+      {loading && <span className="muted">加载中…</span>}
+      {error && <span className="muted">{error}</span>}
+      {!loading && !error && (segments.length > 0 ? (
+        <>
+          <p className="muted detail-note">客户端后台自动全量上传。点查看解压后可搜索。</p>
+          <ul className="detail-list">
+            {segments.map((segment) => (
+              <li key={segment.id}>
+                <span>{segment.osVersion} · seq {segment.sequence} · {segment.lineCount} 行</span>
+                <span className="muted">{timestamp(segment.receivedAt)} · {segment.clientVersion} · {formatBytes(segment.byteSize)}</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => openSegment(segment.id)}
+                >
+                  {openId === segment.id ? '收起' : '查看'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => operationsApi.downloadLogSegment(segment.id).catch(() => undefined)}
+                >
+                  下载
+                </button>
+              </li>
+            ))}
+          </ul>
+          {openId && (
+            <div className="log-preview-wrap">
+              <input
+                className="input compact"
+                type="search"
+                placeholder="搜索 host / process / route"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+              {busy && <span className="muted">正在解压…</span>}
+              {previewError && <span className="muted">{previewError}</span>}
+              {preview && (
+                <>
+                  <div className="muted detail-note">
+                    {preview.truncated
+                      ? `共 ${preview.total} 行，匹配 ${preview.matched}，显示最后 ${preview.shown.length} 行`
+                      : `共 ${preview.total} 行${filter.trim() ? `，匹配 ${preview.matched}` : ''}`}
+                  </div>
+                  <pre className="report-json log-preview">{preview.shown.join('\n')}</pre>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      ) : <span className="muted">还没有自动上传的网络日志</span>)}
+    </div>
+  );
+}
+
 function UserDetailPanel({ user }: { user: UserDto }) {
   const detail = useResource<UserDetailDto>(() => operationsApi.userDetail(user.id), [user.id]);
   const quotaPct = user.quotaBytes
@@ -1281,13 +1392,21 @@ function UserDetailPanel({ user }: { user: UserDto }) {
                 <li key={device.id}>
                   <Status value={device.status} />
                   <strong>{device.name}</strong>
-                  <span className="muted">更新 {timestamp(device.updatedAt)}</span>
+                  <span className="muted">
+                    {device.lastSeenAt ? `心跳 ${timeAgo(device.lastSeenAt)}` : `更新 ${timestamp(device.updatedAt)}`}
+                  </span>
                   {device.status !== 'revoked' && <DeviceActions deviceId={device.id} onChanged={detail.reload} />}
                 </li>
               ))}
             </ul>
           ) : <span className="muted">无设备</span>)}
         </div>
+
+        <NetworkLogsPanel
+          loading={detail.state === 'loading'}
+          error={detail.state === 'error' ? detail.message : null}
+          segments={detail.state === 'ready' ? detail.data.logSegments ?? [] : []}
+        />
 
         <div className="detail-block">
           <h3>诊断报告{detail.state === 'ready' ? `（${detail.data.diagnostics.length}）` : ''}</h3>

@@ -2991,8 +2991,15 @@ async function operationsActivity(e: Env) {
      FROM telemetry_windows t
      JOIN users u ON u.id = t.user_id
      JOIN (
-       SELECT user_id, MAX(received_at) mr FROM telemetry_windows GROUP BY user_id
-     ) latest ON latest.user_id = t.user_id AND latest.mr = t.received_at
+       SELECT user_id, device_id, MAX(received_at) mr
+       FROM telemetry_windows
+       GROUP BY user_id, device_id
+     ) latest ON latest.user_id = t.user_id
+       AND latest.mr = t.received_at
+       AND (
+         (latest.device_id IS NULL AND t.device_id IS NULL)
+         OR latest.device_id = t.device_id
+       )
      ORDER BY t.received_at DESC`,
   ).all<Row>();
   const nowSec = now();
@@ -3018,11 +3025,11 @@ async function operationsActivity(e: Env) {
     };
   });
   const onlineUsers = users.filter((user) => user.online);
-  // Pre-0019 windows carry no device id; fall back to per-user counting there.
+  const onlineUserIds = new Set(onlineUsers.map((user) => user.userId));
   const onlineDevices = new Set(onlineUsers.map((user) => user.deviceId ?? user.userId)).size;
   return {
     onlineWindowSeconds: ACTIVITY_ONLINE_SECONDS,
-    onlineUsers: onlineUsers.length,
+    onlineUsers: onlineUserIds.size,
     onlineDevices,
     users,
   };
@@ -3579,6 +3586,36 @@ async function storeDiagnosticsLogSegment(
   return { id, receivedAt: t, duplicate: false };
 }
 
+const publicDiagnosticsLogSegment = (row: Row) => ({
+  id: String(row.id),
+  userId: String(row.user_id),
+  deviceId: row.device_id == null ? undefined : String(row.device_id),
+  sessionId: String(row.session_id),
+  sequence: Number(row.sequence),
+  byteSize: Number(row.byte_size),
+  lineCount: Number(row.line_count),
+  receivedAt: Number(row.received_at),
+  clientVersion: String(row.client_version),
+  osVersion: String(row.os_version),
+});
+
+async function diagnosticsLogDownloadResponse(e: Env, segmentId: string) {
+  const row = await e.DB.prepare(
+    'SELECT r2_key, session_id, sequence FROM diagnostics_log_objects WHERE id = ?',
+  ).bind(segmentId).first<Row>();
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Log segment not found');
+  const object = await e.DIAGNOSTICS_LOGS.get(String(row.r2_key));
+  if (!object) throw new ApiError(404, 'NOT_FOUND', 'Log segment payload is gone');
+  const name = `${row.session_id}-${String(row.sequence).padStart(7, '0')}.jsonl.gz`;
+  return new Response(object.body, {
+    headers: {
+      'content-type': 'application/gzip',
+      'content-disposition': `attachment; filename="${name}"`,
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 async function rateLimitDiagnostics(e: Env, req: Request, uid: string) {
   await consumeRateLimit(
     e,
@@ -3821,6 +3858,11 @@ async function storeTelemetryWindow(
        id, user_id, device_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(rowId, uid, deviceId, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson).run();
+  if (deviceId) {
+    await e.DB.prepare(
+      'UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ? AND user_id = ?',
+    ).bind(receivedAt, receivedAt, deviceId, uid).run();
+  }
   return { id: rowId, receivedAt };
 }
 
@@ -5889,11 +5931,15 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         const user = await e.DB.prepare('SELECT id FROM users WHERE id = ?').bind(mt[1]).first<Row>();
         if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
         const devices = await e.DB.prepare(
-          'SELECT id, name, status, created_at, updated_at FROM devices WHERE user_id = ? ORDER BY created_at DESC',
+          'SELECT id, name, status, created_at, updated_at, last_seen_at FROM devices WHERE user_id = ? ORDER BY created_at DESC',
         ).bind(mt[1]).all<Row>();
         const reports = await e.DB.prepare(
           `SELECT reference_code, received_at, client_version, os_version, report_json
            FROM diagnostics_reports WHERE user_id = ? ORDER BY received_at DESC LIMIT 20`,
+        ).bind(mt[1]).all<Row>();
+        const logSegments = await e.DB.prepare(
+          `SELECT * FROM diagnostics_log_objects WHERE user_id = ?
+           ORDER BY received_at DESC LIMIT 40`,
         ).bind(mt[1]).all<Row>();
         const accounts = await e.DB.prepare(
           'SELECT * FROM product_accounts WHERE user_id = ? ORDER BY created_at DESC',
@@ -5928,6 +5974,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             status: String(d.status),
             createdAt: Number(d.created_at),
             updatedAt: Number(d.updated_at),
+            lastSeenAt: d.last_seen_at == null ? null : Number(d.last_seen_at),
           })),
           diagnostics: reports.results.map((r) => ({
             referenceCode: String(r.reference_code),
@@ -5936,6 +5983,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             osVersion: String(r.os_version),
             reportJson: String(r.report_json),
           })),
+          logSegments: logSegments.results.map(publicDiagnosticsLogSegment),
           product: {
             accounts: accounts.results.map(publicProductAccount),
             events: events.results.map(publicProductEvent),
@@ -5955,6 +6003,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           onlineWindowSeconds: activity.onlineWindowSeconds,
           affected,
         });
+      }
+      mt = p.match(/^\/api\/v1\/ops\/diagnostics\/logs\/([^/]+)$/);
+      if (mt) {
+        return diagnosticsLogDownloadResponse(e, mt[1]);
       }
       throw new ApiError(404, 'NOT_FOUND', 'Route not found');
     }
@@ -6341,38 +6393,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
              ORDER BY received_at DESC LIMIT ?`,
         ).bind(limit).all<Row>();
       return Response.json({
-        segments: rows.results.map((row) => ({
-          id: String(row.id),
-          userId: String(row.user_id),
-          deviceId: row.device_id == null ? undefined : String(row.device_id),
-          sessionId: String(row.session_id),
-          sequence: Number(row.sequence),
-          byteSize: Number(row.byte_size),
-          lineCount: Number(row.line_count),
-          receivedAt: Number(row.received_at),
-          clientVersion: String(row.client_version),
-          osVersion: String(row.os_version),
-        })),
+        segments: rows.results.map(publicDiagnosticsLogSegment),
       });
     }
     mt = p.match(/^\/api\/v1\/admin\/diagnostics\/logs\/([^/]+)$/);
     if (mt && m === 'GET') {
-      const row = await e.DB.prepare(
-        'SELECT r2_key, session_id, sequence FROM diagnostics_log_objects WHERE id = ?',
-      ).bind(mt[1]).first<Row>();
-      if (!row) throw new ApiError(404, 'NOT_FOUND', 'Log segment not found');
-      const object = await e.DIAGNOSTICS_LOGS.get(String(row.r2_key));
-      // The index outlives a bucket lifecycle rule or a partial retention
-      // sweep, so a missing object is an expected 404 rather than a 500.
-      if (!object) throw new ApiError(404, 'NOT_FOUND', 'Log segment payload is gone');
-      const name = `${row.session_id}-${String(row.sequence).padStart(7, '0')}.jsonl.gz`;
-      return new Response(object.body, {
-        headers: {
-          'content-type': 'application/gzip',
-          'content-disposition': `attachment; filename="${name}"`,
-          'cache-control': 'no-store',
-        },
-      });
+      return diagnosticsLogDownloadResponse(e, mt[1]);
     }
     if (p === '/api/v1/admin/signup-allowlist' && m === 'GET') {
       const q = await e.DB.prepare(

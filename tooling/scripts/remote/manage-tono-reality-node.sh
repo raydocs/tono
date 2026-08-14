@@ -7,6 +7,10 @@ SERVICE_NAME="tono-xray.service"
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 INSTALL_ROOT="/opt/tono-xray"
 SERVICE_USER="tono-xray"
+# Loopback-only gRPC API. Fixed rather than configurable: it is reached over the
+# SSH management path, so a per-node port would be one more thing to record and
+# get wrong, and nothing outside the host can address it either way.
+API_PORT=10085
 
 fail() {
   printf 'Tono node operation failed: %s\n' "$1" >&2
@@ -93,8 +97,32 @@ preflight() {
     ufw_active=true
   fi
 
-  printf '{"os":"%s","arch":"%s","availableKiB":%s,"port":%s,"portInUse":%s,"existingTono":%s,"targetTLS13":%s,"ufwActive":%s}\n' \
-    "$os_id" "$arch" "$available_kib" "$port" "$occupied" "$existing" "$tls13" "$ufw_active"
+  # Clock skew. Reality is TLS, so a badly wrong clock makes handshakes fail in a
+  # way that reads as "the node is broken" from every other vantage point. Report
+  # it rather than refuse: the operator may be provisioning before NTP settles.
+  local clock_synced="unknown"
+  if command -v timedatectl >/dev/null 2>&1; then
+    if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q '^yes$'; then
+      clock_synced=true
+    else
+      clock_synced=false
+    fi
+  fi
+
+  # Whether this host can reach the internet over IPv6 at all. The service pins
+  # its outbound to IPv4, so a node with working IPv6 is not a problem — but a
+  # node where IPv6 exists and is *broken* is where an unpinned resolver would
+  # have produced the intermittent egress failures that are hardest to attribute.
+  # Recorded so the fleet inventory can say which nodes have it.
+  local ipv6_egress=false
+  if timeout 4 getent ahostsv6 one.one.one.one >/dev/null 2>&1 &&
+     timeout 4 bash -c "exec 3<>/dev/tcp/2606:4700:4700::1111/443" 2>/dev/null; then
+    ipv6_egress=true
+  fi
+
+  printf '{"os":"%s","arch":"%s","availableKiB":%s,"port":%s,"portInUse":%s,"existingTono":%s,"targetTLS13":%s,"ufwActive":%s,"clockSynced":"%s","ipv6Egress":%s}\n' \
+    "$os_id" "$arch" "$available_kib" "$port" "$occupied" "$existing" "$tls13" "$ufw_active" \
+    "$clock_synced" "$ipv6_egress"
 }
 
 rollback_deployment() {
@@ -179,9 +207,15 @@ apply_deployment() {
   install -d -m 0750 -o root -g "$SERVICE_USER" "$release"
   install -m 0755 -o root -g root "$artifact" "$release/xray"
 
-  local uuid key_output private_key public_key short_id
+  local uuid key_output private_key public_key short_id clients_json
   uuid=$("$release/xray" uuid)
   [[ $uuid =~ ^[a-f0-9-]{36}$ ]] || fail "Xray returned an invalid UUID"
+  # A single client today, emitted as a list because that is the shape per-user
+  # identity needs and changing the shape later means regenerating every node.
+  # `email` is Xray's key for per-user counters: without it the stats blocks
+  # above record nothing per user, only per inbound.
+  clients_json=$(printf '{ "id": "%s", "flow": "xtls-rprx-vision", "email": "%s", "level": 0 }' \
+    "$uuid" "node-shared")
   key_output=$("$release/xray" x25519)
   private_key=$(printf '%s\n' "$key_output" | sed -n 's/^PrivateKey:[[:space:]]*//p')
   public_key=$(printf '%s\n' "$key_output" | sed -n 's/^Password (PublicKey):[[:space:]]*//p')
@@ -189,34 +223,93 @@ apply_deployment() {
     fail "Xray returned an invalid Reality keypair"
   short_id=$(openssl rand -hex 8)
 
+  # The stats/api/policy trio and the loopback API inbound are installed on every
+  # node from the start, even though nothing reads them yet. They cost nothing at
+  # runtime and cannot be added later without touching every machine in the
+  # fleet — which is the position the existing sixteen nodes are already in.
+  #
+  # `statsUserUplink`/`statsUserDownlink` are what make per-user accounting
+  # possible at all. They are per-level, and every client below is level 0.
+  #
+  # The API listens on 127.0.0.1 only and is reachable solely through the SSH
+  # management path; no firewall rule exposes it. A dokodemo-door inbound is the
+  # documented way to expose Xray's gRPC services, and the routing rule below is
+  # what keeps that inbound from being treated as user traffic.
   cat >"$release/config.json" <<EOF
 {
   "log": { "loglevel": "warning" },
-  "inbounds": [{
-    "listen": "0.0.0.0",
-    "port": $port,
-    "protocol": "vless",
-    "settings": {
-      "clients": [{ "id": "$uuid", "flow": "xtls-rprx-vision" }],
-      "decryption": "none"
+  "stats": {},
+  "api": { "tag": "api", "services": ["StatsService"] },
+  "policy": {
+    "levels": {
+      "0": { "statsUserUplink": true, "statsUserDownlink": true }
     },
-    "streamSettings": {
-      "network": "raw",
-      "security": "reality",
-      "realitySettings": {
-        "target": "$target:443",
-        "serverNames": ["$target"],
-        "privateKey": "$private_key",
-        "shortIds": ["$short_id"]
-      }
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true
     }
+  },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": $port,
+      "protocol": "vless",
+      "tag": "reality-in",
+      "settings": {
+        "clients": [$clients_json],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "target": "$target:443",
+          "serverNames": ["$target"],
+          "privateKey": "$private_key",
+          "shortIds": ["$short_id"]
+        }
+      }
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": $API_PORT,
+      "protocol": "dokodemo-door",
+      "tag": "api-in",
+      "settings": { "address": "127.0.0.1" }
+    }
+  ],
+  "outbounds": [{
+    "protocol": "freedom",
+    "tag": "direct",
+    "settings": { "domainStrategy": "UseIPv4" }
   }],
-  "outbounds": [{ "protocol": "freedom" }]
+  "routing": {
+    "rules": [
+      { "type": "field", "inboundTag": ["api-in"], "outboundTag": "api" }
+    ]
+  }
 }
 EOF
   chown root:"$SERVICE_USER" "$release/config.json"
   chmod 0640 "$release/config.json"
   "$release/xray" run -test -config "$release/config.json" >/dev/null 2>&1 || fail "Xray rejected the generated configuration"
+
+  # Xray logs to the journal and nothing bounds it. On the small disks these
+  # nodes run, an unbounded journal is a slow disk-full outage whose first
+  # symptom looks like a network fault. This is a journald setting, not a
+  # service one — there is no per-unit size cap — so it is a drop-in, and it is
+  # written only when absent so an operator's own policy is never clobbered.
+  if [[ ! -e /etc/systemd/journald.conf.d/99-tono.conf ]]; then
+    mkdir -p /etc/systemd/journald.conf.d
+    cat >/etc/systemd/journald.conf.d/99-tono.conf <<'JOURNALD'
+# Installed by Tono provisioning. Host-wide: these nodes run nothing else.
+[Journal]
+SystemMaxUse=200M
+SystemMaxFileSize=20M
+JOURNALD
+    chmod 0644 /etc/systemd/journald.conf.d/99-tono.conf
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+  fi
 
   cat >"$SERVICE_PATH.new" <<EOF
 [Unit]

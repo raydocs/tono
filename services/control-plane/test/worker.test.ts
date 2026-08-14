@@ -740,6 +740,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(detail.devices[0].name).toBe('Primary Mac');
     expect(typeof detail.devices[0].status).toBe('string');
     expect(detail.diagnostics).toEqual([]);
+    expect(detail.logSegments).toEqual([]);
   });
 
   it('lets Access admins replace the catalog and traffic policy on ops routes', async () => {
@@ -4426,6 +4427,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // No admin token, no payload — this bucket is the one place holding
     // unredacted hostnames.
     expect((await api(`admin/diagnostics/logs/${segment.id}`, { method: 'GET' })).status).toBe(401);
+
+    const opsDetail = await operations(`users/${account.user.id}/detail`);
+    expect(opsDetail.status).toBe(200);
+    const detail = await opsDetail.json() as any;
+    expect(detail.logSegments.map((row: any) => row.id)).toEqual([segment.id]);
+
+    const opsDownload = await operations(`diagnostics/logs/${segment.id}`);
+    expect(opsDownload.status).toBe(200);
+    expect(opsDownload.headers.get('content-type')).toBe('application/gzip');
+    expect(new Uint8Array(await opsDownload.arrayBuffer())).toEqual(body);
   });
 
   it('deletes the R2 payload when a log segment passes retention', async () => {
@@ -4588,5 +4599,41 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(me.uiState).toBe('connected');
     expect(me.catalogRevision).toBe(7);
     expect(me.payloadJson).toBeUndefined();
+  });
+
+  it('lists a Mac and Windows heartbeat for the same account as two rows', async () => {
+    const account = await createAccount('activity-mac-win');
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      osVersion: 'Windows 11 Pro 23H2',
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+         client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      crypto.randomUUID(),
+      account.user.id,
+      crypto.randomUUID(),
+      now,
+      Date.now() - 1_000,
+      Date.now(),
+      '0.0.64',
+      'macOS 26.4.0',
+      JSON.stringify({ selectedServer: 'Los Angeles · Sunset', uiState: 'connected' }),
+    ).run();
+
+    const response = await operations('activity');
+    const { activity } = await response.json() as any;
+    const mine = activity.users.filter((u: any) => u.userId === account.user.id);
+    expect(mine).toHaveLength(2);
+    expect(mine.map((u: any) => u.osVersion).sort()).toEqual([
+      'Windows 11 Pro 23H2',
+      'macOS 26.4.0',
+    ].sort());
+    expect(activity.onlineUsers).toBeGreaterThanOrEqual(1);
+    expect(activity.onlineDevices).toBeGreaterThanOrEqual(2);
   });
 });
