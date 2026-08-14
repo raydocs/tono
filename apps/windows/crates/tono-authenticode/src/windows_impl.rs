@@ -35,7 +35,11 @@ pub fn verify(path: &Path) -> AuthenticodeVerdict {
         cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
         pcwszFilePath: wide.as_ptr(),
         hFile: std::ptr::null_mut(),
-        pgKnownSubject: std::ptr::null(),
+        // `*mut GUID` in windows-sys, not `*const`: "no known subject" is the null
+        // mutable pointer. This crate had never been compiled for Windows — the
+        // commit that introduced it also left `service/Cargo.lock` stale, so CI
+        // failed at dependency resolution and never reached the compiler.
+        pgKnownSubject: std::ptr::null_mut(),
     };
     let mut data: WINTRUST_DATA = unsafe { std::mem::zeroed() };
     data.cbStruct = std::mem::size_of::<WINTRUST_DATA>() as u32;
