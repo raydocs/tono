@@ -604,15 +604,36 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     // mihomo's ruleless UDP fallback from dialling out when an exit cannot carry UDP. That
     // rule is asserted unshadowable in `tono_core::config`. Bounding this permit by
     // destination is the next step and needs address data this build does not have.
+    // Conjunctive with the plan itself, deliberately.
+    //
+    // Gating on the declaration alone was a regression: `reviewed_direct_ports` is stored on
+    // `Armed` and every retraction path clears `direct_endpoints` without touching it, so a
+    // re-lock inside the reload bracket — which is the *normal* second and later activation,
+    // begin -> stage -> lock -> replace — rendered these permits with zero approved endpoints
+    // behind them. The App even proves an empty endpoint digest at that moment. Requiring both
+    // makes "no plan means no permit" true by construction rather than by remembering to clear
+    // a second field at every future retraction site.
     if config.mode == KillSwitchStatusMode::Locked
         && config.tun_luid.is_some()
+        && !config.direct_endpoints.is_empty()
         && !config.reviewed_direct_ports.is_empty()
     {
         // IPv4 only, matching the Mac helper's `inet`-scoped permit and the runtime's own
         // `ipv6: false`. The TUN and fake-ip are IPv4, AAAA dials are dropped, so there is no
         // IPv6 DIRECT flow to carry — and a permit with no address condition on the V6 layer
         // would be a widening with nothing asking for it.
-        for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
+        // TCP only. The declaration is computed from `tcp_wechat_rules` and the signed path
+        // regexes — TCP routing — so rendering a UDP permit from it claims a surface the App
+        // never described. And nothing routes unpinned UDP to the physical interface anyway:
+        // the only UDP rules targeting the direct outbound carry an `IP-CIDR` pin, and
+        // everything else meets the terminating `(NETWORK,UDP),REJECT`. A UDP permit here
+        // therefore admits traffic that cannot arrive — widening with no beneficiary, which is
+        // the worst kind. WeChat voice and video keep working as they do today: pinned media
+        // endpoints go direct under rule G, and the rest falls back to TCP.
+        //
+        // If process-scoped UDP routing is ever added, both halves land together and the
+        // declaration grows to say so.
+        for protocol in [IpProtocol::Tcp] {
             for port in config.reviewed_direct_ports.iter().copied() {
                 filters.push(spec(
                     format!(
@@ -1864,16 +1885,25 @@ mod tests {
 
         // Every reviewed port is covered on both protocols, and nothing outside the set is.
         for port in crate::REVIEWED_DIRECT_PORTS {
-            for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
-                let mut probe =
-                    packet(LayerKind::AleAuthConnectV4, protocol, "43.175.230.151", port);
-                probe.app_id_matches = true;
-                assert_eq!(
-                    arbitrate(&filters, &probe),
-                    FilterAction::Permit,
-                    "reviewed port {port}/{protocol:?} must be permitted for the staged core"
-                );
-            }
+            let mut tcp_probe =
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "43.175.230.151", port);
+            tcp_probe.app_id_matches = true;
+            assert_eq!(
+                arbitrate(&filters, &tcp_probe),
+                FilterAction::Permit,
+                "reviewed port {port}/tcp must be permitted for the staged core"
+            );
+            // UDP deliberately absent: nothing routes unpinned UDP to the physical interface,
+            // so a permit here would admit traffic that cannot arrive. Pinned media still
+            // works through rule G, which is what WeChat voice and video use.
+            let mut udp_probe =
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Udp, "43.175.230.151", port);
+            udp_probe.app_id_matches = true;
+            assert_eq!(
+                arbitrate(&filters, &udp_probe),
+                FilterAction::Block,
+                "reviewed port {port}/udp must not be widened: no rule routes it here"
+            );
         }
 
         // The ALE DIRECT permit is a weight-8, app-scoped exact tuple.
@@ -2048,13 +2078,45 @@ mod tests {
                 .iter()
                 .filter(|filter| filter.name.contains("reviewed DIRECT"))
                 .count(),
-            2,
-            "one filter per protocol for the single declared port"
+            1,
+            "one filter for the single declared port, TCP only"
         );
         let mut port80 =
             packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "43.175.230.151", 80);
         port80.app_id_matches = true;
         assert_eq!(arbitrate(&narrow_filters, &port80), FilterAction::Block);
+    }
+
+    /// The converse of the declaration test, and the regression the second review found.
+    ///
+    /// `reviewed_direct_ports` lives on `Armed` and every retraction path clears
+    /// `direct_endpoints` without touching it, so a re-lock inside the reload bracket — the
+    /// normal second and later activation — arrived here with a declaration and no plan. The
+    /// gate is conjunctive now, so this cannot render regardless of which field a future
+    /// retraction site forgets.
+    #[test]
+    fn a_declaration_without_a_plan_renders_no_permit() {
+        let mut config = config_with_direct_endpoints(KillSwitchStatusMode::Locked);
+        config.direct_endpoints.clear();
+        assert!(
+            !config.reviewed_direct_ports.is_empty(),
+            "the declaration must survive for this to test anything"
+        );
+        let filters = expected_filters(&config);
+        assert!(
+            !filters
+                .iter()
+                .any(|filter| filter.name.contains("reviewed DIRECT")),
+            "no approved endpoint means no plan, and no plan means no permit"
+        );
+        let mut probe = packet(
+            LayerKind::AleAuthConnectV4,
+            IpProtocol::Tcp,
+            "43.175.230.151",
+            443,
+        );
+        probe.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &probe), FilterAction::Block);
     }
 
     #[test]
@@ -2096,7 +2158,7 @@ mod tests {
         // live tunnel, so both must appear here and both must be retracted below.
         assert_eq!(
             direct_keys.len(),
-            2 + crate::REVIEWED_DIRECT_PORTS.len() * 2
+            2 + crate::REVIEWED_DIRECT_PORTS.len()
         );
         let plan = diff(
             &locked.iter().map(|filter| filter.key).collect::<Vec<_>>(),

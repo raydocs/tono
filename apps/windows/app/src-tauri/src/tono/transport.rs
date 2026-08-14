@@ -307,6 +307,9 @@ impl TonoTransport {
 /// sign-in into a three-minute hang, which is worse than the error it is trying to avoid.
 const ALTERNATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 const ALTERNATE_TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
+/// Whole-walk budget, so the per-attempt one cannot be multiplied by the number of ports and
+/// then doubled again by the retry in `ApiClient::call`.
+const ALTERNATE_WALK_BUDGET: Duration = Duration::from_secs(20);
 
 impl TonoTransport {
     /// Same URL, different TCP port.
@@ -337,8 +340,54 @@ impl TonoTransport {
 
     /// Walk the alternate HTTPS ports, most-recently-successful first.
     ///
-    /// Only reached when both normal paths failed in a way that proves no bytes were
-    /// delivered, so re-sending a POST here is the same judgement the existing fallback makes.
+    /// One attempt on one alternate port, with the delivery judgement the rest of this file
+    /// makes.
+    ///
+    /// Returns `Some` when the caller must stop — either it worked, or it failed in a way that
+    /// may already have put the request on the wire. `None` means "provably not delivered,
+    /// safe to try the next port".
+    ///
+    /// This is the part the first version got wrong: it walked every port looking only at
+    /// `Ok`, so a TLS failure or a timeout on port 2053 — both of which can mean the server
+    /// already has the bytes — moved straight on to 2083 and sent the body again. For the
+    /// route this was built for that is a sign-in code submitted twice, and for `DELETE` a
+    /// device removed twice. `should_retry_transport` exists to make exactly this call and was
+    /// consulted once before the walk instead of once per attempt.
+    async fn attempt_one_alternate(
+        &self,
+        request: &ApiRequest,
+        port: u16,
+    ) -> Option<Result<ApiResponse, ApiError>> {
+        let url = Self::with_port(&request.url, port)?;
+        let client = Self::alternate_client(port).ok()?;
+        let attempt = ApiRequest {
+            url,
+            ..request.clone()
+        };
+        match self.attempt(&client, &attempt).await {
+            Ok(response) => {
+                self.alternate_port
+                    .store(port, std::sync::atomic::Ordering::Relaxed);
+                Some(Ok(response))
+            }
+            Err(ApiError::Transport { kind, message }) => {
+                if should_retry_transport(request.method, kind) {
+                    None
+                } else {
+                    Some(Err(ApiError::Transport { kind, message }))
+                }
+            }
+            // A non-transport error is a real answer from the server: it arrived.
+            Err(other) => Some(Err(other)),
+        }
+    }
+
+    /// Walk the alternate HTTPS ports.
+    ///
+    /// Bounded in total, not just per attempt. Five ports on a network that *drops* rather than
+    /// resets would otherwise cost five connect timeouts, and `ApiClient::call` retries the
+    /// whole thing once — the three-minute hang the per-attempt budget was chosen to avoid,
+    /// reached by a different route.
     async fn attempt_alternate_ports(
         &self,
         request: &ApiRequest,
@@ -347,28 +396,24 @@ impl TonoTransport {
         let remembered = self.alternate_port.load(Ordering::Relaxed);
         let ports = clash_verge_service_ipc::CONTROL_PLANE_PORTS;
         let mut order: Vec<u16> = Vec::with_capacity(ports.len());
-        if remembered != 0 {
+        if remembered != 0 && remembered != 443 {
             order.push(remembered);
         }
         // 443 is the port that already failed on this request; skip it here.
-        order.extend(ports.iter().copied().filter(|port| {
-            *port != 443 && *port != remembered
-        }));
+        order.extend(
+            ports
+                .iter()
+                .copied()
+                .filter(|port| *port != 443 && *port != remembered),
+        );
 
+        let deadline = tokio::time::Instant::now() + ALTERNATE_WALK_BUDGET;
         for port in order {
-            let Some(url) = Self::with_port(&request.url, port) else {
-                continue;
-            };
-            let Ok(client) = Self::alternate_client(port) else {
-                continue;
-            };
-            let attempt = ApiRequest {
-                url,
-                ..request.clone()
-            };
-            if let Ok(response) = self.attempt(&client, &attempt).await {
-                self.alternate_port.store(port, Ordering::Relaxed);
-                return Some(Ok(response));
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            if let Some(result) = self.attempt_one_alternate(request, port).await {
+                return Some(result);
             }
         }
         // Every alternate failed too. Forget any remembered port so the next call starts from
@@ -382,6 +427,31 @@ impl TonoTransport {
 impl HttpTransport for TonoTransport {
     async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
         crate::tono::integration_profile::delay_remote_operation().await;
+
+        // A port that already worked goes first, ahead of the two 443 attempts.
+        //
+        // The first version stored it and then still tried 443 twice on every later request,
+        // which is the opposite of what remembering it was for: on a network that *drops* 443
+        // rather than resetting it, that is two connect timeouts before every single call. The
+        // comment on the field claimed this behaviour; the code did not have it.
+        //
+        // If the remembered port has since stopped working, `attempt_one_alternate` clears it
+        // on a provably-undelivered failure and the normal 443 paths below run as usual, so a
+        // network that recovers is not stuck here.
+        let remembered = self
+            .alternate_port
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if remembered != 0 {
+            match self.attempt_one_alternate(&request, remembered).await {
+                Some(result) => return result,
+                // Provably not delivered, so this port has stopped working. Forget it before
+                // falling through, or every later request pays for it first.
+                None => self
+                    .alternate_port
+                    .store(0, std::sync::atomic::Ordering::Relaxed),
+            }
+        }
+
         let pinned = {
             let client = self.client.read().await;
             self.attempt(&client, &request).await
@@ -771,6 +841,40 @@ mod tests {
             ports.iter().skip(1).all(|port| *port != 443),
             "443 must appear once so the fallback never repeats the port that just failed"
         );
+    }
+
+    /// The delivery judgement the alternate-port walk has to make per attempt.
+    ///
+    /// The first version consulted `should_retry_transport` once, before the walk, and then
+    /// looked only at `Ok` for each port. A `Tls` or `Timeout` failure on 2053 — both of which
+    /// can mean the server already has the bytes — therefore moved on and sent the body to
+    /// 2083. On the route this exists for that is a sign-in code submitted twice; on `DELETE`
+    /// it is a device removed twice. This pins the predicate the walk now consults per attempt.
+    #[test]
+    fn only_provably_undelivered_failures_may_move_to_the_next_port() {
+        for kind in [TransportKind::Dns, TransportKind::Connect] {
+            assert!(
+                should_retry_transport(HttpMethod::Post, kind),
+                "{kind:?} proves the bytes never left, so the next port is safe"
+            );
+        }
+        for kind in [TransportKind::Tls, TransportKind::Timeout, TransportKind::Other] {
+            assert!(
+                !should_retry_transport(HttpMethod::Post, kind),
+                "{kind:?} may already have delivered the request; the walk must stop"
+            );
+            assert!(!should_retry_transport(HttpMethod::Delete, kind));
+        }
+        // A GET carries no side effect, so any transport failure may be retried.
+        for kind in [
+            TransportKind::Dns,
+            TransportKind::Connect,
+            TransportKind::Tls,
+            TransportKind::Timeout,
+            TransportKind::Other,
+        ] {
+            assert!(should_retry_transport(HttpMethod::Get, kind));
+        }
     }
 
     #[test]

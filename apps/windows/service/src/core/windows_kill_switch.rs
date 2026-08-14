@@ -1318,6 +1318,7 @@ async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
     .is_some()
     {
         armed.direct_endpoints.clear();
+        armed.reviewed_direct_ports.clear();
         armed.direct_reload = None;
     }
 
@@ -5246,7 +5247,9 @@ mod tests {
         // Two exact-tuple permits (rule G), plus the reviewed-port class (rule H): one filter
         // per port per protocol per address family. Derived from the constant rather than
         // written as a literal, so adding a reviewed port cannot quietly change the count.
-        let reviewed = crate::REVIEWED_DIRECT_PORTS.len() * 2;
+        // One filter per declared port, TCP only — the UDP half was withdrawn because nothing
+        // routes unpinned UDP to the physical interface for it to cover.
+        let reviewed = crate::REVIEWED_DIRECT_PORTS.len();
         assert_eq!(
             wfp_model::expected_filters(&render(&armed).await)
                 .iter()
