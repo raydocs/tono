@@ -3442,19 +3442,18 @@ const MIHOMO_PROCESS_PATH_REGEX_TYPE: &str = "ProcessPathRegex";
 /// internal child option and intentionally does not appear in `Payload()`.
 fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec<ControllerDirectRuleProof> {
     let mut expected = Vec::new();
-    if !plan.tcp_wechat_rules.is_empty() {
-        for process in tono_core::config::WECHAT_PROCESS_NAMES {
-            expected.push(ControllerDirectRuleProof {
-                proxy: config::DIRECT_GROUP_NAME.to_owned(),
-                payload: format!("((Network,tcp) && (ProcessName,{process}))"),
-            });
-        }
-        for regex in &plan.wechat_process_path_regexes {
-            expected.push(ControllerDirectRuleProof {
-                proxy: config::DIRECT_GROUP_NAME.to_owned(),
-                payload: format!("((Network,tcp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
-            });
-        }
+    // Pinned per resolved endpoint, mirroring `runtime_value`. Process-scoped WeChat TCP
+    // was withdrawn because nothing in `wfp_model::session_rules` can permit an unpinned
+    // dial, so it black-holed everything but the connect-time pins; see the comment on the
+    // emitting side in tono-core/src/config.rs.
+    for (host, address, port) in &plan.tcp_wechat_rules {
+        expected.push(ControllerDirectRuleProof {
+            proxy: config::DIRECT_GROUP_NAME.to_owned(),
+            payload: format!(
+                "((Network,tcp) && (DstPort,{port}) && (Domain,{}) && (IPCIDR,{address}/32))",
+                host.to_ascii_lowercase()
+            ),
+        });
     }
     for (address, port) in &plan.udp_wechat_rules {
         for process in tono_core::config::WECHAT_PROCESS_NAMES {
@@ -3483,12 +3482,8 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
             ),
         });
     }
-    for (suffix, port) in &plan.web_suffix_rules {
-        expected.push(ControllerDirectRuleProof {
-            proxy: config::WEB_DIRECT_GROUP_NAME.to_owned(),
-            payload: format!("((Network,tcp) && (DstPort,{port}) && (DomainSuffix,{suffix}))"),
-        });
-    }
+    // Suffix rules are no longer emitted: they can never carry a WFP permit. Kept out of
+    // the proof so a runtime that still had them would fail this check rather than pass it.
     expected
 }
 
@@ -6891,20 +6886,21 @@ mod tests {
                 .all(|(_ip, port)| [443, 8000].contains(port))
         );
         let controller_rules = expected_controller_direct_rules(&plan);
-        // WeChat TCP collapses to one process-scoped row per client process; UDP and
-        // web rows stay per-endpoint.
-        let wechat_tcp_rows = if plan.tcp_wechat_rules.is_empty() {
-            0
-        } else {
-            tono_core::config::WECHAT_PROCESS_NAMES.len()
-        };
+        // One row per *permitted* endpoint. WeChat TCP is per-pin rather than
+        // process-scoped, and suffix rules are not emitted at all, because
+        // `wfp_model::session_rules` can only permit an exact (address, port) tuple —
+        // anything else is routed out the physical interface and then dropped by the
+        // block-all floor.
         assert_eq!(
             controller_rules.len(),
-            wechat_tcp_rows
+            plan.tcp_wechat_rules.len()
                 + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
-                + plan.tcp_web_rules.len()
-                + plan.web_suffix_rules.len(),
+                + plan.tcp_web_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"
+        );
+        assert!(
+            !plan.web_suffix_rules.is_empty(),
+            "fixture must still carry suffixes, so the assertion above proves they are dropped"
         );
         assert!(
             controller_rules
@@ -6941,17 +6937,93 @@ mod tests {
         .unwrap();
         assert_eq!(plan.wechat_process_path_regexes, vec![prefix.clone()]);
         let controller = expected_controller_direct_rules(&plan);
+        // The reviewed regex is retained on the plan — it still governs UDP media, and
+        // reinstating TCP process scope is one block in `runtime_value` once WFP grows an
+        // app-scoped port permit — but it must not produce a TCP row today: that row would
+        // route every WeChat flow out the physical interface, where only the pins below
+        // have a permit and the rest is dropped.
         assert!(
-            controller
-                .iter()
-                .any(|rule| {
-                    rule.payload
-                        == format!(
-                            "((Network,tcp) && ({},{prefix}))",
-                            super::MIHOMO_PROCESS_PATH_REGEX_TYPE
-                        )
-                })
+            !controller.iter().any(|rule| {
+                rule.payload
+                    == format!(
+                        "((Network,tcp) && ({},{prefix}))",
+                        super::MIHOMO_PROCESS_PATH_REGEX_TYPE
+                    )
+            }),
+            "a TCP path-regex row routes flows the WFP permit set cannot cover"
         );
+        assert!(controller.iter().any(|rule| {
+            rule.payload == "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (IPCIDR,9.0.0.10/32))"
+        }));
+    }
+
+    /// The invariant the two halves of the DIRECT overlay must satisfy, and did not.
+    ///
+    /// A rule sends a flow out the physical interface; `wfp_model::session_rules` decides
+    /// whether that flow is allowed to leave. The only session permit that can cover it is
+    /// class G, one filter per `direct_endpoints` entry, matching an exact remote address
+    /// and port — there is no port-scoped, address-free permit for the core, and class A's
+    /// comment forbids adding one at the transport layer. So any rule that does not pin an
+    /// address is routing traffic straight into the `session/block-all` floor.
+    ///
+    /// This is what a process-name rule and a bare domain-suffix rule both did. Nothing
+    /// failed when they were added, because the routing surface lives in tono-core and the
+    /// permit surface lives in the Service.
+    #[test]
+    fn every_direct_rule_pins_an_endpoint_the_kill_switch_can_permit() {
+        let node = node();
+        let wechat = vec![(
+            "wxs.qq.com".to_string(),
+            vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
+            vec![80, 443],
+        )];
+        let web = vec![(
+            "www.bilibili.com".to_string(),
+            vec![std::net::Ipv4Addr::new(9, 0, 0, 30)],
+            vec![443],
+        )];
+        let suffixes = vec![tono_core::policy::PolicyDomain {
+            host: "baidu.com".to_string(),
+            ports: vec![80, 443],
+        }];
+        let (plan, endpoints) = build_direct_plan(
+            "Ethernet 2".to_string(),
+            &wechat,
+            &web,
+            &[],
+            &suffixes,
+            &node,
+            vec![
+                tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
+                    .expect("reviewed prefix"),
+            ],
+        )
+        .expect("plan");
+
+        let permitted: std::collections::BTreeSet<String> = endpoints
+            .iter()
+            .map(|endpoint| format!("{}/32", endpoint.ip))
+            .collect();
+        assert!(!permitted.is_empty(), "fixture must produce permits");
+
+        for rule in expected_controller_direct_rules(&plan) {
+            let pin = rule
+                .payload
+                .split("(IPCIDR,")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "DIRECT rule with no address pin would be dropped by the kill switch: {}",
+                        rule.payload
+                    )
+                });
+            assert!(
+                permitted.contains(pin),
+                "DIRECT rule pins {pin}, which is not in the WFP permit set: {}",
+                rule.payload
+            );
+        }
     }
 
     #[test]
