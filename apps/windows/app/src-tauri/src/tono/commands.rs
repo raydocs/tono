@@ -892,7 +892,10 @@ pub async fn retry_now(state: Arc<TonoState>, app: AppHandle) -> Result<(), Stri
         }
         inner.tasks.abort_reconnect();
     }
-    connection::schedule_reconnect(&state, &app).await;
+    // Not `schedule_reconnect`: that consumes a rung of the backoff ladder, so
+    // aborting the pending attempt and then asking for the *next* delay made this
+    // button strictly delay recovery.
+    connection::retry_reconnect_now(&state, &app).await;
     Ok(())
 }
 

@@ -2018,6 +2018,36 @@ pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
     schedule_reconnect_locked(&mut inner, state, app);
 }
 
+/// Run one protected reconnect **now**, for an explicit user action.
+///
+/// Deliberately not [`schedule_reconnect`]: that hands out the next rung of the
+/// 2/5/10/20/30 s ladder and consumes it. "Retry now" aborts the attempt that was
+/// already pending, so going through the ladder replaced an imminent retry with a
+/// longer wait and advanced the ladder as well — every press pushed recovery
+/// further away, and the countdown the user was watching jumped upward. The
+/// safety predicate is unchanged: still only while idle in Protected Offline with
+/// a verified session and no pending catalog choice.
+pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
+    let mut inner = state.lock().await;
+    if !reconnect_allowed(
+        inner.catalog_requires_choice,
+        inner.fsm.status(),
+        inner.fsm.kill_switch_armed(),
+    ) || !inner.fsm.reconnect_permitted_now()
+    {
+        return;
+    }
+    let task_state = state.clone();
+    let task_app = app.clone();
+    let handle =
+        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO)) as BoxedTask);
+    inner.tasks.reconnect = Some(handle);
+    // The deadline is now, so the UI stops showing a countdown it is no longer
+    // waiting for.
+    inner.next_retry_at_ms = Some(commands::epoch_millis());
+    state.audit().log(AuditEvent::ReconnectScheduled { delay_ms: 0 });
+}
+
 /// Lock-held half of [`schedule_reconnect`]. Spawning and registering are one critical section:
 /// Disconnect/sign-out must never observe an empty task slot and then be followed by a reconnect
 /// handle that escaped their abort.
