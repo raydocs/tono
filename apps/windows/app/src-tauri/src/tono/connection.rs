@@ -397,11 +397,26 @@ pub fn monitor_requires_reconnect(
     health_invalid || (event_invalidated && (core_changed || event_probe_failed))
 }
 
-/// F2: while Connected, the barrier must be wanted, live, and fully
-/// locked; anything else (or no answer) is unhealthy.
+/// F2: while Connected, the barrier must be wanted, live, fully locked, and actually
+/// carrying the tunnel; anything else (or no answer) is unhealthy.
+///
+/// `tunnel_permit_rendered` is here because the other three cannot answer the question. The
+/// Service's own doc on the field says it: a `Locked` session whose permit was retracted —
+/// the core was respawned, or the core instance could not be identified when the lock was
+/// taken — looks exactly like a `Locked` session that is carrying traffic, while every
+/// application's traffic is in fact dropped leaving the TUN, and `wanted`/`verified`/`live`
+/// all keep reporting health. `is_protected_startup_replacement_candidate` and
+/// `mark_verified_committed` already require the field; the continuous leg did not, so the
+/// one state that reads as Connected while nothing gets out was the one it scored healthy.
+///
+/// No version gate is needed: the field arrived in protocol revision 12 and
+/// `MIN_REQUIRED_SERVICE_REVISION` is 12, so every Service this App will pair with sets it.
 pub fn kill_switch_unhealthy(status: Option<&KillSwitchStatus>) -> bool {
     match status {
-        Some(status) => !(status.wanted && status.live && status.mode == KillSwitchStatusMode::Locked),
+        Some(status) => !(status.wanted
+            && status.live
+            && status.mode == KillSwitchStatusMode::Locked
+            && status.tunnel_permit_rendered),
         None => true,
     }
 }
@@ -6152,6 +6167,17 @@ mod tests {
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
         }
+
+        // The state the other three fields cannot distinguish: locked, wanted, live, and
+        // dropping every packet that leaves the TUN.
+        let orphaned_permit = KillSwitchStatus {
+            tunnel_permit_rendered: false,
+            ..healthy.clone()
+        };
+        assert!(
+            kill_switch_unhealthy(Some(&orphaned_permit)),
+            "a Locked session whose tunnel permit was retracted is not a healthy tunnel"
+        );
     }
 
     #[test]
