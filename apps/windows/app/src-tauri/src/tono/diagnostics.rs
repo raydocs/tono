@@ -164,10 +164,23 @@ pub fn scrub_home(path: &Path, home: Option<&Path>) -> String {
     if home.is_empty() {
         return text;
     }
-    if text.len() >= home.len() && text[..home.len()].eq_ignore_ascii_case(home) {
-        return format!("%USERPROFILE%{}", &text[home.len()..]);
+    // `str::get` rather than `&text[..n]`: the index is the *home* directory's
+    // byte length applied to a different string, so it lands wherever it lands.
+    // A data directory holding a multi-byte character across that offset — a
+    // portable install under `D:\我的软件\Tono`, say — made this panic on a
+    // non-char-boundary, and `get` answering `None` there is exactly the
+    // "not a prefix" verdict this needs. The crate unwinds rather than aborts,
+    // so the panic did not crash the app: it destroyed the diagnostics future
+    // without a response, and the button that is documented as the recovery
+    // channel for a machine the kill switch has sealed spun for ever with no
+    // error. Whether it fired depended on the byte length of %USERPROFILE%,
+    // which is to say on the account name.
+    match text.get(..home.len()) {
+        Some(prefix) if prefix.eq_ignore_ascii_case(home) => {
+            format!("%USERPROFILE%{}", &text[home.len()..])
+        }
+        _ => text,
     }
-    text
 }
 
 /// The user's profile directory, for [`scrub_home`].
@@ -566,6 +579,41 @@ mod tests {
             r"D:\shared\x.log"
         );
         assert_eq!(scrub_home(Path::new("/tmp/x.log"), None), "/tmp/x.log");
+    }
+
+    /// A path that is not under the profile, whose byte at `home.len()` falls in
+    /// the middle of a character.
+    ///
+    /// The index comes from one string and is applied to another, so it lands
+    /// wherever it lands. Slicing there panicked, and because this crate unwinds
+    /// rather than aborts the app survived while the diagnostics future died
+    /// without a response — the button documented as the recovery channel for a
+    /// machine the kill switch has sealed spun for ever, with no error. A
+    /// portable install under a Chinese directory name is enough, and whether it
+    /// fired depended on the byte length of %USERPROFILE%: on the account name.
+    #[test]
+    fn a_path_outside_the_profile_survives_a_non_ascii_name() {
+        let path = Path::new(r"D:\我的软件\Tono\logs\traffic-audit.jsonl");
+        // 11 bytes, which lands inside the second character of the path above.
+        let home = Path::new(r"C:\Users\rw");
+        assert_eq!(
+            scrub_home(path, Some(home)),
+            r"D:\我的软件\Tono\logs\traffic-audit.jsonl"
+        );
+
+        // The same shape where the profile itself is not ASCII and the path is
+        // genuinely under it.
+        let home = Path::new(r"C:\Users\张三");
+        assert_eq!(
+            scrub_home(Path::new(r"C:\Users\张三\logs\x.log"), Some(home)),
+            r"%USERPROFILE%\logs\x.log"
+        );
+
+        // And a home longer than the path, which must not index past the end.
+        assert_eq!(
+            scrub_home(Path::new(r"D:\a"), Some(Path::new(r"C:\Users\somebody"))),
+            r"D:\a"
+        );
     }
 
     #[test]
