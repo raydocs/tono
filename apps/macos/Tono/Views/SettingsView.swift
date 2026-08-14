@@ -8,12 +8,12 @@ struct SettingsView: View {
     @EnvironmentObject private var updater: AppUpdater
     @Environment(\.colorScheme) private var colorScheme
 
-    // General
     @State private var launchAtStartup =
         SMAppService.mainApp.status == .enabled
     @State private var isUpdatingLaunchAtStartup = false
     @State private var launchAtStartupMessage: String?
-    @AppStorage(SettingsKey.interfaceLanguage) private var selectedLanguage = "Auto"
+    @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults)
+    private var selectedLanguage = InterfaceLanguagePreference.auto
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
     @AppStorage(SettingsKey.localTrafficAuditEnabled)
     private var localTrafficAuditEnabled = true
@@ -24,54 +24,35 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.aggregatedAppRoutingResearchEnabled,
         store: AppProfile.defaults
-    // Defaults on for the test programme. The earlier reversal here was about a
-    // copy/default mismatch — the row claimed "On by default" while the stored
-    // default was off, so the text described something the user had not done.
-    // The copy below now states the default it actually has, and the build ships
-    // with raw-log upload on regardless, so leaving this aggregate off would
-    // have withheld the cheap, hostname-free half of the same picture.
-    ) private var aggregatedAppRoutingResearchEnabled = true
+    ) private var aggregatedAppRoutingResearchEnabled = false
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
     ) private var networkLogUploadEnabled = true
-
-    // Proxy Engine. The field edits a local draft; only validated values are
-    // committed to storage, so a half-typed "78" abandoned via focus loss can
-    // never become the persisted (and thus effective) port.
-    @AppStorage(SettingsKey.mixedPort) private var mixedPort = "7890"
-    @State private var mixedPortDraft = ""
-    @AppStorage(SettingsKey.tunMode) private var tunMode = false
-    @AppStorage(SettingsKey.allowLAN) private var allowLAN = false
-    // Appearance
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
-    @AppStorage(SettingsKey.glassTransparency) private var glassTransparency: Double = 50
-    @State private var glassTransparencyDraft: Double = 50
 
-    private let languages = ["Auto", "English", "简体中文"]
+    private let languages = InterfaceLanguagePreference.options
     private let themes = ["Light", "Dark", "Adaptive"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Title
             Text("Settings")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.primary)
-                .padding(.bottom, 24)
+                .padding(.bottom, 20)
 
-            // 2×2 Grid
             ScrollView {
-                AccountSettingsCard(session: accountSession)
-                    .padding(.bottom, 24)
-                Grid(horizontalSpacing: 24, verticalSpacing: 24) {
-                    GridRow {
-                        generalCard
-                        proxyEngineCard
+                VStack(alignment: .leading, spacing: 20) {
+                    AccountSettingsCard(session: accountSession)
+
+                    Grid(horizontalSpacing: 20, verticalSpacing: 20) {
+                        GridRow {
+                            preferencesCard
+                            aboutCard
+                        }
                     }
-                    GridRow {
-                        appearanceCard
-                        aboutCard
-                    }
+
+                    privacyCard
                 }
             }
             .scrollIndicators(.hidden)
@@ -82,13 +63,12 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: - General Card
+    // MARK: - Preferences
 
-    private var generalCard: some View {
-        SettingsCard(icon: "gearshape", title: "General") {
+    private var preferencesCard: some View {
+        SettingsCard(icon: "gearshape", title: "Preferences") {
             SettingToggleRow(
-                label: "Launch at Startup",
-                subtitle: "Start app when system boots",
+                label: "Open at login",
                 isOn: Binding(
                     get: { launchAtStartup },
                     set: setLaunchAtStartup
@@ -98,221 +78,40 @@ struct SettingsView: View {
 
             if let launchAtStartupMessage {
                 Text(launchAtStartupMessage)
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             settingDivider
 
-            SettingRow(label: "Interface Language", subtitle: "System-wide display language") {
+            SettingRow(label: "Language") {
                 settingsPicker(selection: $selectedLanguage, options: languages)
                     .onChange(of: selectedLanguage) { _, language in
-                        // .environment(\.locale) only re-localizes SwiftUI
-                        // LocalizedStringKey text; eager String(localized:)
-                        // sites resolve against AppleLanguages at call time.
-                        // Persist the choice so the whole app is consistent
-                        // from the next launch.
-                        let identifiers: [String: [String]] = [
-                            "English": ["en"],
-                            "简体中文": ["zh-Hans"],
-                        ]
-                        if let value = identifiers[language] {
-                            UserDefaults.standard.set(value, forKey: "AppleLanguages")
-                        } else {
-                            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
-                        }
+                        InterfaceLanguagePreference.apply(language)
+                        InterfaceLanguagePreference.relaunch()
                     }
             }
 
             settingDivider
 
-            SettingToggleRow(
-                label: "Enable Logs",
-                subtitle: "Show the Logs page and stream logs while it is open",
-                isOn: $logsEnabled
-            )
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Local Traffic Audit",
-                subtitle: "Save local domains, destination IPs, processes and proxy routes",
-                isOn: $localTrafficAuditEnabled
-            )
-            .onChange(of: localTrafficAuditEnabled) { _, enabled in
-                appState.setLocalTrafficAuditEnabled(enabled)
-            }
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Remote Diagnostics & Safe Actions",
-                subtitle: "Opt in to compact protection state and four fixed actions only. Sends no traffic data unless Claude Traffic Research is enabled separately.",
-                isOn: $remoteDiagnosticsEnabled
-            )
-            .onChange(of: remoteDiagnosticsEnabled) { _, enabled in
-                accountSession.remoteDiagnosticsSettingChanged()
-                // The research toggle states "Requires Remote Diagnostics";
-                // an orphaned child setting kept local streaming alive while
-                // uploads were silently inert — confusing in both directions.
-                if !enabled, claudeTrafficResearchEnabled {
-                    claudeTrafficResearchEnabled = false
-                    appState.setClaudeTrafficResearchEnabled(false)
-                }
-            }
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Claude & WeChat Traffic Research",
-                subtitle: "Requires Remote Diagnostics. Shares aggregate Claude protection and native WeChat trial route counts, including rejected or unknown app attribution, plus fixed exit and bypass verdicts. Official claude.ai/anthropic.com hostnames, ports and byte totals may be included; every other destination is aggregated into an \"other\" bucket carrying only route class, port and byte totals — never the hostname. Raw IPs, process names, paths, content and raw logs stay local.",
-                isOn: $claudeTrafficResearchEnabled
-            )
-            .onChange(of: claudeTrafficResearchEnabled) { _, enabled in
-                appState.setClaudeTrafficResearchEnabled(enabled)
-            }
-            .disabled(!remoteDiagnosticsEnabled)
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Aggregated App Routing Research",
-                subtitle: "On by default in this test build; you can turn it off at any time. Only while signed in and Ready, about every six hours Tono shares a reviewed fixed list of app families, route counts, coarse traffic-volume buckets, app version/build, macOS major.minor, and architecture. The list covers WeChat, QQ, Feishu/Lark, DingTalk, WeCom, Tencent Meeting, WPS, Baidu Netdisk, Aliyun Drive, Douyin, bilibili, NetEase Music, QQMusic, Thunder, Jianying, Youdao, AweSun, major browsers, Claude and Trae. For reviewed native apps, absolute process paths are reduced on-device to five fixed bundle-component categories (main, framework helper, XPC, plugin or other bundle helper); unknown apps remain one aggregate “other” family, and no executable name or path text is sent. Turning this off immediately stops collection and deletes pending local research data. Reports are linked to your account and device for abuse prevention, deleted within 90 days, and shown to administrators only as cohort totals. No hostnames, IPs, ports, usernames, absolute paths, bundle IDs, user file paths, content or connection records leave this device. Results create human-review candidates only and never add DIRECT rules automatically.",
-                isOn: $aggregatedAppRoutingResearchEnabled
-            )
-            .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
-                appState.setAggregatedAppRoutingResearchEnabled(enabled)
-                accountSession.appRoutingResearchSettingChanged()
-            }
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Network Log Upload (Test Build)",
-                subtitle: "On during the test programme. Uploads the audit log itself — visited hostnames and destination IPs, the process that opened each connection and its path, and which rule and route it matched — to Tono support, in compressed segments every couple of minutes while you are signed in. This is how routing bugs get diagnosed: the WeChat detour was found this way. Credentials, URL queries, page content and message content are removed before anything is written to the log, and TLS bodies are never observed. Segments are linked to your account, readable only by Tono administrators, and deleted after 14 days. Turn this off and nothing from the log leaves this Mac.",
-                isOn: $networkLogUploadEnabled
-            )
-            .onChange(of: networkLogUploadEnabled) { _, _ in
-                accountSession.networkLogUploadSettingChanged()
-            }
-
-            settingDivider
-
-            SettingRow(
-                label: "Audit Log",
-                subtitle: "10 MB × 3 · credentials and URL queries redacted · uploaded to support while Network Log Upload is on"
-            ) {
-                Button("Show in Finder") {
-                    let url = LocalTrafficAudit.shared.prepareForReveal()
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tint)
-            }
-        }
-    }
-
-    // MARK: - Proxy Engine Card
-
-    private var proxyEngineCard: some View {
-        SettingsCard(icon: "bolt", title: "Proxy Engine") {
-            SettingRow(label: "Mixed Port", subtitle: "HTTP/SOCKS listener port") {
-                TextField("", text: $mixedPortDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .multilineTextAlignment(.center)
-                    .frame(width: 72)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 12)
-                    .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(.white.opacity(colorScheme == .dark ? 0.08 : 0.4), lineWidth: 0.5)
-                    )
-                    .onAppear { mixedPortDraft = mixedPort }
-                    .onSubmit {
-                        if let port = Int(mixedPortDraft), (1024...65535).contains(port) {
-                            mixedPort = String(port)
-                            mixedPortDraft = String(port)
-                            appState.applySettingChange(key: "mixed-port", value: port)
-                        } else {
-                            // Invalid input never reaches storage; snap the
-                            // draft back to the committed value.
-                            mixedPortDraft = mixedPort
-                        }
-                    }
-            }
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "TUN Mode",
-                subtitle: "Required by Tono to prevent application bypass",
-                isOn: $tunMode
-            )
-            .disabled(true)
-            .onAppear { tunMode = true }
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Allow LAN",
-                subtitle: "Disabled for protected Reality routing",
-                isOn: $allowLAN
-            )
-            .disabled(true)
-            .onAppear { allowLAN = false }
-
-        }
-    }
-
-    // MARK: - Appearance Card
-
-    private var appearanceCard: some View {
-        SettingsCard(icon: "paintpalette", title: "Appearance") {
-            SettingRow(label: "Theme Mode", subtitle: "Light, Dark or Liquid adaptive") {
+            SettingRow(label: "Theme") {
                 settingsPicker(selection: $themeMode, options: themes)
             }
 
             settingDivider
 
-            SettingRow(label: "Glass Transparency", subtitle: "Adjust backdrop visibility") {
-                HStack(spacing: 8) {
-                    Slider(
-                        value: $glassTransparencyDraft,
-                        in: 0...100,
-                        onEditingChanged: { editing in
-                            if !editing {
-                                glassTransparency = glassTransparencyDraft
-                            }
-                        }
-                    )
-                        .tint(.accentColor)
-                        .frame(maxWidth: 140)
-                    Text("\(Int(glassTransparencyDraft.rounded()))%")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
-                }
-                .onAppear {
-                    glassTransparencyDraft = glassTransparency
-                }
-                .onChange(of: glassTransparency) { _, value in
-                    glassTransparencyDraft = value
-                }
-            }
-
+            SettingToggleRow(
+                label: "Show Logs page",
+                isOn: $logsEnabled
+            )
         }
     }
 
-    // MARK: - About Card
+    // MARK: - About
 
     private var aboutCard: some View {
-        VStack(spacing: 10) {
-            // App icon + info
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
@@ -322,25 +121,17 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Tono")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.1") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"))")
+                    Text(versionLabel)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
             settingDivider
 
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Automatic App Updates")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
-                    Text("Checks every 6 hours and installs only after approval")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
+                Text("Updates")
+                    .font(.system(size: 13, weight: .medium))
                 Spacer()
                 Button("Check for Updates") {
                     updater.checkForUpdates()
@@ -350,24 +141,6 @@ struct SettingsView: View {
                 .foregroundStyle(.tint)
                 .disabled(!updater.canCheckForUpdates)
             }
-
-            settingDivider
-
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Protected cloud connection")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
-                    Text("Authenticated VLESS Reality routing with a fail-closed Kill Switch")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "lock.shield")
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -387,6 +160,93 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 24)
                 .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 1)
         )
+    }
+
+    private var versionLabel: String {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "0.0.1"
+        let build = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String ?? "0"
+        return String(localized: "Version \(version) (\(build))")
+    }
+
+    // MARK: - Privacy
+
+    private var privacyCard: some View {
+        SettingsCard(icon: "hand.raised", title: "Privacy") {
+            SettingToggleRow(
+                label: "Remote diagnostics",
+                subtitle: "Share protection status with Tono support",
+                isOn: $remoteDiagnosticsEnabled
+            )
+            .onChange(of: remoteDiagnosticsEnabled) { _, enabled in
+                accountSession.remoteDiagnosticsSettingChanged()
+                if !enabled, claudeTrafficResearchEnabled {
+                    claudeTrafficResearchEnabled = false
+                    appState.setClaudeTrafficResearchEnabled(false)
+                }
+            }
+
+            settingDivider
+
+            SettingToggleRow(
+                label: "Network log upload",
+                subtitle: "Automatically upload the full traffic log in the background",
+                isOn: $networkLogUploadEnabled
+            )
+            .onChange(of: networkLogUploadEnabled) { _, _ in
+                accountSession.networkLogUploadSettingChanged()
+            }
+
+            settingDivider
+
+            SettingToggleRow(
+                label: "App routing research",
+                subtitle: "Share anonymized app-route counts",
+                isOn: $aggregatedAppRoutingResearchEnabled
+            )
+            .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
+                appState.setAggregatedAppRoutingResearchEnabled(enabled)
+                accountSession.appRoutingResearchSettingChanged()
+            }
+
+            settingDivider
+
+            SettingToggleRow(
+                label: "Claude & WeChat research",
+                subtitle: "Requires diagnostics. Route aggregates only.",
+                isOn: $claudeTrafficResearchEnabled
+            )
+            .onChange(of: claudeTrafficResearchEnabled) { _, enabled in
+                appState.setClaudeTrafficResearchEnabled(enabled)
+            }
+            .disabled(!remoteDiagnosticsEnabled)
+
+            settingDivider
+
+            SettingToggleRow(
+                label: "Local traffic log",
+                subtitle: "Save connections on this Mac",
+                isOn: $localTrafficAuditEnabled
+            )
+            .onChange(of: localTrafficAuditEnabled) { _, enabled in
+                appState.setLocalTrafficAuditEnabled(enabled)
+            }
+
+            settingDivider
+
+            SettingRow(label: "Audit Log") {
+                Button("Show in Finder") {
+                    let url = LocalTrafficAudit.shared.prepareForReveal()
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tint)
+            }
+        }
     }
 
     // MARK: - Helpers
@@ -463,7 +323,6 @@ struct SettingsView: View {
         }
         .buttonStyle(.plain)
     }
-
 }
 
 // MARK: - Settings Card Container
@@ -475,8 +334,7 @@ private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Card header
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
                     .font(.system(size: 14))
@@ -488,7 +346,6 @@ private struct SettingsCard<Content: View>: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
             }
-            .padding(.bottom, 4)
 
             content
         }
@@ -502,11 +359,9 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
-// MARK: - Setting Row
-
 private struct SettingRow<Trailing: View>: View {
     let label: String
-    let subtitle: String
+    var subtitle: String?
     @ViewBuilder let trailing: Trailing
 
     var body: some View {
@@ -514,46 +369,34 @@ private struct SettingRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(label))
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                Text(LocalizedStringKey(subtitle))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(LocalizedStringKey(subtitle))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            Spacer()
+            Spacer(minLength: 12)
             trailing
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 
-// MARK: - Setting Toggle Row
-
 private struct SettingToggleRow: View {
     let label: String
-    let subtitle: String
+    var subtitle: String?
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(LocalizedStringKey(label))
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
-                Text(LocalizedStringKey(subtitle))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
+        SettingRow(label: label, subtitle: subtitle) {
             Toggle("", isOn: $isOn)
                 .toggleStyle(.switch)
                 .tint(.accentColor)
                 .labelsHidden()
         }
-        .padding(.vertical, 4)
     }
 }
-
-// MARK: - Preview
 
 #Preview {
     ZStack {

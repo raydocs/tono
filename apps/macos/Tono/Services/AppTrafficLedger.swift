@@ -62,6 +62,9 @@ final class AppTrafficLedger {
     /// owner exited before it looked. Grouping them under a named bucket keeps
     /// the column totals honest instead of dropping the bytes.
     static let unattributed = "Unattributed"
+    /// Mihomo's own dials — DNS, the residential hop, health probes — have no
+    /// client process. File them under the app rather than `unattributed`.
+    static let tonoProcess = "Tono"
 
     /// Distinct processes tracked before new names are folded into
     /// `unattributed`. Far above any real machine; a backstop against a
@@ -77,6 +80,9 @@ final class AppTrafficLedger {
     private var totals: [String: AppTotals] = [:]
     /// Last counters seen per live connection id, so a delta can be taken.
     private var counters: [String: (upload: Int64, download: Int64)] = [:]
+    /// Extra destinations that belong to Tono rather than a client app. The
+    /// catalog home SOCKS host is the important one; built-in DNS is always on.
+    private var extraInfrastructureDestinations: Set<String> = []
 
     func reset() {
         totals = [:]
@@ -84,6 +90,10 @@ final class AppTrafficLedger {
         apps = []
         overall = RouteSplit()
         startedAt = Date()
+    }
+
+    func setInfrastructureDestinations(_ hosts: Set<String>) {
+        extraInfrastructureDestinations = Set(hosts.map { $0.lowercased() })
     }
 
     /// Folds one `/connections` snapshot into the totals.
@@ -142,19 +152,82 @@ final class AppTrafficLedger {
         }
     }
 
-    private func processKey(for connection: APIConnection) -> String {
-        guard let process = connection.metadata.process, !process.isEmpty else {
-            return Self.unattributed
-        }
-        let grouped = Self.groupedProcessName(
-            process: process,
-            processPath: connection.metadata.processPath
+    func resolvedProcessName(for connection: APIConnection) -> String {
+        Self.resolvedProcessName(
+            process: connection.metadata.process,
+            processPath: connection.metadata.processPath,
+            host: connection.metadata.host,
+            destinationIP: connection.metadata.destinationIP,
+            extraInfrastructureDestinations: extraInfrastructureDestinations
         )
+    }
+
+    private func processKey(for connection: APIConnection) -> String {
+        let grouped = resolvedProcessName(for: connection)
         if totals[grouped] != nil { return grouped }
         guard totals.count < Self.maximumTrackedProcesses else {
             return Self.unattributed
         }
         return grouped
+    }
+
+    /// Turns Mihomo's process fields into a stable Activity row id.
+    ///
+    /// `unknown` is a sentinel, not a process. A real `processPath` still names
+    /// the app. DNS and the residential hop are Tono's own sockets.
+    static func resolvedProcessName(
+        process: String?,
+        processPath: String?,
+        host: String,
+        destinationIP: String?,
+        extraInfrastructureDestinations: Set<String> = []
+    ) -> String {
+        let path = processPath ?? ""
+        if let process, !Self.isMissingIdentity(process) {
+            return groupedProcessName(process: process, processPath: path)
+        }
+        if !Self.isMissingIdentity(path) {
+            let base = URL(fileURLWithPath: path).lastPathComponent
+            if !Self.isMissingIdentity(base) {
+                return groupedProcessName(process: base, processPath: path)
+            }
+        }
+        if Self.isInfrastructureDestination(
+            host: host,
+            destinationIP: destinationIP,
+            extra: extraInfrastructureDestinations
+        ) {
+            return tonoProcess
+        }
+        return unattributed
+    }
+
+    private static func isMissingIdentity(_ raw: String) -> Bool {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return true }
+        let lower = value.lowercased()
+        return lower == "unknown" || lower == "<unknown>" || lower == "-"
+    }
+
+    private static let builtInInfrastructureDestinations: Set<String> = [
+        "1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4",
+        "9.9.9.9", "223.5.5.5", "223.6.6.6", "119.29.29.29",
+        "dns.google", "cloudflare-dns.com", "dns.alidns.com",
+    ]
+
+    private static func isInfrastructureDestination(
+        host: String,
+        destinationIP: String?,
+        extra: Set<String>
+    ) -> Bool {
+        let candidates = [host, destinationIP ?? ""]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty && $0 != "unknown" }
+        for candidate in candidates {
+            if builtInInfrastructureDestinations.contains(candidate) { return true }
+            if extra.contains(candidate) { return true }
+        }
+        return false
     }
 
     /// Collapse Claude desktop helpers and Claude Code's versioned launcher
@@ -177,7 +250,36 @@ final class AppTrafficLedger {
         if Self.isCodexIdentity(process: process, processPath: path) {
             return "Codex"
         }
+        if Self.isChromeIdentity(process: process, processPath: path) {
+            return "Google Chrome"
+        }
+        if Self.isGrokIdentity(process: process, processPath: path) {
+            return "Grok"
+        }
+        if Self.isCursorIdentity(process: process, processPath: path) {
+            return "Cursor"
+        }
         return process
+    }
+
+    private static func isChromeIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/google chrome.app/") { return true }
+        return process == "Google Chrome"
+            || process.hasPrefix("Google Chrome Helper")
+    }
+
+    private static func isGrokIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/grok.app/") { return true }
+        if process.hasPrefix("grok-") { return true }
+        return process == "Grok" || process.hasPrefix("Grok Bot")
+    }
+
+    private static func isCursorIdentity(process: String, processPath: String) -> Bool {
+        let path = processPath.lowercased()
+        if path.contains("/cursor.app/") { return true }
+        return process == "Cursor" || process.hasPrefix("Cursor Helper")
     }
 
     private static func isWeChatIdentity(process: String, processPath: String) -> Bool {
@@ -197,7 +299,7 @@ final class AppTrafficLedger {
     private static func isChatGPTIdentity(process: String, processPath: String) -> Bool {
         let path = processPath.lowercased()
         if path.contains("/chatgpt.app/") { return true }
-        return process == "ChatGPT" || process.hasPrefix("ChatGPT Helper")
+        return process == "ChatGPT" || process.hasPrefix("ChatGPT")
             || process == "chatgpt" || process == "ChatGPT.exe"
     }
 
@@ -206,6 +308,7 @@ final class AppTrafficLedger {
         if path.contains("/.local/share/codex/") { return true }
         if path.contains("/node_modules/@openai/codex/") { return true }
         return process == "Codex" || process == "codex" || process == "Codex.exe"
+            || process.hasPrefix("Codex")
     }
 
     /// Classifies a connection by the path its bytes actually took.

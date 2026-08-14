@@ -32,14 +32,20 @@ format and the release script passes and verifies the exact source commit.
 
 ## Current source and published state
 
-- `release/macos` contains the post-Build-62 product line. Build 64 is the
-  Sparkle successor to 62 (`Tono-macOS-0.0.64-build64.zip`): WeChat stays on
+- `release/macos` contains the post-Build-62 product line. **Build 64 is the
+  macOS rollback baseline**: the last-known-good Sparkle successor to 62
+  (`Tono-macOS-0.0.64-build64.zip`) before later feature work. Keep this
+  tagged commit immutable. Sparkle will not install a lower `CFBundleVersion`,
+  so a bad later build is recovered by shipping this source again as a *new
+  higher* build (65+), not by asking users to downgrade. WeChat stays on
   the China-direct path and is found by signature; Claude, ChatGPT, Perplexity
   and Gemini product hosts ride the catalog home hop, including Anthropic's
   first-party IPv4 (`160.79.104.0/21`); IPv6 stays off; Activity is a per-app
   route split with Chinese chrome; connecting no longer drops every connection
-  or fails a superseded arm. Build 62 remains the latest published Sparkle
-  artifact until 64 is notarised from a clean `release/macos` commit.
+  or fails a superseded arm. Helper protocol **3.12.0** restores DNS without
+  snapshotting `127.0.0.1` as the original resolver. Build 62 remains the
+  latest published Sparkle artifact until 64 is notarised from a clean
+  `release/macos` commit that contains only this line's sources.
 - `release/windows` contains Windows 0.0.32 (source) on top of the 0.0.31
   Service pin fix. 0.0.32 adds a pin file at install, proactive token
   refresh, learned control-plane addresses (Service ProgramData via

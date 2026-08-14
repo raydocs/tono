@@ -56,9 +56,16 @@ final class ProtectedDNSManager {
             }
         }
 
+        var servers = try Self.currentDNS(for: service)
+        if servers == [Self.protectedDNSServer] {
+            // A previous session left the Mihomo listener in place without a
+            // snapshot. Recording that as "original DNS" makes Restore Internet
+            // write 127.0.0.1 back after Mihomo is gone.
+            servers = []
+        }
         let snapshot = Snapshot(
             service: service,
-            servers: try Self.currentDNS(for: service)
+            servers: servers
         )
         // Persist recovery state before changing the first system setting.
         try save(snapshot)
@@ -79,23 +86,55 @@ final class ProtectedDNSManager {
         )
     }
 
+    /// Put the recorded resolvers back, then make sure no network service is
+    /// left pointing at a Mihomo listener that is about to stop existing.
+    ///
+    /// Two rules the previous shape got wrong, both of which end as "Restore
+    /// Internet took my DNS away":
+    ///
+    /// - Every service is swept, including ones macOS currently has disabled.
+    ///   `-listallnetworkservices` marks those with a leading `*`, and skipping
+    ///   them deleted the snapshot while leaving `127.0.0.1` in their stored
+    ///   configuration, ready to take effect the moment the user re-enables the
+    ///   adapter with nothing left to recover it from.
+    /// - One service that refuses to commit does not abandon the rest. The
+    ///   failure is still raised, so PF stays armed and the caller can retry,
+    ///   but the services that could be recovered already have been, and the
+    ///   snapshot survives so the retry still knows the original resolvers.
     func restore() throws -> [String: Any] {
         lock.lock()
         defer { lock.unlock() }
-        guard let snapshot = try loadSnapshot() else {
-            return response(
-                configured: false,
-                snapshotPresent: false,
-                service: nil
-            )
+        let snapshot = try loadSnapshot()
+        let services = try Self.allServices()
+        var failure: Error?
+
+        func attempt(_ servers: [String], for service: String) {
+            do {
+                try Self.setDNS(servers, for: service)
+                try verify(servers, for: service)
+            } catch {
+                failure = failure ?? error
+            }
         }
-        try Self.setDNS(snapshot.servers, for: snapshot.service)
-        try verify(snapshot.servers, for: snapshot.service)
+
+        if let snapshot, services.contains(snapshot.service) {
+            attempt(snapshot.servers, for: snapshot.service)
+        }
+        for service in services {
+            let current = (try? Self.currentDNS(for: service)) ?? []
+            // Only loopback is swept. A service the user pointed somewhere of
+            // their own is not ours to rewrite.
+            guard current == [Self.protectedDNSServer] else { continue }
+            attempt(snapshot?.service == service ? snapshot!.servers : [], for: service)
+        }
+        if let failure {
+            throw failure
+        }
         try removeSnapshot()
         return response(
             configured: false,
             snapshotPresent: false,
-            service: snapshot.service
+            service: snapshot?.service
         )
     }
 
@@ -273,15 +312,41 @@ final class ProtectedDNSManager {
         }
     }
 
+    /// Services macOS currently has enabled. Protecting a disabled adapter is
+    /// meaningless, so `enable` validates against this narrower set.
     private static func availableServices() throws -> Set<String> {
+        try listServices(includingDisabled: false)
+    }
+
+    /// Every service in the configuration, disabled ones included. Recovery has
+    /// to reach those: a disabled adapter keeps whatever DNS it was left with.
+    private static func allServices() throws -> Set<String> {
+        try listServices(includingDisabled: true)
+    }
+
+    private static func listServices(includingDisabled: Bool) throws -> Set<String> {
         let result = try runNetworkSetup(["-listallnetworkservices"])
         guard result.status == 0 else {
             throw HelperFailure.system("Could not enumerate network services.")
         }
+        return parseServices(result.output, includingDisabled: includingDisabled)
+    }
+
+    static func parseServices(
+        _ output: String,
+        includingDisabled: Bool
+    ) -> Set<String> {
         var services = Set<String>()
-        for line in result.output.components(separatedBy: .newlines).dropFirst() {
-            let value = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty, !value.hasPrefix("*"),
+        for line in output.components(separatedBy: .newlines).dropFirst() {
+            var value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The asterisk is `networksetup`'s disabled marker, not part of the
+            // name every other subcommand expects.
+            if value.hasPrefix("*") {
+                guard includingDisabled else { continue }
+                value = String(value.dropFirst())
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard !value.isEmpty,
                   (try? validateService(value)) != nil else { continue }
             services.insert(value)
         }
@@ -388,6 +453,21 @@ final class ProtectedDNSManager {
                 _ = try parseDNSOutput("not-an-address\n")
                 return false
             } catch {}
+            let listing = """
+            An asterisk (*) denotes that a network service is disabled.
+            Wi-Fi
+            *Thunderbolt Bridge
+            Ethernet
+
+            """
+            guard parseServices(listing, includingDisabled: false)
+                    == ["Wi-Fi", "Ethernet"],
+                  // Recovery has to reach a disabled adapter, and it must ask
+                  // for it by the name every other subcommand accepts.
+                  parseServices(listing, includingDisabled: true)
+                    == ["Wi-Fi", "Ethernet", "Thunderbolt Bridge"] else {
+                return false
+            }
             return true
         } catch {
             return false

@@ -224,7 +224,7 @@ struct DashboardView: View {
     // MARK: - Network Info Bar
 
     private var networkInfoBar: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 14) {
             infoItem(label: "IP", value: appState.networkInfo.ip)
             infoItem(label: "Network", value: appState.networkInfo.org)
             infoItem(label: "Location", value: appState.networkInfo.location)
@@ -234,32 +234,30 @@ struct DashboardView: View {
                         + "Upstream: 1.1.1.1 / 8.8.8.8 DoH via the protected exit"
                 )
 
-            Spacer()
+            Spacer(minLength: 8)
 
-            // Traffic stats
-            HStack(spacing: 16) {
+            // Keep the sparkline and rates at intrinsic width. The four info
+            // columns share leftover space; without this priority the rates
+            // wrap to one glyph per line in a ~700pt content column.
+            HStack(spacing: 10) {
                 TrafficSparkline(
                     history: trafficHistory,
                     isLive: appState.isConnected
                 )
 
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Text(formatSpeed(appState.trafficStats.uploadSpeed))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 2) {
+                    speedReadout(
+                        systemImage: "arrow.up",
+                        speed: appState.trafficStats.uploadSpeed
+                    )
+                    speedReadout(
+                        systemImage: "arrow.down",
+                        speed: appState.trafficStats.downloadSpeed
+                    )
                 }
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.secondary)
-                    Text(formatSpeed(appState.trafficStats.downloadSpeed))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
+                .fixedSize()
             }
+            .layoutPriority(1)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -289,7 +287,20 @@ struct DashboardView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .truncationMode(.tail)
         }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func speedReadout(systemImage: String, speed: Int64) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+            Text(formatSpeed(speed))
+                .font(.system(size: 11, design: .monospaced))
+        }
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
 
     private func formatSpeed(_ bytesPerSec: Int64) -> String {
@@ -518,7 +529,7 @@ private struct ConnectionProgressCard: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-            } else if appState.isProtectionBlocked, !appState.isDisconnecting {
+            } else if appState.isProtectionBlocked {
                 Button(appState.protectedReconnectPausedForUserAction
                     ? "Repair and reconnect"
                     : "Retry now") {
@@ -526,7 +537,7 @@ private struct ConnectionProgressCard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(!appState.isTonoReady)
+                .disabled(!appState.isTonoReady || appState.isDisconnecting)
 
                 Button("Restore internet") {
                     appState.disconnect(releaseKillSwitch: true)

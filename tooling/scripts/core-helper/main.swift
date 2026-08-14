@@ -864,7 +864,14 @@ private final class CoreManager {
         lock.lock()
         defer { lock.unlock() }
         if process?.isRunning == true {
-            throw HelperFailure.invalid("Mihomo is already running.")
+            // Coded, because the app's recovery for it — stop the orphaned core,
+            // then start again so a force-killed GUI cannot leave mixed port,
+            // 127.0.0.1:53 and utun199 owned by nothing the user can see — has
+            // to key off something sturdier than this sentence.
+            throw HelperFailure.coded(
+                code: "CORE_ALREADY_RUNNING",
+                message: "Mihomo is already running."
+            )
         }
         _ = try secureMetadata(mihomoPath, type: mode_t(S_IFREG), owner: 0)
         let configPath = try snapshot(
@@ -1608,7 +1615,7 @@ private final class SocketServer {
                 sendResponse(client, status: 404, object: ["ok": false, "error": "Not found."])
             }
         } catch let failure as HelperFailure {
-            let status = failure.message.contains("already running") ? 409 : 400
+            let status = failure.code == "CORE_ALREADY_RUNNING" ? 409 : 400
             var body: [String: Any] = ["ok": false, "error": failure.message]
             if let code = failure.code { body["code"] = code }
             sendResponse(client, status: status, object: body)

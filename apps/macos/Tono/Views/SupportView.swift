@@ -28,6 +28,11 @@ struct SupportView: View {
         let helperInstalled: Bool
         let helperReady: Bool
         let helperRejectsApp: Bool
+        /// Whether an authenticated helper actually answered the status query.
+        /// `coreRunning` is conservative when it did not — safe for the release
+        /// sequence, and a lie on a diagnostics page that would otherwise read
+        /// "helper not installed" and "core running" in the same panel.
+        let coreStatusVerified: Bool
         let coreRunning: Bool
         let corePID: Int?
         let coreLastError: String?
@@ -296,7 +301,7 @@ struct SupportView: View {
                     Text(String(localized: "Remote diagnostics"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.primary)
-                    Text(String(localized: "Nothing leaves this Mac unless you turn on Remote Diagnostics & Safe Actions in Settings › General."))
+                    Text(String(localized: "Turn this on in Settings › Privacy."))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -447,6 +452,9 @@ struct SupportView: View {
 
     private var coreText: String {
         guard let probe else { return String(localized: "Checking…") }
+        guard probe.coreStatusVerified else {
+            return String(localized: "Unknown · the helper did not answer")
+        }
         if probe.coreRunning {
             guard let pid = probe.corePID else { return String(localized: "Running") }
             return "\(String(localized: "Running")) · PID \(pid)"
@@ -534,6 +542,7 @@ struct SupportView: View {
             helperInstalled: helper.installed,
             helperReady: helper.ready,
             helperRejectsApp: helper.rejects,
+            coreStatusVerified: core.verified,
             coreRunning: core.running,
             corePID: core.pid,
             coreLastError: core.lastError

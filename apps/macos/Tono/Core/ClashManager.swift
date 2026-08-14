@@ -95,7 +95,17 @@ final class ClashManager {
         directPolicy: ConfigPipeline.ManagedDirectRuntimePolicy? = nil,
         helperPrepared: Bool = false
     ) async throws {
-        guard !isRunning else { return }
+        let helperStatus = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+        if isRunning || (helperStatus.verified && helperStatus.running) {
+            let stopped = await stopAsync()
+            let afterStop = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+            if afterStop.verified && afterStop.running {
+                throw ClashError.startFailed("Mihomo is already running.")
+            }
+            if !stopped && !afterStop.verified {
+                throw ClashError.startFailed("Mihomo is already running.")
+            }
+        }
 
         // The owned Tono runtime intentionally has no GEOIP/GEOSITE/MMDB rules.
         // Legacy non-Tono development configs may still opt into those assets.
@@ -112,12 +122,39 @@ final class ClashManager {
         // Helper installation, launchd replacement, and Unix-socket IPC are
         // serialized off the main actor so the connection animation stays
         // responsive even when macOS displays an administrator prompt.
-        try await PrivilegedRuntimeCoordinator.shared.installAndStartCore(
-            configDirectory: configDirectory.path,
-            configSHA256: digest,
-            helperPrepared: helperPrepared
-        )
+        do {
+            try await PrivilegedRuntimeCoordinator.shared.installAndStartCore(
+                configDirectory: configDirectory.path,
+                configSHA256: digest,
+                helperPrepared: helperPrepared
+            )
+        } catch {
+            guard Self.isAlreadyRunningError(error) else { throw error }
+            let stopped = await stopAsync()
+            let afterStop = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+            let confirmedStopped = afterStop.verified && !afterStop.running
+            guard stopped || confirmedStopped else {
+                throw ClashError.startFailed("Mihomo is already running.")
+            }
+            try await PrivilegedRuntimeCoordinator.shared.installAndStartCore(
+                configDirectory: configDirectory.path,
+                configSHA256: digest,
+                helperPrepared: helperPrepared
+            )
+        }
         isRunning = true
+    }
+
+    /// The daemon refuses a start while a core it owns is still up. Recognise
+    /// that refusal by its code: the message is prose meant for a person, and
+    /// rewording it must not silently disable the orphaned-core recovery below.
+    /// The text check stays only for a daemon old enough to predate the code.
+    private static func isAlreadyRunningError(_ error: Error) -> Bool {
+        if case HelperIPCError.commandFailed(_, let code) = error,
+           code == "CORE_ALREADY_RUNNING" {
+            return true
+        }
+        return error.localizedDescription.lowercased().contains("already running")
     }
 
     // MARK: - Stop (via Helper Daemon)
@@ -128,8 +165,9 @@ final class ClashManager {
             try HelperManager.stopCore()
         } catch {
             print("[ClashManager] stop failed: \(error)")
-            isRunning = false
-            return false
+            let status = HelperManager.coreStatus()
+            isRunning = status.running || !status.verified
+            return !isRunning
         }
         isRunning = false
         return true
@@ -141,8 +179,9 @@ final class ClashManager {
             try await PrivilegedRuntimeCoordinator.shared.stopCore()
         } catch {
             print("[ClashManager] stop failed: \(error)")
-            isRunning = false
-            return false
+            let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+            isRunning = status.running || !status.verified
+            return !isRunning
         }
         isRunning = false
         return true

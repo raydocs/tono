@@ -61,14 +61,16 @@ func connection(
     down: Int64,
     chains: [String],
     rule: String = "Match",
-    processPath: String? = nil
+    processPath: String? = nil,
+    host: String = "example.test",
+    destinationIP: String = "203.0.113.7"
 ) -> APIConnection {
     APIConnection(
         id: id,
         metadata: APIConnectionMetadata(
             network: "tcp", type: "Tun", process: process, processPath: processPath,
-            sourceIP: "198.18.0.1", destinationIP: "203.0.113.7",
-            sourcePort: "1", destinationPort: "443", host: "example.test"
+            sourceIP: "198.18.0.1", destinationIP: destinationIP,
+            sourcePort: "1", destinationPort: "443", host: host
         ),
         upload: up, download: down, start: "", chains: chains,
         rule: rule, rulePayload: nil
@@ -207,8 +209,85 @@ struct AppTrafficLedgerTests {
         check("Codex CLI groups under Codex",
               app(codex, "Codex")?.total == 30,
               "got \(app(codex, "Codex")?.total ?? -1)")
+        let codexService = AppTrafficLedger()
+        codexService.ingest([
+            connection(
+                "cxs", process: "Codex (Service)", up: 0, down: 12,
+                chains: ["US-Home-Broadband", "Tono-Claude-Home"]
+            ),
+        ])
+        check("Codex Service groups under Codex",
+              app(codexService, "Codex")?.total == 12,
+              "got \(app(codexService, "Codex")?.total ?? -1)")
         check("homeProxy node bytes are residential",
               app(grouped, "Claude Code")?.split.residential == 100)
+
+        let helpers = AppTrafficLedger()
+        helpers.ingest([
+            connection(
+                "ch", process: "Google Chrome Helper", up: 0, down: 10,
+                chains: ["US-VLESS-Reality", "Tono-Exit"]
+            ),
+            connection(
+                "cu", process: "Cursor Helper (Plugin)", up: 0, down: 11,
+                chains: ["US-VLESS-Reality", "Tono-Exit"]
+            ),
+            connection(
+                "gr", process: "Grok Bot Helper", up: 0, down: 12,
+                chains: ["US-VLESS-Reality", "Tono-Exit"]
+            ),
+        ])
+        check("Chrome helper groups under Google Chrome",
+              app(helpers, "Google Chrome")?.total == 10)
+        check("Cursor helper groups under Cursor",
+              app(helpers, "Cursor")?.total == 11)
+        check("Grok helper groups under Grok",
+              app(helpers, "Grok")?.total == 12)
+
+        let missing = AppTrafficLedger()
+        missing.setInfrastructureDestinations(["203.0.113.50"])
+        missing.ingest([
+            connection(
+                "dns", process: "unknown", up: 0, down: 3,
+                chains: ["DIRECT"],
+                processPath: "unknown",
+                host: "8.8.8.8",
+                destinationIP: "8.8.8.8"
+            ),
+            connection(
+                "ali", process: "unknown", up: 0, down: 4,
+                chains: ["DIRECT"],
+                processPath: "unknown",
+                host: "223.5.5.5",
+                destinationIP: "223.5.5.5"
+            ),
+            connection(
+                "hop", process: "unknown", up: 0, down: 5,
+                chains: ["US-VLESS-Reality", "Tono-Exit"],
+                processPath: "unknown",
+                host: "203.0.113.50",
+                destinationIP: "203.0.113.50"
+            ),
+            connection(
+                "gap", process: "unknown", up: 0, down: 6,
+                chains: ["US-VLESS-Reality", "Tono-Exit"],
+                processPath: "unknown",
+                host: "chatgpt.com"
+            ),
+            connection(
+                "path", process: "unknown", up: 0, down: 8,
+                chains: ["US-VLESS-Reality", "Tono-Exit"],
+                processPath: "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper",
+                host: "github.com"
+            ),
+        ])
+        check("DNS and home hop with no process are Tono",
+              app(missing, AppTrafficLedger.tonoProcess)?.total == 12,
+              "got \(app(missing, AppTrafficLedger.tonoProcess)?.total ?? -1)")
+        check("unknown chatgpt stays unattributed",
+              app(missing, AppTrafficLedger.unattributed)?.total == 6)
+        check("unknown with a real path recovers Chrome",
+              app(missing, "Google Chrome")?.total == 8)
 
         // --- reset --------------------------------------------------------
         split.reset()

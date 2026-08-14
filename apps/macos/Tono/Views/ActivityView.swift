@@ -24,6 +24,9 @@ private enum ClientAppIconCache {
                 resolved = NSWorkspace.shared.icon(forFile: path)
             }
         }
+        if resolved == nil, processName == "Tono" {
+            resolved = NSWorkspace.shared.icon(forFile: "/Applications/Tono.app")
+        }
         if resolved == nil {
             for app in NSWorkspace.shared.runningApplications {
                 let executable = app.executableURL?.lastPathComponent
@@ -31,6 +34,14 @@ private enum ClientAppIconCache {
                         || app.localizedName == processName
                         || (processName == "Claude Code" && (executable == "Claude"
                             || app.localizedName == "Claude"))
+                        || (processName == "Grok" && (
+                            app.localizedName == "Grok Bot"
+                            || (executable?.hasPrefix("grok-") == true)
+                        ))
+                        || (processName == "Google Chrome" && (
+                            app.localizedName == "Google Chrome"
+                            || executable?.hasPrefix("Google Chrome") == true
+                        ))
                 else { continue }
                 if let bundleURL = app.bundleURL {
                     resolved = NSWorkspace.shared.icon(forFile: bundleURL.path)

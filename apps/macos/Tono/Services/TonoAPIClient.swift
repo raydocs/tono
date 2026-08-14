@@ -159,6 +159,16 @@ actor TonoAPIClient {
         )
     }
 
+    func uploadTelemetryWindow(
+        _ window: TonoTelemetryWindowReport
+    ) async throws -> TonoTelemetryWindowReceipt {
+        try await authorizedRequest(
+            "telemetry/windows",
+            method: "POST",
+            body: TonoTelemetryWindowRequest(window: window)
+        )
+    }
+
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {
         let validID = try validatedDeviceID(id)
         let _: TonoDeviceActionResultResponse = try await authorizedRequest(

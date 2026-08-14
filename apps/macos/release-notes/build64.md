@@ -1,6 +1,8 @@
 # Tono 0.0.64
 
-Build 64 is the first Sparkle update since 62. It is the routing, Activity, and connect release: WeChat stays in China, Claude and the other assistants use your home line when the catalog has one, and the traffic page finally shows which app used which path.
+Build 64 is the first Sparkle update since 62, and the macOS rollback baseline: later feature work should land on a higher build so this one stays a known-good restore point. Sparkle does not install a lower build number; if a later update misbehaves, ship this source again as a new higher build rather than asking people to downgrade.
+
+It is the routing, Activity, and connect release: WeChat stays in China, Claude and the other assistants use your home line when the catalog has one, and the traffic page finally shows which app used which path. Connecting, sleeping, and Restore Internet are the paths this build refuses to get wrong.
 
 ## Claude, ChatGPT, and the other assistants
 
@@ -26,9 +28,15 @@ Build 64 is the first Sparkle update since 62. It is the routing, Activity, and 
 
 - Switching exits, reconnecting, and refreshing routing no longer drop every other connection on the Mac. Withdrawing one permitted address used to clear every tracked connection; it now clears only the address that changed. One account was seeing that every 3.7 minutes.
 - Connecting no longer fails when another protection change lands at the same moment. Tono retries once instead of stopping. One account saw that 46 times in five hours, 21 of them a failed connect.
+- After sleep, Tono waits for the sleep-time firewall change to finish before it reconnects, so the tunnel exceptions are not stripped while the session is coming back.
+- If the home line drops, a Mac that was already on a cloud exit reconnects on that cloud exit instead of sitting in Protected Offline.
+- A leftover core that still owns the local ports is stopped before the next connect, instead of failing with "already running".
+- Restore Internet no longer writes `127.0.0.1` back as "your old DNS" after the tunnel is gone. The helper also clears that loopback resolver on the current network service.
+- Disconnecting no longer hides Restore Internet. A connect click while a disconnect is finishing waits and then connects.
 - The connect stages and the Support timing list use the system language. A connection attempt records whether the catalog actually had a home route (`homeSocks5`, `homeProxy`, or `absent`), so a missing binding is visible in the log instead of looking like a client bug.
 - Signing in stays valid for longer stretches. Tono renews access before it expires, which removes a recurring interruption every fifteen minutes that was slowest from China.
 - If the control plane's address changes, a Mac that is fail-closed with no tunnel can still reach it. Tono remembers addresses it saw while connected.
+- First launch asks for English or 简体中文 before anything else. Returning installs are not sent back through that screen.
 
 ## Support and updates
 

@@ -427,6 +427,40 @@ nonisolated struct HelperManager {
         probeDaemon() == .rejected
     }
 
+    /// Whether an explicit user-requested release must repair the helper before
+    /// its replies can be trusted to mean "core stopped" and "DNS restored".
+    ///
+    /// Rejection is the obvious case: no command can succeed. Version drift is
+    /// the one that shipped as a fault. A 3.11.2 daemon answers a 3.12.0 GUI
+    /// normally — nothing in the IPC negotiates a version — but it restores a
+    /// missing DNS snapshot as success and never sweeps a leftover 127.0.0.1
+    /// resolver. Releasing against it disarms PF while the system resolver
+    /// still points at a Mihomo listener that has just been stopped, which is
+    /// indistinguishable from "Restore Internet took my DNS away".
+    ///
+    /// An absent daemon is deliberately not repaired. A first-run user who
+    /// cancelled the administrator prompt owns no PF rule, core, or snapshot,
+    /// and prompting them again would put a credential dialog between them and
+    /// the only control that releases the machine.
+    static func explicitReleaseRequiresRepair() -> Bool {
+        guard hasInstalledHelperArtifact else { return false }
+        switch probeDaemon() {
+        case .rejected:
+            return true
+        case .version(let installed):
+            return installed != helperVersion
+        case .unreachable:
+            // launchd replaces the daemon in place on upgrade, so a probe can
+            // land in the second where nothing is listening. Reinstalling on
+            // that would prompt for credentials the user does not owe us.
+            Thread.sleep(forTimeInterval: 0.7)
+            switch probeDaemon() {
+            case .rejected, .unreachable: return true
+            case .version(let installed): return installed != helperVersion
+            }
+        }
+    }
+
     private static func currentVersion() -> String? {
         guard case .version(let value) = probeDaemon() else { return nil }
         return value
@@ -518,17 +552,26 @@ nonisolated struct HelperManager {
         _ = try requireSuccess(result, operation: "stop")
     }
 
-    static func coreStatus() -> (running: Bool, pid: Int?, lastError: String?) {
+    static func coreStatus() -> (
+        running: Bool,
+        pid: Int?,
+        lastError: String?,
+        verified: Bool
+    ) {
         guard let result = try? sendRequest(method: "GET", path: "/core/status"),
               result.status == 200,
               let envelope = try? JSONDecoder().decode(Envelope.self, from: result.body),
               envelope.ok == true else {
-            return (false, nil, nil)
+            // An unreachable helper is not evidence that Mihomo exited. Treating
+            // that as "stopped" made the next /core/start hit 409 while mixed
+            // port, 127.0.0.1:53, and utun199 were still owned.
+            return (true, nil, nil, false)
         }
         return (
             envelope.running == true,
             envelope.pid,
-            envelope.lastError.map { String($0.prefix(600)) }
+            envelope.lastError.map { String($0.prefix(600)) },
+            true
         )
     }
 
@@ -633,10 +676,10 @@ nonisolated struct HelperManager {
         }
     }
 
-    /// Restore only when the installed helper reports a retained DNS snapshot.
-    /// A legacy helper returns 404 because it never owned DNS settings, which is
-    /// safely equivalent to "nothing to restore." Transport or malformed-state
-    /// failures still throw so callers never open PF on an unknown DNS state.
+    /// Restore whenever the helper can inspect DNS. A missing snapshot used to
+    /// mean "nothing to restore," which opened PF while 127.0.0.1:53 was still
+    /// the system resolver and Mihomo was already gone. The helper now sweeps
+    /// leftover loopback DNS even without a snapshot file.
     @discardableResult
     static func restoreProtectedDNSIfConfigured() throws -> Bool {
         let result = try sendRequest(method: "GET", path: "/dns/status")
@@ -654,6 +697,7 @@ nonisolated struct HelperManager {
               let configured = envelope.configured else {
             throw HelperIPCError.invalidResponse
         }
+        _ = configured
         // Build 16 did not expose snapshotPresent. Its status response still
         // included the service whenever a retained snapshot existed, including
         // the DNS-drift case where ok/configured were both false.
@@ -664,7 +708,6 @@ nonisolated struct HelperManager {
                 ?? "Helper inspect protected DNS failed."
             throw HelperIPCError.commandFailed(message, code: envelope.code)
         }
-        guard configured || snapshotPresent else { return false }
         try restoreProtectedDNS()
         return true
     }
