@@ -1,7 +1,8 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-14T13:30:00Z",
+ "generatedAt": "2026-08-14T13:26:14Z",
+ "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
   "baseURL": "https://api.afk.ccwu.cc",
@@ -20,7 +21,7 @@
  "releaseSet": {
   "id": "2026-08-14-macos-build65-windows-0.0.32",
   "status": "both-lines-published-and-reachable",
-  "reason": "macOS Build 65 is published and served by the Sparkle feed; Windows 0.0.32 is published and the audited update channel now serves it. For the first time both platforms reach existing users automatically: the macOS feed had stood at Build 62 and the Windows channel at 0.0.25."
+  "reason": "macOS Build 65 is the newest item in the Sparkle feed and Windows 0.0.32 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
  },
  "platforms": {
   "macos": {
@@ -30,12 +31,7 @@
     "build": 65,
     "architecture": "arm64",
     "minimumOS": "26.3",
-    "trafficPolicySchemas": [
-     1,
-     2,
-     3,
-     4
-    ],
+    "availability": "sparkle-published",
     "update": {
      "mechanism": "sparkle-2",
      "feedURL": "https://releases.afk.ccwu.cc/macos/appcast.xml",
@@ -43,14 +39,18 @@
      "automaticCheckSeconds": 21600,
      "silentInstall": false
     },
-    "availability": "sparkle-published",
     "provenance": {
      "releaseLine": "release/macos",
      "sourceCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
      "immutableTagCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
-     "tagStatus": "exact",
-     "audit": "The publisher resolves the tag through the API and refuses to continue unless it points at the source commit, so the misdirection recorded against Build 62 cannot recur."
+     "tagStatus": "exact"
     },
+    "helperContract": "3.12.2",
+    "knownLimitations": [
+     "仅 Apple Silicon，需 macOS 26.3 或更高",
+     "IPv6 全程关闭：TUN 与 fake-ip 只走 IPv4，AAAA 拨号由 Kill Switch 丢弃后客户端改试 IPv4",
+     "首次启动会要求输入一次管理员密码，用于把 helper 替换为 3.12.2"
+    ],
     "artifact": {
      "name": "Tono-0.0.65-build65-arm64.zip",
      "url": "https://github.com/raydocs/tono/releases/download/tono-macos-0.0.65-build65/Tono-0.0.65-build65-arm64.zip",
@@ -58,49 +58,40 @@
      "sha256": "9a53ad2e065538bfd41e51d4351d8a351d3003c2f73dd5cc2cfac393820950e8",
      "sparkleEdSignature": "6yK6/SkqC8PtZy+GrSyC+oVeMM4UwOrN/NRErKByGp4+p8TP8ZdUpCFaDzOYcYTzpgACNJFnASgjvXqp/WwEAA=="
     },
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65",
-    "helperContract": "3.12.2"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65"
    }
   },
   "windows": {
    "current": {
     "releaseId": "windows-0.0.32",
     "version": "0.0.32",
-    "build": 32,
     "architecture": "x86_64",
     "installer": "nsis",
-    "trafficPolicySchemas": [
-     1,
-     2,
-     3
-    ],
-    "recommended": true,
     "availability": "published-stable",
     "update": {
      "mechanism": "tauri-updater-v2",
      "automaticUpdaterEnabled": true,
-     "channelVersion": "0.0.32",
-     "reason": "The audited windows-updates channel was advanced to 0.0.32 on 2026-08-14. It had stood at 0.0.25 since 2026-08-10 because the promote job and its deployment environment named different branches, so the run reported success without moving the channel."
+     "channelVersion": "0.0.32"
     },
     "commit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
     "releaseLine": "release/windows",
+    "serviceProtocolRevision": 14,
+    "minimumServiceRevision": 14,
+    "recommended": true,
     "artifact": {
      "name": "Tono_0.0.32_x64-setup.exe",
      "url": "https://github.com/raydocs/tono/releases/download/v0.0.32/Tono_0.0.32_x64-setup.exe",
      "size": 31484627,
      "sha256": "090c03606ff7b7bc31d4d75848a5b6137a7b0f375cd8c7f4cf4439cf4ba1a1ce",
      "authenticodeSigned": false,
-     "authenticodeStatus": "not-signed",
-     "updaterSignatureVerified": true
+     "authenticodeStatus": "not-signed"
     },
     "knownLimitations": [
-     "The installer carries no Authenticode certificate, so Windows SmartScreen warns on a fresh install. The Tauri key signs the update payload only.",
-     "The App and the Service must ship together: this build requires service protocol revision 14, and the installer replaces both under one elevated transaction.",
-     "Users still on 0.0.25 cross six releases in one step, because every build between them was published without the channel being advanced."
+     "安装包未附 Authenticode 证书，全新安装时 Windows SmartScreen 会告警。Tauri 那把密钥只签更新载荷，不是微软那套代码签名",
+     "App 与 Service 必须同版：本版要求服务协议 14，安装器在一次提权事务里同时替换两者",
+     "仍停在 0.0.25 的用户这一步会跨过六个版本，因为中间每一版都发布过却从未推进更新通道"
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.32",
-    "serviceProtocolRevision": 14,
-    "minimumServiceRevision": 14
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.32"
    }
   }
  },
@@ -110,16 +101,18 @@
    "platform": "macos",
    "version": "0.0.65",
    "build": 65,
-   "publishedAt": "2026-08-14T13:00:48Z",
+   "publishedAt": "2026-08-14T13:00:47Z",
    "status": "published-sparkle-current",
    "sourceCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
    "tagCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
    "summary": [
-    "The first Sparkle update since Build 62, and the macOS rollback baseline. Builds 63 and 64 were assembled and never published, so everything they carried is here.",
-    "Every protection rule now carries a name. macOS was folding each specific rule into the broader one beside it — 66 written, 13 kept, none of the exact ones — so Tono could not report which route traffic took. Nothing leaked; the accounting simply did not exist.",
-    "WeChat is identified by its Apple-issued signature rather than the path /Applications/WeChat.app, so a copy elsewhere or named 微信.app is recognised. One account had 342 of 342 connections in the tunnel while the app reported China-direct as active.",
-    "WeChat’s main channel on port 80 went through the exit, making a round trip to the United States from China; two logs showed 82% and 72% of its connections leaving that way. Both now go direct, with the exit as fallback.",
-    "The privileged helper is 3.12.2, so the first launch asks for an administrator password once."
+    "自 Build 62 以来第一次真正送达用户的更新，同时作为 macOS 的回滚基线：Sparkle 不会安装更低的 build，后续若出问题，应以更高 build 重新发布本份源码，而不是让用户降级。63 与 64 组装后从未发布，内容都在本版。保护规则改为逐条带名，此前内核会把 66 条折叠成 13 条且精确规则一条不剩；微信改按 Apple 签名识别并把 80 端口留在国内直连。",
+    "保护规则现在逐条带名字。此前 macOS 会把每条精确规则折叠进旁边更宽的那条——写入 66 条、内核只留 13 条、精确的一条不剩，所以 Tono 说不出流量走了哪条路。没有泄漏，只是这份账目此前并不存在",
+    "微信按 Apple 签发的签名识别，不再只认 `/Applications/WeChat.app`；放在别处或名为 微信.app 的副本同样生效。曾有账号 342 条连接全部走隧道，而界面显示国内直连正常",
+    "微信主通道走 80 端口，此前被送进受保护出口，从国内绕行美国往返；两份日志显示 82% 和 72% 的连接是这样出去的。现在一律直连，直连失败仍可回落出口",
+    "账户有 home 线路时，`claude.ai`、`claude.com`、`anthropic.com` 与 Anthropic 自有网段走住宅跳点；Claude Code 按安装路径识别，桌面端与命令行不会被拆到两个网络",
+    "活动页改为按应用展示：本次会话用过网络的每个应用，按流量排序，直连／住宅／隧道各一条",
+    "特权 helper 为 3.12.2，首次启动会要求输入一次管理员密码"
    ],
    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65"
   },
@@ -127,17 +120,17 @@
    "releaseId": "windows-0.0.32",
    "platform": "windows",
    "version": "0.0.32",
-   "build": 32,
    "publishedAt": "2026-08-14T12:51:35Z",
    "status": "published-stable-channel-current",
    "sourceCommit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
    "tagCommit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
    "summary": [
-    "WeChat's images, files and media finish again. The direct-path permit knew only the addresses looked up at the moment of connecting, and WeChat finds its own servers as it goes; everything found afterwards was sent and silently dropped. The permit stays bounded to four ports, to Tono's own routing engine, and never to a private address.",
-    "Signing in tries the same server on alternative ports before giving up, which reaches networks that filter 443 alone.",
-    "Disconnect and Restore Internet reach the Service when it is busy. They were given 150 milliseconds to connect while the security check inside that same step is allowed three seconds.",
-    "Tono no longer reports Connected while nothing can leave the tunnel, and turning protection off now stays off across a Wi-Fi hop or a wake from sleep.",
-    "The audited update channel was advanced to this version, the first time since 2026-08-10 that a Windows build reached existing users."
+    "修好微信图片与文件一直转圈：直连放行此前只认连接那一刻查到的地址，之后微信自行找到的服务器全被静默丢弃。同日把已审计的更新通道从 0.0.25 推进到 0.0.32——此前通道推进的工作流与其部署环境指定了不同的分支，从 main 触发会显示成功却什么都没做，这就是 0.0.26 至 0.0.31 发布后无人收到的原因。",
+    "微信的图片、文件和语音能收发完了。直连放行此前只认连接那一刻查到的地址，而微信是边用边找服务器的——之后找到的全被发出去然后静默丢弃，表现就是一直转圈。放行仍有边界：四个端口、只给 Tono 自己的路由引擎、且永不放行内网地址",
+    "登录会在同一台服务器上改试备用端口再放弃，能穿过只封 443 的网络",
+    "服务繁忙时「断开」和「恢复上网」也能送达。此前建立连接只给 150 毫秒，而同一步里的安全校验却有三秒——保护开着、没有网、而唯一能解除它的按钮没反应",
+    "隧道出不去时不再显示「已连接」；关闭保护后不会因换 Wi-Fi 或睡眠唤醒而自行重新武装",
+    "App 与 Service 必须同版：本版要求服务协议 14，安装器在一次提权事务里同时替换两者"
    ],
    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.32"
   },

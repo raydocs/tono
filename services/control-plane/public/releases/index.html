@@ -25,6 +25,7 @@
         <h2>当前跨平台状态</h2>
       </div>
       <div class="grid">
+      <!-- generated:cards -->
         <article class="card current">
           <div class="card-title"><span class="platform">macOS</span><span class="status good">已发布 · 自动更新</span></div>
           <h3>0.0.65 · Build 65</h3>
@@ -53,6 +54,7 @@
           </ul>
           <a class="text-link" href="https://github.com/raydocs/tono/releases/download/v0.0.32/Tono_0.0.32_x64-setup.exe">下载 Windows 0.0.32 →</a>
         </article>
+      <!-- /generated:cards -->
       </div>
     </section>
 
@@ -62,10 +64,12 @@
         <h2>每次发布必须一起核对</h2>
       </div>
       <div class="contract">
+      <!-- generated:contract -->
         <div><strong>macOS</strong><span>Build 65 · helper 3.12.2</span></div>
         <div><strong>macOS 更新 feed</strong><span>0.0.65 · Sparkle 已指向</span></div>
         <div><strong>Windows 已发布包</strong><span>0.0.32 · 服务协议 14</span></div>
-        <div><strong>Windows 更新通道</strong><span>0.0.32 · 与安装包首次一致</span></div>
+        <div><strong>Windows 更新通道</strong><span>0.0.32 · 与安装包一致</span></div>
+      <!-- /generated:contract -->
       </div>
       <p class="note">两个平台现在都能自动送达既有用户。此前 macOS 的 feed 停在 Build 62、Windows 的通道停在 0.0.25，中间发布的每一版都只存在于 GitHub 上——「发布过」和「用户拿得到」在这里是两件事，判断依据是本页的 Manifest，不是 GitHub 的发布列表。</p>
     </section>
@@ -76,8 +80,10 @@
         <h2>版本改动备份</h2>
       </div>
       <div class="timeline">
+      <!-- generated:timeline -->
         <article><time>2026-08-14</time><h3>macOS 0.0.65 · Build 65</h3><p>自 Build 62 以来第一次真正送达用户的更新，同时作为 macOS 的回滚基线：Sparkle 不会安装更低的 build，后续若出问题，应以更高 build 重新发布本份源码，而不是让用户降级。63 与 64 组装后从未发布，内容都在本版。保护规则改为逐条带名，此前内核会把 66 条折叠成 13 条且精确规则一条不剩；微信改按 Apple 签名识别并把 80 端口留在国内直连。</p></article>
         <article><time>2026-08-14</time><h3>Windows 0.0.32</h3><p>修好微信图片与文件一直转圈：直连放行此前只认连接那一刻查到的地址，之后微信自行找到的服务器全被静默丢弃。同日把已审计的更新通道从 0.0.25 推进到 0.0.32——此前通道推进的工作流与其部署环境指定了不同的分支，从 main 触发会显示成功却什么都没做，这就是 0.0.26 至 0.0.31 发布后无人收到的原因。</p></article>
+      <!-- /generated:timeline -->
         <article><time>2026-08-12</time><h3>Windows 0.0.29（源码候选）</h3><p>修复 0.0.28 在 preparingService 阶段遇到 127.0.0.1:53 / Windows error 10048 的问题：连接前先通过已认证 Service 对账并清理 Tono 自己遗留的 Core，再统一检查 DNS TCP/UDP 53。第三方 DNS/代理占用不会被结束，仍会给出可操作提示。源码位于 release/windows，尚未发布安装包。</p></article>
         <article><time>2026-08-12</time><h3>macOS Build 62</h3><p>当前公证并经过 Sparkle 签名验证的 Apple Silicon 预发布包。微信实机路由、Kill Switch、TUN、受保护 DNS 与出口身份均验证正常。GitHub immutable tag 因旧脚本未指定 target 而误指向 Windows 0.0.27 commit；不改写历史，Manifest 明确记录该差异，后续 Mac tag 改用 tono-macos-* 并强制校验精确 SHA。</p></article>
         <article><time>2026-08-10</time><h3>Windows 0.0.27</h3><p>当前公开稳定安装包，改善 VMware、VirtualBox、Hyper-V、WSL、Docker 等虚拟网卡共存。Windows 0.0.28 仍为 Draft，自动更新通道当前为 0.0.25。</p></article>

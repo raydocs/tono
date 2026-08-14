@@ -84,3 +84,27 @@ jobs:
           # A fast-forward ref update is the only publication point. Validation, download,
           # commit, or push failure leaves the previous branch tip and latest.json untouched.
           git push origin HEAD:refs/heads/windows-updates
+
+      # The channel and the download page answer the same question — what should a
+      # customer install — and only one of them used to move. The page named the
+      # build before this one for as long as anybody remembered to edit it.
+      - name: Follow the channel on the download page
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git switch --force main
+          git pull --ff-only origin main
+          node tooling/scripts/generate-release-center.mjs
+          if git diff --quiet -- services/control-plane/public/releases; then
+            echo "the download page already offers v${RELEASE_VERSION}"
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add services/control-plane/public/releases
+          git commit -m "release(center): follow the Windows channel to v${RELEASE_VERSION}"
+          git push origin HEAD:refs/heads/main
+          # Committing is not publishing: the page is a static asset of the Worker
+          # and reaches nobody until the control plane is deployed from main.
+          echo "::notice::The download page now offers v${RELEASE_VERSION} on main. Deploy the control plane to publish it."

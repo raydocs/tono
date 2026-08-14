@@ -246,8 +246,18 @@ step "writing the feed entry"
   || fail "writing the feed entry failed"
 /bin/rm -f "$sig_file"
 
+# The download page customers are sent to used to be edited by hand, so it kept
+# naming the build before this one. It is regenerated from the feed just written
+# above, so it can no longer disagree with what Sparkle serves.
+step "regenerating the release centre"
+/usr/bin/git -C "$repo_root" fetch --quiet origin windows-updates \
+  || fail "could not refresh origin/windows-updates, which the release centre reads"
+/usr/bin/env node "$repo_root/tooling/scripts/generate-release-center.mjs" --repo-root "$repo_root" \
+  || fail "regenerating the release centre failed"
+
 print "\n── published"
-print "  The feed is written but not live: it is a static asset of the Worker."
+print "  The feed and the release centre are written but not live: both are static"
+print "  assets of the Worker."
 print "  Deploy it yourself, after checking what else is in that directory —"
 print "  publishing it once nearly shipped build 42, whose helper could not be"
 print "  repaired on any machine:"

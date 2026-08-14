@@ -44,6 +44,9 @@ jobs:
         working-directory: services/control-plane
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          # the download-page check reads constants out of each released commit
+          fetch-depth: 0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -59,6 +62,17 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # A release published while this page still names the version before it is
+      # invisible until a customer downloads the wrong build, so it is checked
+      # here rather than discovered there.
+      - name: Download page matches what customers are offered
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          git fetch --quiet origin windows-updates
+          node tooling/scripts/generate-release-center.mjs --check
 
       - name: Policy signing contract
         # The signature-aware implementations must agree on the key and signed byte

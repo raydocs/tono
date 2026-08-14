@@ -34,6 +34,14 @@ cd "$control_plane"
 "$repo_root/tooling/scripts/test-policy-signing-contract.sh"
 /usr/bin/env npm run admin:build
 
+# The release centre is served from public/ by this very deploy, so a stale page
+# would go live here and nowhere else would catch it.
+/usr/bin/git -C "$repo_root" fetch --quiet origin windows-updates \
+  || fail "could not refresh origin/windows-updates, which the download page reads"
+/usr/bin/env node "$repo_root/tooling/scripts/generate-release-center.mjs" \
+  --repo-root "$repo_root" --check \
+  || fail "the download page does not match what the feed and the channel serve"
+
 # The console is built here rather than shipped from the repository. There used
 # to be a second worktree-clean check after this build, on the premise that the
 # built assets are committed deployment inputs — but `public/ops/` is listed in
