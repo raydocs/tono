@@ -105,6 +105,29 @@ pub enum AuditEvent {
         node: String,
         elapsed_ms: u64,
     },
+    /// One destination the DIRECT overlay actually dialled, recorded once per distinct
+    /// `(address, port, protocol)` per session.
+    ///
+    /// This is the evidence the reviewed-port permit is scored against. That permit lets the
+    /// staged core reach *any* address on a small port set, which is what makes WeChat's
+    /// HTTPDNS-derived endpoints work; the cost is that the firewall no longer bounds the
+    /// destination. Narrowing it back needs to know where WeChat actually goes, and no pin
+    /// list can answer that — measured on macOS, 21.2 MB of WeChat upload went to addresses
+    /// no pin knew and 95 KB to the pinned ones. So the client records what it dialled and
+    /// the prefix set is computed from real traffic rather than guessed.
+    ///
+    /// Two of these fields are alarms rather than statistics: a `process` that is not a
+    /// reviewed WeChat binary means the routing layer sent something it should not have, and
+    /// an address outside China means the overlay leaked. Classification is deliberately left
+    /// to the server — the client reports the address it used and nothing interprets it here.
+    DirectDial {
+        address: String,
+        port: u16,
+        protocol: &'static str,
+        process: String,
+        chain: String,
+        rule: String,
+    },
     DisconnectBegin {
         cause: &'static str,
     },

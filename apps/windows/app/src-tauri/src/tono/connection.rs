@@ -1300,6 +1300,177 @@ const CONTROL_PLANE_PIN_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60
 /// miss only re-runs WinVerifyTrust when an install actually changes.
 const WECHAT_PATH_REFRESH_INTERVAL: Duration = Duration::from_secs(2 * 60);
 
+/// How often the DIRECT overlay's destinations are sampled while connected.
+///
+/// A sample, not a trace: each distinct `(address, port, protocol)` is recorded once per
+/// session, so the cost is one controller read per minute and a handful of log lines on the
+/// first minute of a session rather than one line per connection.
+const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Upper bound on distinct destinations recorded in one session. WeChat's CDN rotates, so a
+/// long session on a busy account could otherwise write an unbounded number of lines into a
+/// log that is uploaded. Reaching the cap is itself worth knowing — it means the destination
+/// set is wider than a prefix list would comfortably cover — so it is recorded once and
+/// sampling then stops for the session.
+const MAX_DIRECT_SAMPLES: usize = 512;
+
+/// The subset of `/connections` this sampler reads. Deliberately not the full shape: every
+/// field here is one the audit record needs, and anything the controller adds later is
+/// ignored rather than a parse failure.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SampledConnection {
+    #[serde(default)]
+    metadata: SampledMetadata,
+    #[serde(default)]
+    chains: Vec<String>,
+    #[serde(default)]
+    rule: String,
+    #[serde(default, rename = "rulePayload")]
+    rule_payload: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct SampledMetadata {
+    #[serde(default, rename = "destinationIP")]
+    destination_ip: String,
+    #[serde(default, rename = "destinationPort")]
+    destination_port: String,
+    #[serde(default)]
+    network: String,
+    #[serde(default, rename = "processPath")]
+    process_path: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SampledConnections {
+    #[serde(default)]
+    connections: Vec<SampledConnection>,
+}
+
+/// One destination worth recording, already deduplicated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DirectSample {
+    address: String,
+    port: u16,
+    udp: bool,
+    process: String,
+    chain: String,
+    rule: String,
+}
+
+/// Which connections went out the physical interface, and which of those are new this session.
+///
+/// A connection counts as DIRECT when its proxy chain names one of the interface-bound direct
+/// outbounds. The chain is the authority, not the rule: a rule names a *group*, and a group
+/// that failed over is exactly the case where the rule and the actual path disagree — the same
+/// distinction the macOS route classifier had to make.
+fn new_direct_samples(
+    payload: &SampledConnections,
+    seen: &mut std::collections::HashSet<(String, u16, bool)>,
+) -> Vec<DirectSample> {
+    let mut fresh = Vec::new();
+    for connection in &payload.connections {
+        let direct = connection.chains.iter().any(|hop| {
+            hop == config::DIRECT_GROUP_NAME || hop == config::WEB_DIRECT_GROUP_NAME
+        });
+        if !direct {
+            continue;
+        }
+        let address = connection.metadata.destination_ip.trim();
+        if address.is_empty() {
+            continue;
+        }
+        let Ok(port) = connection.metadata.destination_port.trim().parse::<u16>() else {
+            continue;
+        };
+        let udp = connection.metadata.network.eq_ignore_ascii_case("udp");
+        if !seen.insert((address.to_owned(), port, udp)) {
+            continue;
+        }
+        let process = connection
+            .metadata
+            .process_path
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        fresh.push(DirectSample {
+            address: address.to_owned(),
+            port,
+            udp,
+            process,
+            chain: connection.chains.join(" <- "),
+            rule: if connection.rule_payload.is_empty() {
+                connection.rule.clone()
+            } else {
+                format!("{} {}", connection.rule, connection.rule_payload)
+            },
+        });
+    }
+    fresh
+}
+
+/// Read the controller once and record any DIRECT destination not seen this session.
+///
+/// Returns `false` when the caller should stop sampling — a superseded generation, or the cap
+/// reached. Every other failure is swallowed: this is instrumentation, and a controller that
+/// is briefly unreachable must never disturb a working tunnel.
+async fn sample_direct_dials_once(
+    state: &Arc<TonoState>,
+    generation: u64,
+    seen: &mut std::collections::HashSet<(String, u16, bool)>,
+) -> bool {
+    if seen.len() >= MAX_DIRECT_SAMPLES {
+        return false;
+    }
+    let (secret, port) = {
+        let inner = state.lock().await;
+        if inner.controller_generation != generation || !inner.fsm.status().is_connected {
+            return false;
+        }
+        match inner.controller_secret.clone().zip(inner.controller_port) {
+            Some(pair) => pair,
+            None => return true,
+        }
+    };
+    let Ok(client) = controller_client(Duration::from_secs(2)) else {
+        return true;
+    };
+    let Ok(response) = client
+        .get(controller_url(port, "/connections"))
+        .bearer_auth(secret)
+        .send()
+        .await
+    else {
+        return true;
+    };
+    let Ok(payload) = response.json::<SampledConnections>().await else {
+        return true;
+    };
+    for sample in new_direct_samples(&payload, seen) {
+        state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
+            address: sample.address,
+            port: sample.port,
+            protocol: if sample.udp { "udp" } else { "tcp" },
+            process: sample.process,
+            chain: sample.chain,
+            rule: sample.rule,
+        });
+    }
+    if seen.len() >= MAX_DIRECT_SAMPLES {
+        state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
+            address: String::new(),
+            port: 0,
+            protocol: "cap",
+            process: String::new(),
+            chain: String::new(),
+            rule: format!("direct destination sample cap {MAX_DIRECT_SAMPLES} reached"),
+        });
+        return false;
+    }
+    true
+}
+
 async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
     let task_state = Arc::clone(state);
     let task_app = app.clone();
@@ -1309,8 +1480,17 @@ async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle
         let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
+        let mut direct_interval = tokio::time::interval(DIRECT_SAMPLE_INTERVAL);
+        direct_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut direct_seen: std::collections::HashSet<(String, u16, bool)> =
+            std::collections::HashSet::new();
+        let mut sampling_direct = true;
         loop {
             tokio::select! {
+                _ = direct_interval.tick(), if sampling_direct => {
+                    sampling_direct =
+                        sample_direct_dials_once(&task_state, generation, &mut direct_seen).await;
+                }
                 _ = pin_interval.tick() => {
                     if !refresh_control_plane_pins_once(&task_state, generation).await {
                         return;
@@ -5107,7 +5287,7 @@ async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
 mod tests {
     use super::{
         BFE_NOT_RUNNING_PREFIX, CATALOG_NOT_READY_REJECTION, CLOUD_POLICY_RESOLUTION_TIMEOUT, CONNECT_BUDGET_LEGS,
-        classify_bfe_state, wechat_paths_changed,
+        SampledConnections, classify_bfe_state, new_direct_samples, wechat_paths_changed,
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
@@ -7025,6 +7205,81 @@ mod tests {
     /// This is what a process-name rule and a bare domain-suffix rule both did. Nothing
     /// failed when they were added, because the routing surface lives in tono-core and the
     /// permit surface lives in the Service.
+    fn sampled(payload: &str) -> SampledConnections {
+        serde_json::from_str(payload).expect("controller payload")
+    }
+
+    /// What the sampler must and must not record.
+    ///
+    /// The chain decides, not the rule: a rule names a *group*, and a group that failed over
+    /// to the exit is exactly the case where the two disagree. Recording by rule would count a
+    /// flow as direct that went through the tunnel, and the prefix set computed from it would
+    /// be wrong in the direction that matters — too wide.
+    #[test]
+    fn direct_samples_follow_the_chain_and_never_repeat() {
+        let payload = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"43.175.230.151","destinationPort":"443","network":"tcp",
+                "processPath":"C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"},
+               "chains":["Tono-China-Direct","Tono-China-App"],
+               "rule":"AND","rulePayload":"((Network,tcp) && (ProcessName,WeChat.exe))"},
+              {"metadata":{"destinationIP":"43.146.27.18","destinationPort":"8000","network":"udp",
+                "processPath":"C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"},
+               "chains":["Tono-China-Direct"],"rule":"AND","rulePayload":""},
+              {"metadata":{"destinationIP":"142.250.4.100","destinationPort":"443","network":"tcp",
+                "processPath":"C:\\Program Files\\Google\\Chrome\\chrome.exe"},
+               "chains":["US-VLESS-Reality","Tono-Exit"],"rule":"MATCH","rulePayload":""},
+              {"metadata":{"destinationIP":"","destinationPort":"443","network":"tcp",
+                "processPath":"x.exe"},"chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        let mut seen = std::collections::HashSet::new();
+        let first = new_direct_samples(&payload, &mut seen);
+
+        assert_eq!(first.len(), 2, "only the two chains naming a direct outbound");
+        assert_eq!(first[0].address, "43.175.230.151");
+        assert_eq!(first[0].port, 443);
+        assert!(!first[0].udp);
+        assert_eq!(first[0].process, "WeChat.exe", "basename only, never the full path");
+        assert!(first[0].rule.contains("ProcessName"));
+        assert!(first[1].udp, "network=udp must survive into the record");
+
+        // Tunnelled traffic is not a direct dial, however busy it is.
+        assert!(!first.iter().any(|sample| sample.address == "142.250.4.100"));
+        // A row with no destination is dropped rather than recorded as an empty address.
+        assert_eq!(first.len(), 2);
+
+        // The same connections on the next tick add nothing: this is a per-session set, not a
+        // per-tick trace, which is what keeps an uploaded log bounded.
+        assert!(new_direct_samples(&payload, &mut seen).is_empty());
+
+        // A new port on an address already seen is a new destination.
+        let more = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"43.175.230.151","destinationPort":"80","network":"tcp",
+                "processPath":"WeChat.exe"},"chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        assert_eq!(new_direct_samples(&more, &mut seen).len(), 1);
+    }
+
+    /// The web direct outbound counts too — it is the same physical-interface escape, and the
+    /// suffix routes that ride it are the other half of what a prefix list has to cover.
+    #[test]
+    fn direct_samples_include_the_web_direct_outbound() {
+        let payload = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"203.0.113.7","destinationPort":"443","network":"tcp",
+                "processPath":"chrome.exe"},
+               "chains":["Tono-China-Web-Direct"],"rule":"AND","rulePayload":"(DomainSuffix,baidu.com)"}
+            ]}"#,
+        );
+        let mut seen = std::collections::HashSet::new();
+        let samples = new_direct_samples(&payload, &mut seen);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].chain, "Tono-China-Web-Direct");
+    }
+
     #[test]
     fn every_direct_rule_pins_an_endpoint_the_kill_switch_can_permit() {
         let node = node();
