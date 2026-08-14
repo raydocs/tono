@@ -116,6 +116,33 @@ jobs:
         working-directory: apps/windows/app
         run: pnpm run web:build
 
+      # `tauri-build` resolves `externalBin` and `resources` while compiling and
+      # refuses when a declared path is missing. Both directories are gitignored
+      # — they hold release artefacts measured in tens of megabytes — so a
+      # checkout never has them. These are unit tests: nothing here executes the
+      # core, the service binaries or the GeoIP data, and no test reads their
+      # contents. Empty placeholders satisfy the resolver without pulling a
+      # release down.
+      - name: Placeholder the release-only artefacts the build script resolves
+        working-directory: apps/windows/app/src-tauri
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sidecar, resources | Out-Null
+          $paths = @(
+            'sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe',
+            'resources/Country.mmdb',
+            'resources/geoip.dat',
+            'resources/geosite.dat',
+            'resources/enableLoopback.exe',
+            'resources/tono-service.exe',
+            'resources/tono-service-install.exe',
+            'resources/tono-service-uninstall.exe',
+            'resources/core-sha256.txt'
+          )
+          foreach ($p in $paths) {
+            if (-not (Test-Path $p)) { New-Item -ItemType File -Force -Path $p | Out-Null }
+          }
+
       - name: Test the Tauri crate
         working-directory: apps/windows/app/src-tauri
         run: cargo test --locked
