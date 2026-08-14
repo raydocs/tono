@@ -186,6 +186,13 @@ pub struct DirectPlan {
     pub web_suffix_rules: Vec<(String, u16)>,
     pub udp_wechat_rules: Vec<(std::net::Ipv4Addr, u16)>,
     pub wechat_process_path_regexes: Vec<String>,
+    /// Ports the kill switch will let the staged core reach directly, straight from
+    /// `clash_verge_service_ipc::REVIEWED_DIRECT_PORTS`. The process rules below are
+    /// constrained to exactly this set, so what gets *routed* to the physical interface and
+    /// what the WFP permit *lets out* are the same surface by construction. Empty means the
+    /// caller declared no permit, and no process rule is emitted at all — the fail-closed
+    /// default.
+    pub reviewed_direct_ports: Vec<u16>,
 }
 
 impl DirectPlan {
@@ -713,7 +720,7 @@ fn runtime_value(
     }
     if let Some(plan) = direct {
         let has_wechat = !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty();
-        let has_web = !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty();
+        let has_web = !plan.tcp_web_rules.is_empty();
         if has_wechat {
             proxies.push(direct_outbound(DIRECT_GROUP_NAME, &plan.physical_interface));
         }
@@ -827,22 +834,65 @@ fn runtime_value(
         }
     }
     if let Some(plan) = direct {
-        // WeChat TCP is process-scoped, not per-domain: the clients dial Tencent's
-        // file/CDN transfer endpoints by raw IP (no SNI), so domain pins can never
-        // cover file transfer and large sends die hairpinned through the exit node.
-        // PROCESS-NAME covers the reviewed product names; PROCESS-PATH-REGEX
-        // covers helpers inside a signature-verified install tree. WFP remains
-        // the exact IP:port boundary. UDP stays pinned to reviewed media.
+        // WeChat TCP is pinned per resolved endpoint, exactly like the web rules below.
+        //
+        // It used to be process-scoped — `(NETWORK,TCP),(PROCESS-NAME,WeChat.exe)` and the
+        // signature-verified path regexes — on the reasoning that WeChat dials its file/CDN
+        // endpoints by raw IP, so domain pins cannot cover file transfer. That reasoning is
+        // right about the routing and wrong about what happens next. "WFP remains the exact
+        // IP:port boundary" does not mean unpinned dials fall back to the tunnel; it means
+        // they are *dropped*. `wfp_model::session_rules` renders one ALE permit per entry in
+        // `direct_endpoints` (class G) and a `session/block-all` floor, and there is no
+        // port-scoped, address-free permit for the core — class A's own comment forbids one.
+        // A process rule therefore sent every WeChat TCP flow out the physical interface,
+        // where only the handful of connect-time pins had a permit and everything else hit
+        // the floor. `Tono-China-Direct` is a bare `direct` outbound with nowhere to retreat,
+        // so images, file send/receive and every HTTPDNS-derived address stopped working
+        // while connected — a regression from working-but-hairpinned to hard-blocked.
+        //
+        // Routing only what the permit set actually covers restores the pre-policy-v3
+        // behaviour for the rest: unpinned WeChat traffic rides the tunnel again.
+        // `wechat_process_path_regexes` stays computed and plumbed so that reinstating
+        // process scope is one block here once WFP grows an app-scoped port permit to match
+        // (see apps/macos ConfigPipeline.swift:1221-1231 and its PF reviewed-bundle permit
+        // for the shape that makes process scope safe).
+        for (host, address, port) in &plan.tcp_wechat_rules {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{DIRECT_GROUP_NAME}"
+            ));
+        }
+        // Process-scoped WeChat TCP, restored now that the kill switch has a permit that can
+        // cover it. The clients dial their file and CDN endpoints through their own HTTPDNS,
+        // by raw IP, so a domain pin can never describe where they go — measured on macOS,
+        // 21.2 MB of WeChat upload left through the port permit against 95 KB through all 58
+        // exact pins. Withdrawing these rules (the previous commit) kept that traffic working
+        // by putting it back on the tunnel; this restores the acceleration they exist for.
+        //
+        // Constrained to `reviewed_direct_ports`, and that is load-bearing rather than
+        // tidiness: an unconstrained process rule routes *every* port WeChat opens to the
+        // physical interface, where only these four have a permit and the rest hit the
+        // block-all floor — the silent hang this whole change is undoing. WeChat on any other
+        // port falls through to `MATCH,Tono-Exit` and rides the tunnel: slower than intended,
+        // and working.
+        //
+        // Path regexes only, never `PROCESS-NAME`. Mihomo matches a process name on the
+        // executable's basename, so `C:\Users\me\Downloads\WeChat.exe` matches as readily as
+        // the real one. While the permit was an exact `IP:port` tuple that bought an attacker
+        // nothing — the pins were the boundary. Paired with an address-free port permit it
+        // becomes a way for any binary a user can be talked into naming `WeChat.exe` to reach
+        // arbitrary public addresses outside the tunnel. The regexes come from
+        // `signed_apps.rs`, which requires WinVerifyTrust to succeed and the signer to be a
+        // reviewed Tencent publisher, so they carry an identity a filename does not.
+        //
+        // The pinned-domain rules above still use no process condition at all, unchanged: they
+        // are bounded by an exact address instead.
         if !plan.tcp_wechat_rules.is_empty() {
-            for process in WECHAT_PROCESS_NAMES {
-                rules.push(format!(
-                    "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
-                ));
-            }
-            for regex in &plan.wechat_process_path_regexes {
-                rules.push(format!(
-                    "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{DIRECT_GROUP_NAME}"
-                ));
+            for port in &plan.reviewed_direct_ports {
+                for regex in &plan.wechat_process_path_regexes {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-PATH-REGEX,{regex})),{DIRECT_GROUP_NAME}"
+                    ));
+                }
             }
         }
         for (address, port) in &plan.udp_wechat_rules {
@@ -862,13 +912,21 @@ fn runtime_value(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{WEB_DIRECT_GROUP_NAME}"
             ));
         }
-        // Suffix-level web direct: TCP only, no pinned IP — the resolver
-        // answers through the tunnel and only the connection leaves directly.
-        for (suffix, port) in &plan.web_suffix_rules {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN-SUFFIX,{suffix})),{WEB_DIRECT_GROUP_NAME}"
-            ));
-        }
+        // Suffix-level web direct is deliberately not emitted on Windows. A suffix rule
+        // carries no resolved address by design, so it contributes nothing to
+        // `endpoint_keys` and therefore nothing to `direct_endpoints` — there is no WFP
+        // permit it can ever match. Every suffix-routed host was a black hole while
+        // connected: DNS resolved through the tunnel, the browser got an address, and the
+        // physical-interface connect was silently dropped until it timed out. That is the
+        // whole Feishu/Lark family, Baidu netdisk, `aliyuncs.com` tenant storage, Zoom and
+        // `edu.cn`. Leaving the traffic on the tunnel is slower than the feature intended
+        // and faster than not working.
+        //
+        // macOS carries the same rules safely because PF grants the reviewed bundle a
+        // port permit that is not tied to an address (ConfigPipeline.swift:1428-1440
+        // documents this exact bug and that fix). Emitting them here again needs the
+        // equivalent WFP class first.
+        let _ = &plan.web_suffix_rules;
     }
     // Every node is VLESS+Vision today, and Vision cannot carry UDP — Mihomo
     // marks the exit group "UDP is not supported" and *falls back to a
@@ -1279,6 +1337,8 @@ reality-opts:
             web_suffix_rules: vec![("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)],
             udp_wechat_rules: vec![(std::net::Ipv4Addr::new(9, 0, 0, 20), 443)],
             wechat_process_path_regexes: Vec::new(),
+            // Mirrors what the App passes from `clash_verge_service_ipc::REVIEWED_DIRECT_PORTS`.
+            reviewed_direct_ports: vec![80, 443, 8000, 8080],
         }
     }
 
@@ -1295,13 +1355,30 @@ reality-opts:
         rules
     }
 
+    /// Mirrors the emission order in `runtime_value`: the resolved TCP pins in plan order,
+    /// then the UDP media rules. TCP is pinned rather than process-scoped because only a
+    /// pinned endpoint has a matching WFP permit.
     fn expected_wechat_direct_rules() -> Vec<String> {
-        let mut rules: Vec<String> = WECHAT_PROCESS_NAMES
+        let plan = direct_plan();
+        let mut rules: Vec<String> = plan
+            .tcp_wechat_rules
             .iter()
-            .map(|process| {
-                format!("AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-China-Direct")
+            .map(|(host, address, port)| {
+                format!(
+                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),Tono-China-Direct"
+                )
             })
             .collect();
+        // Process scope is path-regex only — a signature-verified install tree, never a
+        // filename. The fixture has no regexes, so this contributes nothing here; the shape is
+        // asserted in `signed_wechat_path_regexes_govern_udp_media_and_not_tcp`.
+        for port in &plan.reviewed_direct_ports {
+            for regex in &plan.wechat_process_path_regexes {
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-PATH-REGEX,{regex})),Tono-China-Direct"
+                ));
+            }
+        }
         for process in WECHAT_PROCESS_NAMES {
             rules.push(format!(
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"
@@ -1349,8 +1426,8 @@ reality-opts:
         }
         rules.extend(expected_wechat_direct_rules());
         rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
-        rules.push("AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
-        rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
+        // No DOMAIN-SUFFIX rows: a suffix rule carries no resolved address, so no WFP
+        // permit can ever match it and the dial would be dropped by the block-all floor.
         rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
         rules.push("MATCH,Tono-Exit".to_string());
         rules
@@ -1475,15 +1552,10 @@ reality-opts:
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
         expected.extend(expected_home_process_rules("Tono-Exit"));
-        for process in WECHAT_PROCESS_NAMES {
-            expected.push(format!("AND,((NETWORK,TCP),(PROCESS-NAME,{process})),Tono-China-Direct"));
-        }
-        for process in WECHAT_PROCESS_NAMES {
-            expected.push(format!("AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"));
-        }
+        // The shared helper, not a second hand-written copy: this test and
+        // `expected_direct_rules` drifted apart exactly once already.
+        expected.extend(expected_wechat_direct_rules());
         expected.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
-        expected.push("AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
-        expected.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web-Direct".to_string());
         expected.push("AND,((NETWORK,UDP)),REJECT".to_string());
         expected.push("MATCH,Tono-Exit".to_string());
         assert_eq!(
@@ -1578,6 +1650,7 @@ reality-opts:
             web_suffix_rules: Vec::new(),
             udp_wechat_rules: Vec::new(),
             wechat_process_path_regexes: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
         };
         let runtime =
             build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)).unwrap();
@@ -1756,8 +1829,74 @@ reality-opts:
         );
     }
 
+    /// Signed-install discovery still governs UDP media, and deliberately no longer
+    /// governs TCP.
+    ///
+    /// A TCP process rule routes *every* flow the process opens out the physical
+    /// interface, and `wfp_model::session_rules` permits only the exact
+    /// `direct_endpoints` tuples — so anything the pins did not cover was dropped by the
+    /// block-all floor rather than hairpinned through the exit. UDP is different: those
+    /// rules carry their own `IP-CIDR` pin, which is in the permit set.
+    /// The cage around mihomo's ruleless UDP dial.
+    ///
+    /// VLESS+Vision cannot carry UDP. When a flow is routed to an exit that cannot take it,
+    /// mihomo does not fail the flow — it *falls back to a DIRECT dial no rule asked for*,
+    /// which is how QUIC and STUN once left through the physical interface. The whole
+    /// defence is the terminating `AND,((NETWORK,UDP)),REJECT`, and it is the last rule in
+    /// the list, which is the most shadowable position there is: any unconditional UDP rule
+    /// above it takes the flow first.
+    ///
+    /// That matters more once the kill switch grows an app-scoped port permit, because then
+    /// nothing downstream stops such a flow either — this rule becomes the only control.
+    /// Rule shadowing is not hypothetical in this codebase; it has already happened in this
+    /// very function.
+    ///
+    /// So: every UDP rule that precedes the REJECT must narrow the flow to something
+    /// reviewed — a process identity or a pinned address. An unconditional one is refused
+    /// here rather than in production.
     #[test]
-    fn signed_wechat_path_regexes_join_the_direct_rules() {
+    fn no_unconditional_udp_rule_may_precede_the_reject() {
+        let mut plan = direct_plan();
+        plan.wechat_process_path_regexes = vec![
+            wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").expect("prefix"),
+        ];
+        for (label, direct) in [("with a direct plan", Some(&plan)), ("without one", None)] {
+            let runtime =
+                build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", direct).unwrap();
+            let parsed_runtime = parsed(&runtime);
+            let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|rule| rule.as_str().unwrap())
+                .collect();
+            let reject = rules
+                .iter()
+                .position(|rule| *rule == "AND,((NETWORK,UDP)),REJECT")
+                .unwrap_or_else(|| panic!("the UDP catch-all is missing {label}"));
+            for rule in &rules[..reject] {
+                // A rule with no NETWORK condition carries UDP too. Skipping those was the
+                // exact hole this test's own comment warns about: the check would have waved
+                // through `AND,((DST-PORT,443)),Tono-China-Direct`, which is unconditional for
+                // UDP in everything but name. Only a rule that names TCP is out of scope.
+                if rule.contains("(NETWORK,TCP)") {
+                    continue;
+                }
+                // Bare rules (`IP-CIDR,127.0.0.0/8,DIRECT,no-resolve`) carry no parenthesis,
+                // so the match cannot require one — they are address-constrained all the same,
+                // which is what this asserts.
+                assert!(
+                    rule.contains("PROCESS-NAME,")
+                        || rule.contains("PROCESS-PATH-REGEX,")
+                        || rule.contains("IP-CIDR"),
+                    "unconditional UDP rule ahead of the catch-all {label}: {rule}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn signed_wechat_path_regexes_govern_udp_media_and_not_tcp() {
         let mut plan = direct_plan();
         let prefix = wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").unwrap();
         plan.wechat_process_path_regexes = vec![prefix.clone()];
@@ -1771,13 +1910,25 @@ reality-opts:
             .map(|rule| rule.as_str().unwrap())
             .collect();
         assert!(rules.contains(&format!(
-            "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{prefix})),Tono-China-Direct"
-        ).as_str()));
-        assert!(rules.contains(&format!(
             "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-PATH-REGEX,{prefix})),Tono-China-Direct"
         ).as_str()));
-        // Name rules stay so a standard-named helper still matches without discovery.
-        assert!(rules.iter().any(|rule| rule.contains("PROCESS-NAME,WeChat.exe")));
+        // Home rules are process-scoped to `Tono-Exit`, which is inside the tunnel and needs
+        // no physical permit; only the China-Direct outbound is constrained by WFP.
+        assert!(
+            !rules.iter().any(|rule| rule.starts_with("AND,((NETWORK,TCP),(PROCESS-NAME,")
+                && rule.ends_with(DIRECT_GROUP_NAME)),
+            "a TCP process rule routes flows the WFP permit set cannot cover"
+        );
+        assert!(
+            !rules.iter().any(|rule| rule
+                .starts_with("AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,")
+                && rule.ends_with(DIRECT_GROUP_NAME)),
+            "a TCP path-regex rule routes flows the WFP permit set cannot cover"
+        );
+        // WeChat still accelerates for everything that does have a permit.
+        assert!(rules.contains(
+            &"AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve)),Tono-China-Direct"
+        ));
     }
 
     #[test]

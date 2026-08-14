@@ -806,6 +806,36 @@ fn ensure_ordinary_windows_entry(path: &Path, directory: bool) -> Result<(), Err
     Ok(())
 }
 
+/// Pre-flight variant of [`ensure_update_scratch_absent`] for the three discovery points that
+/// run before any SCM call or file mutation.
+///
+/// A recovery copy is worth refusing an upgrade over only while it holds bytes that exist
+/// nowhere else. Once the file it shadows carries the same bytes — which is exactly the state a
+/// converged rollback leaves behind, and the state `cleanup()` failing to run leaves behind —
+/// the copy is a duplicate of what is already installed and it carries no recovery information.
+/// Refusing on it anyway is what made a single post-publish rollback failure permanent: every
+/// later `--replace-runtime` run aborts here, and the installer's own error text tells the user
+/// to do the one thing the code refuses.
+///
+/// Adoption is deliberately narrow. An unreadable target, an unreadable scratch file, or any
+/// digest mismatch all fall through to the strict refusal, so a copy that really is the last
+/// surviving image of the old generation is still preserved.
+#[cfg(windows)]
+fn adopt_or_refuse_update_scratch(target: &Path, scratch: &Path) -> Result<(), Error> {
+    if std::fs::symlink_metadata(scratch).is_err() {
+        return ensure_update_scratch_absent(scratch);
+    }
+    let redundant = match (sha256(target), sha256(scratch)) {
+        (Ok(target_digest), Ok(scratch_digest)) => target_digest == scratch_digest,
+        _ => false,
+    };
+    if !redundant {
+        return ensure_update_scratch_absent(scratch);
+    }
+    remove_ordinary_file_if_exists(scratch)
+        .with_context(|| format!("failed to clear the redundant recovery copy {scratch:?}"))
+}
+
 #[cfg(windows)]
 fn ensure_update_scratch_absent(path: &Path) -> Result<(), Error> {
     match std::fs::symlink_metadata(path) {
@@ -878,9 +908,9 @@ fn runtime_replacement_candidate(helper: &Path) -> Result<InstalledBinaryCandida
     let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
     ensure_ordinary_windows_entry(&target, false)?;
     ensure_ordinary_windows_entry(&staged, false)?;
-    ensure_update_scratch_absent(&path_with_suffix(&target, ROLLBACK_SUFFIX))?;
-    ensure_update_scratch_absent(&path_with_suffix(&target, RESTORE_SUFFIX))?;
-    ensure_update_scratch_absent(&path_with_suffix(&target, PUBLISH_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, ROLLBACK_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, RESTORE_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
 
     let expected_digest = decode_sha256(COMPILED_IN_CORE_SHA256.context(
         "this Service installer has no compiled Mihomo SHA-256 pin; use the release build script",
@@ -908,9 +938,9 @@ fn app_replacement_candidate(
     let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
     ensure_ordinary_windows_entry(&target, false)?;
     ensure_ordinary_windows_entry(&staged, false)?;
-    ensure_update_scratch_absent(&path_with_suffix(&target, ROLLBACK_SUFFIX))?;
-    ensure_update_scratch_absent(&path_with_suffix(&target, RESTORE_SUFFIX))?;
-    ensure_update_scratch_absent(&path_with_suffix(&target, PUBLISH_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, ROLLBACK_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, RESTORE_SUFFIX))?;
+    adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
 
     // Unlike Mihomo, the GUI hash is not compiled into the Service helper. Measure the candidate
     // only after the fixed Program Files authority checks above; `prepare` measures it again and
@@ -1349,11 +1379,16 @@ fn replace_existing_service_and_runtime(
                         was_active,
                         &mut replacement_owner,
                     );
-                    if recovery_result.is_ok() {
-                        service_replacement.cleanup();
-                        runtime_replacement.cleanup();
-                        app_replacement.cleanup();
-                    }
+                    // `is_old()` is a SHA-256 proof that all three targets already carry the
+                    // old bytes, so the recovery copies are redundant whatever happens next:
+                    // a failure here is about SCM and IPC liveness, not about disk contents.
+                    // Leaving the scratch behind would be worse than useless — every later
+                    // `--replace-runtime` run calls `ensure_update_scratch_absent` before any
+                    // other work and refuses, so the "run the same installer again" remedy
+                    // this function's own error prints would be permanently unavailable.
+                    service_replacement.cleanup();
+                    runtime_replacement.cleanup();
+                    app_replacement.cleanup();
                     return recovery_result;
                 }
 
@@ -1406,7 +1441,10 @@ fn replace_existing_service_and_runtime(
                 Err(rollback_error) => Err(anyhow::anyhow!(
                     "Service/Mihomo/App replacement failed ({update_error:#}); rollback also failed \
                      ({rollback_error:#}). Recovery copies were preserved and the Service was left \
-                     fail-closed; reboot Windows, then run the same installer again"
+                     fail-closed; reboot Windows, then run the same installer again. If it reports \
+                     that a previous runtime replacement left a recovery file, those copies are the \
+                     only surviving image of a generation that is no longer installed: uninstall \
+                     Tono, which clears them, and install it again"
                 )),
             }
         }
@@ -1448,9 +1486,9 @@ fn main() -> anyhow::Result<()> {
     if install_mode == WindowsInstallMode::ReplaceRuntime {
         // Discover stale recovery state before stopping a healthy Service. The coordinated
         // transaction never overwrites evidence from a prior interrupted rollback.
-        ensure_update_scratch_absent(&path_with_suffix(&target, ROLLBACK_SUFFIX))?;
-        ensure_update_scratch_absent(&path_with_suffix(&target, RESTORE_SUFFIX))?;
-        ensure_update_scratch_absent(&path_with_suffix(&target, PUBLISH_SUFFIX))?;
+        adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, ROLLBACK_SUFFIX))?;
+        adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, RESTORE_SUFFIX))?;
+        adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
     }
     let staged = stage_service_binary(&source, &target)?;
 
@@ -1558,8 +1596,18 @@ fn main() -> anyhow::Result<()> {
         Err(error) if raw_error_code(&error) == Some(ERROR_SERVICE_DOES_NOT_EXIST) => {
             if install_mode == WindowsInstallMode::ReplaceRuntime {
                 let _ = remove_ordinary_file_if_exists(&staged);
+                // Nothing has been changed yet, and the fresh-install path below is written to
+                // handle exactly this ("repair/update runs whose old SCM record is already
+                // gone") — but reaching it would install a Service beside an unreplaced
+                // Mihomo, whose compiled digest pin the Service could then never match. So
+                // this still stops, and now says which route out of it works: every
+                // `--replace-runtime` re-run lands right back here, so "run the installer
+                // again" is not it.
                 bail!(
-                    "the installed Tono Service is missing; runtime replacement stopped before changing Mihomo"
+                    "the installed Tono Service record is gone, so there is nothing to replace; \
+                     Mihomo was not changed. Re-running this installer stops at the same place. \
+                     Uninstall Tono from Settings > Apps (or Add/Remove Programs), then install \
+                     it again — that path does not need the missing Service record."
                 );
             }
         }

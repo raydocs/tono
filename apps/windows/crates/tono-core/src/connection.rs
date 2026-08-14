@@ -309,16 +309,28 @@ impl ConnectionFsm {
         FailureAction::KeepBlockingAndReconnect
     }
 
-    /// Delay before the next protected reconnect attempt. Handed out only
-    /// while idle in Protected Offline — never while connected,
-    /// disconnecting, or mid-transaction (M1).
-    pub fn next_reconnect_delay(&mut self) -> Option<Duration> {
-        if self.status.is_protection_blocked
+    /// Whether a protected reconnect may run at all right now: idle in Protected
+    /// Offline, never while connected, disconnecting, or mid-transaction (M1).
+    ///
+    /// Split out from [`Self::next_reconnect_delay`] because that method answers
+    /// this same question and charges a backoff step for asking. An explicit
+    /// "Retry now" must not be charged: it aborts the attempt that was already
+    /// scheduled, so consuming a step replaced an imminent retry with a longer
+    /// wait — the control that promises "sooner" made the outage strictly
+    /// longer, and holding the button down held the machine in Protected
+    /// Offline for as long as the user kept pressing it.
+    pub fn reconnect_permitted_now(&self) -> bool {
+        self.status.is_protection_blocked
             && self.session_verified
             && !self.status.is_connected
             && !self.status.is_disconnecting
             && !self.status.is_connecting
-        {
+    }
+
+    /// Delay before the next protected reconnect attempt, consuming one step of
+    /// the ladder. Handed out only while [`Self::reconnect_permitted_now`].
+    pub fn next_reconnect_delay(&mut self) -> Option<Duration> {
+        if self.reconnect_permitted_now() {
             Some(self.backoff.next_delay())
         } else {
             None
@@ -327,9 +339,25 @@ impl ConnectionFsm {
 
     /// Explicit disconnect is allowed from Connected or Protected Offline
     /// and is one of the three causes that release the kill switch (§6).
+    ///
+    /// Clears `is_connected` as well as setting `is_disconnecting`. Leaving it
+    /// set meant every "is a tunnel up?" predicate read an in-flight release as
+    /// a live tunnel, and the Windows release runs for seconds — its DNS leg
+    /// alone budgets forty. Two handlers admitted themselves in that window,
+    /// captured the disconnect's *own* generation, queued behind the release on
+    /// the service's locks, and then passed their exit guards because the
+    /// release had already cleared `is_disconnecting` on its way out. Both went
+    /// on to run a full connect: WFP re-armed and the core restarted after
+    /// `disconnect()` had returned and the UI said Not Connected.
+    ///
+    /// Nothing needs the old value. `ui_state` tests `is_disconnecting` first,
+    /// `disconnect()` reads the status before calling this, the release
+    /// sequence never consults it, and every other predicate either carries its
+    /// own `is_disconnecting` term or becomes more conservative.
     pub fn begin_disconnect(&mut self) {
         self.status.is_disconnecting = true;
         self.status.is_connecting = false;
+        self.status.is_connected = false;
         self.status.stage = None;
     }
 
@@ -529,6 +557,92 @@ mod tests {
         assert!(fsm.kill_switch_armed());
         assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
         assert!(!fsm.status().is_connected);
+    }
+
+    /// An in-flight release must not read as a live tunnel.
+    ///
+    /// The Windows release runs for seconds — its DNS leg alone budgets forty —
+    /// and while `begin_disconnect` left `is_connected` set, two handlers
+    /// admitted themselves in that window on exactly this predicate, captured
+    /// the disconnect's own generation, queued behind the release, and then
+    /// passed their exit guards because the release had already cleared
+    /// `is_disconnecting` on its way out. Both went on to run a full connect:
+    /// the barrier re-armed and the core restarted after the user's Disconnect
+    /// had returned and the UI said Not Connected.
+    #[test]
+    fn a_release_in_flight_does_not_read_as_a_live_tunnel() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_session_verified();
+        fsm.connect_succeeded().unwrap();
+        assert!(fsm.status().is_connected);
+
+        fsm.begin_disconnect();
+        assert!(
+            !fsm.status().is_connected,
+            "every \"is a tunnel up?\" predicate reads this field"
+        );
+        assert!(fsm.status().is_disconnecting);
+        // The state the user is shown is unchanged: `ui_state` tests
+        // `is_disconnecting` first, so clearing the other flag is invisible.
+        assert_eq!(fsm.status().ui_state(), UiState::Disconnecting);
+        // And nothing may start a reconnect underneath the release.
+        assert!(!fsm.reconnect_permitted_now());
+        assert_eq!(fsm.next_reconnect_delay(), None);
+    }
+
+    /// Asking whether a reconnect may run must not cost a rung of the ladder.
+    ///
+    /// "Retry now" aborts the attempt that was already scheduled and then asks for
+    /// one. While the only way to ask was `next_reconnect_delay`, that question
+    /// consumed a step, so each press traded an imminent retry for a longer wait
+    /// and pushed the ladder up: after a few failures the user was replacing a
+    /// one-second countdown with a thirty-second one every time they pressed the
+    /// button, and could hold the machine in Protected Offline indefinitely by
+    /// pressing it.
+    #[test]
+    fn asking_whether_a_reconnect_may_run_does_not_consume_a_backoff_step() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_session_verified();
+        fsm.connect_failed();
+
+        // However many times it is asked, the ladder has not moved.
+        for _ in 0..10 {
+            assert!(fsm.reconnect_permitted_now());
+        }
+        assert_eq!(fsm.next_reconnect_delay(), Some(Duration::from_secs(2)));
+        for _ in 0..10 {
+            assert!(fsm.reconnect_permitted_now());
+        }
+        assert_eq!(fsm.next_reconnect_delay(), Some(Duration::from_secs(5)));
+    }
+
+    /// The cheap predicate and the charging one must agree about *when*, or the
+    /// immediate path could run in a state the scheduled path refuses.
+    #[test]
+    fn the_two_reconnect_predicates_agree_about_when() {
+        let mut fsm = ConnectionFsm::new();
+        assert!(!fsm.reconnect_permitted_now());
+        assert_eq!(fsm.next_reconnect_delay(), None);
+
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_session_verified();
+        // Mid-connect: neither may run.
+        assert!(!fsm.reconnect_permitted_now());
+        assert_eq!(fsm.next_reconnect_delay(), None);
+
+        fsm.connect_failed();
+        assert!(fsm.reconnect_permitted_now());
+        assert!(fsm.next_reconnect_delay().is_some());
+
+        // Once a disconnect starts, both refuse again.
+        fsm.begin_disconnect();
+        assert!(!fsm.reconnect_permitted_now());
+        assert_eq!(fsm.next_reconnect_delay(), None);
     }
 
     #[test]

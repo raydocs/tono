@@ -46,6 +46,8 @@ export const translationKeys = [
   'settings.sections.tono.auditLog.dropped',
   'settings.sections.tono.periodicTelemetry.label',
   'settings.sections.tono.periodicTelemetry.description',
+  'settings.sections.tono.networkLogUpload.label',
+  'settings.sections.tono.networkLogUpload.description',
   'settings.sections.system.title',
   'settings.sections.system.toggles.tunMode',
   'settings.sections.system.toggles.systemProxy',
@@ -622,6 +624,8 @@ export const translationKeys = [
   'tono.login.networkBlocked.description',
   'tono.login.networkBlocked.restore',
   'tono.login.networkBlocked.restoring',
+  'tono.login.errors.unreachable',
+  'tono.login.errors.rateLimited',
   'tono.pill.title.notConnected',
   'tono.pill.title.connecting',
   'tono.pill.title.connected',
@@ -798,6 +802,8 @@ export const translationKeys = [
   'tono.settings.about.title',
   'tono.settings.about.tagline',
   'tono.settings.about.description',
+  'tono.startup.stateInitRetrying',
+  'tono.startup.stateInitFailed',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

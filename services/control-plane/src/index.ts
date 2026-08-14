@@ -74,8 +74,6 @@ export interface Env {
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
   ACCESS_ADMIN_EMAILS?: string;
-  OPS_ACCESS_CLIENT_ID?: string;
-  OPS_ACCESS_CLIENT_SECRET?: string;
   // VPS collector (`ops-panel/collect.py`) pushes the quality report + Komari
   // inventory here. Optional: unset means ingest returns 503 and /ops/live
   // still falls back to the legacy Access-protected hostnames.
@@ -2762,35 +2760,17 @@ async function operationsNodes(e: Env) {
 }
 
 // Live node telemetry for the admin monitor. The collector on the ops VPS
-// pushes a sanitized snapshot (`PUT /api/v1/ops-ingest/snapshot`). Until that
-// row exists, /ops/live still falls back to the legacy Access-protected
-// hostnames so a half-cutover does not blank the console.
-const OPS_LIVE_SOURCES = {
-  agents: 'https://ops.afk.ccwu.cc/api/nodes',
-  quality: 'https://quality.afk.ccwu.cc/report.json',
-} as const;
+// pushes a sanitized snapshot (`PUT /api/v1/ops-ingest/snapshot`); the stored
+// row is the only source.
+//
+// It used to fall back to fetching ops.afk.ccwu.cc and quality.afk.ccwu.cc
+// when no row existed. Those hostnames are now absorbed by `admin-worker.ts`,
+// which answers them with a 302 to the admin console — so the fallback fetched
+// this deployment's own SPA HTML, failed to parse it as JSON, and reported the
+// parse error as `qualityError` after two 8s timeouts. A stale snapshot beats
+// a request that cannot succeed; without one, /ops/live says so.
 const OPS_LIVE_MAX_NODES = 64;
 const OPS_LIVE_TEXT_LIMIT = 12_000;
-
-async function opsLiveFetch(url: string, e: Env) {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-    // A bare automated UA is rejected by the zone's browser integrity check.
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-admin-live/1.0',
-  };
-  if (e.OPS_ACCESS_CLIENT_ID && e.OPS_ACCESS_CLIENT_SECRET) {
-    headers['cf-access-client-id'] = e.OPS_ACCESS_CLIENT_ID;
-    headers['cf-access-client-secret'] = e.OPS_ACCESS_CLIENT_SECRET;
-  }
-  const response = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(8_000),
-  });
-  if (!response.ok) {
-    throw new Error(`live source returned HTTP ${response.status}`);
-  }
-  return (await response.json()) as Record<string, any>;
-}
 
 function liveKeywordList(value: unknown, limit = 12): string[] {
   if (!Array.isArray(value)) return [];
@@ -2943,33 +2923,14 @@ async function storeLiveSnapshot(e: Env, input: { quality?: ReturnType<typeof li
 
 async function operationsLive(e: Env) {
   const stored = await storedLiveSnapshot(e);
-  let quality = stored?.quality_json
+  const quality = stored?.quality_json
     ? liveQualityReport(JSON.parse(String(stored.quality_json)))
     : null;
-  let agents = stored?.agents_json
+  const agents = stored?.agents_json
     ? liveAgents(JSON.parse(String(stored.agents_json)))
     : null;
-  let qualityError: string | null = quality ? null : 'no quality snapshot';
-  let agentsError: string | null = agents ? null : 'no agent snapshot';
-
-  if (!quality || !agents) {
-    const [fetchedAgents, fetchedQuality] = await Promise.allSettled([
-      agents ? Promise.resolve(null) : opsLiveFetch(OPS_LIVE_SOURCES.agents, e),
-      quality ? Promise.resolve(null) : opsLiveFetch(OPS_LIVE_SOURCES.quality, e),
-    ]);
-    if (!agents && fetchedAgents.status === 'fulfilled') {
-      agents = liveAgents(fetchedAgents.value);
-      agentsError = agents ? null : 'no agent data';
-    } else if (!agents && fetchedAgents.status === 'rejected') {
-      agentsError = String(fetchedAgents.reason instanceof Error ? fetchedAgents.reason.message : fetchedAgents.reason);
-    }
-    if (!quality && fetchedQuality.status === 'fulfilled') {
-      quality = liveQualityReport(fetchedQuality.value);
-      qualityError = quality ? null : 'no quality data';
-    } else if (!quality && fetchedQuality.status === 'rejected') {
-      qualityError = String(fetchedQuality.reason instanceof Error ? fetchedQuality.reason.message : fetchedQuality.reason);
-    }
-  }
+  const qualityError = quality ? null : 'no quality snapshot';
+  const agentsError = agents ? null : 'no agent snapshot';
 
   return {
     fetchedAt: now(),

@@ -308,6 +308,9 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         inner.credentials_loaded = true;
         return;
     }
+    // A fresh attempt must not inherit the previous verdict. Retry re-enters
+    // here, and a stale error would outlive the condition that produced it.
+    inner.credential_error = None;
     let Ok((refresh, id)) = outcome else {
         // A timeout is not an answer. Reading it as "no credentials" turned a slow Credential
         // Manager into a signed-out user, and latching the gate made that verdict stick until
@@ -319,15 +322,9 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         ));
         return;
     };
-    match refresh {
-        Ok(Some(token)) => {
-            // Hydrate memory only — writing the same bytes back would
-            // risk another prompting vault call.
-            let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
-        }
-        Ok(None) => {}
-        Err(err) => inner.credential_error = Some(err.to_string()),
-    }
+    // The installation id is independent of the refresh token and is handled
+    // first, so the early return below cannot cost a persisted id — losing it
+    // means the next sign-in presents a new device.
     match id {
         Ok(Some(persisted)) => {
             if let Ok(persisted) = normalize_installation_id(&persisted) {
@@ -343,6 +340,25 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
         }
         Err(_) => {
             // The id is not auth-critical: keep the ephemeral one.
+        }
+    }
+    match refresh {
+        Ok(Some(token)) => {
+            // Hydrate memory only — writing the same bytes back would
+            // risk another prompting vault call.
+            let _ = inner.credentials.set_local(CredentialKey::RefreshToken, &token);
+        }
+        Ok(None) => {}
+        Err(err) => {
+            // The same reasoning as the timeout branch above, which this one was
+            // not updated to match. A store error is not an answer about whether
+            // credentials exist, and opening the gate on it made the verdict
+            // stick for the life of the process: `tono_retry_restore` re-enters
+            // here, returns immediately on `credentials_loaded`, and re-emits the
+            // identical error — so the Retry button the account-error screen
+            // offers provably could not succeed, even after the vault recovered.
+            inner.credential_error = Some(err.to_string());
+            return;
         }
     }
     // The vault answered — including "there is nothing stored", which is a real answer. The
@@ -373,7 +389,13 @@ pub async fn tono_sign_in_start(
     let challenge = client
         .start_email_sign_in(&email, "", &installation_id)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| {
+            state.audit().log(crate::tono::audit::AuditEvent::SignInFail {
+                stage: "requestCode",
+                error: err.to_string(),
+            });
+            auth_error(&err)
+        })?;
 
     let mut inner = state.lock().await;
     if inner.sign_in_generation != generation {
@@ -414,7 +436,13 @@ pub async fn tono_sign_in_verify(
     let auth = client
         .verify_email_sign_in(&challenge_id, &code)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| {
+            state.audit().log(crate::tono::audit::AuditEvent::SignInFail {
+                stage: "verifyCode",
+                error: err.to_string(),
+            });
+            auth_error(&err)
+        })?;
 
     let info = account_info_of(&auth.user);
     {
@@ -892,7 +920,10 @@ pub async fn retry_now(state: Arc<TonoState>, app: AppHandle) -> Result<(), Stri
         }
         inner.tasks.abort_reconnect();
     }
-    connection::schedule_reconnect(&state, &app).await;
+    // Not `schedule_reconnect`: that consumes a rung of the backoff ladder, so
+    // aborting the pending attempt and then asking for the *next* delay made this
+    // button strictly delay recovery.
+    connection::retry_reconnect_now(&state, &app).await;
     Ok(())
 }
 
@@ -1346,6 +1377,25 @@ pub async fn tono_set_periodic_telemetry_enabled(
     state.audit().set_periodic_telemetry_enabled(enabled)
 }
 
+/// Whether the raw audit log is uploaded.
+#[tauri::command]
+pub async fn tono_network_log_upload_enabled(
+    state: tauri::State<'_, Arc<TonoState>>,
+) -> Result<bool, String> {
+    Ok(state.audit().network_log_upload_enabled())
+}
+
+/// Toggle uploading the raw audit log. Separate from the telemetry switch on
+/// purpose: this one sends the log itself, and one consent must not stand in for
+/// a materially larger disclosure.
+#[tauri::command]
+pub async fn tono_set_network_log_upload_enabled(
+    state: tauri::State<'_, Arc<TonoState>>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.audit().set_network_log_upload_enabled(enabled)
+}
+
 /// §8: the JSONL audit file info (for the settings page / support bundle).
 ///
 /// TS: `interface TonoAuditLogInfo { path: string; droppedCount: number }`
@@ -1517,6 +1567,29 @@ pub async fn tono_upload_diagnostics(
             Err(message)
         }
     }
+}
+
+/// Classify a sign-in failure into a stable prefix the frontend turns into actionable text.
+///
+/// Without this the raw error reached the login screen verbatim: a user in China saw
+/// `could not reach Tono: pinned[connect: error sending request for url (...) <- client error
+/// (Connect) <- 远程主机强迫关闭了一个现有的连接。 (os error 10054)]; system-dns[...]`, which
+/// tells them nothing they can act on and looks like the product is broken rather than the
+/// network being in the way.
+///
+/// `TONO_AUTH_UNREACHABLE` is the one worth separating. Both transport paths carry the same
+/// hostname and therefore the same TLS SNI, so when both fail the same way the failure is
+/// about reaching the control plane at all — not about the account, the code, or the app. The
+/// actionable part is that sign-in only has to succeed once: the session persists afterwards
+/// and the tunnel provides its own reachability, so one attempt from a working network is
+/// enough. That is what the mapped message says.
+fn auth_error(err: &ApiError) -> String {
+    let prefix = match err {
+        ApiError::Transport { .. } => "TONO_AUTH_UNREACHABLE",
+        ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
+        _ => return err.to_string(),
+    };
+    format!("{prefix}: {err}")
 }
 
 /// Classify an upload failure into a stable `TONO_DIAG_*` prefix the

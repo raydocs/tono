@@ -88,6 +88,65 @@ jobs:
       - name: Test
         run: pnpm test
 
+  app-rust:
+    # The `app` job above type-checks and unit-tests the frontend. Nothing ran
+    # the Tauri crate's own 357 Rust tests — not this workflow, not the release
+    # one — so two of them had been failing unnoticed. On Windows because that is
+    # what ships, and because `build.rs` gives every test harness its own Common
+    # Controls activation context there; the tests die at load time without it.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: Install pnpm as the project pins it
+        run: npm install --global pnpm@11.3.0
+
+      - name: Install exactly what the lockfile pins
+        working-directory: apps/windows/app
+        run: pnpm install --frozen-lockfile
+
+      # `tauri.conf.json` points `frontendDist` at `../dist`, and `tauri-build`
+      # refuses to run without it. Building the web assets is the cheapest way to
+      # satisfy that; it is the same command the release uses.
+      - name: Build the web assets the Tauri crate is configured against
+        working-directory: apps/windows/app
+        run: pnpm run web:build
+
+      # `tauri-build` resolves `externalBin` and `resources` while compiling and
+      # refuses when a declared path is missing. Both directories are gitignored
+      # — they hold release artefacts measured in tens of megabytes — so a
+      # checkout never has them. These are unit tests: nothing here executes the
+      # core, the service binaries or the GeoIP data, and no test reads their
+      # contents. Empty placeholders satisfy the resolver without pulling a
+      # release down.
+      - name: Placeholder the release-only artefacts the build script resolves
+        working-directory: apps/windows/app/src-tauri
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path sidecar, resources | Out-Null
+          $paths = @(
+            'sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe',
+            'resources/Country.mmdb',
+            'resources/geoip.dat',
+            'resources/geosite.dat',
+            'resources/enableLoopback.exe',
+            'resources/tono-service.exe',
+            'resources/tono-service-install.exe',
+            'resources/tono-service-uninstall.exe',
+            'resources/core-sha256.txt'
+          )
+          foreach ($p in $paths) {
+            if (-not (Test-Path $p)) { New-Item -ItemType File -Force -Path $p | Out-Null }
+          }
+
+      - name: Test the Tauri crate
+        working-directory: apps/windows/app/src-tauri
+        run: cargo test --locked
+
   service:
     runs-on: windows-2022
     steps:
@@ -102,3 +161,20 @@ jobs:
         # The suite is gated behind these features; without them the files compile
         # to nothing and the job would pass having tested nothing at all.
         run: cargo test --locked --features standalone,client,test
+
+      # `mod wfp` is `not(feature = "test")`, so every invocation above compiles it out and
+      # the tests inside it have never run anywhere — including the one that predates this
+      # step. That is the one part of the kill switch no model can stand in for: whether the
+      # kernel accepts the filter shapes the service builds. This runner is Windows and
+      # administrator, so it can answer.
+      #
+      # Scoped to that module on purpose. Running the whole suite without the `test` feature
+      # would take stubs off code that talks to the SCM and the network, which is not what
+      # this step is for.
+      - name: Ask the real filtering engine
+        working-directory: apps/windows/service
+        # `--lib` because `tests/common.rs` reaches for helpers that only exist under the
+        # `test` feature and is compiled whatever the integration files' own `cfg` says, so
+        # the crate does not build its integration targets in this configuration at all.
+        # Verified locally before pushing rather than by watching this step fail.
+        run: cargo test --locked --features standalone,client --lib core::wfp::real_engine_tests -- --nocapture

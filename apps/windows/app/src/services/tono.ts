@@ -115,6 +115,12 @@ const toError = (error: unknown): Error => {
 
 /** Stable Rust prefixes → i18n keys for Connect/Disconnect action errors. */
 const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
+  // Sign-in could not reach the control plane. Both transport paths carry the same
+  // hostname and TLS SNI, so when both fail the failure is about reaching the server at
+  // all — not the account, the code, or the app. Without this entry the raw Rust error
+  // chain reached the login screen verbatim.
+  { prefix: 'TONO_AUTH_UNREACHABLE', key: 'tono.login.errors.unreachable' },
+  { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
   { prefix: 'TONO_SERVICE_BUSY', key: 'tono.dashboard.errors.serviceBusy' },
   {
     prefix: 'TONO_RELEASE_RECONCILING',
@@ -287,6 +293,12 @@ export const tonoPeriodicTelemetryEnabled = () =>
 
 export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
   call<void>('tono_set_periodic_telemetry_enabled', { enabled })
+
+export const tonoNetworkLogUploadEnabled = () =>
+  call<boolean>('tono_network_log_upload_enabled')
+
+export const tonoSetNetworkLogUploadEnabled = (enabled: boolean) =>
+  call<void>('tono_set_network_log_upload_enabled', { enabled })
 
 export interface TonoAuditLogInfo {
   path: string

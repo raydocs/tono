@@ -143,6 +143,14 @@ pub struct TonoTransport {
     /// permit covers the pinned addresses only. It can add a success; it cannot
     /// take one away.
     resolved: reqwest::Client,
+    /// The alternate HTTPS port that last worked, or 0.
+    ///
+    /// Remembered for the process, not persisted. Once 443 has proven unreachable on this
+    /// network, paying for that failure on every later request is the difference between a
+    /// usable app and one that stalls on each call — and when 443 is *dropped* rather than
+    /// reset, that failure costs the full connect timeout. A fresh start re-tries 443 first,
+    /// so a network that recovers is not stuck on an alternate for ever.
+    alternate_port: std::sync::atomic::AtomicU16,
 }
 
 impl TonoTransport {
@@ -153,6 +161,7 @@ impl TonoTransport {
         Ok(Self {
             client: tokio::sync::RwLock::new(Self::build_pinned_client()?),
             resolved,
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
         })
     }
 
@@ -206,6 +215,7 @@ impl TonoTransport {
                 .resolve_to_addrs(host, resolved)
                 .build()
                 .context("failed to build the resolving test client")?,
+            alternate_port: std::sync::atomic::AtomicU16::new(0),
         })
     }
 
@@ -288,10 +298,160 @@ impl TonoTransport {
     }
 }
 
+
+/// Connect budget for an alternate-port attempt.
+///
+/// Deliberately far shorter than the 30 s production connect timeout. An alternate port is a
+/// long shot on a network that is already interfering, and some networks *drop* non-standard
+/// ports rather than resetting them — walking five of those at 30 s each would turn a failed
+/// sign-in into a three-minute hang, which is worse than the error it is trying to avoid.
+const ALTERNATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+const ALTERNATE_TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
+/// Whole-walk budget, so the per-attempt one cannot be multiplied by the number of ports and
+/// then doubled again by the retry in `ApiClient::call`.
+const ALTERNATE_WALK_BUDGET: Duration = Duration::from_secs(20);
+
+impl TonoTransport {
+    /// Same URL, different TCP port.
+    fn with_port(url: &str, port: u16) -> Option<String> {
+        let mut parsed = reqwest::Url::parse(url).ok()?;
+        parsed.set_port(Some(port)).ok()?;
+        Some(parsed.to_string())
+    }
+
+    /// A client pinned to the control-plane addresses at `port`.
+    ///
+    /// The pins carry the port and the URL carries the same one, so there is no dependence on
+    /// how the HTTP client treats a port inside a DNS override. Everything else — no proxy, no
+    /// redirects, full certificate validation against the same hostname — is the shared
+    /// builder, so this is the same channel on a different port rather than a weaker one.
+    fn alternate_client(port: u16) -> Result<reqwest::Client> {
+        let pinned: Vec<std::net::SocketAddr> = bootstrap::control_plane_http_pins()
+            .into_iter()
+            .map(|ip| std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port))
+            .collect();
+        Self::builder()
+            .connect_timeout(ALTERNATE_CONNECT_TIMEOUT)
+            .timeout(ALTERNATE_TOTAL_TIMEOUT)
+            .resolve_to_addrs(bootstrap::API_HOST, &pinned)
+            .build()
+            .context("failed to build the alternate-port Tono HTTP client")
+    }
+
+    /// Walk the alternate HTTPS ports, most-recently-successful first.
+    ///
+    /// One attempt on one alternate port, with the delivery judgement the rest of this file
+    /// makes.
+    ///
+    /// Returns `Some` when the caller must stop — either it worked, or it failed in a way that
+    /// may already have put the request on the wire. `None` means "provably not delivered,
+    /// safe to try the next port".
+    ///
+    /// This is the part the first version got wrong: it walked every port looking only at
+    /// `Ok`, so a TLS failure or a timeout on port 2053 — both of which can mean the server
+    /// already has the bytes — moved straight on to 2083 and sent the body again. For the
+    /// route this was built for that is a sign-in code submitted twice, and for `DELETE` a
+    /// device removed twice. `should_retry_transport` exists to make exactly this call and was
+    /// consulted once before the walk instead of once per attempt.
+    async fn attempt_one_alternate(
+        &self,
+        request: &ApiRequest,
+        port: u16,
+    ) -> Option<Result<ApiResponse, ApiError>> {
+        let url = Self::with_port(&request.url, port)?;
+        let client = Self::alternate_client(port).ok()?;
+        let attempt = ApiRequest {
+            url,
+            ..request.clone()
+        };
+        match self.attempt(&client, &attempt).await {
+            Ok(response) => {
+                self.alternate_port
+                    .store(port, std::sync::atomic::Ordering::Relaxed);
+                Some(Ok(response))
+            }
+            Err(ApiError::Transport { kind, message }) => {
+                if should_retry_transport(request.method, kind) {
+                    None
+                } else {
+                    Some(Err(ApiError::Transport { kind, message }))
+                }
+            }
+            // A non-transport error is a real answer from the server: it arrived.
+            Err(other) => Some(Err(other)),
+        }
+    }
+
+    /// Walk the alternate HTTPS ports.
+    ///
+    /// Bounded in total, not just per attempt. Five ports on a network that *drops* rather than
+    /// resets would otherwise cost five connect timeouts, and `ApiClient::call` retries the
+    /// whole thing once — the three-minute hang the per-attempt budget was chosen to avoid,
+    /// reached by a different route.
+    async fn attempt_alternate_ports(
+        &self,
+        request: &ApiRequest,
+    ) -> Option<Result<ApiResponse, ApiError>> {
+        use std::sync::atomic::Ordering;
+        let remembered = self.alternate_port.load(Ordering::Relaxed);
+        let ports = clash_verge_service_ipc::CONTROL_PLANE_PORTS;
+        let mut order: Vec<u16> = Vec::with_capacity(ports.len());
+        if remembered != 0 && remembered != 443 {
+            order.push(remembered);
+        }
+        // 443 is the port that already failed on this request; skip it here.
+        order.extend(
+            ports
+                .iter()
+                .copied()
+                .filter(|port| *port != 443 && *port != remembered),
+        );
+
+        let deadline = tokio::time::Instant::now() + ALTERNATE_WALK_BUDGET;
+        for port in order {
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            if let Some(result) = self.attempt_one_alternate(request, port).await {
+                return Some(result);
+            }
+        }
+        // Every alternate failed too. Forget any remembered port so the next call starts from
+        // 443 again rather than paying for a port that has stopped working.
+        self.alternate_port.store(0, Ordering::Relaxed);
+        None
+    }
+}
+
 #[async_trait]
 impl HttpTransport for TonoTransport {
     async fn send(&self, request: ApiRequest) -> Result<ApiResponse, ApiError> {
         crate::tono::integration_profile::delay_remote_operation().await;
+
+        // A port that already worked goes first, ahead of the two 443 attempts.
+        //
+        // The first version stored it and then still tried 443 twice on every later request,
+        // which is the opposite of what remembering it was for: on a network that *drops* 443
+        // rather than resetting it, that is two connect timeouts before every single call. The
+        // comment on the field claimed this behaviour; the code did not have it.
+        //
+        // If the remembered port has since stopped working, `attempt_one_alternate` clears it
+        // on a provably-undelivered failure and the normal 443 paths below run as usual, so a
+        // network that recovers is not stuck here.
+        let remembered = self
+            .alternate_port
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if remembered != 0 {
+            match self.attempt_one_alternate(&request, remembered).await {
+                Some(result) => return result,
+                // Provably not delivered, so this port has stopped working. Forget it before
+                // falling through, or every later request pays for it first.
+                None => self
+                    .alternate_port
+                    .store(0, std::sync::atomic::Ordering::Relaxed),
+            }
+        }
+
         let pinned = {
             let client = self.client.read().await;
             self.attempt(&client, &request).await
@@ -316,12 +476,24 @@ impl HttpTransport for TonoTransport {
             Err(ApiError::Transport {
                 kind: fallback_kind,
                 message: fallback_message,
-            }) => Err(ApiError::Transport {
-                kind: fallback_kind,
-                message: format!(
-                    "pinned[{message}]; system-dns[{fallback_message}]"
-                ),
-            }),
+            }) => {
+                // Both paths carry the same hostname and therefore the same TLS SNI, so when
+                // both fail identically the address is not what is being refused. Trying the
+                // same server on a port an SNI blocklist is unlikely to be keyed on is the one
+                // route around that which needs no server change — Cloudflare answers the same
+                // zone, with the same certificate, on all of these.
+                if should_retry_transport(request.method, fallback_kind)
+                    && let Some(result) = self.attempt_alternate_ports(&request).await
+                {
+                    return result;
+                }
+                Err(ApiError::Transport {
+                    kind: fallback_kind,
+                    message: format!(
+                        "pinned[{message}]; system-dns[{fallback_message}]"
+                    ),
+                })
+            }
             Err(other) => Err(other),
         }
     }
@@ -339,6 +511,25 @@ mod tests {
     };
 
 
+    /// Whether something in the network path accepts a connection to an address
+    /// that must not be reachable.
+    ///
+    /// Both tests below rest on one premise: packets to a blackholed RFC1918
+    /// address are dropped, so the connect runs out of time and reqwest reports
+    /// a connect-phase failure. A TUN VPN — including this product's own —
+    /// completes that connect locally and instantly, and the failure then
+    /// arrives later as a response timeout with `is_connect()` false. The
+    /// premise is gone, so the assertions below say nothing, and a developer
+    /// running the suite while connected would be told reqwest had changed its
+    /// error flags. CI runners have no tunnel, which is where these must run.
+    fn blackhole_is_intercepted() -> bool {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([10, 255, 255, 1], 80)),
+            std::time::Duration::from_millis(300),
+        )
+        .is_ok()
+    }
+
     /// A connect that timed out must be classified as never-delivered.
     ///
     /// reqwest sets both flags for it, so the ordering inside `classify` decides
@@ -347,6 +538,13 @@ mod tests {
     /// the sign-in screen — and signing in is a POST.
     #[tokio::test]
     async fn a_connect_that_times_out_is_not_an_ambiguous_timeout() {
+        if blackhole_is_intercepted() {
+            eprintln!(
+                "skipped: a tunnel is completing the blackhole connect, so the \
+                 connect phase cannot fail here; run without a VPN, as CI does"
+            );
+            return;
+        }
         let client = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(std::time::Duration::from_millis(700))
@@ -575,6 +773,14 @@ mod tests {
     /// responses, and a merged sentence cannot separate them.
     #[tokio::test]
     async fn a_total_failure_reports_both_paths() {
+        if blackhole_is_intercepted() {
+            eprintln!(
+                "skipped: a tunnel is completing the blackhole connect, so both \
+                 halves report a response timeout rather than a connect phase; \
+                 run without a VPN, as CI does"
+            );
+            return;
+        }
         let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
         let transport = TonoTransport::with_clients("tono-nowhere.test", &dead, &dead)
             .expect("transport");
@@ -620,4 +826,70 @@ mod tests {
         assert_eq!(CONNECT_TIMEOUT, std::time::Duration::from_secs(30));
         assert_eq!(TOTAL_TIMEOUT, std::time::Duration::from_secs(45));
     }
+    /// The port set the client walks must be the one the kill switch permits.
+    ///
+    /// A port the transport tries but rule C refuses is worse than not trying it: while the
+    /// switch is armed the attempt is blocked by Tono's own firewall, and the user sees a
+    /// failure that looks like the network. One constant, both sides — this asserts the
+    /// transport reads it rather than keeping a copy.
+    #[test]
+    fn alternate_ports_come_from_the_shared_constant() {
+        let ports = clash_verge_service_ipc::CONTROL_PLANE_PORTS;
+        assert_eq!(ports[0], 443, "443 stays the preferred path");
+        assert!(ports.len() > 1, "there must be something to fall back to");
+        assert!(
+            ports.iter().skip(1).all(|port| *port != 443),
+            "443 must appear once so the fallback never repeats the port that just failed"
+        );
+    }
+
+    /// The delivery judgement the alternate-port walk has to make per attempt.
+    ///
+    /// The first version consulted `should_retry_transport` once, before the walk, and then
+    /// looked only at `Ok` for each port. A `Tls` or `Timeout` failure on 2053 — both of which
+    /// can mean the server already has the bytes — therefore moved on and sent the body to
+    /// 2083. On the route this exists for that is a sign-in code submitted twice; on `DELETE`
+    /// it is a device removed twice. This pins the predicate the walk now consults per attempt.
+    #[test]
+    fn only_provably_undelivered_failures_may_move_to_the_next_port() {
+        for kind in [TransportKind::Dns, TransportKind::Connect] {
+            assert!(
+                should_retry_transport(HttpMethod::Post, kind),
+                "{kind:?} proves the bytes never left, so the next port is safe"
+            );
+        }
+        for kind in [TransportKind::Tls, TransportKind::Timeout, TransportKind::Other] {
+            assert!(
+                !should_retry_transport(HttpMethod::Post, kind),
+                "{kind:?} may already have delivered the request; the walk must stop"
+            );
+            assert!(!should_retry_transport(HttpMethod::Delete, kind));
+        }
+        // A GET carries no side effect, so any transport failure may be retried.
+        for kind in [
+            TransportKind::Dns,
+            TransportKind::Connect,
+            TransportKind::Tls,
+            TransportKind::Timeout,
+            TransportKind::Other,
+        ] {
+            assert!(should_retry_transport(HttpMethod::Get, kind));
+        }
+    }
+
+    #[test]
+    fn with_port_rewrites_only_the_port() {
+        let rewritten = TonoTransport::with_port(
+            "https://api.example.com/api/v1/auth/email/verify",
+            2053,
+        )
+        .expect("rewrite");
+        assert_eq!(
+            rewritten,
+            "https://api.example.com:2053/api/v1/auth/email/verify",
+            "host, scheme and path must survive so TLS still validates the same name"
+        );
+        assert!(TonoTransport::with_port("not a url", 2053).is_none());
+    }
+
 }

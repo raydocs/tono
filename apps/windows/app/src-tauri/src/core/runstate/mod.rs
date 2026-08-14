@@ -25,6 +25,17 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, bail};
+
+/// The two refusals that `tono::connection::map_service_ready_error` recognises to tell the
+/// user "Tono Service is busy, look for an admin prompt" instead of showing raw English.
+///
+/// They are constants because the recognition is by substring across module boundaries: a
+/// reworded `bail!` here would leave that mapping silently matching nothing, the user would
+/// see the raw text, and every test would still pass — the consumer's test pins the literal,
+/// not the producer. Naming them makes the compiler hold the two ends together.
+pub const SERVICE_OPERATION_BUSY: &str = "service operation already running";
+pub const PRIVILEGED_OUTCOME_UNCERTAIN: &str =
+    "the previous privileged service operation may still be running; restart Tono before retrying";
 use arc_swap::ArcSwap;
 use clash_verge_logging::{Type, logging};
 use once_cell::sync::Lazy;
@@ -429,7 +440,7 @@ impl<E: RunStateEnv> RunStateStore<E> {
     pub fn allow_sidecar_for_session(&self) -> Result<()> {
         let mut state = self.service.lock();
         if self.operation_running.load(Ordering::Acquire) {
-            bail!("service operation already running");
+            bail!("{SERVICE_OPERATION_BUSY}");
         }
         let permitted = match (state.service.pending, state.service.sidecar_allowed) {
             (Some(PendingAction::Install), _) => true,
@@ -456,7 +467,7 @@ impl<E: RunStateEnv> RunStateStore<E> {
     pub fn require_install_for_session(&self) -> Result<()> {
         let mut state = self.service.lock();
         if self.operation_running.load(Ordering::Acquire) {
-            bail!("service operation already running");
+            bail!("{SERVICE_OPERATION_BUSY}");
         }
         if state.service.pending.is_none()
             && !state.service.sidecar_allowed
@@ -584,10 +595,10 @@ impl<E: RunStateEnv> RunStateStore<E> {
     pub fn begin_operation(&self) -> Result<OperationGuard<'_, E>> {
         let mut state = self.service.lock();
         if self.privileged_outcome_uncertain.load(Ordering::Acquire) {
-            bail!("the previous privileged service operation may still be running; restart Tono before retrying");
+            bail!("{PRIVILEGED_OUTCOME_UNCERTAIN}");
         }
         if self.operation_running.swap(true, Ordering::AcqRel) {
-            bail!("service operation already running");
+            bail!("{SERVICE_OPERATION_BUSY}");
         }
         state.bump();
         drop(state);

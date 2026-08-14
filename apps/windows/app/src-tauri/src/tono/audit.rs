@@ -71,6 +71,16 @@ pub enum AuditEvent {
     SignInOk {
         email: String,
     },
+    /// A sign-in step that failed, with the raw transport detail.
+    ///
+    /// The user is shown a mapped, actionable message instead of the error chain, so this is
+    /// where the detail that support actually needs survives — which path failed, and whether
+    /// the network reset the connection, timed it out, or could not resolve the name. Those
+    /// mean different things and only the raw text distinguishes them.
+    SignInFail {
+        stage: &'static str,
+        error: String,
+    },
     SignOut,
     RevokeDevice {
         id: String,
@@ -104,6 +114,30 @@ pub enum AuditEvent {
     ConnectOk {
         node: String,
         elapsed_ms: u64,
+    },
+    /// One destination the DIRECT overlay actually dialled, recorded once per distinct
+    /// `(address, port, protocol)` per session.
+    ///
+    /// This is the evidence the reviewed-port permit is scored against. That permit lets the
+    /// staged core reach *any* address on a small port set, which is what makes WeChat's
+    /// HTTPDNS-derived endpoints work; the cost is that the firewall no longer bounds the
+    /// destination. Narrowing it back needs to know where WeChat actually goes, and no pin
+    /// list can answer that — measured on macOS, 21.2 MB of WeChat upload went to addresses
+    /// no pin knew and 95 KB to the pinned ones. So the client records what it dialled and
+    /// the prefix set is computed from real traffic rather than guessed.
+    ///
+    /// Two of these fields are alarms rather than statistics: a `process` that is not a
+    /// reviewed WeChat binary means the routing layer sent something it should not have, and
+    /// an address outside China means the overlay leaked. Classification is deliberately left
+    /// to the server — the client reports the address it used and nothing interprets it here.
+    DirectDial {
+        address: String,
+        host: String,
+        port: u16,
+        protocol: &'static str,
+        process: String,
+        chain: String,
+        rule: String,
     },
     DisconnectBegin {
         cause: &'static str,
@@ -200,6 +234,8 @@ pub enum AuditEvent {
     AuditDisabled,
     PeriodicTelemetryEnabled,
     PeriodicTelemetryDisabled,
+    NetworkLogUploadEnabled,
+    NetworkLogUploadDisabled,
 }
 
 impl AuditEvent {
@@ -467,6 +503,12 @@ fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
     save_settings(dir, &settings)
 }
 
+fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
+    let mut settings = load_settings(dir);
+    settings.network_log_upload_enabled = enabled;
+    save_settings(dir, &settings)
+}
+
 // ---- Audit handle ----
 
 /// The product-wide audit handle: an atomic enable flag plus a bounded
@@ -621,6 +663,29 @@ impl Audit {
             self.record(AuditEvent::PeriodicTelemetryEnabled);
         } else {
             self.record(AuditEvent::PeriodicTelemetryDisabled);
+        }
+        Ok(())
+    }
+
+    /// Toggle the upload of the raw audit log.
+    ///
+    /// This is the larger disclosure of the two and needs its own answer: the
+    /// periodic telemetry window carries counts and states, while this sends the
+    /// log itself — the hostnames connected to, the process that opened each
+    /// connection, and which rule and route it matched. The flag, the gate in
+    /// `log_upload::sweep` and the reader above all existed; the half that lets
+    /// a person say no did not, so it was permanently on. The reader's own note
+    /// — "a stale one would keep sending after the user switched it off" — was
+    /// written for a switch that had never been built.
+    pub fn set_network_log_upload_enabled(&self, enabled: bool) -> Result<(), String> {
+        if self.network_log_upload_enabled() == enabled {
+            return Ok(());
+        }
+        save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        if enabled {
+            self.record(AuditEvent::NetworkLogUploadEnabled);
+        } else {
+            self.record(AuditEvent::NetworkLogUploadDisabled);
         }
         Ok(())
     }

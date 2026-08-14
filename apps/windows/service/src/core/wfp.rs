@@ -1054,3 +1054,91 @@ fn validate_tunnel_luid(luid: u64) -> Result<()> {
         row.Type
     )
 }
+
+/// Real-kernel checks. Only meaningful on Windows with the Base Filtering Engine reachable and
+/// enough privilege to open the engine for write, which is the GitHub `windows-2022` runner and
+/// a developer's elevated shell; anywhere else they skip rather than fail, so CI does not turn
+/// flaky on an environment that simply cannot answer.
+///
+/// These exist because everything else about the filter model is a *model*. `wfp_model`'s
+/// `filter_matches` encodes WFP's documented combining rule — conditions on different fields
+/// AND, repeats of the same field OR — and the reviewed-port permit depends on it: it carries
+/// one `AleAppId`, one protocol, one port and 116 remote-address prefixes on a single filter.
+/// If the kernel refused a filter shaped like that, arming would fail for every user, and no
+/// test on any platform would have noticed: until now nothing ever called `install`.
+// The enclosing module is already `windows` and `not(feature = "test")`; this only adds the
+// test gate. Note what that means: with the `test` feature on — which is how the main CI step
+// and every local run invoke this crate — none of this compiles. That is why a dedicated CI
+// step runs it without that feature, and why the test above it had never executed anywhere.
+#[cfg(test)]
+mod real_engine_tests {
+    use super::*;
+    use crate::core::wfp_model::{
+        Condition, FilterAction, FilterSpec, IpProtocol, LayerKind, WEIGHT_HARD_PERMIT,
+    };
+
+    /// `None` when this machine cannot answer the question.
+    fn engine_or_skip() -> Option<Engine> {
+        match Engine::open() {
+            Ok(engine) => Some(engine),
+            Err(error) => {
+                eprintln!("skipping real-engine test: {error:#}");
+                None
+            }
+        }
+    }
+
+    /// A permit, never a block: an accidental block-all on a CI runner would cut the network
+    /// the job needs to report its own result.
+    fn multi_prefix_permit() -> FilterSpec {
+        let prefixes = crate::core::wfp_model::public_unicast_v4_prefixes();
+        assert!(
+            prefixes.len() > 8,
+            "the point of this test is a filter with many same-field conditions"
+        );
+        let mut conditions = vec![
+            Condition::Protocol(IpProtocol::Tcp),
+            Condition::RemotePort(443),
+        ];
+        conditions.extend(
+            prefixes
+                .into_iter()
+                .map(|(addr, prefix)| Condition::RemoteAddressV4 { addr, prefix }),
+        );
+        FilterSpec {
+            key: crate::core::wfp_model::key_for("tono/self-test/multi-prefix-permit"),
+            name: "tono self-test multi-prefix permit".to_owned(),
+            layer: LayerKind::AleAuthConnectV4,
+            weight: WEIGHT_HARD_PERMIT,
+            action: FilterAction::Permit,
+            conditions,
+            hard_permit: false,
+            persistent: false,
+        }
+    }
+
+    /// The kernel must accept a filter carrying many conditions on the same field.
+    ///
+    /// This is the shape rule H uses. It does not prove the OR semantics — that needs traffic,
+    /// and arming a fail-closed switch on a runner would take the runner's own network with it
+    /// — but it does prove the filter loads, which is the failure that would break arming for
+    /// everybody rather than merely leave WeChat as slow as it is today.
+    #[test]
+    fn the_kernel_accepts_a_filter_with_many_same_field_conditions() {
+        let Some(engine) = engine_or_skip() else {
+            return;
+        };
+        let spec = multi_prefix_permit();
+        let condition_count = spec.conditions.len();
+        ensure_provider_and_sublayer(&engine).expect("provider and sublayer");
+
+        let result = add_filter(&engine, &spec, std::ptr::null_mut());
+        // Always clean up, whatever the outcome: a leftover permit on a developer machine is a
+        // real if harmless change to their firewall.
+        let removed = delete_filter_if_exists(&engine, spec.key);
+        result.unwrap_or_else(|error| {
+            panic!("the kernel refused a {condition_count}-condition filter: {error:#}")
+        });
+        removed.expect("the self-test filter must be removable");
+    }
+}

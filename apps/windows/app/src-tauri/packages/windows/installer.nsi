@@ -623,7 +623,7 @@ FunctionEnd
     ${ElseIf} $0 != "0"
       ; Result 3 means the kill-switch filters may still be installed. DNS-only problems no longer
       ; land here (they are exit 4). Reboot and retry, or reinstall to repair the Service first.
-      Abort "Tono could not confirm this machine was made safe to uninstall (result $0), so nothing was deleted and the recovery files were kept. See the messages above for what failed. The kill switch may still be installed — reboot Windows and run this uninstaller or installer again. Removing Tono while the barrier stays armed would leave the machine blocked with nothing left to unblock it. Installing Tono again first also repairs the Service."
+      Abort "Tono could not confirm this machine was made safe to uninstall (result $0), so nothing was deleted and the recovery files were kept. See the messages above for what failed. The kill switch may still be installed. A reboot does not clear it and makes it worse — the block filters survive a restart while the loopback and DHCP exceptions beside them do not — so use the elevated Start-Menu shortcut ${RESTORENETWORKLINK} first, or run this uninstaller or installer again. Removing Tono while the barrier stays armed would leave the machine blocked with nothing left to unblock it. Installing Tono again first also repairs the Service."
     ${EndIf}
   ${EndIf}
 !macroend
@@ -1034,7 +1034,7 @@ Function .onInstFailed
   ; disarm WFP—the opposite of safe upgrade rollback. `/UPDATE` alone is not authoritative because
   ; callers can pass it on a fresh install; only the validated registry detector sets this flag.
   ${If} $ConfirmedExistingInstall = 1
-    DetailPrint "Upgrade failed while replacing ${PRODUCTNAME} Service; preserving the existing Service and network-protection state. Reboot Windows if needed, then run this installer again."
+    DetailPrint "Upgrade failed while replacing ${PRODUCTNAME} Service; preserving the existing Service and network-protection state. Reboot Windows if needed, then run this installer again. If it stops at the same place, uninstall ${PRODUCTNAME} from Settings > Apps and install it again — an upgrade cannot repair a Service whose Windows record is gone, and a fresh install can."
     Return
   ${EndIf}
   ${IfNot} ${FileExists} "$INSTDIR\resources\tono-service-uninstall.exe"
@@ -1231,6 +1231,17 @@ Section Uninstall
   ; We do this when not updating (to preserve the registry value on updates)
   ${If} $UpdateMode <> 1
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
+
+    ; The Run value above is inherited plumbing that the Windows build never writes — auto
+    ; launch is a scheduled task (utils/schtasks.rs, TASK_NAME_USER / TASK_NAME_ADMIN), and
+    ; nothing removed it. A user who had turned auto launch on kept a task pointing at a
+    ; deleted Tono.exe, which Task Scheduler retries and fails at every logon, silently,
+    ; for ever. `update_launch` only runs on a settings toggle, so a later reinstall does
+    ; not clear it either. Both names are removed; /F so a missing task is not an error.
+    nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\schtasks.exe" /Delete /TN "Tono" /F'
+    Pop $0
+    nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\schtasks.exe" /Delete /TN "Tono (Admin)" /F'
+    Pop $0
   ${EndIf}
 
   ; Delete app data if the checkbox is selected

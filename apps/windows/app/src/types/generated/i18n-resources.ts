@@ -755,6 +755,10 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          networkLogUpload: {
+            description: string
+            label: string
+          }
           periodicTelemetry: {
             description: string
             label: string
@@ -1032,6 +1036,10 @@ export interface TranslationResources {
         codeSent: string
         emailLabel: string
         emailPlaceholder: string
+        errors: {
+          rateLimited: string
+          unreachable: string
+        }
         intro: string
         invalidCode: string
         invalidEmail: string
@@ -1205,6 +1213,10 @@ export interface TranslationResources {
           tunSubtitle: string
         }
         title: string
+      }
+      startup: {
+        stateInitFailed: string
+        stateInitRetrying: string
       }
       support: {
         audit: {

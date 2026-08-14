@@ -62,6 +62,38 @@ jobs:
           }
           pnpm release:updater-config
 
+      # Mirrors the macOS discipline: Sparkle refuses to build without
+      # apps/macos/release-notes/build<N>.md, because the text a user reads before accepting
+      # an update must be reviewed in git, not typed into a signed feed by hand. Windows had
+      # no equivalent, so tauri-action's placeholder `releaseBody` became the `notes` field
+      # of latest.json, and the update dialog rendered an operator instruction at every user.
+      - name: Require committed release notes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $notesPath = Join-Path $env:GITHUB_WORKSPACE "apps/windows/release-notes/$env:RELEASE_VERSION.md"
+          if (-not (Test-Path -LiteralPath $notesPath -PathType Leaf)) {
+            Write-Output "::error title=Release notes are missing::$notesPath"
+            throw "apps/windows/release-notes/$env:RELEASE_VERSION.md does not exist. Update notes are shown to every user in the update dialog and must be reviewed in git."
+          }
+          # Null-check before Trim(): Get-Content -Raw on an empty file returns $null, and
+          # $null.Trim() under ErrorActionPreference=Stop throws something unrelated to the
+          # actual problem.
+          $notes = Get-Content -LiteralPath $notesPath -Raw
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            throw "apps/windows/release-notes/$env:RELEASE_VERSION.md is empty"
+          }
+          $notes = $notes.Trim()
+          # A heredoc delimiter appearing inside the payload would let the notes file write
+          # arbitrary further variables into the job environment.
+          $delimiter = 'TONO_RELEASE_NOTES_EOF'
+          if ($notes -match [regex]::Escape($delimiter)) {
+            throw "release notes must not contain the literal $delimiter"
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value "RELEASE_NOTES<<$delimiter"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value $notes
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Value $delimiter
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
@@ -153,7 +185,7 @@ jobs:
           args: --config src-tauri/tauri.updater.conf.json
           tagName: v__VERSION__
           releaseName: Tono Windows v__VERSION__
-          releaseBody: After review and publication, run Promote Windows update channel for this exact version.
+          releaseBody: ${{ env.RELEASE_NOTES }}
           releaseDraft: true
           prerelease: false
 
@@ -170,3 +202,22 @@ jobs:
             throw "Expected exactly one NSIS setup executable, found $($installers.Count)"
           }
           pnpm release:preflight --payload-only $installers[0].FullName
+
+      # The draft this job creates reaches no user until the channel is advanced. That used to
+      # be said in the release body, where users read it and operators did not; it belongs in
+      # the run summary instead.
+      - name: Say what still has to happen
+        if: always()
+        shell: pwsh
+        run: |
+          $lines = @(
+            "## Tono Windows v$env:RELEASE_VERSION",
+            "",
+            "A **draft** GitHub Release was created. No user can reach it yet.",
+            "",
+            "1. Review and **publish** the draft release.",
+            "2. Run **Promote Windows update channel** for exactly ``$env:RELEASE_VERSION``.",
+            "",
+            "Until step 2 completes, ``windows-updates/latest.json`` keeps offering the previously promoted version to every installed client."
+          )
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Value ($lines -join "`n")

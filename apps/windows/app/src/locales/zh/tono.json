@@ -89,6 +89,10 @@
       "description": "Tono 恢复了上次连接遗留的防泄漏保护。请先恢复正常网络，再进行登录。",
       "restore": "恢复正常网络",
       "restoring": "正在恢复网络…"
+    },
+    "errors": {
+      "unreachable": "连不上 Tono 服务器。是你的网络切断了连接——不是账号或验证码的问题。登录只需要成功一次:换一个能用的网络登录(手机热点,或先开着别的翻墙工具的 TUN/全局模式),之后就会一直保持登录状态。",
+      "rateLimited": "登录尝试次数过多,请等几分钟再试。"
     }
   },
   "pill": {
@@ -318,5 +322,9 @@
       "tagline": "受保护的云端连接",
       "description": "经认证的 VLESS Reality 路由，配备故障关闭式 Kill Switch"
     }
+  },
+  "startup": {
+    "stateInitRetrying": "Tono 暂时无法打开自己的数据文件夹，正在重试。通常是磁盘已满，或者用户配置文件还没挂载好。原因消失后会自动恢复。",
+    "stateInitFailed": "Tono 无法打开自己的数据文件夹，因此无法启动（{{error}}）。请清出磁盘空间，或确认用户配置文件可用，然后重新启动 Tono。如果这台电脑已经没有网络，说明网络保护可能仍处于开启状态：以管理员身份打开命令提示符，运行 tono-service.exe --emergency-disarm 即可解除。"
   }
 }

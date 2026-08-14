@@ -45,9 +45,24 @@ reports should use redacted examples.
 
 ## Third-party components
 
-- Mihomo is a separately distributed, separately licensed executable; it is
-  staged with SHA-256 verification and (in signed builds) Authenticode
-  verification before every start.
+- Mihomo is a separately distributed, separately licensed executable. It is
+  staged with SHA-256 verification and, in signed builds, Authenticode
+  verification.
+  - Those checks run on the App-driven planning path (`prepare_runtime` and
+    `stage_runtime`, both via `validate_core_path`). They do **not** run on the
+    two paths that keep the core alive without the App: the watchdog respawn and
+    the boot-time desired-state restore both reach `start_core` with a persisted
+    path and spawn it unverified. A binary swapped at that path after the first
+    verified start is therefore relaunched at every boot, and inherits the WFP
+    app-id permit bound to the path.
+  - This is defence in depth rather than a boundary: reaching that state needs
+    write access to `%ProgramFiles%\*\tono` or to the SYSTEM-only state
+    directory, and an adversary with either can equally replace the Service
+    binary that carries the compiled-in pin. It is recorded here because this
+    document previously claimed "before every start", which is not what the code
+    does. Moving the gate into `CoreManager::start_core` is the fix; it needs the
+    unpinned case decided first, since an absent pin is currently a hard refusal
+    and no pin exists in test or standalone environments.
 - The Clash Verge Rev forks provide GUI/service infrastructure; Tono's
   product layer replaces their configuration trust model as documented in
   `docs/product-contract.md`.

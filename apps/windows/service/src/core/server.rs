@@ -937,6 +937,7 @@ fn create_ipc_router() -> Result<Router> {
             );
             match windows_kill_switch::replace_direct_endpoints(
                 &request.payload.direct_endpoints,
+                &request.payload.reviewed_direct_ports,
                 active.generation,
                 request.payload.reload_id,
             )

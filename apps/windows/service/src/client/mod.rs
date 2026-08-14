@@ -343,9 +343,30 @@ async fn connect_with_max_retries(max_retries: Option<usize>) -> Result<IpcHttpC
         },
     )?;
 
+    // Explicitly budgeted, not left to `default_timeout`.
+    //
+    // This handshake is where the connect actually happens: `CreateFileW` on the pipe, the
+    // `ERROR_PIPE_BUSY` retry loop, and `windows_identity::verify_registered_service_process_id`,
+    // which queries the SCM about the process on the other end under its own 3 s fail-closed
+    // deadline. `call_guard` already reserves `CONNECT_PHASE_BUDGET` on top of every route
+    // timeout for exactly this phase — but the request itself fell through to the App's
+    // `IpcConfig::default_timeout`, 150 ms, a value chosen for a startup polling loop. The
+    // reserved head-room could never be spent, so a connect slower than 150 ms failed the
+    // handshake and the route was never sent.
+    //
+    // Mutating verbs get `MUTATING_REQUEST_ATTEMPTS = 1`, so that single miss is the whole
+    // call: kill-switch release, restrict-bootstrap, dns/restore and clash/stop are the
+    // routes that broke first, and they are the ones that must work when the Service is
+    // parked inside a BFE call — which is the exact condition the SCM deadline exists for,
+    // and the condition in which the machine has no network and the UI cannot leave
+    // Protected Offline.
+    //
+    // The ceiling is a backstop, not a wait: the verifier fails closed at 3 s and the
+    // pipe-busy loop caps at 10 x 50 ms, so a real failure still returns in about 3.5 s.
     if let Err(e) = client
         .get(IpcCommand::Magic.as_ref())
         .header(IPC_AUTH_HEADER_KEY, IPC_AUTH_EXPECT)
+        .timeout(CONNECT_PHASE_BUDGET)
         .send()
         .await
     {

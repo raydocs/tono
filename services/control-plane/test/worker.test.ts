@@ -67,9 +67,13 @@ const ACCESS_ADMIN_EMAIL = 'operator@example.com';
 let sequence = 0;
 const tailscaleRequests: string[] = [];
 const emailCodes = new Map<string, string>();
-let liveAgentsPayload: unknown = { data: [] };
-let liveQualityPayload: unknown = { nodes: [] };
-let liveRequestHeaders: { clientId: string | null; clientSecret: string | null } | null = null;
+// `admin-worker.ts` answers these hostnames with a 302 to the console, so a
+// fetch of one can only ever return HTML. Recording instead of stubbing means
+// a reintroduced fallback fails a test rather than silently timing out twice
+// in production.
+const ABSORBED_HOSTS = ['ops.afk.ccwu.cc', 'quality.afk.ccwu.cc'];
+const ADMIN_MONITOR_URL = 'https://admin.afk.ccwu.cc/ops/#/monitor';
+let absorbedHostFetches: string[] = [];
 let oidcPrivateKey: CryptoKey;
 let oidcPublicKey: JsonWebKey & { kid: string };
 
@@ -294,16 +298,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         );
       }
 
-      if (url === 'https://ops.afk.ccwu.cc/api/nodes' && method === 'GET') {
-        liveRequestHeaders = {
-          clientId: request.headers.get('cf-access-client-id'),
-          clientSecret: request.headers.get('cf-access-client-secret'),
-        };
-        return Response.json(liveAgentsPayload);
-      }
-
-      if (url === 'https://quality.afk.ccwu.cc/report.json' && method === 'GET') {
-        return Response.json(liveQualityPayload);
+      if (ABSORBED_HOSTS.includes(new URL(url).hostname)) {
+        absorbedHostFetches.push(`${method} ${url}`);
+        return new Response(null, { status: 302, headers: { location: ADMIN_MONITOR_URL } });
       }
 
       tailscaleRequests.push(`${method} ${url} ${requestBody}`);
@@ -559,70 +556,24 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await unavailable.json() as any).error.code).toBe('ACCESS_UNAVAILABLE');
   });
 
-  it('serves aggregated live node telemetry to Access admins only', async () => {
+  it('reports an empty live state to Access admins without fetching an absorbed host', async () => {
     const unauthorized = await api('ops/live', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
     });
     expect(unauthorized.status).toBe(401);
 
-    liveAgentsPayload = {
-      data: [{
-        name: 'Los Angeles · Marina',
-        os: 'Debian GNU/Linux 11',
-        arch: 'amd64',
-        cpu_name: 'Test CPU',
-        mem_total: 1024,
-        disk_total: 10240,
-        token: 'must-not-leak',
-        ipv4: '203.0.113.10',
-      }],
-    };
-    liveQualityPayload = {
-      updated_at: 1786270932,
-      updated_at_iso: '2026-08-09T10:00:00Z',
-      nodes: [{
-        name: 'Los Angeles · Marina',
-        host: '203.0.113.10',
-        ok: true,
-        quality: 'ok',
-        risk_keywords: [],
-        route_keywords: ['4837'],
-        block: { status: 'OK', label: '正常' },
-        security_check: 'long report not shipped',
-        backtrace: 'long report not shipped',
-      }],
-    };
-
+    // No collector has pushed a snapshot yet in this suite's database.
+    absorbedHostFetches = [];
     const response = await operations('live');
     expect(response.status).toBe(200);
     const { live } = await response.json() as any;
-    expect(live.agents).toHaveLength(1);
-    expect(live.agents[0]).toMatchObject({ name: 'Los Angeles · Marina', arch: 'amd64', memTotal: 1024 });
-    expect(live.agents[0].token).toBeUndefined();
-    expect(live.agents[0].ipv4).toBeUndefined();
-    expect(live.quality.updatedAt).toBe(1786270932);
-    expect(live.quality.nodes[0]).toMatchObject({
-      name: 'Los Angeles · Marina',
-      ok: true,
-      block: { status: 'OK', label: '正常' },
-      securityCheck: 'long report not shipped',
-      backtrace: 'long report not shipped',
-    });
-    expect(live.quality.nodes[0].security_check).toBeUndefined();
-    expect(live.agentsError).toBeNull();
-    expect(live.qualityError).toBeNull();
-
-    // With a service token configured, live sources receive Access credentials.
-    (env as unknown as Env).OPS_ACCESS_CLIENT_ID = 'test-client-id';
-    (env as unknown as Env).OPS_ACCESS_CLIENT_SECRET = 'test-client-secret';
-    const authed = await operations('live');
-    expect(authed.status).toBe(200);
-    expect(liveRequestHeaders).toEqual({ clientId: 'test-client-id', clientSecret: 'test-client-secret' });
-    (env as unknown as Env).OPS_ACCESS_CLIENT_ID = undefined;
-    (env as unknown as Env).OPS_ACCESS_CLIENT_SECRET = undefined;
-
-    liveAgentsPayload = { data: [] };
-    liveQualityPayload = { nodes: [] };
+    expect(live.quality).toBeNull();
+    expect(live.agents).toBeNull();
+    expect(live.qualityError).toBe('no quality snapshot');
+    expect(live.agentsError).toBe('no agent snapshot');
+    // The console showing "no snapshot" is the point: the previous code showed
+    // a JSON parse error here, having fetched its own redirect.
+    expect(absorbedHostFetches).toEqual([]);
   });
 
   it('lets the VPS collector store a live snapshot that ops/live serves without origin fetches', async () => {
@@ -682,8 +633,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(ingested.status).toBe(200);
     expect(await ingested.json()).toMatchObject({ ok: true, qualityNodes: 1, agentCount: 1 });
 
-    liveAgentsPayload = { data: [{ name: 'Must Not Appear', os: 'x' }] };
-    liveQualityPayload = { nodes: [{ name: 'Must Not Appear', ok: false }] };
+    absorbedHostFetches = [];
     const response = await operations('live');
     expect(response.status).toBe(200);
     const { live } = await response.json() as any;
@@ -708,9 +658,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }]);
     expect(live.agentsError).toBeNull();
     expect(live.qualityError).toBeNull();
+    expect(absorbedHostFetches).toEqual([]);
 
-    liveAgentsPayload = { data: [] };
-    liveQualityPayload = { nodes: [] };
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 

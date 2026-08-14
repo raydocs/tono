@@ -397,11 +397,26 @@ pub fn monitor_requires_reconnect(
     health_invalid || (event_invalidated && (core_changed || event_probe_failed))
 }
 
-/// F2: while Connected, the barrier must be wanted, live, and fully
-/// locked; anything else (or no answer) is unhealthy.
+/// F2: while Connected, the barrier must be wanted, live, fully locked, and actually
+/// carrying the tunnel; anything else (or no answer) is unhealthy.
+///
+/// `tunnel_permit_rendered` is here because the other three cannot answer the question. The
+/// Service's own doc on the field says it: a `Locked` session whose permit was retracted —
+/// the core was respawned, or the core instance could not be identified when the lock was
+/// taken — looks exactly like a `Locked` session that is carrying traffic, while every
+/// application's traffic is in fact dropped leaving the TUN, and `wanted`/`verified`/`live`
+/// all keep reporting health. `is_protected_startup_replacement_candidate` and
+/// `mark_verified_committed` already require the field; the continuous leg did not, so the
+/// one state that reads as Connected while nothing gets out was the one it scored healthy.
+///
+/// No version gate is needed: the field arrived in protocol revision 12 and
+/// `MIN_REQUIRED_SERVICE_REVISION` is 12, so every Service this App will pair with sets it.
 pub fn kill_switch_unhealthy(status: Option<&KillSwitchStatus>) -> bool {
     match status {
-        Some(status) => !(status.wanted && status.live && status.mode == KillSwitchStatusMode::Locked),
+        Some(status) => !(status.wanted
+            && status.live
+            && status.mode == KillSwitchStatusMode::Locked
+            && status.tunnel_permit_rendered),
         None => true,
     }
 }
@@ -793,8 +808,8 @@ pub fn map_wfp_engine_error(text: &str) -> Option<String> {
 /// Everything else keeps the original detail for diagnostics.
 pub fn map_service_ready_error(err: &anyhow::Error) -> String {
     let text = format!("{err:#}");
-    if text.contains("service operation already running")
-        || text.contains("previous privileged service operation may still be running")
+    if text.contains(crate::core::runstate::SERVICE_OPERATION_BUSY)
+        || text.contains(crate::core::runstate::PRIVILEGED_OUTCOME_UNCERTAIN)
     {
         return format!(
             "{SERVICE_BUSY_PREFIX}: Tono Service 正在安装/修复中，请检查是否有待授权的管理员提示；若无反应请重启 Tono"
@@ -1285,6 +1300,207 @@ const CONTROL_PLANE_PIN_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60
 /// miss only re-runs WinVerifyTrust when an install actually changes.
 const WECHAT_PATH_REFRESH_INTERVAL: Duration = Duration::from_secs(2 * 60);
 
+/// How often the DIRECT overlay's destinations are sampled while connected.
+///
+/// A sample, not a trace: each distinct `(address, port, protocol)` is recorded once per
+/// session, so the cost is one controller read per minute and a handful of log lines on the
+/// first minute of a session rather than one line per connection.
+const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Upper bound on distinct destinations recorded in one session. WeChat's CDN rotates, so a
+/// long session on a busy account could otherwise write an unbounded number of lines into a
+/// log that is uploaded. Reaching the cap is itself worth knowing — it means the destination
+/// set is wider than a prefix list would comfortably cover — so it is recorded once and
+/// sampling then stops for the session.
+const MAX_DIRECT_SAMPLES: usize = 512;
+
+/// The subset of `/connections` this sampler reads. Deliberately not the full shape: every
+/// field here is one the audit record needs, and anything the controller adds later is
+/// ignored rather than a parse failure.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SampledConnection {
+    #[serde(default)]
+    metadata: SampledMetadata,
+    #[serde(default)]
+    chains: Vec<String>,
+    #[serde(default)]
+    rule: String,
+    #[serde(default, rename = "rulePayload")]
+    rule_payload: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct SampledMetadata {
+    #[serde(default, rename = "destinationIP")]
+    destination_ip: String,
+    #[serde(default)]
+    host: String,
+    #[serde(default, rename = "destinationPort")]
+    destination_port: String,
+    #[serde(default)]
+    network: String,
+    #[serde(default, rename = "processPath")]
+    process_path: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SampledConnections {
+    #[serde(default)]
+    connections: Vec<SampledConnection>,
+}
+
+/// One destination worth recording, already deduplicated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DirectSample {
+    /// The resolved address, when the flow carried one. Empty for a domain-routed flow under
+    /// fake-ip, where the controller reports the name and not an address the prefix set could
+    /// be computed from.
+    address: String,
+    /// The destination name, when the flow carried one.
+    host: String,
+    port: u16,
+    udp: bool,
+    process: String,
+    chain: String,
+    rule: String,
+}
+
+/// Which connections went out the physical interface, and which of those are new this session.
+///
+/// A connection counts as DIRECT when its proxy chain names one of the interface-bound direct
+/// outbounds. The chain is the authority, not the rule: a rule names a *group*, and a group
+/// that failed over is exactly the case where the rule and the actual path disagree — the same
+/// distinction the macOS route classifier had to make.
+fn new_direct_samples(
+    payload: &SampledConnections,
+    seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
+) -> Vec<DirectSample> {
+    let mut fresh = Vec::new();
+    for connection in &payload.connections {
+        let direct = connection.chains.iter().any(|hop| {
+            hop == config::DIRECT_GROUP_NAME || hop == config::WEB_DIRECT_GROUP_NAME
+        });
+        if !direct {
+            continue;
+        }
+        // Both shapes occur and both matter. A raw-IP dial — WeChat's HTTPDNS path, the one
+        // rule H exists for — reports an address and no name. A domain-routed flow under
+        // fake-ip reports the name, and its `destinationIP` is either absent or a fake-ip
+        // placeholder that no prefix set could be computed from. Recording only the address
+        // would therefore miss exactly the traffic this instrumentation is for on half the
+        // flows, so keep whichever the controller gave.
+        let address = connection.metadata.destination_ip.trim();
+        let host = connection.metadata.host.trim();
+        if address.is_empty() && host.is_empty() {
+            continue;
+        }
+        let Ok(port) = connection.metadata.destination_port.trim().parse::<u16>() else {
+            continue;
+        };
+        let udp = connection.metadata.network.eq_ignore_ascii_case("udp");
+        let process = connection
+            .metadata
+            .process_path
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        // The process belongs in the key. Without it, the second process to reach an address
+        // some other process already reached is silently dropped — and "a process that is not
+        // WeChat went direct" is an alarm, not a statistic, so suppressing it is the one
+        // deduplication this must not do.
+        let key = (
+            if address.is_empty() { host.to_owned() } else { address.to_owned() },
+            port,
+            udp,
+        );
+        if !seen.insert((key.0.clone(), key.1, key.2, process.clone())) {
+            continue;
+        }
+        fresh.push(DirectSample {
+            address: address.to_owned(),
+            host: host.to_owned(),
+            port,
+            udp,
+            process,
+            chain: connection.chains.join(" <- "),
+            rule: if connection.rule_payload.is_empty() {
+                connection.rule.clone()
+            } else {
+                format!("{} {}", connection.rule, connection.rule_payload)
+            },
+        });
+    }
+    fresh
+}
+
+/// Read the controller once and record any DIRECT destination not seen this session.
+///
+/// Returns `false` when the caller should stop sampling — a superseded generation, or the cap
+/// reached. Every other failure is swallowed: this is instrumentation, and a controller that
+/// is briefly unreachable must never disturb a working tunnel.
+async fn sample_direct_dials_once(
+    state: &Arc<TonoState>,
+    generation: u64,
+    seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
+) -> bool {
+    if seen.len() >= MAX_DIRECT_SAMPLES {
+        return false;
+    }
+    let (secret, port) = {
+        let inner = state.lock().await;
+        // `connect_generation`, matching the sibling arms of this task. The first version
+        // compared `controller_generation` — a different counter, bumped per controller setup —
+        // which never equalled the connect generation this task was spawned with, so the very
+        // first tick disabled sampling and nothing was ever recorded.
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+            return false;
+        }
+        match inner.controller_secret.clone().zip(inner.controller_port) {
+            Some(pair) => pair,
+            None => return true,
+        }
+    };
+    let Ok(client) = controller_client(Duration::from_secs(2)) else {
+        return true;
+    };
+    let Ok(response) = client
+        .get(controller_url(port, "/connections"))
+        .bearer_auth(secret)
+        .send()
+        .await
+    else {
+        return true;
+    };
+    let Ok(payload) = response.json::<SampledConnections>().await else {
+        return true;
+    };
+    for sample in new_direct_samples(&payload, seen) {
+        state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
+            address: sample.address,
+            host: sample.host,
+            port: sample.port,
+            protocol: if sample.udp { "udp" } else { "tcp" },
+            process: sample.process,
+            chain: sample.chain,
+            rule: sample.rule,
+        });
+    }
+    if seen.len() >= MAX_DIRECT_SAMPLES {
+        state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
+            address: String::new(),
+            host: String::new(),
+            port: 0,
+            protocol: "cap",
+            process: String::new(),
+            chain: String::new(),
+            rule: format!("direct destination sample cap {MAX_DIRECT_SAMPLES} reached"),
+        });
+        return false;
+    }
+    true
+}
+
 async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
     let task_state = Arc::clone(state);
     let task_app = app.clone();
@@ -1294,8 +1510,17 @@ async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle
         let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
+        let mut direct_interval = tokio::time::interval(DIRECT_SAMPLE_INTERVAL);
+        direct_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut direct_seen: std::collections::HashSet<(String, u16, bool, String)> =
+            std::collections::HashSet::new();
+        let mut sampling_direct = true;
         loop {
             tokio::select! {
+                _ = direct_interval.tick(), if sampling_direct => {
+                    sampling_direct =
+                        sample_direct_dials_once(&task_state, generation, &mut direct_seen).await;
+                }
                 _ = pin_interval.tick() => {
                     if !refresh_control_plane_pins_once(&task_state, generation).await {
                         return;
@@ -2018,6 +2243,36 @@ pub async fn schedule_reconnect(state: &Arc<TonoState>, app: &AppHandle) {
     schedule_reconnect_locked(&mut inner, state, app);
 }
 
+/// Run one protected reconnect **now**, for an explicit user action.
+///
+/// Deliberately not [`schedule_reconnect`]: that hands out the next rung of the
+/// 2/5/10/20/30 s ladder and consumes it. "Retry now" aborts the attempt that was
+/// already pending, so going through the ladder replaced an imminent retry with a
+/// longer wait and advanced the ladder as well — every press pushed recovery
+/// further away, and the countdown the user was watching jumped upward. The
+/// safety predicate is unchanged: still only while idle in Protected Offline with
+/// a verified session and no pending catalog choice.
+pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
+    let mut inner = state.lock().await;
+    if !reconnect_allowed(
+        inner.catalog_requires_choice,
+        inner.fsm.status(),
+        inner.fsm.kill_switch_armed(),
+    ) || !inner.fsm.reconnect_permitted_now()
+    {
+        return;
+    }
+    let task_state = state.clone();
+    let task_app = app.clone();
+    let handle =
+        AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO)) as BoxedTask);
+    inner.tasks.reconnect = Some(handle);
+    // The deadline is now, so the UI stops showing a countdown it is no longer
+    // waiting for.
+    inner.next_retry_at_ms = Some(commands::epoch_millis());
+    state.audit().log(AuditEvent::ReconnectScheduled { delay_ms: 0 });
+}
+
 /// Lock-held half of [`schedule_reconnect`]. Spawning and registering are one critical section:
 /// Disconnect/sign-out must never observe an empty task slot and then be followed by a reconnect
 /// handle that escaped their abort.
@@ -2710,7 +2965,13 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
     // its next await; now both are protected on purpose.
     let generation = {
         let mut inner = state.lock().await;
-        if !inner.fsm.status().is_connected {
+        // `is_disconnecting` is redundant now that `begin_disconnect` clears
+        // `is_connected`, and it is written out anyway: this guard is the one
+        // that has to say "not while a release is in flight" out loud, because
+        // the generation captured below is the disconnect's own once one has
+        // started, and the exit guard then compares a value to itself.
+        let status = inner.fsm.status();
+        if !status.is_connected || status.is_disconnecting {
             return;
         }
         inner.fsm.tunnel_died();
@@ -3406,18 +3667,31 @@ const MIHOMO_PROCESS_PATH_REGEX_TYPE: &str = "ProcessPathRegex";
 /// internal child option and intentionally does not appear in `Payload()`.
 fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec<ControllerDirectRuleProof> {
     let mut expected = Vec::new();
+    // Pinned per resolved endpoint, then process-scoped and bounded to the reviewed ports —
+    // mirroring `runtime_value` exactly. A rule the runtime carries and this proof does not
+    // expect fails the graph check and the connect with it, so the two must move together.
+    for (host, address, port) in &plan.tcp_wechat_rules {
+        expected.push(ControllerDirectRuleProof {
+            proxy: config::DIRECT_GROUP_NAME.to_owned(),
+            payload: format!(
+                "((Network,tcp) && (DstPort,{port}) && (Domain,{}) && (IPCIDR,{address}/32))",
+                host.to_ascii_lowercase()
+            ),
+        });
+    }
     if !plan.tcp_wechat_rules.is_empty() {
-        for process in tono_core::config::WECHAT_PROCESS_NAMES {
-            expected.push(ControllerDirectRuleProof {
-                proxy: config::DIRECT_GROUP_NAME.to_owned(),
-                payload: format!("((Network,tcp) && (ProcessName,{process}))"),
-            });
-        }
-        for regex in &plan.wechat_process_path_regexes {
-            expected.push(ControllerDirectRuleProof {
-                proxy: config::DIRECT_GROUP_NAME.to_owned(),
-                payload: format!("((Network,tcp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
-            });
+        for port in &plan.reviewed_direct_ports {
+            // Path regexes only: a `PROCESS-NAME` rule matches any binary with that filename,
+            // which is not an identity worth pairing with an address-free port permit. See the
+            // emitting side in tono-core/src/config.rs.
+            for regex in &plan.wechat_process_path_regexes {
+                expected.push(ControllerDirectRuleProof {
+                    proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                    payload: format!(
+                        "((Network,tcp) && (DstPort,{port}) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"
+                    ),
+                });
+            }
         }
     }
     for (address, port) in &plan.udp_wechat_rules {
@@ -3447,12 +3721,8 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
             ),
         });
     }
-    for (suffix, port) in &plan.web_suffix_rules {
-        expected.push(ControllerDirectRuleProof {
-            proxy: config::WEB_DIRECT_GROUP_NAME.to_owned(),
-            payload: format!("((Network,tcp) && (DstPort,{port}) && (DomainSuffix,{suffix}))"),
-        });
-    }
+    // Suffix rules are no longer emitted: they can never carry a WFP permit. Kept out of
+    // the proof so a runtime that still had them would fail this check rather than pass it.
     expected
 }
 
@@ -3465,6 +3735,9 @@ struct PendingDirectCommit {
     session: OwnerSessionProof,
     reload_id: u64,
     endpoints: Vec<ProxyEndpoint>,
+    /// Declared to the Service so it renders the reviewed-port permit for exactly the ports
+    /// this plan emitted process-scoped rules on — empty when it emitted none.
+    reviewed_direct_ports: Vec<u16>,
     endpoint_digest: String,
     core_identity: ServiceCoreIdentity,
     controller_secret: String,
@@ -3576,6 +3849,18 @@ async fn apply_cloud_policy(
         return Ok(None);
     }
     let expected_controller_rules = expected_controller_direct_rules(&plan);
+    // Declared to the Service exactly when `runtime_value` emits process-scoped rules, and with
+    // the same condition it uses. A pin existing is not the same as process routing existing:
+    // `direct_endpoints` is the union of the WeChat, web and media pins and the Service cannot
+    // tell them apart, so left to infer it would widen the boundary for a web-only or
+    // media-only policy that routes nothing there.
+    let reviewed_direct_ports = if plan.tcp_wechat_rules.is_empty()
+        || plan.wechat_process_path_regexes.is_empty()
+    {
+        Vec::new()
+    } else {
+        plan.reviewed_direct_ports.clone()
+    };
     let direct_interface = plan.physical_interface.clone();
 
     // Build the staged bundle before the irreversible bracket. The controller secret and ports
@@ -3665,6 +3950,7 @@ async fn apply_cloud_policy(
         original_secret.to_owned(),
         controller_port,
         expected_controller_rules,
+        reviewed_direct_ports,
         direct_interface,
         !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
         !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty(),
@@ -4133,6 +4419,10 @@ async fn activate_direct_runtime_cancellation_safe(
     controller_secret: String,
     controller_port: u16,
     expected_controller_rules: Vec<ControllerDirectRuleProof>,
+    // Ports the Service should render the reviewed-port permit for. Non-empty only when this
+    // plan emitted process-scoped rules, so the permit and the routing are one surface rather
+    // than the Service inferring one from whichever pins happen to exist.
+    reviewed_direct_ports: Vec<u16>,
     direct_interface: String,
     require_wechat_direct: bool,
     require_web_direct: bool,
@@ -4266,6 +4556,7 @@ async fn activate_direct_runtime_cancellation_safe(
                 session,
                 reload_id,
                 endpoints,
+                reviewed_direct_ports,
                 endpoint_digest,
                 core_identity,
                 controller_secret,
@@ -4328,7 +4619,12 @@ async fn commit_direct_policy_cancellation_safe(
             prove_service_endpoint_digest(&kill_before, &empty_digest).map_err(StageFailure::error)?;
 
             let committed =
-                service::tono_replace_direct_endpoints(&pending.session, pending.reload_id, pending.endpoints.clone())
+                service::tono_replace_direct_endpoints(
+                    &pending.session,
+                    pending.reload_id,
+                    pending.endpoints.clone(),
+                    pending.reviewed_direct_ports.clone(),
+                )
                     .await
                     .map_err(StageFailure::error)?;
             validate_direct_reload_result(
@@ -4753,6 +5049,11 @@ pub fn build_direct_plan(
         web_suffix_rules,
         udp_wechat_rules: udp,
         wechat_process_path_regexes,
+        // Straight from the Service crate, not a second copy of the numbers: the rules emitted
+        // from this plan and the WFP permit the Service renders are then the same surface by
+        // construction. That is the whole reason the constant lives in
+        // `clash_verge_service_ipc` rather than once in each crate that needs it.
+        reviewed_direct_ports: clash_verge_service_ipc::REVIEWED_DIRECT_PORTS.to_vec(),
     };
     Ok((plan, endpoints))
 }
@@ -5039,7 +5340,7 @@ async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
 mod tests {
     use super::{
         BFE_NOT_RUNNING_PREFIX, CATALOG_NOT_READY_REJECTION, CLOUD_POLICY_RESOLUTION_TIMEOUT, CONNECT_BUDGET_LEGS,
-        classify_bfe_state, wechat_paths_changed,
+        SampledConnections, classify_bfe_state, new_direct_samples, wechat_paths_changed,
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
@@ -6020,8 +6321,8 @@ mod tests {
     #[test]
     fn service_busy_maps_to_a_stable_prefixed_message() {
         for detail in [
-            "service operation already running",
-            "the previous privileged service operation may still be running; restart Tono before retrying",
+            crate::core::runstate::SERVICE_OPERATION_BUSY,
+            crate::core::runstate::PRIVILEGED_OUTCOME_UNCERTAIN,
         ] {
             let busy = anyhow::anyhow!(detail);
             let mapped = map_service_ready_error(&busy);
@@ -6121,6 +6422,17 @@ mod tests {
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
         }
+
+        // The state the other three fields cannot distinguish: locked, wanted, live, and
+        // dropping every packet that leaves the TUN.
+        let orphaned_permit = KillSwitchStatus {
+            tunnel_permit_rendered: false,
+            ..healthy.clone()
+        };
+        assert!(
+            kill_switch_unhealthy(Some(&orphaned_permit)),
+            "a Locked session whose tunnel permit was retracted is not a healthy tunnel"
+        );
     }
 
     #[test]
@@ -6855,20 +7167,27 @@ mod tests {
                 .all(|(_ip, port)| [443, 8000].contains(port))
         );
         let controller_rules = expected_controller_direct_rules(&plan);
-        // WeChat TCP collapses to one process-scoped row per client process; UDP and
-        // web rows stay per-endpoint.
-        let wechat_tcp_rows = if plan.tcp_wechat_rules.is_empty() {
+        // One row per *permitted* endpoint. WeChat TCP is per-pin rather than
+        // process-scoped, and suffix rules are not emitted at all, because
+        // `wfp_model::session_rules` can only permit an exact (address, port) tuple —
+        // anything else is routed out the physical interface and then dropped by the
+        // block-all floor.
+        let process_rows = if plan.tcp_wechat_rules.is_empty() {
             0
         } else {
-            tono_core::config::WECHAT_PROCESS_NAMES.len()
+            plan.reviewed_direct_ports.len() * plan.wechat_process_path_regexes.len()
         };
         assert_eq!(
             controller_rules.len(),
-            wechat_tcp_rows
+            plan.tcp_wechat_rules.len()
+                + process_rows
                 + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
-                + plan.tcp_web_rules.len()
-                + plan.web_suffix_rules.len(),
+                + plan.tcp_web_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"
+        );
+        assert!(
+            !plan.web_suffix_rules.is_empty(),
+            "fixture must still carry suffixes, so the assertion above proves they are dropped"
         );
         assert!(
             controller_rules
@@ -6905,17 +7224,224 @@ mod tests {
         .unwrap();
         assert_eq!(plan.wechat_process_path_regexes, vec![prefix.clone()]);
         let controller = expected_controller_direct_rules(&plan);
+        // The reviewed regex is retained on the plan — it still governs UDP media, and
+        // reinstating TCP process scope is one block in `runtime_value` once WFP grows an
+        // app-scoped port permit — but it must not produce a TCP row today: that row would
+        // route every WeChat flow out the physical interface, where only the pins below
+        // have a permit and the rest is dropped.
         assert!(
-            controller
-                .iter()
-                .any(|rule| {
-                    rule.payload
-                        == format!(
-                            "((Network,tcp) && ({},{prefix}))",
-                            super::MIHOMO_PROCESS_PATH_REGEX_TYPE
-                        )
-                })
+            !controller.iter().any(|rule| {
+                rule.payload
+                    == format!(
+                        "((Network,tcp) && ({},{prefix}))",
+                        super::MIHOMO_PROCESS_PATH_REGEX_TYPE
+                    )
+            }),
+            "a TCP path-regex row routes flows the WFP permit set cannot cover"
         );
+        assert!(controller.iter().any(|rule| {
+            rule.payload == "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (IPCIDR,9.0.0.10/32))"
+        }));
+    }
+
+    /// The invariant the two halves of the DIRECT overlay must satisfy, and did not.
+    ///
+    /// A rule sends a flow out the physical interface; `wfp_model::session_rules` decides
+    /// whether that flow is allowed to leave. The only session permit that can cover it is
+    /// class G, one filter per `direct_endpoints` entry, matching an exact remote address
+    /// and port — there is no port-scoped, address-free permit for the core, and class A's
+    /// comment forbids adding one at the transport layer. So any rule that does not pin an
+    /// address is routing traffic straight into the `session/block-all` floor.
+    ///
+    /// This is what a process-name rule and a bare domain-suffix rule both did. Nothing
+    /// failed when they were added, because the routing surface lives in tono-core and the
+    /// permit surface lives in the Service.
+    fn sampled(payload: &str) -> SampledConnections {
+        serde_json::from_str(payload).expect("controller payload")
+    }
+
+    /// What the sampler must and must not record.
+    ///
+    /// The chain decides, not the rule: a rule names a *group*, and a group that failed over
+    /// to the exit is exactly the case where the two disagree. Recording by rule would count a
+    /// flow as direct that went through the tunnel, and the prefix set computed from it would
+    /// be wrong in the direction that matters — too wide.
+    #[test]
+    fn direct_samples_follow_the_chain_and_never_repeat() {
+        let payload = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"43.175.230.151","destinationPort":"443","network":"tcp",
+                "processPath":"C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"},
+               "chains":["Tono-China-Direct","Tono-China-App"],
+               "rule":"AND","rulePayload":"((Network,tcp) && (ProcessName,WeChat.exe))"},
+              {"metadata":{"destinationIP":"43.146.27.18","destinationPort":"8000","network":"udp",
+                "processPath":"C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"},
+               "chains":["Tono-China-Direct"],"rule":"AND","rulePayload":""},
+              {"metadata":{"destinationIP":"142.250.4.100","destinationPort":"443","network":"tcp",
+                "processPath":"C:\\Program Files\\Google\\Chrome\\chrome.exe"},
+               "chains":["US-VLESS-Reality","Tono-Exit"],"rule":"MATCH","rulePayload":""},
+              {"metadata":{"destinationIP":"","destinationPort":"443","network":"tcp",
+                "processPath":"x.exe"},"chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        let mut seen = std::collections::HashSet::new();
+        let first = new_direct_samples(&payload, &mut seen);
+
+        assert_eq!(first.len(), 2, "only the two chains naming a direct outbound");
+        assert_eq!(first[0].address, "43.175.230.151");
+        assert_eq!(first[0].port, 443);
+        assert!(!first[0].udp);
+        assert_eq!(first[0].process, "WeChat.exe", "basename only, never the full path");
+        assert!(first[0].rule.contains("ProcessName"));
+        assert!(first[1].udp, "network=udp must survive into the record");
+
+        // Tunnelled traffic is not a direct dial, however busy it is.
+        assert!(!first.iter().any(|sample| sample.address == "142.250.4.100"));
+        // A row with no destination is dropped rather than recorded as an empty address.
+        assert_eq!(first.len(), 2);
+
+        // The same connections on the next tick add nothing: this is a per-session set, not a
+        // per-tick trace, which is what keeps an uploaded log bounded.
+        assert!(new_direct_samples(&payload, &mut seen).is_empty());
+
+        // A second process reaching an address the first already used must still be recorded:
+        // "something that is not WeChat went direct" is the alarm this whole record exists for.
+        let other_process = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"43.175.230.151","destinationPort":"443","network":"tcp",
+                "processPath":"C:\\Windows\\Temp\\evil.exe"},
+               "chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        let flagged = new_direct_samples(&other_process, &mut seen);
+        assert_eq!(flagged.len(), 1, "a different process on a seen address is not a duplicate");
+        assert_eq!(flagged[0].process, "evil.exe");
+
+        // A domain-routed flow under fake-ip carries a name and no usable address. Recording
+        // only addresses would miss half the traffic rule H newly permits.
+        let by_name = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"","destinationPort":"443","network":"tcp",
+                "host":"res.wx.qq.com","processPath":"WeChat.exe"},
+               "chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        let named = new_direct_samples(&by_name, &mut seen);
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].host, "res.wx.qq.com");
+        assert!(named[0].address.is_empty());
+
+        // A new port on an address already seen is a new destination.
+        let more = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"43.175.230.151","destinationPort":"80","network":"tcp",
+                "processPath":"WeChat.exe"},"chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        assert_eq!(new_direct_samples(&more, &mut seen).len(), 1);
+    }
+
+    /// The web direct outbound counts too — it is the same physical-interface escape, and the
+    /// suffix routes that ride it are the other half of what a prefix list has to cover.
+    #[test]
+    fn direct_samples_include_the_web_direct_outbound() {
+        let payload = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"203.0.113.7","destinationPort":"443","network":"tcp",
+                "processPath":"chrome.exe"},
+               "chains":["Tono-China-Web-Direct"],"rule":"AND","rulePayload":"(DomainSuffix,baidu.com)"}
+            ]}"#,
+        );
+        let mut seen = std::collections::HashSet::new();
+        let samples = new_direct_samples(&payload, &mut seen);
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].chain, "Tono-China-Web-Direct");
+    }
+
+    #[test]
+    fn every_direct_rule_pins_an_endpoint_the_kill_switch_can_permit() {
+        let node = node();
+        let wechat = vec![(
+            "wxs.qq.com".to_string(),
+            vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
+            vec![80, 443],
+        )];
+        let web = vec![(
+            "www.bilibili.com".to_string(),
+            vec![std::net::Ipv4Addr::new(9, 0, 0, 30)],
+            vec![443],
+        )];
+        let suffixes = vec![tono_core::policy::PolicyDomain {
+            host: "baidu.com".to_string(),
+            ports: vec![80, 443],
+        }];
+        let (plan, endpoints) = build_direct_plan(
+            "Ethernet 2".to_string(),
+            &wechat,
+            &web,
+            &[],
+            &suffixes,
+            &node,
+            vec![
+                tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
+                    .expect("reviewed prefix"),
+            ],
+        )
+        .expect("plan");
+
+        let permitted: std::collections::BTreeSet<String> = endpoints
+            .iter()
+            .map(|endpoint| format!("{}/32", endpoint.ip))
+            .collect();
+        assert!(!permitted.is_empty(), "fixture must produce permits");
+
+        // Two ways a rule can be covered, and every rule must be covered by one of them:
+        //   - it pins an address that `direct_endpoints` permits exactly (rule G), or
+        //   - its port is one the reviewed-port class permits for the staged core (rule H).
+        // A rule covered by neither routes a flow to the physical interface that the
+        // block-all floor then drops — the silent hang this whole class exists to end.
+        for rule in expected_controller_direct_rules(&plan) {
+            let port = rule
+                .payload
+                .split("(DstPort,")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next())
+                .and_then(|value| value.parse::<u16>().ok());
+            let covered_by_port = port
+                .is_some_and(|port| clash_verge_service_ipc::REVIEWED_DIRECT_PORTS.contains(&port));
+            let pin = rule
+                .payload
+                .split("(IPCIDR,")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next());
+            match pin {
+                Some(pin) => assert!(
+                    permitted.contains(pin) || covered_by_port,
+                    "DIRECT rule pins {pin}, which is neither in the WFP permit set nor on a \
+                     reviewed port: {}",
+                    rule.payload
+                ),
+                None => assert!(
+                    covered_by_port,
+                    "DIRECT rule with no address pin and no reviewed port would be dropped by \
+                     the kill switch: {}",
+                    rule.payload
+                ),
+            }
+        }
+
+        // The port constraint is what makes the second arm safe, so prove it is really there:
+        // an unconstrained process rule would route every port WeChat opens to the physical
+        // interface, where only the reviewed four have a permit.
+        for rule in expected_controller_direct_rules(&plan) {
+            if rule.payload.contains("ProcessName") || rule.payload.contains("ProcessPathRegex") {
+                assert!(
+                    rule.payload.contains("(DstPort,"),
+                    "a process-scoped DIRECT rule must name a port: {}",
+                    rule.payload
+                );
+            }
+        }
     }
 
     #[test]

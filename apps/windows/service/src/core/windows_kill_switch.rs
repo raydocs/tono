@@ -120,6 +120,10 @@ struct Armed {
     /// re-lock re-render them without another round trip. Every restore path rebuilds with an
     /// empty set (fail-closed until the app's next connect transaction re-issues them).
     direct_endpoints: Vec<ProxyEndpoint>,
+    /// Ports the App declared it emitted process-scoped DIRECT rules for, already intersected
+    /// with `REVIEWED_DIRECT_PORTS`. Same lifetime as `direct_endpoints`: memory only, cleared
+    /// on omission, never restored.
+    reviewed_direct_ports: Vec<u16>,
     /// Volatile Service-owned reload bracket. Pending physical permits expire without relying on
     /// the GUI process to remain alive; committed permits keep only an idempotency receipt.
     direct_reload: Option<DirectReloadLease>,
@@ -410,6 +414,8 @@ fn ensure_supported() -> Result<()> {
     }
 }
 
+const MAX_PROXY_ENDPOINTS: usize = 256;
+
 fn validate_config(config: &KillSwitchConfig) -> Result<()> {
     if config.tunnel_interface.trim().is_empty() {
         bail!("enabled kill switch requires tunnel_interface");
@@ -419,6 +425,16 @@ fn validate_config(config: &KillSwitchConfig) -> Result<()> {
     }
     if config.proxy_endpoints.is_empty() {
         bail!("enabled kill switch requires at least one proxy endpoint");
+    }
+    // Bounded like every other list that feeds the same WFP install (`direct_endpoints`
+    // below, API hosts in `wfp_model::sanitize_api_host_ips`, `proxyEndpoints` in the Mac
+    // helper). Each entry becomes one ALE filter in a single transaction, and the intent is
+    // persisted before that transaction runs, so an unbounded list arms the machine
+    // fail-closed with an install that cannot finish and is replayed at every service start.
+    // A session carries the selected node plus at most the home route; 256 is the sibling
+    // bound and the Mac ceiling (8 hosts x 32 pinned addresses) alike.
+    if config.proxy_endpoints.len() > MAX_PROXY_ENDPOINTS {
+        bail!("proxy_endpoints exceeds the {MAX_PROXY_ENDPOINTS}-entry bound");
     }
     for endpoint in &config.proxy_endpoints {
         if wfp_model::parse_endpoint(endpoint).is_none() {
@@ -533,6 +549,13 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
         direct_endpoints: if armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some()
         {
             armed.direct_endpoints.clone()
+        } else {
+            Vec::new()
+        },
+        reviewed_direct_ports: if armed.intent.mode == KillSwitchStatusMode::Locked
+            && tun_luid.is_some()
+        {
+            armed.reviewed_direct_ports.clone()
         } else {
             Vec::new()
         },
@@ -1093,6 +1116,7 @@ pub(crate) async fn arm_bootstrap(
         core_instance: None,
         // In memory only — populated exclusively by the lease-backed reload transaction.
         direct_endpoints: Vec::new(),
+        reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
@@ -1294,6 +1318,7 @@ async fn lock_unlocked(tunnel_interface: Option<&str>) -> Result<()> {
     .is_some()
     {
         armed.direct_endpoints.clear();
+        armed.reviewed_direct_ports.clear();
         armed.direct_reload = None;
     }
 
@@ -1507,6 +1532,7 @@ pub(crate) async fn begin_direct_runtime_reload(
 /// the permits and moves the machine to exact Blocked.
 pub(crate) async fn replace_direct_endpoints(
     endpoints: &[ProxyEndpoint],
+    reviewed_ports: &[u16],
     owner_generation: u64,
     reload_id: u64,
 ) -> Result<crate::DirectRuntimeReloadResult> {
@@ -1608,6 +1634,15 @@ pub(crate) async fn replace_direct_endpoints(
 
     let mut candidate = previous.clone();
     candidate.direct_endpoints = canonical.clone();
+    // The App proposes; this keeps only what the Service itself sanctions, so a client asking
+    // for port 22 gets nothing rather than an argument.
+    candidate.reviewed_direct_ports = reviewed_ports
+        .iter()
+        .copied()
+        .filter(|port| crate::REVIEWED_DIRECT_PORTS.contains(port))
+        .collect();
+    candidate.reviewed_direct_ports.sort_unstable();
+    candidate.reviewed_direct_ports.dedup();
     let tunnel_luid = previous
         .tun_luid
         .context("locked DIRECT replacement lost its tunnel LUID")?;
@@ -2043,6 +2078,7 @@ fn emergency_armed() -> Armed {
         tun_luid: None,
         core_instance: None,
         direct_endpoints: Vec::new(),
+        reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     }
 }
@@ -2079,6 +2115,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                         tun_luid: None,
                         core_instance: None,
                         direct_endpoints: Vec::new(),
+                        reviewed_direct_ports: Vec::new(),
                         direct_reload: None,
                     };
                     armed.intent.mode = KillSwitchStatusMode::Blocked;
@@ -2108,6 +2145,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     // recovered session stays fail-closed for them until the app's next
                     // connect transaction re-issues the approved tuples.
                     direct_endpoints: Vec::new(),
+                    reviewed_direct_ports: Vec::new(),
                     direct_reload: None,
                 };
                 // A persisted Locked mode is not proof this boot's tunnel exists: downgrade to
@@ -4005,6 +4043,7 @@ mod tests {
             tun_luid: None,
             core_instance: None,
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         });
         authorize_write_for("owner-bob")?;
@@ -4057,6 +4096,7 @@ mod tests {
                 port: 443,
                 protocol: ProxyProtocol::Tcp,
             }],
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
 
@@ -4133,6 +4173,7 @@ mod tests {
                 generation: 0,
             }),
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
         let a = ProxyEndpoint {
@@ -4201,7 +4242,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).map_err(anyhow::Error::msg)?;
-        replace_direct_endpoints(&endpoints, owner_generation, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, owner_generation, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, owner_generation, begin.reload_id).await?;
         Ok((core, digest))
     }
@@ -4381,7 +4422,7 @@ mod tests {
         let digest = crate::direct_endpoint_digest(&endpoints).map_err(anyhow::Error::msg)?;
 
         let failures = SimulatedStateFailures::arm_ambiguous_install();
-        let error = replace_direct_endpoints(&endpoints, 76, begin.reload_id)
+        let error = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 76, begin.reload_id)
             .await
             .expect_err("commit-before-verify must be treated as a possibly-live candidate");
         assert!(
@@ -4429,6 +4470,7 @@ mod tests {
 
         let error = replace_direct_endpoints(
             &test_config_with_direct().direct_endpoints,
+            &crate::REVIEWED_DIRECT_PORTS,
             77,
             first.reload_id,
         )
@@ -4461,7 +4503,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let expected_digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        let replaced = replace_direct_endpoints(&endpoints, 91, begin.reload_id).await?;
+        let replaced = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 91, begin.reload_id).await?;
         assert_eq!(replaced.reload_id, begin.reload_id);
         assert_eq!(replaced.endpoint_digest, expected_digest);
 
@@ -4470,7 +4512,7 @@ mod tests {
             .and_then(|armed| armed.direct_reload.as_ref())
             .and_then(|lease| lease.expires_at)
             .expect("pending lease has a deadline");
-        let replay = replace_direct_endpoints(&endpoints, 91, begin.reload_id).await?;
+        let replay = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 91, begin.reload_id).await?;
         assert_eq!(replay, replaced);
         let replayed_lease = armed_guard()
             .as_ref()
@@ -4531,7 +4573,7 @@ mod tests {
         let begin = begin_direct_runtime_reload(123).await?;
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
-        replace_direct_endpoints(&endpoints, 123, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 123, begin.reload_id).await?;
 
         {
             let mut guard = armed_guard();
@@ -4575,7 +4617,7 @@ mod tests {
         let begin = begin_direct_runtime_reload(144).await?;
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
-        replace_direct_endpoints(&endpoints, 144, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 144, begin.reload_id).await?;
 
         let error = finalize_direct_runtime_reload(&"0".repeat(64), 144, begin.reload_id)
             .await
@@ -4598,7 +4640,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 145, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 145, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 145, begin.reload_id).await?;
         let first_deadline = armed_guard()
             .as_ref()
@@ -4634,7 +4676,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 146, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 146, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 146, begin.reload_id).await?;
 
         renew_direct_runtime_reload(&"0".repeat(64), 146, begin.reload_id)
@@ -4657,7 +4699,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 147, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 147, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 147, begin.reload_id).await?;
 
         let committed = armed_guard().clone().expect("committed state");
@@ -4700,11 +4742,11 @@ mod tests {
         let begin = begin_direct_runtime_reload(155).await?;
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
-        replace_direct_endpoints(&endpoints, 155, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 155, begin.reload_id).await?;
         crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 8)))
             .await;
 
-        let error = replace_direct_endpoints(&endpoints, 155, begin.reload_id)
+        let error = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 155, begin.reload_id)
             .await
             .expect_err("a recycled PID with a new restart count is a different Core");
         assert!(format!("{error:#}").contains("locked tunnel grant"));
@@ -4725,7 +4767,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 166, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 166, begin.reload_id).await?;
 
         // The test engine resolves the live alias to LUID 0. Changing only the recorded LUID
         // models same-PID Mihomo recreating WinTUN between replacement and finalize.
@@ -4808,6 +4850,7 @@ mod tests {
                 tun_luid: Some(0x7777),
                 core_instance: recorded,
                 direct_endpoints: Vec::new(),
+                reviewed_direct_ports: Vec::new(),
                 direct_reload: None,
             };
             // This is exactly what `lock` now does: `armed.core_instance` and the render's
@@ -4828,6 +4871,7 @@ mod tests {
             tun_luid: Some(0x7777),
             core_instance: None,
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
         assert_eq!(rule_config_for(&stale, Some(running)).tun_luid, None);
@@ -4852,6 +4896,7 @@ mod tests {
             tun_luid: Some(0x99),
             core_instance: Some(running),
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
 
@@ -5074,6 +5119,40 @@ mod tests {
         Ok(())
     }
 
+    /// `proxy_endpoints` is the list every ALE session filter is emitted from, and the
+    /// intent carrying it is persisted with `wanted: true` *before* the WFP transaction
+    /// runs. An unbounded list therefore arms the machine fail-closed with an install too
+    /// large to finish, replayed at every service start. Every sibling list is bounded;
+    /// this one must be too.
+    #[test]
+    fn proxy_endpoints_are_bounded_like_every_sibling_list() {
+        let mut config = test_config();
+        config.proxy_endpoints = (0..MAX_PROXY_ENDPOINTS as u32)
+            .map(|index| ProxyEndpoint {
+                ip: format!("198.51.{}.{}", index / 256, index % 256),
+                port: 443,
+                protocol: ProxyProtocol::Tcp,
+            })
+            .collect();
+        validate_config(&config).expect("the bound itself must still be accepted");
+
+        config.proxy_endpoints.push(ProxyEndpoint {
+            ip: "198.51.101.1".to_owned(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        });
+        let err = validate_config(&config)
+            .expect_err("accepted an unbounded proxy_endpoints list")
+            .to_string();
+        assert!(
+            err.contains("proxy_endpoints"),
+            "the refusal must name the list that was too long, got {err}"
+        );
+
+        // A real session carries the selected node plus at most the home route.
+        assert!(validate_config(&test_config()).is_ok());
+    }
+
     /// The S1 residual risk in miniature: a WFP call that never returns must produce a
     /// mappable error, and the abandoned blocking thread must keep the single-writer claim
     /// until the kernel call really comes back. The FFI is mock-gated off Windows, so the
@@ -5151,7 +5230,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 199, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 199, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 199, begin.reload_id).await?;
         assert_eq!(
             ARMED
@@ -5165,12 +5244,18 @@ mod tests {
         );
 
         let armed = armed_guard().clone().expect("still armed");
+        // Two exact-tuple permits (rule G), plus the reviewed-port class (rule H): one filter
+        // per port per protocol per address family. Derived from the constant rather than
+        // written as a literal, so adding a reviewed port cannot quietly change the count.
+        // One filter per declared port, TCP only — the UDP half was withdrawn because nothing
+        // routes unpinned UDP to the physical interface for it to cover.
+        let reviewed = crate::REVIEWED_DIRECT_PORTS.len();
         assert_eq!(
             wfp_model::expected_filters(&render(&armed).await)
                 .iter()
                 .filter(|filter| filter.name.contains("DIRECT"))
                 .count(),
-            2,
+            2 + reviewed,
             "each approved tuple must be one ALE permit carrying both Mihomo identity and the exact tuple"
         );
         let persisted = tokio::fs::read_to_string(intent_path()).await?;

@@ -336,8 +336,11 @@ fn main() -> anyhow::Result<()> {
             eprintln!(
                 "Cleanup could not prove this machine was made safe. The service registration \
                  was deleted whenever a service handle was available, and the recovery state \
-                 files were preserved; reboot once to clear any residual network barrier: \
-                 {error:#}"
+                 files were preserved. Do NOT rely on a reboot: the floor's two condition-free \
+                 block filters are the only persistent ones, while the loopback, DHCP and NDP \
+                 permits beside them are not, so restarting removes the exceptions and keeps \
+                 the block. Run the elevated Start-Menu shortcut \"Tono — 恢复网络 (Restore \
+                 Network)\", or run this uninstaller again, before restarting: {error:#}"
             );
             std::process::exit(code);
         }
@@ -574,15 +577,21 @@ fn windows_cleanup() -> CleanupOutcome {
                             ))
                         }
                         _ => {
-                            // The barrier could not be proven gone. Tono's WFP objects are
-                            // dynamic and cleared on reboot, so deleting the service and asking
-                            // for one reboot is the safe fallback; what must never survive is an
-                            // orphaned auto-start service registration.
+                            // The barrier could not be proven gone. A reboot does NOT clear it:
+                            // `only_floor_blocks_are_persistent` pins that exactly two filters
+                            // are persistent and that both are the condition-free block, so a
+                            // restart drops the loopback, DHCP and NDP permits and keeps the
+                            // block. The registration is still deleted — an orphaned auto-start
+                            // service registration is the one leftover nothing else clears — but
+                            // the user must be pointed at the elevated disarm, not at a restart.
                             eprintln!(
                                 "Disarm could not prove the network barrier was removed ({error:#}); \
                                  the service registration will still be deleted so no orphaned \
                                  auto-start service remains, and the state files are preserved for \
-                                 recovery. Reboot once to clear any residual network barrier."
+                                 recovery. A reboot will NOT clear the barrier — only the \
+                                 condition-free block filters are persistent, and the permits \
+                                 beside them are not — so use the elevated Restore Network \
+                                 shortcut or run this uninstaller again first."
                             );
                             if blocking_error.is_none() {
                                 blocking_error = Some(error);
@@ -600,9 +609,10 @@ fn windows_cleanup() -> CleanupOutcome {
     }
 
     // The service registration is deleted whenever the handle is in hand, even when the disarm
-    // or the stop could not be proven: an unproven barrier is cleared by one reboot (Tono's WFP
-    // objects are dynamic), while an orphaned auto-start service with no binary on disk is not
-    // cleared by anything. A delete/poll/binary failure stays cosmetic: both continue, and the
+    // or the stop could not be proven: an orphaned auto-start service with no binary on disk is
+    // not cleared by anything, and the elevated Restore Network shortcut in the install
+    // directory remains the escape for an unproven barrier. Note that a reboot is not that
+    // escape — the persistent floor blocks survive it and the permits do not. A delete/poll/binary failure stays cosmetic: both continue, and the
     // leftovers are the thing a future install has to act on. `final_cleanup_outcome` gives the
     // blocking error precedence so an unproven-safe machine never reads as a mere cosmetic miss.
     let mut cosmetic_error: Option<Error> = None;
@@ -703,6 +713,16 @@ fn remove_windows_service_binary() -> Result<(), Error> {
         "core-sha256.txt.tmp",
         "control-plane-pins.json",
         "control-plane-pins.json.tmp",
+        // Update scratch. A coordinated replacement that fails past the publish point can
+        // leave these behind deliberately, and `ensure_update_scratch_absent` then refuses
+        // every subsequent `--replace-runtime` upgrade before it does any other work. If the
+        // uninstall does not sweep them, uninstalling is not a way out either: the fresh
+        // install that follows runs in ServiceOnly mode and skips the guard, so the dead end
+        // only reappears at the next upgrade. The suffixes mirror install_service.rs:686-692.
+        "tono-service.exe.next",
+        "tono-service.exe.rollback",
+        "tono-service.exe.restore",
+        "tono-service.exe.publish",
     ] {
         let leftover = install_dir.join(name);
         if leftover.try_exists().unwrap_or(true) {

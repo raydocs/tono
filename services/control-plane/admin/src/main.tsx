@@ -1707,6 +1707,10 @@ function MonitorPage() {
     const keyOf = (node: LiveQualityNodeDto) => node.publicIp || node.host || node.name;
     const routeChips = (node: LiveQualityNodeDto) =>
       node.routeKeywords.filter((keyword) => !['联通', '电信', '移动'].includes(keyword)).slice(0, 4);
+    // A listed exit is the failure customers report as "everything asks me for a
+    // captcha", and it is invisible from latency or reachability — the node
+    // answers probes perfectly while being useless for real browsing.
+    const riskChips = (node: LiveQualityNodeDto) => node.riskKeywords.slice(0, 4);
     return <div className="stack">
       {(live.agentsError || live.qualityError) && (
         <Banner
@@ -1741,7 +1745,7 @@ function MonitorPage() {
         <article className={`metric${poor.length ? ' metric-warn' : ''}`}>
           <div className="metric-label"><span>质量差</span></div>
           <div className="metric-value">{poor.length}</div>
-          <div className="metric-hint">仅严重风险才标</div>
+          <div className="metric-hint">{poor.length ? poor.map((n) => n.name).join('、') : '仅严重风险才标'}</div>
         </article>
       </div>
 
@@ -1839,6 +1843,9 @@ function MonitorPage() {
                     </td>
                     <td>
                       <div className="chip-list">
+                        {riskChips(node).map((keyword) => (
+                          <span className="chip chip-risk" key={`risk-${keyword}`}>{keyword}</span>
+                        ))}
                         {routeChips(node).map((keyword) => (
                           <span className={`chip${/9929|CMIN2|CN2|GIA/.test(keyword) ? ' chip-hot' : ''}`} key={keyword}>{keyword}</span>
                         ))}

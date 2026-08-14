@@ -45,10 +45,6 @@ pub const FIRST_DELAY: Duration = Duration::from_secs(90);
 /// this lands far below the server's 2 MiB compressed cap; `gzip_within_limit`
 /// is the check for the exception rather than the assumption.
 const READ_CHUNK_BYTES: usize = 4 * 1024 * 1024;
-/// Enough unsent bytes to keep sweeping instead of waiting for the next tick. A
-/// redial storm produces megabytes in a minute, and that is exactly the window
-/// worth having promptly.
-const EAGER_THRESHOLD_BYTES: u64 = 256 * 1024;
 const CURSOR_FILE_NAME: &str = "traffic-audit.upload-cursor.json";
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -89,7 +85,7 @@ struct Segment {
 /// Compresses `raw`, refusing rather than truncating if it exceeds the server's
 /// cap so the caller can retry with a smaller read.
 fn gzip_within_limit(raw: &[u8]) -> Option<Vec<u8>> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
     encoder.write_all(raw).ok()?;
     let bytes = encoder.finish().ok()?;
     if bytes.len() > MAX_DIAGNOSTICS_LOG_SEGMENT_BYTES {
@@ -187,8 +183,8 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
     }
 }
 
-/// One pass: the rotated tail first, then the live file until it is nearly
-/// drained. Returns on the first failure so the cursor never advances past bytes
+/// One pass: the rotated tail first, then every complete line still on the live
+/// file. Returns on the first failure so the cursor never advances past bytes
 /// the server has not accepted.
 async fn sweep(
     state: &Arc<TonoState>,
@@ -251,9 +247,10 @@ async fn sweep(
         send(state, &client, session_id, sequence, &segment, client_version, &os_version).await?;
         cursor.offset += segment.consumed;
         cursor.save(&cursor_path);
-        if segment.remaining < EAGER_THRESHOLD_BYTES {
+        if segment.remaining == 0 {
             return Ok(());
         }
+        tokio::time::sleep(Duration::from_millis(80)).await;
     }
 }
 
@@ -296,17 +293,33 @@ async fn send(
     }
 }
 
+/// The `os_version` header value, bounded so the server cannot reject the whole
+/// segment over it.
+///
+/// This used to call `os_info::get()`, a crate that was never in `Cargo.toml`,
+/// so the Tauri crate did not compile for Windows at all — the call sits behind
+/// `#[cfg(windows)]`, and no CI job ever compiled this crate for Windows. The
+/// same string is already produced for the telemetry window by
+/// `tauri_plugin_clash_verge_sysinfo::os_long_version`, which is a real
+/// dependency and is cross-platform, so both paths now report the same thing
+/// instead of two different guesses.
+///
+/// Trimmed to printable ASCII within the server's column bound: a localized
+/// Windows edition string can carry characters that a header rejects, and losing
+/// every log segment over the machine's display language is not a trade worth
+/// making for a display-only field.
 fn os_version_string() -> String {
-    #[cfg(windows)]
-    {
-        let info = os_info::get();
-        format!("Windows {}", info.version())
-    }
-    #[cfg(not(windows))]
-    {
-        // The crate builds on macOS for tests; the value is display-only.
-        format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)
-    }
+    ascii_header(&tauri_plugin_clash_verge_sysinfo::os_long_version(), 80)
+}
+
+fn ascii_header(value: &str, max_len: usize) -> String {
+    let filtered: String = value
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_ascii_control())
+        .collect();
+    let trimmed = filtered.trim();
+    let usable = if trimmed.is_empty() { "Unknown" } else { trimmed };
+    usable.chars().take(max_len).collect()
 }
 
 #[cfg(test)]
