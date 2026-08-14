@@ -8,7 +8,7 @@ import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useI18n } from '@/hooks/use-i18n'
 import { useUpdate } from '@/hooks/use-update'
 import { useVerge } from '@/hooks/use-verge'
-import { supportedLanguages } from '@/services/i18n'
+import { resolveLanguage, supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
 import { setCacheData, useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
@@ -235,7 +235,12 @@ const GeneralCard = () => {
       </Row>
       <Row label={t('tono.settings.general.language')}>
         <select
-          value={verge?.language ?? 'en'}
+          // The resolved language, not the stored one. `supportedLanguages` is ['en','zh'],
+          // so a stored value the app merely *falls back* from — 'jp', 'ko', 'de', and
+          // 'zhtw', which resolveLanguage maps to 'zh' — matched no option and left the
+          // control blank, showing nothing while the app was plainly running in some
+          // language. This shows whichever one is actually running.
+          value={resolveLanguage(verge?.language)}
           onChange={(event) => void handleLanguage(event.target.value)}
           style={{
             fontFamily: 'inherit',
