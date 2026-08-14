@@ -444,29 +444,35 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const manifest = await fetchRelease('/manifest.json');
     expect(manifest.status).toBe(200);
-    expect(await manifest.json()).toMatchObject({
-      schemaVersion: 1,
-      channel: 'test',
-      platforms: {
-        macos: { current: { version: '0.0.62', build: 62 } },
-        windows: {
-          current: {
-            version: '0.0.27',
-            build: 27,
-            trafficPolicySchemas: [1, 2, 3],
-            artifact: {
-              sha256: 'fe29a3e2bc7aee24026f8bdb5e6c717555c16c2f32c7652a1aa6ee09090e8319',
-            },
-          },
-          candidate: {
-            version: '0.0.29',
-            availability: 'source-ready-unpublished',
-            serviceVersion: '2.6.5',
-            serviceProtocol: '2.11',
-          },
-        },
-      },
-    });
+    const manifestBody = (await manifest.json()) as {
+      schemaVersion: number;
+      channel: string;
+      platforms: Record<
+        string,
+        { current: { version: string; artifact: { url: string; sha256: string; size: number } } }
+      >;
+      archive: Array<{ platform: string; version: string; publishedAt: string }>;
+    };
+    expect(manifestBody).toMatchObject({ schemaVersion: 1, channel: 'test' });
+
+    // Pinned versions used to live here, which made this test a step in the
+    // release checklist that nobody remembers — the same mistake the appcast
+    // assertion below already avoids. What is worth catching is a manifest that
+    // disagrees with itself, because it is edited by hand in two places: the
+    // card a customer reads and the archive entry beneath it. So each platform's
+    // current version must be its newest archive entry, and must be the version
+    // whose file it actually offers.
+    for (const platform of ['macos', 'windows']) {
+      const current = manifestBody.platforms[platform].current;
+      const newest = manifestBody.archive
+        .filter((entry) => entry.platform === platform)
+        .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))[0];
+      expect(newest).toBeDefined();
+      expect(newest.version).toBe(current.version);
+      expect(current.artifact.url).toContain(current.version);
+      expect(current.artifact.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(current.artifact.size).toBeGreaterThan(0);
+    }
 
     // Asserted against the file this deploy would publish, not against a build
     // number. Pinning a number couples every release to this test, and it broke
