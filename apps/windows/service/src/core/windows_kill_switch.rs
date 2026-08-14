@@ -120,6 +120,10 @@ struct Armed {
     /// re-lock re-render them without another round trip. Every restore path rebuilds with an
     /// empty set (fail-closed until the app's next connect transaction re-issues them).
     direct_endpoints: Vec<ProxyEndpoint>,
+    /// Ports the App declared it emitted process-scoped DIRECT rules for, already intersected
+    /// with `REVIEWED_DIRECT_PORTS`. Same lifetime as `direct_endpoints`: memory only, cleared
+    /// on omission, never restored.
+    reviewed_direct_ports: Vec<u16>,
     /// Volatile Service-owned reload bracket. Pending physical permits expire without relying on
     /// the GUI process to remain alive; committed permits keep only an idempotency receipt.
     direct_reload: Option<DirectReloadLease>,
@@ -545,6 +549,13 @@ fn rule_config_for(armed: &Armed, current_core: Option<CoreInstance>) -> RuleCon
         direct_endpoints: if armed.intent.mode == KillSwitchStatusMode::Locked && tun_luid.is_some()
         {
             armed.direct_endpoints.clone()
+        } else {
+            Vec::new()
+        },
+        reviewed_direct_ports: if armed.intent.mode == KillSwitchStatusMode::Locked
+            && tun_luid.is_some()
+        {
+            armed.reviewed_direct_ports.clone()
         } else {
             Vec::new()
         },
@@ -1105,6 +1116,7 @@ pub(crate) async fn arm_bootstrap(
         core_instance: None,
         // In memory only — populated exclusively by the lease-backed reload transaction.
         direct_endpoints: Vec::new(),
+        reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     };
     // Persist fail-closed intent before touching WFP: a daemon restart installs at least the
@@ -1519,6 +1531,7 @@ pub(crate) async fn begin_direct_runtime_reload(
 /// the permits and moves the machine to exact Blocked.
 pub(crate) async fn replace_direct_endpoints(
     endpoints: &[ProxyEndpoint],
+    reviewed_ports: &[u16],
     owner_generation: u64,
     reload_id: u64,
 ) -> Result<crate::DirectRuntimeReloadResult> {
@@ -1620,6 +1633,15 @@ pub(crate) async fn replace_direct_endpoints(
 
     let mut candidate = previous.clone();
     candidate.direct_endpoints = canonical.clone();
+    // The App proposes; this keeps only what the Service itself sanctions, so a client asking
+    // for port 22 gets nothing rather than an argument.
+    candidate.reviewed_direct_ports = reviewed_ports
+        .iter()
+        .copied()
+        .filter(|port| crate::REVIEWED_DIRECT_PORTS.contains(port))
+        .collect();
+    candidate.reviewed_direct_ports.sort_unstable();
+    candidate.reviewed_direct_ports.dedup();
     let tunnel_luid = previous
         .tun_luid
         .context("locked DIRECT replacement lost its tunnel LUID")?;
@@ -2055,6 +2077,7 @@ fn emergency_armed() -> Armed {
         tun_luid: None,
         core_instance: None,
         direct_endpoints: Vec::new(),
+        reviewed_direct_ports: Vec::new(),
         direct_reload: None,
     }
 }
@@ -2091,6 +2114,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                         tun_luid: None,
                         core_instance: None,
                         direct_endpoints: Vec::new(),
+                        reviewed_direct_ports: Vec::new(),
                         direct_reload: None,
                     };
                     armed.intent.mode = KillSwitchStatusMode::Blocked;
@@ -2120,6 +2144,7 @@ pub async fn restore_on_service_start() -> Result<()> {
                     // recovered session stays fail-closed for them until the app's next
                     // connect transaction re-issues the approved tuples.
                     direct_endpoints: Vec::new(),
+                    reviewed_direct_ports: Vec::new(),
                     direct_reload: None,
                 };
                 // A persisted Locked mode is not proof this boot's tunnel exists: downgrade to
@@ -4017,6 +4042,7 @@ mod tests {
             tun_luid: None,
             core_instance: None,
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         });
         authorize_write_for("owner-bob")?;
@@ -4069,6 +4095,7 @@ mod tests {
                 port: 443,
                 protocol: ProxyProtocol::Tcp,
             }],
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
 
@@ -4145,6 +4172,7 @@ mod tests {
                 generation: 0,
             }),
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
         let a = ProxyEndpoint {
@@ -4213,7 +4241,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).map_err(anyhow::Error::msg)?;
-        replace_direct_endpoints(&endpoints, owner_generation, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, owner_generation, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, owner_generation, begin.reload_id).await?;
         Ok((core, digest))
     }
@@ -4393,7 +4421,7 @@ mod tests {
         let digest = crate::direct_endpoint_digest(&endpoints).map_err(anyhow::Error::msg)?;
 
         let failures = SimulatedStateFailures::arm_ambiguous_install();
-        let error = replace_direct_endpoints(&endpoints, 76, begin.reload_id)
+        let error = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 76, begin.reload_id)
             .await
             .expect_err("commit-before-verify must be treated as a possibly-live candidate");
         assert!(
@@ -4441,6 +4469,7 @@ mod tests {
 
         let error = replace_direct_endpoints(
             &test_config_with_direct().direct_endpoints,
+            &crate::REVIEWED_DIRECT_PORTS,
             77,
             first.reload_id,
         )
@@ -4473,7 +4502,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let expected_digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        let replaced = replace_direct_endpoints(&endpoints, 91, begin.reload_id).await?;
+        let replaced = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 91, begin.reload_id).await?;
         assert_eq!(replaced.reload_id, begin.reload_id);
         assert_eq!(replaced.endpoint_digest, expected_digest);
 
@@ -4482,7 +4511,7 @@ mod tests {
             .and_then(|armed| armed.direct_reload.as_ref())
             .and_then(|lease| lease.expires_at)
             .expect("pending lease has a deadline");
-        let replay = replace_direct_endpoints(&endpoints, 91, begin.reload_id).await?;
+        let replay = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 91, begin.reload_id).await?;
         assert_eq!(replay, replaced);
         let replayed_lease = armed_guard()
             .as_ref()
@@ -4543,7 +4572,7 @@ mod tests {
         let begin = begin_direct_runtime_reload(123).await?;
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
-        replace_direct_endpoints(&endpoints, 123, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 123, begin.reload_id).await?;
 
         {
             let mut guard = armed_guard();
@@ -4587,7 +4616,7 @@ mod tests {
         let begin = begin_direct_runtime_reload(144).await?;
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
-        replace_direct_endpoints(&endpoints, 144, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 144, begin.reload_id).await?;
 
         let error = finalize_direct_runtime_reload(&"0".repeat(64), 144, begin.reload_id)
             .await
@@ -4610,7 +4639,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 145, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 145, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 145, begin.reload_id).await?;
         let first_deadline = armed_guard()
             .as_ref()
@@ -4646,7 +4675,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 146, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 146, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 146, begin.reload_id).await?;
 
         renew_direct_runtime_reload(&"0".repeat(64), 146, begin.reload_id)
@@ -4669,7 +4698,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 147, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 147, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 147, begin.reload_id).await?;
 
         let committed = armed_guard().clone().expect("committed state");
@@ -4712,11 +4741,11 @@ mod tests {
         let begin = begin_direct_runtime_reload(155).await?;
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
-        replace_direct_endpoints(&endpoints, 155, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 155, begin.reload_id).await?;
         crate::core::manager::set_running_core_identity_for_kill_switch_tests(Some((4242, 8)))
             .await;
 
-        let error = replace_direct_endpoints(&endpoints, 155, begin.reload_id)
+        let error = replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 155, begin.reload_id)
             .await
             .expect_err("a recycled PID with a new restart count is a different Core");
         assert!(format!("{error:#}").contains("locked tunnel grant"));
@@ -4737,7 +4766,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 166, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 166, begin.reload_id).await?;
 
         // The test engine resolves the live alias to LUID 0. Changing only the recorded LUID
         // models same-PID Mihomo recreating WinTUN between replacement and finalize.
@@ -4820,6 +4849,7 @@ mod tests {
                 tun_luid: Some(0x7777),
                 core_instance: recorded,
                 direct_endpoints: Vec::new(),
+                reviewed_direct_ports: Vec::new(),
                 direct_reload: None,
             };
             // This is exactly what `lock` now does: `armed.core_instance` and the render's
@@ -4840,6 +4870,7 @@ mod tests {
             tun_luid: Some(0x7777),
             core_instance: None,
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
         assert_eq!(rule_config_for(&stale, Some(running)).tun_luid, None);
@@ -4864,6 +4895,7 @@ mod tests {
             tun_luid: Some(0x99),
             core_instance: Some(running),
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
             direct_reload: None,
         };
 
@@ -5197,7 +5229,7 @@ mod tests {
         lock(None).await?;
         let endpoints = test_config_with_direct().direct_endpoints;
         let digest = crate::direct_endpoint_digest(&endpoints).unwrap();
-        replace_direct_endpoints(&endpoints, 199, begin.reload_id).await?;
+        replace_direct_endpoints(&endpoints, &crate::REVIEWED_DIRECT_PORTS, 199, begin.reload_id).await?;
         finalize_direct_runtime_reload(&digest, 199, begin.reload_id).await?;
         assert_eq!(
             ARMED

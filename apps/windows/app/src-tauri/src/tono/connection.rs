@@ -3735,6 +3735,9 @@ struct PendingDirectCommit {
     session: OwnerSessionProof,
     reload_id: u64,
     endpoints: Vec<ProxyEndpoint>,
+    /// Declared to the Service so it renders the reviewed-port permit for exactly the ports
+    /// this plan emitted process-scoped rules on — empty when it emitted none.
+    reviewed_direct_ports: Vec<u16>,
     endpoint_digest: String,
     core_identity: ServiceCoreIdentity,
     controller_secret: String,
@@ -3846,6 +3849,18 @@ async fn apply_cloud_policy(
         return Ok(None);
     }
     let expected_controller_rules = expected_controller_direct_rules(&plan);
+    // Declared to the Service exactly when `runtime_value` emits process-scoped rules, and with
+    // the same condition it uses. A pin existing is not the same as process routing existing:
+    // `direct_endpoints` is the union of the WeChat, web and media pins and the Service cannot
+    // tell them apart, so left to infer it would widen the boundary for a web-only or
+    // media-only policy that routes nothing there.
+    let reviewed_direct_ports = if plan.tcp_wechat_rules.is_empty()
+        || plan.wechat_process_path_regexes.is_empty()
+    {
+        Vec::new()
+    } else {
+        plan.reviewed_direct_ports.clone()
+    };
     let direct_interface = plan.physical_interface.clone();
 
     // Build the staged bundle before the irreversible bracket. The controller secret and ports
@@ -3935,6 +3950,7 @@ async fn apply_cloud_policy(
         original_secret.to_owned(),
         controller_port,
         expected_controller_rules,
+        reviewed_direct_ports,
         direct_interface,
         !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
         !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty(),
@@ -4403,6 +4419,10 @@ async fn activate_direct_runtime_cancellation_safe(
     controller_secret: String,
     controller_port: u16,
     expected_controller_rules: Vec<ControllerDirectRuleProof>,
+    // Ports the Service should render the reviewed-port permit for. Non-empty only when this
+    // plan emitted process-scoped rules, so the permit and the routing are one surface rather
+    // than the Service inferring one from whichever pins happen to exist.
+    reviewed_direct_ports: Vec<u16>,
     direct_interface: String,
     require_wechat_direct: bool,
     require_web_direct: bool,
@@ -4536,6 +4556,7 @@ async fn activate_direct_runtime_cancellation_safe(
                 session,
                 reload_id,
                 endpoints,
+                reviewed_direct_ports,
                 endpoint_digest,
                 core_identity,
                 controller_secret,
@@ -4598,7 +4619,12 @@ async fn commit_direct_policy_cancellation_safe(
             prove_service_endpoint_digest(&kill_before, &empty_digest).map_err(StageFailure::error)?;
 
             let committed =
-                service::tono_replace_direct_endpoints(&pending.session, pending.reload_id, pending.endpoints.clone())
+                service::tono_replace_direct_endpoints(
+                    &pending.session,
+                    pending.reload_id,
+                    pending.endpoints.clone(),
+                    pending.reviewed_direct_ports.clone(),
+                )
                     .await
                     .map_err(StageFailure::error)?;
             validate_direct_reload_result(

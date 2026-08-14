@@ -1410,11 +1410,16 @@ pub(crate) async fn tono_replace_direct_endpoints(
     session: &OwnerSessionProof,
     reload_id: u64,
     direct_endpoints: Vec<clash_verge_service_ipc::ProxyEndpoint>,
+    reviewed_direct_ports: Vec<u16>,
 ) -> Result<DirectRuntimeReloadResult> {
     let credentials = current_owner_credentials()?;
     let request = ReplaceDirectEndpointsRequest {
         reload_id,
         direct_endpoints,
+        // Declared only when this plan actually emitted process-scoped rules. An empty
+        // declaration means the Service renders no reviewed-port permit, which is the correct
+        // answer for a plan whose every route is an exact pin.
+        reviewed_direct_ports,
     };
     let mut last_ambiguous = None;
     for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {

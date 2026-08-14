@@ -189,6 +189,11 @@ pub struct RuleConfig {
     /// core may reach on the physical NIC. Rendered **only in `Locked`** (see rule G);
     /// never persisted, never restored, never inherited by the next arm — omission = clear.
     pub direct_endpoints: Vec<ProxyEndpoint>,
+    /// Ports the App declared it routes process-scoped DIRECT traffic on, already filtered to
+    /// `REVIEWED_DIRECT_PORTS` by the Service. Rule H renders exactly these and nothing when
+    /// empty, so the permit surface and the routing surface are the same set by construction
+    /// rather than by inference from whatever pins happen to exist.
+    pub reviewed_direct_ports: Vec<u16>,
 }
 
 /// One row of the rule tables: every field of a `FilterSpec` except the derived key/name.
@@ -601,14 +606,14 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     // destination is the next step and needs address data this build does not have.
     if config.mode == KillSwitchStatusMode::Locked
         && config.tun_luid.is_some()
-        && !config.direct_endpoints.is_empty()
+        && !config.reviewed_direct_ports.is_empty()
     {
         // IPv4 only, matching the Mac helper's `inet`-scoped permit and the runtime's own
         // `ipv6: false`. The TUN and fake-ip are IPv4, AAAA dials are dropped, so there is no
         // IPv6 DIRECT flow to carry — and a permit with no address condition on the V6 layer
         // would be a widening with nothing asking for it.
         for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
-            for port in crate::REVIEWED_DIRECT_PORTS {
+            for port in config.reviewed_direct_ports.iter().copied() {
                 filters.push(spec(
                     format!(
                         "session/permit-reviewed-direct/{}/{port}/{}",
@@ -793,6 +798,7 @@ mod tests {
             tun_luid: Some(0x1234_5678),
             app_path: r"C:\ProgramData\Tono\bin\mihomo.exe".to_owned(),
             direct_endpoints: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
         }
     }
 
@@ -1727,6 +1733,9 @@ mod tests {
 
     fn config_with_direct_endpoints(mode: KillSwitchStatusMode) -> RuleConfig {
         let mut config = config(mode);
+        // Declared by the App, not inferred from the pins: a plan carrying only web or media
+        // pins routes nothing process-scoped and must therefore get no reviewed-port permit.
+        config.reviewed_direct_ports = crate::REVIEWED_DIRECT_PORTS.to_vec();
         config.direct_endpoints = vec![
             endpoint("203.0.113.9", 443),
             ProxyEndpoint {
@@ -1958,6 +1967,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A pinned tuple existing is not the same as process-scoped routing existing.
+    ///
+    /// `direct_endpoints` is the union of the WeChat, web and media pins, and a web pin is
+    /// 80/443 exactly like a WeChat one, so the Service cannot tell them apart. Gating rule H
+    /// on "some pin exists" rendered an address-free port permit for policies that route
+    /// nothing to it — a web-only or media-only plan got the widening for free. The App now
+    /// declares the ports it actually emitted rules for, and an empty declaration renders
+    /// nothing.
+    #[test]
+    fn reviewed_port_permit_needs_the_app_to_declare_it_not_just_a_pin() {
+        let mut config = config_with_direct_endpoints(KillSwitchStatusMode::Locked);
+        config.reviewed_direct_ports.clear();
+        let filters = expected_filters(&config);
+        assert!(
+            !filters
+                .iter()
+                .any(|filter| filter.name.contains("reviewed DIRECT")),
+            "a plan that declares no reviewed ports must not widen the boundary"
+        );
+        // The exact pins it does carry still work: this withdraws the widening, not the plan.
+        let mut pinned = packet(
+            LayerKind::AleAuthConnectV4,
+            IpProtocol::Tcp,
+            "203.0.113.9",
+            443,
+        );
+        pinned.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &pinned), FilterAction::Permit);
+
+        // And an unpinned address is refused again, which is the pre-rule-H behaviour.
+        let mut unpinned = packet(
+            LayerKind::AleAuthConnectV4,
+            IpProtocol::Tcp,
+            "43.175.230.151",
+            443,
+        );
+        unpinned.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &unpinned), FilterAction::Block);
+
+        // Only the ports declared are rendered, not the whole compiled set.
+        let mut narrowed = config_with_direct_endpoints(KillSwitchStatusMode::Locked);
+        narrowed.reviewed_direct_ports = vec![443];
+        let narrow_filters = expected_filters(&narrowed);
+        assert_eq!(
+            narrow_filters
+                .iter()
+                .filter(|filter| filter.name.contains("reviewed DIRECT"))
+                .count(),
+            2,
+            "one filter per protocol for the single declared port"
+        );
+        let mut port80 =
+            packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, "43.175.230.151", 80);
+        port80.app_id_matches = true;
+        assert_eq!(arbitrate(&narrow_filters, &port80), FilterAction::Block);
     }
 
     #[test]

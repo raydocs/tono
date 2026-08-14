@@ -250,6 +250,20 @@ pub struct ReplaceDirectEndpointsRequest {
     pub reload_id: u64,
     #[serde(default)]
     pub direct_endpoints: Vec<ProxyEndpoint>,
+    /// Ports the App actually emitted process-scoped DIRECT rules for.
+    ///
+    /// Declared rather than inferred, because the Service cannot tell one pin from another:
+    /// `direct_endpoints` is the union of the WeChat, web and media pins, and a web pin is
+    /// 80/443 exactly like a WeChat one. Gating the reviewed-port permit on "some pin exists"
+    /// therefore rendered it for policies that route nothing to it — a web-only or media-only
+    /// plan got the permit with no process rule anywhere.
+    ///
+    /// Empty is the fail-closed default and what an older App sends, so the permit simply does
+    /// not render. The Service still validates every entry against its own
+    /// `REVIEWED_DIRECT_PORTS`: the App proposes, the Service decides, and neither side alone
+    /// can widen the boundary.
+    #[serde(default)]
+    pub reviewed_direct_ports: Vec<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
