@@ -123,8 +123,23 @@ fn run_emergency_disarm() -> Result<()> {
     let outcome = rt.block_on(async {
         // Owner lock is preferred but not required: Chinese machines fail
         // ensure_private_service_directory with ERROR_INVALID_OWNER (1307) and would otherwise
-        // never reach WFP removal. The service is stopped (or absent) when users run this.
+        // never reach WFP removal. That is the `Err` case, and it still proceeds.
+        //
+        // `Ok(None)` is a different answer and must not be folded into it.
+        // `acquire_service_owner` only returns it after `wait_for_owner_health`
+        // succeeds, so it means a live service that *answers* owns the machine.
+        // Disarming underneath it loses a race that cannot be won: this process
+        // deletes the filters and the intent file, the running service's
+        // watchdog checks its own in-memory intent within its period, finds the
+        // filters gone and reinstalls the block — and the DNS watchdog can
+        // re-point every adapter at the protected resolver and rewrite the
+        // snapshot. The user is told "your network is restored" and is blocked
+        // again seconds later, with the intent file now missing so the next
+        // service start comes up in the emergency block. Because the owner
+        // answered, the supported route is open, which is exactly what the
+        // refusal below tells them to use.
         let _owner_guard = match clash_verge_service_ipc::acquire_service_owner().await {
+            Ok(None) => return Ok(false),
             Ok(guard) => guard,
             Err(error) => {
                 eprintln!(
