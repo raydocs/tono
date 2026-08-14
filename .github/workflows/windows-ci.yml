@@ -173,4 +173,8 @@ jobs:
       # this step is for.
       - name: Ask the real filtering engine
         working-directory: apps/windows/service
-        run: cargo test --locked --features standalone,client core::wfp::real_engine_tests -- --nocapture
+        # `--lib` because `tests/common.rs` reaches for helpers that only exist under the
+        # `test` feature and is compiled whatever the integration files' own `cfg` says, so
+        # the crate does not build its integration targets in this configuration at all.
+        # Verified locally before pushing rather than by watching this step fail.
+        run: cargo test --locked --features standalone,client --lib core::wfp::real_engine_tests -- --nocapture
