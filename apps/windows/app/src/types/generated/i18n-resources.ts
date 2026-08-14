@@ -755,6 +755,10 @@ export interface TranslationResources {
             label: string
             pathLabel: string
           }
+          networkLogUpload: {
+            description: string
+            label: string
+          }
           periodicTelemetry: {
             description: string
             label: string

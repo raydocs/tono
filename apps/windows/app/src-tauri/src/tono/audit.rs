@@ -200,6 +200,8 @@ pub enum AuditEvent {
     AuditDisabled,
     PeriodicTelemetryEnabled,
     PeriodicTelemetryDisabled,
+    NetworkLogUploadEnabled,
+    NetworkLogUploadDisabled,
 }
 
 impl AuditEvent {
@@ -467,6 +469,12 @@ fn save_periodic_telemetry_enabled(dir: &Path, enabled: bool) -> Result<()> {
     save_settings(dir, &settings)
 }
 
+fn save_network_log_upload_enabled(dir: &Path, enabled: bool) -> Result<()> {
+    let mut settings = load_settings(dir);
+    settings.network_log_upload_enabled = enabled;
+    save_settings(dir, &settings)
+}
+
 // ---- Audit handle ----
 
 /// The product-wide audit handle: an atomic enable flag plus a bounded
@@ -621,6 +629,29 @@ impl Audit {
             self.record(AuditEvent::PeriodicTelemetryEnabled);
         } else {
             self.record(AuditEvent::PeriodicTelemetryDisabled);
+        }
+        Ok(())
+    }
+
+    /// Toggle the upload of the raw audit log.
+    ///
+    /// This is the larger disclosure of the two and needs its own answer: the
+    /// periodic telemetry window carries counts and states, while this sends the
+    /// log itself — the hostnames connected to, the process that opened each
+    /// connection, and which rule and route it matched. The flag, the gate in
+    /// `log_upload::sweep` and the reader above all existed; the half that lets
+    /// a person say no did not, so it was permanently on. The reader's own note
+    /// — "a stale one would keep sending after the user switched it off" — was
+    /// written for a switch that had never been built.
+    pub fn set_network_log_upload_enabled(&self, enabled: bool) -> Result<(), String> {
+        if self.network_log_upload_enabled() == enabled {
+            return Ok(());
+        }
+        save_network_log_upload_enabled(&self.settings_dir, enabled).map_err(|err| err.to_string())?;
+        if enabled {
+            self.record(AuditEvent::NetworkLogUploadEnabled);
+        } else {
+            self.record(AuditEvent::NetworkLogUploadDisabled);
         }
         Ok(())
     }

@@ -23,6 +23,10 @@
       "periodicTelemetry": {
         "label": "Share diagnostic timeline (testing)",
         "description": "About every 20 minutes while signed in, Tono uploads a short protection and network event summary so we can improve Claude stability in China. No chat content, passwords, or node secrets. You can turn this off anytime."
+      },
+      "networkLogUpload": {
+        "label": "Upload the full traffic log (testing)",
+        "description": "Uploads the local diagnostic log itself, not a summary: the hostnames you connected to, the process that opened each connection, and which rule and route it matched. Credentials and URL queries are removed before anything is written. This is a larger disclosure than the diagnostic timeline above and is asked separately. Turning it off stops the next upload."
       }
     },
     "system": {

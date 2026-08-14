@@ -46,6 +46,8 @@ export const translationKeys = [
   'settings.sections.tono.auditLog.dropped',
   'settings.sections.tono.periodicTelemetry.label',
   'settings.sections.tono.periodicTelemetry.description',
+  'settings.sections.tono.networkLogUpload.label',
+  'settings.sections.tono.networkLogUpload.description',
   'settings.sections.system.title',
   'settings.sections.system.toggles.tunMode',
   'settings.sections.system.toggles.systemProxy',

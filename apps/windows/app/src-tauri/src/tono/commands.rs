@@ -1349,6 +1349,25 @@ pub async fn tono_set_periodic_telemetry_enabled(
     state.audit().set_periodic_telemetry_enabled(enabled)
 }
 
+/// Whether the raw audit log is uploaded.
+#[tauri::command]
+pub async fn tono_network_log_upload_enabled(
+    state: tauri::State<'_, Arc<TonoState>>,
+) -> Result<bool, String> {
+    Ok(state.audit().network_log_upload_enabled())
+}
+
+/// Toggle uploading the raw audit log. Separate from the telemetry switch on
+/// purpose: this one sends the log itself, and one consent must not stand in for
+/// a materially larger disclosure.
+#[tauri::command]
+pub async fn tono_set_network_log_upload_enabled(
+    state: tauri::State<'_, Arc<TonoState>>,
+    enabled: bool,
+) -> Result<(), String> {
+    state.audit().set_network_log_upload_enabled(enabled)
+}
+
 /// §8: the JSONL audit file info (for the settings page / support bundle).
 ///
 /// TS: `interface TonoAuditLogInfo { path: string; droppedCount: number }`

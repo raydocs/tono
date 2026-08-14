@@ -288,6 +288,12 @@ export const tonoPeriodicTelemetryEnabled = () =>
 export const tonoSetPeriodicTelemetryEnabled = (enabled: boolean) =>
   call<void>('tono_set_periodic_telemetry_enabled', { enabled })
 
+export const tonoNetworkLogUploadEnabled = () =>
+  call<boolean>('tono_network_log_upload_enabled')
+
+export const tonoSetNetworkLogUploadEnabled = (enabled: boolean) =>
+  call<void>('tono_set_network_log_upload_enabled', { enabled })
+
 export interface TonoAuditLogInfo {
   path: string
   droppedCount: number

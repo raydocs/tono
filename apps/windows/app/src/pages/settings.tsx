@@ -18,6 +18,8 @@ import {
   tonoPeriodicTelemetryEnabled,
   tonoSetAuditEnabled,
   tonoSetPeriodicTelemetryEnabled,
+  tonoNetworkLogUploadEnabled,
+  tonoSetNetworkLogUploadEnabled,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import {
@@ -36,6 +38,9 @@ const tonoAuditEnabledQueryKey = ['tonoAuditEnabled'] as const
 const tonoAuditLogPathQueryKey = ['tonoAuditLogPath'] as const
 const tonoPeriodicTelemetryEnabledQueryKey = [
   'tonoPeriodicTelemetryEnabled',
+] as const
+const tonoNetworkLogUploadEnabledQueryKey = [
+  'tonoNetworkLogUploadEnabled',
 ] as const
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -140,6 +145,10 @@ const GeneralCard = () => {
     queryKey: tonoPeriodicTelemetryEnabledQueryKey,
     queryFn: tonoPeriodicTelemetryEnabled,
   })
+  const { data: networkLogUploadEnabled } = useQuery({
+    queryKey: tonoNetworkLogUploadEnabledQueryKey,
+    queryFn: tonoNetworkLogUploadEnabled,
+  })
   const logPath = auditLogInfo?.path
 
   const handleAutostart = useLockFn(async (value: boolean) => {
@@ -184,6 +193,17 @@ const GeneralCard = () => {
       await tonoSetPeriodicTelemetryEnabled(value)
     } catch (error) {
       setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
+      showNotice.error(error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  const handleNetworkLogUpload = useLockFn(async (value: boolean) => {
+    const previous = networkLogUploadEnabled ?? true
+    setCacheData(tonoNetworkLogUploadEnabledQueryKey, value)
+    try {
+      await tonoSetNetworkLogUploadEnabled(value)
+    } catch (error) {
+      setCacheData(tonoNetworkLogUploadEnabledQueryKey, previous)
       showNotice.error(error instanceof Error ? error.message : String(error))
     }
   })
@@ -254,6 +274,16 @@ const GeneralCard = () => {
           checked={periodicTelemetryEnabled ?? true}
           onChange={(value) => void handlePeriodicTelemetry(value)}
           label={t('settings.sections.tono.periodicTelemetry.label')}
+        />
+      </Row>
+      <Row
+        label={t('settings.sections.tono.networkLogUpload.label')}
+        subtitle={t('settings.sections.tono.networkLogUpload.description')}
+      >
+        <TonoToggle
+          checked={networkLogUploadEnabled ?? true}
+          onChange={(value) => void handleNetworkLogUpload(value)}
+          label={t('settings.sections.tono.networkLogUpload.label')}
         />
       </Row>
       <Row label={t('settings.sections.tono.auditLog.pathLabel')}>
