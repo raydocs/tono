@@ -1,0 +1,3 @@
+# Tono 0.0.65
+
+- The network protection rules Tono installs can now be read back. Tono writes one rule per address it permits — the exit node, the control plane, the accelerated Chinese endpoints — but macOS was folding every one of those rules into the single broader rule that sits beside them, so none of them existed in the kernel: 58 rules written, 13 kept, zero of the specific ones. Nothing was leaking and nothing was blocked that should not have been; the effect was that Tono could not tell you which route your traffic actually took, and neither could support. Each rule now carries a name, which is what keeps macOS from folding it away, and the counts per route are readable for the first time.
