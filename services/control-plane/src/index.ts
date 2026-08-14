@@ -2933,6 +2933,21 @@ function liveAgents(value: unknown): Row[] | null {
       netIn: optionalNumber(node.netIn ?? node.net_in ?? node.net_in_transfer),
       netOut: optionalNumber(node.netOut ?? node.net_out ?? node.net_out_transfer),
       uptime: optionalNumber(node.uptime),
+      // The fields that answer "which box is in trouble" rather than "what is
+      // this box". Load against core count is the one number that separates a
+      // node that is busy from a node that is failing to keep up; swap in use
+      // on a 1 GB VPS means it is already thrashing; and a stalled agent is
+      // indistinguishable from a healthy idle one without `observedAt`, which
+      // is how a dead collector reads as a quiet fleet.
+      cpuCores: optionalNumber(node.cpuCores ?? node.cpu_cores),
+      load1: optionalNumber(node.load1 ?? node.load_1),
+      load5: optionalNumber(node.load5 ?? node.load_5),
+      load15: optionalNumber(node.load15 ?? node.load_15),
+      swapTotal: optionalNumber(node.swapTotal ?? node.swap_total),
+      swapUsed: optionalNumber(node.swapUsed ?? node.swap_used),
+      tcpConnections: optionalNumber(node.tcpConnections ?? node.tcp_connections),
+      processes: optionalNumber(node.processes ?? node.process),
+      observedAt: optionalNumber(node.observedAt ?? node.observed_at),
     };
   }).filter((node: Row | null): node is Row => node !== null);
 }

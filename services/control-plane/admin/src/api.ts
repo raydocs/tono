@@ -222,6 +222,17 @@ export interface LiveAgentDto {
   netIn: number | null;
   netOut: number | null;
   uptime: number | null;
+  cpuCores: number | null;
+  load1: number | null;
+  load5: number | null;
+  load15: number | null;
+  swapTotal: number | null;
+  swapUsed: number | null;
+  tcpConnections: number | null;
+  processes: number | null;
+  /** When the agent last reported. A stalled agent is indistinguishable from a
+   *  healthy idle one without this. */
+  observedAt: number | null;
 }
 
 export interface LiveProbeDto {

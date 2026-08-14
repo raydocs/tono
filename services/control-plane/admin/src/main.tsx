@@ -57,14 +57,26 @@ function usePage() {
   return page;
 }
 
-function useResource<T>(load: () => Promise<T>, deps: unknown[] = []): Resource<T> & { reload: () => void } {
+function useResource<T>(
+  load: () => Promise<T>,
+  deps: unknown[] = [],
+  refreshMs = 0,
+): Resource<T> & { reload: () => void; refreshedAt: number; stale: string | null } {
   const [tick, setTick] = useState(0);
   const [resource, setResource] = useState<Resource<T>>({ state: 'loading' });
+  const [refreshedAt, setRefreshedAt] = useState(0);
+  const [stale, setStale] = useState<string | null>(null);
+
   useEffect(() => {
     let active = true;
     setResource({ state: 'loading' });
     load().then(
-      (data) => active && setResource({ state: 'ready', data }),
+      (data) => {
+        if (!active) return;
+        setResource({ state: 'ready', data });
+        setRefreshedAt(Date.now());
+        setStale(null);
+      },
       (error: unknown) => active && setResource({
         state: 'error',
         message: error instanceof Error ? error.message : 'Unable to load operations data',
@@ -73,7 +85,58 @@ function useResource<T>(load: () => Promise<T>, deps: unknown[] = []): Resource<
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, ...deps]);
-  return { ...resource, reload: () => setTick((value) => value + 1) };
+
+  // Background refresh, deliberately not routed through the code above.
+  //
+  // Two things it must not do. It must not set `loading`, or the page blanks
+  // itself every interval and reading it becomes impossible. And it must not
+  // replace good data with an error state: a single failed poll — an expired
+  // Access session, a blip — would wipe a screen that was correct a moment
+  // ago. The last good data stays, and the failure is reported beside it.
+  useEffect(() => {
+    if (!refreshMs) return undefined;
+    let active = true;
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      load().then(
+        (data) => {
+          if (!active) return;
+          setResource({ state: 'ready', data });
+          setRefreshedAt(Date.now());
+          setStale(null);
+        },
+        (error: unknown) => active && setStale(
+          error instanceof Error ? error.message : '刷新失败',
+        ),
+      );
+    }, refreshMs);
+    return () => { active = false; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshMs, tick, ...deps]);
+
+  return { ...resource, reload: () => setTick((value) => value + 1), refreshedAt, stale };
+}
+
+// Refresh cadence, remembered per browser. Off is offered because a console
+// left open on a wall display is a different job from one being read.
+const REFRESH_CHOICES = [
+  { label: '关闭', ms: 0 },
+  { label: '15 秒', ms: 15_000 },
+  { label: '30 秒', ms: 30_000 },
+  { label: '60 秒', ms: 60_000 },
+];
+const REFRESH_KEY = 'tono-ops-refresh-ms';
+
+function useRefreshInterval(): [number, (ms: number) => void] {
+  const [ms, setMs] = useState(() => {
+    if (typeof localStorage === 'undefined') return 30_000;
+    const stored = Number(localStorage.getItem(REFRESH_KEY));
+    return REFRESH_CHOICES.some((choice) => choice.ms === stored) ? stored : 30_000;
+  });
+  return [ms, (next: number) => {
+    setMs(next);
+    try { localStorage.setItem(REFRESH_KEY, String(next)); } catch { /* private mode */ }
+  }];
 }
 
 function timestamp(value: number | null | undefined) {
@@ -1704,8 +1767,125 @@ function trafficRemaining(profile: NodeProfileDto | undefined, agent: { netIn: n
   return null;
 }
 
+// Machine pressure, worst first.
+//
+// Komari already reports all of this and the console stored eleven fields of it
+// while rendering one — a CPU percentage, and only when an agent existed. The
+// question an operator actually arrives with is "which box is in trouble", and
+// answering it from a name-ordered table means reading every row.
+//
+// Ranked by the worst single signal on each node, so a box in trouble cannot be
+// below the fold. A node whose agent has gone quiet ranks above a busy one:
+// silence is the reading you cannot interpret, and a stalled agent otherwise
+// looks exactly like a healthy idle one.
+function machineSignals(agent: LiveAgentDto, nowMs: number) {
+  const signals: { label: string; severity: number }[] = [];
+  const pct = (used: number | null, total: number | null) =>
+    used != null && total != null && total > 0 ? (used / total) * 100 : null;
+
+  const memPct = pct(agent.memUsed, agent.memTotal);
+  const diskPct = pct(agent.diskUsed, agent.diskTotal);
+  const perCore = agent.load1 != null && agent.cpuCores ? agent.load1 / agent.cpuCores : null;
+  const ageSec = agent.observedAt ? Math.max(0, Math.round(nowMs / 1000) - agent.observedAt) : null;
+
+  if (ageSec === null) signals.push({ label: '未上报', severity: 3 });
+  else if (ageSec > 600) signals.push({ label: `失联 ${Math.round(ageSec / 60)} 分钟`, severity: 4 });
+  else if (ageSec > 180) signals.push({ label: `${Math.round(ageSec / 60)} 分钟未更新`, severity: 2 });
+
+  if (perCore != null && perCore >= 2) signals.push({ label: `负载 ${perCore.toFixed(1)}×核`, severity: 4 });
+  else if (perCore != null && perCore >= 1) signals.push({ label: `负载 ${perCore.toFixed(1)}×核`, severity: 2 });
+
+  if (memPct != null && memPct >= 92) signals.push({ label: `内存 ${memPct.toFixed(0)}%`, severity: 3 });
+  if (diskPct != null && diskPct >= 90) signals.push({ label: `磁盘 ${diskPct.toFixed(0)}%`, severity: 3 });
+  // Swap in use on a 1 GB VPS is not a warning sign, it is the thrashing.
+  if (agent.swapUsed != null && agent.swapUsed > 0) {
+    signals.push({ label: `swap ${formatBytes(agent.swapUsed)}`, severity: 2 });
+  }
+  return { signals, memPct, diskPct, perCore, ageSec };
+}
+
+function MachinePressure({ agents }: { agents: LiveAgentDto[] }) {
+  // Recomputed on each render rather than held in state: the only thing that
+  // makes it move is a refresh, and a clock ticking on its own would redraw a
+  // table nobody asked to change.
+  const nowMs = Date.now();
+  const rows = agents
+    .map((agent) => ({ agent, ...machineSignals(agent, nowMs) }))
+    .sort((a, b) => {
+      const worst = (r: typeof a) => r.signals.reduce((m, s) => Math.max(m, s.severity), 0);
+      const delta = worst(b) - worst(a);
+      if (delta !== 0) return delta;
+      return (b.perCore ?? 0) - (a.perCore ?? 0);
+    });
+  const troubled = rows.filter((row) => row.signals.length > 0).length;
+
+  return <section className="card">
+    <div className="card-header">
+      <div>
+        <h2>机器负载</h2>
+        <p>{troubled ? `${troubled} 台有信号，已排在最前` : '全部正常'}</p>
+      </div>
+    </div>
+    <div className="card-body">
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>节点</th><th>CPU</th><th>内存</th><th>磁盘</th>
+              <th>负载 1/5/15</th><th>TCP</th><th>运行</th><th>信号</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ agent, signals, memPct, diskPct }) => (
+              <tr key={agent.name}>
+                <td><strong>{agent.name}</strong>
+                  <small className="muted">{agent.cpuCores ? `${agent.cpuCores} 核` : ''}</small></td>
+                <td className="mono">{agent.cpu != null ? `${agent.cpu.toFixed(0)}%` : '—'}</td>
+                <td className="mono">{memPct != null ? `${memPct.toFixed(0)}%` : '—'}
+                  <small className="muted">{formatBytes(agent.memTotal)}</small></td>
+                <td className="mono">{diskPct != null ? `${diskPct.toFixed(0)}%` : '—'}</td>
+                <td className="mono">
+                  {[agent.load1, agent.load5, agent.load15]
+                    .map((value) => (value == null ? '—' : value.toFixed(2))).join(' / ')}
+                </td>
+                <td className="mono">{agent.tcpConnections ?? '—'}</td>
+                <td className="muted">{formatDuration(agent.uptime)}</td>
+                <td>
+                  <div className="chip-list">
+                    {signals.length === 0
+                      ? <span className="chip chip-muted">正常</span>
+                      : signals.map((signal) => (
+                        <span
+                          className={`chip${signal.severity >= 3 ? ' chip-risk' : ' chip-muted'}`}
+                          key={signal.label}
+                        >{signal.label}</span>
+                      ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>;
+}
+
+function formatDuration(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined) return '—';
+  const days = Math.floor(seconds / 86_400);
+  if (days > 0) return `${days} 天`;
+  const hours = Math.floor(seconds / 3_600);
+  if (hours > 0) return `${hours} 小时`;
+  return `${Math.max(1, Math.floor(seconds / 60))} 分钟`;
+}
+
 function MonitorPage() {
-  const resource = useResource(operationsApi.live);
+  const [refreshMs, setRefreshMs] = useRefreshInterval();
+  // Only the live snapshot polls. Node profiles and activity change when
+  // someone edits them, not on their own, so refetching those on a timer would
+  // be traffic for no new information.
+  const resource = useResource(operationsApi.live, [], refreshMs);
   const profilesRes = useResource(operationsApi.nodeProfiles);
   const activityRes = useResource(operationsApi.activity);
   const [query, setQuery] = useState('');
@@ -1801,6 +1981,30 @@ function MonitorPage() {
       };
     };
     return <div className="stack">
+      <div className="refresh-bar">
+        <span className="muted">
+          {resource.refreshedAt
+            ? `数据更新于 ${new Date(resource.refreshedAt).toLocaleTimeString()}`
+            : '尚未刷新'}
+        </span>
+        {/* A failed poll leaves the previous reading on screen, so it has to say
+            so — otherwise a stale number is indistinguishable from a live one,
+            which is the whole failure this panel exists to avoid. */}
+        {resource.stale && <span className="chip chip-risk">刷新失败：{resource.stale}</span>}
+        <label className="muted">
+          自动刷新
+          <select
+            className="control-select"
+            value={refreshMs}
+            onChange={(event) => setRefreshMs(Number(event.target.value))}
+          >
+            {REFRESH_CHOICES.map((choice) => (
+              <option key={choice.ms} value={choice.ms}>{choice.label}</option>
+            ))}
+          </select>
+        </label>
+        <button className="btn btn-outline btn-sm" onClick={resource.reload}>立即刷新</button>
+      </div>
       {(live.agentsError || live.qualityError) && (
         <Banner
           tone="error"
@@ -1837,6 +2041,8 @@ function MonitorPage() {
           <div className="metric-hint">{poor.length ? poor.map((n) => n.name).join('、') : '仅严重风险才标'}</div>
         </article>
       </div>
+
+      {agents.length > 0 && <MachinePressure agents={agents} />}
 
       <section className="card">
         <div className="card-header">

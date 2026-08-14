@@ -647,7 +647,13 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
           }],
         },
         agents: {
-          data: [{ name: 'Stored Node', os: 'Debian', arch: 'amd64', token: 'must-not-leak', ipv4: '203.0.113.20' }],
+          data: [{
+            name: 'Stored Node', os: 'Debian', arch: 'amd64',
+            token: 'must-not-leak', ipv4: '203.0.113.20',
+            cpu_cores: 2, load_1: 3.5, load_5: 2.1, load_15: 1.0,
+            swap_total: 1048576, swap_used: 524288,
+            tcp_connections: 189, process: 71, observed_at: 1_786_715_907,
+          }],
         },
       }),
     });
@@ -688,7 +694,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       name: 'Stored Node', os: 'Debian', arch: 'amd64', cpuName: null,
       cpu: null, memTotal: null, memUsed: null, diskTotal: null, diskUsed: null,
       netIn: null, netOut: null, uptime: null,
+      // Pressure, not inventory: load against cores separates a busy node from
+      // one failing to keep up, and `observedAt` is the only thing that tells a
+      // stalled agent from a healthy idle one.
+      cpuCores: 2, load1: 3.5, load5: 2.1, load15: 1.0,
+      swapTotal: 1048576, swapUsed: 524288,
+      tcpConnections: 189, processes: 71, observedAt: 1_786_715_907,
     }]);
+    // The address and the agent token must still never survive ingest.
+    expect(JSON.stringify(live.agents)).not.toContain('must-not-leak');
+    expect(JSON.stringify(live.agents)).not.toContain('203.0.113.20');
     expect(live.agentsError).toBeNull();
     expect(live.qualityError).toBeNull();
     expect(absorbedHostFetches).toEqual([]);
