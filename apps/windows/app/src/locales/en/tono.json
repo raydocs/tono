@@ -89,6 +89,10 @@
       "description": "Tono restored its leak protection from an earlier connection. Restore normal internet access before signing in.",
       "restore": "Restore normal internet",
       "restoring": "Restoring internet…"
+    },
+    "errors": {
+      "unreachable": "Tono's server could not be reached. Your network closed the connection — this is the network in the way, not a problem with your account or the code. Signing in only has to succeed once: do it on a network that works (a phone hotspot, or with another VPN running in TUN or global mode), and it stays signed in afterwards.",
+      "rateLimited": "Too many sign-in attempts. Wait a few minutes and try again."
     }
   },
   "pill": {

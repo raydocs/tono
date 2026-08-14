@@ -71,6 +71,16 @@ pub enum AuditEvent {
     SignInOk {
         email: String,
     },
+    /// A sign-in step that failed, with the raw transport detail.
+    ///
+    /// The user is shown a mapped, actionable message instead of the error chain, so this is
+    /// where the detail that support actually needs survives — which path failed, and whether
+    /// the network reset the connection, timed it out, or could not resolve the name. Those
+    /// mean different things and only the raw text distinguishes them.
+    SignInFail {
+        stage: &'static str,
+        error: String,
+    },
     SignOut,
     RevokeDevice {
         id: String,

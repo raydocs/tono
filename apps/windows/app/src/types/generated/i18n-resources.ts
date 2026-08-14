@@ -1036,6 +1036,10 @@ export interface TranslationResources {
         codeSent: string
         emailLabel: string
         emailPlaceholder: string
+        errors: {
+          rateLimited: string
+          unreachable: string
+        }
         intro: string
         invalidCode: string
         invalidEmail: string
