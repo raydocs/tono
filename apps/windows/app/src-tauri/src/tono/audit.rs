@@ -132,6 +132,7 @@ pub enum AuditEvent {
     /// to the server — the client reports the address it used and nothing interprets it here.
     DirectDial {
         address: String,
+        host: String,
         port: u16,
         protocol: &'static str,
         process: String,

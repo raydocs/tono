@@ -1333,6 +1333,8 @@ struct SampledConnection {
 struct SampledMetadata {
     #[serde(default, rename = "destinationIP")]
     destination_ip: String,
+    #[serde(default)]
+    host: String,
     #[serde(default, rename = "destinationPort")]
     destination_port: String,
     #[serde(default)]
@@ -1350,7 +1352,12 @@ struct SampledConnections {
 /// One destination worth recording, already deduplicated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DirectSample {
+    /// The resolved address, when the flow carried one. Empty for a domain-routed flow under
+    /// fake-ip, where the controller reports the name and not an address the prefix set could
+    /// be computed from.
     address: String,
+    /// The destination name, when the flow carried one.
+    host: String,
     port: u16,
     udp: bool,
     process: String,
@@ -1366,7 +1373,7 @@ struct DirectSample {
 /// distinction the macOS route classifier had to make.
 fn new_direct_samples(
     payload: &SampledConnections,
-    seen: &mut std::collections::HashSet<(String, u16, bool)>,
+    seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
 ) -> Vec<DirectSample> {
     let mut fresh = Vec::new();
     for connection in &payload.connections {
@@ -1376,17 +1383,21 @@ fn new_direct_samples(
         if !direct {
             continue;
         }
+        // Both shapes occur and both matter. A raw-IP dial — WeChat's HTTPDNS path, the one
+        // rule H exists for — reports an address and no name. A domain-routed flow under
+        // fake-ip reports the name, and its `destinationIP` is either absent or a fake-ip
+        // placeholder that no prefix set could be computed from. Recording only the address
+        // would therefore miss exactly the traffic this instrumentation is for on half the
+        // flows, so keep whichever the controller gave.
         let address = connection.metadata.destination_ip.trim();
-        if address.is_empty() {
+        let host = connection.metadata.host.trim();
+        if address.is_empty() && host.is_empty() {
             continue;
         }
         let Ok(port) = connection.metadata.destination_port.trim().parse::<u16>() else {
             continue;
         };
         let udp = connection.metadata.network.eq_ignore_ascii_case("udp");
-        if !seen.insert((address.to_owned(), port, udp)) {
-            continue;
-        }
         let process = connection
             .metadata
             .process_path
@@ -1394,8 +1405,21 @@ fn new_direct_samples(
             .next()
             .unwrap_or_default()
             .to_owned();
+        // The process belongs in the key. Without it, the second process to reach an address
+        // some other process already reached is silently dropped — and "a process that is not
+        // WeChat went direct" is an alarm, not a statistic, so suppressing it is the one
+        // deduplication this must not do.
+        let key = (
+            if address.is_empty() { host.to_owned() } else { address.to_owned() },
+            port,
+            udp,
+        );
+        if !seen.insert((key.0.clone(), key.1, key.2, process.clone())) {
+            continue;
+        }
         fresh.push(DirectSample {
             address: address.to_owned(),
+            host: host.to_owned(),
             port,
             udp,
             process,
@@ -1418,14 +1442,18 @@ fn new_direct_samples(
 async fn sample_direct_dials_once(
     state: &Arc<TonoState>,
     generation: u64,
-    seen: &mut std::collections::HashSet<(String, u16, bool)>,
+    seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
 ) -> bool {
     if seen.len() >= MAX_DIRECT_SAMPLES {
         return false;
     }
     let (secret, port) = {
         let inner = state.lock().await;
-        if inner.controller_generation != generation || !inner.fsm.status().is_connected {
+        // `connect_generation`, matching the sibling arms of this task. The first version
+        // compared `controller_generation` — a different counter, bumped per controller setup —
+        // which never equalled the connect generation this task was spawned with, so the very
+        // first tick disabled sampling and nothing was ever recorded.
+        if inner.connect_generation != generation || !inner.fsm.status().is_connected {
             return false;
         }
         match inner.controller_secret.clone().zip(inner.controller_port) {
@@ -1450,6 +1478,7 @@ async fn sample_direct_dials_once(
     for sample in new_direct_samples(&payload, seen) {
         state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
             address: sample.address,
+            host: sample.host,
             port: sample.port,
             protocol: if sample.udp { "udp" } else { "tcp" },
             process: sample.process,
@@ -1460,6 +1489,7 @@ async fn sample_direct_dials_once(
     if seen.len() >= MAX_DIRECT_SAMPLES {
         state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
             address: String::new(),
+            host: String::new(),
             port: 0,
             protocol: "cap",
             process: String::new(),
@@ -1482,7 +1512,7 @@ async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle
         let mut skip_first_wechat = true;
         let mut direct_interval = tokio::time::interval(DIRECT_SAMPLE_INTERVAL);
         direct_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut direct_seen: std::collections::HashSet<(String, u16, bool)> =
+        let mut direct_seen: std::collections::HashSet<(String, u16, bool, String)> =
             std::collections::HashSet::new();
         let mut sampling_direct = true;
         loop {
@@ -3651,12 +3681,9 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
     }
     if !plan.tcp_wechat_rules.is_empty() {
         for port in &plan.reviewed_direct_ports {
-            for process in tono_core::config::WECHAT_PROCESS_NAMES {
-                expected.push(ControllerDirectRuleProof {
-                    proxy: config::DIRECT_GROUP_NAME.to_owned(),
-                    payload: format!("((Network,tcp) && (DstPort,{port}) && (ProcessName,{process}))"),
-                });
-            }
+            // Path regexes only: a `PROCESS-NAME` rule matches any binary with that filename,
+            // which is not an identity worth pairing with an address-free port permit. See the
+            // emitting side in tono-core/src/config.rs.
             for regex in &plan.wechat_process_path_regexes {
                 expected.push(ControllerDirectRuleProof {
                     proxy: config::DIRECT_GROUP_NAME.to_owned(),
@@ -7122,9 +7149,7 @@ mod tests {
         let process_rows = if plan.tcp_wechat_rules.is_empty() {
             0
         } else {
-            plan.reviewed_direct_ports.len()
-                * (tono_core::config::WECHAT_PROCESS_NAMES.len()
-                    + plan.wechat_process_path_regexes.len())
+            plan.reviewed_direct_ports.len() * plan.wechat_process_path_regexes.len()
         };
         assert_eq!(
             controller_rules.len(),
@@ -7252,6 +7277,33 @@ mod tests {
         // The same connections on the next tick add nothing: this is a per-session set, not a
         // per-tick trace, which is what keeps an uploaded log bounded.
         assert!(new_direct_samples(&payload, &mut seen).is_empty());
+
+        // A second process reaching an address the first already used must still be recorded:
+        // "something that is not WeChat went direct" is the alarm this whole record exists for.
+        let other_process = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"43.175.230.151","destinationPort":"443","network":"tcp",
+                "processPath":"C:\\Windows\\Temp\\evil.exe"},
+               "chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        let flagged = new_direct_samples(&other_process, &mut seen);
+        assert_eq!(flagged.len(), 1, "a different process on a seen address is not a duplicate");
+        assert_eq!(flagged[0].process, "evil.exe");
+
+        // A domain-routed flow under fake-ip carries a name and no usable address. Recording
+        // only addresses would miss half the traffic rule H newly permits.
+        let by_name = sampled(
+            r#"{"connections":[
+              {"metadata":{"destinationIP":"","destinationPort":"443","network":"tcp",
+                "host":"res.wx.qq.com","processPath":"WeChat.exe"},
+               "chains":["Tono-China-Direct"],"rule":"","rulePayload":""}
+            ]}"#,
+        );
+        let named = new_direct_samples(&by_name, &mut seen);
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].host, "res.wx.qq.com");
+        assert!(named[0].address.is_empty());
 
         // A new port on an address already seen is a new destination.
         let more = sampled(

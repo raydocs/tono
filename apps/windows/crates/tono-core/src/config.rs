@@ -874,13 +874,20 @@ fn runtime_value(
         // block-all floor — the silent hang this whole change is undoing. WeChat on any other
         // port falls through to `MATCH,Tono-Exit` and rides the tunnel: slower than intended,
         // and working.
+        //
+        // Path regexes only, never `PROCESS-NAME`. Mihomo matches a process name on the
+        // executable's basename, so `C:\Users\me\Downloads\WeChat.exe` matches as readily as
+        // the real one. While the permit was an exact `IP:port` tuple that bought an attacker
+        // nothing — the pins were the boundary. Paired with an address-free port permit it
+        // becomes a way for any binary a user can be talked into naming `WeChat.exe` to reach
+        // arbitrary public addresses outside the tunnel. The regexes come from
+        // `signed_apps.rs`, which requires WinVerifyTrust to succeed and the signer to be a
+        // reviewed Tencent publisher, so they carry an identity a filename does not.
+        //
+        // The pinned-domain rules above still use no process condition at all, unchanged: they
+        // are bounded by an exact address instead.
         if !plan.tcp_wechat_rules.is_empty() {
             for port in &plan.reviewed_direct_ports {
-                for process in WECHAT_PROCESS_NAMES {
-                    rules.push(format!(
-                        "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
-                    ));
-                }
                 for regex in &plan.wechat_process_path_regexes {
                     rules.push(format!(
                         "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-PATH-REGEX,{regex})),{DIRECT_GROUP_NAME}"
@@ -1362,11 +1369,13 @@ reality-opts:
                 )
             })
             .collect();
-        // Process scope, restored and bounded to the ports the kill switch permits.
+        // Process scope is path-regex only — a signature-verified install tree, never a
+        // filename. The fixture has no regexes, so this contributes nothing here; the shape is
+        // asserted in `signed_wechat_path_regexes_govern_udp_media_and_not_tcp`.
         for port in &plan.reviewed_direct_ports {
-            for process in WECHAT_PROCESS_NAMES {
+            for regex in &plan.wechat_process_path_regexes {
                 rules.push(format!(
-                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-NAME,{process})),Tono-China-Direct"
+                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-PATH-REGEX,{regex})),Tono-China-Direct"
                 ));
             }
         }
@@ -1866,13 +1875,20 @@ reality-opts:
                 .position(|rule| *rule == "AND,((NETWORK,UDP)),REJECT")
                 .unwrap_or_else(|| panic!("the UDP catch-all is missing {label}"));
             for rule in &rules[..reject] {
-                if !rule.contains("(NETWORK,UDP)") {
+                // A rule with no NETWORK condition carries UDP too. Skipping those was the
+                // exact hole this test's own comment warns about: the check would have waved
+                // through `AND,((DST-PORT,443)),Tono-China-Direct`, which is unconditional for
+                // UDP in everything but name. Only a rule that names TCP is out of scope.
+                if rule.contains("(NETWORK,TCP)") {
                     continue;
                 }
+                // Bare rules (`IP-CIDR,127.0.0.0/8,DIRECT,no-resolve`) carry no parenthesis,
+                // so the match cannot require one — they are address-constrained all the same,
+                // which is what this asserts.
                 assert!(
-                    rule.contains("(PROCESS-NAME,")
-                        || rule.contains("(PROCESS-PATH-REGEX,")
-                        || rule.contains("(IP-CIDR,"),
+                    rule.contains("PROCESS-NAME,")
+                        || rule.contains("PROCESS-PATH-REGEX,")
+                        || rule.contains("IP-CIDR"),
                     "unconditional UDP rule ahead of the catch-all {label}: {rule}"
                 );
             }

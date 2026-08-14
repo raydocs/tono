@@ -377,6 +377,80 @@ fn ale_layer_for(ip: IpAddr) -> LayerKind {
 }
 
 /// The volatile session set, rebuilt per connect and per service start.
+
+/// IPv4 ranges the reviewed-port permit must never cover.
+///
+/// Mirrors `windows_kill_switch::is_public_direct_ipv4`, which every cloud-supplied address is
+/// already filtered through. Rule H takes no address from the policy, so without this it would
+/// be the one permit in this file with no public-unicast bound — and the traffic it exists for
+/// is WeChat's plaintext HTTPDNS, where the address comes from whatever answered the lookup. A
+/// hostile network answering `192.168.1.1` would have the integrity-pinned core dial the user's
+/// own LAN, from inside a kill switch the user believes is closed.
+const RESERVED_V4: [([u8; 4], u8); 14] = [
+    ([0, 0, 0, 0], 8),
+    ([10, 0, 0, 0], 8),
+    ([100, 64, 0, 0], 10),
+    ([127, 0, 0, 0], 8),
+    ([169, 254, 0, 0], 16),
+    ([172, 16, 0, 0], 12),
+    ([192, 0, 0, 0], 24),
+    ([192, 0, 2, 0], 24),
+    ([192, 88, 99, 0], 24),
+    ([192, 168, 0, 0], 16),
+    ([198, 18, 0, 0], 15),
+    ([198, 51, 100, 0], 24),
+    ([203, 0, 113, 0], 24),
+    ([224, 0, 0, 0], 3),
+];
+
+/// The complement of [`RESERVED_V4`], as prefixes.
+///
+/// Computed rather than written out, so the permit and the predicate it mirrors cannot drift:
+/// editing the table moves both. WFP ORs conditions that share a field key, so these go on one
+/// filter and mean "remote address is public unicast".
+fn public_unicast_v4_prefixes() -> Vec<([u8; 4], u8)> {
+    let mut blocked: Vec<(u32, u32)> = RESERVED_V4
+        .iter()
+        .map(|(addr, prefix)| {
+            let base = u32::from_be_bytes(*addr);
+            let size = if *prefix == 0 { u32::MAX } else { (1u32 << (32 - prefix)) - 1 };
+            (base, base.saturating_add(size))
+        })
+        .collect();
+    blocked.sort_unstable();
+
+    let mut allowed: Vec<([u8; 4], u8)> = Vec::new();
+    let mut cursor: u64 = 0;
+    for (start, end) in blocked {
+        if u64::from(start) > cursor {
+            emit_prefixes(cursor as u32, (start - 1), &mut allowed);
+        }
+        cursor = cursor.max(u64::from(end) + 1);
+    }
+    if cursor <= u64::from(u32::MAX) {
+        emit_prefixes(cursor as u32, u32::MAX, &mut allowed);
+    }
+    allowed
+}
+
+/// Split an inclusive address range into the fewest CIDR blocks that cover it exactly.
+fn emit_prefixes(mut start: u32, end: u32, out: &mut Vec<([u8; 4], u8)>) {
+    loop {
+        // The largest block that starts here and does not run past `end`.
+        let max_by_alignment = if start == 0 { 32 } else { start.trailing_zeros() };
+        let mut size = max_by_alignment.min(32);
+        while size > 0 && (u64::from(start) + (1u64 << size) - 1) > u64::from(end) {
+            size -= 1;
+        }
+        out.push((start.to_be_bytes(), (32 - size) as u8));
+        let next = u64::from(start) + (1u64 << size);
+        if next > u64::from(end) {
+            return;
+        }
+        start = next as u32;
+    }
+}
+
 pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     use Condition as C;
     use FilterAction as A;
@@ -434,20 +508,27 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
     // C: the bounded bootstrap API channel. Open in bootstrap, retracted at lock, and open
     // again in blocked mode as the recovery channel.
     if config.mode != KillSwitchStatusMode::Locked {
+        // One permit per pinned address per reachable port. The address set is what bounds
+        // this channel; the port was never doing security work, and pinning it to 443 alone
+        // meant the client could not use the alternate HTTPS ports the same Cloudflare zone
+        // answers on — the one route around an SNI blocklist keyed on 443, and the difference
+        // between a user stuck in Protected Offline being able to re-authenticate or not.
         for ip in &config.api_host_ips {
-            filters.push(spec(
-                format!("session/permit-api/ale/{ip}"),
-                "session permit bootstrap API",
-                ale_layer_for(*ip),
-                WEIGHT_INFRA_PERMIT,
-                A::Permit,
-                vec![
-                    remote_address_condition(*ip),
-                    C::Protocol(IpProtocol::Tcp),
-                    C::RemotePort(443),
-                ],
-                false,
-            ));
+            for port in crate::CONTROL_PLANE_PORTS {
+                filters.push(spec(
+                    format!("session/permit-api/ale/{ip}/{port}"),
+                    "session permit bootstrap API",
+                    ale_layer_for(*ip),
+                    WEIGHT_INFRA_PERMIT,
+                    A::Permit,
+                    vec![
+                        remote_address_condition(*ip),
+                        C::Protocol(IpProtocol::Tcp),
+                        C::RemotePort(port),
+                    ],
+                    false,
+                ));
+            }
         }
     }
 
@@ -538,7 +619,18 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
                     L::AleAuthConnectV4,
                     WEIGHT_HARD_PERMIT,
                     A::Permit,
-                    vec![C::AleAppId, C::Protocol(protocol), C::RemotePort(port)],
+                    {
+                        // AleAppId AND Protocol AND RemotePort AND (address in any public
+                        // unicast prefix) — WFP ANDs distinct field keys and ORs repeats of
+                        // the same one, so the prefixes below are a single "is public"
+                        // condition rather than many separate permits.
+                        let mut conditions =
+                            vec![C::AleAppId, C::Protocol(protocol), C::RemotePort(port)];
+                        conditions.extend(public_unicast_v4_prefixes().into_iter().map(
+                            |(addr, prefix)| C::RemoteAddressV4 { addr, prefix },
+                        ));
+                        conditions
+                    },
                     false,
                 ));
             }
@@ -1193,12 +1285,46 @@ mod tests {
         }
     }
 
+    /// WFP's own combining rule, which the model previously did not implement.
+    ///
+    /// From the `FWPM_FILTER0` contract: conditions on *different* fields are AND'd, and
+    /// conditions repeating the *same* field are OR'd. The model ANDed everything, so a filter
+    /// carrying several remote-address prefixes — the shape rule H uses to mean "any public
+    /// unicast address" — could never match, and the test asserted a Block that production
+    /// would not produce.
+    ///
+    /// Note this is the one place the model encodes a WFP semantic that cannot be exercised on
+    /// a non-Windows host. It is the documented behaviour, and getting it wrong fails closed:
+    /// the permit would simply never match and WeChat would stay as broken as it was before
+    /// rule H existed. Still worth one confirmation on a real machine.
+    fn field_key(condition: &Condition) -> u8 {
+        match condition {
+            Condition::RemoteAddressV4 { .. } => 0,
+            Condition::RemoteAddressV6 { .. } => 1,
+            Condition::Protocol(_) => 2,
+            Condition::LocalPort(_) => 3,
+            Condition::RemotePort(_) => 4,
+            Condition::IcmpV6TypeRange { .. } => 5,
+            Condition::AleLoopback => 6,
+            Condition::AleAppId => 7,
+            Condition::LocalInterface(_) => 8,
+        }
+    }
+
     fn filter_matches(filter: &FilterSpec, packet: &Packet) -> bool {
-        filter.layer == packet.layer
-            && filter
+        if filter.layer != packet.layer {
+            return false;
+        }
+        let mut keys: Vec<u8> = filter.conditions.iter().map(field_key).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        keys.into_iter().all(|key| {
+            filter
                 .conditions
                 .iter()
-                .all(|condition| condition_matches(condition, packet))
+                .filter(|condition| field_key(condition) == key)
+                .any(|condition| condition_matches(condition, packet))
+        })
     }
 
     fn arbitrate(filters: &[FilterSpec], packet: &Packet) -> FilterAction {
@@ -1661,10 +1787,14 @@ mod tests {
 
         // On a reviewed port an unpinned address is permitted — for the staged core only.
         // This is the behaviour WeChat needs and the widening class H is.
+        //
+        // A real public address on purpose: the documentation ranges the other fixtures use
+        // (203.0.113.0/24 and friends) are reserved, and class H refuses them. 43.175.230.151
+        // is one of the addresses WeChat was measured dialling directly.
         let mut unpinned_reviewed = packet(
             LayerKind::AleAuthConnectV4,
             IpProtocol::Tcp,
-            "203.0.113.11",
+            "43.175.230.151",
             443,
         );
         assert_eq!(
@@ -1680,11 +1810,29 @@ mod tests {
         let mut unpinned_other_port = packet(
             LayerKind::AleAuthConnectV4,
             IpProtocol::Tcp,
-            "203.0.113.11",
+            "43.175.230.151",
             9443,
         );
         unpinned_other_port.app_id_matches = true;
         assert_eq!(arbitrate(&filters, &unpinned_other_port), FilterAction::Block);
+
+        // The permit is bounded to public unicast. The exact table is checked exhaustively in
+        // its own test; these are the ranges a hostile HTTPDNS answer would actually name.
+        //
+        // Loopback is deliberately absent from this list: the core must reach its own
+        // controller and DNS listener, and a separate class permits that. Rule H not covering
+        // 127/8 is the property under test, not whether 127.0.0.1 is reachable at all.
+        for private in ["192.168.1.1", "10.0.0.5", "169.254.1.1", "100.64.0.1", "172.16.0.9"] {
+            let mut probe =
+                packet(LayerKind::AleAuthConnectV4, IpProtocol::Tcp, private, 443);
+            probe.app_id_matches = true;
+            assert_eq!(
+                arbitrate(&filters, &probe),
+                FilterAction::Block,
+                "{private} must stay unreachable: WeChat's HTTPDNS is plaintext, so the address \
+                 comes from whatever answered the lookup"
+            );
+        }
 
         // IPv4 only. The runtime is `ipv6: false` and AAAA dials are dropped, so there is no
         // IPv6 DIRECT flow — and an address-free permit on the V6 layer would widen the
@@ -1709,7 +1857,7 @@ mod tests {
         for port in crate::REVIEWED_DIRECT_PORTS {
             for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
                 let mut probe =
-                    packet(LayerKind::AleAuthConnectV4, protocol, "198.51.100.7", port);
+                    packet(LayerKind::AleAuthConnectV4, protocol, "43.175.230.151", port);
                 probe.app_id_matches = true;
                 assert_eq!(
                     arbitrate(&filters, &probe),
@@ -1761,6 +1909,57 @@ mod tests {
     /// exact approved tuples to Block, and the rendered
     /// set must not merely down-weight them — the permits must be absent, so the key-only diff
     /// removes them when the mode changes instead of leaving them installed.
+
+    /// The computed complement must agree with the predicate it mirrors, everywhere.
+    ///
+    /// Exhaustive over the first two octets — 65 536 probes, which covers every boundary in
+    /// `RESERVED_V4` — rather than a handful of samples, because an off-by-one in a CIDR split
+    /// is exactly the kind of error a spot check passes.
+    #[test]
+    fn public_unicast_prefixes_are_the_exact_complement_of_the_reserved_table() {
+        fn covered(prefixes: &[([u8; 4], u8)], addr: u32) -> bool {
+            prefixes.iter().any(|(base, len)| {
+                let mask = if *len == 0 { 0 } else { u32::MAX << (32 - len) };
+                (u32::from_be_bytes(*base) & mask) == (addr & mask)
+            })
+        }
+        fn reserved(addr: u32) -> bool {
+            let [a, b, c, _] = addr.to_be_bytes();
+            matches!(
+                (a, b, c),
+                (0, _, _)
+                    | (10, _, _)
+                    | (100, 64..=127, _)
+                    | (127, _, _)
+                    | (169, 254, _)
+                    | (172, 16..=31, _)
+                    | (192, 0, 0)
+                    | (192, 0, 2)
+                    | (192, 88, 99)
+                    | (192, 168, _)
+                    | (198, 18..=19, _)
+                    | (198, 51, 100)
+                    | (203, 0, 113)
+                    | (224..=255, _, _)
+            )
+        }
+        let prefixes = public_unicast_v4_prefixes();
+        assert!(!prefixes.is_empty());
+        for a in 0..=255u8 {
+            for b in 0..=255u8 {
+                // Third octet chosen to land inside every /24 the table names.
+                for c in [0u8, 2, 99, 100, 113, 255] {
+                    let addr = u32::from_be_bytes([a, b, c, 7]);
+                    assert_eq!(
+                        covered(&prefixes, addr),
+                        !reserved(addr),
+                        "{a}.{b}.{c}.7 disagrees with the reserved table"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn direct_permits_are_absent_and_blocked_outside_locked() {
         for mode in [

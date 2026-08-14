@@ -113,12 +113,18 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// Revision 13 adds GET/POST `/bootstrap-pins` so learned control-plane addresses persist under
 /// the Service's ProgramData ACL. MIN_REQUIRED stays 12: an older Service is still safe, and the
 /// App then keeps only the compiled pins.
-pub const PROTOCOL_REVISION: u16 = 13;
+/// Revision 14 adds the reviewed-port DIRECT permit (`wfp_model` rule H) and widens the
+/// bootstrap API channel to `CONTROL_PLANE_PORTS`. Both are Service capabilities the App now
+/// relies on: an App that emits process-scoped WeChat rules against a revision-13 Service gets
+/// the routing without the permit, which is precisely the silent black hole rule H exists to
+/// end. MIN_REQUIRED moves with it for that reason — this is not an additive field a client can
+/// ignore, it is a behaviour the client's own rules assume.
+pub const PROTOCOL_REVISION: u16 = 14;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.
 pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 12;
-pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 12;
+pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 14;
 
 /// Ports the staged core may reach directly on the physical NIC while a DIRECT plan is live.
 ///
@@ -138,6 +144,26 @@ pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 12;
 /// traffic. It is deliberately small and deliberately not "any port": a routing mistake can at
 /// worst escape on a web or transfer port, and everything else still fails closed.
 pub const REVIEWED_DIRECT_PORTS: [u16; 4] = [80, 443, 8000, 8080];
+
+/// HTTPS ports the control plane is reachable on, most-preferred first.
+///
+/// 443 is the normal path. The rest are Cloudflare's alternate proxied HTTPS ports, which it
+/// serves on every plan for the same zone, with the same certificate and the same SNI — so
+/// reaching one of them is the same server over the same TLS identity, only on a different TCP
+/// port.
+///
+/// That matters because of how the failure this fixes actually behaves. A customer in China saw
+/// both transport paths fail with WSAECONNRESET, instantly, while other users on other networks
+/// signed in fine. Both paths carry the same hostname and therefore the same SNI, so pinning
+/// addresses cannot route around SNI-level interference, and retrying does not help either:
+/// that kind of interference is stateful and holds the address:port for minutes, while the
+/// client's four attempts all land inside half a second. Port 443 is what such blocklists are
+/// keyed on; the alternates are not, which is why they are worth trying.
+///
+/// One constant, used by both sides. `wfp_model::session_rules` renders the bootstrap API
+/// permit from it and the App's transport walks it, so a port the client will try cannot be one
+/// the kill switch refuses — which is exactly what would happen if each side kept its own list.
+pub const CONTROL_PLANE_PORTS: [u16; 6] = [443, 2053, 2083, 2087, 2096, 8443];
 /// Revision that introduced GET/POST `/bootstrap-pins`.
 pub const MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS: u16 = 13;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;
