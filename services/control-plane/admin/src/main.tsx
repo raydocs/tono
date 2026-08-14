@@ -1,6 +1,7 @@
 import { Fragment, StrictMode, useEffect, useMemo, useState, type FormEvent, type ReactNode, type SVGProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
+  LiveAgentDto,
   operationsApi,
   type ActivityDto,
   type DashboardDto,
