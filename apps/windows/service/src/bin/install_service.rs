@@ -1596,8 +1596,18 @@ fn main() -> anyhow::Result<()> {
         Err(error) if raw_error_code(&error) == Some(ERROR_SERVICE_DOES_NOT_EXIST) => {
             if install_mode == WindowsInstallMode::ReplaceRuntime {
                 let _ = remove_ordinary_file_if_exists(&staged);
+                // Nothing has been changed yet, and the fresh-install path below is written to
+                // handle exactly this ("repair/update runs whose old SCM record is already
+                // gone") — but reaching it would install a Service beside an unreplaced
+                // Mihomo, whose compiled digest pin the Service could then never match. So
+                // this still stops, and now says which route out of it works: every
+                // `--replace-runtime` re-run lands right back here, so "run the installer
+                // again" is not it.
                 bail!(
-                    "the installed Tono Service is missing; runtime replacement stopped before changing Mihomo"
+                    "the installed Tono Service record is gone, so there is nothing to replace; \
+                     Mihomo was not changed. Re-running this installer stops at the same place. \
+                     Uninstall Tono from Settings > Apps (or Add/Remove Programs), then install \
+                     it again — that path does not need the missing Service record."
                 );
             }
         }
