@@ -339,6 +339,25 @@ mod tests {
     };
 
 
+    /// Whether something in the network path accepts a connection to an address
+    /// that must not be reachable.
+    ///
+    /// Both tests below rest on one premise: packets to a blackholed RFC1918
+    /// address are dropped, so the connect runs out of time and reqwest reports
+    /// a connect-phase failure. A TUN VPN — including this product's own —
+    /// completes that connect locally and instantly, and the failure then
+    /// arrives later as a response timeout with `is_connect()` false. The
+    /// premise is gone, so the assertions below say nothing, and a developer
+    /// running the suite while connected would be told reqwest had changed its
+    /// error flags. CI runners have no tunnel, which is where these must run.
+    fn blackhole_is_intercepted() -> bool {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([10, 255, 255, 1], 80)),
+            std::time::Duration::from_millis(300),
+        )
+        .is_ok()
+    }
+
     /// A connect that timed out must be classified as never-delivered.
     ///
     /// reqwest sets both flags for it, so the ordering inside `classify` decides
@@ -347,6 +366,13 @@ mod tests {
     /// the sign-in screen — and signing in is a POST.
     #[tokio::test]
     async fn a_connect_that_times_out_is_not_an_ambiguous_timeout() {
+        if blackhole_is_intercepted() {
+            eprintln!(
+                "skipped: a tunnel is completing the blackhole connect, so the \
+                 connect phase cannot fail here; run without a VPN, as CI does"
+            );
+            return;
+        }
         let client = reqwest::Client::builder()
             .no_proxy()
             .connect_timeout(std::time::Duration::from_millis(700))
@@ -575,6 +601,14 @@ mod tests {
     /// responses, and a merged sentence cannot separate them.
     #[tokio::test]
     async fn a_total_failure_reports_both_paths() {
+        if blackhole_is_intercepted() {
+            eprintln!(
+                "skipped: a tunnel is completing the blackhole connect, so both \
+                 halves report a response timeout rather than a connect phase; \
+                 run without a VPN, as CI does"
+            );
+            return;
+        }
         let dead = vec![std::net::SocketAddr::from(([10, 255, 255, 1], 443))];
         let transport = TonoTransport::with_clients("tono-nowhere.test", &dead, &dead)
             .expect("transport");
