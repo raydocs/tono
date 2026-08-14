@@ -90,7 +90,7 @@ const fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-fn key_for(tag: &str) -> Guid {
+pub(crate) fn key_for(tag: &str) -> Guid {
     Guid::from_u128(FILTER_NAMESPACE | fnv1a64(tag.as_bytes()) as u128)
 }
 
@@ -413,7 +413,7 @@ const RESERVED_V4: [([u8; 4], u8); 14] = [
 /// Computed rather than written out, so the permit and the predicate it mirrors cannot drift:
 /// editing the table moves both. WFP ORs conditions that share a field key, so these go on one
 /// filter and mean "remote address is public unicast".
-fn public_unicast_v4_prefixes() -> Vec<([u8; 4], u8)> {
+pub(crate) fn public_unicast_v4_prefixes() -> Vec<([u8; 4], u8)> {
     let mut blocked: Vec<(u32, u32)> = RESERVED_V4
         .iter()
         .map(|(addr, prefix)| {
