@@ -34,11 +34,17 @@ cd "$control_plane"
 "$repo_root/tooling/scripts/test-policy-signing-contract.sh"
 /usr/bin/env npm run admin:build
 
-# Static ops assets are committed deployment inputs. A non-deterministic or
-# forgotten build must be reviewed and pushed instead of being smuggled into a
-# Worker version whose metadata claims it came from an otherwise clean SHA.
-[[ -z $(git -C "$repo_root" status --porcelain) ]] \
-  || fail "admin build changed tracked output; commit and push it before deploying"
+# The console is built here rather than shipped from the repository. There used
+# to be a second worktree-clean check after this build, on the premise that the
+# built assets are committed deployment inputs — but `public/ops/` is listed in
+# services/control-plane/.gitignore and has never had a tracked file in it, so
+# the build wrote into an ignored directory and the check could not fail. It
+# guarded nothing while reading like the thing that made the build reproducible.
+#
+# What actually ties a deployed bundle to a revision is the tag below: the
+# Worker version records main@<sha>, and rebuilding from that commit reproduces
+# what shipped. The check worth having is the one above — that the source is
+# exactly remote main — and that one is real.
 
 short_commit=${source_commit[1,12]}
 /usr/bin/env npx wrangler deploy --strict \
