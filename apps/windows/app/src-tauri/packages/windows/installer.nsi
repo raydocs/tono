@@ -623,7 +623,7 @@ FunctionEnd
     ${ElseIf} $0 != "0"
       ; Result 3 means the kill-switch filters may still be installed. DNS-only problems no longer
       ; land here (they are exit 4). Reboot and retry, or reinstall to repair the Service first.
-      Abort "Tono could not confirm this machine was made safe to uninstall (result $0), so nothing was deleted and the recovery files were kept. See the messages above for what failed. The kill switch may still be installed — reboot Windows and run this uninstaller or installer again. Removing Tono while the barrier stays armed would leave the machine blocked with nothing left to unblock it. Installing Tono again first also repairs the Service."
+      Abort "Tono could not confirm this machine was made safe to uninstall (result $0), so nothing was deleted and the recovery files were kept. See the messages above for what failed. The kill switch may still be installed. A reboot does not clear it and makes it worse — the block filters survive a restart while the loopback and DHCP exceptions beside them do not — so use the elevated Start-Menu shortcut ${RESTORENETWORKLINK} first, or run this uninstaller or installer again. Removing Tono while the barrier stays armed would leave the machine blocked with nothing left to unblock it. Installing Tono again first also repairs the Service."
     ${EndIf}
   ${EndIf}
 !macroend
