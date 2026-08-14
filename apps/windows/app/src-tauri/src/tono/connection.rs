@@ -3457,10 +3457,9 @@ const MIHOMO_PROCESS_PATH_REGEX_TYPE: &str = "ProcessPathRegex";
 /// internal child option and intentionally does not appear in `Payload()`.
 fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec<ControllerDirectRuleProof> {
     let mut expected = Vec::new();
-    // Pinned per resolved endpoint, mirroring `runtime_value`. Process-scoped WeChat TCP
-    // was withdrawn because nothing in `wfp_model::session_rules` can permit an unpinned
-    // dial, so it black-holed everything but the connect-time pins; see the comment on the
-    // emitting side in tono-core/src/config.rs.
+    // Pinned per resolved endpoint, then process-scoped and bounded to the reviewed ports —
+    // mirroring `runtime_value` exactly. A rule the runtime carries and this proof does not
+    // expect fails the graph check and the connect with it, so the two must move together.
     for (host, address, port) in &plan.tcp_wechat_rules {
         expected.push(ControllerDirectRuleProof {
             proxy: config::DIRECT_GROUP_NAME.to_owned(),
@@ -3469,6 +3468,24 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
                 host.to_ascii_lowercase()
             ),
         });
+    }
+    if !plan.tcp_wechat_rules.is_empty() {
+        for port in &plan.reviewed_direct_ports {
+            for process in tono_core::config::WECHAT_PROCESS_NAMES {
+                expected.push(ControllerDirectRuleProof {
+                    proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                    payload: format!("((Network,tcp) && (DstPort,{port}) && (ProcessName,{process}))"),
+                });
+            }
+            for regex in &plan.wechat_process_path_regexes {
+                expected.push(ControllerDirectRuleProof {
+                    proxy: config::DIRECT_GROUP_NAME.to_owned(),
+                    payload: format!(
+                        "((Network,tcp) && (DstPort,{port}) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"
+                    ),
+                });
+            }
+        }
     }
     for (address, port) in &plan.udp_wechat_rules {
         for process in tono_core::config::WECHAT_PROCESS_NAMES {
@@ -4799,6 +4816,11 @@ pub fn build_direct_plan(
         web_suffix_rules,
         udp_wechat_rules: udp,
         wechat_process_path_regexes,
+        // Straight from the Service crate, not a second copy of the numbers: the rules emitted
+        // from this plan and the WFP permit the Service renders are then the same surface by
+        // construction. That is the whole reason the constant lives in
+        // `clash_verge_service_ipc` rather than once in each crate that needs it.
+        reviewed_direct_ports: clash_verge_service_ipc::REVIEWED_DIRECT_PORTS.to_vec(),
     };
     Ok((plan, endpoints))
 }
@@ -6917,9 +6939,17 @@ mod tests {
         // `wfp_model::session_rules` can only permit an exact (address, port) tuple —
         // anything else is routed out the physical interface and then dropped by the
         // block-all floor.
+        let process_rows = if plan.tcp_wechat_rules.is_empty() {
+            0
+        } else {
+            plan.reviewed_direct_ports.len()
+                * (tono_core::config::WECHAT_PROCESS_NAMES.len()
+                    + plan.wechat_process_path_regexes.len())
+        };
         assert_eq!(
             controller_rules.len(),
             plan.tcp_wechat_rules.len()
+                + process_rows
                 + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
                 + plan.tcp_web_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"
@@ -7032,23 +7062,52 @@ mod tests {
             .collect();
         assert!(!permitted.is_empty(), "fixture must produce permits");
 
+        // Two ways a rule can be covered, and every rule must be covered by one of them:
+        //   - it pins an address that `direct_endpoints` permits exactly (rule G), or
+        //   - its port is one the reviewed-port class permits for the staged core (rule H).
+        // A rule covered by neither routes a flow to the physical interface that the
+        // block-all floor then drops — the silent hang this whole class exists to end.
         for rule in expected_controller_direct_rules(&plan) {
+            let port = rule
+                .payload
+                .split("(DstPort,")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next())
+                .and_then(|value| value.parse::<u16>().ok());
+            let covered_by_port = port
+                .is_some_and(|port| clash_verge_service_ipc::REVIEWED_DIRECT_PORTS.contains(&port));
             let pin = rule
                 .payload
                 .split("(IPCIDR,")
                 .nth(1)
-                .and_then(|rest| rest.split(')').next())
-                .unwrap_or_else(|| {
-                    panic!(
-                        "DIRECT rule with no address pin would be dropped by the kill switch: {}",
-                        rule.payload
-                    )
-                });
-            assert!(
-                permitted.contains(pin),
-                "DIRECT rule pins {pin}, which is not in the WFP permit set: {}",
-                rule.payload
-            );
+                .and_then(|rest| rest.split(')').next());
+            match pin {
+                Some(pin) => assert!(
+                    permitted.contains(pin) || covered_by_port,
+                    "DIRECT rule pins {pin}, which is neither in the WFP permit set nor on a \
+                     reviewed port: {}",
+                    rule.payload
+                ),
+                None => assert!(
+                    covered_by_port,
+                    "DIRECT rule with no address pin and no reviewed port would be dropped by \
+                     the kill switch: {}",
+                    rule.payload
+                ),
+            }
+        }
+
+        // The port constraint is what makes the second arm safe, so prove it is really there:
+        // an unconstrained process rule would route every port WeChat opens to the physical
+        // interface, where only the reviewed four have a permit.
+        for rule in expected_controller_direct_rules(&plan) {
+            if rule.payload.contains("ProcessName") || rule.payload.contains("ProcessPathRegex") {
+                assert!(
+                    rule.payload.contains("(DstPort,"),
+                    "a process-scoped DIRECT rule must name a port: {}",
+                    rule.payload
+                );
+            }
         }
     }
 

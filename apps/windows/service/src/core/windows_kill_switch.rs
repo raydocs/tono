@@ -5211,12 +5211,16 @@ mod tests {
         );
 
         let armed = armed_guard().clone().expect("still armed");
+        // Two exact-tuple permits (rule G), plus the reviewed-port class (rule H): one filter
+        // per port per protocol per address family. Derived from the constant rather than
+        // written as a literal, so adding a reviewed port cannot quietly change the count.
+        let reviewed = crate::REVIEWED_DIRECT_PORTS.len() * 2 * 2;
         assert_eq!(
             wfp_model::expected_filters(&render(&armed).await)
                 .iter()
                 .filter(|filter| filter.name.contains("DIRECT"))
                 .count(),
-            2,
+            2 + reviewed,
             "each approved tuple must be one ALE permit carrying both Mihomo identity and the exact tuple"
         );
         let persisted = tokio::fs::read_to_string(intent_path()).await?;

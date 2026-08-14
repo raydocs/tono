@@ -119,6 +119,25 @@ pub const PROTOCOL_REVISION: u16 = 13;
 /// additive: a revision-12 client may still pair.
 pub const MIN_SUPPORTED_CLIENT_REVISION: u16 = 12;
 pub const MIN_REQUIRED_SERVICE_REVISION: u16 = 12;
+
+/// Ports the staged core may reach directly on the physical NIC while a DIRECT plan is live.
+///
+/// This is the one place the number lives. `wfp_model::session_rules` renders the permit from
+/// it, and the App feeds the same array into `DirectPlan::reviewed_direct_ports`, so the rules
+/// that *route* a flow to the physical interface and the filters that *let it out* cannot name
+/// different ports. Both crates import this constant rather than mirroring it — the shape this
+/// codebase keeps getting wrong is two agreeing values written in two places.
+///
+/// Why a port set at all, rather than the exact `IP:port` pins beside it: WeChat resolves its
+/// file and CDN endpoints through its own HTTPDNS and dials addresses no pin can know. Measured
+/// on macOS, whose PF policy is the same shape: 21.2 MB of WeChat upload left through the port
+/// permit and 95 KB through the 58 exact pins. Without this class, that 21.2 MB is what the
+/// Windows block-all floor silently drops — the images and file transfers that hang.
+///
+/// The set mirrors the Mac helper's `reviewedBundleDirectPorts`, which has carried production
+/// traffic. It is deliberately small and deliberately not "any port": a routing mistake can at
+/// worst escape on a web or transfer port, and everything else still fails closed.
+pub const REVIEWED_DIRECT_PORTS: [u16; 4] = [80, 443, 8000, 8080];
 /// Revision that introduced GET/POST `/bootstrap-pins`.
 pub const MIN_SERVICE_REVISION_FOR_BOOTSTRAP_PINS: u16 = 13;
 pub const MIN_SERVICE_REVISION_FOR_DIRECT_RUNTIME_RELOAD: u16 = 10;

@@ -490,6 +490,59 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         }
     }
 
+    // H: the reviewed-bundle port permit. Same gate as G, and deliberately the only permit
+    // in this file with no address condition.
+    //
+    // G permits exact `IP:port` tuples resolved from the cloud policy. That is a complete
+    // description of where the policy's *domains* live and a useless one for where WeChat
+    // actually dials: it resolves file and CDN endpoints through its own HTTPDNS and connects
+    // to addresses no pin can know in advance. The routing rules send those flows out the
+    // physical NIC; without this class the floor at E drops them, which is the hang users
+    // report as WeChat images and file transfers never finishing.
+    //
+    // Measured on macOS, whose PF policy is this same shape: 21.2 MB of WeChat upload left
+    // through the port permit against 95 KB through all 58 exact pins.
+    //
+    // What keeps it narrow:
+    //   - `AleAppId` — only the staged core, whose bytes the integrity pin fixes. No other
+    //     process on the machine can match this filter, so no application can use it directly.
+    //     The only way a flow reaches it is if the core dials on that flow's behalf.
+    //   - `REVIEWED_DIRECT_PORTS` — four ports, shared with the rules that decide what gets
+    //     routed here, so the two surfaces cannot name different sets.
+    //   - Only alongside a live DIRECT plan. No plan means no permit, which is exactly the
+    //     behaviour before this class existed.
+    //
+    // What it does not stop, stated plainly: a routing mistake that sends some other flow to
+    // the physical interface on one of these four ports. The control for that is the rule
+    // layer — specifically the terminating `(NETWORK,UDP),REJECT`, which is what stops
+    // mihomo's ruleless UDP fallback from dialling out when an exit cannot carry UDP. That
+    // rule is asserted unshadowable in `tono_core::config`. Bounding this permit by
+    // destination is the next step and needs address data this build does not have.
+    if config.mode == KillSwitchStatusMode::Locked
+        && config.tun_luid.is_some()
+        && !config.direct_endpoints.is_empty()
+    {
+        for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
+            for port in crate::REVIEWED_DIRECT_PORTS {
+                for layer in [L::AleAuthConnectV4, L::AleAuthConnectV6] {
+                    filters.push(spec(
+                        format!(
+                            "session/permit-reviewed-direct/{layer:?}/{}/{port}/{}",
+                            config.app_path,
+                            protocol.number()
+                        ),
+                        "session permit reviewed DIRECT ports",
+                        layer,
+                        WEIGHT_HARD_PERMIT,
+                        A::Permit,
+                        vec![C::AleAppId, C::Protocol(protocol), C::RemotePort(port)],
+                        false,
+                    ));
+                }
+            }
+        }
+    }
+
     // E: redundant block-all, always present while armed. This default-deny floor already blocks
     // physical DNS unless a more specific permit matches. Do not add a separate port-53 block:
     // Windows resolver traffic starts at 127.0.0.1 and can transition to the TUN address, and a
@@ -1557,8 +1610,19 @@ mod tests {
         config
     }
 
+    /// The DIRECT boundary, stated as the two things that are still true and the one that
+    /// deliberately is not.
+    ///
+    /// Still true: no process but the staged core reaches any of it, and outside
+    /// `REVIEWED_DIRECT_PORTS` the permit is still an exact `IP:port` tuple.
+    ///
+    /// No longer true: on those four ports the core may reach any address. That is the point
+    /// of class H — WeChat dials HTTPDNS-derived addresses no pin can know, and pinning was
+    /// therefore silently dropping its images and file transfers. The trade is written out in
+    /// the class comment; this test is where the shape is pinned so relaxing it further has to
+    /// be deliberate.
     #[test]
-    fn direct_endpoints_require_the_staged_core_at_ale_and_remain_exact_while_locked() {
+    fn direct_endpoints_require_the_staged_core_at_ale_and_remain_exact_off_reviewed_ports() {
         let filters = expected_filters(&config_with_direct_endpoints(KillSwitchStatusMode::Locked));
 
         // An arbitrary process cannot open an exact tuple directly; Mihomo (the staged app id)
@@ -1582,7 +1646,8 @@ mod tests {
         udp.app_id_matches = true;
         assert_eq!(arbitrate(&filters, &udp), FilterAction::Permit);
 
-        // Same IP, wrong port: blocked. Wrong IP: blocked.
+        // A port outside the reviewed set stays exact: even the pinned address is refused
+        // there, and 8443 is deliberately close to 443 to catch a widened match.
         let mut wrong_port = packet(
             LayerKind::AleAuthConnectV4,
             IpProtocol::Tcp,
@@ -1591,14 +1656,47 @@ mod tests {
         );
         wrong_port.app_id_matches = true;
         assert_eq!(arbitrate(&filters, &wrong_port), FilterAction::Block);
-        let mut wrong_ip = packet(
+
+        // On a reviewed port an unpinned address is permitted — for the staged core only.
+        // This is the behaviour WeChat needs and the widening class H is.
+        let mut unpinned_reviewed = packet(
             LayerKind::AleAuthConnectV4,
             IpProtocol::Tcp,
             "203.0.113.11",
             443,
         );
-        wrong_ip.app_id_matches = true;
-        assert_eq!(arbitrate(&filters, &wrong_ip), FilterAction::Block);
+        assert_eq!(
+            arbitrate(&filters, &unpinned_reviewed),
+            FilterAction::Block,
+            "a process that is not the staged core must never reach this permit"
+        );
+        unpinned_reviewed.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &unpinned_reviewed), FilterAction::Permit);
+
+        // And an unpinned address off the reviewed ports is still refused, so the widening is
+        // bounded by the port set rather than open-ended.
+        let mut unpinned_other_port = packet(
+            LayerKind::AleAuthConnectV4,
+            IpProtocol::Tcp,
+            "203.0.113.11",
+            9443,
+        );
+        unpinned_other_port.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &unpinned_other_port), FilterAction::Block);
+
+        // Every reviewed port is covered on both protocols, and nothing outside the set is.
+        for port in crate::REVIEWED_DIRECT_PORTS {
+            for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
+                let mut probe =
+                    packet(LayerKind::AleAuthConnectV4, protocol, "198.51.100.7", port);
+                probe.app_id_matches = true;
+                assert_eq!(
+                    arbitrate(&filters, &probe),
+                    FilterAction::Permit,
+                    "reviewed port {port}/{protocol:?} must be permitted for the staged core"
+                );
+            }
+        }
 
         // The ALE DIRECT permit is a weight-8, app-scoped exact tuple.
         let permit = filters
@@ -1677,7 +1775,12 @@ mod tests {
             .filter(|filter| filter.name.contains("DIRECT"))
             .map(|filter| filter.key)
             .collect::<Vec<_>>();
-        assert_eq!(direct_keys.len(), 2);
+        // Rule G's two exact tuples plus rule H's port class. Both are gated on Locked with a
+        // live tunnel, so both must appear here and both must be retracted below.
+        assert_eq!(
+            direct_keys.len(),
+            2 + crate::REVIEWED_DIRECT_PORTS.len() * 2 * 2
+        );
         let plan = diff(
             &locked.iter().map(|filter| filter.key).collect::<Vec<_>>(),
             &blocked,

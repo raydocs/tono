@@ -186,6 +186,13 @@ pub struct DirectPlan {
     pub web_suffix_rules: Vec<(String, u16)>,
     pub udp_wechat_rules: Vec<(std::net::Ipv4Addr, u16)>,
     pub wechat_process_path_regexes: Vec<String>,
+    /// Ports the kill switch will let the staged core reach directly, straight from
+    /// `clash_verge_service_ipc::REVIEWED_DIRECT_PORTS`. The process rules below are
+    /// constrained to exactly this set, so what gets *routed* to the physical interface and
+    /// what the WFP permit *lets out* are the same surface by construction. Empty means the
+    /// caller declared no permit, and no process rule is emitted at all — the fail-closed
+    /// default.
+    pub reviewed_direct_ports: Vec<u16>,
 }
 
 impl DirectPlan {
@@ -854,6 +861,33 @@ fn runtime_value(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{DIRECT_GROUP_NAME}"
             ));
         }
+        // Process-scoped WeChat TCP, restored now that the kill switch has a permit that can
+        // cover it. The clients dial their file and CDN endpoints through their own HTTPDNS,
+        // by raw IP, so a domain pin can never describe where they go — measured on macOS,
+        // 21.2 MB of WeChat upload left through the port permit against 95 KB through all 58
+        // exact pins. Withdrawing these rules (the previous commit) kept that traffic working
+        // by putting it back on the tunnel; this restores the acceleration they exist for.
+        //
+        // Constrained to `reviewed_direct_ports`, and that is load-bearing rather than
+        // tidiness: an unconstrained process rule routes *every* port WeChat opens to the
+        // physical interface, where only these four have a permit and the rest hit the
+        // block-all floor — the silent hang this whole change is undoing. WeChat on any other
+        // port falls through to `MATCH,Tono-Exit` and rides the tunnel: slower than intended,
+        // and working.
+        if !plan.tcp_wechat_rules.is_empty() {
+            for port in &plan.reviewed_direct_ports {
+                for process in WECHAT_PROCESS_NAMES {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
+                    ));
+                }
+                for regex in &plan.wechat_process_path_regexes {
+                    rules.push(format!(
+                        "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-PATH-REGEX,{regex})),{DIRECT_GROUP_NAME}"
+                    ));
+                }
+            }
+        }
         for (address, port) in &plan.udp_wechat_rules {
             for process in WECHAT_PROCESS_NAMES {
                 rules.push(format!(
@@ -1296,6 +1330,8 @@ reality-opts:
             web_suffix_rules: vec![("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)],
             udp_wechat_rules: vec![(std::net::Ipv4Addr::new(9, 0, 0, 20), 443)],
             wechat_process_path_regexes: Vec::new(),
+            // Mirrors what the App passes from `clash_verge_service_ipc::REVIEWED_DIRECT_PORTS`.
+            reviewed_direct_ports: vec![80, 443, 8000, 8080],
         }
     }
 
@@ -1316,7 +1352,8 @@ reality-opts:
     /// then the UDP media rules. TCP is pinned rather than process-scoped because only a
     /// pinned endpoint has a matching WFP permit.
     fn expected_wechat_direct_rules() -> Vec<String> {
-        let mut rules: Vec<String> = direct_plan()
+        let plan = direct_plan();
+        let mut rules: Vec<String> = plan
             .tcp_wechat_rules
             .iter()
             .map(|(host, address, port)| {
@@ -1325,6 +1362,14 @@ reality-opts:
                 )
             })
             .collect();
+        // Process scope, restored and bounded to the ports the kill switch permits.
+        for port in &plan.reviewed_direct_ports {
+            for process in WECHAT_PROCESS_NAMES {
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-NAME,{process})),Tono-China-Direct"
+                ));
+            }
+        }
         for process in WECHAT_PROCESS_NAMES {
             rules.push(format!(
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"
@@ -1596,6 +1641,7 @@ reality-opts:
             web_suffix_rules: Vec::new(),
             udp_wechat_rules: Vec::new(),
             wechat_process_path_regexes: Vec::new(),
+            reviewed_direct_ports: Vec::new(),
         };
         let runtime =
             build_owned_runtime(&three_nodes(), "JP Reality 02", "s", Some(&plan)).unwrap();
@@ -1782,6 +1828,57 @@ reality-opts:
     /// `direct_endpoints` tuples — so anything the pins did not cover was dropped by the
     /// block-all floor rather than hairpinned through the exit. UDP is different: those
     /// rules carry their own `IP-CIDR` pin, which is in the permit set.
+    /// The cage around mihomo's ruleless UDP dial.
+    ///
+    /// VLESS+Vision cannot carry UDP. When a flow is routed to an exit that cannot take it,
+    /// mihomo does not fail the flow — it *falls back to a DIRECT dial no rule asked for*,
+    /// which is how QUIC and STUN once left through the physical interface. The whole
+    /// defence is the terminating `AND,((NETWORK,UDP)),REJECT`, and it is the last rule in
+    /// the list, which is the most shadowable position there is: any unconditional UDP rule
+    /// above it takes the flow first.
+    ///
+    /// That matters more once the kill switch grows an app-scoped port permit, because then
+    /// nothing downstream stops such a flow either — this rule becomes the only control.
+    /// Rule shadowing is not hypothetical in this codebase; it has already happened in this
+    /// very function.
+    ///
+    /// So: every UDP rule that precedes the REJECT must narrow the flow to something
+    /// reviewed — a process identity or a pinned address. An unconditional one is refused
+    /// here rather than in production.
+    #[test]
+    fn no_unconditional_udp_rule_may_precede_the_reject() {
+        let mut plan = direct_plan();
+        plan.wechat_process_path_regexes = vec![
+            wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").expect("prefix"),
+        ];
+        for (label, direct) in [("with a direct plan", Some(&plan)), ("without one", None)] {
+            let runtime =
+                build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", direct).unwrap();
+            let parsed_runtime = parsed(&runtime);
+            let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
+                .as_sequence()
+                .unwrap()
+                .iter()
+                .map(|rule| rule.as_str().unwrap())
+                .collect();
+            let reject = rules
+                .iter()
+                .position(|rule| *rule == "AND,((NETWORK,UDP)),REJECT")
+                .unwrap_or_else(|| panic!("the UDP catch-all is missing {label}"));
+            for rule in &rules[..reject] {
+                if !rule.contains("(NETWORK,UDP)") {
+                    continue;
+                }
+                assert!(
+                    rule.contains("(PROCESS-NAME,")
+                        || rule.contains("(PROCESS-PATH-REGEX,")
+                        || rule.contains("(IP-CIDR,"),
+                    "unconditional UDP rule ahead of the catch-all {label}: {rule}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn signed_wechat_path_regexes_govern_udp_media_and_not_tcp() {
         let mut plan = direct_plan();
