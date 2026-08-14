@@ -522,23 +522,25 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         && config.tun_luid.is_some()
         && !config.direct_endpoints.is_empty()
     {
+        // IPv4 only, matching the Mac helper's `inet`-scoped permit and the runtime's own
+        // `ipv6: false`. The TUN and fake-ip are IPv4, AAAA dials are dropped, so there is no
+        // IPv6 DIRECT flow to carry — and a permit with no address condition on the V6 layer
+        // would be a widening with nothing asking for it.
         for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
             for port in crate::REVIEWED_DIRECT_PORTS {
-                for layer in [L::AleAuthConnectV4, L::AleAuthConnectV6] {
-                    filters.push(spec(
-                        format!(
-                            "session/permit-reviewed-direct/{layer:?}/{}/{port}/{}",
-                            config.app_path,
-                            protocol.number()
-                        ),
-                        "session permit reviewed DIRECT ports",
-                        layer,
-                        WEIGHT_HARD_PERMIT,
-                        A::Permit,
-                        vec![C::AleAppId, C::Protocol(protocol), C::RemotePort(port)],
-                        false,
-                    ));
-                }
+                filters.push(spec(
+                    format!(
+                        "session/permit-reviewed-direct/{}/{port}/{}",
+                        config.app_path,
+                        protocol.number()
+                    ),
+                    "session permit reviewed DIRECT ports",
+                    L::AleAuthConnectV4,
+                    WEIGHT_HARD_PERMIT,
+                    A::Permit,
+                    vec![C::AleAppId, C::Protocol(protocol), C::RemotePort(port)],
+                    false,
+                ));
             }
         }
     }
@@ -1684,6 +1686,25 @@ mod tests {
         unpinned_other_port.app_id_matches = true;
         assert_eq!(arbitrate(&filters, &unpinned_other_port), FilterAction::Block);
 
+        // IPv4 only. The runtime is `ipv6: false` and AAAA dials are dropped, so there is no
+        // IPv6 DIRECT flow — and an address-free permit on the V6 layer would widen the
+        // boundary with nothing asking for it. Adding one has to be a deliberate change.
+        assert!(
+            !filters.iter().any(|filter| {
+                filter.name.contains("reviewed DIRECT")
+                    && filter.layer == LayerKind::AleAuthConnectV6
+            }),
+            "the reviewed-port permit must not reach the IPv6 layer"
+        );
+        let mut v6 = packet(
+            LayerKind::AleAuthConnectV6,
+            IpProtocol::Tcp,
+            "2001:db8::1",
+            443,
+        );
+        v6.app_id_matches = true;
+        assert_eq!(arbitrate(&filters, &v6), FilterAction::Block);
+
         // Every reviewed port is covered on both protocols, and nothing outside the set is.
         for port in crate::REVIEWED_DIRECT_PORTS {
             for protocol in [IpProtocol::Tcp, IpProtocol::Udp] {
@@ -1779,7 +1800,7 @@ mod tests {
         // live tunnel, so both must appear here and both must be retracted below.
         assert_eq!(
             direct_keys.len(),
-            2 + crate::REVIEWED_DIRECT_PORTS.len() * 2 * 2
+            2 + crate::REVIEWED_DIRECT_PORTS.len() * 2
         );
         let plan = diff(
             &locked.iter().map(|filter| filter.key).collect::<Vec<_>>(),
