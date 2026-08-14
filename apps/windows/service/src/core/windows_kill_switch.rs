@@ -410,6 +410,8 @@ fn ensure_supported() -> Result<()> {
     }
 }
 
+const MAX_PROXY_ENDPOINTS: usize = 256;
+
 fn validate_config(config: &KillSwitchConfig) -> Result<()> {
     if config.tunnel_interface.trim().is_empty() {
         bail!("enabled kill switch requires tunnel_interface");
@@ -419,6 +421,16 @@ fn validate_config(config: &KillSwitchConfig) -> Result<()> {
     }
     if config.proxy_endpoints.is_empty() {
         bail!("enabled kill switch requires at least one proxy endpoint");
+    }
+    // Bounded like every other list that feeds the same WFP install (`direct_endpoints`
+    // below, API hosts in `wfp_model::sanitize_api_host_ips`, `proxyEndpoints` in the Mac
+    // helper). Each entry becomes one ALE filter in a single transaction, and the intent is
+    // persisted before that transaction runs, so an unbounded list arms the machine
+    // fail-closed with an install that cannot finish and is replayed at every service start.
+    // A session carries the selected node plus at most the home route; 256 is the sibling
+    // bound and the Mac ceiling (8 hosts x 32 pinned addresses) alike.
+    if config.proxy_endpoints.len() > MAX_PROXY_ENDPOINTS {
+        bail!("proxy_endpoints exceeds the {MAX_PROXY_ENDPOINTS}-entry bound");
     }
     for endpoint in &config.proxy_endpoints {
         if wfp_model::parse_endpoint(endpoint).is_none() {
@@ -5072,6 +5084,40 @@ mod tests {
         );
         cleanup().await;
         Ok(())
+    }
+
+    /// `proxy_endpoints` is the list every ALE session filter is emitted from, and the
+    /// intent carrying it is persisted with `wanted: true` *before* the WFP transaction
+    /// runs. An unbounded list therefore arms the machine fail-closed with an install too
+    /// large to finish, replayed at every service start. Every sibling list is bounded;
+    /// this one must be too.
+    #[test]
+    fn proxy_endpoints_are_bounded_like_every_sibling_list() {
+        let mut config = test_config();
+        config.proxy_endpoints = (0..MAX_PROXY_ENDPOINTS as u32)
+            .map(|index| ProxyEndpoint {
+                ip: format!("198.51.{}.{}", index / 256, index % 256),
+                port: 443,
+                protocol: ProxyProtocol::Tcp,
+            })
+            .collect();
+        validate_config(&config).expect("the bound itself must still be accepted");
+
+        config.proxy_endpoints.push(ProxyEndpoint {
+            ip: "198.51.101.1".to_owned(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        });
+        let err = validate_config(&config)
+            .expect_err("accepted an unbounded proxy_endpoints list")
+            .to_string();
+        assert!(
+            err.contains("proxy_endpoints"),
+            "the refusal must name the list that was too long, got {err}"
+        );
+
+        // A real session carries the selected node plus at most the home route.
+        assert!(validate_config(&test_config()).is_ok());
     }
 
     /// The S1 residual risk in miniature: a WFP call that never returns must produce a
