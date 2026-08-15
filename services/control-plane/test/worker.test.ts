@@ -700,6 +700,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       cpuCores: 2, load1: 3.5, load5: 2.1, load15: 1.0,
       swapTotal: 1048576, swapUsed: 524288,
       tcpConnections: 189, processes: 71, observedAt: 1_786_715_907,
+      price: null, currency: null, billingCycle: null, expiredAt: null,
+      trafficLimit: null, trafficLimitType: null,
     }]);
     // The address and the agent token must still never survive ingest.
     expect(JSON.stringify(live.agents)).not.toContain('must-not-leak');
@@ -708,6 +710,63 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(live.qualityError).toBeNull();
     expect(absorbedHostFetches).toEqual([]);
 
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('keeps agent minutes and serves them as metrics instead of overwriting a singleton', async () => {
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const token = {
+      authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+      'content-type': 'application/json',
+    };
+    const t0 = Math.floor(Date.now() / 1000) - 120;
+    const t1 = t0 + 60;
+    for (const [cpu, observedAt] of [[10, t0], [40, t1]] as const) {
+      const ingested = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({
+          agents: {
+            data: [{
+              name: 'Trend Node',
+              cpu,
+              cpu_cores: 2,
+              load_1: 1.2,
+              mem_used: 512,
+              mem_total: 1024,
+              observed_at: observedAt,
+              price: 5.5,
+              currency: '$',
+              billing_cycle: 30,
+              expired_at: 1_790_000_000,
+              traffic_limit: 1_000_000_000,
+              traffic_limit_type: 'sum',
+            }],
+          },
+        }),
+      });
+      expect(ingested.status).toBe(200);
+    }
+
+    const live = await operations('live');
+    expect((await live.json() as any).live.agents[0]).toMatchObject({
+      name: 'Trend Node',
+      cpu: 40,
+      price: 5.5,
+      currency: '$',
+      billingCycle: 30,
+      expiredAt: 1_790_000_000,
+      trafficLimit: 1_000_000_000,
+      trafficLimitType: 'sum',
+    });
+
+    const metrics = await operations('metrics?range=24h&node=Trend%20Node');
+    expect(metrics.status).toBe(200);
+    const body = await metrics.json() as any;
+    expect(body.metrics.series['Trend Node'].length).toBeGreaterThanOrEqual(2);
+    expect(body.metrics.series['Trend Node'].map((p: { cpu: number }) => p.cpu)).toEqual(
+      expect.arrayContaining([10, 40]),
+    );
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 

@@ -17,6 +17,14 @@ import {
   type OidcProvider,
 } from './oidc';
 import { AccessVerificationError, verifyAccessRequest } from './access';
+import {
+  queryAgentMetrics,
+  queryHomeProbeHistory,
+  recordAgentSamples,
+  recordHomeProbeSamples,
+  recordQualitySamples,
+  retainOperationsTimeseries,
+} from './ops-timeseries';
 
 export interface Env {
   DB: D1Database;
@@ -829,6 +837,9 @@ function publicHomeExit(row: Row) {
     bindCount: row.bind_count === undefined || row.bind_count === null ? undefined : Number(row.bind_count),
     lastProbedAt: row.last_probed_at == null ? undefined : Number(row.last_probed_at),
     probeStatus: row.probe_status == null ? undefined : String(row.probe_status),
+    probeAlive: row.probe_alive == null ? undefined : Number(row.probe_alive),
+    probeTotal: row.probe_total == null ? undefined : Number(row.probe_total),
+    probeUptimeRatio: row.probe_uptime_ratio == null ? undefined : Number(row.probe_uptime_ratio),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -1817,7 +1828,34 @@ async function sharedAdministrativeResource(
        FROM home_exits
        ORDER BY status ASC, display_name ASC, created_at ASC`,
     ).all<Row>();
-    return Response.json({ homeExits: q.results.map(publicHomeExit) });
+    const exits = q.results.map(publicHomeExit);
+    try {
+      const stats = await e.DB.prepare(
+        `SELECT home_exit_id,
+                SUM(CASE WHEN status = 'alive' THEN 1 ELSE 0 END) AS alive,
+                COUNT(*) AS total
+         FROM operations_home_probe_samples
+         GROUP BY home_exit_id`,
+      ).all<Row>();
+      const byId = new Map(stats.results.map((row) => [String(row.home_exit_id), row]));
+      return Response.json({
+        homeExits: exits.map((exit) => {
+          const row = byId.get(exit.id);
+          if (!row) return exit;
+          const alive = Number(row.alive);
+          const total = Number(row.total);
+          return {
+            ...exit,
+            probeAlive: alive,
+            probeTotal: total,
+            probeUptimeRatio: total > 0 ? alive / total : undefined,
+          };
+        }),
+      });
+    } catch (error) {
+      if (!String(error).includes('no such table')) throw error;
+      return Response.json({ homeExits: exits });
+    }
   }
   if (resource === 'home-exits' && m === 'POST') {
     const b = await body(req, 8 * 1024);
@@ -1979,6 +2017,12 @@ async function sharedAdministrativeResource(
     }
     if (created.length > 0) await bumpCatalogRevision(e);
     return Response.json({ created, skipped, failed }, { status: created.length > 0 ? 201 : 200 });
+  }
+  mt = resource.match(/^home-exits\/([^/]+)\/probes$/);
+  if (mt && m === 'GET') {
+    const existing = await e.DB.prepare('SELECT id FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
+    if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
+    return Response.json({ probes: await queryHomeProbeHistory(e.DB, mt[1], now()) });
   }
   mt = resource.match(/^home-exits\/([^/]+)$/);
   if (mt && m === 'PATCH') {
@@ -2948,6 +2992,15 @@ function liveAgents(value: unknown): Row[] | null {
       tcpConnections: optionalNumber(node.tcpConnections ?? node.tcp_connections),
       processes: optionalNumber(node.processes ?? node.process),
       observedAt: optionalNumber(node.observedAt ?? node.observed_at),
+      // Komari /api/nodes inventory. Manual nodeProfiles still win when filled;
+      // these fill the holes so "which box renews / is about to blow quota"
+      // is not a second spreadsheet.
+      price: optionalNumber(node.price),
+      currency: optionalText(node.currency)?.slice(0, 8) ?? null,
+      billingCycle: optionalNumber(node.billingCycle ?? node.billing_cycle),
+      expiredAt: optionalNumber(node.expiredAt ?? node.expired_at),
+      trafficLimit: optionalNumber(node.trafficLimit ?? node.traffic_limit),
+      trafficLimitType: optionalText(node.trafficLimitType ?? node.traffic_limit_type)?.slice(0, 16) ?? null,
     };
   }).filter((node: Row | null): node is Row => node !== null);
 }
@@ -4816,6 +4869,11 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
     .run();
+  try {
+    await retainOperationsTimeseries(e.DB, t);
+  } catch (x) {
+    console.error('ops timeseries retention failed', x instanceof Error ? x.message : String(x));
+  }
   const routingResearchRetention = Math.min(
     envInt(
       e,
@@ -5816,6 +5874,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid agent inventory');
     }
     let probesUpdated = 0;
+    const acceptedProbes: Array<{ id: string; status: 'alive' | 'dead' }> = [];
     if (payload.homeProbes !== undefined) {
       if (!Array.isArray(payload.homeProbes) || payload.homeProbes.length > 200) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid homeProbes');
@@ -5835,7 +5894,13 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           `UPDATE home_exits SET last_probed_at = ?, probe_status = ?, updated_at = updated_at
            WHERE id = ? AND kind = 'socks5'`,
         ).bind(t, status, probeId).run();
-        if (updated.meta.changes) probesUpdated += 1;
+        if (updated.meta.changes) {
+          probesUpdated += 1;
+          acceptedProbes.push({ id: probeId, status });
+        }
+      }
+      if (acceptedProbes.length) {
+        await recordHomeProbeSamples(e.DB, acceptedProbes, t);
       }
     }
     const stored = payload.report === undefined && payload.agents === undefined
@@ -5844,6 +5909,42 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         quality: quality ?? undefined,
         agents: agents ?? undefined,
       });
+    if (agents) {
+      await recordAgentSamples(e.DB, agents as Array<{
+        name: string;
+        cpu: number | null;
+        cpuCores: number | null;
+        memTotal: number | null;
+        memUsed: number | null;
+        diskTotal: number | null;
+        diskUsed: number | null;
+        netIn: number | null;
+        netOut: number | null;
+        load1: number | null;
+        load5: number | null;
+        load15: number | null;
+        swapTotal: number | null;
+        swapUsed: number | null;
+        tcpConnections: number | null;
+        processes: number | null;
+        uptime: number | null;
+        observedAt: number | null;
+      }>, stored.updatedAt);
+    }
+    if (quality?.nodes.length) {
+      await recordQualitySamples(
+        e.DB,
+        quality.nodes.map((node) => ({
+          name: String(node.name),
+          ok: node.ok === true,
+          quality: typeof node.quality === 'string' ? node.quality : null,
+          blockStatus: node.block && typeof node.block === 'object'
+            ? (optionalText((node.block as Row).status) ?? null)
+            : null,
+        })),
+        stored.updatedAt,
+      );
+    }
     return Response.json({
       ok: true,
       qualityNodes: quality?.nodes.length ?? null,
@@ -5893,6 +5994,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       if (p === '/api/v1/ops/live') {
         return Response.json({ live: await operationsLive(e) });
+      }
+      if (p === '/api/v1/ops/metrics') {
+        const url = new URL(req.url);
+        return Response.json({
+          metrics: await queryAgentMetrics(e.DB, {
+            range: url.searchParams.get('range'),
+            node: url.searchParams.get('node'),
+            nowUnix: now(),
+          }),
+        });
       }
       if (p === '/api/v1/ops/activity') {
         return Response.json({ activity: await operationsActivity(e) });

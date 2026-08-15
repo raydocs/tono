@@ -1051,7 +1051,9 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.refresh-bar label { display: inline-flex; align-items: center; gap: 0.4rem; }
+.refresh-bar label,
+.topbar-right label { display: inline-flex; align-items: center; gap: 0.4rem; }
+.sparkline { color: hsl(var(--foreground)); display: block; }
 .control-select {
   border: 1px solid hsl(var(--border));
   border-radius: calc(var(--radius) - 2px);

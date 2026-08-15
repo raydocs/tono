@@ -182,6 +182,9 @@ export interface HomeExitDto {
   bindCount?: number;
   lastProbedAt?: number;
   probeStatus?: string;
+  probeAlive?: number;
+  probeTotal?: number;
+  probeUptimeRatio?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -233,6 +236,12 @@ export interface LiveAgentDto {
   /** When the agent last reported. A stalled agent is indistinguishable from a
    *  healthy idle one without this. */
   observedAt: number | null;
+  price: number | null;
+  currency: string | null;
+  billingCycle: number | null;
+  expiredAt: number | null;
+  trafficLimit: number | null;
+  trafficLimitType: string | null;
 }
 
 export interface LiveProbeDto {
@@ -379,9 +388,35 @@ export interface DeviceActionDto {
   result: unknown;
 }
 
+export interface MetricPointDto {
+  t: number;
+  cpu: number | null;
+  memUsed: number | null;
+  memTotal: number | null;
+  diskUsed: number | null;
+  diskTotal: number | null;
+  load1: number | null;
+  netIn: number | null;
+  netOut: number | null;
+  swapUsed: number | null;
+  tcpConnections: number | null;
+}
+
+export interface MetricsDto {
+  from: number;
+  to: number;
+  resolutionSeconds: number;
+  series: Record<string, MetricPointDto[]>;
+}
+
 export const operationsApi = {
   dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
   live: async () => (await get<{ live: LiveDto }>('live')).live,
+  metrics: async (range = '24h', node?: string) => {
+    const query = new URLSearchParams({ range });
+    if (node) query.set('node', node);
+    return (await get<{ metrics: MetricsDto }>(`metrics?${query}`)).metrics;
+  },
   activity: async () => (await get<{ activity: ActivityDto }>('activity')).activity,
   servers: async () => (await get<{ servers: ServerDto[] }>('servers')).servers,
   nodes: async () => (await get<{ nodes: NodeDto[] }>('nodes')).nodes,

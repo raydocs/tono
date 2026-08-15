@@ -24,6 +24,10 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM product_account_events').run();
   await env.DB.prepare('DELETE FROM product_accounts').run();
   await env.DB.prepare('DELETE FROM operations_live_snapshot').run();
+  await env.DB.prepare('DELETE FROM operations_agent_samples').run();
+  await env.DB.prepare('DELETE FROM operations_agent_rollups').run();
+  await env.DB.prepare('DELETE FROM operations_home_probe_samples').run();
+  await env.DB.prepare('DELETE FROM operations_quality_samples').run();
   await env.DB.prepare('DELETE FROM operations_catalog_revision_metadata').run();
   await env.DB.prepare('DELETE FROM operations_deployments').run();
   await env.DB.prepare('DELETE FROM operations_logical_nodes').run();
