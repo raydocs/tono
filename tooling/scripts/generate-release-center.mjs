@@ -429,6 +429,9 @@ export function renderManifest(model) {
     generator: 'tooling/scripts/generate-release-center.mjs',
     releaseCenter: previous.releaseCenter,
     controlPlane: previous.controlPlane,
+    // Why everything before the baseline is gone. Carried forward rather than
+    // regenerated: it is a decision about the past, and the past stops changing.
+    ...(previous.withdrawn ? { withdrawn: previous.withdrawn } : {}),
     releaseSet: {
       id: `${model.macos.publishedAt.slice(0, 10)}-macos-build${model.macos.build}-windows-${model.windows.version}`,
       status:

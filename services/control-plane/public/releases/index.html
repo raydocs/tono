@@ -84,21 +84,7 @@
         <article><time>2026-08-14</time><h3>macOS 0.0.65 · Build 65</h3><p>自 Build 62 以来第一次真正送达用户的更新，同时作为 macOS 的回滚基线：Sparkle 不会安装更低的 build，后续若出问题，应以更高 build 重新发布本份源码，而不是让用户降级。63 与 64 组装后从未发布，内容都在本版。保护规则改为逐条带名，此前内核会把 66 条折叠成 13 条且精确规则一条不剩；微信改按 Apple 签名识别并把 80 端口留在国内直连。</p></article>
         <article><time>2026-08-14</time><h3>Windows 0.0.32</h3><p>修好微信图片与文件一直转圈：直连放行此前只认连接那一刻查到的地址，之后微信自行找到的服务器全被静默丢弃。同日把已审计的更新通道从 0.0.25 推进到 0.0.32——此前通道推进的工作流与其部署环境指定了不同的分支，从 main 触发会显示成功却什么都没做，这就是 0.0.26 至 0.0.31 发布后无人收到的原因。</p></article>
       <!-- /generated:timeline -->
-        <article><time>2026-08-12</time><h3>Windows 0.0.29（源码候选）</h3><p>修复 0.0.28 在 preparingService 阶段遇到 127.0.0.1:53 / Windows error 10048 的问题：连接前先通过已认证 Service 对账并清理 Tono 自己遗留的 Core，再统一检查 DNS TCP/UDP 53。第三方 DNS/代理占用不会被结束，仍会给出可操作提示。源码位于 release/windows，尚未发布安装包。</p></article>
-        <article><time>2026-08-12</time><h3>macOS Build 62</h3><p>当前公证并经过 Sparkle 签名验证的 Apple Silicon 预发布包。微信实机路由、Kill Switch、TUN、受保护 DNS 与出口身份均验证正常。GitHub immutable tag 因旧脚本未指定 target 而误指向 Windows 0.0.27 commit；不改写历史，Manifest 明确记录该差异，后续 Mac tag 改用 tono-macos-* 并强制校验精确 SHA。</p></article>
-        <article><time>2026-08-10</time><h3>Windows 0.0.27</h3><p>当前公开稳定安装包，改善 VMware、VirtualBox、Hyper-V、WSL、Docker 等虚拟网卡共存。Windows 0.0.28 仍为 Draft，自动更新通道当前为 0.0.25。</p></article>
-        <article><time>2026-08-07</time><h3>macOS Build 42</h3><p>延续 Build 39 的 Forbidden / Kill Switch 恢复、微信精确直连与 Claude 代理优先；新增默认开启但可随时关闭的应用路由聚合研究。只上传固定 app family、固定 bundle-component 类别、路由计数与粗粒度流量档位，未知应用统一进入 other，不上传原始应用名、路径、Bundle ID、域名、IP、端口、内容或逐连接记录。</p></article>
-        <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 6（小范围验收）</h3><p>修复 13 个经对抗性验证的缺陷：连接超时不再中止自身任务（UI 永久“连接中”）、释放失败保留 armed 显示、连接成功重置监控种子（终结重连死循环）、DNS 启用后刷新解析缓存、WFP 开机先装后扫等；连接路径并发化提速。首个通过 7zz 载荷提取门与完整 preflight 的构建。真机 S6 故障注入仍待完成。</p></article>
-        <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 5（已由 Test 6 取代）</h3><p>把 Windows Service IPC 放到独立 Tokio runtime，避免同步 named-pipe / SCM 工作饿死 Tauri runtime；调用方取消后请求仍可完成安全对账。连接中的阶段耗时现在会持续增长。安装包曾混入 alpha Mihomo 与 Unix 辅助文件，已由 Test 6 修正。</p></article>
-        <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 4（已暂停）</h3><p>虽然修复了 TUN 接口别名 error 123，但 Windows 真机在进入“启动 Kill Switch”后原生窗口立即无响应。正在修复长生命周期连接任务与 UI 的隔离，当前不得继续测试。</p></article>
-        <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 3（已停用）</h3><p>虽然修复了 GUI 启动恢复未验证 Kill Switch 状态，但锁定流量时把接口别名交给了错误的 Windows API，稳定返回 error 123。仅保留审计记录，请勿继续使用。</p></article>
-        <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 2（已停用）</h3><p>可能在只打开 GUI 时恢复陈旧、未验证的 Kill Switch 状态并导致整机断网。已由 Test 4 取代，仅保留审计记录，请勿继续安装。</p></article>
-        <article><time>2026-08-02</time><h3>Windows 2.5.4 Test 1</h3><p>同步策略 v2、Claude 代理优先、精确视频 TCP/443、自适应 gVisor 和当前 Service helper；安装包、源码差异快照、构建清单均保存在 GitHub。</p></article>
-        <article><time>2026-08-01</time><h3>macOS Build 37</h3><p>七天精确域名直连试验；微信、视频网页独立统计和云端回滚；Claude 代理优先；自适应 Mihomo。</p></article>
-        <article><time>2026-08-01</time><h3>Windows 2.5.3 Test 1</h3><p>首个 hardened Windows x64 NSIS 测试包。未完成 Windows 真机和更新签名验证，现因仅支持策略 v1 转为历史包。</p></article>
-        <article><time>2026-08-01</time><h3>macOS Build 34</h3><p>建立 Sparkle 2 自动更新基线；每六小时检查；更新需用户确认；保留大陆弱网超时与有限重试。</p></article>
-        <article><time>2026-08-01</time><h3>macOS Build 33</h3><p>修复节点切换配置 reload 的模糊超时；失败继续保持 Kill Switch；同时保存 Build 33 以前安装包校验目录。</p></article>
-        <article><time>2026-07-31</time><h3>macOS Build 25</h3><p>用于国内连接故障定位的私有公证备份，加入 helper、Kill Switch、TUN、DNS 和 Reality 阶段审计。</p></article>
+        <p class="note">这两版是基准。之前的每一个构建都已撤下——它们带着这两版修好的缺陷：微信在连接后自行找到的服务器被静默丢弃、Kill Switch 解除后会自行重新武装、隧道明明出不去却仍显示已连接；其中若干版本因为更新通道从未推进，任何客户都不曾拿到过。Git tag 全部保留，源码可追溯。</p>
       </div>
     </section>
 
