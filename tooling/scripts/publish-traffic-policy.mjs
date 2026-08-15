@@ -121,6 +121,33 @@ const counts = ['domains', 'webDomains', 'directSuffixes', 'tcpEndpoints', 'medi
   .map((field) => `${field} ${parsed[field].length}`)
   .join(', ');
 process.stdout.write(`  version ${parsed.version}: ${counts}\n`);
+
+// What this policy costs a client in exact PF permits, which is a different
+// budget from any of the counts above and the one that actually runs out.
+//
+// macOS turns each `webDomains` entry into up to 8 resolved addresses per port,
+// and every managed-direct session also permits the two China DoH resolvers.
+// Past `SESSION_ENDPOINT_LIMIT` the client trims the tail — the dropped hosts
+// simply stop routing direct, recorded only as `managed_direct_pins_over_budget`
+// in a local audit nobody is reading at publish time. Before the client trimmed,
+// the same overflow threw the whole policy away. Either way this is the moment
+// to see it, so the number is printed on every publish rather than discovered
+// from a customer's log.
+const SESSION_ENDPOINT_LIMIT = 256;
+const ADDRESSES_PER_HOST = 8;
+const RESOLVER_ENDPOINTS = 2;
+const webEndpointCeiling = (parsed.webDomains ?? [])
+  .reduce((total, entry) => total + entry.ports.length * ADDRESSES_PER_HOST, RESOLVER_ENDPOINTS);
+process.stdout.write(
+  `  client session endpoints: up to ${webEndpointCeiling} of ${SESSION_ENDPOINT_LIMIT}\n`,
+);
+if (webEndpointCeiling > SESSION_ENDPOINT_LIMIT) {
+  process.stdout.write(
+    `  ! over budget by ${webEndpointCeiling - SESSION_ENDPOINT_LIMIT}. A client keeps the\n` +
+      '    earlier hosts and drops the tail; the dropped ones do not route direct.\n' +
+      '    Move hosts to directSuffixes, or publish fewer webDomains.\n',
+  );
+}
 process.stdout.write(`  sha256 ${preview.body.sha256}\n`);
 process.stdout.write(`  signature ${preview.body.signatureRequired ? 'required' : 'not required'}\n`);
 

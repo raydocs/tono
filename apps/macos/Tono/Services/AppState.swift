@@ -4269,15 +4269,56 @@ final class AppState {
             protectedAddresses: protectedAddresses,
             api: api
         )
-        let runtime = ConfigPipeline.ManagedDirectRuntimePolicy(
+        let resolverHosts = base?.directResolverHosts
+            ?? (policy.domains + policy.webDomains).map(\.host)
+        // Everything this session will permit that is not a web pin, counted by
+        // the same computed property the validator counts, so the budget below
+        // cannot drift from the ceiling it exists to keep us under.
+        let withoutWebPins = ConfigPipeline.ManagedDirectRuntimePolicy(
             physicalInterface: physicalInterface,
             domainPins: [],
-            webDomainPins: webPins,
+            webDomainPins: [],
             webDomainSuffixes: base?.webDomainSuffixes ?? [],
             mediaEndpoints: [],
             tcpEndpoints: [],
-            directResolverHosts: base?.directResolverHosts
-                ?? (policy.domains + policy.webDomains).map(\.host),
+            directResolverHosts: resolverHosts,
+            trusted: policy.trusted
+        )
+        // Trim to the ceiling rather than walk into it. Over the limit,
+        // `validatedManagedDirectPolicy` throws, the catch below returns nil,
+        // and the session runs with no web pins whatsoever — losing every
+        // reviewed host to keep the ones that did not fit. The control plane
+        // can reach that on its own: 32 `webDomains` is its published maximum
+        // and resolves to as many as 258 session endpoints.
+        let budgeted = ConfigPipeline.pinsWithinSessionEndpointBudget(
+            webPins,
+            seededBy: withoutWebPins.sessionEndpoints
+        )
+        if !budgeted.dropped.isEmpty {
+            // Named, because the alternative reading of a short pin list is
+            // "those hosts failed to resolve", which is a different fault with
+            // a different fix, and `managed_direct_domains_unresolved` below
+            // would otherwise report it as exactly that.
+            LocalTrafficAudit.shared.recordEvent(
+                "managed_direct_pins_over_budget",
+                details: [
+                    "limit": String(ConfigPipeline.maximumSessionDirectEndpoints),
+                    "kept": String(budgeted.kept.count),
+                    "dropped": String(budgeted.dropped.count),
+                    "dropped_hosts": budgeted.dropped
+                        .prefix(8)
+                        .joined(separator: ","),
+                ]
+            )
+        }
+        let runtime = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: physicalInterface,
+            domainPins: [],
+            webDomainPins: budgeted.kept,
+            webDomainSuffixes: base?.webDomainSuffixes ?? [],
+            mediaEndpoints: [],
+            tcpEndpoints: [],
+            directResolverHosts: resolverHosts,
             trusted: policy.trusted
         )
         do {

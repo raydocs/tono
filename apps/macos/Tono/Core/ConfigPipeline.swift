@@ -404,6 +404,16 @@ nonisolated struct ConfigPipeline {
         "https://223.5.5.5/dns-query",
         "https://223.6.6.6/dns-query",
     ]
+    /// Ceiling on the exact PF permits one session may carry.
+    ///
+    /// This is not a preference. The privileged helper independently refuses
+    /// more than 256 `sessionDirectEndpoints`, and an installed helper is
+    /// replaced only by a `HelperProtocolVersion` bump — so raising this number
+    /// alone would produce an arm the daemon rejects, turning a partial loss of
+    /// direct routes into a session that cannot connect at all. The two must
+    /// move together or not move.
+    static let maximumSessionDirectEndpoints = 256
+
     static let managedDirectResolverEndpoints = [
         DirectEndpoint(address: "223.5.5.5", port: 443, transport: "tcp"),
         DirectEndpoint(address: "223.6.6.6", port: 443, transport: "tcp"),
@@ -589,6 +599,54 @@ nonisolated struct ConfigPipeline {
             "managed direct bundle path unsafe for rule emission"
         )
         return pattern
+    }
+
+    /// Keep as many resolved pins as the session-endpoint budget allows, and
+    /// name the hosts that did not fit.
+    ///
+    /// `validatedManagedDirectPolicy` refuses a policy over
+    /// `maximumSessionDirectEndpoints`, and refusal is all-or-nothing: the
+    /// caller catches it and runs the session with no pins at all. That is the
+    /// wrong shape for a ceiling the control plane can reach on its own —
+    /// 32 `webDomains`, its published maximum, resolve to as many as 32 × 8
+    /// addresses, which with the two China DoH resolver endpoints is 258. The
+    /// comment on `directResolverHosts` above records this exact failure
+    /// happening once already, discovered only after it had discarded every
+    /// managed-direct route in the field.
+    ///
+    /// Counting is incremental and deduplicated, exactly as `sessionEndpoints`
+    /// counts, so CDN hosts that share addresses cost nothing extra and no pin
+    /// is dropped that would have fitted. Order decides who survives, so the
+    /// caller must pass a stable one.
+    static func pinsWithinSessionEndpointBudget(
+        _ pins: [DirectDomainPin],
+        seededBy fixed: [DirectEndpoint],
+        limit: Int = maximumSessionDirectEndpoints
+    ) -> (kept: [DirectDomainPin], dropped: [String]) {
+        var accepted = Set(fixed)
+        var kept: [DirectDomainPin] = []
+        var dropped: [String] = []
+        for pin in pins {
+            var candidate = accepted
+            for address in pin.addresses {
+                for port in pin.ports {
+                    candidate.insert(
+                        DirectEndpoint(
+                            address: address,
+                            port: port,
+                            transport: "tcp"
+                        )
+                    )
+                }
+            }
+            if candidate.count <= limit {
+                accepted = candidate
+                kept.append(pin)
+            } else {
+                dropped.append(pin.host)
+            }
+        }
+        return (kept, dropped)
     }
 
     /// Finds the product-default cloud exit without depending on one exact
@@ -1760,7 +1818,7 @@ nonisolated struct ConfigPipeline {
               policy.webDomainSuffixes.count <= 64,
               policy.mediaEndpoints.count <= 128,
               policy.tcpEndpoints.count <= 128,
-              policy.sessionEndpoints.count <= 256,
+              policy.sessionEndpoints.count <= maximumSessionDirectEndpoints,
               // Resolver hosts are one entry per managed or web direct policy
               // hostname, so this must admit the control plane's own maxima
               // (32 `domains` + 32 `webDomains`). A lower ceiling silently
