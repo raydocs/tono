@@ -410,7 +410,9 @@ pub fn monitor_requires_reconnect(
 /// one state that reads as Connected while nothing gets out was the one it scored healthy.
 ///
 /// No version gate is needed: the field arrived in protocol revision 12 and
-/// `MIN_REQUIRED_SERVICE_REVISION` is 12, so every Service this App will pair with sets it.
+/// `MIN_REQUIRED_SERVICE_REVISION` is now 14, so every Service this App will pair
+/// with sets it. The floor only ever rises, which is what keeps this true without
+/// a check here.
 pub fn kill_switch_unhealthy(status: Option<&KillSwitchStatus>) -> bool {
     match status {
         Some(status) => !(status.wanted

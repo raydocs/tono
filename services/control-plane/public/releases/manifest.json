@@ -1,22 +1,12 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-15T04:33:11Z",
+ "generatedAt": "2026-08-15T04:44:00Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
   "baseURL": "https://api.afk.ccwu.cc",
-  "apiVersion": "0.0.1",
-  "trafficPolicy": {
-   "currentRevision": 8,
-   "currentSchema": 3,
-   "supportedSchemas": [
-    1,
-    2,
-    3,
-    4
-   ]
-  }
+  "apiVersion": "0.0.1"
  },
  "withdrawn": {
   "reason": "Every build before this baseline has been withdrawn. They carried defects these two fix — WeChat traffic silently dropped after the addresses looked up at connect time, a kill switch that could re-arm itself after being released, and a Connected state that survived a tunnel passing nothing — and several were never reachable by any customer because the update channel was never advanced past them.",

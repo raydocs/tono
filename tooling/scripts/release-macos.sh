@@ -254,6 +254,20 @@ remote_release_commit=$(/usr/bin/git -C "$repo_root" rev-parse origin/release/ma
   --target "$source_commit" \
   --title "Tono macOS $short_version Build $build" --notes-file "$notes" "$named" \
   || fail "creating the release failed"
+# `gh release create` is expected to publish, but 0.0.66 came out of it as a
+# draft and only a hand check caught it — a draft has no tag, reaches nobody, and
+# the script said "published" anyway. Read the state back rather than trust it.
+release_state=$(/usr/bin/env gh release view "$tag" --repo "$release_repo" \
+  --json isDraft --jq .isDraft 2>/dev/null) \
+  || fail "could not read back the release just created"
+if [[ $release_state == true ]]; then
+  print "  the release was created as a draft; publishing it"
+  /usr/bin/env gh release edit "$tag" --repo "$release_repo" --draft=false --prerelease \
+    >/dev/null || fail "the release is a draft and could not be published"
+  [[ $(/usr/bin/env gh release view "$tag" --repo "$release_repo" --json isDraft --jq .isDraft) == false ]] \
+    || fail "the release is still a draft after publishing it"
+fi
+
 released_commit=$(/usr/bin/env gh api \
   "repos/$release_repo/commits/$tag" --jq .sha 2>/dev/null) \
   || fail "could not resolve the published tag"

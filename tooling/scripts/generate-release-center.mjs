@@ -459,7 +459,18 @@ export function renderManifest(model) {
     generatedAt: model.generatedAt,
     generator: 'tooling/scripts/generate-release-center.mjs',
     releaseCenter: previous.releaseCenter,
-    controlPlane: previous.controlPlane,
+    // `trafficPolicy` used to sit here with a revision and a schema number, both
+    // carried forward by hand from whatever they were when someone last typed
+    // them. The revision is a live counter in D1 and the schema lives inside an
+    // AES-GCM ciphertext, so nothing here can check either — and an unverifiable
+    // number on a published artefact is worse than no number, because it reads
+    // as measured. What the compatibility section is actually for is served by
+    // the helper contract and the service protocol, which are read out of each
+    // released commit on every run.
+    controlPlane: {
+      baseURL: previous.controlPlane?.baseURL,
+      apiVersion: previous.controlPlane?.apiVersion,
+    },
     // Why everything before the baseline is gone. Carried forward rather than
     // regenerated: it is a decision about the past, and the past stops changing.
     ...(previous.withdrawn ? { withdrawn: previous.withdrawn } : {}),
