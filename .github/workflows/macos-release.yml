@@ -48,10 +48,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A job-level `if:` on the branch is a guard that cannot fail. GitHub records a
+  # skipped job as a success, so dispatching this workflow from the wrong ref
+  # produced a green run that had built and released nothing — the same shape
+  # that once left the Windows channel unadvanced for days while every run
+  # reported success. This job carries no condition, so a wrong ref goes red.
+  branch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse a ref that is not the release line
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != tag ] \
+            && [ "$GITHUB_REF" != refs/heads/release/macos ]; then
+            echo "::error::A macOS release must run from refs/heads/release/macos or a tono-macos-*-build* tag, but this run is on $GITHUB_REF. Nothing was built."
+            exit 1
+          fi
+          echo "running from $GITHUB_REF"
+
   build:
     # Manual releases belong to the macOS release line. A tag is accepted only
     # after the ancestry check below proves it names a commit on that line.
-    if: github.ref_type == 'tag' || github.ref == 'refs/heads/release/macos'
+    needs: branch
     runs-on: macos-26
     outputs:
       short_version: ${{ steps.release-version.outputs.short_version }}

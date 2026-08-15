@@ -16,8 +16,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A job-level `if:` on the branch is a guard that cannot fail. GitHub records a
+  # skipped job as a success, so dispatching this workflow from the wrong ref
+  # produced a green run that did nothing — which is precisely how this
+  # workflow's own guard and its environment's branch policy disagreed for days
+  # without anyone noticing, and why the step that reaches users could not
+  # succeed at all. This job carries no condition, so a wrong ref goes red, and
+  # `needs:` keeps the real job from starting or requesting its environment
+  # approval.
+  branch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Refuse a ref that is not the release line
+        env:
+          EXPECTED: refs/heads/release/windows
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "$EXPECTED" ]; then
+            echo "::error::Promoting the Windows update channel must run from $EXPECTED, but this run is on $GITHUB_REF. Nothing was done."
+            exit 1
+          fi
+          echo "running from $GITHUB_REF"
+
   promote:
-    if: github.ref == 'refs/heads/release/windows'
+    needs: branch
     environment: windows-update-channel
     runs-on: ubuntu-24.04
     env:
