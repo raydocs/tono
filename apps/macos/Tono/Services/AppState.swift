@@ -43,13 +43,6 @@ nonisolated private enum PhysicalBypassSocketResult: Sendable {
     case inconclusive
 }
 
-nonisolated private enum ManagedDirectHealthResult: Sendable {
-    case direct
-    case protectedExit
-    case unavailable
-    case controllerError(String)
-}
-
 private actor ProviderRuleLoader {
     private static let maximumProviderBytes = 8 * 1_024 * 1_024
     private static let maximumRules = 200_000
@@ -1600,10 +1593,6 @@ final class AppState {
                             )
                         try Task.checkCancellation()
                         try await api.reloadConfig(path: runtimeConfigPath)
-                        await self.primeManagedDirectFallbackGroups(
-                            policy: resolvedPolicy,
-                            api: api
-                        )
                         try Task.checkCancellation()
                         committedDirectPolicy = resolvedPolicy
                         LocalTrafficAudit.shared.recordEvent(
@@ -2984,14 +2973,6 @@ final class AppState {
                     proxy: nodeName
                 )
                 try Task.checkCancellation()
-                // Fallback health is URL-specific and may still describe the
-                // previous selected exit. Refresh every exact WeChat group now
-                // so the new node's reachability is authoritative immediately.
-                await primeManagedDirectFallbackGroups(
-                    policy: activeDirectPolicy,
-                    api: api
-                )
-                try Task.checkCancellation()
                 try await api.closeAllConnections()
                 try Task.checkCancellation()
                 // Prove both the selector handshake and ordinary signed-in-user
@@ -3342,18 +3323,9 @@ final class AppState {
                         // the app silently black-holes until the next full arm.
                         reviewedBundleDirect: true
                     )
-                    // Priming immediately after a reload measured 20 of 20
-                    // targets timing out and 0 reachable directly, versus 10
-                    // reachable on the same targets at connect. Those verdicts
-                    // are not noise: a fallback group with no healthy direct
-                    // member sends traffic that belongs on the direct path
-                    // through the tunnel until the next probe cycle. Wait for
-                    // the controller to answer before asking it anything.
+                    // Let the controller answer before the connection
+                    // close below asks it anything.
                     try? await api.waitUntilReady()
-                    await primeManagedDirectFallbackGroups(
-                        policy: pendingDirectPolicy,
-                        api: api
-                    )
                     LocalTrafficAudit.shared.recordEvent(
                         "managed_direct_pins_refreshed",
                         details: [
@@ -3365,11 +3337,6 @@ final class AppState {
                                 pendingDirectPolicy.sessionEndpoints.count
                             ),
                         ]
-                    )
-                } else if let effectiveDirectPolicy {
-                    await primeManagedDirectFallbackGroups(
-                        policy: effectiveDirectPolicy,
-                        api: api
                     )
                 }
                 try Task.checkCancellation()
@@ -3480,82 +3447,6 @@ final class AppState {
             pendingFullConfigReload = false
             reloadCoreConfig()
         }
-    }
-
-    /// Populate Mihomo's URL-specific fallback state before new application
-    /// connections rely on it. Tests run concurrently, so the barrier costs at
-    /// most one bounded probe timeout rather than host-count × timeout. A host
-    /// probe never fails the protected tunnel: REJECT remains the deterministic
-    /// all-down result, and controller errors are audited separately.
-    private func primeManagedDirectFallbackGroups(
-        policy: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        api: ClashAPI
-    ) async {
-        let targets = ConfigPipeline.managedDirectFallbackTargets(for: policy)
-        guard !targets.isEmpty else { return }
-        let results = await withTaskGroup(
-            of: ManagedDirectHealthResult.self,
-            returning: [ManagedDirectHealthResult].self
-        ) { group in
-            for target in targets {
-                group.addTask {
-                    do {
-                        let outcome = try await api.testProxyGroupMembers(
-                            name: target.groupName,
-                            url: target.testURL,
-                            timeout: ConfigPipeline
-                                .managedDirectPrimeTimeoutMilliseconds
-                        )
-                        switch outcome {
-                        case .reachableMembers(let delays):
-                            if delays[ConfigPipeline.directProxyName] != nil {
-                                return .direct
-                            }
-                            if delays[ConfigPipeline.exitGroupName] != nil {
-                                return .protectedExit
-                            }
-                            return .unavailable
-                        case .allUnavailable:
-                            return .unavailable
-                        }
-                    } catch {
-                        return .controllerError(
-                            String(error.localizedDescription.prefix(200))
-                        )
-                    }
-                }
-            }
-            var values: [ManagedDirectHealthResult] = []
-            for await value in group { values.append(value) }
-            return values
-        }
-        guard !Task.isCancelled else { return }
-        var direct = 0
-        var protectedExit = 0
-        var unavailable = 0
-        var controllerErrors: [String] = []
-        for result in results {
-            switch result {
-            case .direct: direct += 1
-            case .protectedExit: protectedExit += 1
-            case .unavailable: unavailable += 1
-            case .controllerError(let message): controllerErrors.append(message)
-            }
-        }
-        var details = [
-            "targets": String(targets.count),
-            "direct": String(direct),
-            "protected_exit": String(protectedExit),
-            "unavailable": String(unavailable),
-            "controller_errors": String(controllerErrors.count),
-        ]
-        if let firstError = controllerErrors.first {
-            details["first_error"] = firstError
-        }
-        LocalTrafficAudit.shared.recordEvent(
-            "managed_direct_health_primed",
-            details: details
-        )
     }
 
     private func requireRuntimeConfigDigest() throws -> String {

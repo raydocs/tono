@@ -394,9 +394,10 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     /// were never routing decisions at all, against 62 genuine unknowns, in
     /// four days of one Mac's log:
     ///
-    /// - `BLOCKED`: a `REJECT` outbound. Deliberate and high-volume — every
-    ///   `Tono-WeChat-TCP-*` group carries `REJECT` as its fail-closed first
-    ///   member — and it is the same word `classifyConnection` already uses.
+    /// - `BLOCKED`: a `REJECT` outbound. Deliberate and high-volume — the
+    ///   terminal `AND,((NETWORK,UDP)),REJECT` rule rejects every UDP flow the
+    ///   direct routes do not claim — and it is the same word
+    ///   `classifyConnection` already uses.
     /// - `NOT_A_ROUTE`: this is every core log line, not only route decisions.
     ///   A line with no ` using ` clause did not route anything, and calling
     ///   that an unrecognised route is simply false.

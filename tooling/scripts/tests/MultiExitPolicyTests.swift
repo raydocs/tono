@@ -388,32 +388,6 @@ struct MultiExitPolicyTests {
         guard validatedDirectPolicy?.sessionEndpoints.count == 6 else {
             throw TestFailure("managed direct policy did not produce exact PF tuples")
         }
-        let fallbackTargets = ConfigPipeline.managedDirectFallbackTargets(
-            for: validatedDirectPolicy
-        )
-        guard fallbackTargets.count == 3,
-              Set(fallbackTargets.map(\.groupName)).count == 3,
-              let fallback80 = fallbackTargets.first(where: {
-                  $0.host == "res.wx.qq.com" && $0.port == 80
-              }),
-              let fallback443 = fallbackTargets.first(where: {
-                  $0.host == "res.wx.qq.com" && $0.port == 443
-              }),
-              let tcpFallback80 = fallbackTargets.first(where: {
-                  $0.host == "49.51.67.253" && $0.port == 80
-              }),
-              fallback80.host == "res.wx.qq.com",
-              fallback80.testURL == "http://res.wx.qq.com/",
-              fallback443.host == "res.wx.qq.com",
-              fallback443.testURL == "https://res.wx.qq.com/",
-              tcpFallback80.testURL == "http://mmbiz.qpic.cn/",
-              fallbackTargets.allSatisfy({
-                  $0.groupName.hasPrefix(
-                      ConfigPipeline.managedDirectFallbackGroupPrefix
-                  )
-              }) else {
-            throw TestFailure("managed DIRECT fallback targets were not exact")
-        }
         let managedDirectRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
             subscriptionYAML: "proxies: []\n",
             overlay: cloudOnlyOverlay,
@@ -432,14 +406,6 @@ struct MultiExitPolicyTests {
                 ConfigPipeline.managedDirectProcessPathRegexes.first else {
             throw TestFailure("managed DIRECT omitted the standard WeChat bundle")
         }
-        let directRule80 =
-            "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN,res.wx.qq.com),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback80.groupName)"
-        let directRule443 =
-            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,res.wx.qq.com),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback443.groupName)"
-        let pinnedIPRule443 =
-            "AND,((NETWORK,TCP),(DST-PORT,443),(IP-CIDR,43.146.27.19/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(fallback443.groupName)"
-        let tcpDirectRule80 =
-            "AND,((NETWORK,TCP),(DST-PORT,80),(IP-CIDR,49.51.67.253/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(tcpFallback80.groupName)"
         // Claude Code's launcher is named after its version, so the basename
         // rules can never match it. These assert the path rules exist, target
         // the residential hop, and are never rewritten onto a direct target.
@@ -447,36 +413,46 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\($0))),\(ConfigPipeline.claudeHomeGroupName)"
         }
         // Mihomo takes the first matching rule, and the bundle-wide rule carries
-        // the same PROCESS-PATH-REGEX with no port and no address, so every pin
-        // below it is unreachable. That is deliberate — the comment on the
-        // bundle rule calls the pins "a redundant narrower match" — and this
-        // asserts the arrangement rather than trusting it, because it is not
-        // free: each pin still builds a `fallback` group with `lazy: false`, so
-        // roughly sixty of them health-probe every interval for rules that
-        // cannot fire, and the connect transaction primes all of them.
+        // the same PROCESS-PATH-REGEX with no port and no address — so every
+        // narrower WeChat pin that used to follow it was unreachable by
+        // construction. They were emitted anyway, as "a redundant narrower
+        // match", and each one also built a `fallback` group with `lazy: false`,
+        // probing every interval for a rule that could not match. That cost had
+        // already stopped: 189acf6 stopped carrying `domainPins`,
+        // `mediaEndpoints` and `tcpEndpoints` into the runtime policy, so the
+        // emission loops had nothing to iterate. This asserts the machinery
+        // stays gone, so it cannot come back with a field that gets repopulated.
         //
-        // If anyone reorders these, this test fails and the cost becomes a
-        // choice again rather than an accident.
+        // The pins are gone and the bundle-wide rule is the only expression of
+        // the decision. This asserts their absence rather than their order,
+        // because reintroducing one would bring its probing group back with it.
+        // The pinned addresses stay load-bearing through `hosts:` and the PF
+        // session endpoints, both checked separately below.
         let bundleWideRule =
             "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(ConfigPipeline.appDirectGroupName)"
-        let pinRulesAreShadowedByTheBundleRule: Bool = {
-            guard let bundleRange = managedDirectRuntime.range(of: bundleWideRule) else {
-                return false
-            }
-            return [directRule80, directRule443, pinnedIPRule443].allSatisfy { pin in
-                guard let pinRange = managedDirectRuntime.range(of: pin) else { return false }
-                return bundleRange.lowerBound < pinRange.lowerBound
-            }
-        }()
+        let pinRuleFragments = [
+            "(DST-PORT,80),(DOMAIN,res.wx.qq.com),(PROCESS-PATH-REGEX,",
+            "(DST-PORT,443),(DOMAIN,res.wx.qq.com),(PROCESS-PATH-REGEX,",
+            "(DST-PORT,443),(IP-CIDR,43.146.27.19/32,no-resolve),(PROCESS-PATH-REGEX,",
+            "(DST-PORT,80),(IP-CIDR,49.51.67.253/32,no-resolve),(PROCESS-PATH-REGEX,",
+        ]
+        let pinRulesAreGone = pinRuleFragments.allSatisfy {
+            !managedDirectRuntime.contains($0)
+        }
+        let noPerPinHealthGroups = !managedDirectRuntime.contains(
+            ConfigPipeline.managedDirectFallbackGroupPrefix
+        )
 
         let webDirectRule =
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com)),Tono-China-Web"
+        // Both UDP media pins sat under the bundle-wide UDP rule and could not
+        // fire either. Kept here as strings so their absence is asserted.
         let mediaRule443 =
             "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,43.146.27.17/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),Tono-China-Direct"
         let mediaRule8000 =
             "AND,((NETWORK,UDP),(DST-PORT,8000),(IP-CIDR,43.146.27.17/32,no-resolve),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),Tono-China-Direct"
         let directRulePrecedesMatch: Bool
-        if let directRuleRange = managedDirectRuntime.range(of: directRule443),
+        if let directRuleRange = managedDirectRuntime.range(of: bundleWideRule),
            let matchRuleRange = managedDirectRuntime.range(of: "  - MATCH,Tono-Exit") {
             directRulePrecedesMatch = directRuleRange.lowerBound < matchRuleRange.lowerBound
         } else {
@@ -490,7 +466,7 @@ struct MultiExitPolicyTests {
         ]
         let claudeRulesPrecedeDirect = claudeRules.allSatisfy { rule in
             guard let claudeRange = managedDirectRuntime.range(of: rule),
-                  let directRange = managedDirectRuntime.range(of: directRule443) else {
+                  let directRange = managedDirectRuntime.range(of: bundleWideRule) else {
                 return false
             }
             return claudeRange.lowerBound < directRange.lowerBound
@@ -507,7 +483,7 @@ struct MultiExitPolicyTests {
         ] + assistantPathRules
         let claudeProtectedRulesPrecedeDirect = claudeProtectedRules.allSatisfy { rule in
             guard let claudeRange = claudeProtectedRuntime.range(of: rule),
-                  let directRange = claudeProtectedRuntime.range(of: directRule443) else {
+                  let directRange = claudeProtectedRuntime.range(of: bundleWideRule) else {
                 return false
             }
             return claudeRange.lowerBound < directRange.lowerBound
@@ -534,9 +510,9 @@ struct MultiExitPolicyTests {
         let fallbackGroupCount = managedDirectRuntime
             .components(separatedBy: "\n    type: fallback\n")
             .count - 1
-        // `Tono-China-Web` is a fallback group too, so the WeChat per-port
-        // groups are no longer the whole population. Counting it explicitly
-        // keeps the per-port invariant meaningful instead of loosening it.
+        // With the per-pin groups gone the whole population is `Tono-China-Web`
+        // and `Tono-China-App`, so the count is now an exact statement rather
+        // than a subtraction against a variable number of pins.
         let webFallbackGroupCount = managedDirectRuntime
             .contains("name: \"\(ConfigPipeline.webDirectGroupName)\"") ? 1 : 0
         // The reviewed bundle's own route is a fallback group too now, so a
@@ -544,9 +520,10 @@ struct MultiExitPolicyTests {
         let appFallbackGroupCount = managedDirectRuntime
             .contains("name: \"\(ConfigPipeline.appDirectGroupName)\"") ? 1 : 0
         // Scoped to this group's own block. A bare `contains` of the two member
-        // lines passed while the group had no exit member at all, because the
-        // WeChat per-port groups list the same pair — an assertion that cannot
-        // fail for the reason it was written.
+        // lines once passed while the group had no exit member at all, because
+        // the per-pin groups listed the same pair — an assertion that could not
+        // fail for the reason it was written. Those groups are gone; the
+        // scoping stays, because it is what made the check mean anything.
         let appDirectFallsBackToExit: Bool
         if let header = managedDirectRuntime.range(
             of: "- name: \"\(ConfigPipeline.appDirectGroupName)\"\n"
@@ -563,19 +540,6 @@ struct MultiExitPolicyTests {
         } else {
             appDirectFallsBackToExit = false
         }
-        let fallback443Block = """
-          - name: "\(fallback443.groupName)"
-            type: fallback
-            proxies:
-              - REJECT
-              - "Tono-China-Direct"
-              - "Tono-Exit"
-            url: "https://res.wx.qq.com/"
-            interval: 60
-            timeout: 3500
-            lazy: false
-            hidden: true
-        """
         // A customer's WeChat lived at
         // /Applications/联系软件/微信.app — renamed bundle, own folder — and the
         // adoption gates rejected it for not being named WeChat.app and for not
@@ -705,15 +669,15 @@ struct MultiExitPolicyTests {
                     "\n  \"www.bilibili.com\":\n    - \"120.92.78.97\"\n"
                 )
             ),
-            ("tcp-80-fallback-rule", managedDirectRuntime.contains(directRule80)),
-            ("tcp-443-fallback-rule", managedDirectRuntime.contains(directRule443)),
-            ("pinned-ip-443-fallback-rule", managedDirectRuntime.contains(pinnedIPRule443)),
-            ("tcp-ip-80-fallback-rule", managedDirectRuntime.contains(tcpDirectRule80)),
             ("web-tcp-rule", managedDirectRuntime.contains(webDirectRule)),
-            ("udp-443-rule", managedDirectRuntime.contains(mediaRule443)),
-            ("udp-8000-rule", managedDirectRuntime.contains(mediaRule8000)),
+            // The four TCP pins and both UDP media pins were all unreachable
+            // under the bundle-wide rule, and each TCP pin dragged a probing
+            // health group in with it. Absence is the assertion now.
+            ("no-dead-wechat-pin-rules", pinRulesAreGone),
+            ("no-per-pin-health-groups", noPerPinHealthGroups),
+            ("no-dead-udp-443-pin", !managedDirectRuntime.contains(mediaRule443)),
+            ("no-dead-udp-8000-pin", !managedDirectRuntime.contains(mediaRule8000)),
             ("rule-order", directRulePrecedesMatch),
-            ("pins-shadowed-by-bundle-rule", pinRulesAreShadowedByTheBundleRule),
             ("claude-code-identity", claudeCodeIdentitiesHold),
             ("claude-app-identity", claudeAppIdentitiesHold),
             ("claude-process-rules", claudeRulesPrecedeDirect),
@@ -722,15 +686,14 @@ struct MultiExitPolicyTests {
             ("udp-fail-closed", managedDirectRuntime.contains("AND,((NETWORK,UDP)),REJECT")),
             ("app-direct-group-exists", appFallbackGroupCount == 1),
             ("app-direct-falls-back-to-exit", appDirectFallsBackToExit),
+            // The reviewed bundle's group and the browser web group are now the
+            // entire fallback population. An exact count is what catches a
+            // reintroduced per-pin group: it would be `hidden: true` and
+            // invisible to every other assertion here.
             (
-                "one-fallback-per-wechat-port",
-                fallbackGroupCount - webFallbackGroupCount - appFallbackGroupCount
-                    == fallbackTargets.count
-            ),
-            ("fail-closed-fallback-order", managedDirectRuntime.contains(fallback443Block)),
-            (
-                "no-web-fallback-group",
-                !fallbackTargets.contains { $0.host == "www.bilibili.com" }
+                "only-two-fallback-groups",
+                fallbackGroupCount == webFallbackGroupCount + appFallbackGroupCount
+                    && fallbackGroupCount == 2
             ),
             (
                 "no-unchecked-wechat-direct-tcp",
@@ -774,17 +737,15 @@ struct MultiExitPolicyTests {
                 managedDirectRuntime.contains("MATCH,\(ConfigPipeline.exitGroupName)")
                     && !managedDirectRuntime.contains("MATCH,DIRECT")
             ),
-            // The connect-path prime was shortened for latency; the runtime
-            // groups must keep the generous steady-state budget so a congested
-            // but usable direct path is not flapped onto the proxy.
+            // There is no connect-path prime any more — the two remaining
+            // groups reach their first verdict on mihomo's own schedule. The
+            // budget stays generous so a congested but usable direct path is
+            // not flapped onto the proxy.
             (
                 "runtime-keeps-steady-state-timeout",
                 managedDirectRuntime.contains(
                     "timeout: \(ConfigPipeline.managedDirectHealthTimeoutMilliseconds)"
                 )
-                    && !managedDirectRuntime.contains(
-                        "timeout: \(ConfigPipeline.managedDirectPrimeTimeoutMilliseconds)"
-                    )
             ),
             ("no-domain-keyword", !managedDirectRuntime.contains("DOMAIN-KEYWORD")),
             ("no-wide-cidr", !managedDirectRuntime.contains("43.146.27.0/24")),
