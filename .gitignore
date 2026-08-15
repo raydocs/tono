@@ -44,3 +44,6 @@ __pycache__/
 
 # Packaged macOS build output (1.1 GB of .app bundles as of build 47)
 artifacts/
+
+# Node — the workspaces keep their own; a stray root one is a tool artefact
+node_modules/
