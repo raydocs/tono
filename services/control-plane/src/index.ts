@@ -6773,8 +6773,19 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     });
   }
 
-  if (p === '/api/v1/home/usage' && m === 'POST') {
-    await privileged(req, e.HOME_AGENT_TOKEN);
+  // Same handler for the home agent and the collector. The collector is what
+  // has SSH to all sixteen nodes and therefore what reads the per-user byte
+  // counters; giving it the home agent's token instead would widen that one
+  // rather than scope this.
+  if ((p === '/api/v1/home/usage' || p === '/api/v1/ops-ingest/usage') && m === 'POST') {
+    if (p === '/api/v1/ops-ingest/usage') {
+      if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
+        throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
+      }
+      await privileged(req, e.OPS_COLLECTOR_TOKEN);
+    } else {
+      await privileged(req, e.HOME_AGENT_TOKEN);
+    }
     const b = await body(req, 512 * 1024);
     const reports = b.reports;
     if (!Array.isArray(reports) || reports.length < 1 || reports.length > 500) {

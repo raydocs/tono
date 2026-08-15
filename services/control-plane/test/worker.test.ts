@@ -893,6 +893,56 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('accepts usage from the collector under its own token, on the same rules', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_usage', 'usage@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+
+    const unconfigured = await api('ops-ingest/usage', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ reports: [] }),
+    });
+    expect(unconfigured.status).toBe(503);
+
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const headers = {
+      authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+      'content-type': 'application/json',
+    };
+    const send = (reportId: string, totalBytes: number) => api('ops-ingest/usage', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        reports: [{ reportId, userId: 'usr_usage', totalBytes, observedAt: seeded }],
+      }),
+    });
+
+    expect((await send('usr_usage-1', 5_000)).status).toBe(200);
+    const after = await (env as unknown as Env).DB.prepare(
+      'SELECT usage_bytes FROM users WHERE id = ?',
+    ).bind('usr_usage').first<Record<string, unknown>>();
+    expect(Number(after!.usage_bytes)).toBe(5_000);
+
+    // `usage_bytes` is written with MAX(), so a replay cannot inflate it and a
+    // lower figure cannot walk it back — the property the reporting agent has
+    // to be built around, since over-reporting once suspends an account for
+    // good.
+    expect((await send('usr_usage-1', 5_000)).status).toBe(200);
+    expect((await send('usr_usage-2', 1_000)).status).toBe(200);
+    const settled = await (env as unknown as Env).DB.prepare(
+      'SELECT usage_bytes FROM users WHERE id = ?',
+    ).bind('usr_usage').first<Record<string, unknown>>();
+    expect(Number(settled!.usage_bytes)).toBe(5_000);
+
+    // Same reportId with different content is a conflict, not a silent write.
+    expect((await send('usr_usage-1', 9_999)).status).toBe(409);
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
   it('redirects the absorbed quality and ops hostnames to the admin monitor', async () => {
     for (const host of ['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']) {
       const context = createExecutionContext();
