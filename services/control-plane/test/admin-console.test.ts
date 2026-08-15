@@ -72,3 +72,27 @@ describe('admin console helpers', () => {
     expect(trafficRemaining(profile, agent())).toBe(400);
   });
 });
+
+describe('billing fields Komari leaves unset', () => {
+  // Every node in the fleet currently reads price=0, billing_cycle=0,
+  // traffic_limit=0, expired_at=null — nobody has filled Komari's billing
+  // settings in. Rendering those zeros as values put "$0" on sixteen paid
+  // servers, and a zero quota against a known usage produces a negative
+  // remaining.
+  const empty = agent({
+    price: 0, currency: '$', billingCycle: 0, expiredAt: null, trafficLimit: 0,
+  } as Partial<LiveAgentDto>);
+
+  it('reads an unfilled Komari record as absent, not as zero', () => {
+    const billing = mergedBilling(undefined, empty);
+    expect(billing.price).toBeNull();
+    expect(billing.billingCycle).toBeNull();
+    expect(billing.trafficQuotaBytes).toBeNull();
+    expect(billing.source).toBe('none');
+  });
+
+  it('does not turn a missing quota into a negative remaining', () => {
+    const profile = { trafficUsedBytes: 900, trafficQuotaBytes: null } as unknown as NodeProfileDto;
+    expect(trafficRemaining(profile, empty)).toBeNull();
+  });
+});

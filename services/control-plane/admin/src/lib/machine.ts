@@ -48,16 +48,22 @@ export type BillingView = {
   source: 'profile' | 'komari' | 'mixed' | 'none';
 };
 
+// Komari writes 0 for a billing field nobody filled in. The collector strips
+// those now, but a zero that slips through here would render as "$0" on a paid
+// server or as a zero quota — both read as fact rather than as absence.
+const unset = (value: number | null | undefined): number | null =>
+  value === null || value === undefined || value === 0 ? null : value;
+
 export function mergedBilling(
   profile: NodeProfileDto | undefined,
   agent: LiveAgentDto | undefined,
 ): BillingView {
-  const renewsAt = profile?.renewsAt ?? agent?.expiredAt ?? null;
-  const trafficQuotaBytes = profile?.trafficQuotaBytes ?? agent?.trafficLimit ?? null;
+  const renewsAt = profile?.renewsAt ?? unset(agent?.expiredAt) ?? null;
+  const trafficQuotaBytes = profile?.trafficQuotaBytes ?? unset(agent?.trafficLimit) ?? null;
   const trafficUsedBytes = profile?.trafficUsedBytes ?? null;
-  const price = agent?.price ?? null;
+  const price = unset(agent?.price);
   const currency = agent?.currency ?? null;
-  const billingCycle = agent?.billingCycle ?? null;
+  const billingCycle = unset(agent?.billingCycle);
   const fromProfile = Boolean(profile?.renewsAt || profile?.trafficQuotaBytes);
   const fromKomari = Boolean(agent?.expiredAt || agent?.trafficLimit || agent?.price);
   let source: BillingView['source'] = 'none';
@@ -71,7 +77,7 @@ export function trafficRemaining(
   profile: NodeProfileDto | undefined,
   agent: LiveAgentDto | undefined,
 ) {
-  const quota = profile?.trafficQuotaBytes ?? agent?.trafficLimit ?? null;
+  const quota = profile?.trafficQuotaBytes ?? unset(agent?.trafficLimit) ?? null;
   if (quota == null) return null;
   if (profile?.trafficUsedBytes != null) return quota - profile.trafficUsedBytes;
   if (
