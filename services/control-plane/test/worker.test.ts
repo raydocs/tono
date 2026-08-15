@@ -992,7 +992,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // way down, one over-report suspended a paying customer for good.
     const suspended = await (env as unknown as Env).DB.prepare(
       'SELECT 1 AS hit FROM users WHERE id = ? AND quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes',
-    ).bind('usr_cycle').first<Row>();
+    ).bind('usr_cycle').first<Record<string, unknown>>();
     expect(suspended).toBeNull();
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
