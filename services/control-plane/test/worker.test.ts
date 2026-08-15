@@ -822,6 +822,35 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('serves the node roster to the collector, and never an empty list by accident', async () => {
+    const unconfigured = await api('ops-ingest/node-clients', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(unconfigured.status).toBe(503);
+
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const wrongToken = await api('ops-ingest/node-clients', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(wrongToken.status).toBe(401);
+
+    const response = await api('ops-ingest/node-clients', {
+      headers: { authorization: 'Bearer collector-test-token-with-at-least-32-chars' },
+    });
+    expect(response.status).toBe(200);
+    const roster = await response.json() as any;
+    // `observedAt` is what lets a reconciler tell a stale response from a real
+    // empty roster; applying an empty list as current would strip every managed
+    // client from every node.
+    expect(roster.observedAt).toBeGreaterThan(0);
+    expect(Array.isArray(roster.clients)).toBe(true);
+    for (const client of roster.clients) {
+      expect(client.email).toBe(`u:${client.userId}`);
+      expect(client.clientUUID).toMatch(/^[0-9a-f-]{36}$/);
+    }
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
   it('redirects the absorbed quality and ops hostnames to the admin monitor', async () => {
     for (const host of ['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']) {
       const context = createExecutionContext();

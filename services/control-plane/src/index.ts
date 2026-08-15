@@ -5855,6 +5855,42 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     });
   }
 
+  // The roster the node client lists are reconciled against.
+  //
+  // Same rows as `/api/v1/home/exit-identities`, which the home agent reads
+  // with its own token; this exists so the collector can drive node sync with
+  // the token it already holds, rather than widening the home agent's.
+  if (p === '/api/v1/ops-ingest/node-clients' && m === 'GET') {
+    if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
+      throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
+    }
+    await privileged(req, e.OPS_COLLECTOR_TOKEN);
+    const t = now();
+    const rows = await e.DB.prepare(
+      `SELECT exit_credentials.user_id AS user_id, exit_credentials.client_uuid AS client_uuid
+         FROM exit_credentials
+         JOIN users ON users.id = exit_credentials.user_id
+        WHERE users.status = 'active'
+          AND (users.expires_at IS NULL OR users.expires_at > ?)
+          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
+        ORDER BY exit_credentials.user_id`,
+    ).bind(t).all<Row>();
+    return Response.json({
+      // Echoed so a reconciling agent can tell a stale response from an empty
+      // roster: applying an empty list as if it were current would remove every
+      // managed client from every node at once.
+      observedAt: t,
+      clients: rows.results.map((row) => ({
+        userId: String(row.user_id),
+        clientUUID: String(row.client_uuid),
+        // The label per-user traffic accounting is keyed by. Namespaced so a
+        // reconciler can tell the clients it owns from `shared-legacy` and the
+        // hand-added entries it must never touch.
+        email: `u:${String(row.user_id)}`,
+      })),
+    });
+  }
+
   if (p === '/api/v1/ops-ingest/snapshot' && m === 'PUT') {
     if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
       throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
