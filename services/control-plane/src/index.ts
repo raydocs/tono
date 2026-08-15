@@ -5866,6 +5866,34 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     await privileged(req, e.OPS_COLLECTOR_TOKEN);
     const t = now();
+
+    // Identities are otherwise minted lazily, on a catalog fetch, and only when
+    // the catalog carries the placeholder. The published catalog is still the
+    // legacy one with a literal shared UUID, so that branch has never run and
+    // `exit_credentials` is empty — which deadlocks the cutover: the nodes need
+    // the credentials before the catalog can carry the placeholder, and the
+    // credentials were only created by serving that catalog.
+    //
+    // So the roster mints what is missing. `exitClientUUID` is unchanged and
+    // still adopts whatever row exists, so an account that fetches a catalog
+    // later is served the same identity this created.
+    const pending = await e.DB.prepare(
+      `SELECT users.id AS id
+         FROM users
+         LEFT JOIN exit_credentials ON exit_credentials.user_id = users.id
+        WHERE exit_credentials.user_id IS NULL
+          AND users.status = 'active'
+          AND (users.expires_at IS NULL OR users.expires_at > ?)
+          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
+        ORDER BY users.id
+        LIMIT 500`,
+    ).bind(t).all<Row>();
+    if (pending.results.length) {
+      await e.DB.batch(pending.results.map((row) => e.DB.prepare(
+        'INSERT OR IGNORE INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?,?,?)',
+      ).bind(String(row.id), crypto.randomUUID(), t)));
+    }
+
     const rows = await e.DB.prepare(
       `SELECT exit_credentials.user_id AS user_id, exit_credentials.client_uuid AS client_uuid
          FROM exit_credentials

@@ -829,6 +829,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(unconfigured.status).toBe(503);
 
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+
+    // Seeded here rather than relying on another test having made one: what is
+    // being checked is that an entitled account with no credential yet gets one.
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_roster', 'roster@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+
     const wrongToken = await api('ops-ingest/node-clients', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
     });
@@ -844,6 +854,18 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // client from every node.
     expect(roster.observedAt).toBeGreaterThan(0);
     expect(Array.isArray(roster.clients)).toBe(true);
+    // Identities are otherwise minted only when a catalog carrying the
+    // placeholder is fetched, and the published catalog is still the legacy
+    // one — so without minting here the roster is empty forever and the
+    // cutover cannot start.
+    expect(roster.clients.some((c: { userId: string }) => c.userId === 'usr_roster')).toBe(true);
+    // Minting is idempotent: a second call must not hand the same account a
+    // different identity, or every node would be reconciled to a UUID the
+    // customer does not present.
+    const again = await api('ops-ingest/node-clients', {
+      headers: { authorization: 'Bearer collector-test-token-with-at-least-32-chars' },
+    });
+    expect(await again.json()).toMatchObject({ clients: roster.clients });
     for (const client of roster.clients) {
       expect(client.email).toBe(`u:${client.userId}`);
       expect(client.clientUUID).toMatch(/^[0-9a-f-]{36}$/);
