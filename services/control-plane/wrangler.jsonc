@@ -39,6 +39,11 @@
   // the scheduled cleanup at the same retention as their index rows.
   "r2_buckets": [{
     "binding": "DIAGNOSTICS_LOGS", "bucket_name": "tono-diagnostics-logs"
+  }, {
+    // Installers are served from here rather than from the GitHub release, so a
+    // download does not depend on the repository being public and does not cross
+    // to a host that mainland China filters.
+    "binding": "RELEASES", "bucket_name": "tono-releases"
   }],
   "vars": {
     "ALLOWED_ORIGIN": "https://api.afk.ccwu.cc",

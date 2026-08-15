@@ -72,6 +72,7 @@ export interface Env {
   // that forgets the binding must fail at the first upload rather than
   // silently accepting segments it cannot store.
   DIAGNOSTICS_LOGS: R2Bucket;
+  RELEASES: R2Bucket;
   DIAGNOSTICS_LOG_RETENTION_SECONDS?: string;
   RATE_LIMIT_DIAGNOSTICS_LOG_USER_HOUR?: string;
   RATE_LIMIT_DIAGNOSTICS_LOG_USER_DAY?: string;
@@ -6985,6 +6986,27 @@ export default {
           headers: { allow: 'GET, HEAD' },
         }), false);
       }
+      // Installers come from R2, not from the GitHub release they were built by.
+      // A release asset is only anonymously downloadable while the repository is
+      // public, and github.com is not dependably reachable from where most of
+      // these users are; neither is true of this bucket. The Sparkle and Tauri
+      // signatures cover the bytes, not the address, so serving the same file
+      // from here is verified exactly as before.
+      const download = /^\/download\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/.exec(path);
+      if (download) {
+        const object = await e.RELEASES.get(download[1]);
+        if (!object) return secure(new Response('Not found', { status: 404 }), false);
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set('etag', object.httpEtag);
+        headers.set('content-length', String(object.size));
+        // An installer at a given filename never changes: a new build is a new
+        // name. Caching it hard is what keeps a 30 MB download off the origin.
+        headers.set('cache-control', 'public, max-age=31536000, immutable');
+        headers.set('content-disposition', `attachment; filename="${download[1]}"`);
+        return secure(new Response(req.method === 'HEAD' ? null : object.body, { headers }), false);
+      }
+
       const assetPath = new Map([
         ['/', '/releases/'],
         ['/index.html', '/releases/'],
