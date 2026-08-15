@@ -6639,6 +6639,14 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const b = await body(req, 16 * 1024);
       const status = b.status;
       const quota = b.quotaBytes;
+      // Ending a cycle, not editing a number. The collector keeps a fleet-wide
+      // cumulative total and re-sends it every ten minutes, so zeroing
+      // `usage_bytes` on its own would be undone by the next report; moving the
+      // baseline to the counter is what actually clears the cycle.
+      const resetUsage = b.resetUsage;
+      if (resetUsage !== undefined && resetUsage !== true) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'resetUsage may only be true');
+      }
       const deviceLimit = b.deviceLimit;
       const expiresAt = b.expiresAt;
       if (status !== undefined && !['active', 'disabled'].includes(status)) {
@@ -6685,6 +6693,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            quota_bytes = CASE WHEN ? THEN ? ELSE quota_bytes END,
            device_limit = CASE WHEN ? THEN ? ELSE device_limit END,
            expires_at = CASE WHEN ? THEN ? ELSE expires_at END,
+           usage_baseline_bytes = CASE WHEN ? THEN usage_reported_bytes ELSE usage_baseline_bytes END,
+           usage_bytes = CASE WHEN ? THEN 0 ELSE usage_bytes END,
            updated_at = ?
          WHERE id = ?`,
       ).bind(
@@ -6695,6 +6705,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         deviceLimit ?? null,
         expiresAt !== undefined,
         expiresAt ?? null,
+        resetUsage === true,
+        resetUsage === true,
         now(),
         mt[1],
       ).run();
@@ -6883,9 +6895,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            GROUP BY input.user_id
          )
          UPDATE users
-         SET usage_bytes = MAX(
-               usage_bytes,
+         SET usage_reported_bytes = MAX(
+               usage_reported_bytes,
                (SELECT accepted.total_bytes FROM accepted WHERE accepted.user_id = users.id)
+             ),
+             usage_bytes = MAX(
+               0,
+               MAX(
+                 usage_reported_bytes,
+                 (SELECT accepted.total_bytes FROM accepted WHERE accepted.user_id = users.id)
+               ) - usage_baseline_bytes
              ),
              updated_at = ?
          WHERE id IN (SELECT user_id FROM accepted)`,

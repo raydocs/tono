@@ -943,6 +943,60 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('lets a billing cycle be reset without the next report undoing it', async () => {
+    const t = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, quota_bytes, created_at, updated_at)
+       VALUES('usr_cycle', 'cycle@example.com', 'h', 's', 'active', 0, 1000, ?, ?)`,
+    ).bind(t, t).run();
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const headers = {
+      authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+      'content-type': 'application/json',
+    };
+    const report = (reportId: string, totalBytes: number) => api('ops-ingest/usage', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reports: [{ reportId, userId: 'usr_cycle', totalBytes, observedAt: t }] }),
+    });
+    const usage = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes, usage_reported_bytes, usage_baseline_bytes FROM users WHERE id = ?',
+      ).bind('usr_cycle').first<Record<string, unknown>>();
+      return {
+        billed: Number(row!.usage_bytes),
+        counter: Number(row!.usage_reported_bytes),
+        baseline: Number(row!.usage_baseline_bytes),
+      };
+    };
+
+    await report('cycle-1', 900);
+    expect(await usage()).toMatchObject({ billed: 900, counter: 900, baseline: 0 });
+
+    const reset = await api('admin/users/usr_cycle', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ resetUsage: true }),
+    });
+    expect(reset.status).toBe(200);
+    expect(await usage()).toMatchObject({ billed: 0, counter: 900, baseline: 900 });
+
+    // The collector never lowers its fleet-wide total, so the very next report
+    // carries the pre-reset figure. Before the baseline existed, MAX() put the
+    // account straight back over its quota and the reset meant nothing.
+    await report('cycle-2', 950);
+    expect(await usage()).toMatchObject({ billed: 50, counter: 950, baseline: 900 });
+
+    // And the account is under quota again, which is the whole point: with no
+    // way down, one over-report suspended a paying customer for good.
+    const suspended = await (env as unknown as Env).DB.prepare(
+      'SELECT 1 AS hit FROM users WHERE id = ? AND quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes',
+    ).bind('usr_cycle').first<Row>();
+    expect(suspended).toBeNull();
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
   it('redirects the absorbed quality and ops hostnames to the admin monitor', async () => {
     for (const host of ['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']) {
       const context = createExecutionContext();
