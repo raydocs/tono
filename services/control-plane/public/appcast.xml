@@ -26,7 +26,7 @@ only so that later ones reach you from the place they will keep coming from.
 The privileged helper is unchanged at 3.12.2, so this update does not ask for an
 administrator password.
 ]]></description>
-            <enclosure url="https://github.com/raydocs/tono/releases/download/tono-macos-0.0.66-build66/Tono-0.0.66-build66-arm64.zip" length="19895679" type="application/zip" sparkle:edSignature="t7gtZDOMa1y0n/tRdahaDdFETeJpST8Y8jkyoLycXnjrseHGarjREzgkyI9i6+K0E4oIrW8AUxA//ug0EdR0BQ=="/>
+            <enclosure url="https://releases.afk.ccwu.cc/download/Tono-0.0.66-build66-arm64.zip" length="19895679" type="application/zip" sparkle:edSignature="t7gtZDOMa1y0n/tRdahaDdFETeJpST8Y8jkyoLycXnjrseHGarjREzgkyI9i6+K0E4oIrW8AUxA//ug0EdR0BQ=="/>
         </item>
     </channel>
 </rss>

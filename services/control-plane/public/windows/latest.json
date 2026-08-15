@@ -5,11 +5,11 @@
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlNTNFJUR2VEZWtDbEZJZ3NoSFhYcXYyNVVCbjVpbUczSVJZMEIvZXk0amJJOHdwV3dTQ2VmdlI2Y0k1VTBZcEprQWNZRWRaZ0pHcjdWWTJkL0xyTWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NzU4MTM2CWZpbGU6VG9ub18wLjAuMzNfeDY0LXNldHVwLmV4ZQpnM2FWRzd0RkxsYXRZWE85TjExc29NRk1CM05HSXEybTErb2xROHp5dXVvTloyT1NEcHZYOGtvakkwVEJEZG1jMnJmQWRBNEtwby9SVUsxTWhQdW9BZz09Cg==",
-      "url": "https://github.com/raydocs/tono/releases/download/v0.0.33/Tono_0.0.33_x64-setup.exe"
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.33_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUL0owYnF4Z3YvZlNTNFJUR2VEZWtDbEZJZ3NoSFhYcXYyNVVCbjVpbUczSVJZMEIvZXk0amJJOHdwV3dTQ2VmdlI2Y0k1VTBZcEprQWNZRWRaZ0pHcjdWWTJkL0xyTWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2NzU4MTM2CWZpbGU6VG9ub18wLjAuMzNfeDY0LXNldHVwLmV4ZQpnM2FWRzd0RkxsYXRZWE85TjExc29NRk1CM05HSXEybTErb2xROHp5dXVvTloyT1NEcHZYOGtvakkwVEJEZG1jMnJmQWRBNEtwby9SVUsxTWhQdW9BZz09Cg==",
-      "url": "https://github.com/raydocs/tono/releases/download/v0.0.33/Tono_0.0.33_x64-setup.exe"
+      "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.33_x64-setup.exe"
     }
   }
 }

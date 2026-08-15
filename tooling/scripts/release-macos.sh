@@ -64,7 +64,13 @@ tag="tono-macos-$short_version-build$build"
 # the archive is named for the release from the start rather than renamed later.
 archive_name="Tono-$short_version-build$build-arm64.zip"
 release_repo=${TONO_RELEASE_REPO:-raydocs/tono}
-enclosure="https://github.com/$release_repo/releases/download/$tag/$archive_name"
+# The archive is served from the control plane's bucket, not from the GitHub
+# release that carries it: an asset there is anonymously downloadable only while
+# the repository is public, and github.com is not dependably reachable from where
+# most of these users are. Sparkle verifies the bytes, so the address is free to
+# move. The GitHub release still exists and still holds the same file; it is the
+# audit copy, not the one users fetch.
+enclosure="https://releases.afk.ccwu.cc/download/$archive_name"
 link="https://github.com/$release_repo/releases/tag/$tag"
 
 step() { print "\n── $1" }
@@ -216,6 +222,20 @@ if [[ $publish != yes ]]; then
   print "  It installs the daemon, checks what landed, and puts the previous one back."
   exit 0
 fi
+
+step "uploading the archive to the release bucket"
+# Before the release exists, so a published feed entry can never point at an
+# object that was never uploaded.
+( cd "$repo_root/services/control-plane" \
+  && /usr/bin/env npx wrangler r2 object put "tono-releases/$archive_name" \
+       --file "$named" --remote --content-type application/zip >/dev/null ) \
+  || fail "uploading $archive_name to the release bucket failed"
+served_length=$(/usr/bin/curl -sIL "$enclosure" \
+  | /usr/bin/awk 'tolower($1) == "content-length:" { print $2 }' | /usr/bin/tr -d '\r' | /usr/bin/tail -1)
+local_length=$(/usr/bin/stat -f%z "$named")
+[[ $served_length == $local_length ]] \
+  || fail "the bucket serves $served_length bytes for $archive_name but the archive is $local_length"
+print "  $enclosure serves $served_length bytes"
 
 step "creating the GitHub release"
 source_branch=$(git -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null) \

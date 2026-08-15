@@ -28,6 +28,9 @@ export const FEED_PATH = 'services/control-plane/public/appcast.xml'
 export const CHANNEL_REF = 'origin/windows-updates:latest.json'
 export const CHANNEL_MIRROR_PATH = 'services/control-plane/public/windows/latest.json'
 export const REPO = 'raydocs/tono'
+// Users download from the bucket, never from the GitHub release, which is the
+// audit copy and is anonymously readable only while the repository is public.
+export const DOWNLOAD_BASE = 'https://releases.afk.ccwu.cc/download/'
 
 export class GeneratorRefusal extends Error {
   constructor(reason) {
@@ -185,6 +188,13 @@ export function readWindowsChannel(repoRoot) {
   }
   const parsed = JSON.parse(raw)
   if (!parsed.version) refuse(`${CHANNEL_REF} names no version`)
+  for (const [platform, entry] of Object.entries(parsed.platforms ?? {})) {
+    if (!String(entry.url ?? '').startsWith(DOWNLOAD_BASE)) {
+      refuse(
+        `${CHANNEL_REF} sends ${platform} to ${entry.url}, which is not under ${DOWNLOAD_BASE}`,
+      )
+    }
+  }
 
   // The same file is served twice: the orphan branch that every build shipped
   // before 0.0.33 still asks for, and the control-plane asset every later build
@@ -200,7 +210,7 @@ export function readWindowsChannel(repoRoot) {
         `the asset offers ${JSON.parse(mirror).version} and the branch offers ${parsed.version}`,
     )
   }
-  return parsed.version
+  return parsed
 }
 
 // The compatibility section exists because the two halves of a release have to
@@ -272,16 +282,21 @@ async function buildModel(repoRoot, log) {
   const macDigest = await digestFor(feed.url, feed.size, knownArtifacts)
   if (macDigest.downloaded) log(`  hashed ${feed.url.split('/').pop()}`)
 
-  const channelVersion = readWindowsChannel(repoRoot)
+  const channel = readWindowsChannel(repoRoot)
+  const channelVersion = channel.version
   const winTag = `v${channelVersion}`
   const winRelease = releaseByTag(winTag)
   const winCommit = commitForTag(winTag)
   const winAsset = assetNamed(winRelease, (a) => a.name.endsWith('-setup.exe'), winTag)
-  const winDigest = await digestFor(
-    winAsset.browser_download_url,
-    winAsset.size,
-    knownArtifacts,
-  )
+  // The channel is what an updater obeys, so the page must describe the address
+  // it actually sends people to — not the GitHub asset the build happens to be
+  // archived beside, which is where the two could silently diverge.
+  const winUrl = `${DOWNLOAD_BASE}${winAsset.name}`
+  const channelUrls = new Set(Object.values(channel.platforms ?? {}).map((entry) => entry.url))
+  for (const url of channelUrls) {
+    if (url !== winUrl) refuse(`${CHANNEL_REF} offers ${url} but the ${winTag} asset is ${winAsset.name}`)
+  }
+  const winDigest = await digestFor(winUrl, winAsset.size, knownArtifacts)
   if (winDigest.downloaded) log(`  hashed ${winAsset.name}`)
 
   const copyFor = (path, notesPath, label) => {
@@ -349,7 +364,7 @@ async function buildModel(repoRoot, log) {
       ),
       artifact: {
         name: winAsset.name,
-        url: winAsset.browser_download_url,
+        url: winUrl,
         size: winAsset.size,
         sha256: winDigest.sha256,
       },

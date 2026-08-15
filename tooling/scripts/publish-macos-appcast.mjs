@@ -6,8 +6,12 @@ import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 
 export const DEFAULT_FEED_PATH = 'services/control-plane/public/appcast.xml'
-export const DEFAULT_ENCLOSURE_HOST = 'github.com'
-export const DEFAULT_ENCLOSURE_PATH_PREFIX = '/raydocs/tono/releases/download/'
+// Enclosures come from the control plane's bucket, not from the GitHub release
+// they were built by: a release asset is anonymously downloadable only while the
+// repository is public, and github.com is not dependably reachable from where
+// most of these users are. The signature covers the bytes, not the address.
+export const DEFAULT_ENCLOSURE_HOST = 'releases.afk.ccwu.cc'
+export const DEFAULT_ENCLOSURE_PATH_PREFIX = '/download/'
 export const ED_SIGNATURE_BYTES = 64
 export const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 
@@ -386,12 +390,16 @@ export function validateEnclosureUrl(value, options = {}) {
   }
   const relativePath = url.pathname.slice(expectedPathPrefix.length)
   const segments = relativePath.split('/').filter(Boolean)
-  if (segments.length !== 2) {
+  // Two shapes are legitimate: <tag>/<file> under a GitHub release, and <file>
+  // in the bucket, where the object name alone identifies the build. Every
+  // segment is still checked below, so the shorter form gives up no guarantee —
+  // the file name has always been the part that has to name one exact build.
+  if (segments.length < 1 || segments.length > 2) {
     refuse(
-      `enclosure URL must be <tag>/<file>, got ${relativePath || '(empty)'} under ${expectedPathPrefix}`,
+      `enclosure URL must be <file> or <tag>/<file>, got ${relativePath || '(empty)'} under ${expectedPathPrefix}`,
     )
   }
-  const [tag, fileName] = segments
+  const fileName = segments[segments.length - 1]
   if (!fileName.endsWith('.zip')) {
     refuse(`enclosure URL must reference a .zip archive, got ${fileName}`)
   }
@@ -400,10 +408,10 @@ export function validateEnclosureUrl(value, options = {}) {
   const shortPattern = new RegExp(
     `(?:^|[^0-9.])${shortVersionString.replaceAll('.', '\\.')}(?![0-9.])`,
   )
-  for (const [label, segment] of [
-    ['release tag', tag],
-    ['archive file name', fileName],
-  ]) {
+  for (const [label, segment] of segments.map((segment, index) => [
+    index === segments.length - 1 ? 'archive file name' : 'release tag',
+    segment,
+  ])) {
     if (MUTABLE_ALIAS.test(segment)) {
       refuse(
         `enclosure URL ${label} "${segment}" looks like a mutable alias; it must name exactly one immutable build`,

@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-15T01:45:58Z",
+ "generatedAt": "2026-08-15T04:33:11Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -61,7 +61,7 @@
     ],
     "artifact": {
      "name": "Tono-0.0.66-build66-arm64.zip",
-     "url": "https://github.com/raydocs/tono/releases/download/tono-macos-0.0.66-build66/Tono-0.0.66-build66-arm64.zip",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.66-build66-arm64.zip",
      "size": 19895679,
      "sha256": "188541f808e8a8a260fa7eef4a536ccb914a6703ace1da10b5a0898ba363d548",
      "sparkleEdSignature": "t7gtZDOMa1y0n/tRdahaDdFETeJpST8Y8jkyoLycXnjrseHGarjREzgkyI9i6+K0E4oIrW8AUxA//ug0EdR0BQ=="
@@ -88,7 +88,7 @@
     "recommended": true,
     "artifact": {
      "name": "Tono_0.0.33_x64-setup.exe",
-     "url": "https://github.com/raydocs/tono/releases/download/v0.0.33/Tono_0.0.33_x64-setup.exe",
+     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.33_x64-setup.exe",
      "size": 31491532,
      "sha256": "a1384aa391ba93e8afaf5ea443bb6fda09537931c846802e459a3eb9a884f749",
      "authenticodeSigned": false,
