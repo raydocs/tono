@@ -55,6 +55,11 @@ jobs:
             --pattern latest.json \
             --dir "$RUNNER_TEMP/windows-channel-candidate"
 
+      # The artefact must already be in the bucket: the validator below downloads
+      # from there and checks the signature over exactly what an updater will
+      # fetch, so a forgotten upload fails this run instead of pointing every
+      # updater at a 404. Upload with:
+      #   node tooling/scripts/upload-release-asset.mjs --tag v<version>
       - name: Verify every channel artifact with the configured updater public key
         run: |
           node apps/windows/app/scripts/validate-windows-channel.mjs \

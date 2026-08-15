@@ -6,6 +6,12 @@ import { verifyUpdaterSignature } from './prepare-updater-config.mjs'
 
 const WINDOWS_PLATFORM = /^windows-(?:x86_64|i686|aarch64)(?:-(?:nsis|msi))?$/
 
+// Updaters are sent to the bucket, never to the GitHub release. A release asset
+// is anonymously readable only while the repository is public, so pointing the
+// channel there made one settings toggle enough to 404 every update — and it
+// broke this validator too, which downloads the artifact to verify it.
+export const DOWNLOAD_BASE = 'https://releases.afk.ccwu.cc/download/'
+
 export async function validateWindowsChannel(
   manifest,
   expectedVersion,
@@ -69,22 +75,33 @@ export async function validateWindowsChannel(
         `${platform} must reference an immutable raydocs/tono v${expectedVersion} release asset`,
       )
     }
-    update.url = url.href
+    const assetName = url.pathname.slice(expectedPrefix.length)
+    if (!assetName || assetName.includes('/')) {
+      throw new Error(`${platform} does not name a single release asset`)
+    }
+    update.url = `${DOWNLOAD_BASE}${assetName}`
     if (typeof update.signature !== 'string' || !update.signature.trim()) {
       throw new Error(`${platform} has no updater signature`)
     }
 
-    const response = await fetchAsset(url)
+    // Deliberately the bucket rather than the release: this both proves the
+    // object is already there — the channel must never name a file that has not
+    // been uploaded yet — and proves it is byte-for-byte the artifact the key
+    // signed, since the signature is checked over exactly what an updater will
+    // download.
+    const response = await fetchAsset(new URL(update.url))
     if (!response.ok) {
       throw new Error(
-        `${platform} artifact download failed: HTTP ${response.status}`,
+        `${platform} is not in the release bucket yet: ${update.url} answered HTTP ${response.status}`,
       )
     }
-    verifyUpdaterSignature(
-      publicKey,
-      update.signature,
-      Buffer.from(await response.arrayBuffer()),
-    )
+    const body = Buffer.from(await response.arrayBuffer())
+    if (typeof releaseAsset.size === 'number' && body.byteLength !== releaseAsset.size) {
+      throw new Error(
+        `${platform} bucket object is ${body.byteLength} bytes but the release asset is ${releaseAsset.size}`,
+      )
+    }
+    verifyUpdaterSignature(publicKey, update.signature, body)
   }
 
   return manifest
