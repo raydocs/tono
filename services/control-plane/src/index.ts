@@ -6269,6 +6269,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)$/);
     if (mt && m === 'PATCH') {
       const b = await body(req, 16 * 1024);
+      // A misspelled field used to return 200 and change nothing. For an
+      // endpoint whose job includes clearing a billing cycle so a locked-out
+      // customer can connect again, a silent success is the worst possible
+      // answer: the operator believes the account was reset and only finds out
+      // when the customer is still suspended.
+      rejectUnexpectedKeys(b, ['status', 'expiresAt', 'notes', 'contact', 'plan']);
       const status = b.status;
       const expiresAt = b.expiresAt;
       if (status !== undefined && !['active', 'disabled'].includes(status)) {
@@ -6637,6 +6643,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     mt = p.match(/^\/api\/v1\/admin\/users\/([^/]+)$/);
     if (mt && m === 'PATCH') {
       const b = await body(req, 16 * 1024);
+      // A misspelled field used to return 200 and change nothing. For an
+      // endpoint whose job includes clearing a billing cycle so a locked-out
+      // customer can connect again, a silent success is the worst possible
+      // answer: the operator believes the account was reset, and only the
+      // customer finds out otherwise.
+      rejectUnexpectedKeys(b, ['status', 'quotaBytes', 'deviceLimit', 'expiresAt', 'resetUsage']);
       const status = b.status;
       const quota = b.quotaBytes;
       // Ending a cycle, not editing a number. The collector keeps a fleet-wide

@@ -974,6 +974,27 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     await report('cycle-1', 900);
     expect(await usage()).toMatchObject({ billed: 900, counter: 900, baseline: 0 });
 
+    // A typo must not read as success. This valve exists to get a locked-out
+    // customer working again; a silent no-op is discovered only by the customer.
+    const typo = await api('admin/users/usr_cycle', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ resetUsge: true }),
+    });
+    expect(typo.status).toBe(400);
+
+    // The console's own route keeps its own fields; tightening the scripted one
+    // must not start rejecting a note or a plan change.
+    const consoleEdit = await api('ops/users/usr_cycle', {
+      method: 'PATCH',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ notes: 'still editable' }),
+    });
+    expect(consoleEdit.status).toBe(200);
+
     const reset = await api('admin/users/usr_cycle', {
       method: 'PATCH',
       headers: { authorization: `Bearer ${ADMIN_TOKEN}`, 'content-type': 'application/json' },
