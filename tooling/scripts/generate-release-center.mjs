@@ -251,10 +251,42 @@ function assetNamed(release, predicate, tag) {
   return asset
 }
 
+// Every run asks the bucket whether it still serves this exact artefact, even
+// when the digest below is reused.
+//
+// Reuse is what made this necessary. A steady-state run matches the previous
+// manifest on URL and size, returns its recorded digest, and never opens a
+// connection — so the whole download-page check could pass while the object it
+// advertises was gone. That is the shape of the fault this product has already
+// shipped once: the release existed, the metadata was correct, and no customer
+// could download anything. "A release exists" and "a customer can get it" are
+// different facts, and only one of them was being checked.
+//
+// A HEAD costs nothing next to the 30 MB the digest reuse is protecting, and
+// `content-length` is the same number the signature was taken over, so a
+// truncated or replaced object fails here rather than on a customer's machine.
+export async function assertServed(url, size) {
+  let response
+  try {
+    response = await fetch(url, { method: 'HEAD', redirect: 'follow' })
+  } catch (error) {
+    refuse(`${url} could not be reached: ${error.message}`)
+  }
+  if (!response.ok) {
+    refuse(`${url} answered ${response.status}; no customer can download it`)
+  }
+  const served = response.headers.get('content-length')
+  if (served === null) refuse(`${url} served no content-length`)
+  if (Number(served) !== size) {
+    refuse(`${url} serves ${served} bytes but the release announces ${size}`)
+  }
+}
+
 // Digests cost a download, so they are reused whenever the previous manifest
 // already recorded one for this exact URL at this exact size. A changed size is
-// a changed file and always re-hashes.
+// a changed file and always re-hashes. Reachability is checked either way.
 async function digestFor(url, size, previous) {
+  await assertServed(url, size)
   const prior = previous.find((entry) => entry?.url === url && entry?.size === size)
   if (prior?.sha256) return { sha256: prior.sha256, downloaded: false }
   const response = await fetch(url, { redirect: 'follow' })

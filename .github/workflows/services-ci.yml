@@ -16,6 +16,10 @@ on:
     paths:
       - services/**
       - tooling/scripts/remote/**
+      # The download-page check and its tests live here. Without these two the
+      # generator could be changed without ever running the job that guards it.
+      - tooling/scripts/generate-release-center.mjs
+      - tooling/scripts/tests/generate-release-center.test.mjs
       - .github/workflows/services-ci.yml
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
@@ -27,6 +31,10 @@ on:
     paths:
       - services/**
       - tooling/scripts/remote/**
+      # The download-page check and its tests live here. Without these two the
+      # generator could be changed without ever running the job that guards it.
+      - tooling/scripts/generate-release-center.mjs
+      - tooling/scripts/tests/generate-release-center.test.mjs
       - .github/workflows/services-ci.yml
 
 permissions:
@@ -62,6 +70,13 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Download page guards can still fail
+        # The reachability guard is the one check standing between "the manifest
+        # says so" and "the bucket serves it". A guard that cannot fail is worth
+        # nothing, so its refusals are exercised against a local origin.
+        working-directory: ${{ github.workspace }}
+        run: node --test tooling/scripts/tests/generate-release-center.test.mjs
 
       # A release published while this page still names the version before it is
       # invisible until a customer downloads the wrong build, so it is checked
