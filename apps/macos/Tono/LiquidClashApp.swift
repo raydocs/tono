@@ -183,12 +183,15 @@ enum RuntimeCleanup {
 
         let didStartCore = AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
         let coreStatus = await PrivilegedRuntimeCoordinator.shared.coreStatus()
-        if didStartCore || coreStatus.running {
+        let coreMayStillBeRunning = didStartCore
+            || (coreStatus.verified && coreStatus.running)
+        if coreMayStillBeRunning {
             do {
                 try await PrivilegedRuntimeCoordinator.shared.stopCore()
             } catch {
                 let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
-                guard !status.running else {
+                let confirmedStopped = status.verified && !status.running
+                guard confirmedStopped else {
                     throw ClashError.startFailed(
                         "A previous protected core could not be stopped safely."
                     )
@@ -199,9 +202,18 @@ enum RuntimeCleanup {
 
         // Restore DNS while PF remains armed. A fresh installation or a legacy
         // helper has no DNS endpoint and therefore nothing to recover.
+        //
+        // A missing snapshot is not evidence that nothing needs recovering. A
+        // force-kill between `removeSnapshot` and the last `networksetup` call
+        // leaves the Mihomo resolver on a live service with no snapshot at all,
+        // and the core this launch just stopped is what that resolver pointed
+        // at. The helper sweeps exactly that case, so ask for the restore
+        // whenever this Mac may have been protected — gating on the snapshot
+        // was what kept the sweep from ever running at launch.
         let protectedDNS =
             await PrivilegedRuntimeCoordinator.shared.protectedDNSStatus()
-        if protectedDNS.snapshotPresent {
+        if protectedDNS.available,
+           protectedDNS.snapshotPresent || didStartCore || shouldResumeProtection {
             _ = try await PrivilegedRuntimeCoordinator.shared
                 .restoreProtectedDNSIfConfigured()
         } else if !protectedDNS.available,
@@ -633,6 +645,7 @@ struct LiquidClashApp: App {
     @State private var accountSession: AccountSession
 
     init() {
+        InterfaceLanguagePreference.syncAppleLanguagesFromStore()
         // Before any service exists: a fault while constructing AppState or the
         // account session would otherwise leave no local trace at all.
         CrashReporter.shared.install()
@@ -733,11 +746,15 @@ struct LiquidClashApp: App {
                     .frame(minWidth: 860, idealWidth: 920,
                            minHeight: 540, idealHeight: 600)
 
-                AccountGateView(session: accountSession) {
-                    ContentView()
-                        .environment(appState)
-                        .environment(accountSession)
-                        .environmentObject(updater)
+                if InterfaceLanguagePreference.hasChosen {
+                    AccountGateView(session: accountSession) {
+                        ContentView()
+                            .environment(appState)
+                            .environment(accountSession)
+                            .environmentObject(updater)
+                    }
+                } else {
+                    LanguageSetupView()
                 }
             }
             .background(WindowConfigurator { visible in
@@ -755,7 +772,12 @@ struct LiquidClashApp: App {
                 // Load the verified local catalog before account restoration so
                 // the cloud-only session can become usable from cache without
                 // waiting for a second control-plane round trip.
-                if accountSession.state == .restoring {
+                // Do not restore (or arm) behind the first-launch language
+                // chooser. Choosing a language relaunches the app; a restore
+                // in flight can leave Kill Switch armed with AccountGateView
+                // not mounted, so Restore Internet is unreachable.
+                if InterfaceLanguagePreference.hasChosen,
+                   accountSession.state == .restoring {
                     await accountSession.restore()
                 }
             }

@@ -15,10 +15,10 @@ actor PrivilegedRuntimeCoordinator {
     }
 
     /// Explicit user-requested release is the one safe place to prompt for a
-    /// rejecting helper repair. The actor keeps the probe and possible install
-    /// ordered before core stop, DNS restoration, and PF disarm.
-    func repairRejectingHelperForExplicitReleaseIfNeeded() throws {
-        guard HelperManager.daemonRejectsClient() else { return }
+    /// helper repair. The actor keeps the probe and possible install ordered
+    /// before core stop, DNS restoration, and PF disarm.
+    func repairHelperForExplicitReleaseIfNeeded() throws {
+        guard HelperManager.explicitReleaseRequiresRepair() else { return }
         try KillSwitchService.installIfNeeded()
     }
 
@@ -47,7 +47,12 @@ actor PrivilegedRuntimeCoordinator {
         )
     }
 
-    func coreStatus() -> (running: Bool, pid: Int?, lastError: String?) {
+    func coreStatus() -> (
+        running: Bool,
+        pid: Int?,
+        lastError: String?,
+        verified: Bool
+    ) {
         HelperManager.coreStatus()
     }
 

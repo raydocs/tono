@@ -117,16 +117,17 @@ fi
 
 # Establish a stream through the core and prove it works before touching
 # anything, so a later failure cannot be blamed on it never having worked.
-/usr/bin/python3 - "$mixed_port" "$echo_port" "$work/result" <<'PY' &
-import socket, sys, time
-mixed, echo, result = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+/usr/bin/python3 - "$mixed_port" "$echo_port" "$work/result" "$work/reloaded" <<'PY' &
+import os, socket, sys, time
+mixed, echo = int(sys.argv[1]), int(sys.argv[2])
+result, reloaded = sys.argv[3], sys.argv[4]
 def note(text):
     with open(result, "a") as handle:
         handle.write(text + "\n")
 try:
-    s = socket.create_connection(("127.0.0.1", mixed), timeout=8)
+    s = socket.create_connection(("127.0.0.1", mixed), timeout=30)
     s.sendall(f"CONNECT 127.0.0.1:{echo} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode())
-    s.settimeout(8)
+    s.settimeout(30)
     head = s.recv(200)
     if b"200" not in head:
         note("setup-failed:" + repr(head[:60]))
@@ -136,11 +137,20 @@ try:
         note("setup-failed:no-echo")
         raise SystemExit
     note("established")
-    # Hold across the reload, then prove the same socket still carries data.
-    time.sleep(6)
+    # Wait for the reload to actually have happened rather than sleeping a
+    # guessed interval. A fixed sleep decides the result by scheduling: too
+    # short and the socket is re-used before the operation under test ran, too
+    # long under load and the recv deadline expires and reports a severed
+    # stream the reload had nothing to do with.
+    deadline = time.monotonic() + 120
+    while not os.path.exists(reloaded):
+        if time.monotonic() > deadline:
+            note("no-reload-signal")
+            raise SystemExit
+        time.sleep(0.05)
     try:
         s.sendall(b"after")
-        s.settimeout(6)
+        s.settimeout(30)
         got = s.recv(64)
         note("survived" if got == b"after" else "wrong-echo:" + repr(got))
     except OSError as error:
@@ -150,7 +160,7 @@ finally:
 PY
 stream_pid=$!
 
-for _ in {1..40}; do
+for _ in {1..240}; do
   [[ -f "$work/result" ]] && /usr/bin/grep -q . "$work/result" && break
   /bin/sleep 0.25
 done
@@ -173,6 +183,10 @@ if [[ $reload_status != 204 && $reload_status != 200 ]]; then
   exit 1
 fi
 
+# Release the held stream only now, so "survived" can only mean it survived
+# this reload.
+: > "$work/reloaded"
+
 wait $stream_pid 2>/dev/null || true
 outcome=$(/usr/bin/tail -1 "$work/result" 2>/dev/null || echo "no-result")
 
@@ -187,6 +201,10 @@ case $outcome in
     echo "  flush was solely responsible. If reload severs connections now," >&2
     echo "  that conclusion no longer holds and applying policy to a live" >&2
     echo "  session needs rethinking, not just the arm sequence." >&2
+    exit 1
+    ;;
+  no-reload-signal)
+    echo "the reload never signalled the held stream, so nothing was tested" >&2
     exit 1
     ;;
   *)

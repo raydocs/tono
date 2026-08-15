@@ -675,7 +675,9 @@ final class AppState {
     var tonoTransport: TonoTransportDescriptor? = nil
     private(set) var cloudOnlyTransportReady = false
     var isTonoReady: Bool {
-        tonoTransport != nil || (cloudOnlyTransportReady && selectedExitNode() != nil)
+        if tonoTransport != nil { return true }
+        if selectedExitNode() != nil { return true }
+        return cloudOnlyTransportReady && defaultCloudExitNode() != nil
     }
     private var isOwnedTonoMode: Bool {
         tonoTransport != nil || cloudOnlyTransportReady
@@ -734,6 +736,7 @@ final class AppState {
     private var lastProtectedReconnectKick: Date?
     private var networkEnvironmentTask: Task<Void, Never>?
     private var wakeRecoveryTask: Task<Void, Never>?
+    private var sleepRestrictTask: Task<Void, Never>?
     private var resumeProtectionAfterWake = false
     private var initialDataLoaded = false
     private var autoConnectRequested = false
@@ -905,6 +908,8 @@ final class AppState {
         protectionOperationGeneration &+= 1
         wakeRecoveryTask?.cancel()
         wakeRecoveryTask = nil
+        sleepRestrictTask?.cancel()
+        sleepRestrictTask = nil
         networkEnvironmentTask?.cancel()
         networkEnvironmentTask = nil
         protectedReconnectTask?.cancel()
@@ -916,8 +921,9 @@ final class AppState {
         protectedReconnectNextAttemptAt = nil
         if isConnected || isConnecting || clashManager.isRunning {
             disconnect(releaseKillSwitch: false)
-        } else {
-            Task {
+        } else if KillSwitchService.isArmed || isProtectionBlocked {
+            sleepRestrictTask?.cancel()
+            sleepRestrictTask = Task {
                 try? await PrivilegedRuntimeCoordinator.shared
                     .restrictKillSwitchToBootstrap()
             }
@@ -945,6 +951,8 @@ final class AppState {
             if self.isConnected || self.isConnecting || self.clashManager.isRunning {
                 self.disconnect(releaseKillSwitch: false)
             }
+            _ = await self.sleepRestrictTask?.value
+            self.sleepRestrictTask = nil
             await self.finishPendingDisconnect()
             var barrierReady = false
             for delay in [0, 1, 2, 5, 10, 30] {
@@ -1276,7 +1284,18 @@ final class AppState {
     // MARK: - Connection Control
 
     func connect() {
-        guard !isConnected && !isConnecting && !isDisconnecting else { return }
+        if isDisconnecting {
+            Task { [weak self] in
+                await self?.finishPendingDisconnect()
+                guard let self,
+                      !self.isConnected,
+                      !self.isConnecting,
+                      !self.isDisconnecting else { return }
+                self.connect()
+            }
+            return
+        }
+        guard !isConnected && !isConnecting else { return }
         guard !catalogSelectionRequiresChoice else {
             errorMessage = String(localized: "Choose an available cloud server before reconnecting.")
             return
@@ -1753,6 +1772,20 @@ final class AppState {
                 // round trip and could interrupt a healthy first connection.
                 let committed = await self.onCoreStarted(api: api)
                 guard committed else { return }
+                if let started = self.connectionStageStartedAt {
+                    let elapsedMs = max(
+                        0,
+                        Int(Date().timeIntervalSince(started) * 1_000)
+                    )
+                    if self.lastConnectionStageDurations.count < 32 {
+                        self.lastConnectionStageDurations.append(
+                            StageDuration(
+                                stage: self.connectionStage,
+                                milliseconds: elapsedMs
+                            )
+                        )
+                    }
+                }
                 self.completedConnectionStages.insert(self.connectionStage)
                 self.isConnecting = false
                 self.connectionStartedAt = nil
@@ -1926,6 +1959,8 @@ final class AppState {
             protectedReconnectNextAttemptAt = nil
             wakeRecoveryTask?.cancel()
             wakeRecoveryTask = nil
+            sleepRestrictTask?.cancel()
+            sleepRestrictTask = nil
             resumeProtectionAfterWake = false
             autoConnectRequested = false
             connectionStartedAt = nil
@@ -2014,14 +2049,16 @@ final class AppState {
             if releaseKillSwitch {
                 do {
                     // A helper that rejects this GUI will also reject core stop,
-                    // DNS restoration, and disarm. Repair once, while PF remains
+                    // DNS restoration, and disarm; one on an older protocol
+                    // answers, but its "restored" does not mean this build's
+                    // DNS contract. Repair either once, while PF remains
                     // fail-closed, before attempting any release operation.
                     try await PrivilegedRuntimeCoordinator.shared
-                        .repairRejectingHelperForExplicitReleaseIfNeeded()
+                        .repairHelperForExplicitReleaseIfNeeded()
                 } catch {
                     helperReadyForRelease = false
                     transitionError = String(
-                        localized: "Tono's network helper rejected this copy of Tono, so protection was not released and your traffic stays protected. Choose Restore internet again to repair the helper and release protection. If repair keeps failing, the Support page has a recovery command. \(error.localizedDescription)"
+                        localized: "Tono's network helper needs repair before protection can be released, so your traffic stays protected. Choose Restore internet again and approve the administrator prompt. If repair keeps failing, the Support page has a recovery command. \(error.localizedDescription)"
                     )
                     LocalTrafficAudit.shared.recordEvent(
                         "helper_release_repair_failed",
@@ -2036,9 +2073,13 @@ final class AppState {
             let stopped = helperReadyForRelease
                 ? (shouldStopCore ? await clashManager.stopAsync() : true)
                 : false
-            let coreStillRunning = helperReadyForRelease && shouldStopCore
-                ? await PrivilegedRuntimeCoordinator.shared.coreStatus().running
-                : false
+            let coreStillRunning: Bool
+            if helperReadyForRelease && shouldStopCore {
+                let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+                coreStillRunning = status.running || !status.verified
+            } else {
+                coreStillRunning = false
+            }
             // A failed identity repair aborts the privileged release sequence.
             // Do not infer "stopped" from an unauthorized status endpoint.
             let coreStopped = helperReadyForRelease
@@ -2201,13 +2242,13 @@ final class AppState {
                 // where the user navigated, which is worse than showing none.
                 self.appTrafficLedger.ingest(apiConnections)
             }
-            guard self.isMainWindowVisible,
-                  self.selectedPage == .activity else { return }
             var stats = self.trafficStats
             stats.totalUpload = response.uploadTotal
             stats.totalDownload = response.downloadTotal
             stats.activeConnections = response.connections?.count ?? 0
             self.trafficStats = stats
+            guard self.isMainWindowVisible,
+                  self.selectedPage == .activity else { return }
             self.updateConnections(from: response)
         }
 
@@ -2490,12 +2531,11 @@ final class AppState {
                 guard healthCycle.isMultiple(of: 3),
                       self.switchingNodeId == nil,
                       self.configReloadTask == nil,
-                      let api = self.clashAPI,
-                      let selected = self.proxyService.activeNodeName
+                      let api = self.clashAPI
                 else { continue }
 
                 let health = await api.testProxyDelayWithRetry(
-                    name: selected,
+                    name: ConfigPipeline.exitGroupName,
                     url: "https://www.gstatic.com/generate_204",
                     timeout: 4_000,
                     attempts: 2,
@@ -2555,46 +2595,51 @@ final class AppState {
     }
 
     /// Switch to one alternate validated managed cloud exit without releasing
-    /// the protected TUN/PF transaction. When Home-US is enabled this changes
-    /// only the cloud dialer beneath the Home/Claude route; it does not replace
-    /// the Home-US identity or move Claude to the ordinary cloud exit.
+    /// the protected TUN/PF transaction. Home-US as the selected exit can also
+    /// fail over onto a catalog cloud node; Claude's residential hop is unchanged
+    /// when a cloud node was already selected and only the dialer moves.
     private func attemptAutomaticCloudFailover() async -> Bool {
         guard isConnected,
               !isDisconnecting,
               switchingNodeId == nil,
-              configReloadTask == nil,
-              let current = selectedExitNode() else {
+              configReloadTask == nil else {
             return false
         }
-        // A single validated node has nowhere to fail over to, so the caller
-        // falls through to the fail-closed reconnect path and retries the same
-        // exit. Record that separately: without it the resulting generic
-        // "stopped responding" message hides the actual reason from support,
-        // and this branch is indistinguishable from a healthy no-op.
-        guard importedExitNodes.count > 1 else {
+        let current = selectedExitNode()
+        guard importedExitNodes.count > (current == nil ? 0 : 1) else {
             LocalTrafficAudit.shared.recordEvent(
                 "automatic_cloud_failover_unavailable",
-                details: ["reason": "single_validated_node"]
+                details: ["reason": current == nil
+                    ? "no_validated_cloud_node"
+                    : "single_validated_node"]
             )
             return false
         }
 
-        let nodes = importedExitNodes
-        guard let currentIndex = nodes.firstIndex(where: { $0.id == current.id }) else {
-            return false
-        }
-        let rotated = Array(nodes.dropFirst(currentIndex + 1))
-            + Array(nodes.prefix(currentIndex + 1))
-        guard let candidate = rotated.first(where: { node in
-            node.id != current.id && !proxyTarget(node.name, matches: current.name)
-        }) else {
+        let candidate: ProxyNode
+        if let current {
+            let nodes = importedExitNodes
+            guard let currentIndex = nodes.firstIndex(where: { $0.id == current.id }) else {
+                return false
+            }
+            let rotated = Array(nodes.dropFirst(currentIndex + 1))
+                + Array(nodes.prefix(currentIndex + 1))
+            guard let next = rotated.first(where: { node in
+                node.id != current.id && !proxyTarget(node.name, matches: current.name)
+            }) else {
+                return false
+            }
+            candidate = next
+        } else if let fallback = defaultCloudExitNode() ?? importedExitNodes.first {
+            candidate = fallback
+        } else {
             return false
         }
 
         LocalTrafficAudit.shared.recordEvent(
             "automatic_cloud_failover_requested",
             details: [
-                "from": current.name,
+                "from": current?.name ?? ConfigPipeline.homeNodeName,
                 "to": candidate.name,
             ]
         )
@@ -2686,6 +2731,8 @@ final class AppState {
         consecutiveProtectedFailureCount = 0
         wakeRecoveryTask?.cancel()
         wakeRecoveryTask = nil
+        sleepRestrictTask?.cancel()
+        sleepRestrictTask = nil
         resumeProtectionAfterWake = false
         autoConnectRequested = false
         connectionStartedAt = nil
@@ -3673,6 +3720,7 @@ final class AppState {
         managedCatalogRevision = catalog.revision
         managedCatalogDigest = catalog.sha256
         managedCatalogRouting = validatedRouting
+        refreshTrafficInfrastructureDestinations()
 
         if selectedCloudNodeWasRemoved {
             applyDefaultProxySelection(persist: true)
@@ -3704,6 +3752,23 @@ final class AppState {
         } else if isConnecting {
             managedCatalogReloadPending = true
         }
+    }
+
+    private func refreshTrafficInfrastructureDestinations() {
+        var hosts: Set<String> = []
+        let residentialHop = managedCatalogRouting?.homeSocks5?.host
+        if let host = residentialHop {
+            let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                hosts.insert(trimmed)
+            }
+        }
+        appTrafficLedger.setInfrastructureDestinations(hosts)
+        // The assistant group only exists, and only has a residential first
+        // member, when the catalog carries this hop.
+        LocalTrafficAudit.setAssistantDirectFirstMember(
+            residentialHop == nil ? nil : ConfigPipeline.homeResidentialProxyName
+        )
     }
 
     private func validatedCatalogRouting(
@@ -3935,28 +4000,10 @@ final class AppState {
                 || !policy.directSuffixes.isEmpty else {
             return nil
         }
-        let media = policy.mediaEndpoints.flatMap { endpoint in
-            endpoint.ports.compactMap { port in
-                UInt16(exactly: port).map {
-                    ConfigPipeline.DirectEndpoint(
-                        address: endpoint.address,
-                        port: $0,
-                        transport: "udp"
-                    )
-                }
-            }
-        }
-        let tcp = policy.tcpEndpoints.flatMap { endpoint in
-            endpoint.ports.compactMap { port in
-                UInt16(exactly: port).map {
-                    ConfigPipeline.DirectEndpoint(
-                        address: endpoint.address,
-                        port: $0,
-                        transport: "tcp"
-                    )
-                }
-            }
-        }
+        // `mediaEndpoints` and `tcpEndpoints` are deliberately not carried into
+        // the runtime policy below, so the conversions that used to build them
+        // are gone rather than computed and dropped — the only two warnings in
+        // the build, and the shape that hides a field being silently ignored.
         let directSuffixes = try policy.directSuffixes.map { entry in
             let host = try ConfigPipeline.validatedManagedDirectSuffix(
                 entry.host,
@@ -5561,12 +5608,11 @@ final class AppState {
                 type: type,
                 network: conn.metadata.network.uppercased(),
                 destination: destination,
-                processName: conn.metadata.process?.isEmpty == false
-                    ? AppTrafficLedger.groupedProcessName(
-                        process: conn.metadata.process ?? "",
-                        processPath: conn.metadata.processPath
-                    )
-                    : nil,
+                processName: {
+                    let name = appTrafficLedger.resolvedProcessName(for: conn)
+                    if name == AppTrafficLedger.unattributed { return nil }
+                    return name
+                }(),
                 route: conn.chains.isEmpty
                     ? "Direct"
                     : conn.chains.joined(separator: " → "),
@@ -5614,6 +5660,18 @@ final class AppState {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         let selected = proxyService.activeNodeName ?? activeNode?.name ?? "unknown"
+        let stageLabel: String
+        if isConnecting {
+            stageLabel = connectionStage.rawValue
+        } else if isDisconnecting {
+            stageLabel = disconnectionStage.rawValue
+        } else if isProtectionBlocked {
+            stageLabel = "Protected Offline"
+        } else if isConnected {
+            stageLabel = "Protected"
+        } else {
+            stageLabel = "Standby"
+        }
         let lastErrorCategory: String? = errorMessage.map { _ in
             switch lastConnectionFailure?.stage {
             case .preparing: "preparation"
@@ -5633,7 +5691,7 @@ final class AppState {
             protectionBlocked: isProtectionBlocked, killSwitchArmed: KillSwitchService.isArmed,
             utunPresent: KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface),
             protectedDNSConfigured: protectedDNSService != nil,
-            selectedExit: String(selected.prefix(100)), connectionStage: String(connectionStage.rawValue.prefix(100)),
+            selectedExit: String(selected.prefix(100)), connectionStage: String(stageLabel.prefix(100)),
             reconnectAttempt: min(max(protectedReconnectAttempt, 0), 1000),
             lastErrorCategory: lastErrorCategory,
             lastCrashLabel: nil

@@ -1,8 +1,13 @@
-# Tono 0.0.64
+# Tono 0.0.65
 
-Build 64 is the first Sparkle update since 62, and the macOS rollback baseline: later feature work should land on a higher build so this one stays a known-good restore point. Sparkle does not install a lower build number; if a later update misbehaves, ship this source again as a new higher build rather than asking people to downgrade.
+Build 65 is the first Sparkle update since 62, and the macOS rollback baseline: later feature work should land on a higher build so this one stays a known-good restore point. Sparkle does not install a lower build number; if a later update misbehaves, ship this source again as a new higher build rather than asking people to downgrade. Builds 63 and 64 were assembled but never published, so everything they contained is here.
 
 It is the routing, Activity, and connect release: WeChat stays in China, Claude and the other assistants use your home line when the catalog has one, and the traffic page finally shows which app used which path. Connecting, sleeping, and Restore Internet are the paths this build refuses to get wrong.
+
+## Network protection
+
+- The protection rules Tono installs can now be read back, one line per route. Tono writes a rule for each address it permits — the exit node, the control plane, the accelerated Chinese endpoints — but macOS was folding every one of them into the single broader rule beside them, so none of the specific ones existed once loaded: 66 rules written, 13 kept, zero of the exact ones. Nothing leaked and nothing was blocked that should not have been, but Tono could not tell you which route your traffic took, and neither could support. Each rule now carries a name, which is what stops macOS folding it away. Measured on one live session afterwards: 5,967 packets and 9.2 MB on the exit, 4,625 and 8.1 MB through the tunnel, and 733 packets dropped by the fail-closed rule — numbers that did not exist before.
+- The privileged helper is version 3.12.2. Your Mac will ask for an administrator password once on first launch to replace the old one.
 
 ## Claude, ChatGPT, and the other assistants
 

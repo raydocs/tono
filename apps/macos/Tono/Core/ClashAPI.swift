@@ -7,6 +7,24 @@ actor ClashAPI {
     let secret: String
     private let session: URLSession
 
+    /// Slack on top of the probe budget Mihomo is asked to honour.
+    ///
+    /// The controller is on loopback, so this is never about the network. It is
+    /// about what the controller still has to do after the last member's
+    /// deadline expires: a group delay tests every member, and the reply cannot
+    /// be written until the slowest one has been waited out. A one-second
+    /// margin made the client the thing that failed — health priming reported
+    /// 20 controller timeouts out of 20 targets, repeatedly, at exactly the
+    /// moment a fresh tunnel makes the controller busiest, and an all-or-nothing
+    /// result is the signature of a deadline that was never survivable rather
+    /// than of probes that individually failed.
+    ///
+    /// Generous costs nothing: a live measurement of this call returns in
+    /// 0.37–0.56 s, twenty of them concurrently in 0.35–0.43 s. The request
+    /// completes when the controller answers; the ceiling only decides when to
+    /// stop believing it will.
+    private static let controllerProbeSlack: TimeInterval = 5
+
     init(host: String = "127.0.0.1", port: Int = 9090, secret: String = "") {
         self.baseURL = URL(string: "http://\(host):\(port)")!
         self.secret = secret
@@ -168,7 +186,8 @@ actor ClashAPI {
         // Mihomo owns the probe deadline. Keep only a one-second local grace
         // period instead of making every failed selection appear frozen for
         // an additional three seconds.
-        urlRequest.timeoutInterval = max(1, TimeInterval(timeout) / 1_000 + 1)
+        urlRequest.timeoutInterval =
+            max(1, TimeInterval(timeout) / 1_000 + Self.controllerProbeSlack)
         if !secret.isEmpty {
             urlRequest.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }
@@ -250,7 +269,10 @@ actor ClashAPI {
         }
         var urlRequest = URLRequest(url: requestURL)
         urlRequest.httpMethod = "GET"
-        urlRequest.timeoutInterval = TimeInterval(boundedTimeout) / 1_000 + 1
+        // A group tests every member, so the reply waits on the slowest of them
+        // rather than on one probe.
+        urlRequest.timeoutInterval =
+            TimeInterval(boundedTimeout) / 1_000 + Self.controllerProbeSlack
         if !secret.isEmpty {
             urlRequest.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }

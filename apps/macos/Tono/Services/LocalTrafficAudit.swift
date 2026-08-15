@@ -66,6 +66,9 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     let logFileURL: URL
 
     private let fileManager = FileManager.default
+    /// One report per group per process: the point is to learn that it happened
+    /// at all, not to add a line to every connection while it stays failed over.
+    private var reportedManagedDirectFallbacks: Set<String> = []
     private let queue = DispatchQueue(
         label: "com.raydocs.tono.local-traffic-audit",
         qos: .utility
@@ -314,6 +317,128 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         }
     }
 
+    static let unclassifiedRoute = "UNCLASSIFIED"
+
+    /// Groups whose whole purpose is "this member first, the exit only if it is
+    /// unreachable", with the member each one is supposed to be sitting on.
+    ///
+    /// The China groups are fixed. The assistant group is not: it exists only
+    /// when the catalog carries a residential hop, and its first member is that
+    /// hop, so it is registered at the same moment the runtime commits to one.
+    private static let staticDirectFirstGroupMembers = [
+        ConfigPipeline.appDirectGroupName: ConfigPipeline.directProxyName,
+        ConfigPipeline.webDirectGroupName: ConfigPipeline.webDirectProxyName,
+    ]
+
+    /// Set when a runtime is built with a residential hop, cleared when one is
+    /// built without. Nothing is reported for the assistant group while this is
+    /// nil, because without a hop the group either does not exist or its first
+    /// member is a catalog node whose name is not knowable here.
+    nonisolated(unsafe) private static var assistantDirectFirstMember: String?
+    private static let assistantMemberLock = NSLock()
+
+    /// Registers the member `Tono-Claude-Home` is expected to be sitting on.
+    ///
+    /// Worth its own entry point rather than a constant: this is the one
+    /// failover in the product that silently changes *who the user appears to
+    /// be*. Claude and ChatGPT are routed through a residential hop precisely
+    /// so their egress identity is a home connection; when that hop's health
+    /// check misses, the group quietly moves them onto the datacenter exit and
+    /// every downstream signal still reads "PROXIED". The China groups only
+    /// change how fast traffic is.
+    static func setAssistantDirectFirstMember(_ name: String?) {
+        assistantMemberLock.lock()
+        defer { assistantMemberLock.unlock() }
+        assistantDirectFirstMember = name
+    }
+
+    private static func directFirstMember(for group: String) -> String? {
+        if let known = staticDirectFirstGroupMembers[group] { return known }
+        guard group == ConfigPipeline.claudeHomeGroupName else { return nil }
+        assistantMemberLock.lock()
+        defer { assistantMemberLock.unlock() }
+        return assistantDirectFirstMember
+    }
+
+    /// The direct-first group in this route decision that is no longer on its
+    /// direct member, if any.
+    ///
+    /// Mihomo writes the selection as `using <group>[<proxy>]` where the
+    /// bracket holds the *leaf* proxy, not the intermediate group — a failed
+    /// over `Tono-China-App` reads `Tono-China-App[US-VLESS-Reality]`, never
+    /// `[Tono-Exit]`. So the test is "not the member it should be on", which
+    /// needs no knowledge of which exit node happens to be selected.
+    static func managedDirectGroupThatFellBack(_ message: String) -> String? {
+        guard let using = message.range(of: " using ", options: .backwards),
+              message[message.startIndex..<using.lowerBound].contains(" match ")
+        else {
+            return nil
+        }
+        let outbound = message[using.upperBound...]
+        guard let open = outbound.firstIndex(of: "["),
+              let close = outbound.lastIndex(of: "]"), open < close else {
+            return nil
+        }
+        let group = String(outbound[outbound.startIndex..<open])
+        guard let expected = directFirstMember(for: group) else { return nil }
+        let selected = String(outbound[outbound.index(after: open)..<close])
+        return selected == expected ? nil : group
+    }
+
+    /// Classify one Mihomo log line's routing decision.
+    ///
+    /// Extracted so the vocabulary can be tested without a running core. Two
+    /// buckets exist because both were being answered with "UNCLASSIFIED", and
+    /// that made the one number meant to surface routes Tono does not
+    /// understand into noise — 13 670 `REJECT` decisions and 2 339 lines that
+    /// were never routing decisions at all, against 62 genuine unknowns, in
+    /// four days of one Mac's log:
+    ///
+    /// - `BLOCKED`: a `REJECT` outbound. Deliberate and high-volume — every
+    ///   `Tono-WeChat-TCP-*` group carries `REJECT` as its fail-closed first
+    ///   member — and it is the same word `classifyConnection` already uses.
+    /// - `NOT_A_ROUTE`: this is every core log line, not only route decisions.
+    ///   A line with no ` using ` clause did not route anything, and calling
+    ///   that an unrecognised route is simply false.
+    static func classifyCoreRouteLog(_ message: String) -> String {
+        // A routing decision is `… match <rule> using <group>[<proxy>]`. Both
+        // halves are required: Mihomo also logs prose containing the word
+        // "using" ("… using fake ping echo"), and reading an outbound name out
+        // of that is how chatter became an unrecognised route.
+        guard let using = message.range(of: " using ", options: .backwards),
+              message[message.startIndex..<using.lowerBound].contains(" match ")
+        else {
+            return "NOT_A_ROUTE"
+        }
+        let outbound = message[using.upperBound...]
+        func selects(_ name: String) -> Bool {
+            outbound.hasPrefix(name)
+        }
+        if selects("REJECT") {
+            return "BLOCKED"
+        }
+        if selects(ConfigPipeline.directProxyName)
+            || selects(ConfigPipeline.webDirectProxyName)
+            || selects(ConfigPipeline.appDirectGroupName)
+            || selects(ConfigPipeline.webDirectGroupName)
+            || selects(ConfigPipeline.managedDirectFallbackGroupPrefix) {
+            return "MANAGED_DIRECT"
+        }
+        if selects("DIRECT") {
+            // A Mihomo route decision is not proof that PF put the packet on
+            // the wire, but it must remain conspicuous in an exported audit
+            // instead of being hidden from connection snapshots that do not
+            // include ICMP.
+            return "DIRECT_ATTEMPT"
+        }
+        if selects(ConfigPipeline.claudeHomeGroupName)
+            || selects(ConfigPipeline.homeResidentialProxyName)
+            || selects(ConfigPipeline.exitGroupName) {
+            return "PROXIED"
+        }
+        return unclassifiedRoute
+    }
+
     func recordCoreLogs(_ entries: [(level: String, message: String)]) {
         let localAuditEnabled = Self.isEnabled
         let researchEnabled = Self.isClaudeTrafficResearchEnabled
@@ -325,34 +450,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         }
         queue.async { [self] in
             for entry in values {
-                let routeClassification: String
-                if entry.message.contains(
-                    " using \(ConfigPipeline.directProxyName)"
-                ) || entry.message.contains(
-                    " using \(ConfigPipeline.webDirectProxyName)"
-                ) || entry.message.contains(
-                    " using \(ConfigPipeline.appDirectGroupName)"
-                ) || entry.message.contains(
-                    " using \(ConfigPipeline.webDirectGroupName)"
-                ) || entry.message.contains(
-                    " using \(ConfigPipeline.managedDirectFallbackGroupPrefix)"
-                ) {
-                    routeClassification = "MANAGED_DIRECT"
-                } else if entry.message.contains(" using DIRECT") {
-                    // A Mihomo route decision is not proof that PF put the
-                    // packet on the wire, but it must remain conspicuous in an
-                    // exported audit instead of being hidden from connection
-                    // snapshots that do not include ICMP.
-                    routeClassification = "DIRECT_ATTEMPT"
-                } else if entry.message.contains(
-                    " using \(ConfigPipeline.claudeHomeGroupName)"
-                ) || entry.message.contains(
-                    " using \(ConfigPipeline.homeResidentialProxyName)"
-                ) || entry.message.contains(" using Tono-Exit[") {
-                    routeClassification = "PROXIED"
-                } else {
-                    routeClassification = "UNCLASSIFIED"
-                }
+                let routeClassification = Self.classifyCoreRouteLog(entry.message)
                 if researchEnabled && Self.isClaudeTrafficResearchEnabled {
                     switch routeClassification {
                     case "DIRECT_ATTEMPT":
@@ -365,7 +463,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                             researchManagedDirectRouteCount + 1,
                             Self.maximumResearchCount
                         )
-                    case "UNCLASSIFIED":
+                    case Self.unclassifiedRoute:
+                        // Only real route decisions. `NOT_A_ROUTE` used to land
+                        // here too, and this counter exists to say "Tono saw a
+                        // route it does not understand" — a number that was 85%
+                        // Mihomo chatter answered nothing.
                         researchUnclassifiedRouteCount = min(
                             researchUnclassifiedRouteCount + 1,
                             Self.maximumResearchCount
@@ -375,6 +477,26 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                     }
                 }
                 guard localAuditEnabled, Self.isEnabled else { continue }
+                // A direct-first group that has selected the exit is the one
+                // transition worth naming. It means an entire app quietly moved
+                // to the cloud exit because one health probe missed, and it is
+                // invisible in a route log that says only "PROXIED" — the same
+                // word an ordinary MATCH produces. It has not been observed in
+                // any retained log, which is exactly why it needs to announce
+                // itself the first time it does rather than be reconstructed
+                // afterwards from chains.
+                if let group = Self.managedDirectGroupThatFellBack(entry.message),
+                   !reportedManagedDirectFallbacks.contains(group) {
+                    reportedManagedDirectFallbacks.insert(group)
+                    enqueue(
+                        kind: "protection_event",
+                        fields: [
+                            "event": "managed_direct_group_failed_over",
+                            "group": group,
+                            "route": String(entry.message.suffix(160)),
+                        ]
+                    )
+                }
                 let network = entry.message.first == "["
                     ? entry.message.dropFirst().prefix { $0 != "]" }.uppercased()
                     : "UNKNOWN"
@@ -424,12 +546,14 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 let host = metadata.host.isEmpty
                     ? metadata.destinationIP ?? "unknown"
                     : metadata.host
-                let process = metadata.process?.isEmpty == false
-                    ? metadata.process ?? "unknown"
-                    : "unknown"
-                let processPath = metadata.processPath?.isEmpty == false
-                    ? metadata.processPath ?? "unknown"
-                    : "unknown"
+                let processPath = Self.displayProcessField(metadata.processPath)
+                let process: String = {
+                    let named = Self.displayProcessField(metadata.process)
+                    if named != "unknown" { return named }
+                    if processPath == "unknown" { return "unknown" }
+                    let base = URL(fileURLWithPath: processPath).lastPathComponent
+                    return Self.displayProcessField(base)
+                }()
                 let chain = connection.chains.isEmpty
                     ? "Direct"
                     : connection.chains.joined(separator: " -> ")
@@ -877,6 +1001,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         )
     }
 
+    private static func displayProcessField(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "unknown" }
+        return value
+    }
+
     private static func routeClassification(
         _ connection: APIConnection
     ) -> String {
@@ -885,6 +1014,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         if upperRule.hasPrefix("REJECT")
             || upperRouteValues.contains(where: { $0.hasPrefix("REJECT") }) {
             return "BLOCKED"
+        }
+        if upperRouteValues.contains(
+            ConfigPipeline.homeResidentialProxyName.uppercased()
+        ) {
+            return "RESIDENTIAL"
         }
         if upperRouteValues.contains("DIRECT")
             || upperRouteValues.contains(ConfigPipeline.directProxyName.uppercased())
@@ -946,10 +1080,17 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         flushWorkItem = nil
         guard !pending.isEmpty else { return }
         let output = pending.reduce(into: Data()) { $0.append($1) }
+        let snapshot = pending
+        let snapshotBytes = pendingBytes
         pending.removeAll(keepingCapacity: true)
         pendingBytes = 0
+        func restorePending() {
+            pending.insert(contentsOf: snapshot, at: 0)
+            pendingBytes += snapshotBytes
+        }
         guard rotateIfNeeded(adding: output.count), ensureLogFile(),
               let handle = try? FileHandle(forWritingTo: logFileURL) else {
+            restorePending()
             return
         }
         defer { try? handle.close() }
@@ -957,7 +1098,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             try handle.seekToEnd()
             try handle.write(contentsOf: output)
         } catch {
-            return
+            restorePending()
         }
     }
 

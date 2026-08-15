@@ -52,16 +52,25 @@ run_case() {
   fi
   "$server" "$socket_path" "$expected" &
   server_pid=$!
-  attempts=0
+  # A wall-clock deadline, not a fixed count of 10 ms naps. The previous budget
+  # came to one second, which a freshly re-signed binary misses on its first
+  # exec while the rest of the suite has the machine busy — and this is a
+  # release gate, so a failure that means "the Mac was loaded" is worse than no
+  # gate at all: it teaches everyone to wave the next real one through.
+  deadline=$(( $(date +%s) + 30 ))
   while [ ! -S "$socket_path" ]; do
-    attempts=$((attempts + 1))
-    if [ "$attempts" -ge 100 ]; then
-      kill "$server_pid" 2>/dev/null || true
+    if ! kill -0 "$server_pid" 2>/dev/null; then
       wait "$server_pid" 2>/dev/null || true
-      echo "authorization test server did not start" >&2
+      echo "authorization test server exited before it listened" >&2
       exit 1
     fi
-    sleep 0.01
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      kill "$server_pid" 2>/dev/null || true
+      wait "$server_pid" 2>/dev/null || true
+      echo "authorization test server did not start within 30s" >&2
+      exit 1
+    fi
+    sleep 0.05
   done
   "$client" "$socket_path"
   wait "$server_pid"

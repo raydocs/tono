@@ -110,6 +110,123 @@ struct DiagnosticsLogUploaderTests {
         check("new file picked up", joined.contains("\"n\":110,"))
         check("no duplicate of already-sent", joined.contains("\"n\":1,") == false)
 
+        // --- 5. incomplete rotated tail is retried, not abandoned ----------------
+        let extraComplete = (111...115).map(line).joined()
+        let extraPartial = "{\"kind\":\"partial-rotate\",\"n\":116,\"no\":\"newline yet"
+        let appendHandle = try FileHandle(forWritingTo: logURL)
+        try appendHandle.seekToEnd()
+        try appendHandle.write(contentsOf: Data((extraComplete + extraPartial).utf8))
+        try appendHandle.close()
+        try FileManager.default.removeItem(
+            at: root.appendingPathComponent("traffic-audit.jsonl.1")
+        )
+        try FileManager.default.moveItem(
+            at: logURL, to: root.appendingPathComponent("traffic-audit.jsonl.1")
+        )
+        try (300...305).map(line).joined().write(to: logURL, atomically: true, encoding: .utf8)
+        await uploader.sweep()
+        captured = await MainActor.run { Captured.segments }
+        let afterIncomplete = captured.map(\.text).joined()
+        check(
+            "incomplete backup does not skip to live file",
+            afterIncomplete.contains("\"n\":300,") == false,
+            "segments=\(captured.count)"
+        )
+        let backup = root.appendingPathComponent("traffic-audit.jsonl.1")
+        if let handle = try? FileHandle(forWritingTo: backup) {
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data("\"}\n".utf8))
+            try handle.close()
+        }
+        await uploader.sweep()
+        captured = await MainActor.run { Captured.segments }
+        let afterRetry = captured.map(\.text).joined()
+        check("retried backup recovered new complete lines", afterRetry.contains("\"n\":115,"))
+        check("live file picked up after backup retry", afterRetry.contains("\"n\":305,"))
+
+        // --- 6. account switch does not upload leftover JSONL --------------------
+        let beforeAbandon = captured.count
+        let leftoverHandle = try FileHandle(forWritingTo: logURL)
+        try leftoverHandle.seekToEnd()
+        try leftoverHandle.write(contentsOf: Data((400...405).map(line).joined().utf8))
+        try leftoverHandle.close()
+        await uploader.abandonUnsentForAccountSwitch()
+        let switched = makeUploader(logURL)
+        await switched.sweep()
+        captured = await MainActor.run { Captured.segments }
+        check(
+            "abandoned tail is not uploaded under the next session",
+            captured.count == beforeAbandon
+                && captured.map(\.text).joined().contains("\"n\":400,") == false,
+            "segments=\(captured.count)"
+        )
+
+        // --- 6b. the file grew while we were reading it --------------------------
+        // `size` is measured before the read and the cursor is known only after
+        // it, with `LocalTrafficAudit` appending in between from this same
+        // process. A read that returns bytes newer than the measurement puts the
+        // cursor past `size`, and on UInt64 that subtraction is a trap, not a
+        // negative number. It crashed the shipped 0.0.64 build twice on one Mac
+        // inside two hours, byte-identical stacks, SIGTRAP on a background
+        // cooperative thread.
+        check(
+            "cursor past the measured size reports nothing left, not a trap",
+            DiagnosticsLogUploader.remainingBytes(size: 100, consumedThrough: 140) == 0,
+            "got \(DiagnosticsLogUploader.remainingBytes(size: 100, consumedThrough: 140))"
+        )
+        check(
+            "an exhausted file reports nothing left",
+            DiagnosticsLogUploader.remainingBytes(size: 100, consumedThrough: 100) == 0
+        )
+        check(
+            "an ordinary partial read still reports the tail",
+            DiagnosticsLogUploader.remainingBytes(size: 100, consumedThrough: 40) == 60
+        )
+
+        // --- 7. a rotated tail that never completes must not stall uploads -------
+        // The retry in case 5 is for the flush that was in flight when the
+        // rename happened. Nothing else ever writes a rotated file, so a tail
+        // that stays unreadable has to be given up: the cursor cannot leave a
+        // backup by itself, and while it points at one the live file is never
+        // read, so "retry forever" is the upload stopping for good.
+        let stallRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("dlu-stall-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: stallRoot, withIntermediateDirectories: true
+        )
+        let stallLog = stallRoot.appendingPathComponent("traffic-audit.jsonl")
+        try (1...5).map(line).joined().write(to: stallLog, atomically: true, encoding: .utf8)
+        await MainActor.run { Captured.segments.removeAll() }
+        let stalled = makeUploader(stallLog)
+        await stalled.sweep()                                   // cursor now on this inode
+        // Append a line with no terminator at all, then rotate: the backup's
+        // unsent tail can never be completed by anyone.
+        let stallHandle = try FileHandle(forWritingTo: stallLog)
+        try stallHandle.seekToEnd()
+        try stallHandle.write(contentsOf: Data("{\"kind\":\"never-terminated\"".utf8))
+        try stallHandle.close()
+        try FileManager.default.moveItem(
+            at: stallLog, to: stallRoot.appendingPathComponent("traffic-audit.jsonl.1")
+        )
+        try (900...905).map(line).joined().write(to: stallLog, atomically: true, encoding: .utf8)
+        var stallSweeps = 0
+        var recovered = false
+        while stallSweeps < 12 {
+            await stalled.sweep()
+            stallSweeps += 1
+            let text = await MainActor.run { Captured.segments.map(\.text).joined() }
+            if text.contains("\"n\":905,") {
+                recovered = true
+                break
+            }
+        }
+        check(
+            "unreadable rotated tail is abandoned so the live file resumes",
+            recovered,
+            "still stalled after \(stallSweeps) sweeps"
+        )
+        try? FileManager.default.removeItem(at: stallRoot)
+
         try? FileManager.default.removeItem(at: root)
         print(failures == 0 ? "\nall cursor/rotation checks passed" : "\n\(failures) FAILED")
         exit(failures == 0 ? 0 : 1)

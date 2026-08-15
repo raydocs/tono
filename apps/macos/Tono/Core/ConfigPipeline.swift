@@ -374,6 +374,39 @@ nonisolated struct ConfigPipeline {
         "zoom.us", "zoom.com", "zoomgov.com", "oray.com", "sunlogin.com",
         "edu.cn",
     ]
+    /// Domain families the reviewed WeChat bundle dials, resolved through China
+    /// DoH on the interface-bound direct outbound.
+    ///
+    /// The bundle-wide process rule already sends every WeChat socket to
+    /// `appDirectGroupName`, but a route is only as good as the answer behind
+    /// it. Published policy pins exact hostnames, and the ones WeChat actually
+    /// uses are not the ones on that list: over four days of one Mac's audit,
+    /// `mmbiz.qpic.cn` was pinned while `snsvideo.c2c.wechat.com` — the busiest
+    /// WeChat host on the machine — was not, so its name was resolved through
+    /// `#Tono-Exit` and the "direct" dial waited on a lookup that crossed the
+    /// Pacific first.
+    ///
+    /// Suffixes, not the process, on purpose: WeChat's in-app browser opens
+    /// ordinary sites (`chase.com`, `google.com`, `tesla.com` all appear in the
+    /// same audit), and those must keep resolving the way every other app's
+    /// hostnames do. Kept to families that are unambiguously WeChat rather than
+    /// Tencent-wide — no bare `qq.com`, which would swallow `v.qq.com` video
+    /// and everything else the managed policy governs separately.
+    ///
+    /// Accepted limitation, the same one the managed suffixes already carry: a
+    /// `nameserver-policy` entry has no fallback to the global nameserver, so
+    /// if the direct outbound cannot reach AliDNS these names stop resolving
+    /// rather than resolving through the exit.
+    static let wechatDirectDNSSuffixes = [
+        "wechat.com",       // snsvideo.c2c, mmsns.c2c, mmhead.c2c, dns, dl
+        "weixinbridge.com", // cube, badjs
+        "qpic.cn",          // mmbiz, mmsns, wework
+        "qlogo.cn",         // wx.qlogo
+        "weixin.qq.com",    // mp, game, liteapp, wwfile.work
+        "wx.qq.com",        // res
+        "wxs.qq.com",       // wxa, wxsmw
+    ]
+
     /// AliDNS DoH over TCP/443 with IP-literal certificates. Managed-direct
     /// domains resolve through these upstreams via the interface-bound direct
     /// outbound (nameserver-policy `#Tono-China-Direct`), which keeps pinned
@@ -1114,9 +1147,16 @@ nonisolated struct ConfigPipeline {
             yaml += "\n"
         }
         yaml += tonoDNS + "\n"
+        // Emitted on the same condition as the bundle group itself, so the
+        // routing decision and the resolver behind it can never disagree.
+        let wechatResolverKeys =
+            directPolicy != nil && !managedDirectProcessPathRegexes.isEmpty
+                ? wechatDirectDNSSuffixes.flatMap { [$0, "+.\($0)"] }
+                : []
         if let directPolicy,
            !directPolicy.directResolverHosts.isEmpty
-            || !directPolicy.webDomainSuffixes.isEmpty {
+            || !directPolicy.webDomainSuffixes.isEmpty
+            || !wechatResolverKeys.isEmpty {
             // Managed-direct hostnames resolve via China DoH through the
             // interface-bound direct outbound so /dns/query returns
             // region-correct answers for pinning. Client-facing answers for
@@ -1126,6 +1166,7 @@ nonisolated struct ConfigPipeline {
                 .joined(separator: ", ")
             yaml += "  nameserver-policy:\n"
             var policyKeys: [String] = directPolicy.directResolverHosts
+                + wechatResolverKeys
             // A suffix route is only as good as the answer behind it. Resolved
             // through the exit, a China CDN hands back the node nearest the
             // exit, so the "direct" hop would then cross the Pacific twice.

@@ -329,6 +329,16 @@
         }
       }
     },
+    "App routing research": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用路由研究"
+          }
+        }
+      }
+    },
     "Appearance": {
       "extractionState": "manual",
       "localizations": {
@@ -399,6 +409,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "应用自动更新"
+          }
+        }
+      }
+    },
+    "Automatically upload the full traffic log in the background": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "后台自动全量上传流量日志"
           }
         }
       }
@@ -522,6 +542,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Claude 与微信流量研究"
+          }
+        }
+      }
+    },
+    "Claude & WeChat research": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 与微信研究"
           }
         }
       }
@@ -1522,6 +1552,16 @@
         }
       }
     },
+    "Language": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "语言"
+          }
+        }
+      }
+    },
     "Last Connect Timing": {
       "localizations": {
         "zh-Hans": {
@@ -1689,6 +1729,16 @@
         }
       }
     },
+    "Local traffic log": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地流量日志"
+          }
+        }
+      }
+    },
     "Locking traffic to tunnel…": {
       "extractionState": "stale",
       "localizations": {
@@ -1768,6 +1818,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "网络助手"
+          }
+        }
+      }
+    },
+    "Network log upload": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传网络日志"
           }
         }
       }
@@ -2065,6 +2125,16 @@
         }
       }
     },
+    "Open at login": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登录时打开"
+          }
+        }
+      }
+    },
     "Opt in to compact protection state and four fixed actions only. Sends no traffic data unless Claude Traffic Research is enabled separately.": {
       "extractionState": "stale",
       "localizations": {
@@ -2118,6 +2188,16 @@
         }
       }
     },
+    "Preferences": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "偏好设置"
+          }
+        }
+      }
+    },
     "Preparing protection…": {
       "extractionState": "stale",
       "localizations": {
@@ -2136,6 +2216,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在准备安全组件…"
+          }
+        }
+      }
+    },
+    "Privacy": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐私"
           }
         }
       }
@@ -2366,6 +2456,16 @@
         }
       }
     },
+    "Re-test the selected exit": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新测试所选出口"
+          }
+        }
+      }
+    },
     "Ready": {
       "localizations": {
         "zh-Hans": {
@@ -2537,6 +2637,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要先开启远程诊断。共享 Claude 保护与微信原生试用路由的聚合计数（含被拒或未知应用归因）以及固定的出口与绕行判定。可能包含官方 claude.ai/anthropic.com 主机名、端口与字节总量；其他所有目标只归入“其他”桶，仅携带路由类别、端口与字节总量——绝不包含主机名。原始 IP、进程名、路径、内容与原始日志均保留在本地。"
+          }
+        }
+      }
+    },
+    "Requires diagnostics. Route aggregates only.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需先开启诊断。仅分享路由汇总。"
           }
         }
       }
@@ -2755,6 +2865,16 @@
         }
       }
     },
+    "Save connections on this Mac": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在本机保存连接记录"
+          }
+        }
+      }
+    },
     "Save local domains, destination IPs, processes and proxy routes": {
       "extractionState": "stale",
       "localizations": {
@@ -2858,6 +2978,26 @@
         }
       }
     },
+    "Send the newest log segment to support now": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即把最新的日志分段发送给支持团队"
+          }
+        }
+      }
+    },
+    "Sending…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送中…"
+          }
+        }
+      }
+    },
     "Server": {
       "extractionState": "manual",
       "localizations": {
@@ -2909,6 +3049,26 @@
         }
       }
     },
+    "Share anonymized app-route counts": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分享匿名应用路由统计"
+          }
+        }
+      }
+    },
+    "Share protection status with Tono support": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "向 Tono 支持分享保护状态"
+          }
+        }
+      }
+    },
     "Show Audit Log in Finder": {
       "localizations": {
         "zh-Hans": {
@@ -2925,6 +3085,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "在访达中显示诊断日志"
+          }
+        }
+      }
+    },
+    "Show Logs page": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示日志页"
           }
         }
       }
@@ -3535,6 +3705,16 @@
         }
       }
     },
+    "Theme": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外观"
+          }
+        }
+      }
+    },
     "Theme Mode": {
       "extractionState": "manual",
       "localizations": {
@@ -3562,6 +3742,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "这就是技术支持索取诊断快照时 Tono 会上报的全部内容，其中不含主机名、IP 地址、进程名或账号令牌。"
+          }
+        }
+      }
+    },
+    "This is exactly what Tono reports when support requests a diagnostic snapshot. It carries no hostnames, IP addresses, process names or account tokens. It is a separate, smaller report than the audit log above, which in this test build is uploaded in full.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这正是支持团队请求诊断快照时 Tono 上报的内容。其中不含主机名、IP 地址、进程名或账号令牌。它与上面的审计日志是两份不同的报告，体积更小；审计日志在这个测试版本中会被完整上传。"
           }
         }
       }
@@ -3657,6 +3847,16 @@
         }
       }
     },
+    "Tono keeps one redacted log file. Support may call it the audit log or the diagnostics log — it is the same file. Credentials and URL queries are removed before anything is written, and TLS bodies are never observed. In this test build the file is also uploaded to Tono support so routing bugs can be diagnosed without asking you for it; it carries the hostnames you connected to, the process that opened each connection, and which rule and route it matched. Settings › Privacy turns the upload off.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 只保留一份已脱敏的日志文件。支持团队可能称它为审计日志或诊断日志——是同一份文件。凭据和 URL 查询参数在写入前已被移除，TLS 内容从不被读取。在这个测试版本中，该文件还会上传给 Tono 支持团队，以便无需向你索取即可排查路由问题；其中包含你连接过的主机名、发起每条连接的进程，以及命中的规则与路由。可在「设置 › 隐私」中关闭上传。"
+          }
+        }
+      }
+    },
     "Tono quit unexpectedly on %@ · %@ · build %@": {
       "localizations": {
         "zh-Hans": {
@@ -3677,22 +3877,22 @@
         }
       }
     },
+    "Tono's network helper needs repair before protection can be released, so your traffic stays protected. Choose Restore internet again and approve the administrator prompt. If repair keeps failing, the Support page has a recovery command. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 的网络助手需要修复后才能解除保护，你的流量仍处于保护中。请再次选择「恢复联网」并在管理员提示中授权。若修复持续失败，支持页面提供了一条恢复命令。%@"
+          }
+        }
+      }
+    },
     "Tono's network helper rejected this copy of Tono, so automatic retries are paused. Choose Repair and reconnect to reinstall the helper, or Restore internet to turn protection off. If repair keeps failing, the Support page has a recovery command.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "Tono 的网络助手拒绝了当前这份 Tono，自动重试已暂停。请选择「修复并重新连接」以重新安装助手，或选择「恢复正常网络」以关闭保护。若修复反复失败，「支持与诊断」页面提供了恢复命令。"
-          }
-        }
-      }
-    },
-    "Tono's network helper rejected this copy of Tono, so protection was not released and your traffic stays protected. Choose Restore internet again to repair the helper and release protection. If repair keeps failing, the Support page has a recovery command. %@": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tono 的网络助手拒绝了当前这份 Tono，因此保护未被解除，你的流量仍受保护。请再次选择「恢复正常网络」以修复助手并解除保护。若修复反复失败，「支持与诊断」页面提供了恢复命令。%@"
           }
         }
       }
@@ -3727,12 +3927,32 @@
         }
       }
     },
+    "Turn this on in Settings › Privacy.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在「设置 › 隐私」中开启。"
+          }
+        }
+      }
+    },
     "URL Test": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "自动测速"
+          }
+        }
+      }
+    },
+    "Unknown · the helper did not answer": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知 · 助手未响应"
           }
         }
       }
@@ -3754,6 +3974,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "已更新"
+          }
+        }
+      }
+    },
+    "Updates": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新"
+          }
+        }
+      }
+    },
+    "Upload now": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "立即上传"
           }
         }
       }
@@ -4215,6 +4455,12 @@
     },
     "Unattributed": {
       "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未归属"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",

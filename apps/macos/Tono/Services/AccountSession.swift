@@ -34,6 +34,11 @@ final class AccountSession {
     private var deviceRefreshTask: Task<Void, Never>?
     private var deviceActionTask: Task<Void, Never>?
     private var appRoutingResearchTask: Task<Void, Never>?
+    private var periodicTelemetryTask: Task<Void, Never>?
+    private var lastPeriodicTelemetryAt: Date?
+    /// Slightly under the 20-minute cadence so an on-time window is never
+    /// dropped by clock jitter, and comfortably inside the six-an-hour budget.
+    private static let periodicTelemetryMinimumSpacing: TimeInterval = 18 * 60
     /// Test-programme raw-log upload. Built lazily on first use so a signed-out
     /// launch never touches the audit directory, and kept for the process
     /// lifetime so its upload cursor survives sign-out and sleep.
@@ -497,9 +502,11 @@ final class AccountSession {
         deviceActionTask = nil
         appRoutingResearchTask?.cancel()
         appRoutingResearchTask = nil
-        if let uploader = diagnosticsLogUploader {
-            // Stop, but keep the instance: its cursor is what stops the next
-            // sign-in from re-uploading everything already accepted.
+        periodicTelemetryTask?.cancel()
+        periodicTelemetryTask = nil
+        if logOutIdentity {
+            await abandonDiagnosticsLogUploader()
+        } else if let uploader = diagnosticsLogUploader {
             await uploader.stop()
         }
         // Clear descriptor first so Mihomo stops, while kill switch may remain armed.
@@ -660,7 +667,7 @@ final class AccountSession {
                     await descriptorConsumer(nil)
                     await sidecar.stop()
                     do {
-                        try await activateCloudFallback()
+                        try await activateCloudFallback(resumeProtection: true)
                         state = .ready
                     } catch {
                         pauseAppRoutingResearch()
@@ -678,9 +685,10 @@ final class AccountSession {
     /// after the failed Home-US sidecar is fully stopped. The first catalog
     /// request can otherwise reuse a control-plane connection invalidated when
     /// PF is armed and its previous states are flushed.
-    private func activateCloudFallback() async throws {
+    private func activateCloudFallback(resumeProtection: Bool? = nil) async throws {
+        let resume = resumeProtection ?? shouldResumeProtection
         do {
-            try cloudFallbackConsumer(shouldResumeProtection)
+            try cloudFallbackConsumer(resume)
             shouldResumeProtection = false
             return
         } catch {
@@ -690,7 +698,7 @@ final class AccountSession {
                     "Managed cloud catalog is unavailable.\(detail)"
                 )
             }
-            try cloudFallbackConsumer(shouldResumeProtection)
+            try cloudFallbackConsumer(resume)
             shouldResumeProtection = false
         }
     }
@@ -727,6 +735,7 @@ final class AccountSession {
         updateRemoteDiagnosticsPolling()
         updateAppRoutingResearchUploading()
         updateDiagnosticsLogUploading()
+        updatePeriodicTelemetry()
     }
 
     func remoteDiagnosticsSettingChanged() {
@@ -749,6 +758,7 @@ final class AccountSession {
         catalogSyncTask?.cancel(); catalogSyncTask = nil
         deviceActionTask?.cancel(); deviceActionTask = nil
         appRoutingResearchTask?.cancel(); appRoutingResearchTask = nil
+        periodicTelemetryTask?.cancel(); periodicTelemetryTask = nil
         if let uploader = diagnosticsLogUploader {
             Task { await uploader.stop() }
         }
@@ -759,6 +769,7 @@ final class AccountSession {
         guard state == .ready else { return }
         startCatalogSync(refreshImmediately: false)
         updateDiagnosticsLogUploading()
+        updatePeriodicTelemetry()
         // startCatalogSync resumes opted-in actions immediately, while its
         // catalog request waits for the normal timer and cannot race wake protection.
     }
@@ -814,8 +825,102 @@ final class AccountSession {
         }
     }
 
+    private func abandonDiagnosticsLogUploader() async {
+        guard let uploader = diagnosticsLogUploader else { return }
+        await uploader.abandonUnsentForAccountSwitch()
+        diagnosticsLogUploader = nil
+    }
+
     func networkLogUploadSettingChanged() {
         updateDiagnosticsLogUploading()
+    }
+
+    /// Ops "online" is derived from `POST telemetry/windows`. Windows already
+    /// sends this; without it a signed-in Mac never appears on the dashboard.
+    private func updatePeriodicTelemetry() {
+        guard state == .ready, !systemSleeping, user != nil else {
+            periodicTelemetryTask?.cancel()
+            periodicTelemetryTask = nil
+            return
+        }
+        // Sign-in, every settings change, and every wake route through here.
+        // Cancelling and restarting on each one turned a 20-minute cadence into
+        // an extra window per event, and the account budget is six an hour, so
+        // a laptop opened a few times an hour would 429 its own heartbeat.
+        guard periodicTelemetryTask == nil else { return }
+        periodicTelemetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(45))
+            while !Task.isCancelled {
+                guard let self, state == .ready, !systemSleeping else { return }
+                await uploadPeriodicTelemetryWindow()
+                do { try await Task.sleep(for: .seconds(20 * 60)) } catch { return }
+            }
+        }
+    }
+
+    private func uploadPeriodicTelemetryWindow() async {
+        // A sleep cancels the timer and a wake starts a fresh one, so the task
+        // being new is not evidence that a window is due. Hold the cadence
+        // across restarts rather than spending the hourly budget on them.
+        let now = Date()
+        if let last = lastPeriodicTelemetryAt,
+           now.timeIntervalSince(last) < Self.periodicTelemetryMinimumSpacing {
+            return
+        }
+        lastPeriodicTelemetryAt = now
+        let snapshot = diagnosticSnapshotConsumer()
+        let nowMs = Int64(now.timeIntervalSince1970 * 1_000)
+        let uiState: String
+        if snapshot.connected {
+            uiState = "connected"
+        } else if snapshot.connecting {
+            uiState = "connecting"
+        } else if snapshot.disconnecting {
+            uiState = "disconnecting"
+        } else if snapshot.protectionBlocked {
+            uiState = "protectedOffline"
+        } else {
+            uiState = "notConnected"
+        }
+        #if arch(arm64)
+        let osArch = "arm64"
+        #elseif arch(x86_64)
+        let osArch = "x86_64"
+        #else
+        let osArch = "unknown"
+        #endif
+        let window = TonoTelemetryWindowReport(
+            schemaVersion: 1,
+            kind: "periodic_window",
+            windowStartMs: nowMs - 22 * 60 * 1_000,
+            windowEndMs: nowMs,
+            appVersion: String(snapshot.appVersion.prefix(40)),
+            osVersion: String(
+                DiagnosticsLogUploader.compactOperatingSystemVersion().prefix(80)
+            ),
+            osArch: osArch,
+            uiState: uiState,
+            accountState: "ready",
+            selectedServer: snapshot.selectedExit == "unknown" ? nil : snapshot.selectedExit,
+            catalogRevision: nil,
+            killSwitchMode: snapshot.killSwitchArmed ? "locked" : "off",
+            killSwitchWanted: snapshot.killSwitchArmed || snapshot.connected,
+            killSwitchLive: snapshot.killSwitchArmed,
+            dnsEnabled: snapshot.protectedDNSConfigured,
+            eventCount: 0,
+            eventsDropped: 0,
+            events: []
+        )
+        do {
+            _ = try await api.uploadTelemetryWindow(window)
+        } catch TonoAPIClient.APIError.unauthorized {
+            await fail(
+                TonoAPIClient.APIError.unauthorized,
+                signsOutOnUnauthorized: true
+            )
+        } catch {
+            // The next cadence retries. This path must not drop protection.
+        }
     }
 
     /// Sends whatever is unsent right now, for the Support page's button. Returns
@@ -986,6 +1091,7 @@ final class AccountSession {
         // aggregate available to a later session.
         if accountLost {
             deactivateAppRoutingResearch()
+            await abandonDiagnosticsLogUploader()
         } else {
             pauseAppRoutingResearch()
         }
@@ -999,6 +1105,8 @@ final class AccountSession {
         deviceActionTask = nil
         appRoutingResearchTask?.cancel()
         appRoutingResearchTask = nil
+        periodicTelemetryTask?.cancel()
+        periodicTelemetryTask = nil
         await descriptorConsumer(nil)
         // Health / runtime failures keep kill switch; only auth sign-out disarms.
         if accountLost {

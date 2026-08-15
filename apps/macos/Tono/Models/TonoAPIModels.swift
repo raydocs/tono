@@ -289,6 +289,71 @@ nonisolated struct TonoDiagnosticsLogSegmentResponse: Codable, Sendable {
     let segment: Segment
 }
 
+/// Periodic ops heartbeat. Same wire shape as Windows `telemetry/windows`.
+nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
+    let schemaVersion: Int
+    let kind: String
+    let windowStartMs: Int64
+    let windowEndMs: Int64
+    let appVersion: String
+    let osVersion: String
+    let osArch: String
+    let uiState: String
+    let accountState: String
+    let selectedServer: String?
+    let catalogRevision: Int?
+    let killSwitchMode: String?
+    let killSwitchWanted: Bool?
+    let killSwitchLive: Bool?
+    let dnsEnabled: Bool?
+    let eventCount: Int
+    let eventsDropped: Int
+    let events: [TonoTelemetryEvent]
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion, kind, windowStartMs, windowEndMs, appVersion, osVersion
+        case osArch, uiState, accountState, selectedServer, catalogRevision
+        case killSwitchMode, killSwitchWanted, killSwitchLive, dnsEnabled
+        case eventCount, eventsDropped, events
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(windowStartMs, forKey: .windowStartMs)
+        try container.encode(windowEndMs, forKey: .windowEndMs)
+        try container.encode(appVersion, forKey: .appVersion)
+        try container.encode(osVersion, forKey: .osVersion)
+        try container.encode(osArch, forKey: .osArch)
+        try container.encode(uiState, forKey: .uiState)
+        try container.encode(accountState, forKey: .accountState)
+        if let selectedServer { try container.encode(selectedServer, forKey: .selectedServer) }
+        if let catalogRevision { try container.encode(catalogRevision, forKey: .catalogRevision) }
+        if let killSwitchMode { try container.encode(killSwitchMode, forKey: .killSwitchMode) }
+        if let killSwitchWanted { try container.encode(killSwitchWanted, forKey: .killSwitchWanted) }
+        if let killSwitchLive { try container.encode(killSwitchLive, forKey: .killSwitchLive) }
+        if let dnsEnabled { try container.encode(dnsEnabled, forKey: .dnsEnabled) }
+        try container.encode(eventCount, forKey: .eventCount)
+        try container.encode(eventsDropped, forKey: .eventsDropped)
+        try container.encode(events, forKey: .events)
+    }
+}
+
+nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
+    let ts: Int64
+    let kind: String
+}
+
+nonisolated struct TonoTelemetryWindowRequest: Encodable, Sendable {
+    let window: TonoTelemetryWindowReport
+}
+
+nonisolated struct TonoTelemetryWindowReceipt: Decodable, Sendable {
+    let id: String
+    let receivedAt: Int?
+}
+
 nonisolated enum TonoDeviceActionName: String, Codable, Sendable {
     case diagnosticSnapshot = "diagnostic_snapshot"
     case claudeTrafficSnapshot = "claude_traffic_snapshot"
