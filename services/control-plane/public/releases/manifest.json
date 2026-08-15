@@ -24,7 +24,7 @@
    "macos-0.0.65-build65",
    "windows-0.0.32"
   ],
-  "gitTagsRetained": true
+  "provenance": "Their tags are gone, but nothing is lost: every withdrawn build was merged into main, so each one is still reachable by commit and can be checked out and rebuilt. What was removed is the suggestion that any of them is still an option."
  },
  "releaseSet": {
   "id": "2026-08-14-macos-build65-windows-0.0.32",

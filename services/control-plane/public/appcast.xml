@@ -3,6 +3,32 @@
     <channel>
         <title>Tono</title>
         <item>
+            <title>0.0.66</title>
+            <pubDate>Sat, 15 Aug 2026 01:16:39 +0000</pubDate>
+            <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.66-build66</link>
+            <sparkle:version>66</sparkle:version>
+            <sparkle:shortVersionString>0.0.66</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.3</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Tono 0.0.66
+
+Build 66 is Build 65's code, published from Tono's own repository rather than a fork of
+someone else's. Nothing about routing, the kill switch or the app itself changed; if you
+are on Build 65 you already have every fix this contains, and the update is worth taking
+only so that later ones reach you from the place they will keep coming from.
+
+- The download and update addresses now point at Tono's own repository. Build 65 was
+  published from a fork, and everything it linked to lived under that fork's name.
+- The Windows side of the same release moved with it, and its update check no longer goes
+  to an address blocked from mainland China. That does not affect this build; it is the
+  reason the pair moved together.
+
+The privileged helper is unchanged at 3.12.2, so this update does not ask for an
+administrator password.
+]]></description>
+            <enclosure url="https://github.com/raydocs/tono/releases/download/tono-macos-0.0.66-build66/Tono-0.0.66-build66-arm64.zip" length="19895679" type="application/zip" sparkle:edSignature="t7gtZDOMa1y0n/tRdahaDdFETeJpST8Y8jkyoLycXnjrseHGarjREzgkyI9i6+K0E4oIrW8AUxA//ug0EdR0BQ=="/>
+        </item>
+        <item>
             <title>0.0.65</title>
             <pubDate>Fri, 14 Aug 2026 13:00:48 +0000</pubDate>
             <link>https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65</link>
