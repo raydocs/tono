@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-15T01:45:19Z",
+ "generatedAt": "2026-08-15T01:45:58Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -21,10 +21,11 @@
  "withdrawn": {
   "reason": "Every build before this baseline has been withdrawn. They carried defects these two fix — WeChat traffic silently dropped after the addresses looked up at connect time, a kill switch that could re-arm itself after being released, and a Connected state that survived a tunnel passing nothing — and several were never reachable by any customer because the update channel was never advanced past them.",
   "baseline": [
-   "macos-0.0.65-build65",
-   "windows-0.0.32"
+   "macos-0.0.66-build66",
+   "windows-0.0.33"
   ],
-  "provenance": "Their tags are gone, but nothing is lost: every withdrawn build was merged into main, so each one is still reachable by commit and can be checked out and rebuilt. What was removed is the suggestion that any of them is still an option."
+  "provenance": "Their tags and releases are gone, but nothing is lost: every withdrawn build was merged into main, so each one is still reachable by commit and can be checked out and rebuilt. What was removed is the suggestion that any of them is still an option.",
+  "repository": "Published from Tono’s own repository. Everything before 0.0.66 and 0.0.33 was released from a fork of another project, and the Windows updater asked a host blocked from mainland China, so a PC that could not connect was told no update existed."
  },
  "releaseSet": {
   "id": "2026-08-15-macos-build66-windows-0.0.33",
@@ -135,44 +136,6 @@
     "其余与 0.0.32 完全一致，包括服务协议，所以 App 与 Service 的配对关系不变"
    ],
    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.33"
-  },
-  {
-   "releaseId": "macos-0.0.65-build65",
-   "platform": "macos",
-   "version": "0.0.65",
-   "build": 65,
-   "publishedAt": "2026-08-14T13:00:47Z",
-   "status": "published-sparkle-current",
-   "sourceCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
-   "tagCommit": "90c81059fc5ad6a8198d1e5159365a451bb83178",
-   "summary": [
-    "自 Build 62 以来第一次真正送达用户的更新，同时作为 macOS 的回滚基线：Sparkle 不会安装更低的 build，后续若出问题，应以更高 build 重新发布本份源码，而不是让用户降级。63 与 64 组装后从未发布，内容都在本版。保护规则改为逐条带名，此前内核会把 66 条折叠成 13 条且精确规则一条不剩；微信改按 Apple 签名识别并把 80 端口留在国内直连。",
-    "保护规则现在逐条带名字。此前 macOS 会把每条精确规则折叠进旁边更宽的那条——写入 66 条、内核只留 13 条、精确的一条不剩，所以 Tono 说不出流量走了哪条路。没有泄漏，只是这份账目此前并不存在",
-    "微信按 Apple 签发的签名识别，不再只认 `/Applications/WeChat.app`；放在别处或名为 微信.app 的副本同样生效。曾有账号 342 条连接全部走隧道，而界面显示国内直连正常",
-    "微信主通道走 80 端口，此前被送进受保护出口，从国内绕行美国往返；两份日志显示 82% 和 72% 的连接是这样出去的。现在一律直连，直连失败仍可回落出口",
-    "账户有 home 线路时，`claude.ai`、`claude.com`、`anthropic.com` 与 Anthropic 自有网段走住宅跳点；Claude Code 按安装路径识别，桌面端与命令行不会被拆到两个网络",
-    "活动页改为按应用展示：本次会话用过网络的每个应用，按流量排序，直连／住宅／隧道各一条",
-    "特权 helper 为 3.12.2，首次启动会要求输入一次管理员密码"
-   ],
-   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.65-build65"
-  },
-  {
-   "releaseId": "windows-0.0.32",
-   "platform": "windows",
-   "version": "0.0.32",
-   "publishedAt": "2026-08-14T12:51:35Z",
-   "status": "published-stable-channel-current",
-   "sourceCommit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
-   "tagCommit": "ecea3a33a5d8057ee80fdc4fbc2e695cdfb98fa3",
-   "summary": [
-    "修好微信图片与文件一直转圈：直连放行此前只认连接那一刻查到的地址，之后微信自行找到的服务器全被静默丢弃。同日把已审计的更新通道从 0.0.25 推进到 0.0.32——此前通道推进的工作流与其部署环境指定了不同的分支，从 main 触发会显示成功却什么都没做，这就是 0.0.26 至 0.0.31 发布后无人收到的原因。",
-    "微信的图片、文件和语音能收发完了。直连放行此前只认连接那一刻查到的地址，而微信是边用边找服务器的——之后找到的全被发出去然后静默丢弃，表现就是一直转圈。放行仍有边界：四个端口、只给 Tono 自己的路由引擎、且永不放行内网地址",
-    "登录会在同一台服务器上改试备用端口再放弃，能穿过只封 443 的网络",
-    "服务繁忙时「断开」和「恢复上网」也能送达。此前建立连接只给 150 毫秒，而同一步里的安全校验却有三秒——保护开着、没有网、而唯一能解除它的按钮没反应",
-    "隧道出不去时不再显示「已连接」；关闭保护后不会因换 Wi-Fi 或睡眠唤醒而自行重新武装",
-    "App 与 Service 必须同版：本版要求服务协议 14，安装器在一次提权事务里同时替换两者"
-   ],
-   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.32"
   }
  ]
 }
