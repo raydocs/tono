@@ -446,6 +446,29 @@ struct MultiExitPolicyTests {
         let assistantPathRules = ConfigPipeline.assistantHomeProcessPathRegexes.map {
             "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\($0))),\(ConfigPipeline.claudeHomeGroupName)"
         }
+        // Mihomo takes the first matching rule, and the bundle-wide rule carries
+        // the same PROCESS-PATH-REGEX with no port and no address, so every pin
+        // below it is unreachable. That is deliberate — the comment on the
+        // bundle rule calls the pins "a redundant narrower match" — and this
+        // asserts the arrangement rather than trusting it, because it is not
+        // free: each pin still builds a `fallback` group with `lazy: false`, so
+        // roughly sixty of them health-probe every interval for rules that
+        // cannot fire, and the connect transaction primes all of them.
+        //
+        // If anyone reorders these, this test fails and the cost becomes a
+        // choice again rather than an accident.
+        let bundleWideRule =
+            "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(weChatProcessPathRegex))),\(ConfigPipeline.appDirectGroupName)"
+        let pinRulesAreShadowedByTheBundleRule: Bool = {
+            guard let bundleRange = managedDirectRuntime.range(of: bundleWideRule) else {
+                return false
+            }
+            return [directRule80, directRule443, pinnedIPRule443].allSatisfy { pin in
+                guard let pinRange = managedDirectRuntime.range(of: pin) else { return false }
+                return bundleRange.lowerBound < pinRange.lowerBound
+            }
+        }()
+
         let webDirectRule =
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com)),Tono-China-Web"
         let mediaRule443 =
@@ -690,6 +713,7 @@ struct MultiExitPolicyTests {
             ("udp-443-rule", managedDirectRuntime.contains(mediaRule443)),
             ("udp-8000-rule", managedDirectRuntime.contains(mediaRule8000)),
             ("rule-order", directRulePrecedesMatch),
+            ("pins-shadowed-by-bundle-rule", pinRulesAreShadowedByTheBundleRule),
             ("claude-code-identity", claudeCodeIdentitiesHold),
             ("claude-app-identity", claudeAppIdentitiesHold),
             ("claude-process-rules", claudeRulesPrecedeDirect),

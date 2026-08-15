@@ -75,7 +75,7 @@ const PUBLISHED_ITEM = `        <item>
 
 - shipped
 ]]></description>
-            <enclosure url="https://github.com/raydocs/tono/releases/download/tono-0.0.1-build42/Tono-0.0.1-build42-arm64.zip" length="19862862" type="application/zip" sparkle:edSignature="hem2MI+cAfLkGABNUj+3v0eWI0SoI1AUM6RTpwUYWVnRcrmNBsb1ZyeEUH2IaVnzO1W0oAb6UJt011hBki0SBg=="/>
+            <enclosure url="https://releases.afk.ccwu.cc/download/tono-0.0.1-build42/Tono-0.0.1-build42-arm64.zip" length="19862862" type="application/zip" sparkle:edSignature="hem2MI+cAfLkGABNUj+3v0eWI0SoI1AUM6RTpwUYWVnRcrmNBsb1ZyeEUH2IaVnzO1W0oAb6UJt011hBki0SBg=="/>
         </item>`
 
 const FEED = `<?xml version="1.0" standalone="yes"?>
@@ -105,7 +105,7 @@ function input(overrides = {}) {
     shortVersion: '0.0.2',
     edSignature: SIGNATURE,
     enclosureUrl:
-      'https://github.com/raydocs/tono/releases/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip',
+      'https://releases.afk.ccwu.cc/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip',
     link: 'https://github.com/raydocs/tono/releases/tag/tono-0.0.2-build43',
     notes: '## Tono Build 43\n\n- fixed the feed publication path\n',
     pubDate: '2026-08-10T12:00:00Z',
@@ -131,7 +131,7 @@ test('refuses a downgrade below the newest published build', () => {
       version: '41',
       shortVersion: '0.0.1',
       enclosureUrl:
-        'https://github.com/raydocs/tono/releases/download/tono-0.0.1-build41/Tono-0.0.1-build41-arm64.zip',
+        'https://releases.afk.ccwu.cc/download/tono-0.0.1-build41/Tono-0.0.1-build41-arm64.zip',
       link: 'https://github.com/raydocs/tono/releases/tag/tono-0.0.1-build41',
       enclosureFileName: 'Tono-0.0.1-build41-arm64.zip',
     },
@@ -149,7 +149,7 @@ test('refuses republishing the version already in the feed', () => {
       version: '42',
       shortVersion: '0.0.1',
       enclosureUrl:
-        'https://github.com/raydocs/tono/releases/download/tono-0.0.1-build42/Tono-0.0.1-build42-arm64.zip',
+        'https://releases.afk.ccwu.cc/download/tono-0.0.1-build42/Tono-0.0.1-build42-arm64.zip',
       link: 'https://github.com/raydocs/tono/releases/tag/tono-0.0.1-build42',
       enclosureFileName: 'Tono-0.0.1-build42-arm64.zip',
     },
@@ -163,7 +163,7 @@ test('refuses a lower short version even when the build advances', () => {
       infoPlistXml: INFO_PLIST.replace('<string>0.0.2</string>', '<string>0.0.0</string>'),
       shortVersion: '0.0.0',
       enclosureUrl:
-        'https://github.com/raydocs/tono/releases/download/tono-0.0.0-build43/Tono-0.0.0-build43-arm64.zip',
+        'https://releases.afk.ccwu.cc/download/tono-0.0.0-build43/Tono-0.0.0-build43-arm64.zip',
       enclosureFileName: 'Tono-0.0.0-build43-arm64.zip',
     },
     /short version 0\.0\.0 is lower than the published 0\.0\.1/,
@@ -211,7 +211,7 @@ test('refuses a mutable "latest" enclosure alias', () => {
   refusal(
     {
       enclosureUrl:
-        'https://github.com/raydocs/tono/releases/download/latest/Tono-0.0.2-build43-arm64.zip',
+        'https://releases.afk.ccwu.cc/download/latest/Tono-0.0.2-build43-arm64.zip',
     },
     /looks like a mutable alias/,
   )
@@ -221,7 +221,7 @@ test('refuses an enclosure URL that does not embed the build', () => {
   refusal(
     {
       enclosureUrl:
-        'https://github.com/raydocs/tono/releases/download/tono-0.0.2-build43/Tono-0.0.2-arm64.zip',
+        'https://releases.afk.ccwu.cc/download/tono-0.0.2-build43/Tono-0.0.2-arm64.zip',
       enclosureFileName: 'Tono-0.0.2-arm64.zip',
     },
     /archive file name "Tono-0\.0\.2-arm64\.zip" must embed build43/,
@@ -232,7 +232,7 @@ test('refuses a build number that is only a prefix of the URL build token', () =
   refusal(
     {
       enclosureUrl:
-        'https://github.com/raydocs/tono/releases/download/tono-0.0.2-build430/Tono-0.0.2-build430-arm64.zip',
+        'https://releases.afk.ccwu.cc/download/tono-0.0.2-build430/Tono-0.0.2-build430-arm64.zip',
       enclosureFileName: 'Tono-0.0.2-build430-arm64.zip',
     },
     /must embed build43/,
@@ -255,7 +255,7 @@ test('refuses an enclosure URL on an unexpected host', () => {
       enclosureUrl:
         'https://cdn.example.com/raydocs/tono/releases/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip',
     },
-    /host must be github\.com/,
+    /host must be releases\.afk\.ccwu\.cc/,
   )
 })
 
@@ -382,7 +382,7 @@ test('pure helpers refuse independently of the aggregate validator', () => {
   assert.throws(
     () =>
       validateEnclosureUrl(
-        'https://github.com/raydocs/tono/releases/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip?x=1',
+        'https://releases.afk.ccwu.cc/download/tono-0.0.2-build43/Tono-0.0.2-build43-arm64.zip?x=1',
         { version: '43', shortVersionString: '0.0.2' },
       ),
     /query string/,

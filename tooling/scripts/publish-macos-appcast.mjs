@@ -12,6 +12,11 @@ export const DEFAULT_FEED_PATH = 'services/control-plane/public/appcast.xml'
 // most of these users are. The signature covers the bytes, not the address.
 export const DEFAULT_ENCLOSURE_HOST = 'releases.afk.ccwu.cc'
 export const DEFAULT_ENCLOSURE_PATH_PREFIX = '/download/'
+// The link is the human-facing release page and stays on GitHub, which is a
+// different question from where the bytes come from. They shared one constant
+// until the download moved, and then the link was required to be somewhere it
+// has never been.
+export const DEFAULT_RELEASE_LINK_HOST = 'github.com'
 export const ED_SIGNATURE_BYTES = 64
 export const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 
@@ -430,7 +435,7 @@ export function validateEnclosureUrl(value, options = {}) {
 export function validateReleaseLink(value, options = {}) {
   const raw = requireString(value, '--link')
   const version = requireString(options.version, 'version')
-  const expectedHost = options.expectedHost ?? DEFAULT_ENCLOSURE_HOST
+  const expectedHost = options.expectedHost ?? DEFAULT_RELEASE_LINK_HOST
   let url
   try {
     url = new URL(raw)
