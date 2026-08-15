@@ -4,8 +4,12 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+// Served by the control plane, not by GitHub. raw.githubusercontent.com is
+// blocked in mainland China, so an updater pointed at it can only discover a
+// release while the tunnel it might need to fix is already working — and it
+// also pinned every shipped build to one GitHub repository for good.
 export const TONO_UPDATER_ENDPOINT =
-  'https://raw.githubusercontent.com/raydocs/tono/windows-updates/latest.json'
+  'https://releases.afk.ccwu.cc/windows/latest.json'
 
 function decodeBase64(value, label) {
   const encoded = String(value)

@@ -26,6 +26,7 @@ export const MANIFEST_PATH = 'services/control-plane/public/releases/manifest.js
 export const PAGE_PATH = 'services/control-plane/public/releases/index.html'
 export const FEED_PATH = 'services/control-plane/public/appcast.xml'
 export const CHANNEL_REF = 'origin/windows-updates:latest.json'
+export const CHANNEL_MIRROR_PATH = 'services/control-plane/public/windows/latest.json'
 export const REPO = 'raydocs/tono'
 
 export class GeneratorRefusal extends Error {
@@ -184,6 +185,21 @@ export function readWindowsChannel(repoRoot) {
   }
   const parsed = JSON.parse(raw)
   if (!parsed.version) refuse(`${CHANNEL_REF} names no version`)
+
+  // The same file is served twice: the orphan branch that every build shipped
+  // before 0.0.33 still asks for, and the control-plane asset every later build
+  // asks for instead. Two copies of one fact drift, and the drift is invisible —
+  // one population of users would go on being offered a version the other had
+  // moved past — so they are compared here rather than discovered in the field.
+  const mirrorPath = join(repoRoot, CHANNEL_MIRROR_PATH)
+  if (!existsSync(mirrorPath)) refuse(`${CHANNEL_MIRROR_PATH} is missing`)
+  const mirror = readFileSync(mirrorPath, 'utf8')
+  if (JSON.stringify(JSON.parse(mirror)) !== JSON.stringify(parsed)) {
+    refuse(
+      `${CHANNEL_MIRROR_PATH} does not match ${CHANNEL_REF}: ` +
+        `the asset offers ${JSON.parse(mirror).version} and the branch offers ${parsed.version}`,
+    )
+  }
   return parsed.version
 }
 

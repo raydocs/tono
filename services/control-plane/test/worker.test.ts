@@ -474,6 +474,26 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(current.artifact.size).toBeGreaterThan(0);
     }
 
+    // Every Windows build from 0.0.33 asks this host for its update metadata,
+    // because the address it used to ask — raw.githubusercontent.com — is
+    // blocked in mainland China, so the updater could only find a release while
+    // the tunnel it might be needed to fix was already carrying traffic. The
+    // path is an explicit entry in the release host's allowlist, so forgetting
+    // it 404s every updater at once; that is what this asserts.
+    const channel = await fetchRelease('/windows/latest.json');
+    expect(channel.status).toBe(200);
+    const channelBody = (await channel.json()) as {
+      version: string;
+      platforms: Record<string, { url: string; signature: string }>;
+    };
+    expect(channelBody.version).toMatch(/^\d+\.\d+\.\d+$/);
+    for (const platform of Object.values(channelBody.platforms)) {
+      expect(platform.url).toContain(channelBody.version);
+      // An unsigned payload is one tauri-plugin-updater refuses, so serving one
+      // would be an update nobody can install rather than a visible failure.
+      expect(platform.signature.length).toBeGreaterThan(0);
+    }
+
     // Asserted against the file this deploy would publish, not against a build
     // number. Pinning a number couples every release to this test, and it broke
     // the moment the feed was corrected — which is the wrong thing to notice

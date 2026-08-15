@@ -6952,6 +6952,11 @@ export default {
         ['/manifest.json', '/releases/manifest.json'],
         ['/appcast.xml', '/appcast.xml'],
         ['/macos/appcast.xml', '/appcast.xml'],
+        // Windows updaters used to ask raw.githubusercontent.com, which is
+        // blocked in mainland China — so the customers most in need of a fix
+        // were the ones who could not be told one existed, unless they were
+        // already connected through the product being fixed.
+        ['/windows/latest.json', '/windows/latest.json'],
       ]).get(path);
       if (!assetPath) {
         return secure(new Response('Not found', { status: 404 }), false);
