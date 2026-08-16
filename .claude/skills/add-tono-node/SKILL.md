@@ -149,6 +149,39 @@ Then append to `/opt/tono-ops/nodes.secrets.json` (back it up first):
 `ssh_command` refuses to fall back to a password, by design. Verify by watching
 `/var/log/tono-ops-sync.log` for a line naming the node.
 
+### The fleet is not uniform: check `key` before assuming a password
+
+`nodes.secrets.json` carries **two** auth shapes. Sixteen nodes hold a `password`;
+`Los Angeles · Mesa` holds `"key": true` and has **no password at all** — it is the first
+node of the key migration the hub's `ssh_command` was already written for.
+
+Any loop that does `env["SSHPASS"] = n.get("password", "")` and shells out to `sshpass`
+gets `Permission denied (publickey)` on a key-auth node, and every ad-hoc script reports
+that as **"unreachable"** — which is how a perfectly healthy node gets written up as dead.
+It has already happened once.
+
+Branch the way `collect.py` does:
+
+```python
+if n.get("key"):
+    argv = ["ssh", "-i", "/opt/tono-ops/tono-collector", "-o", "IdentitiesOnly=yes",
+            "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+            "-o", "UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts"]
+else:
+    argv = ["sshpass", "-e", "ssh", "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null"]      # env SSHPASS = n["password"]
+argv += ["-p", str(n.get("port", 22)), f"{n.get('user','root')}@{n['host']}"]
+```
+
+Before concluding a node is down, prove it with something that does not depend on SSH
+auth at all — ICMP, and a TCP connect to 443 and 22:
+
+```
+ping -c 3 <ip>; nc -z <ip> 443; nc -z <ip> 22
+```
+
+`check-node-in-fleet.py` already branches correctly; hand-rolled loops are where this bites.
+
 ## 6. Komari monitoring
 
 Nothing auto-registers. Create the client on the hub, which returns its token:
