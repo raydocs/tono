@@ -70,6 +70,7 @@ def main() -> int:
         return 2
     name, host = sys.argv[1], sys.argv[2]
     results: list[tuple[str, bool | None, str]] = []
+    cat_entry: dict[str, str] = {}
 
     token = keychain(ADMIN_KEYCHAIN)
     try:
@@ -86,10 +87,16 @@ def main() -> int:
         if listed:
             # Every entry must carry the placeholder or that node serves one shared identity.
             block = yaml[yaml.index(name):]
-            uuid_line = next((l for l in block.splitlines() if "uuid:" in l), "")
-            ok = "{{TONO_CLIENT_UUID}}" in uuid_line
+            nxt = block.find("\n  - name:", 1)
+            block = block[:nxt] if nxt > 0 else block
+            for line in block.splitlines():
+                if ":" in line:
+                    k, _, v = line.strip().lstrip("- ").partition(":")
+                    if k in ("uuid", "public-key", "short-id", "servername", "port", "server"):
+                        cat_entry[k] = v.strip().strip('"')
+            ok = cat_entry.get("uuid") == "{{TONO_CLIENT_UUID}}"
             results.append(("  └ per-account identity placeholder", ok,
-                            uuid_line.strip() if not ok else "{{TONO_CLIENT_UUID}}"))
+                            cat_entry.get("uuid", "?") if not ok else "{{TONO_CLIENT_UUID}}"))
     except Exception as exc:
         results.append(("catalog (customers can select it)", None, f"could not read: {type(exc).__name__}"))
 
@@ -101,35 +108,40 @@ def main() -> int:
     # Recency, not a total. A node that died months ago still has thousands of
     # historical passes in this log, so counting them answers nothing — the
     # question is whether the sync reached it in the last few minutes.
+    # Recency against the *registry* name looked up by host, because a total
+    # counts a long-dead node as healthy, and the catalog name is not always the
+    # registry name — the catalog says "Los Angeles · Lagoon" where the registry
+    # and this log say "Los Angeles · Lagoon（家宽测试）". Matching the catalog
+    # name reported a node syncing every minute as never synced.
     synced = hub("python3 - <<'PY'\n"
-                 "import re, time, datetime\n"
-                 "cut = time.time() - 900\n"
+                 "import json, re, time, datetime\n"
+                 "reg = json.load(open('/opt/tono-ops/nodes.secrets.json'))['nodes']\n"
+                 f"m = [x for x in reg if x.get('host') == {host!r}]\n"
+                 "if not m:\n"
+                 "    print('unregistered')\n"
+                 "    raise SystemExit\n"
+                 "target = 'sync ' + m[0]['name'] + ':'\n"
                  "last = None\n"
                  "try:\n"
                  "    for line in open('/var/log/tono-ops-sync.log', errors='replace'):\n"
-                 f"        if 'sync ' + {name!r} + ':' not in line: continue\n"
-                 # A failure is logged on the same line shape as a success:
-                 #   sync <name>: ssh: connect ... timed out
-                 # Matching the name alone reported a dead node as freshly
-                 # synced. Only a pass that reported a roster carries 'managed='.
-                 "        if 'managed=' not in line: continue\n"
-                 "        m = re.match(r'(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)', line)\n"
-                 "        if m: last = m.group(1)\n"
+                 "        if target not in line or 'managed=' not in line: continue\n"
+                 "        g = re.match(r'(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)', line)\n"
+                 "        if g: last = g.group(1)\n"
                  "except OSError:\n"
                  "    pass\n"
                  "if not last:\n"
                  "    print('never')\n"
                  "else:\n"
                  "    ts = datetime.datetime.strptime(last, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).timestamp()\n"
-                 "    age = int(time.time() - ts)\n"
-                 "    print(('fresh ' if ts >= cut else 'stale ') + str(age))\n"
+                 "    print(('fresh ' if ts >= time.time() - 900 else 'stale ') + str(int(time.time() - ts)))\n"
                  "PY")
     fresh = synced.startswith("fresh")
     if synced.startswith("never"):
-        detail = "never synced"
+        detail = "no successful pass in the log"
+    elif synced.startswith("unregistered"):
+        detail = "not in the hub registry"
     else:
-        secs = synced.split()[-1] if " " in synced else "?"
-        detail = f"last sync {secs}s ago" + ("" if fresh else "  <-- stale")
+        detail = f"last sync {synced.split()[-1]}s ago" + ("" if fresh else "  <-- stale")
     results.append(("  └ synced within the last 15 min", fresh, detail))
 
     kom = hub("python3 - <<'PY'\n"
@@ -148,6 +160,48 @@ def main() -> int:
               "print(('yes ' + m[0]['uuid'][:8]) if m else 'no')\n"
               "PY")
     results.append(("komari monitoring", kom.startswith("yes"), kom[4:].strip() or "not registered"))
+
+    # The catalog's Reality credentials must match what the box is running. This
+    # is the check that catches a *reinstalled* node: everything above stays
+    # green, the service is healthy, monitoring is happy — and every customer
+    # who picks it fails, because the catalog still carries the old machine's
+    # keys. It cost about 24 hours on Los Angeles · Pacific and raised no alarm
+    # anywhere. The private key never leaves the host; only the derived public
+    # key is compared, and that value is already public in the catalog.
+    if cat_entry:
+        ok_k, live = node(host,
+            "X=/opt/tono-xray/current/xray; "
+            "PRIV=$(python3 -c \"import json;c=json.load(open('/opt/tono-xray/current/config.json'));"
+            "i=[x for x in c['inbounds'] if x.get('tag')=='tono-vless'][0];"
+            "print(i['streamSettings']['realitySettings']['privateKey'])\"); "
+            # Two Xray versions are in the fleet and they label this differently:
+            # 25.3.6 prints "Public key:", 26.3.27 prints "Password (PublicKey):".
+            # Matching only one left PUB empty, and the empty field then shifted
+            # every later field along — reporting six healthy nodes as drifted.
+            "PUB=$($X x25519 -i \"$PRIV\" 2>/dev/null | sed -n -e 's/^Password (PublicKey): //p' -e 's/^Public key: //p'); "
+            "python3 -c \"import json,sys;c=json.load(open('/opt/tono-xray/current/config.json'));"
+            "i=[x for x in c['inbounds'] if x.get('tag')=='tono-vless'][0];"
+            "r=i['streamSettings']['realitySettings'];"
+            "print('|'.join([sys.argv[1], str(i['port']), ','.join(r['shortIds']), ','.join(r['serverNames'])]))\" \"$PUB\"")
+        f = live.split("|") if (ok_k and live and "__" not in live) else []
+        if len(f) == 4 and all(x.strip() for x in f):
+            live_pub, live_port, live_sids, live_sni = f
+            for label, want, got, hay in (
+                ("reality public key", cat_entry.get("public-key"), live_pub, None),
+                ("reality short-id", cat_entry.get("short-id"), None, live_sids.split(",")),
+                ("reality servername", cat_entry.get("servername"), None, live_sni.split(",")),
+                ("port", cat_entry.get("port"), live_port, None),
+            ):
+                good = (want == got) if hay is None else (want in hay)
+                shown = (got if hay is None else ",".join(hay))
+                results.append((f"  └ catalog {label} matches the box", good,
+                                "matches" if good else f"catalog={want} box={shown}"))
+        else:
+            # Padding a short record is what caused the false drift report, so a
+            # record that is not exactly four non-empty fields is refused rather
+            # than interpreted.
+            why = "could not read the box" if not f else f"unreadable record: {len(f)} field(s)"
+            results.append(("  └ catalog credentials match the box", None, why))
 
     ok, out = node(host,
                    "printf '%s %s %s %s' "
