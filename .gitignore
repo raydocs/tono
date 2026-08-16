@@ -17,7 +17,12 @@ DerivedData/
 LiquidClash/design/
 
 # Claude / AI tooling
-.claude/
+# Not `.claude/`: an ignored *directory* is never descended into, so a
+# negation inside it can never take effect. Ignore the contents instead,
+# then re-include skills — they are shared project knowledge and belong in
+# review, unlike settings.local.json which is per-machine.
+.claude/*
+!.claude/skills/
 .codex/
 .serena/
 .spec-workflow/
