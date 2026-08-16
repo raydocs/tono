@@ -41,19 +41,37 @@ chmod 0700 "$work"
 
 # Nothing to do is the common case on a re-run, and finding that out must not
 # cost a disconnection.
-if python3 - "$TRANSFORM" < "$CONFIG" <<'PY'
+#
+# The program is passed with -c rather than on stdin. It used to be a heredoc
+# *and* `< "$CONFIG"`, which is two stdin redirections: the heredoc won, so
+# python read its own source as the configuration, `json.load` hit EOF, and the
+# probe exited non-zero every time. That landed in the branch below and printed
+# "already metered" — so this script reported success without ever metering
+# anything, on every node it was ever run against.
+#
+# The three outcomes are kept distinct too. A crashed probe used to be
+# indistinguishable from "no changes needed", which is what let the bug above
+# read as a clean no-op for as long as it did.
+set +e
+python3 -c '
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("config", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-raise SystemExit(0 if module.needs_changes(json.load(sys.stdin)) else 1)
-PY
-then
-  :
-else
-  echo "already metered; leaving the service alone"
-  exit 0
-fi
+raise SystemExit(0 if module.needs_changes(json.load(sys.stdin)) else 3)
+' "$TRANSFORM" < "$CONFIG"
+probe=$?
+set -e
+case "$probe" in
+  0) ;;
+  3)
+    echo "already metered; leaving the service alone"
+    exit 0
+    ;;
+  *)
+    fail "could not read $CONFIG to decide whether this exit is already metered (probe exit $probe)"
+    ;;
+esac
 
 python3 "$TRANSFORM" < "$CONFIG" > "$work/config.json" \
   || fail "the configuration could not be edited"
