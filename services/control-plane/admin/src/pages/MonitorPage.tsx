@@ -6,12 +6,15 @@ import {
   type LiveQualityNodeDto,
   type NodeProfileDto,
 } from '../api';
+import { gibibytes, unixDate } from '../lib/fields';
 import { formatBytes, formatDuration, timestamp } from '../lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../lib/machine';
 import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
 import { useRefresh, useResource } from '../hooks';
-import { Banner, StateBoundary, Status } from '../ui';
+import { Banner, DataHealth, StateBoundary, Status } from '../ui';
 import { AgentTrends } from '../charts';
+import { CarrierPing } from '../carriers';
+import { worstCarrier } from '../lib/carrier';
 
 const RISK_SIGNAL_LABELS: Record<string, string> = {
   attacker: '攻击者', abuser: '滥用者', threat: '威胁',
@@ -30,23 +33,80 @@ function NodeExpand({ node, agent, profile, onProfile }: {
   const [used, setUsed] = useState(profile?.trafficUsedBytes != null ? String(Math.round(profile.trafficUsedBytes / (1024 ** 3))) : '');
   const [renew, setRenew] = useState(profile?.renewsAt ? new Date(profile.renewsAt * 1000).toISOString().slice(0, 10) : '');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function save() {
+    const trafficQuotaBytes = gibibytes(quota);
+    const trafficUsedBytes = gibibytes(used);
+    const renewsAt = unixDate(renew);
+    const bad = [
+      trafficQuotaBytes === 'invalid' ? '套餐 GB' : null,
+      trafficUsedBytes === 'invalid' ? '已用 GB' : null,
+      renewsAt === 'invalid' ? '续费日期' : null,
+    ].filter((label): label is string => label !== null);
+    // Nothing partial: one unreadable box holds back the whole save. Sending
+    // the fields that did parse would leave the operator looking at a form that
+    // is half stored and half not, with no way to tell which half.
+    if (
+      trafficQuotaBytes === 'invalid'
+      || trafficUsedBytes === 'invalid'
+      || renewsAt === 'invalid'
+    ) {
+      setError(`${bad.join('、')}不是有效数值，什么都没有保存。`);
+      return;
+    }
+    setError(null);
     setBusy(true);
     try {
       const payload = {
         catalogName: node.name,
-        billingUrl: url.trim() || undefined,
-        trafficQuotaBytes: quota === '' ? undefined : Number(quota) * 1024 * 1024 * 1024,
-        trafficUsedBytes: used === '' ? undefined : Number(used) * 1024 * 1024 * 1024,
-        renewsAt: renew ? Math.floor(new Date(renew).getTime() / 1000) : undefined,
+        billingUrl: url.trim() || null,
+        trafficQuotaBytes,
+        trafficUsedBytes,
+        renewsAt,
         publicIp: node.publicIp ?? undefined,
-        cycleNetIn: agent?.netIn ?? undefined,
-        cycleNetOut: agent?.netOut ?? undefined,
       };
+      // The cycle baseline is deliberately absent from an ordinary save. It
+      // records the interface counters as they stood when the billing period
+      // began, and `trafficRemaining` measures against it — so writing it on
+      // every save meant that correcting a typo in the billing URL silently
+      // moved the start of the period to now and reported the node as having
+      // used nothing. It is set once, when the profile is created, and
+      // afterwards only by the button that says it is doing so.
       if (profile) await operationsApi.updateNodeProfile(profile.id, payload);
-      else await operationsApi.createNodeProfile(payload);
+      else {
+        await operationsApi.createNodeProfile({
+          ...payload,
+          cycleNetIn: agent?.netIn ?? null,
+          cycleNetOut: agent?.netOut ?? null,
+        });
+      }
       onProfile();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startNewCycle() {
+    if (!profile) return;
+    setError(null);
+    setBusy(true);
+    try {
+      // Both halves, or the reset does not happen: a hand-entered 已用 wins
+      // over the counter arithmetic in `trafficRemaining`, so leaving it in
+      // place would hold the old number on screen while the baseline moved
+      // underneath it.
+      await operationsApi.updateNodeProfile(profile.id, {
+        cycleNetIn: agent?.netIn ?? null,
+        cycleNetOut: agent?.netOut ?? null,
+        trafficUsedBytes: null,
+      });
+      setUsed('');
+      onProfile();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重置计费周期失败');
     } finally {
       setBusy(false);
     }
@@ -59,6 +119,8 @@ function NodeExpand({ node, agent, profile, onProfile }: {
         <p>状态：{blockLabel(node)}</p>
         <p>质量：{node.quality === 'poor' ? '差' : '正常'}</p>
         {node.block?.rule ? <p className="muted">{node.block.rule}</p> : null}
+        <h4>大陆路径</h4>
+        <CarrierPing carriers={agent?.carriers ?? null} />
         <h4>对外暴露</h4>
         {!node.exposure ? (
           <p className="muted">尚未探测。这一栏空着不代表干净——泄露的面板正是在没人看的状态下开了几周。</p>
@@ -126,10 +188,21 @@ function NodeExpand({ node, agent, profile, onProfile }: {
           <input className="input compact" type="number" min={0} placeholder="套餐 GB" value={quota} onChange={(e) => setQuota(e.target.value)} />
           <input className="input compact" type="number" min={0} placeholder="已用 GB（手填）" value={used} onChange={(e) => setUsed(e.target.value)} />
           <input className="input compact" type="date" value={renew} onChange={(e) => setRenew(e.target.value)} />
+          <small className="muted">清空一格再保存即清除该项；填错格式会被拒绝，不会当成清除。</small>
           <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void save()}>保存档案</button>
+          {profile && (
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              disabled={busy || !agent}
+              title={agent ? undefined : '这台没有探针，读不到当前计数器'}
+              onClick={() => void startNewCycle()}
+            >把本周期已用归零</button>
+          )}
           {profile?.billingUrl && (
             <a className="btn btn-outline btn-sm" href={profile.billingUrl} target="_blank" rel="noreferrer">打开账单</a>
           )}
+          <Banner message={error} tone="error" />
         </div>
       </div>
       <div>
@@ -229,6 +302,7 @@ export function MonitorPage() {
   const [newUrl, setNewUrl] = useState('');
   const [newQuota, setNewQuota] = useState('');
   const [newRenew, setNewRenew] = useState('');
+  const [newError, setNewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return <StateBoundary resource={resource}>{(live: LiveDto) => {
     const qualityNodes = [...(live.quality?.nodes ?? [])].sort((a, b) => {
@@ -315,6 +389,12 @@ export function MonitorPage() {
       };
     };
     return <div className="stack">
+      <DataHealth sources={[
+        { label: '服务器档案', resource: profilesRes },
+        { label: '在线活动', resource: activityRes },
+        { label: '趋势指标', resource: metrics },
+        { label: '节点质量', resource },
+      ]} />
       {(live.agentsError || live.qualityError) && (
         <Banner
           tone="error"
@@ -359,7 +439,7 @@ export function MonitorPage() {
         <div className="card-header">
           <div>
             <h2>补服务器档案</h2>
-            <p>账单页和手填余量仍写在这里。价格、到期日、流量额度优先用 Komari，空着的才用手填档案。</p>
+            <p>账单页和手填余量写在这里。到期日、流量额度以这份手填档案为准，档案里空着的才回落到 Komari；价格和计费周期只有 Komari 有。</p>
           </div>
         </div>
         <div className="card-body">
@@ -368,19 +448,28 @@ export function MonitorPage() {
             onSubmit={async (event) => {
               event.preventDefault();
               if (!newName.trim()) return;
+              const trafficQuotaBytes = gibibytes(newQuota);
+              const renewsAt = unixDate(newRenew);
+              if (trafficQuotaBytes === 'invalid' || renewsAt === 'invalid') {
+                setNewError('套餐 GB 或续费日期不是有效数值，档案没有建立。');
+                return;
+              }
+              setNewError(null);
               setBusy(true);
               try {
                 await operationsApi.createNodeProfile({
                   catalogName: newName.trim(),
-                  billingUrl: newUrl.trim() || undefined,
-                  trafficQuotaBytes: newQuota ? Number(newQuota) * 1024 * 1024 * 1024 : undefined,
-                  renewsAt: newRenew ? Math.floor(new Date(newRenew).getTime() / 1000) : undefined,
+                  billingUrl: newUrl.trim() || null,
+                  trafficQuotaBytes,
+                  renewsAt,
                 });
                 setNewName('');
                 setNewUrl('');
                 setNewQuota('');
                 setNewRenew('');
                 profilesRes.reload();
+              } catch (err) {
+                setNewError(err instanceof Error ? err.message : '建立档案失败');
               } finally {
                 setBusy(false);
               }
@@ -392,6 +481,7 @@ export function MonitorPage() {
             <input className="input compact" type="date" value={newRenew} onChange={(e) => setNewRenew(e.target.value)} disabled={busy} />
             <button className="btn btn-sm" type="submit" disabled={busy || !newName.trim()}>保存档案</button>
           </form>
+          <Banner message={newError} tone="error" />
         </div>
       </section>
 
@@ -440,7 +530,9 @@ export function MonitorPage() {
                       {agent ? <Status value="active" /> : <span className="muted">未安装</span>}
                       {agent?.cpu != null && <small className="muted">CPU {Math.round(agent.cpu)}%</small>}
                     </td>
-                    <td className="mono">{occupancy.get(node.name) ?? 0}</td>
+                    <td className="mono">
+                      {activityRes.state === 'ready' ? (occupancy.get(node.name) ?? 0) : '—'}
+                    </td>
                     <td className="mono">{remain == null ? '—' : formatBytes(remain)}</td>
                     <td className="muted">
                       {billing.renewsAt ? timestamp(billing.renewsAt) : '—'}
@@ -453,6 +545,23 @@ export function MonitorPage() {
                     </td>
                     <td>
                       <div className="chip-list">
+                        {(() => {
+                          // Only the carrier doing worst, and only when something
+                          // was actually probed. A row that says nothing is
+                          // correct here; a row that says "0 ms" would not be.
+                          const worst = worstCarrier(agent?.carriers ?? null);
+                          if (!worst) return null;
+                          const bad = worst.lossTone === 'bad' || worst.latencyTone === 'bad';
+                          return (
+                            <span
+                              className={`chip${bad ? ' chip-risk' : ' chip-muted'}`}
+                              title={worst.detail}
+                            >
+                              {worst.label} {worst.latencyText}
+                              {worst.lossPct ? ` · 丢 ${worst.lossText}` : ''}
+                            </span>
+                          );
+                        })()}
                         {(() => {
                           const chip = exposureChip(node);
                           return chip ? (

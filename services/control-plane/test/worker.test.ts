@@ -673,6 +673,18 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
             cpu_cores: 2, load_1: 3.5, load_5: 2.1, load_15: 1.0,
             swap_total: 1048576, swap_used: 524288,
             tcp_connections: 189, process: 71, observed_at: 1_786_715_907,
+            carriers: {
+              telecom: {
+                latencyMs: 148.3, lossPct: 0, samples: 9,
+                targets: ['三网-电信-上海', '三网-电信-天津'],
+                history: [{ latencyMs: 148.3, lossPct: 0 }, { latencyMs: null, lossPct: null }],
+              },
+              // Komari reports a ping task no agent has run as `avg: 0,
+              // loss: 0` — field for field a flawless result. It must not
+              // survive as a carrier, or the console prints "0 ms, 0% loss"
+              // for a path nothing has travelled.
+              mobile: { latencyMs: 0, lossPct: 0, samples: 0, targets: [], history: [] },
+            },
           }],
         },
       }),
@@ -718,6 +730,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       // one failing to keep up, and `observedAt` is the only thing that tells a
       // stalled agent from a healthy idle one.
       cpuCores: 2, load1: 3.5, load5: 2.1, load15: 1.0,
+      // Only the carrier that was actually probed. `mobile` came in with zero
+      // samples and is absent rather than perfect.
+      carriers: {
+        telecom: {
+          latencyMs: 148.3, lossPct: 0, samples: 9,
+          targets: ['三网-电信-上海', '三网-电信-天津'],
+          history: [{ latencyMs: 148.3, lossPct: 0 }, { latencyMs: null, lossPct: null }],
+        },
+      },
       swapTotal: 1048576, swapUsed: 524288,
       tcpConnections: 189, processes: 71, observedAt: 1_786_715_907,
       price: null, currency: null, billingCycle: null, expiredAt: null,
@@ -1015,6 +1036,69 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       'SELECT 1 AS hit FROM users WHERE id = ? AND quota_bytes IS NOT NULL AND usage_bytes >= quota_bytes',
     ).bind('usr_cycle').first<Record<string, unknown>>();
     expect(suspended).toBeNull();
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('lets the console end a billing cycle, which is where the lockout is seen', async () => {
+    // The dashboard raises 已超配额 from the console's own user list, and the
+    // rollback manual names resetUsage as the remedy — but the field existed
+    // only on the token-admin route, so the console could show the lockout and
+    // not clear it. Every assertion here is about the console's own session.
+    const t = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, quota_bytes, created_at, updated_at)
+       VALUES('usr_opscycle', 'opscycle@example.com', 'h', 's', 'active', 0, 1000, ?, ?)`,
+    ).bind(t, t).run();
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const console_ = async (payload: unknown) => api('ops/users/usr_opscycle', {
+      method: 'PATCH',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    const usage = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes, usage_reported_bytes, usage_baseline_bytes FROM users WHERE id = ?',
+      ).bind('usr_opscycle').first<Record<string, unknown>>();
+      return {
+        billed: Number(row!.usage_bytes),
+        counter: Number(row!.usage_reported_bytes),
+        baseline: Number(row!.usage_baseline_bytes),
+      };
+    };
+    const report = (reportId: string, totalBytes: number) => api('ops-ingest/usage', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ reports: [{ reportId, userId: 'usr_opscycle', totalBytes, observedAt: t }] }),
+    });
+
+    await report('ops-cycle-1', 900);
+    expect(await usage()).toMatchObject({ billed: 900, counter: 900, baseline: 0 });
+
+    // A misspelling still has to fail loudly on this route too. A silent 200 on
+    // the endpoint that unlocks a paying customer is discovered by the customer.
+    expect((await console_({ resetUsge: true })).status).toBe(400);
+    // And only `true` — nothing that could be read as "no" may pass as one.
+    expect((await console_({ resetUsage: false })).status).toBe(400);
+    expect(await usage()).toMatchObject({ billed: 900 });
+
+    expect((await console_({ resetUsage: true })).status).toBe(200);
+    expect(await usage()).toMatchObject({ billed: 0, counter: 900, baseline: 900 });
+
+    // The collector's total only ever rises, so the next report re-sends the
+    // pre-reset figure. The baseline is what keeps the reset from being undone.
+    await report('ops-cycle-2', 950);
+    expect(await usage()).toMatchObject({ billed: 50, counter: 950, baseline: 900 });
+
+    // Ending a cycle must not disturb the fields the console already edited.
+    expect((await console_({ notes: 'kept' })).status).toBe(200);
+    expect(await usage()).toMatchObject({ billed: 50, baseline: 900 });
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 

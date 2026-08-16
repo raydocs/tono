@@ -9,7 +9,7 @@ import {
 import { catalogProxyNames } from '../lib/catalog';
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { useRefresh, useResource } from '../hooks';
-import { Banner, StateBoundary, Status } from '../ui';
+import { Banner, DataHealth, StateBoundary, Status } from '../ui';
 
 function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
   unusedHomes: HomeExitDto[];
@@ -191,6 +191,34 @@ export function UsersPage() {
     }
   }
 
+  // The dashboard raises 已超配额 from this same list, and a suspended customer
+  // cannot connect until a cycle ends. Until now the only way to end one was a
+  // hand-written call to the token-admin API.
+  //
+  // Not a zeroing. The collector re-sends a fleet-wide cumulative total every
+  // ten minutes and the control plane keeps `MAX()` of what it has seen, so
+  // usage that was merely set to 0 comes back within ten minutes. The server
+  // moves the baseline up to the reported counter instead, which is why this
+  // sends `resetUsage` rather than a number.
+  async function resetUsage(user: UserDto) {
+    if (!confirm(
+      `把 ${user.email} 的计费周期归零？\n\n`
+      + `当前用量 ${formatBytes(user.usageBytes)} 记为已结清，从现在起重新计数。`
+      + `节点上的历史累计不会被删除，也无法撤销。`,
+    )) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await operationsApi.resetUserUsage(user.id);
+      setMessage(`${user.email} 的计费周期已归零`);
+      users.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '重置计费周期失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function applyExpiryPick(user: UserDto) {
     const value = expiryPick[user.id];
     if (!value) {
@@ -290,6 +318,13 @@ export function UsersPage() {
   }, [catalog, homes]);
 
   return <div className="stack">
+    <DataHealth sources={[
+      { label: '客户', resource: users },
+      { label: '注册白名单', resource: allowlist },
+      { label: '家宽库存', resource: homes },
+      { label: '节点目录', resource: catalog },
+      { label: 'Claude 号池', resource: pooled },
+    ]} />
     <Banner message={error} tone="error" />
     <Banner message={message} tone="ok" />
 
@@ -462,6 +497,7 @@ export function UsersPage() {
                         onExpiry30={() => setExpiry(user, Math.floor(Date.now() / 1_000) + 30 * 86_400)}
                         onApplyExpiry={() => applyExpiryPick(user)}
                         onClearExpiry={() => setExpiry(user, null)}
+                        onResetUsage={() => resetUsage(user)}
                       />
                     </td>
                   </tr>
@@ -483,7 +519,7 @@ function UserWorkbench({
   user, busy, activeHomes, unusedHomes, sharedProxies,
   bindPick, defaultPick, expiryPick,
   onBindPick, onDefaultPick, onExpiryPick,
-  onBind, onUnbind, onToggle, onExpiry30, onApplyExpiry, onClearExpiry,
+  onBind, onUnbind, onToggle, onExpiry30, onApplyExpiry, onClearExpiry, onResetUsage,
 }: {
   user: UserDto;
   busy: boolean;
@@ -502,6 +538,7 @@ function UserWorkbench({
   onExpiry30: () => void;
   onApplyExpiry: () => void;
   onClearExpiry: () => void;
+  onResetUsage: () => void;
 }) {
   const nowSec = Math.floor(Date.now() / 1_000);
   const aliveDays = Math.max(0, Math.floor((nowSec - user.createdAt) / 86_400));
@@ -541,6 +578,15 @@ function UserWorkbench({
         <button type="button" className="btn btn-outline btn-sm" disabled={busy || !expiryPick} onClick={onApplyExpiry}>改到期</button>
         {user.expiresAt != null && (
           <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onClearExpiry}>清到期</button>
+        )}
+        {user.usageBytes > 0 && (
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            disabled={busy}
+            onClick={onResetUsage}
+            title="把当前用量记为已结清，从现在起重新计数"
+          >新计费周期</button>
         )}
       </div>
       <UserDetailPanel user={user} />

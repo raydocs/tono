@@ -2954,6 +2954,60 @@ function liveQualityReport(value: unknown): { updatedAt: number | null; updatedA
   };
 }
 
+const CARRIER_KEYS = ['unicom', 'telecom', 'mobile'] as const;
+const CARRIER_HISTORY_MAX = 48;
+
+/**
+ * Per-carrier mainland latency and loss for one node, as measured *from* it.
+ *
+ * A carrier that was never measured is absent from this object — never present
+ * with zeros. Komari reports an unrun ping task as `avg: 0, loss: 0`, which is
+ * field-for-field identical to a flawless result, so the collector drops those
+ * before sending and anything that arrives here claiming a carrier is claiming
+ * it was actually probed. The console renders a missing carrier as unknown.
+ *
+ * This is not the block verdict and cannot stand in for it. These probes leave
+ * the node heading for China; whether China can open a connection back to the
+ * node is the other direction, measured by the mainland agents. A node can be
+ * perfect here and still be unreachable from inside the country.
+ */
+function liveCarriers(value: unknown): Row | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const source = value as Row;
+  const out: Row = {};
+  for (const key of CARRIER_KEYS) {
+    const raw = source[key];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const carrier = raw as Row;
+    const samples = optionalNumber(carrier.samples);
+    // No samples, no carrier. Anything else would put a number on screen for a
+    // path nothing has travelled.
+    if (samples === null || samples <= 0) continue;
+    const history = Array.isArray(carrier.history)
+      ? carrier.history.slice(0, CARRIER_HISTORY_MAX).map((point: unknown) => {
+        if (!point || typeof point !== 'object' || Array.isArray(point)) {
+          return { latencyMs: null, lossPct: null };
+        }
+        const entry = point as Row;
+        return {
+          latencyMs: optionalNumber(entry.latencyMs),
+          lossPct: optionalNumber(entry.lossPct),
+        };
+      })
+      : [];
+    out[key] = {
+      latencyMs: optionalNumber(carrier.latencyMs),
+      lossPct: optionalNumber(carrier.lossPct),
+      samples,
+      targets: Array.isArray(carrier.targets)
+        ? carrier.targets.slice(0, 12).map((name: unknown) => optionalText(name)).filter(Boolean)
+        : [],
+      history,
+    };
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function liveAgents(value: unknown): Row[] | null {
   if (value === null || value === undefined) return null;
   const rows = Array.isArray(value)
@@ -3002,6 +3056,9 @@ function liveAgents(value: unknown): Row[] | null {
       expiredAt: optionalNumber(node.expiredAt ?? node.expired_at),
       trafficLimit: optionalNumber(node.trafficLimit ?? node.traffic_limit),
       trafficLimitType: optionalText(node.trafficLimitType ?? node.traffic_limit_type)?.slice(0, 16) ?? null,
+      // How this node reaches 联通 / 电信 / 移动 — the half of "is this exit any
+      // good" that reachability alone never answered.
+      carriers: liveCarriers(node.carriers),
     };
   }).filter((node: Row | null): node is Row => node !== null);
 }
@@ -6275,9 +6332,23 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       // customer can connect again, a silent success is the worst possible
       // answer: the operator believes the account was reset and only finds out
       // when the customer is still suspended.
-      rejectUnexpectedKeys(b, ['status', 'expiresAt', 'notes', 'contact', 'plan']);
+      rejectUnexpectedKeys(b, ['status', 'expiresAt', 'notes', 'contact', 'plan', 'resetUsage']);
       const status = b.status;
       const expiresAt = b.expiresAt;
+      // The console is where a quota lockout is noticed — the dashboard raises
+      // "已超配额" from this same data — so it is where ending the cycle has to
+      // be possible. It lived only on the token-admin endpoint, which meant the
+      // one documented remedy for a paying customer who cannot connect was a
+      // hand-written API call.
+      //
+      // Ending a cycle, not editing a number: the collector re-sends a
+      // fleet-wide cumulative total every ten minutes and the write is a MAX(),
+      // so zeroing `usage_bytes` alone is undone within ten minutes. Moving the
+      // baseline up to the reported counter is what actually clears it.
+      const resetUsage = b.resetUsage;
+      if (resetUsage !== undefined && resetUsage !== true) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'resetUsage may only be true');
+      }
       if (status !== undefined && !['active', 'disabled'].includes(status)) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
       }
@@ -6289,10 +6360,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expiresAt');
       }
       if (
-        status === undefined && expiresAt === undefined
+        status === undefined && expiresAt === undefined && resetUsage === undefined
         && b.notes === undefined && b.contact === undefined && b.plan === undefined
       ) {
-        throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact or plan is required');
+        throw new ApiError(400, 'VALIDATION_ERROR', 'status, expiresAt, notes, contact, plan or resetUsage is required');
       }
       if (status === 'active') {
         const residual = await e.DB.prepare(
@@ -6323,6 +6394,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            notes = CASE WHEN ? THEN ? ELSE notes END,
            contact = CASE WHEN ? THEN ? ELSE contact END,
            plan = CASE WHEN ? THEN ? ELSE plan END,
+           usage_baseline_bytes = CASE WHEN ? THEN usage_reported_bytes ELSE usage_baseline_bytes END,
+           usage_bytes = CASE WHEN ? THEN 0 ELSE usage_bytes END,
            updated_at = ?
          WHERE id = ?`,
       ).bind(
@@ -6335,10 +6408,15 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         b.contact === undefined ? null : optionalNotes(b.contact, 'contact', 200),
         b.plan !== undefined,
         b.plan === undefined || b.plan === null || b.plan === '' ? null : PRODUCT_CLAUDE,
+        resetUsage === true,
+        resetUsage === true,
         now(),
         mt[1],
       ).run();
       if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+      if (resetUsage === true) {
+        await writeOpsAudit(e, actor.email, 'user.usage-reset', 'user', mt[1], 'billing cycle reset');
+      }
       await enforceUser(e, mt[1]);
       return Response.json({ ok: true });
     }

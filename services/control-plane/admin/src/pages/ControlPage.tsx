@@ -1,40 +1,74 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { operationsApi } from '../api';
 import { timestamp } from '../lib/format';
+import { publishGate } from '../lib/revision';
 import { useRefresh, useResource } from '../hooks';
-import { Banner, StateBoundary } from '../ui';
+import { Banner, DataHealth, StateBoundary } from '../ui';
 
 export function ControlPage() {
   const { refreshMs } = useRefresh();
   const catalog = useResource(operationsApi.exitCatalog, [], refreshMs);
   const policy = useResource(operationsApi.trafficPolicy, [], refreshMs);
   const [yaml, setYaml] = useState('');
+  // The revision this draft was written against, frozen when the draft appears.
+  //
+  // `expectedRevision` is the server's compare-and-swap: publish only if the
+  // catalog is still what I looked at. Reading it live off an auto-refreshing
+  // resource made it always agree with the server by construction, so the check
+  // could never fire from this page. Someone else publishing r37 while a draft
+  // built on r36 sat in the box meant that draft went out as r38 and r37
+  // vanished with no error anywhere. Frozen, the server answers 409 — which is
+  // the whole point of sending the field.
+  const [yamlBase, setYamlBase] = useState<number | null>(null);
   const [policyText, setPolicyText] = useState('');
+  const [policyBase, setPolicyBase] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const catalogRevision = catalog.state === 'ready' ? catalog.data.revision : null;
+  const policyRevision = policy.state === 'ready' ? policy.data.revision : null;
+  const catalogGate = publishGate(yamlBase, catalogRevision);
+  const policyGate = publishGate(policyBase, policyRevision);
+  const catalogDrifted = catalogGate.allow && catalogGate.drifted;
+  const policyDrifted = policyGate.allow && policyGate.drifted;
+
+  // Seeded once, then left alone. This effect used to re-run whenever the
+  // served policy changed, which — with the page refreshing on a timer —
+  // replaced whatever the operator had typed with the server's copy, without
+  // saying so. Re-seeding is now something you ask for.
   useEffect(() => {
-    if (policy.state === 'ready') {
-      try {
-        setPolicyText(JSON.stringify(JSON.parse(policy.data.json), null, 2));
-      } catch {
-        setPolicyText(policy.data.json);
-      }
+    if (policy.state !== 'ready' || policyBase !== null) return;
+    try {
+      setPolicyText(JSON.stringify(JSON.parse(policy.data.json), null, 2));
+    } catch {
+      setPolicyText(policy.data.json);
     }
-  }, [policy.state, policy.state === 'ready' ? policy.data.json : '']);
+    setPolicyBase(policy.data.revision);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policy.state, policyBase, policy.state === 'ready' ? policy.data.json : '']);
+
+  function editYaml(text: string) {
+    setYaml(text);
+    if (!text.trim()) setYamlBase(null);
+    else if (yamlBase === null && catalogRevision !== null) setYamlBase(catalogRevision);
+  }
 
   async function replaceCatalog(event: FormEvent) {
     event.preventDefault();
     if (!yaml.trim()) return;
+    if (!catalogGate.allow) {
+      setError(catalogGate.reason);
+      return;
+    }
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const expected = catalog.state === 'ready' ? catalog.data.revision : 0;
-      const result = await operationsApi.replaceCatalog(yaml, expected);
+      const result = await operationsApi.replaceCatalog(yaml, catalogGate.expectedRevision);
       setMessage(`节点目录已更新到版本 ${result.revision}`);
       setYaml('');
+      setYamlBase(null);
       catalog.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : '替换目录失败');
@@ -44,9 +78,10 @@ export function ControlPage() {
   }
 
   async function publishPolicy(next: unknown) {
-    const expected = policy.state === 'ready' ? policy.data.revision : 0;
-    const result = await operationsApi.replaceTrafficPolicy(next, expected);
+    if (!policyGate.allow) throw new Error(policyGate.reason);
+    const result = await operationsApi.replaceTrafficPolicy(next, policyGate.expectedRevision);
     setMessage(`精确直连策略已更新到版本 ${result.revision}`);
+    setPolicyBase(null);
     policy.reload();
   }
 
@@ -65,8 +100,24 @@ export function ControlPage() {
   }
 
   return <div className="stack">
+    <DataHealth sources={[
+      { label: '节点目录', resource: catalog },
+      { label: '直连策略', resource: policy },
+    ]} />
     <Banner message={error} tone="error" />
     <Banner message={message} tone="ok" />
+    <Banner
+      tone="error"
+      message={catalogDrifted
+        ? `云端目录已经是版本 ${catalogRevision}，这份草稿基于版本 ${yamlBase}。现在替换会被服务端拒绝——先取回版本 ${catalogRevision} 合并你的改动。`
+        : null}
+    />
+    <Banner
+      tone="error"
+      message={policyDrifted
+        ? `云端策略已经是版本 ${policyRevision}，编辑框里的是版本 ${policyBase}。保存会被拒绝——点「重新载入」取回最新版本，你现在的改动会被丢弃。`
+        : null}
+    />
 
     <section className="card">
       <div className="card-header">
@@ -96,7 +147,7 @@ export function ControlPage() {
                   event.target.value = '';
                   return;
                 }
-                setYaml(await file.text());
+                editYaml(await file.text());
                 setMessage('目录已在本机载入；确认后再替换云端版本。');
               }}
             />
@@ -108,7 +159,7 @@ export function ControlPage() {
             autoComplete="off"
             placeholder={'proxies:\n  - name: ...'}
             value={yaml}
-            onChange={(event) => setYaml(event.target.value)}
+            onChange={(event) => editYaml(event.target.value)}
             disabled={busy}
           />
           <div className="form-actions">
@@ -142,6 +193,12 @@ export function ControlPage() {
           />
           <div className="form-actions">
             <button className="btn" type="submit" disabled={busy || policy.state !== 'ready'}>替换精确直连策略</button>
+            <button
+              className="btn btn-outline"
+              type="button"
+              disabled={busy || policy.state !== 'ready'}
+              onClick={() => { setPolicyBase(null); policy.reload(); }}
+            >重新载入</button>
             <button
               className="btn btn-outline"
               type="button"

@@ -3,18 +3,25 @@ export function timestamp(value: number | null | undefined) {
   return new Date(value * 1_000).toLocaleString();
 }
 
+// Scaled on magnitude, with the sign put back afterwards. A negative byte
+// count is not a nonsense input here: the server list's 余量 column is
+// `quota - used`, so the moment a node goes over its plan the number goes
+// negative — and that is exactly the row somebody needs to read. Comparing the
+// signed value against 1024 sent every one of them down the "already small
+// enough" branch, which printed -3221225472 B where -3.0 GB belonged.
 export function formatBytes(value: number | null | undefined) {
   if (value === null || value === undefined) return '—';
-  if (value < 1024) return `${value} B`;
+  const sign = value < 0 ? '-' : '';
+  let size = Math.abs(value);
+  if (size < 1024) return `${sign}${size} B`;
   const units = ['KB', 'MB', 'GB', 'TB'];
-  let size = value;
   let unit = 'B';
   for (const next of units) {
     if (size < 1024) break;
     size /= 1024;
     unit = next;
   }
-  return `${size >= 100 ? Math.round(size) : size.toFixed(1)} ${unit}`;
+  return `${sign}${size >= 100 ? Math.round(size) : size.toFixed(1)} ${unit}`;
 }
 
 export function timeAgo(value: number | null | undefined) {

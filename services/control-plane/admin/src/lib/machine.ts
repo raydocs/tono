@@ -65,7 +65,12 @@ export function mergedBilling(
   const currency = agent?.currency ?? null;
   const billingCycle = unset(agent?.billingCycle);
   const fromProfile = Boolean(profile?.renewsAt || profile?.trafficQuotaBytes);
-  const fromKomari = Boolean(agent?.expiredAt || agent?.trafficLimit || agent?.price);
+  // Billing cycle counts as Komari data like the rest of it. Leaving it out
+  // meant a server whose only filled-in Komari field was the cycle reported its
+  // source as 'none' while the cycle itself was on screen.
+  const fromKomari = Boolean(
+    agent?.expiredAt || agent?.trafficLimit || agent?.price || agent?.billingCycle,
+  );
   let source: BillingView['source'] = 'none';
   if (fromProfile && fromKomari) source = 'mixed';
   else if (fromProfile) source = 'profile';

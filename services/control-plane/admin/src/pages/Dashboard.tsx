@@ -3,7 +3,7 @@ import { operationsApi, type ActivityDto, type DashboardDto, type LiveQualityNod
 import { useRefresh, useResource } from '../hooks';
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
-import { StateBoundary, Status } from '../ui';
+import { DataHealth, StateBoundary, Status } from '../ui';
 
 function UsageLeaderboard({ users }: { users: UserDto[] }) {
   const top = useMemo(
@@ -11,7 +11,7 @@ function UsageLeaderboard({ users }: { users: UserDto[] }) {
     [users],
   );
   if (!top.some((user) => user.usageBytes > 0)) {
-    return <div className="state"><strong>暂无按用户流量</strong><span>计量链还没建：节点仍是共享 UUID，控制面没有把用户列表同步上去，也没有按增量上报的 agent。在这三件事做完之前，等多久都不会有数据。</span></div>;
+    return <div className="state"><strong>暂无按用户流量</strong><span>计量链是通的（每台节点持有独立凭据，采集器每十分钟上报一次跨节点累计值）。这里为空只说明这一批账号还没有计到量：刚重置过周期，或者他们仍在用旧的共享凭据，要等客户端下次拉取目录才会换过去。</span></div>;
   }
   const max = top[0]?.usageBytes || 1;
   return (
@@ -71,6 +71,19 @@ export function Dashboard() {
         alerts.push({ tone: 'warn', text: `${probeless.length} 台未装探针：${probeless.map((node) => node.name).join('、')}` });
       }
     }
+    // Absence is not health. This card used to render whenever *either* source
+    // was ready while the checks below only ran for the source that had loaded,
+    // so a failed user call left a green "所有节点与用户状态正常" standing on
+    // node data alone — asserting exactly the half it had never seen. Quota and
+    // expiry lockouts are what this card exists to catch.
+    const unchecked: string[] = [];
+    if (live.state === 'error') {
+      alerts.push({ tone: 'warn', text: `节点数据没能加载（${live.message}）——被墙、探测失败、质量异常这三类没有检查` });
+    } else if (live.state !== 'ready') unchecked.push('节点');
+    if (usersRes.state === 'error') {
+      alerts.push({ tone: 'warn', text: `用户数据没能加载（${usersRes.message}）——配额与到期没有检查` });
+    } else if (usersRes.state !== 'ready') unchecked.push('用户');
+
     if (usersRes.state === 'ready') {
       for (const user of usersRes.data) {
         if (user.status !== 'active') continue;
@@ -122,6 +135,13 @@ export function Dashboard() {
     };
 
     return <>
+      <DataHealth sources={[
+        { label: '节点质量', resource: live },
+        { label: '用户', resource: usersRes },
+        { label: '在线活动', resource: activityRes },
+        { label: '操作记录', resource: auditRes },
+        { label: '概览', resource },
+      ]} />
       <div className="metrics metrics-hero">
         <article className={`metric${blocked.length ? ' metric-alert' : ''}`}>
           <div className="metric-label"><span>被墙</span></div>
@@ -173,7 +193,9 @@ export function Dashboard() {
             </div>
           </div>
           {alerts.length === 0 ? (
-            <div className="attention-ok">✓ 所有节点与用户状态正常</div>
+            unchecked.length === 0
+              ? <div className="attention-ok">✓ 所有节点与用户状态正常</div>
+              : <div className="attention-ok">{unchecked.join('与')}数据仍在加载，尚未检查完</div>
           ) : (
             <ul className="attention-list">
               {alerts.map((alert, index) => (

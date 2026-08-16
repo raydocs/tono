@@ -242,7 +242,35 @@ export interface LiveAgentDto {
   expiredAt: number | null;
   trafficLimit: number | null;
   trafficLimitType: string | null;
+  /** Mainland reachability *from* this node — see `CarrierPingDto`. `null` when
+   *  no carrier has been probed yet. */
+  carriers: CarrierPingMapDto;
 }
+
+export type CarrierKey = 'unicom' | 'telecom' | 'mobile';
+
+/**
+ * One carrier's path quality as measured from a node, over the last hour.
+ *
+ * A carrier that appears here was actually probed. One that was not is absent
+ * from the map rather than present with zeros — Komari reports an unrun ping
+ * task as `avg: 0, loss: 0`, which reads exactly like a flawless result, so
+ * "no data" has to survive the trip as an absence.
+ *
+ * This measures the direction node → 中国. Whether China can reach the node is
+ * the block verdict, which comes from the mainland agents and is not this.
+ */
+export interface CarrierPingDto {
+  latencyMs: number | null;
+  lossPct: number | null;
+  samples: number;
+  /** The ping tasks averaged into this row; several cities, so the number is
+   *  about the carrier rather than about one city's distance. */
+  targets: string[];
+  history: Array<{ latencyMs: number | null; lossPct: number | null }>;
+}
+
+export type CarrierPingMapDto = Partial<Record<CarrierKey, CarrierPingDto>> | null;
 
 export interface LiveProbeDto {
   ok?: boolean;
@@ -366,6 +394,36 @@ const del = <T>(path: string, body?: unknown) => request<T>(path, {
   method: 'DELETE',
   body: body === undefined ? undefined : JSON.stringify(body),
 });
+
+/**
+ * What a profile write may say, which is not the same shape as what a read
+ * returns. Three states have to survive the trip and `Partial<NodeProfileDto>`
+ * could only express two of them:
+ *
+ *   omitted  — leave whatever is stored alone
+ *   null     — clear the stored value
+ *   a number — set it
+ *
+ * The distinction is load-bearing because `JSON.stringify` drops `undefined`
+ * members entirely. A form that sent `undefined` for an emptied box was asking
+ * the server to keep the old value, so a wrong quota could be typed but never
+ * removed.
+ */
+export interface NodeProfileInput {
+  catalogName?: string;
+  publicIp?: string | null;
+  provider?: string | null;
+  billingUrl?: string | null;
+  trafficQuotaBytes?: number | null;
+  trafficUsedBytes?: number | null;
+  trafficCycleStart?: number | null;
+  trafficCycleEnd?: number | null;
+  cycleNetIn?: number | null;
+  cycleNetOut?: number | null;
+  renewsAt?: number | null;
+  notes?: string | null;
+  status?: string;
+}
 
 export interface TrafficPolicyDto {
   revision: number;
@@ -530,6 +588,11 @@ export const operationsApi = {
     contact?: string | null;
     plan?: string | null;
   }) => patch<{ ok: boolean }>(`users/${userId}`, input),
+  // Only ever `true`. There is no un-reset, and the server rejects any other
+  // value rather than treating it as "no".
+  resetUserUsage: async (userId: string) => (
+    await patch<{ ok: boolean }>(`users/${userId}`, { resetUsage: true })
+  ),
   productAccounts: async (status?: string) => (
     await get<{ accounts: ProductAccountDto[] }>(
       status ? `product-accounts?status=${encodeURIComponent(status)}` : 'product-accounts',
@@ -549,9 +612,9 @@ export const operationsApi = {
       { accountRef, notes },
     )),
   nodeProfiles: async () => (await get<{ profiles: NodeProfileDto[] }>('node-profiles')).profiles,
-  createNodeProfile: async (input: Partial<NodeProfileDto> & { catalogName: string }) =>
+  createNodeProfile: async (input: NodeProfileInput & { catalogName: string }) =>
     (await post<{ profile: NodeProfileDto }>('node-profiles', input)).profile,
-  updateNodeProfile: async (id: string, input: Partial<NodeProfileDto>) =>
+  updateNodeProfile: async (id: string, input: NodeProfileInput) =>
     (await put<{ profile: NodeProfileDto }>(`node-profiles/${id}`, input)).profile,
   nodeIncident: async (name: string) => get<{
     node: string;

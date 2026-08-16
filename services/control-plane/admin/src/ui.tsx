@@ -1,5 +1,6 @@
 import type { ReactNode, SVGProps } from 'react';
-import type { Resource } from './hooks';
+import type { Live, Resource } from './hooks';
+import { dataHealthLines } from './lib/health';
 
 export function Icon({ d, ...props }: SVGProps<SVGSVGElement> & { d: string }) {
   return (
@@ -52,6 +53,26 @@ export function StateBoundary<T>({ resource, empty, children }: {
     return <div className="state"><strong>暂无数据</strong><span>当前没有记录。</span></div>;
   }
   return children(resource.data);
+}
+
+/**
+ * Renders what `dataHealthLines` has to say about this page's sources. The
+ * reasoning for saying it at all lives with that function.
+ */
+export function DataHealth({ sources }: {
+  sources: Array<{ label: string; resource: Live<unknown> }>;
+}) {
+  const lines = dataHealthLines(
+    sources.map(({ label, resource }) => ({
+      label,
+      state: resource.state,
+      stale: resource.stale,
+      refreshedAt: resource.refreshedAt,
+    })),
+    Date.now(),
+  );
+  if (!lines.length) return null;
+  return <Banner tone="error" message={lines.join(' ')} />;
 }
 
 export function Banner({ message, tone = 'info' }: { message: string | null; tone?: 'info' | 'error' | 'ok' }) {

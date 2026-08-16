@@ -33,11 +33,24 @@ export function usePage() {
   return page;
 }
 
+/**
+ * A resource plus the two facts about it that are not in the data: when it was
+ * last successfully read, and why the most recent background refresh failed.
+ * Both exist because a failing refresh deliberately keeps showing the last good
+ * snapshot rather than blanking the page — which is only honest if the page
+ * says so. See `DataHealth` in ui.tsx, which is what says so.
+ */
+export type Live<T> = Resource<T> & {
+  reload: () => void;
+  refreshedAt: number;
+  stale: string | null;
+};
+
 export function useResource<T>(
   load: () => Promise<T>,
   deps: unknown[] = [],
   refreshMs = 0,
-): Resource<T> & { reload: () => void; refreshedAt: number; stale: string | null } {
+): Live<T> {
   const [tick, setTick] = useState(0);
   const [resource, setResource] = useState<Resource<T>>({ state: 'loading' });
   const [refreshedAt, setRefreshedAt] = useState(0);
