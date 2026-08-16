@@ -35,8 +35,8 @@ platform() {
   # shellcheck disable=SC1091
   . /etc/os-release
   case "${ID:-}:${VERSION_ID:-}" in
-    ubuntu:22.04|ubuntu:24.04|debian:12) ;;
-    *) fail "only Ubuntu 22.04/24.04 and Debian 12 are supported" ;;
+    ubuntu:22.04|ubuntu:24.04|debian:12|debian:13) ;;
+    *) fail "only Ubuntu 22.04/24.04 and Debian 12/13 are supported" ;;
   esac
   case "$(uname -m)" in
     x86_64|aarch64) ;;
