@@ -4,7 +4,7 @@ import { formatBytes } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
 import { gibibytes, unixDate } from '../admin/src/lib/fields';
 import { dataHealthLines } from '../admin/src/lib/health';
-import { publishGate } from '../admin/src/lib/revision';
+import { publishGate, catalogLag } from '../admin/src/lib/revision';
 import { carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
 import type { CarrierPingMapDto } from '../admin/src/api';
 import type { LiveAgentDto, NodeProfileDto } from '../admin/src/api';
@@ -289,5 +289,29 @@ describe('three-network ping, and what it refuses to claim', () => {
     // as "measured, fine"; showing nothing reads as "not measured".
     expect(worstCarrier(null)).toBeNull();
     expect(worstCarrier({ mobile: carrier({ samples: 0 }) } as CarrierPingMapDto)).toBeNull();
+  });
+});
+
+describe('how far behind a catalog a client is', () => {
+  it('separates "too old to say" from "up to date"', () => {
+    // Clients before the fix sent a hardcoded nil. Rendering that as current
+    // would have answered "did everyone pick up the publish" with a confident
+    // yes on no evidence — the mistake this column exists to prevent.
+    expect(catalogLag(null, 39)).toEqual({ state: 'unreported' });
+    expect(catalogLag(undefined, 39)).toEqual({ state: 'unreported' });
+    expect(catalogLag(39, 39)).toEqual({ state: 'current', revision: 39 });
+  });
+
+  it('reports the gap, not just the number', () => {
+    // The number alone requires remembering which revision is published.
+    expect(catalogLag(36, 39)).toEqual({ state: 'behind', revision: 36, by: 3 });
+  });
+
+  it('does not describe a rolled-back catalog as a negative lag', () => {
+    expect(catalogLag(40, 39)).toEqual({ state: 'ahead', revision: 40 });
+  });
+
+  it('admits when it does not know the published revision', () => {
+    expect(catalogLag(36, null)).toEqual({ state: 'unknown-target', revision: 36 });
   });
 });

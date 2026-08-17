@@ -553,7 +553,8 @@ nonisolated final class CrashReporter: @unchecked Sendable {
             connectionStage: snapshot.connectionStage,
             reconnectAttempt: snapshot.reconnectAttempt,
             lastErrorCategory: snapshot.lastErrorCategory,
-            lastCrashLabel: label
+            lastCrashLabel: label,
+            catalogRevision: snapshot.catalogRevision
         )
     }
 

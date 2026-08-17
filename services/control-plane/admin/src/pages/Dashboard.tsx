@@ -4,6 +4,7 @@ import { useRefresh, useResource } from '../hooks';
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
 import { DataHealth, StateBoundary, Status } from '../ui';
+import { catalogLag } from '../lib/revision';
 
 function UsageLeaderboard({ users }: { users: UserDto[] }) {
   const top = useMemo(
@@ -246,7 +247,7 @@ export function Dashboard() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>用户</th><th>状态</th><th>在用节点</th><th>客户端</th><th>最后心跳</th></tr>
+                <tr><th>用户</th><th>状态</th><th>在用节点</th><th>目录</th><th>客户端</th><th>最后心跳</th></tr>
               </thead>
               <tbody>{activityRes.data.users.map((user) => (
                 <tr key={user.userId}>
@@ -258,6 +259,21 @@ export function Dashboard() {
                     {user.uiState ? <small className="muted">{user.uiState}</small> : null}
                   </td>
                   <td>{user.selectedServer ?? <span className="muted">—</span>}</td>
+                  <td>{(() => {
+                    // Against the published revision, because the number alone
+                    // does not answer "did they pick up what I just published".
+                    const lag = catalogLag(user.catalogRevision, data.catalog.revision);
+                    if (lag.state === 'unreported') {
+                      return <span className="muted" title="这个客户端版本不上报目录版本,不代表它落后">未上报</span>;
+                    }
+                    if (lag.state === 'behind') {
+                      return <span className="chip chip-risk" title={`已发布 ${data.catalog.revision}`}>r{lag.revision} · 落后 {lag.by}</span>;
+                    }
+                    if (lag.state === 'ahead') {
+                      return <span className="chip chip-risk" title="客户端比已发布的还新——目录可能被回滚过">r{lag.revision} · 超前</span>;
+                    }
+                    return <span className="mono">r{lag.revision}</span>;
+                  })()}</td>
                   <td className="muted">{user.clientVersion} · {user.osVersion}</td>
                   <td className="muted">{timeAgo(user.lastSeenAt)}</td>
                 </tr>

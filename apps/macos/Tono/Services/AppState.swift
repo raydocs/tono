@@ -5626,7 +5626,8 @@ final class AppState {
             selectedExit: String(selected.prefix(100)), connectionStage: String(stageLabel.prefix(100)),
             reconnectAttempt: min(max(protectedReconnectAttempt, 0), 1000),
             lastErrorCategory: lastErrorCategory,
-            lastCrashLabel: nil
+            lastCrashLabel: nil,
+            catalogRevision: managedCatalogVersion
         )
     }
 

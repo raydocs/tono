@@ -74,7 +74,8 @@ final class AccountSession {
                  killSwitchArmed: false, utunPresent: false,
                  protectedDNSConfigured: false, selectedExit: "unknown",
                  connectionStage: "unknown", reconnectAttempt: 0,
-                 lastErrorCategory: nil, lastCrashLabel: nil
+                 lastErrorCategory: nil, lastCrashLabel: nil,
+                 catalogRevision: nil
              )
          },
          claudeTrafficResearchConsumer: @escaping
@@ -902,7 +903,7 @@ final class AccountSession {
             uiState: uiState,
             accountState: "ready",
             selectedServer: snapshot.selectedExit == "unknown" ? nil : snapshot.selectedExit,
-            catalogRevision: nil,
+            catalogRevision: snapshot.catalogRevision,
             killSwitchMode: snapshot.killSwitchArmed ? "locked" : "off",
             killSwitchWanted: snapshot.killSwitchArmed || snapshot.connected,
             killSwitchLive: snapshot.killSwitchArmed,

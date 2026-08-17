@@ -27,3 +27,37 @@ export function publishGate(base: number | null, current: number | null): Publis
   }
   return { allow: true, expectedRevision: base, drifted: current !== null && current !== base };
 }
+
+/**
+ * How far behind a client's catalog is, for the activity table.
+ *
+ * A bare revision number is useless on screen — reading it means remembering
+ * which revision is current. What an operator wants after publishing is "did
+ * they pick it up", so this reports the gap.
+ *
+ * `null` is not zero and not "behind". Clients before the fix that made them
+ * report this sent a hardcoded nil, so an unreported revision means the client
+ * is too old to say — which is worth showing as its own state rather than
+ * quietly rendering as up to date or as a lag of unknown size.
+ */
+export type CatalogLag =
+  | { state: 'unreported' }
+  | { state: 'current'; revision: number }
+  | { state: 'behind'; revision: number; by: number }
+  | { state: 'ahead'; revision: number }
+  | { state: 'unknown-target'; revision: number };
+
+export function catalogLag(
+  clientRevision: number | null | undefined,
+  currentRevision: number | null | undefined,
+): CatalogLag {
+  if (clientRevision === null || clientRevision === undefined) return { state: 'unreported' };
+  if (currentRevision === null || currentRevision === undefined) {
+    return { state: 'unknown-target', revision: clientRevision };
+  }
+  if (clientRevision === currentRevision) return { state: 'current', revision: clientRevision };
+  // A client ahead of the published revision should not be described as behind
+  // by a negative number; it means the catalog was rolled back under it.
+  if (clientRevision > currentRevision) return { state: 'ahead', revision: clientRevision };
+  return { state: 'behind', revision: clientRevision, by: currentRevision - clientRevision };
+}

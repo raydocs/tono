@@ -383,6 +383,16 @@ nonisolated struct TonoDiagnosticSnapshot: Codable, Sendable {
     /// Fixed label from `CrashSummary.labels` when the previous run of this
     /// session crashed. The control plane whitelists the same set.
     let lastCrashLabel: String?
+    /// Revision of the managed exit catalog this client is actually running,
+    /// or nil before one has been installed.
+    ///
+    /// The control plane has accepted this field all along and the periodic
+    /// telemetry window sent a hardcoded nil, so operations could not answer
+    /// "have clients picked up the catalog I just published" — the question that
+    /// matters immediately after every publish, and the one that was guessed at
+    /// wrongly during an incident because the only values in the database were
+    /// stale leftovers from a reporting path that no longer runs.
+    let catalogRevision: Int?
 }
 nonisolated struct TonoClaudeTrafficResearchEntry: Codable, Sendable {
     let service: String
