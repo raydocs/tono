@@ -323,16 +323,17 @@ final class AppTrafficLedger {
         }
         // What matters is that this precedes the `.tunnel` fallthrough, not that
         // it precedes the direct names: a residential chain carries the exit it
-        // was dialled through and never a direct outbound, so without this test
+        // is dialled through and never a direct outbound, so without this test
         // every residential byte would be filed as ordinary tunnel traffic and
-        // the exit the customer is paying for would be invisible.
+        // the home egress the customer is paying for would be invisible.
         if connection.chains.contains(ConfigPipeline.homeResidentialProxyName) {
             return .residential
         }
         // homeProxy (a catalog node, not the chained SOCKS5) never names
         // Tono-Home-Residential. The healthy chain is `HomeNode →
-        // Tono-Claude-Home`. Failover inserts Tono-Exit, and those bytes
-        // really did leave through the datacenter, so they stay tunnel.
+        // Tono-Claude-Home`. A legacy runtime may include Tono-Exit after a
+        // fallback; those bytes really did leave through the datacenter, so
+        // they stay tunnel.
         if connection.chains.contains(ConfigPipeline.claudeHomeGroupName)
             && !connection.chains.contains(ConfigPipeline.exitGroupName) {
             return .residential

@@ -1489,7 +1489,8 @@ final class AppState {
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     allowSystemResolution: allowSystemResolution,
                     helperPrepared: true,
-                    reviewedBundleDirect: committedDirectPolicy != nil
+                    reviewedBundleDirect:
+                        committedDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
                 self.connectionStage = .startingTunnel
@@ -1532,7 +1533,8 @@ final class AppState {
                         committedDirectPolicy?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     helperPrepared: true,
-                    reviewedBundleDirect: committedDirectPolicy != nil
+                    reviewedBundleDirect:
+                        committedDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
                 self.connectionStage = .applyingCloudPolicy
@@ -1578,7 +1580,8 @@ final class AppState {
                             sessionDirectEndpoints: resolvedPolicy.sessionEndpoints,
                             tailscaleBootstrapEnabled: usesHomeBootstrap,
                             helperPrepared: true,
-                            reviewedBundleDirect: true
+                            reviewedBundleDirect:
+                                resolvedPolicy.requiresAddressFreeDirectPermit
                         )
                         try Task.checkCancellation()
                         try await clashManager.rewriteConfig(
@@ -2464,7 +2467,8 @@ final class AppState {
                             tailscaleBootstrapEnabled:
                                 AppProfile.homeExitEnabled && self.tonoTransport != nil,
                             helperPrepared: true,
-                            reviewedBundleDirect: self.activeDirectPolicy != nil
+                            reviewedBundleDirect:
+                                self.activeDirectPolicy?.requiresAddressFreeDirectPermit == true
                         )
                         // Only a successful re-arm may consume the intent: a
                         // busy helper or a generation-guard rejection must
@@ -2965,7 +2969,8 @@ final class AppState {
                     sessionDirectEndpoints:
                         activeDirectPolicy?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
-                    reviewedBundleDirect: activeDirectPolicy != nil
+                    reviewedBundleDirect:
+                        activeDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
                 try await api.selectProxy(
@@ -3276,7 +3281,8 @@ final class AppState {
                         + self.claudeHomeDialEndpoints(excluding: selectedExit),
                     sessionDirectEndpoints: sessionEndpoints,
                     tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && transport != nil,
-                    reviewedBundleDirect: effectiveDirectPolicy != nil
+                    reviewedBundleDirect:
+                        effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
                 try await clashManager.rewriteConfig(
@@ -3321,7 +3327,8 @@ final class AppState {
                         // the rule engine still routes that bundle direct —
                         // those packets then hit `block drop out quick all` and
                         // the app silently black-holes until the next full arm.
-                        reviewedBundleDirect: true
+                        reviewedBundleDirect:
+                            pendingDirectPolicy.requiresAddressFreeDirectPermit
                     )
                     // Let the controller answer before the connection
                     // close below asks it anything.
@@ -3924,14 +3931,18 @@ final class AppState {
             domainPins: [],
             webDomainPins: [],
             webDomainSuffixes: directSuffixes,
-            // Both are reviewed-bundle-only routes that the bundle-wide process
-            // rule already matches first, so emitting them would add fallback
-            // groups and PF endpoints for rules mihomo never reaches.
+            // Native-app pins and media endpoints are reviewed-bundle-only
+            // inputs. They are not copied into the Mac runtime because the
+            // bundle-wide process rule already handles the app's rotating
+            // HTTPDNS/raw-IP traffic; web pins/suffixes remain separate.
             mediaEndpoints: [],
             tcpEndpoints: [],
             directResolverHosts: (policy.domains + policy.webDomains)
                 .map(\.host),
-            trusted: policy.trusted
+            trusted: policy.trusted,
+            nativeAppDirect: !policy.domains.isEmpty
+                || !policy.mediaEndpoints.isEmpty
+                || !policy.tcpEndpoints.isEmpty
         )
         return try ConfigPipeline.validatedManagedDirectPolicy(
             runtime,
@@ -4187,7 +4198,8 @@ final class AppState {
             mediaEndpoints: current.mediaEndpoints,
             tcpEndpoints: current.tcpEndpoints,
             directResolverHosts: current.directResolverHosts,
-            trusted: current.trusted
+            trusted: current.trusted,
+            nativeAppDirect: current.nativeAppDirect
         )
         return merged == current ? nil : merged
     }
@@ -4282,7 +4294,12 @@ final class AppState {
             mediaEndpoints: [],
             tcpEndpoints: [],
             directResolverHosts: resolverHosts,
-            trusted: policy.trusted
+            trusted: policy.trusted,
+            nativeAppDirect: base?.nativeAppDirect ?? (
+                !policy.domains.isEmpty
+                    || !policy.mediaEndpoints.isEmpty
+                    || !policy.tcpEndpoints.isEmpty
+            )
         )
         // Trim to the ceiling rather than walk into it. Over the limit,
         // `validatedManagedDirectPolicy` throws, the catch below returns nil,
@@ -4319,7 +4336,12 @@ final class AppState {
             mediaEndpoints: [],
             tcpEndpoints: [],
             directResolverHosts: resolverHosts,
-            trusted: policy.trusted
+            trusted: policy.trusted,
+            nativeAppDirect: base?.nativeAppDirect ?? (
+                !policy.domains.isEmpty
+                    || !policy.mediaEndpoints.isEmpty
+                    || !policy.tcpEndpoints.isEmpty
+            )
         )
         do {
             return try ConfigPipeline.validatedManagedDirectPolicy(

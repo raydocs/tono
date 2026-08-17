@@ -537,7 +537,7 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         }
     }
 
-    // G: cloud-approved DIRECT endpoints (WeChat acceleration). Mihomo owns the physical socket;
+    // G: cloud-approved DIRECT endpoints (reviewed native-app acceleration). Mihomo owns the physical socket;
     // PROCESS-NAME/AND rules decide which captured original flow may select that outbound. The
     // physical exception therefore stays wholly at ALE, where the staged core app id and exact
     // tuple can be enforced together. Policy-change reauthorization prevents a pre-existing flow
@@ -576,7 +576,7 @@ pub fn session_rules(config: &RuleConfig) -> Vec<FilterSpec> {
         }
     }
 
-    // H: the reviewed-bundle port permit. Same gate as G, and deliberately the only permit
+    // H: the reviewed native-app port permit. Same gate as G, and deliberately the only permit
     // in this file with no address condition.
     //
     // G permits exact `IP:port` tuples resolved from the cloud policy. That is a complete

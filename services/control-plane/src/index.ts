@@ -1525,12 +1525,46 @@ function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy 
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid traffic policy version or shape');
   }
   const allowedWeChatSuffixes = ['qq.com', 'qq.com.cn', 'qpic.cn', 'qlogo.cn', 'gtimg.cn', 'gtimg.com', 'wechat.com', 'weixin.com', 'weixinbridge.com', 'wxs.qq.com'];
+  // `domains` is the application-direct set. The field predates the office
+  // clients and keeps its wire name for compatibility, but its admission is
+  // now shared by WeChat, DingTalk and Feishu/Lark. The client still requires
+  // a reviewed process identity before a raw-IP socket can use this surface.
+  const allowedNativeDirectSuffixes = [
+    ...allowedWeChatSuffixes,
+    'feishu.cn', 'feishucdn.com', 'larksuite.com', 'larkoffice.com',
+    'feishu.net', 'feishuapp.cn', 'feishuapp.com', 'feishudoc.cn',
+    'feishudoc.com', 'feishumeetings.cn', 'feishumeetings.com',
+    'feishuimg.com', 'feishukacdn.com', 'larkofficecdn.com',
+    'larkofficeimg.com', 'larkcloud.com', 'larkcloud.net',
+    'getfeishu.cn', 'getfeishu.com', 'feishupkg.com', 'feishuvc.cn',
+    'feishuvc.com', 'securityfeishu.cn', 'securityfs.cn', 'statusfeishu.cn',
+    // Feishu's official client firewall list includes these shared service
+    // namespaces. Keep them native-app-only; browser suffix routing stays
+    // narrower so a signed-client policy cannot widen ordinary web traffic.
+    'zjurl.cn', 'snssdk.com', 'pstatp.com', 'byteimg.com',
+    'bytedance.net', 'bytedance.com', 'byted-static.com', 'bytegoofy.com',
+    'feishu-3rd-party-services.com', 'bytehwm.com', 'ttwebview.com',
+    'bytegecko.com', 'bytescm.com', 'kundou.cn', 'bytetos.com',
+    'zijieapi.com', 'byteeffecttos.com', 'bytednsdoc.com', 'bytedanceapi.com',
+    'volcvideo.com', 'feelgood.cn', 'baseopendev.com', 'bytedapm.com',
+    'ibytedapm.com', 'larkenterprise.com', 'aiforce.cloud', 'aiforce.run',
+    'dingtalk.cn', 'dingtalk.com', 'dingtalk.net', 'dingtalkapps.com',
+    'dingtalkcloud.com', 'dingding.xin', 'ztna-dingtalk.com', 'ddurl.to',
+  ];
   const allowedWebSuffixes = [
     'bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com', 'qq.com',
     'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com', 'qiyipic.com',
     'iqiyipic.com', 'youku.com', 'ykimg.com', 'xiaohongshu.com',
     'xhslink.com', 'xhscdn.com', 'feishu.cn', 'feishucdn.com',
-    'larksuite.com', 'larkoffice.com', 'baidu.com', 'baidupcs.com',
+    'larksuite.com', 'larkoffice.com', 'feishu.net', 'feishuapp.cn',
+    'feishuapp.com', 'feishudoc.cn', 'feishudoc.com', 'feishumeetings.cn',
+    'feishumeetings.com', 'feishuimg.com', 'feishukacdn.com',
+    'larkofficecdn.com', 'larkofficeimg.com', 'larkcloud.com',
+    'larkcloud.net', 'getfeishu.cn', 'getfeishu.com', 'feishupkg.com',
+    'feishuvc.cn', 'feishuvc.com', 'securityfeishu.cn', 'securityfs.cn',
+    'statusfeishu.cn', 'dingtalk.cn', 'dingtalk.com', 'dingtalk.net',
+    'dingtalkapps.com', 'dingtalkcloud.com', 'dingding.xin',
+    'ztna-dingtalk.com', 'ddurl.to', 'baidu.com', 'baidupcs.com',
     'bcebos.com', 'baidubcs.com', 'bdstatic.com', 'bdimg.com',
     'aliyuncs.com', '10jqka.com.cn', 'iwencai.com', 'eastmoney.com',
     'dfcfw.com', 'sina.com.cn', 'sinajs.cn', 'legulegu.com', 'optbbs.com',
@@ -1550,18 +1584,25 @@ function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy 
   // Several entries here are namespaces where a third party chooses the hostname
   // — `aliyuncs.com` and `bcebos.com`/`baidubcs.com` are tenant object storage,
   // `edu.cn` spans thousands of independent institutions, `oray.com`/
-  // `sunlogin.com` relay arbitrary remote-access sessions. A *wildcard* direct
-  // exception over those namespaces would let anyone who can host an object
-  // there collect a real IP outside the tunnel, which is why ConfigPipeline no
-  // longer renders `directSuffixes` as routes at all. Keep that in mind before
-  // re-enabling suffix routing: these belong in `allowedWebExactHosts` as
-  // individually reviewed hosts, not as apex wildcards.
+  // `sunlogin.com` relay arbitrary remote-access sessions. They remain in the
+  // signed policy contract for compatibility, but the Windows client deliberately
+  // emits only the reviewed Bilibili family as address-free suffix routes; other
+  // suffixes stay tunnelled there. Platform clients must keep their own runtime
+  // suffix allowlist narrower than this control-plane acceptance list.
   const allowedDirectSuffixes = [
     'bilibili.com', 'biliapi.net', 'bilivideo.com', 'hdslb.com',
     'qq.com', 'gtimg.cn', 'gtimg.com', 'iqiyi.com', 'qiyi.com',
     'qiyipic.com', 'iqiyipic.com', 'youku.com', 'ykimg.com',
     'xiaohongshu.com', 'xhslink.com', 'xhscdn.com', 'feishu.cn',
-    'feishucdn.com', 'larksuite.com', 'larkoffice.com', 'baidu.com',
+    'feishucdn.com', 'larksuite.com', 'larkoffice.com', 'feishu.net',
+    'feishuapp.cn', 'feishuapp.com', 'feishudoc.cn', 'feishudoc.com',
+    'feishumeetings.cn', 'feishumeetings.com', 'feishuimg.com',
+    'feishukacdn.com', 'larkofficecdn.com', 'larkofficeimg.com',
+    'larkcloud.com', 'larkcloud.net', 'getfeishu.cn', 'getfeishu.com',
+    'feishupkg.com', 'feishuvc.cn', 'feishuvc.com', 'securityfeishu.cn',
+    'securityfs.cn', 'statusfeishu.cn', 'dingtalk.cn', 'dingtalk.com',
+    'dingtalk.net', 'dingtalkapps.com', 'dingtalkcloud.com', 'dingding.xin',
+    'ztna-dingtalk.com', 'ddurl.to', 'baidu.com',
     'baidupcs.com', 'bcebos.com', 'baidubcs.com', 'bdstatic.com',
     'bdimg.com', 'aliyuncs.com', '10jqka.com.cn', 'iwencai.com',
     'eastmoney.com', 'dfcfw.com', 'sina.com.cn', 'sinajs.cn',
@@ -1603,7 +1644,7 @@ function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy 
   }).sort((a, b) => a.host < b.host ? -1 : a.host > b.host ? 1 : 0);
   const domains = canonicalDomains(
     policy.domains,
-    allowedWeChatSuffixes,
+    allowedNativeDirectSuffixes,
     [],
     false,
   );

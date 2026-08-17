@@ -1611,7 +1611,9 @@ async fn signed_wechat_paths_require_reconnect(state: &Arc<TonoState>, generatio
     if applied.is_none() {
         return false;
     }
-    let discovered = tokio::task::spawn_blocking(signed_apps::discover_signed_wechat_path_regexes)
+    let discovered = tokio::task::spawn_blocking(
+        signed_apps::discover_signed_reviewed_direct_path_regexes,
+    )
         .await
         .unwrap_or_default();
     let inner = state.lock().await;
@@ -1622,7 +1624,7 @@ async fn signed_wechat_paths_require_reconnect(state: &Arc<TonoState>, generatio
         logging!(
             info,
             Type::Service,
-            "Tono: signed WeChat install paths changed; scheduling a protected reconnect"
+            "Tono: signed reviewed direct-app paths changed; scheduling a protected reconnect"
         );
         true
     } else {
@@ -3697,7 +3699,7 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
         }
     }
     for (address, port) in &plan.udp_wechat_rules {
-        for process in tono_core::config::WECHAT_PROCESS_NAMES {
+        for process in tono_core::config::REVIEWED_DIRECT_PROCESS_NAMES {
             expected.push(ControllerDirectRuleProof {
                 proxy: config::DIRECT_GROUP_NAME.to_owned(),
                 payload: format!(
@@ -3723,8 +3725,21 @@ fn expected_controller_direct_rules(plan: &tono_core::config::DirectPlan) -> Vec
             ),
         });
     }
-    // Suffix rules are no longer emitted: they can never carry a WFP permit. Kept out of
-    // the proof so a runtime that still had them would fail this check rather than pass it.
+    // Address-free web suffixes are emitted only when the signed native-app
+    // path permit is present; that is the WFP port boundary they share.
+    if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
+        for (suffix, port) in &plan.web_suffix_rules {
+            if !tono_core::config::is_address_free_web_suffix(suffix) {
+                continue;
+            }
+            expected.push(ControllerDirectRuleProof {
+                proxy: config::WEB_DIRECT_GROUP_NAME.to_owned(),
+                payload: format!(
+                    "((Network,tcp) && (DstPort,{port}) && (DomainSuffix,{suffix}))"
+                ),
+            });
+        }
+    }
     expected
 }
 
@@ -3805,7 +3820,9 @@ async fn apply_cloud_policy(
     // sequence so their separate batches cannot double the global cap.
     // Signed-app discovery is local and independent of controller DNS, so
     // it overlaps the resolution budget instead of adding a serial wait.
-    let wechat_path_regexes = tokio::task::spawn_blocking(signed_apps::discover_signed_wechat_path_regexes);
+    let wechat_path_regexes = tokio::task::spawn_blocking(
+        signed_apps::discover_signed_reviewed_direct_path_regexes,
+    );
     let resolution = tokio::time::timeout(CLOUD_POLICY_RESOLUTION_TIMEOUT, async {
         let wechat = resolve_direct_domains(original_secret, controller_port, &policy.document.domains, node).await?;
         let web = resolve_direct_domains(original_secret, controller_port, &policy.document.web_domains, node).await?;
@@ -3955,7 +3972,16 @@ async fn apply_cloud_policy(
         reviewed_direct_ports,
         direct_interface,
         !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
-        !plan.tcp_web_rules.is_empty() || !plan.web_suffix_rules.is_empty(),
+        // Suffix routes share the signed native-app WFP port permit; without
+        // that permit they remain accepted policy but are intentionally
+        // tunnelled.
+        !plan.tcp_web_rules.is_empty()
+            || (!plan.tcp_wechat_rules.is_empty()
+                && !plan.wechat_process_path_regexes.is_empty()
+                && plan
+                    .web_suffix_rules
+                    .iter()
+                    .any(|(suffix, _)| tono_core::config::is_address_free_web_suffix(suffix))),
         home_node.is_some() || home_socks5.is_some(),
         plan.tcp_wechat_rules.len(),
         plan.tcp_web_rules.len(),
@@ -5007,6 +5033,12 @@ pub fn build_direct_plan(
     // [80, 443] subset, so this only normalizes order and duplicates.
     let mut web_suffix_rules: Vec<(String, u16)> = Vec::new();
     for entry in suffixes {
+        // Windows has an address-free WFP permit only for the currently
+        // reviewed Bilibili family. Keep other accepted policy suffixes on
+        // the tunnel until their own process/permit contract exists.
+        if !tono_core::config::is_address_free_web_suffix(&entry.host) {
+            continue;
+        }
         for port in &entry.ports {
             web_suffix_rules.push((entry.host.clone(), *port));
         }
@@ -7104,6 +7136,10 @@ mod tests {
         ];
         let suffixes = vec![
             tono_core::policy::PolicyDomain {
+                host: "bilibili.com".to_string(),
+                ports: vec![80, 443],
+            },
+            tono_core::policy::PolicyDomain {
                 host: "baidu.com".to_string(),
                 ports: vec![80, 443],
             },
@@ -7133,14 +7169,13 @@ mod tests {
         );
         // UDP: only (9.0.0.20, 443|8000).
         assert_eq!(plan.udp_wechat_rules.len(), 2);
-        // Suffix rules: one row per (suffix, port), sorted, no DNS and no
-        // WFP endpoint consumption.
+        // Only the reviewed Bilibili family is retained for the Windows
+        // address-free path; other accepted suffixes stay tunnelled.
         assert_eq!(
             plan.web_suffix_rules,
             vec![
-                ("baidu.com".to_string(), 80),
-                ("baidu.com".to_string(), 443),
-                ("zoom.us".to_string(), 443),
+                ("bilibili.com".to_string(), 80),
+                ("bilibili.com".to_string(), 443),
             ]
         );
         // hosts carry both WeChat domains and the exact web domain.
@@ -7169,11 +7204,9 @@ mod tests {
                 .all(|(_ip, port)| [443, 8000].contains(port))
         );
         let controller_rules = expected_controller_direct_rules(&plan);
-        // One row per *permitted* endpoint. WeChat TCP is per-pin rather than
-        // process-scoped, and suffix rules are not emitted at all, because
-        // `wfp_model::session_rules` can only permit an exact (address, port) tuple —
-        // anything else is routed out the physical interface and then dropped by the
-        // block-all floor.
+        // One row per *permitted* endpoint. This fixture has no signed native
+        // path, so its Bilibili suffix remains tunnelled and contributes no
+        // controller row.
         let process_rows = if plan.tcp_wechat_rules.is_empty() {
             0
         } else {
@@ -7183,7 +7216,8 @@ mod tests {
             controller_rules.len(),
             plan.tcp_wechat_rules.len()
                 + process_rows
-                + plan.udp_wechat_rules.len() * tono_core::config::WECHAT_PROCESS_NAMES.len()
+                + plan.udp_wechat_rules.len()
+                    * tono_core::config::REVIEWED_DIRECT_PROCESS_NAMES.len()
                 + plan.tcp_web_rules.len(),
             "controller read-back must require one canonical Mihomo row per generated rule"
         );
@@ -7197,6 +7231,47 @@ mod tests {
                 .all(|rule| { !rule.payload.contains("Network,TCP") && !rule.payload.contains("Network,UDP") })
         );
         assert!(plan.wechat_process_path_regexes.is_empty());
+    }
+
+    #[test]
+    fn bilibili_suffix_is_in_controller_proof_only_with_signed_native_path() {
+        let node = node();
+        let pins = vec![
+            (
+                "wxs.qq.com".to_string(),
+                vec![std::net::Ipv4Addr::new(9, 0, 0, 10)],
+                vec![443],
+            ),
+        ];
+        let suffixes = vec![tono_core::policy::PolicyDomain {
+            host: "bilibili.com".to_string(),
+            ports: vec![80, 443],
+        }];
+        let prefix = tono_core::config::wechat_prefix_path_regex(
+            r"C:\Program Files\Tencent\WeChat",
+        )
+        .expect("reviewed prefix");
+        let (plan, _) = build_direct_plan(
+            "Ethernet 2".to_string(),
+            &pins,
+            &[],
+            &[],
+            &suffixes,
+            &node,
+            vec![prefix],
+        )
+        .expect("plan");
+        let rules = expected_controller_direct_rules(&plan);
+        assert!(rules.iter().any(|rule| {
+            rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
+                && rule.payload
+                    == "((Network,tcp) && (DstPort,80) && (DomainSuffix,bilibili.com))"
+        }));
+        assert!(rules.iter().any(|rule| {
+            rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
+                && rule.payload
+                    == "((Network,tcp) && (DstPort,443) && (DomainSuffix,bilibili.com))"
+        }));
     }
 
     #[test]
@@ -7246,18 +7321,14 @@ mod tests {
         }));
     }
 
-    /// The invariant the two halves of the DIRECT overlay must satisfy, and did not.
+    /// The invariant the two halves of the DIRECT overlay must satisfy.
     ///
     /// A rule sends a flow out the physical interface; `wfp_model::session_rules` decides
-    /// whether that flow is allowed to leave. The only session permit that can cover it is
-    /// class G, one filter per `direct_endpoints` entry, matching an exact remote address
-    /// and port — there is no port-scoped, address-free permit for the core, and class A's
-    /// comment forbids adding one at the transport layer. So any rule that does not pin an
-    /// address is routing traffic straight into the `session/block-all` floor.
-    ///
-    /// This is what a process-name rule and a bare domain-suffix rule both did. Nothing
-    /// failed when they were added, because the routing surface lives in tono-core and the
-    /// permit surface lives in the Service.
+    /// whether that flow is allowed to leave. Exact pins use class G, one
+    /// filter per `direct_endpoints` entry. The signed native path rules and
+    /// reviewed Bilibili suffix rules share the narrower class-H TCP port
+    /// permit; anything outside that explicit combination still falls into
+    /// the `session/block-all` floor.
     fn sampled(payload: &str) -> SampledConnections {
         serde_json::from_str(payload).expect("controller payload")
     }
