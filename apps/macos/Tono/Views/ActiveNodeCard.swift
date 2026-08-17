@@ -1,18 +1,26 @@
 import SwiftUI
 
 struct ActiveNodeCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let nodeName: String
     var groupName: String?
     var latency: Int = 0
     var eyebrow: LocalizedStringKey = "ACTIVE SERVER"
     var onSwitch: (() -> Void)?
-
-    private var flag: String {
-        ConfigParser.extractFlag(from: nodeName).flag
-    }
+    @State private var isSwitchHovered = false
 
     private var cleanName: String {
         ProxyNode.displayName(for: ConfigParser.extractFlag(from: nodeName).cleanName)
+    }
+
+    private var secondaryLine: String {
+        let parsed = ConfigParser.extractFlag(from: nodeName)
+        let code = nodeRegionCode(flag: parsed.flag, name: parsed.cleanName)
+        if let group = groupName {
+            return "\(group) · \(code)"
+        }
+        return code
     }
 
     var body: some View {
@@ -21,7 +29,7 @@ struct ActiveNodeCard: View {
                 Text(eyebrow)
                     .font(.system(size: 10, weight: .semibold))
                     .fontWeight(.semibold)
-                    .foregroundStyle(Color(hex: "8E8E93"))
+                    .foregroundStyle(.secondary)
                     .kerning(0.6)
                 Spacer()
                 Button {
@@ -30,12 +38,21 @@ struct ActiveNodeCard: View {
                     Text("Switch")
                         .font(.system(size: 12, weight: .medium))
                         .fontWeight(.medium)
-                        .foregroundStyle(Color(hex: "8E8E93"))
+                        .foregroundStyle(isSwitchHovered ? .primary : .secondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
+                        .background(
+                            Color.primary.opacity(isSwitchHovered ? 0.06 : 0),
+                            in: Capsule()
+                        )
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .onHover { isSwitchHovered = $0 }
+                .animation(
+                    TonoMotion.easeOut(0.15, reduceMotion: reduceMotion),
+                    value: isSwitchHovered
+                )
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -43,55 +60,56 @@ struct ActiveNodeCard: View {
 
             HStack {
                 HStack(spacing: 10) {
-                    Text(flag)
-                        .font(.system(size: 16))
-                        .frame(width: 28, height: 28)
-                        .background(.white.opacity(0.28), in: Circle())
+                    NodeRouteMark(size: 32)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(cleanName)
                             .font(.system(size: 13, weight: .semibold))
                             .fontWeight(.semibold)
                             .foregroundStyle(.primary)
-                        if let group = groupName {
-                            Text(group)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Color(hex: "8E8E93"))
-                        }
+                        Text(secondaryLine)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
                 if latency > 0 {
+                    let tint = Color(hex: LatencyLevel.level(for: latency).color)
                     Text("\(latency)ms")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(latency < 200 ? Color(hex: "30D158") :
-                                        latency < 400 ? Color(hex: "FF9F0A") :
-                                        Color(hex: "FF3B30"))
+                        .foregroundStyle(tint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(
-                            (latency < 200 ? Color(hex: "30D158") :
-                             latency < 400 ? Color(hex: "FF9F0A") :
-                             Color(hex: "FF3B30")).opacity(0.15),
-                            in: RoundedRectangle(cornerRadius: 6)
-                        )
+                        .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(.white.opacity(0.24), in: RoundedRectangle(cornerRadius: 10))
+            .background(
+                .white.opacity(colorScheme == .dark ? 0.08 : 0.24),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(.white.opacity(0.45), lineWidth: 1)
+                    .strokeBorder(
+                        .white.opacity(colorScheme == .dark ? 0.14 : 0.45),
+                        lineWidth: 1
+                    )
             }
             .glassEffect(in: RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
         .frame(width: 480)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.06 : 0.12),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.white.opacity(0.4), lineWidth: 1)
+                .strokeBorder(
+                    .white.opacity(colorScheme == .dark ? 0.12 : 0.4),
+                    lineWidth: 1
+                )
         }
         .glassEffect(in: RoundedRectangle(cornerRadius: 12))
     }

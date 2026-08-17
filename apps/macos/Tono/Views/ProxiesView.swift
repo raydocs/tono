@@ -4,6 +4,8 @@ struct ProxiesView: View {
     @Environment(AppState.self) private var appState
     @Environment(AccountSession.self) private var accountSession
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var isSearchFocused: Bool
     @State private var showingAddNode = false
     @State private var editingNode: ProxyNode?
     @State private var isTesting = false
@@ -11,8 +13,9 @@ struct ProxiesView: View {
     @State private var catalogFeedback: String?
     @State private var catalogRefreshSucceeded = false
     @State private var searchText = ""
-    @State private var nodeFilter: NodeFilter = .all
+    @State private var regionFilter: String?
     @State private var targetGroup: ProxyService.MihomoGroup?
+    @State private var catalogFeedbackDismissal: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -66,6 +69,34 @@ struct ProxiesView: View {
         .onChange(of: showingAddNode) { _, showing in
             if !showing { editingNode = nil }
         }
+        .onChange(of: appState.selectedNodeId) { oldValue, newValue in
+            // Restore/initial catalog sync assigns the selection without a
+            // user switch; only announce a real node-to-node change.
+            guard oldValue != nil, let newValue, oldValue != newValue else { return }
+            let nodes = appState.proxyRegions.flatMap(\.nodes)
+            let displayName = nodes.first { $0.id == newValue || $0.name == newValue }?.displayName
+                ?? ProxyNode.displayName(for: newValue)
+            ToastCenter.shared.show(
+                String(localized: "Switched to \(displayName)"),
+                systemImage: "checkmark.circle.fill"
+            )
+        }
+        .onChange(of: regionOptions) { _, options in
+            // A catalog refresh can retire the filtered region; fall back to
+            // All instead of pinning the list to an empty result.
+            if let filter = regionFilter, !options.contains(filter) {
+                regionFilter = nil
+            }
+        }
+        .background {
+            Button("Search servers") {
+                isSearchFocused = true
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .overlay {
             if showingAddNode {
                 AddNodeSheet(isPresented: $showingAddNode, onAdd: { node in
@@ -80,20 +111,15 @@ struct ProxiesView: View {
         }
     }
 
-    private enum NodeFilter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case us = "US"
-        case japan = "Japan"
+    /// Region chips are derived from the catalog itself: "All" plus every
+    /// region code that actually appears, so new regions show up without a
+    /// code change. `nil` means no region filter.
+    private var regionOptions: [String] {
+        Array(Set(cloudNodes.map { nodeRegionCode(flag: $0.flag, name: $0.name) })).sorted()
+    }
 
-        var id: Self { self }
-
-        var icon: String {
-            switch self {
-            case .all: "square.grid.2x2"
-            case .us: "🇺🇸"
-            case .japan: "🇯🇵"
-            }
-        }
+    private var cloudNodes: [ProxyNode] {
+        appState.proxyRegions.filter { $0.id != "custom" }.flatMap(\.nodes)
     }
 
     // MARK: - Proxy Groups (from mihomo API)
@@ -173,13 +199,17 @@ struct ProxiesView: View {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
-                        .background(.white.opacity(isActive ? 0.7 : 0.35),
-                                    in: RoundedRectangle(cornerRadius: 8))
+                        .background(
+                            .white.opacity(colorScheme == .dark
+                                ? (isActive ? 0.14 : 0.07)
+                                : (isActive ? 0.7 : 0.35)),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
                                 .strokeBorder(
                                     isActive
-                                        ? Color(hex: "4B6EFF").opacity(0.5)
+                                        ? TonoBrand.accent.opacity(0.5)
                                         : .white.opacity(colorScheme == .dark ? 0.1 : 0.5),
                                     lineWidth: 0.5
                                 )
@@ -222,9 +252,12 @@ struct ProxiesView: View {
     // MARK: - Nodes Section (flat list from mihomo API)
 
     private var nodesSection: some View {
-        let allNodes = appState.proxyRegions.filter { $0.id != "custom" }
-            .flatMap(\.nodes)
+        let allNodes = cloudNodes
         let localNodes = filteredNodes(from: allNodes)
+        let grouped = Dictionary(grouping: localNodes) {
+            nodeRegionCode(flag: $0.flag, name: $0.name)
+        }
+        let regionCodes = grouped.keys.sorted()
 
         return Group {
             if !localNodes.isEmpty {
@@ -239,9 +272,13 @@ struct ProxiesView: View {
                     }
 
                     let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(localNodes) { node in
-                            localNodeCard(node)
+                    ForEach(regionCodes, id: \.self) { code in
+                        regionHeader(code, count: grouped[code]?.count ?? 0)
+                            .padding(.top, regionCodes.first == code ? 0 : 8)
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(grouped[code] ?? []) { node in
+                                localNodeCard(node)
+                            }
                         }
                     }
                 }
@@ -268,76 +305,144 @@ struct ProxiesView: View {
                 || ConfigParser.extractFlag(from: $0.name).cleanName
                     == ConfigParser.extractFlag(from: node.name).cleanName
         }
+        let hasLatency = (runtimeNode?.latency ?? 0) > 0
+        let statusTitle: String = if runtimeNode?.lastTestFailed == true {
+            String(localized: "Unavailable")
+        } else if hasLatency {
+            String(localized: "Ready to connect")
+        } else {
+            String(localized: "Ready to test")
+        }
+        let statusColor: Color = runtimeNode?.lastTestFailed == true
+            ? TonoStatus.error
+            : .secondary
+        let isDisabled = appState.isConnecting
+            || appState.isDisconnecting
+            || (appState.switchingNodeId != nil && !isSwitching)
         return Button {
             appState.selectNode(node.name)
         } label: {
-            HStack(spacing: 8) {
-                Text(node.flag)
-                    .font(.system(size: 14))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(node.displayName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(node.type.rawValue)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-                if isSwitching {
-                    HStack(spacing: 4) {
-                        ProgressView()
-                            .controlSize(.mini)
-                        Text("Connecting…")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                } else if let runtimeNode, runtimeNode.latency > 0 {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(runtimeNode.latency)ms")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(
-                                runtimeNode.latency < 200 ? Color(hex: "30D158")
-                                    : runtimeNode.latency < 400 ? Color(hex: "FF9F0A")
-                                    : Color(hex: "FF3B30")
+            NodeCardSurface(isActive: isActive, isDisabled: isDisabled) {
+            VStack(alignment: .leading, spacing: 13) {
+                HStack(alignment: .top, spacing: 11) {
+                    NodeRouteMark()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 7) {
+                            Text(node.displayName)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            if isActive {
+                                Text("ACTIVE")
+                                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                                    .kerning(0.7)
+                                    .foregroundStyle(TonoStatus.positive)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(TonoStatus.positive.opacity(0.12), in: Capsule())
+                            }
+                        }
+
+                        HStack(spacing: 6) {
+                            nodeMetaChip(node.protocolType.uppercased(), systemImage: "lock.fill")
+                            Label(
+                                nodeRegionCode(flag: node.flag, name: node.name),
+                                systemImage: "globe"
                             )
-                        Text(isActive ? "Selected" : "Ready")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            if !node.relay.isEmpty {
+                                Text(node.relay)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
-                } else if runtimeNode?.lastTestFailed == true {
-                    Text("Timeout")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color(hex: "FF3B30").opacity(0.7))
-                } else {
-                    Text(isActive ? "Selected" : "Ready")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+
+                    Spacer(minLength: 0)
+
+                    if isSwitching {
+                        HStack(spacing: 5) {
+                            ProgressView()
+                                .controlSize(.mini)
+                            Text("Connecting…")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(TonoStatus.connecting)
+                        }
+                    } else {
+                        NodeLatencyBadge(
+                            latency: runtimeNode?.latency ?? 0,
+                            didFail: runtimeNode?.lastTestFailed == true
+                        )
+                    }
                 }
 
-                if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color(hex: "30D158"))
+                // Active and connecting states already read from the ACTIVE
+                // chip / spinner above — the footer only invites selection.
+                if !isActive && !isSwitching {
+                    HStack(spacing: 7) {
+                        Image(systemName: "circle.dotted")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(statusColor)
+                        Text(statusTitle)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(statusColor)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
-            .padding(10)
-            .background(
-                isActive ? Color.accentColor.opacity(0.15) : .white.opacity(colorScheme == .dark ? 0.06 : 0.7),
-                in: RoundedRectangle(cornerRadius: 12)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isActive ? Color.accentColor.opacity(0.5) : .white.opacity(colorScheme == .dark ? 0.12 : 0.7), lineWidth: 0.5)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            }
         }
         .buttonStyle(.plain)
-        .disabled(
-            appState.isConnecting
-                || appState.isDisconnecting
-                || (appState.switchingNodeId != nil && !isSwitching)
-        )
+        .disabled(isDisabled)
+        .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isActive)
+        .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isSwitching)
+        .accessibilityLabel(localNodeAccessibilitySummary(
+            node: node,
+            isActive: isActive,
+            isSwitching: isSwitching,
+            latency: runtimeNode?.latency ?? 0,
+            didFail: runtimeNode?.lastTestFailed == true
+        ))
+    }
+
+    private func localNodeAccessibilitySummary(
+        node: ProxyNode,
+        isActive: Bool,
+        isSwitching: Bool,
+        latency: Int,
+        didFail: Bool
+    ) -> String {
+        var parts = [
+            node.displayName,
+            nodeRegionCode(flag: node.flag, name: node.name),
+            node.protocolType,
+        ]
+        if latency > 0 { parts.append(String(localized: "\(latency) milliseconds")) }
+        if isSwitching {
+            parts.append(String(localized: "connecting"))
+        } else if isActive {
+            parts.append(String(localized: "active"))
+        } else if didFail {
+            parts.append(String(localized: "unavailable"))
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    @ViewBuilder
+    private func nodeMetaChip(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 9, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.white.opacity(colorScheme == .dark ? 0.08 : 0.42), in: Capsule())
     }
 
     private func nodeCard(_ node: ProxyService.MihomoNode) -> some View {
@@ -348,8 +453,7 @@ struct ProxiesView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Text(node.flag)
-                    .font(.system(size: 14))
+                NodeRouteMark(size: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(
                         ProxyNode.displayName(
@@ -367,24 +471,26 @@ struct ProxiesView: View {
                 if node.latency > 0 {
                     Text("\(node.latency)ms")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(node.latency < 200 ? Color(hex: "30D158") :
-                                        node.latency < 400 ? Color(hex: "FF9F0A") :
-                                        Color(hex: "FF3B30"))
+                        .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency).color))
                 } else if node.lastTestFailed {
                     Text("Timeout")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color(hex: "FF3B30").opacity(0.7))
+                        .foregroundStyle(TonoStatus.error.opacity(0.7))
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(.white.opacity(isActive ? 0.7 : 0.35),
-                        in: RoundedRectangle(cornerRadius: 10))
+            .background(
+                .white.opacity(colorScheme == .dark
+                    ? (isActive ? 0.14 : 0.07)
+                    : (isActive ? 0.7 : 0.35)),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(
                         isActive
-                            ? Color(hex: "4B6EFF").opacity(0.5)
+                            ? TonoBrand.accent.opacity(0.5)
                             : .white.opacity(colorScheme == .dark ? 0.1 : 0.5),
                         lineWidth: 0.5
                     )
@@ -392,6 +498,18 @@ struct ProxiesView: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+    }
+
+    private func regionHeader(_ code: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Label(code, systemImage: "globe")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .kerning(0.8)
+                .foregroundStyle(.secondary)
+            Text("\(count)")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private func sectionTitle(_ title: LocalizedStringKey, count: Int) -> some View {
@@ -520,13 +638,13 @@ struct ProxiesView: View {
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(Color(hex: "30D158"))
+                        .foregroundStyle(TonoStatus.positive)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .background(
-                isSelected ? Color.accentColor.opacity(0.12) : Color.clear,
+                isSelected ? TonoBrand.accent.opacity(0.12) : Color.clear,
                 in: RoundedRectangle(cornerRadius: 8)
             )
             .contentShape(RoundedRectangle(cornerRadius: 8))
@@ -543,9 +661,8 @@ struct ProxiesView: View {
 
     @ViewBuilder
     private func targetIcon(for target: String) -> some View {
-        if let node = mihomoNode(named: target) {
-            Text(node.flag)
-                .font(.system(size: 13))
+        if mihomoNode(named: target) != nil {
+            NodeRouteMark(size: 18)
         } else {
             Image(systemName: targetSystemIcon(for: target))
                 .font(.system(size: 11))
@@ -632,23 +749,41 @@ struct ProxiesView: View {
         String(format: String(localized: "%lld more"), Int64(count))
     }
 
+    @ViewBuilder
+    private func regionFilterChip(_ code: String?) -> some View {
+        let isOn = regionFilter == code
+        Button {
+            regionFilter = code
+        } label: {
+            HStack(spacing: 4) {
+                if let code {
+                    Text(code)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                } else {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("All")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+            }
+            .foregroundStyle(isOn ? .primary : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                isOn ? TonoBrand.accent.opacity(0.14) : .clear,
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func filteredNodes(from nodes: [ProxyNode]) -> [ProxyNode] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             .localizedLowercase
 
         return nodes.filter { node in
-            let matchesFilter: Bool
-            switch nodeFilter {
-            case .all:
-                matchesFilter = true
-            case .us:
-                matchesFilter = node.flag.contains("🇺🇸")
-                    || node.name.localizedCaseInsensitiveContains("US")
-            case .japan:
-                matchesFilter = node.flag.contains("🇯🇵")
-                    || node.name.localizedCaseInsensitiveContains("JP")
-                    || node.name.localizedCaseInsensitiveContains("Japan")
-            }
+            let matchesFilter = regionFilter == nil
+                || nodeRegionCode(flag: node.flag, name: node.name) == regionFilter
 
             guard !query.isEmpty else { return matchesFilter }
             return matchesFilter
@@ -748,6 +883,7 @@ struct ProxiesView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(catalogRefreshSucceeded ? Color.green : Color.orange)
                     .lineLimit(1)
+                    .transition(.opacity)
             }
 
             Button {
@@ -790,6 +926,7 @@ struct ProxiesView: View {
                 TextField("Search servers", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .focused($isSearchFocused)
 
                 if !searchText.isEmpty {
                     Button {
@@ -811,30 +948,9 @@ struct ProxiesView: View {
             )
 
             HStack(spacing: 3) {
-                ForEach(NodeFilter.allCases) { filter in
-                    Button {
-                        nodeFilter = filter
-                    } label: {
-                        HStack(spacing: 4) {
-                            if filter == .all {
-                                Image(systemName: filter.icon)
-                                    .font(.system(size: 10, weight: .semibold))
-                            } else {
-                                Text(filter.icon)
-                                    .font(.system(size: 11))
-                            }
-                            Text(filter.rawValue)
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .foregroundStyle(nodeFilter == filter ? .primary : .secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 7)
-                        .background(
-                            nodeFilter == filter ? Color.accentColor.opacity(0.14) : .clear,
-                            in: Capsule()
-                        )
-                    }
-                    .buttonStyle(.plain)
+                regionFilterChip(nil)
+                ForEach(regionOptions, id: \.self) { code in
+                    regionFilterChip(code)
                 }
             }
             .padding(3)
@@ -885,14 +1001,28 @@ struct ProxiesView: View {
     private func refreshCatalog() {
         guard !isRefreshingCatalog else { return }
         isRefreshingCatalog = true
+        catalogFeedbackDismissal?.cancel()
+        catalogFeedbackDismissal = nil
         catalogFeedback = nil
         Task {
             let succeeded = await accountSession.refreshManagedCatalog()
             isRefreshingCatalog = false
             catalogRefreshSucceeded = succeeded
-            catalogFeedback = succeeded
-                ? String(localized: "Updated")
-                : String(localized: "Using last verified copy")
+            withAnimation(.easeOut(duration: 0.2)) {
+                catalogFeedback = succeeded
+                    ? String(localized: "Updated")
+                    : String(localized: "Using last verified copy")
+            }
+            // Success is transient; a fallback-copy warning stays visible.
+            if succeeded {
+                catalogFeedbackDismissal = Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        catalogFeedback = nil
+                    }
+                }
+            }
         }
     }
 

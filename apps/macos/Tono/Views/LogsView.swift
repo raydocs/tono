@@ -6,17 +6,42 @@ struct LogsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.colorScheme) private var colorScheme
     @State private var searchText: String = ""
+    @State private var levelFilter: String?
+
+    private static let knownLevels = ["error", "warning", "info", "debug"]
 
     private var filteredLogs: [LogEntry] {
         appState.logEntries.filter { entry in
-            searchText.isEmpty || entry.message.localizedCaseInsensitiveContains(searchText)
+            (levelFilter == nil || entry.level.lowercased() == levelFilter)
+                && (searchText.isEmpty || entry.message.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+
+    /// Badge/chip tint per log level, from the shared status ramp.
+    private func levelTint(_ level: String?) -> Color {
+        switch level?.lowercased() {
+        case "error": TonoStatus.error
+        case "warning": TonoStatus.blocked
+        default: .secondary
+        }
+    }
+
+    private func levelTitle(_ level: String?) -> LocalizedStringKey {
+        switch level?.lowercased() {
+        case "error": "Error"
+        case "warning": "Warning"
+        case "info": "Info"
+        case "debug": "Debug"
+        default: "All"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerRow
-                .padding(.bottom, 16)
+                .padding(.bottom, 10)
+            levelFilterRow
+                .padding(.bottom, 12)
 
             // Log container
             VStack(spacing: 0) {
@@ -178,6 +203,52 @@ struct LogsView: View {
         }
     }
 
+    // MARK: - Level Filter
+
+    private var levelFilterRow: some View {
+        HStack(spacing: 3) {
+            levelFilterChip(nil)
+            ForEach(Self.knownLevels, id: \.self) { level in
+                levelFilterChip(level)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(3)
+        .background(.white.opacity(colorScheme == .dark ? 0.06 : 0.32), in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.1 : 0.55), lineWidth: 0.5)
+        )
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func levelFilterChip(_ level: String?) -> some View {
+        let isOn = levelFilter == level
+        Button {
+            levelFilter = level
+        } label: {
+            HStack(spacing: 4) {
+                if let level {
+                    Circle()
+                        .fill(levelTint(level))
+                        .frame(width: 5, height: 5)
+                }
+                Text(levelTitle(level))
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(isOn ? .primary : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                isOn ? TonoBrand.accent.opacity(0.14) : .clear,
+                in: Capsule()
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Log Row
 
     private func logRow(_ entry: LogEntry) -> some View {
@@ -189,10 +260,10 @@ struct LogsView: View {
 
             Text(entry.level.uppercased())
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color(hex: entry.levelColor))
+                .foregroundStyle(levelTint(entry.level))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Color(hex: entry.levelColor).opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                .background(levelTint(entry.level).opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
                 .frame(width: 80, alignment: .leading)
 
             Text(entry.message)
@@ -218,7 +289,15 @@ struct LogsView: View {
             "[\(entry.formattedTime)] [\(entry.level.uppercased())] \(entry.message)"
         }.joined(separator: "\n")
 
-        try? content.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            ToastCenter.shared.show(
+                String(localized: "Logs exported"),
+                systemImage: "checkmark.circle.fill"
+            )
+        } catch {
+            // Export stays silent on failure, matching the previous behavior.
+        }
     }
 }
 

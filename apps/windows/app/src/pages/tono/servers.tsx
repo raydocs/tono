@@ -20,11 +20,13 @@ import {
   TONO_MONO_STACK,
   tonoText,
 } from '@/tono-ui/theme'
+import { useTonoToast } from '@/tono-ui/tono-toast-context'
+import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 
 import { latencyColor, readNodeLatency } from './node-latency'
 import {
+  nodeCode,
   nodeDisplayName,
-  nodeFlag,
   nodeProtocol,
   nodeRegion,
 } from './node-meta'
@@ -43,11 +45,25 @@ const hex = (color: string, alpha: number) =>
     .padStart(2, '0')
     .toUpperCase()}`
 
+const TonoTestIcon = () => (
+  <svg
+    aria-hidden
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+  >
+    <title>Test latency</title>
+    <path d="m13.4 2-9 11.2h6.2L9.6 22l10-12.4h-6.1L13.4 2Z" />
+  </svg>
+)
+
 const ServersPage = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status, mutateTonoStatus } = useTonoStatus()
+  const showToast = useTonoToast()
   const [selectError, setSelectError] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [testingAll, setTestingAll] = useState(false)
@@ -92,6 +108,7 @@ const ServersPage = () => {
       try {
         await tonoSelectServer(name)
         await Promise.all([mutateServers(), mutateTonoStatus()])
+        showToast(t('tono.nodes.switchedTo', { name: nodeDisplayName(name) }))
       } catch (error) {
         setSelectError(error instanceof Error ? error.message : String(error))
       }
@@ -234,7 +251,7 @@ const ServersPage = () => {
             onClick={testingAll ? handleCancelTests : handleTestAll}
             disabled={testing || (!testingAll && !canTestAll)}
           >
-            <span style={{ fontSize: 12 }}>⚡</span>
+            <TonoTestIcon />
             {testingAll ? t('tono.nodes.cancelTest') : t('tono.nodes.testAll')}
           </button>
           <button
@@ -248,7 +265,7 @@ const ServersPage = () => {
               status?.uiState !== 'connected'
             }
           >
-            <span style={{ fontSize: 12 }}>⚡</span>
+            <TonoTestIcon />
             {testing ? '…' : t('tono.nodes.testCurrent')}
           </button>
         </div>
@@ -388,6 +405,25 @@ const ServersPage = () => {
                             })
                           : '—'
                   const available = server.available !== false
+                  const latencyTone =
+                    !available || endpointFailure
+                      ? TONO_COLORS.error
+                      : latency !== null
+                        ? latencyColor(latency)
+                        : text.tertiary
+                  const latencyHasTone =
+                    !available ||
+                    endpointFailure !== undefined ||
+                    latency !== null
+                  const cardStatus = !available
+                    ? t('tono.nodes.unavailable')
+                    : endpointFailure === 'timeout'
+                      ? t('tono.nodes.timeout')
+                      : endpointFailure
+                        ? t('tono.nodes.testFailed')
+                        : server.selected
+                          ? t('tono.node.activeServer')
+                          : t('tono.node.group')
                   return (
                     <button
                       key={server.name}
@@ -402,11 +438,15 @@ const ServersPage = () => {
                         )
                       }
                       style={{
+                        position: 'relative',
+                        overflow: 'hidden',
+                        flexDirection: 'column',
+                        alignItems: 'stretch',
+                        justifyContent: 'space-between',
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: 11,
-                        minHeight: 66,
-                        padding: '12px 14px',
+                        gap: 14,
+                        minHeight: 126,
+                        padding: '16px 16px 14px',
                         borderRadius: 16,
                         fontFamily: 'inherit',
                         textAlign: 'left',
@@ -418,91 +458,272 @@ const ServersPage = () => {
                         opacity: available ? 1 : 0.55,
                         color: text.primary,
                         background: server.selected
-                          ? hex(TONO_COLORS.accent, 0.15)
+                          ? hex(TONO_COLORS.accent, dark ? 0.13 : 0.08)
                           : dark
-                            ? 'rgba(16,21,33,0.68)'
-                            : 'rgba(255,255,255,0.72)',
+                            ? 'rgba(16,21,33,0.72)'
+                            : 'rgba(255,255,255,0.76)',
                         border: server.selected
-                          ? `1px solid ${hex(TONO_COLORS.accent, 0.5)}`
+                          ? `1px solid ${hex(TONO_COLORS.accent, 0.55)}`
                           : `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(56,72,108,0.09)'}`,
                         boxShadow: server.selected
-                          ? `0 14px 30px -24px ${hex(TONO_COLORS.accent, 0.75)}`
-                          : 'none',
+                          ? `0 18px 34px -22px ${hex(TONO_COLORS.accent, 0.82)}`
+                          : `0 10px 24px -22px rgba(16,24,48,${dark ? 0.9 : 0.28})`,
                         transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}, transform 0.15s ${TONO_EASE}`,
                       }}
                     >
                       <span
-                        aria-hidden
                         style={{
                           display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 34,
-                          height: 34,
-                          borderRadius: 10,
-                          fontSize: 17,
-                          flexShrink: 0,
-                          background: dark
-                            ? 'rgba(255,255,255,0.07)'
-                            : 'rgba(235,240,250,0.78)',
-                        }}
-                      >
-                        {nodeFlag(server.name)}
-                      </span>
-                      <span
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 1,
-                          flex: 1,
-                          minWidth: 0,
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 12,
                         }}
                       >
                         <span
                           style={{
-                            fontSize: 13,
-                            fontWeight: 600,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 12,
+                            minWidth: 0,
+                            flex: 1,
+                          }}
+                        >
+                          <TonoNodeBadge size={44} />
+                          <span
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 7,
+                              minWidth: 0,
+                              paddingTop: 1,
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 7,
+                                minWidth: 0,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: 14,
+                                  fontWeight: 650,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {nodeDisplayName(server.name)}
+                              </span>
+                              {server.selected && (
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    padding: '3px 6px',
+                                    borderRadius: 999,
+                                    color: TONO_COLORS.connected,
+                                    background: hex(
+                                      TONO_COLORS.connected,
+                                      0.13,
+                                    ),
+                                    fontSize: 9,
+                                    fontWeight: 750,
+                                    letterSpacing: 0.6,
+                                  }}
+                                >
+                                  ACTIVE
+                                </span>
+                              )}
+                            </span>
+                            <span
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                minWidth: 0,
+                                color: text.tertiary,
+                                fontSize: 10,
+                                fontWeight: 600,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  flexShrink: 0,
+                                  letterSpacing: 0.4,
+                                }}
+                              >
+                                <svg
+                                  aria-hidden
+                                  width={10}
+                                  height={10}
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <title>Region</title>
+                                  <circle cx="12" cy="12" r="10" />
+                                  <path d="M2 12h20" />
+                                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                                </svg>
+                                {nodeCode(server.name)}
+                              </span>
+                              <span
+                                style={{
+                                  padding: '3px 6px',
+                                  borderRadius: 999,
+                                  color: text.secondary,
+                                  background: dark
+                                    ? 'rgba(255,255,255,0.08)'
+                                    : 'rgba(235,240,250,0.86)',
+                                  letterSpacing: 0.2,
+                                }}
+                              >
+                                {nodeProtocol(server.name)}
+                              </span>
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                <span aria-hidden>●</span>
+                                {t('tono.dashboard.info.protection')}
+                              </span>
+                            </span>
+                          </span>
+                        </span>
+                        <span
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            flexShrink: 0,
+                            padding: '6px 8px',
+                            borderRadius: 999,
+                            color: latencyTone,
+                            background: latencyHasTone
+                              ? hex(latencyTone, 0.11)
+                              : dark
+                                ? 'rgba(255,255,255,0.06)'
+                                : 'rgba(56,72,108,0.06)',
+                            fontSize: 11,
+                            fontWeight: 650,
+                            fontFamily: TONO_MONO_STACK,
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          {nodeDisplayName(server.name)}
-                        </span>
-                        <span style={{ fontSize: 11, color: text.tertiary }}>
-                          {nodeProtocol(server.name)}
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              background: latencyTone,
+                              boxShadow: latencyHasTone
+                                ? `0 0 0 3px ${hex(latencyTone, 0.1)}`
+                                : 'none',
+                            }}
+                          />
+                          {!available
+                            ? t('tono.nodes.unavailable')
+                            : endpointFailure === 'timeout'
+                              ? t('tono.nodes.timeout')
+                              : endpointFailure
+                                ? t('tono.nodes.testFailed')
+                                : latencyLabel}
                         </span>
                       </span>
                       <span
                         style={{
-                          fontSize: 11,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          paddingTop: 10,
+                          borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
+                          color: server.selected
+                            ? TONO_COLORS.connected
+                            : text.tertiary,
+                          fontSize: 10,
                           fontWeight: 600,
-                          fontFamily: TONO_MONO_STACK,
-                          flexShrink: 0,
-                          padding: '4px 7px',
-                          borderRadius: 7,
-                          color:
-                            !available || endpointFailure
-                              ? TONO_COLORS.error
-                              : latency !== null
-                                ? latencyColor(latency)
-                                : text.tertiary,
-                          background:
-                            !available || endpointFailure
-                              ? hex(TONO_COLORS.error, 0.12)
-                              : latency !== null
-                                ? hex(latencyColor(latency), 0.11)
-                                : 'transparent',
                         }}
                       >
-                        {!available
-                          ? t('tono.nodes.unavailable')
-                          : endpointFailure === 'timeout'
-                            ? t('tono.nodes.timeout')
-                            : endpointFailure
-                              ? t('tono.nodes.testFailed')
-                              : latencyLabel}
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              background: server.selected
+                                ? TONO_COLORS.connected
+                                : available
+                                  ? TONO_COLORS.accent
+                                  : text.tertiary,
+                              opacity: available ? 1 : 0.55,
+                            }}
+                          />
+                          {cardStatus}
+                        </span>
+                        {server.selected ? (
+                          <span
+                            aria-hidden
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 20,
+                              height: 20,
+                              borderRadius: '50%',
+                              color: '#FFFFFF',
+                              background: TONO_COLORS.connected,
+                              fontSize: 13,
+                              lineHeight: 1,
+                            }}
+                          >
+                            ✓
+                          </span>
+                        ) : (
+                          <span
+                            aria-hidden
+                            style={{ color: text.tertiary, fontSize: 14 }}
+                          >
+                            ›
+                          </span>
+                        )}
                       </span>
+                      {server.selected && (
+                        <span
+                          aria-hidden
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 18,
+                            right: 18,
+                            height: 2,
+                            borderRadius: 999,
+                            background: `linear-gradient(90deg, ${TONO_COLORS.accent}, ${TONO_COLORS.accentWarm})`,
+                          }}
+                        />
+                      )}
                     </button>
                   )
                 })}

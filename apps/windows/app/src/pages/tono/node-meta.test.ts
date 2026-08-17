@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { nodeFlag, nodeRegion } from './node-meta'
+import { nodeCode, nodeRegion } from './node-meta'
 
 describe('nodeRegion', () => {
   it('matches US and JP as whole tokens like the verified-catalog sorter', () => {
@@ -20,18 +20,18 @@ describe('nodeRegion', () => {
   })
 })
 
-describe('nodeFlag', () => {
-  it('uses the city landmark emoji, including for renamed legacy wire names', () => {
-    expect(nodeFlag('Los Angeles · Sunset')).toBe('🌴')
-    expect(nodeFlag('Salt Lake City · Summit')).toBe('🏔️')
-    expect(nodeFlag('Buffalo · Niagara')).toBe('🦬')
-    expect(nodeFlag('Tokyo · Sakura')).toBe('🗼')
+describe('nodeCode', () => {
+  it('uses a stable region code, including for renamed legacy wire names', () => {
+    expect(nodeCode('Los Angeles · Sunset')).toBe('US')
+    expect(nodeCode('Salt Lake City · Summit')).toBe('US')
+    expect(nodeCode('Buffalo · Niagara')).toBe('US')
+    expect(nodeCode('Tokyo · Sakura')).toBe('JP')
     // Legacy wire names pick up their display city.
-    expect(nodeFlag('US-VLESS-Reality')).toBe('🌴')
-    expect(nodeFlag('JP-VLESS-Reality')).toBe('🗼')
-    // Unknown cities fall back to the region flag, then the globe.
-    expect(nodeFlag('US West 01')).toBe('🇺🇸')
-    expect(nodeFlag('jp-west')).toBe('🇯🇵')
-    expect(nodeFlag('Paris · Seine')).toBe('🌐')
+    expect(nodeCode('US-VLESS-Reality')).toBe('US')
+    expect(nodeCode('JP-VLESS-Reality')).toBe('JP')
+    // Unknown cities fall back to an explicit region token, then GL.
+    expect(nodeCode('US West 01')).toBe('US')
+    expect(nodeCode('jp-west')).toBe('JP')
+    expect(nodeCode('Paris · Seine')).toBe('GL')
   })
 })

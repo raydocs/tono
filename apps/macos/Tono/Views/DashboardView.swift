@@ -3,6 +3,8 @@ import SwiftUI
 
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
 
@@ -74,7 +76,7 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .contentShape(Rectangle())
-        .animation(.spring(duration: 0.5, bounce: 0.15), value: appState.isConnected)
+        .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.15), value: appState.isConnected)
         .onChange(of: appState.isConnected) { _, connected in
             if !connected {
                 appState.networkInfo = NetworkInfo()
@@ -122,7 +124,7 @@ struct DashboardView: View {
                 value: protectionValue,
                 detail: protectionDetail,
                 systemImage: appState.isConnected ? "checkmark.shield.fill" : "shield",
-                tint: appState.isConnected ? Color(hex: "30D158") : Color(hex: "8E8E93")
+                tint: appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
             )
 
             DashboardStatCard(
@@ -152,10 +154,10 @@ struct DashboardView: View {
     }
 
     private var statusBadgeColor: Color {
-        if appState.isConnecting || appState.isDisconnecting { return Color(hex: "B29500") }
-        if appState.isProtectionBlocked { return Color(hex: "FF9F0A") }
-        if isDegradedWhileConnected { return Color(hex: "FF9F0A") }
-        return appState.isConnected ? Color(hex: "30D158") : Color(hex: "8E8E93")
+        if appState.isConnecting || appState.isDisconnecting { return TonoStatus.connecting }
+        if appState.isProtectionBlocked { return TonoStatus.blocked }
+        if isDegradedWhileConnected { return TonoStatus.blocked }
+        return appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
     }
 
     /// The health loop marks a degraded exit on its first failed probe, well
@@ -261,7 +263,10 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.08 : 0.42),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .task {
@@ -356,7 +361,7 @@ private struct ConnectionProgressCard: View {
         if appState.lastConnectionFailure != nil, !appState.isConnecting {
             return .orange.opacity(0.08)
         }
-        return Color(hex: "4B6EFF").opacity(0.06)
+        return TonoBrand.accent.opacity(0.06)
     }
 
     @ViewBuilder
@@ -448,7 +453,7 @@ private struct ConnectionProgressCard: View {
     private var headerColor: Color {
         appState.lastConnectionFailure != nil && !appState.isConnecting
             ? .orange
-            : Color(hex: "FFD60A")
+            : TonoStatus.connecting
     }
 
     private var activeStartedAt: Date? {
@@ -480,7 +485,7 @@ private struct ConnectionProgressCard: View {
         } else if appState.completedConnectionStages.contains(stage) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(Color(hex: "2ED573"))
+                .foregroundStyle(TonoStatus.connected)
         } else if !appState.isConnecting,
                   appState.lastConnectionFailure?.stage == stage {
             Image(systemName: "xmark.circle.fill")

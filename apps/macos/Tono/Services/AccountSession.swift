@@ -154,9 +154,7 @@ final class AccountSession {
                     try await PrivilegedRuntimeCoordinator.shared.disarmKillSwitch()
                 } catch {
                     state = .error(
-                        "Tono could not release a protection state left by an earlier session. "
-                        + "Run the documented sudo emergency-disarm command, then reopen Tono. "
-                        + error.localizedDescription
+                        String(localized: "Tono could not release a protection state left by an earlier session. Run the documented sudo emergency-disarm command, then reopen Tono. \(error.localizedDescription)")
                     )
                     return
                 }
@@ -229,7 +227,7 @@ final class AccountSession {
             if state != .authenticating {
                 state = .error(
                     (error as? LocalizedError)?.errorDescription
-                        ?? "Tono sign-in is temporarily unavailable."
+                        ?? String(localized: "Tono sign-in is temporarily unavailable.")
                 )
             }
         }
@@ -246,7 +244,7 @@ final class AccountSession {
 
     func requestEmailCode(email: String, deviceName: String) async {
         guard TonoAccountRules.validEmail(email) else {
-            state = .error("Enter a valid email address.")
+            state = .error(String(localized: "Enter a valid email address."))
             return
         }
         state = .authenticating
@@ -268,7 +266,7 @@ final class AccountSession {
               normalizedCode.count == 6,
               normalizedCode.unicodeScalars.allSatisfy({ (48...57).contains($0.value) })
         else {
-            state = .error("Enter the six-digit code from your email.")
+            state = .error(String(localized: "Enter the six-digit code from your email."))
             return
         }
         await authenticate {
@@ -282,7 +280,7 @@ final class AccountSession {
     #if DEBUG
     func signInWithApple(deviceName: String) async {
         guard authMethods?.apple.enabled == true else {
-            state = .error("Sign in with Apple is not configured.")
+            state = .error(String(localized: "Sign in with Apple is not configured."))
             return
         }
         await authenticate {
@@ -306,7 +304,7 @@ final class AccountSession {
         guard authMethods?.google.enabled == true,
               let advertisedClientID = authMethods?.google.clientId
         else {
-            state = .error("Google sign-in is not configured.")
+            state = .error(String(localized: "Google sign-in is not configured."))
             return
         }
         await authenticate {
@@ -397,7 +395,7 @@ final class AccountSession {
     func reloadDevices() async throws { devices = try await api.devices().devices }
 
     func revoke(_ target: TonoDevice) async {
-        guard target.id != device?.id && target.current != true else { state = .error("The current device cannot revoke itself."); return }
+        guard target.id != device?.id && target.current != true else { state = .error(String(localized: "The current device cannot revoke itself.")); return }
         do { try await api.revokeDevice(target.id); try await reloadDevices() }
         catch { await fail(error) }
     }
@@ -436,7 +434,7 @@ final class AccountSession {
             await startCloudOnlyRuntime()
             return
         }
-        guard let device else { state = .error("No Tono device is available to enroll."); return }
+        guard let device else { state = .error(String(localized: "No Tono device is available to enroll.")); return }
         state = .enrolling
         do {
             let response = try await api.enrollment(deviceId: device.id, installationId: keychain.installationId())
@@ -673,7 +671,7 @@ final class AccountSession {
                     } catch {
                         pauseAppRoutingResearch()
                         state = .error(
-                            "The Tono home transport stopped and no managed cloud exit is available. Internet remains blocked by the kill switch."
+                            String(localized: "The Tono home transport stopped and no managed cloud exit is available. Internet remains blocked by the kill switch.")
                         )
                     }
                     return
@@ -1116,7 +1114,7 @@ final class AccountSession {
             await api.logout(); clearAccount(); state = .signedOut
         } else {
             // Leave kill switch armed if it was armed — prevents IP leak on failed reconnect.
-            state = .error((error as? LocalizedError)?.errorDescription ?? "Something went wrong. Please try again.")
+            state = .error((error as? LocalizedError)?.errorDescription ?? String(localized: "Something went wrong. Please try again."))
         }
     }
 

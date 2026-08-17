@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// Press feedback for the connection pill: a quick 0.98 squeeze. The pill is
+/// disabled during connecting/disconnecting, so the press state only ever
+/// appears when a tap is actionable. Reduce Motion skips the scale entirely.
+private struct ConnectPillPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .animation(
+                TonoMotion.easeOut(0.1, reduceMotion: reduceMotion),
+                value: configuration.isPressed
+            )
+    }
+}
+
 struct ConnectPill: View {
     @Binding var isConnected: Bool
     var isConnecting: Bool = false
@@ -8,35 +24,36 @@ struct ConnectPill: View {
     var connectionStage: ConnectionStage = .preparing
     var disconnectionStage: DisconnectionStage = .finishingOperation
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var accentColor: Color {
-        if isConnecting || isDisconnecting { return Color(hex: "FFD60A") }
-        if isProtectionBlocked { return Color(hex: "FF9F0A") }
-        return isConnected ? Color(hex: "2ED573") : Color(hex: "E83B3B")
+        if isConnecting || isDisconnecting { return TonoStatus.connecting }
+        if isProtectionBlocked { return TonoStatus.blocked }
+        return isConnected ? TonoStatus.connected : TonoStatus.standby
     }
 
     var body: some View {
         Button {
             isConnected.toggle()
         } label: {
-            HStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 0) {
                 iconWithGlow
-                    .frame(width: 80)
+                    .frame(width: 60, height: 72)
                 textBlock
                     .frame(width: 160)
-                    .offset(x: -20)
+                Spacer(minLength: 0)
             }
             .frame(width: 240, height: 72)
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ConnectPillPressStyle())
         .glassEffect(
             .regular.tint(pillTint),
             in: Capsule()
         )
         .shadow(
             color: isConnected
-                ? Color(hex: "2ED573").opacity(0.25)
+                ? TonoStatus.connected.opacity(0.25)
                 : Color.black.opacity(colorScheme == .dark ? 0.35 : 0.10),
             radius: 15, y: 5
         )
@@ -44,9 +61,9 @@ struct ConnectPill: View {
         // the unlabeled pill inert during a transition prevents an accidental
         // click from releasing fail-closed protection during an auto-retry.
         .disabled(isConnecting || isDisconnecting)
-        .animation(.easeOut(duration: 0.22), value: isConnected)
-        .animation(.easeOut(duration: 0.22), value: isConnecting)
-        .animation(.easeOut(duration: 0.22), value: isDisconnecting)
+        .animation(TonoMotion.easeOut(0.22, reduceMotion: reduceMotion), value: isConnected)
+        .animation(TonoMotion.easeOut(0.22, reduceMotion: reduceMotion), value: isConnecting)
+        .animation(TonoMotion.easeOut(0.22, reduceMotion: reduceMotion), value: isDisconnecting)
     }
 
     // Glass tint adapts to color scheme
@@ -76,7 +93,11 @@ struct ConnectPill: View {
                 )
                 .frame(width: 96, height: 96)
                 .opacity(isConnected || isConnecting || isDisconnecting ? 0.78 : 0.48)
-                .scaleEffect(isConnected || isConnecting || isDisconnecting ? 1.08 : 0.96)
+                .scaleEffect(
+                    reduceMotion
+                        ? 1
+                        : (isConnected || isConnecting || isDisconnecting ? 1.08 : 0.96)
+                )
                 .accessibilityHidden(true)
 
             // Clash logo
@@ -107,9 +128,9 @@ struct ConnectPill: View {
     }
 
     private var statusColor: Color {
-        if isConnecting || isDisconnecting { return Color(hex: "FFD60A") }
-        if isProtectionBlocked { return Color(hex: "FF9F0A") }
-        return isConnected ? Color(hex: "2ED573") : Color.primary
+        if isConnecting || isDisconnecting { return TonoStatus.connecting }
+        if isProtectionBlocked { return TonoStatus.blocked }
+        return isConnected ? TonoStatus.connected : Color.primary
     }
 
     private var textBlock: some View {

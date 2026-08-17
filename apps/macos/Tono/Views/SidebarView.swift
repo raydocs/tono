@@ -3,6 +3,8 @@ import SwiftUI
 struct SidebarView: View {
     @Binding var selectedPage: AppPage
     @AppStorage(SettingsKey.logsEnabled) private var logsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hoveredPage: AppPage?
 
     // Keep the primary flow focused on connection, servers, and diagnostics.
     // Catalog synchronization is part of Nodes; it is not a separate user
@@ -56,7 +58,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func navigationItem(for page: AppPage) -> some View {
         let isSelected = selectedPage == page
-        Button {
+        let item = Button {
             selectedPage = page
         } label: {
             HStack(spacing: 10) {
@@ -76,12 +78,30 @@ struct SidebarView: View {
             .contentShape(Rectangle())
             .background(
                 isSelected
-                    ? Color.accentColor
-                    : .clear,
+                    ? TonoBrand.accent
+                    : Color.primary.opacity(hoveredPage == page ? 0.06 : 0),
                 in: RoundedRectangle(cornerRadius: 8)
             )
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            hoveredPage = hovering ? page : (hoveredPage == page ? nil : hoveredPage)
+        }
+        .animation(TonoMotion.easeOut(0.15, reduceMotion: reduceMotion), value: hoveredPage)
+        .animation(TonoMotion.easeOut(0.15, reduceMotion: reduceMotion), value: isSelected)
+
+        if let shortcut = commandShortcut(for: page) {
+            item.keyboardShortcut(shortcut, modifiers: .command)
+        } else {
+            item
+        }
+    }
+
+    /// ⌘1–⌘4 follow the visible `mainPages` order so Logs only claims ⌘4
+    /// when that destination is actually in the sidebar.
+    private func commandShortcut(for page: AppPage) -> KeyEquivalent? {
+        guard let index = mainPages.firstIndex(of: page), index < 9 else { return nil }
+        return KeyEquivalent(Character(String(index + 1)))
     }
 }
 

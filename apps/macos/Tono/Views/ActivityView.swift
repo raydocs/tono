@@ -100,10 +100,10 @@ private enum ActivityByteFormat {
 /// One colour per path class, used by every split bar and legend on this page so
 /// a colour means the same thing in the header card and in an app's own row.
 private enum RouteTint {
-    static let direct = Color(hex: "30D158")
+    static let direct = TonoStatus.positive
     static let residential = Color(hex: "BF5AF2")
-    static let tunnel = Color(hex: "4B6EFF")
-    static let blocked = Color(hex: "8E8E93")
+    static let tunnel = TonoBrand.accent
+    static let blocked = TonoStatus.neutral
 }
 
 /// Proportional bar for a route split.
@@ -269,13 +269,13 @@ struct ActivityView: View {
                 }
 
                 ActivityCard(title: "Upload") {
-                    rateValue(appState.trafficStats.uploadSpeed, tint: Color(hex: "64D2FF"))
+                    rateValue(appState.trafficStats.uploadSpeed, tint: TonoTraffic.upload)
                     Text("\(activityBytes(appState.trafficStats.totalUpload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
 
                 ActivityCard(title: "Download") {
-                    rateValue(appState.trafficStats.downloadSpeed, tint: Color(hex: "2ED573"))
+                    rateValue(appState.trafficStats.downloadSpeed, tint: TonoTraffic.download)
                     Text("\(activityBytes(appState.trafficStats.totalDownload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
@@ -383,7 +383,7 @@ struct ActivityView: View {
                         .padding(.vertical, 6)
                         .background(
                             section == candidate
-                                ? AnyShapeStyle(Color(hex: "4B6EFF"))
+                                ? AnyShapeStyle(TonoBrand.accent)
                                 : AnyShapeStyle(.white.opacity(colorScheme == .dark ? 0.08 : 0.4)),
                             in: Capsule()
                         )
@@ -446,7 +446,7 @@ struct ActivityView: View {
 
     private var timelineLine: some View {
         LinearGradient(
-            colors: [Color(hex: "4B6EFF"), .secondary.opacity(0.3)],
+            colors: [TonoBrand.accent, .secondary.opacity(0.3)],
             startPoint: .top,
             endPoint: .bottom
         )
@@ -594,11 +594,13 @@ private struct LogEntryRow: View {
     var onClose: (() -> Void)?
     @State private var isHovered = false
 
+    // Same palette as RouteTint so the per-connection dots agree with the
+    // header split bar and legend on this page.
     private var dotColor: Color {
         switch entry.type {
-        case .proxied:  return Color(hex: "4B6EFF")
-        case .direct:   return Color(hex: "FF6E52")
-        case .rejected: return Color(hex: "333333")
+        case .proxied:  return RouteTint.tunnel
+        case .direct:   return RouteTint.direct
+        case .rejected: return RouteTint.blocked
         }
     }
 
@@ -619,10 +621,11 @@ private struct LogEntryRow: View {
     }
 
     private var latencyStyle: (fg: String, bg: String) {
-        guard let ms = entry.latency else { return ("A2A3C4", "000000") }
-        if ms <= 80 { return ("10B981", "10B981") }
-        if ms <= 200 { return ("F59E0B", "F59E0B") }
-        return ("EF4444", "EF4444")
+        // Same latency banding as the node cards (LatencyLevel.level(for:)),
+        // so a given millisecond count is the same colour app-wide.
+        guard let ms = entry.latency else { return ("98989D", "000000") }
+        let color = LatencyLevel.level(for: ms).color
+        return (color, color)
     }
 
     var body: some View {
@@ -728,12 +731,12 @@ private struct LogEntryRow: View {
                         directionRow(
                             symbol: "arrow.down",
                             value: entry.downloadText,
-                            tint: Color(hex: "10B981")
+                            tint: TonoTraffic.download
                         )
                         directionRow(
                             symbol: "arrow.up",
                             value: entry.uploadText,
-                            tint: Color(hex: "4B6EFF")
+                            tint: TonoTraffic.upload
                         )
                     }
                 }

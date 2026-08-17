@@ -15,7 +15,6 @@ import {
   tonoRetryNow,
   tonoUploadDiagnostics,
 } from '@/services/tono'
-import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import {
@@ -25,11 +24,13 @@ import {
   TONO_SPRING,
   tonoText,
 } from '@/tono-ui/theme'
+import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import parseTraffic from '@/utils/parse-traffic'
 
 import { ConnectProgressCard } from './connect-progress'
 import { latencyColor, readNodeLatency } from './node-latency'
-import { nodeFlag, nodeDisplayName } from './node-meta'
+import { nodeCode, nodeDisplayName } from './node-meta'
 
 const TONO_PROTECTED_DNS_V4 = '198.18.0.2'
 
@@ -41,6 +42,7 @@ const LockIcon = ({ locked }: { locked: boolean }) => (
     fill="currentColor"
     aria-hidden
   >
+    <title>Lock status</title>
     {locked ? (
       <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z" />
     ) : (
@@ -162,24 +164,7 @@ const ActiveNodeCard = ({
             border: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
           }}
         >
-          <span
-            aria-hidden
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 36,
-              height: 36,
-              borderRadius: 11,
-              fontSize: 18,
-              background: dark
-                ? 'rgba(255,255,255,0.08)'
-                : 'rgba(255,255,255,0.82)',
-              flexShrink: 0,
-            }}
-          >
-            {nodeFlag(serverName)}
-          </span>
+          <TonoNodeBadge size={36} />
           <span
             style={{
               display: 'flex',
@@ -202,7 +187,7 @@ const ActiveNodeCard = ({
               {nodeDisplayName(serverName)}
             </span>
             <span style={{ fontSize: 11, color: text.tertiary }}>
-              {t('tono.node.group')}
+              {t('tono.node.group')} · {nodeCode(serverName)}
             </span>
           </span>
           <span
@@ -294,7 +279,10 @@ const DashboardPage = () => {
       const receipt = await tonoUploadDiagnostics()
       setActionError((current) =>
         current
-          ? { ...current, message: `${current.message}\n${receipt.referenceCode}` }
+          ? {
+              ...current,
+              message: `${current.message}\n${receipt.referenceCode}`,
+            }
           : current,
       )
     } catch (error) {

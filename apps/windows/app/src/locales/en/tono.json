@@ -216,6 +216,7 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshSuccess": "Cloud servers are up to date.",
+    "switchedTo": "Switched to {{name}}",
     "cloudServers": "Cloud Servers",
     "empty": "No servers available",
     "timeout": "Timeout",

@@ -946,9 +946,9 @@ enum HelperInstallError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .resourceNotFound: "Authenticated helper resources are missing."
-        case .userDenied: "Administrator privileges were not granted."
-        case .installFailed(let message): "Helper installation failed: \(message)"
+        case .resourceNotFound: String(localized: "Authenticated helper resources are missing.")
+        case .userDenied: String(localized: "Administrator privileges were not granted.")
+        case .installFailed(let message): String(localized: "Helper installation failed: \(message)")
         }
     }
 }
@@ -963,12 +963,13 @@ enum HelperIPCError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .socketFailed: "Could not communicate with the network helper."
-        case .connectFailed: "The authenticated network helper is unavailable."
-        case .emptyResponse: "The network helper closed the connection."
-        case .invalidResponse: "The network helper returned an invalid response."
+        case .socketFailed: String(localized: "Could not communicate with the network helper.")
+        case .connectFailed: String(localized: "The authenticated network helper is unavailable.")
+        case .emptyResponse: String(localized: "The network helper closed the connection.")
+        case .invalidResponse: String(localized: "The network helper returned an invalid response.")
         case .forbidden:
-            "The installed network helper rejected this copy of Tono."
+            String(localized: "The installed network helper rejected this copy of Tono.")
+        // commandFailed carries helper-produced text verbatim; not a catalog key.
         case .commandFailed(let message, _): message
         }
     }

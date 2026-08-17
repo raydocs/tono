@@ -15,7 +15,13 @@ extension Color {
 /// Frosted glass background with a readable minimum tint. The appearance
 /// control varies the tint without ever making the app fully transparent.
 struct MeshGradientBackground: View {
+    /// When true, the login gate (and similar full-window brand surfaces)
+    /// get a light-mode brand wash. Default stays identical to the previous
+    /// two-layer frost so Dashboard and every existing call site are unchanged.
+    var emphasis: Bool = false
+
     @AppStorage(SettingsKey.glassTransparency) private var glassTransparency: Double = 50
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
@@ -30,6 +36,43 @@ struct MeshGradientBackground: View {
                 // frosted backdrop, while retaining enough tint for legibility.
                 .opacity(0.94 - (min(max(glassTransparency, 0), 100) / 100.0) * 0.22)
                 .ignoresSafeArea()
+
+            if emphasis {
+                emphasisWash
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    /// Light mode needs a real brand presence — frost + `.background` reads
+    /// as a blank sheet. Dark mode already has contrast, so the wash stays
+    /// quieter.
+    private var emphasisWash: some View {
+        Group {
+            if colorScheme == .dark {
+                RadialGradient(
+                    colors: [
+                        TonoBrand.accent.opacity(0.10),
+                        TonoBrand.accentSoft.opacity(0.05),
+                        .clear,
+                    ],
+                    center: .topTrailing,
+                    startRadius: 40,
+                    endRadius: 560
+                )
+            } else {
+                LinearGradient(
+                    colors: [
+                        TonoBrand.accent.opacity(0.20),
+                        TonoBrand.accentSoft.opacity(0.12),
+                        TonoBrand.accentWarm.opacity(0.10),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
         }
     }
 }
@@ -56,4 +99,16 @@ struct FrostedGlassView: NSViewRepresentable {
     MeshGradientBackground()
         .frame(width: 600, height: 400)
         .preferredColorScheme(.light)
+}
+
+#Preview("Light · emphasis") {
+    MeshGradientBackground(emphasis: true)
+        .frame(width: 600, height: 400)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Dark · emphasis") {
+    MeshGradientBackground(emphasis: true)
+        .frame(width: 600, height: 400)
+        .preferredColorScheme(.dark)
 }

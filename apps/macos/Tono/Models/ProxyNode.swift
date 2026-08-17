@@ -29,10 +29,19 @@ nonisolated enum ProxyType: String, Codable, CaseIterable, Hashable, Sendable {
 nonisolated enum LatencyLevel {
     case low, mid, high
 
+    /// Canonical latency banding for the whole app (macOS and Windows agree):
+    /// <200 good, <400 slow, ≥400 poor. Keep aligned with `latencyColor` in
+    /// the Windows `pages/tono/node-latency.ts`.
+    static func level(for ms: Int) -> LatencyLevel {
+        if ms < 200 { return .low }
+        if ms < 400 { return .mid }
+        return .high
+    }
+
     var color: String {
         switch self {
         case .low:  "30D158"
-        case .mid:  "B29500"
+        case .mid:  "FF9F0A"
         case .high: "FF453A"
         }
     }
@@ -95,11 +104,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     var protocolType: String { type.displayName }
     var ping: Int { latency }
 
-    var latencyColor: LatencyLevel {
-        if latency <= 100 { return .low }
-        else if latency <= 150 { return .mid }
-        else { return .high }
-    }
+    var latencyColor: LatencyLevel { LatencyLevel.level(for: latency) }
 
     enum CodingKeys: String, CodingKey {
         case id, flag, name, type, server, port, relay, latency, isActive, subscriptionId

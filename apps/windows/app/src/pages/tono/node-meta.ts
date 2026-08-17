@@ -1,7 +1,7 @@
 /**
- * Tono node presentation metadata: user-facing display names, flag emoji, and
- * the protocol line, derived from the catalog's wire names. The server
- * address itself is never shown — that is Tono's idea of redaction.
+ * Tono node presentation metadata: user-facing display names, compact region
+ * codes, and the protocol line, derived from the catalog's wire names. The
+ * server address itself is never shown — that is Tono's idea of redaction.
  */
 
 const NODE_DISPLAY_NAMES: Record<string, string> = {
@@ -12,33 +12,55 @@ const NODE_DISPLAY_NAMES: Record<string, string> = {
 export const nodeDisplayName = (wireName: string) =>
   NODE_DISPLAY_NAMES[wireName] ?? wireName
 
-/**
- * Per-city landmark emoji: easier to tell nodes apart at a glance than a row
- * of identical flags. Keyed by the lowercase city segment of the *display*
- * name so legacy wire names (US-VLESS-Reality → Los Angeles · Grove) pick up
- * their city's icon too. Falls back to the region flag, then 🌐.
- */
-const CITY_EMOJI: Record<string, string> = {
-  'los angeles': '🌴',
-  'salt lake city': '🏔️',
-  buffalo: '🦬',
-  'new york': '🗽',
-  'san jose': '💻',
-  seattle: '☕',
-  chicago: '🌭',
-  dallas: '🤠',
-  miami: '🏖️',
-  tokyo: '🗼',
-  osaka: '🏯',
+const CITY_CODES: Record<string, string> = {
+  'los angeles': 'US',
+  'salt lake city': 'US',
+  buffalo: 'US',
+  'new york': 'US',
+  'san jose': 'US',
+  seattle: 'US',
+  chicago: 'US',
+  dallas: 'US',
+  miami: 'US',
+  tokyo: 'JP',
+  osaka: 'JP',
 }
 
-export const nodeFlag = (wireName: string) => {
-  const emoji = CITY_EMOJI[cityOf(nodeDisplayName(wireName))]
-  if (emoji) return emoji
+const KNOWN_REGION_CODES = new Set([
+  'US',
+  'JP',
+  'SG',
+  'HK',
+  'TW',
+  'CN',
+  'KR',
+  'GB',
+  'DE',
+  'FR',
+  'CA',
+  'AU',
+  'IN',
+  'RU',
+  'BR',
+  'NL',
+])
+
+/** Stable two-letter mark used in the Windows and macOS server cards. */
+export const nodeCode = (wireName: string) => {
+  const displayName = nodeDisplayName(wireName)
+  const cityCode = CITY_CODES[cityOf(displayName)]
+  if (cityCode) return cityCode
+
+  const tokenCode = wireName
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.toUpperCase())
+    .find((token) => KNOWN_REGION_CODES.has(token))
+  if (tokenCode) return tokenCode
+
   const region = nodeRegion(wireName)
-  if (region === 'us') return '🇺🇸'
-  if (region === 'jp') return '🇯🇵'
-  return '🌐'
+  if (region === 'us') return 'US'
+  if (region === 'jp') return 'JP'
+  return 'GL'
 }
 
 export const nodeProtocol = (wireName: string) =>

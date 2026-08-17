@@ -1101,6 +1101,7 @@ export interface TranslationResources {
           unavailable: string
           us: string
         }
+        switchedTo: string
         tcpLatency: string
         testAll: string
         testCurrent: string

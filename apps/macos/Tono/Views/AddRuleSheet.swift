@@ -136,7 +136,7 @@ struct AddRuleSheet: View {
                             .padding(.vertical, 9)
                             .background(
                                 LinearGradient(
-                                    colors: [Color(hex: "4B6EFF"), Color(hex: "6B8CFF")],
+                                    colors: [TonoBrand.accent, Color(hex: "6B8CFF")],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
@@ -145,7 +145,7 @@ struct AddRuleSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .shadow(color: Color(hex: "4B6EFF").opacity(0.25), radius: 8, y: 3)
+                    .shadow(color: TonoBrand.accent.opacity(0.25), radius: 8, y: 3)
                 }
             }
             .padding(28)
