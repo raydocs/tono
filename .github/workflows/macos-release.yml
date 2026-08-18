@@ -86,7 +86,7 @@ jobs:
       # only, and why it has never completed once. `$RUNNER_TEMP` is the same
       # directory and is a plain environment variable, which is what the rest of
       # this file already uses.
-      KEYCHAIN_PATH: ${RUNNER_TEMP}/tono-macos-release.keychain-db
+      KEYCHAIN_PATH: ${{ runner.temp }}/tono-macos-release.keychain-db
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
