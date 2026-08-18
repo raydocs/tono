@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-18T10:59:09Z",
+ "generatedAt": "2026-08-18T12:02:18Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -18,9 +18,9 @@
   "repository": "Published from Tono’s own repository. Everything before 0.0.66 and 0.0.33 was released from a fork of another project, and the Windows updater asked a host blocked from mainland China, so a PC that could not connect was told no update existed."
  },
  "releaseSet": {
-  "id": "2026-08-18-macos-build67-windows-0.0.33",
+  "id": "2026-08-18-macos-build67-windows-0.0.34",
   "status": "both-lines-published-and-reachable",
-  "reason": "macOS Build 67 is the newest item in the Sparkle feed and Windows 0.0.33 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
+  "reason": "macOS Build 67 is the newest item in the Sparkle feed and Windows 0.0.34 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
  },
  "platforms": {
   "macos": {
@@ -61,35 +61,34 @@
   },
   "windows": {
    "current": {
-    "releaseId": "windows-0.0.33",
-    "version": "0.0.33",
+    "releaseId": "windows-0.0.34",
+    "version": "0.0.34",
     "architecture": "x86_64",
     "installer": "nsis",
     "availability": "published-stable",
     "update": {
      "mechanism": "tauri-updater-v2",
      "automaticUpdaterEnabled": true,
-     "channelVersion": "0.0.33"
+     "channelVersion": "0.0.34"
     },
-    "commit": "a4fb0d9f8aad7b0939727fcc8e345d93bc104631",
+    "commit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
     "releaseLine": "release/windows",
     "serviceProtocolRevision": 14,
     "minimumServiceRevision": 14,
     "recommended": true,
     "artifact": {
-     "name": "Tono_0.0.33_x64-setup.exe",
-     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.33_x64-setup.exe",
-     "size": 31491532,
-     "sha256": "a1384aa391ba93e8afaf5ea443bb6fda09537931c846802e459a3eb9a884f749",
+     "name": "Tono_0.0.34_x64-setup.exe",
+     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.34_x64-setup.exe",
+     "size": 32337730,
+     "sha256": "b746d353a11a86ca3bc61f06ac866a6ab0f32961f26bab0a56212d703263f427",
      "authenticodeSigned": false,
      "authenticodeStatus": "not-signed"
     },
     "knownLimitations": [
-     "已安装的旧版本无法自动更新到本版，必须手动安装一次；此后自动更新恢复",
      "安装包未附 Authenticode 证书，全新安装时 Windows SmartScreen 会告警",
-     "App 与 Service 必须同版：本版要求服务协议 14，安装器在一次提权事务里同时替换两者"
+     "App 与 Service 必须同版；从 0.0.33 自动更新会在一次提权事务里同时替换两者"
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.33"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.34"
    }
   }
  },
@@ -114,6 +113,23 @@
     "切换节点、导出日志有轻提示确认；测速结果逐个滚动出现；动效遵循\"减弱动态效果\"设置"
    ],
    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.67-build67"
+  },
+  {
+   "releaseId": "windows-0.0.34",
+   "platform": "windows",
+   "version": "0.0.34",
+   "publishedAt": "2026-08-18T11:59:54Z",
+   "status": "published-stable-channel-current",
+   "sourceCommit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
+   "tagCommit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
+   "summary": [
+    "以打磨与中文质量为主的版本：切换节点有轻提示确认、全面梳理简体中文文案（统一\"节点\"术语与全角标点）、节点徽章与 macOS 品牌标识逐像素对齐。服务协议不变，可从 0.0.33 自动更新。",
+    "切换节点后会弹出轻提示，标明已切换到哪个节点，不再无声切换",
+    "全面梳理中文文案：统一称\"节点\"，中文语境使用全角标点，重写了若干生硬的翻译",
+    "节点徽章图形重制为与 macOS 逐像素一致的品牌标识",
+    "选中节点的高亮与卡片描边的一致性小修"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.34"
   },
   {
    "releaseId": "windows-0.0.33",
