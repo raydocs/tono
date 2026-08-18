@@ -615,7 +615,10 @@ function managedCatalogYAML(value: unknown): string {
 function catalogProxyName(block: string): string | null {
   for (const line of block.split(/\r?\n/)) {
     const match = line.match(
-      /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#]+))\s*(?:#.*)?$/,
+      // The plain-scalar branch must accept internal spaces ("Los Angeles · Mesa"):
+      // the publish tooling validates names with a real YAML parser, and a name this
+      // regex cannot see fails the whole catalog closed for every filtered account.
+      /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#"'][^#]*?))\s*(?:#.*)?$/,
     );
     if (!match) continue;
     const raw = match[1] ?? match[2] ?? match[3] ?? '';
