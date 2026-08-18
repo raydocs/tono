@@ -330,30 +330,26 @@ struct MultiExitPolicyTests {
             }
         }
 
-        // The residential hop is a consumer uplink reached through a second
-        // hop; a one-member `select` group left every Claude stream with no
-        // failover and no liveness check, which is how requests died
-        // mid-response while the exit probe still reported healthy. The hop
-        // must stay first, the protected exit must back it, and both members
-        // must remain protected exits so nothing here can egress directly.
+        // The residential hop is an egress-identity requirement, not an
+        // availability preference (see the group's builder in ConfigPipeline):
+        // a fallback to Tono-Exit would keep the request inside TUN but
+        // silently swap the public IP from the home broadband address to the
+        // datacenter address — a successful request with the wrong identity.
+        // The group must therefore stay a single protected member, so a
+        // home-path failure surfaces as an assistant failure instead.
         let claudeGroupBlock = claudeSocks5Runtime
             .components(separatedBy: "name: \"\(ConfigPipeline.claudeHomeGroupName)\"")
             .dropFirst()
+            .first?
+            .components(separatedBy: "- name:")
             .first ?? ""
-        let residentialIndex = claudeGroupBlock.range(of: "- \"\(residentialProxy)\"")?.lowerBound
-        let exitIndex = claudeGroupBlock.range(of: "- \"\(ConfigPipeline.exitGroupName)\"")?.lowerBound
-        guard claudeGroupBlock.contains("type: fallback"),
-              let residentialIndex,
-              let exitIndex,
-              residentialIndex < exitIndex,
-              claudeGroupBlock.contains("url: \"\(ConfigPipeline.claudeHomeHealthURL)\""),
-              claudeGroupBlock.contains(
-                  "interval: \(ConfigPipeline.managedDirectHealthIntervalSeconds)"
-              ),
+        guard claudeGroupBlock.contains("type: select"),
+              claudeGroupBlock.contains("- \"\(residentialProxy)\""),
+              !claudeGroupBlock.contains("- \"\(ConfigPipeline.exitGroupName)\""),
               !claudeGroupBlock.contains("- DIRECT"),
               !claudeGroupBlock.contains("- \"\(ConfigPipeline.directProxyName)\"") else {
             throw TestFailure(
-                "Claude home group must be a health-checked fallback that prefers the residential hop and backs it with the protected exit only"
+                "Claude home group must stay a single-member select on the residential hop: any fallback member would silently swap the egress identity"
             )
         }
 
