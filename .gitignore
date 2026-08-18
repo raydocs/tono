@@ -6,7 +6,8 @@ DerivedData/
 *.xcodeproj/xcuserdata/
 **/*.xcodeproj/xcuserdata/
 *.xcworkspace/xcshareddata/swiftpm/
-**/*.xcworkspace/xcshareddata/swiftpm/
+**/*.xcworkspace/xcshareddata/swiftpm/*
+!**/*.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # macOS
 .DS_Store
