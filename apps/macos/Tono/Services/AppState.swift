@@ -736,6 +736,10 @@ final class AppState {
     private var managedCatalogRevision = -1
     private var managedCatalogDigest: String?
     private var managedCatalogRouting: TonoExitCatalogRouting?
+
+    /// Read-only view of the cloud-assigned residential line, for display.
+    /// The assistant lanes (Claude, ChatGPT, Grok) egress through it.
+    var residentialHomeHost: String? { managedCatalogRouting?.homeSocks5?.host }
     private var managedCatalogReloadPending = false
     private var managedTrafficPolicy = TonoTrafficPolicy(
         version: 1,

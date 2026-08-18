@@ -17,9 +17,11 @@ enum TonoAccountRules {
         return String((trimmed.isEmpty ? "Mac" : trimmed).prefix(80))
     }
 
-    static func quotaText(used: Int, limit: Int) -> String { "\(used) / \(limit) devices" }
+    static func quotaText(used: Int, limit: Int) -> String {
+        String(localized: "\(used) / \(limit) devices")
+    }
     static func expiryText(_ date: Date?, locale: Locale = .current) -> String {
-        guard let date else { return "No expiration" }
+        guard let date else { return String(localized: "No expiration") }
         return date.formatted(.dateTime.year().month().day().locale(locale))
     }
 }

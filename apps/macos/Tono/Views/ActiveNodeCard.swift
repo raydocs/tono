@@ -17,10 +17,11 @@ struct ActiveNodeCard: View {
     private var secondaryLine: String {
         let parsed = ConfigParser.extractFlag(from: nodeName)
         let code = nodeRegionCode(flag: parsed.flag, name: parsed.cleanName)
-        if let group = groupName {
-            return "\(group) · \(code)"
-        }
-        return code
+        var parts: [String] = []
+        if let codename = nodeCityParts(cleanName).codename { parts.append(codename) }
+        if let group = groupName { parts.append(group) }
+        parts.append(code)
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
@@ -60,9 +61,9 @@ struct ActiveNodeCard: View {
 
             HStack {
                 HStack(spacing: 10) {
-                    NodeRouteMark(size: 32)
+                    NodeRouteMark(size: 32, city: nodeCityParts(cleanName).city)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(cleanName)
+                        Text(nodeCityTitle(cleanName))
                             .font(.system(size: 13, weight: .semibold))
                             .fontWeight(.semibold)
                             .foregroundStyle(.primary)

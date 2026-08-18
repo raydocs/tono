@@ -246,7 +246,7 @@ nonisolated struct HelperManager {
 
         let uid = getuid()
         guard uid > 0 else {
-            throw HelperInstallError.installFailed("Refusing to bind the helper to root.")
+            throw HelperInstallError.installFailed(String(localized: "Refusing to bind the helper to root."))
         }
 
         let script = installScript(
@@ -349,7 +349,7 @@ nonisolated struct HelperManager {
                 ),
             ]
         )
-        throw HelperInstallError.installFailed("The authenticated helper did not start.")
+        throw HelperInstallError.installFailed(String(localized: "The authenticated helper did not start."))
     }
 
     private static func durationMilliseconds(since start: Date) -> String {

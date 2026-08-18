@@ -127,16 +127,200 @@ struct NodeRouteGlyph: Shape {
     }
 }
 
-/// The node identity mark: a neutral glass tile carrying the brand route
-/// glyph. Identity comes from the Tono brand language (gradient trace), not
-/// from flags or per-region color blocks; the tile itself stays neutral so it
-/// sits quietly in both light and dark mode.
+// MARK: - City glyphs
+
+/// Landmark strokes per exit city — palm for Los Angeles, torii for Tokyo,
+/// castle keep for Osaka — all drawn on the same 24×24 grid and stroked with
+/// the brand gradient, so identity varies while the language stays one.
+
+/// Palm tree (Los Angeles and, for now, other US beach/west cities).
+struct PalmGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let u = min(rect.width, rect.height) / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + (x - 12) * u, y: rect.midY + (y - 12) * u)
+        }
+        var path = Path()
+        // Trunk with a slight sway
+        path.move(to: p(12, 21))
+        path.addCurve(to: p(12, 11), control1: p(12.5, 18), control2: p(12.5, 14))
+        // Fountain of open fronds — single strokes, no doubling back, so the
+        // silhouette stays readable at badge size.
+        path.move(to: p(12, 11))
+        path.addCurve(to: p(5.6, 12.6), control1: p(10.2, 10.6), control2: p(7.4, 11.2))
+        path.move(to: p(12, 11))
+        path.addCurve(to: p(18.4, 12.6), control1: p(13.8, 10.6), control2: p(16.6, 11.2))
+        path.move(to: p(12, 11))
+        path.addCurve(to: p(5.8, 7.2), control1: p(10.4, 9.4), control2: p(8.2, 7.8))
+        path.move(to: p(12, 11))
+        path.addCurve(to: p(18.2, 7.2), control1: p(13.6, 9.4), control2: p(15.8, 7.8))
+        path.move(to: p(12, 11))
+        path.addCurve(to: p(9.4, 4.6), control1: p(11.2, 8.8), control2: p(10.4, 6.4))
+        path.move(to: p(12, 11))
+        path.addCurve(to: p(14.6, 4.6), control1: p(12.8, 8.8), control2: p(13.6, 6.4))
+        // Ground
+        path.move(to: p(8.5, 21))
+        path.addLine(to: p(15.5, 21))
+        return path
+    }
+}
+
+/// Torii gate (Tokyo).
+struct ToriiGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let u = min(rect.width, rect.height) / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + (x - 12) * u, y: rect.midY + (y - 12) * u)
+        }
+        var path = Path()
+        // Curved kasagi (top lintel)
+        path.move(to: p(4, 6.5))
+        path.addCurve(to: p(20, 6.5), control1: p(6.6, 5.5), control2: p(17.4, 5.5))
+        // Lintel end caps
+        path.move(to: p(6, 6.2)); path.addLine(to: p(6, 5.4))
+        path.move(to: p(18, 6.2)); path.addLine(to: p(18, 5.4))
+        // Nuki (second beam)
+        path.move(to: p(5.5, 10)); path.addLine(to: p(18.5, 10))
+        // Pillars, slightly splayed
+        path.move(to: p(7, 6.5)); path.addLine(to: p(6.5, 20))
+        path.move(to: p(17, 6.5)); path.addLine(to: p(17.5, 20))
+        // Gakuzuka (center strut)
+        path.move(to: p(12, 6.5)); path.addLine(to: p(12, 10))
+        return path
+    }
+}
+
+/// Castle keep (Osaka).
+struct CastleGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let u = min(rect.width, rect.height) / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + (x - 12) * u, y: rect.midY + (y - 12) * u)
+        }
+        var path = Path()
+        // Gate
+        path.move(to: p(9.5, 20)); path.addLine(to: p(9.5, 16.8))
+        path.addLine(to: p(14.5, 16.8)); path.addLine(to: p(14.5, 20))
+        // First eave (curved)
+        path.move(to: p(7, 16.8))
+        path.addCurve(to: p(17, 16.8), control1: p(8.4, 15.8), control2: p(15.6, 15.8))
+        // Tiers
+        path.move(to: p(8.6, 13.4)); path.addLine(to: p(15.4, 13.4))
+        path.addLine(to: p(16.6, 15.4)); path.addLine(to: p(7.4, 15.4)); path.closeSubpath()
+        path.move(to: p(9.4, 10.2)); path.addLine(to: p(14.6, 10.2))
+        path.addLine(to: p(15.6, 12)); path.addLine(to: p(8.4, 12)); path.closeSubpath()
+        path.move(to: p(10.4, 7.4)); path.addLine(to: p(13.6, 7.4))
+        path.addLine(to: p(14.5, 9)); path.addLine(to: p(9.5, 9)); path.closeSubpath()
+        // Finial
+        path.move(to: p(12, 7.4)); path.addLine(to: p(12, 5.2))
+        path.addLine(to: p(13.3, 4.5))
+        // Ground
+        path.move(to: p(5.5, 20)); path.addLine(to: p(18.5, 20))
+        return path
+    }
+}
+
+/// Mountain peaks over the lake (Salt Lake City — the Wasatch over the
+/// Great Salt Lake).
+struct MountainLakeGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let u = min(rect.width, rect.height) / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + (x - 12) * u, y: rect.midY + (y - 12) * u)
+        }
+        var path = Path()
+        // Two peaks, the far one lower
+        path.move(to: p(3.5, 16))
+        path.addLine(to: p(9, 7))
+        path.addLine(to: p(12.2, 12.2))
+        path.move(to: p(10.8, 14.5))
+        path.addLine(to: p(15, 5.5))
+        path.addLine(to: p(20.5, 16))
+        // Snow notch on the tall peak
+        path.move(to: p(13.7, 8.4))
+        path.addLine(to: p(15, 9.6))
+        path.addLine(to: p(16.3, 8.4))
+        // Lake: two calm strokes
+        path.move(to: p(4.5, 18.5))
+        path.addCurve(to: p(12, 18.5), control1: p(7, 17.8), control2: p(9.5, 19.2))
+        path.move(to: p(13.5, 18.5))
+        path.addCurve(to: p(19.5, 18.5), control1: p(15.5, 19.2), control2: p(17.5, 17.8))
+        return path
+    }
+}
+
+/// Waterfall curtain with mist (Buffalo — Niagara).
+struct FallsGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let u = min(rect.width, rect.height) / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + (x - 12) * u, y: rect.midY + (y - 12) * u)
+        }
+        var path = Path()
+        // Upstream river reaching the brink
+        path.move(to: p(3.5, 7.5))
+        path.addCurve(to: p(10, 7.5), control1: p(5.5, 7.1), control2: p(8, 7.9))
+        // Brink arc
+        path.move(to: p(10, 7.5))
+        path.addCurve(to: p(17.5, 8.2), control1: p(12.5, 7.2), control2: p(15.5, 7.4))
+        // Falling curtain
+        path.move(to: p(11, 7.9)); path.addLine(to: p(11, 16.5))
+        path.move(to: p(13.5, 7.8)); path.addLine(to: p(13.5, 17.2))
+        path.move(to: p(16, 8)); path.addLine(to: p(16, 16.5))
+        // Mist at the plunge pool
+        path.move(to: p(7.5, 18.8))
+        path.addCurve(to: p(12, 18.8), control1: p(9, 17.8), control2: p(10.5, 19.6))
+        path.addCurve(to: p(16.5, 18.8), control1: p(13.5, 17.9), control2: p(15, 19.6))
+        return path
+    }
+}
+
+/// Splits a catalog display name ("Los Angeles · Sunset") into the city the
+/// user actually thinks in and the codename that merely tells lines apart.
+func nodeCityParts(_ displayName: String) -> (city: String, codename: String?) {
+    let parts = displayName.split(separator: "·", maxSplits: 1)
+    guard parts.count == 2 else { return (displayName, nil) }
+    return (
+        parts[0].trimmingCharacters(in: .whitespaces),
+        parts[1].trimmingCharacters(in: .whitespaces)
+    )
+}
+
+/// The user-facing city title, localized (洛杉矶 / 东京 / …) when the catalog
+/// city has a translation; otherwise the original name.
+func nodeCityTitle(_ displayName: String) -> String {
+    let city = nodeCityParts(displayName).city
+    return String(localized: String.LocalizationValue(city))
+}
+
+private func cityGlyphShape(for city: String) -> AnyShape {
+    switch city.lowercased() {
+    case "los angeles", "san jose", "miami":
+        AnyShape(PalmGlyph())
+    case "salt lake city":
+        AnyShape(MountainLakeGlyph())
+    case "buffalo":
+        AnyShape(FallsGlyph())
+    case "tokyo":
+        AnyShape(ToriiGlyph())
+    case "osaka":
+        AnyShape(CastleGlyph())
+    default:
+        AnyShape(NodeRouteGlyph())
+    }
+}
+
+/// The node identity mark: a neutral glass tile carrying a brand-gradient
+/// stroke. With a `city`, the stroke is that city's landmark (palm, torii,
+/// castle keep); otherwise the generic route glyph. The tile itself stays
+/// neutral so it sits quietly in both light and dark mode.
 struct NodeRouteMark: View {
     @Environment(\.colorScheme) private var colorScheme
     var size: CGFloat = 44
+    var city: String? = nil
 
     var body: some View {
-        NodeRouteGlyph()
+        cityGlyphShape(for: city ?? "")
             .stroke(
                 TonoBrand.routeGradient,
                 style: StrokeStyle(
@@ -171,6 +355,9 @@ struct NodeCardSurface<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var isActive: Bool = false
     var isDisabled: Bool = false
+    /// When provided, the active top hairline slides between cards on
+    /// selection instead of blinking out and in.
+    var activeLineNamespace: Namespace.ID? = nil
     @ViewBuilder var content: () -> Content
 
     @State private var isHovering = false
@@ -217,14 +404,13 @@ struct NodeCardSurface<Content: View>: View {
                         .frame(height: 2)
                         .padding(.horizontal, 18)
                         .allowsHitTesting(false)
+                        .modifier(ActiveLineMatch(namespace: reduceMotion ? nil : activeLineNamespace))
                 }
             }
-            .glassEffect(
-                .regular.tint(isActive
-                    ? TonoBrand.accent.opacity(0.06)
-                    : .white.opacity(0.035)),
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
+            // No per-card glassEffect: adjacent Liquid Glass shapes in a grid
+            // render merge bridges between cards (the stray white bar under
+            // each card). The translucent fill + hairline + shadow carry the
+            // glass read on their own.
             .shadow(
                 color: isActive ? TonoBrand.accent.opacity(0.16) : .black.opacity(0.04),
                 radius: isActive ? 14 : 7,
@@ -235,6 +421,20 @@ struct NodeCardSurface<Content: View>: View {
             .animation(TonoMotion.easeOut(0.15, reduceMotion: reduceMotion), value: isHovering)
             .animation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion), value: isActive)
             .onHover { isHovering = $0 }
+    }
+}
+
+/// Applies matchedGeometryEffect only when a namespace is supplied, so the
+/// surface stays usable outside grids (and under Reduce Motion).
+private struct ActiveLineMatch: ViewModifier {
+    var namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.matchedGeometryEffect(id: "tono.activeTopLine", in: namespace)
+        } else {
+            content
+        }
     }
 }
 
@@ -272,9 +472,12 @@ struct NodeLatencyBadge: View {
                 .shadow(color: tint.opacity(0.45), radius: 3)
 
             VStack(alignment: .trailing, spacing: 1) {
+                // Digits roll as results land, so a latency sweep reads as a
+                // wave of numbers arriving card by card.
                 Text(title)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(tint)
+                    .contentTransition(.numericText())
                 if let detail {
                     Text(detail)
                         .font(.system(size: 9, weight: .medium))
@@ -289,6 +492,8 @@ struct NodeLatencyBadge: View {
             Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.7)
         }
         .fixedSize()
+        .animation(.easeOut(duration: 0.35), value: latency)
+        .animation(.easeOut(duration: 0.35), value: didFail)
     }
 }
 
@@ -304,14 +509,27 @@ struct NodeCardView: View {
             NodeCardSurface(isActive: isSelected) {
                 VStack(alignment: .leading, spacing: 13) {
                     HStack(alignment: .top, spacing: 11) {
-                        NodeRouteMark()
+                        NodeRouteMark(city: nodeCityParts(node.displayName).city)
 
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 7) {
-                                Text(node.displayName)
+                                // City first — the name users actually think
+                                // in; the codename only tells lines apart.
+                                Text(nodeCityTitle(node.displayName))
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
+                                    .layoutPriority(1)
+
+                                if let codename = nodeCityParts(node.displayName).codename {
+                                    Text(codename)
+                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2.5)
+                                        .background(.primary.opacity(0.05), in: Capsule())
+                                }
 
                                 if isSelected {
                                     Text("ACTIVE")

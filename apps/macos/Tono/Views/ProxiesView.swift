@@ -16,6 +16,7 @@ struct ProxiesView: View {
     @State private var regionFilter: String?
     @State private var targetGroup: ProxyService.MihomoGroup?
     @State private var catalogFeedbackDismissal: Task<Void, Never>?
+    @Namespace private var activeLineNS
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -271,7 +272,10 @@ struct ProxiesView: View {
                         }
                     }
 
-                    let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+                    // Adaptive columns: cards hold a comfortable width and the
+                    // column count follows the window instead of stretching
+                    // two cards across however much space there is.
+                    let columns = [GridItem(.adaptive(minimum: 284, maximum: 430), spacing: 12)]
                     ForEach(regionCodes, id: \.self) { code in
                         regionHeader(code, count: grouped[code]?.count ?? 0)
                             .padding(.top, regionCodes.first == code ? 0 : 8)
@@ -320,19 +324,38 @@ struct ProxiesView: View {
             || appState.isDisconnecting
             || (appState.switchingNodeId != nil && !isSwitching)
         return Button {
-            appState.selectNode(node.name)
+            withAnimation(TonoMotion.easeOut(0.35, reduceMotion: reduceMotion)) {
+                appState.selectNode(node.name)
+            }
         } label: {
-            NodeCardSurface(isActive: isActive, isDisabled: isDisabled) {
+            NodeCardSurface(
+                isActive: isActive,
+                isDisabled: isDisabled,
+                activeLineNamespace: activeLineNS
+            ) {
             VStack(alignment: .leading, spacing: 13) {
                 HStack(alignment: .top, spacing: 11) {
-                    NodeRouteMark()
+                    NodeRouteMark(city: nodeCityParts(node.displayName).city)
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 7) {
-                            Text(node.displayName)
+                            // City first — the name users actually think in;
+                            // the codename only tells lines apart.
+                            Text(nodeCityTitle(node.displayName))
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
+                                .layoutPriority(1)
+
+                            if let codename = nodeCityParts(node.displayName).codename {
+                                Text(codename)
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2.5)
+                                    .background(.primary.opacity(0.05), in: Capsule())
+                            }
 
                             if isActive {
                                 Text("ACTIVE")
@@ -453,13 +476,12 @@ struct ProxiesView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                NodeRouteMark(size: 32)
+                let clean = ProxyNode.displayName(
+                    for: ConfigParser.extractFlag(from: node.name).cleanName
+                )
+                NodeRouteMark(size: 32, city: nodeCityParts(clean).city)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(
-                        ProxyNode.displayName(
-                            for: ConfigParser.extractFlag(from: node.name).cleanName
-                        )
-                    )
+                    Text(clean)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)

@@ -58,6 +58,16 @@
         }
       }
     },
+    "%lld / %lld devices": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld / %lld 台设备"
+          }
+        }
+      }
+    },
     "%lld active": {
       "localizations": {
         "zh-Hans": {
@@ -508,12 +518,32 @@
         }
       }
     },
+    "Back": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回"
+          }
+        }
+      }
+    },
     "Blocked": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "已拦截"
+          }
+        }
+      }
+    },
+    "Buffalo": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "布法罗"
           }
         }
       }
@@ -611,6 +641,16 @@
         }
       }
     },
+    "Chicago": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "芝加哥"
+          }
+        }
+      }
+    },
     "Choose Target": {
       "localizations": {
         "zh-Hans": {
@@ -659,6 +699,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Claude 与微信研究"
+          }
+        }
+      }
+    },
+    "Claude, ChatGPT and Grok egress through this residential line.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude、ChatGPT 与 Grok 经这条家宽线路出网。"
           }
         }
       }
@@ -889,6 +939,16 @@
         }
       }
     },
+    "Continue with email": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "使用邮箱登录"
+          }
+        }
+      }
+    },
     "Copied": {
       "localizations": {
         "zh-Hans": {
@@ -1040,6 +1100,16 @@
       }
     },
     "DNS": {},
+    "Dallas": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "达拉斯"
+          }
+        }
+      }
+    },
     "Dark": {
       "extractionState": "manual",
       "localizations": {
@@ -1564,6 +1634,16 @@
         }
       }
     },
+    "Home line": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "家宽"
+          }
+        }
+      }
+    },
     "Home-US is temporarily disabled. Choose a managed cloud server.": {
       "localizations": {
         "zh-Hans": {
@@ -1998,6 +2078,16 @@
         }
       }
     },
+    "Location": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置"
+          }
+        }
+      }
+    },
     "Locking traffic to tunnel…": {
       "extractionState": "stale",
       "localizations": {
@@ -2039,6 +2129,16 @@
         }
       }
     },
+    "Los Angeles": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "洛杉矶"
+          }
+        }
+      }
+    },
     "MESSAGE": {
       "localizations": {
         "zh-Hans": {
@@ -2055,6 +2155,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "由 Tono 管理"
+          }
+        }
+      }
+    },
+    "Miami": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "迈阿密"
           }
         }
       }
@@ -2081,6 +2191,16 @@
         }
       }
     },
+    "Network": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络"
+          }
+        }
+      }
+    },
     "Network helper": {
       "localizations": {
         "zh-Hans": {
@@ -2098,6 +2218,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "上传网络日志"
+          }
+        }
+      }
+    },
+    "New York": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纽约"
           }
         }
       }
@@ -2180,6 +2310,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "未选择出口"
+          }
+        }
+      }
+    },
+    "No expiration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "永不过期"
           }
         }
       }
@@ -2445,6 +2585,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "仅上报精简的保护状态并允许四种固定操作。除非单独开启 Claude 流量研究，否则不会发送任何流量数据。"
+          }
+        }
+      }
+    },
+    "Osaka": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大阪"
           }
         }
       }
@@ -2884,6 +3034,16 @@
         }
       }
     },
+    "Refusing to bind the helper to root.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拒绝将网络组件绑定到 root 用户。"
+          }
+        }
+      }
+    },
     "Reject": {
       "extractionState": "manual",
       "localizations": {
@@ -2933,6 +3093,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "远程诊断"
+          }
+        }
+      }
+    },
+    "Remove": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除"
           }
         }
       }
@@ -3194,12 +3364,32 @@
         }
       }
     },
+    "Salt Lake City": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "盐湖城"
+          }
+        }
+      }
+    },
     "Sample": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "采样"
+          }
+        }
+      }
+    },
+    "San Jose": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "圣何塞"
           }
         }
       }
@@ -3252,6 +3442,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索服务器"
+          }
+        }
+      }
+    },
+    "Seattle": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "西雅图"
           }
         }
       }
@@ -4017,6 +4217,16 @@
         }
       }
     },
+    "Tap to connect via %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点按经 %@ 连接"
+          }
+        }
+      }
+    },
     "Tap to disconnect": {
       "localizations": {
         "zh-Hans": {
@@ -4097,6 +4307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前网络已切换。断网保护正在阻断流量，Tono 正在保护新的连接。"
+          }
+        }
+      }
+    },
+    "The authenticated helper did not start.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已认证的网络组件未能启动。"
           }
         }
       }
@@ -4273,6 +4493,16 @@
         }
       }
     },
+    "This device": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台设备"
+          }
+        }
+      }
+    },
     "This is exactly what Tono reports when support requests a diagnostic snapshot. It carries no hostnames, IP addresses, process names or account tokens.": {
       "extractionState": "stale",
       "localizations": {
@@ -4320,6 +4550,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "为确保 Tono 稳定运行，必须从“应用程序”文件夹启动。请退出 Tono，在安装窗口中将它拖到“应用程序”，然后打开已安装的副本。"
+          }
+        }
+      }
+    },
+    "Tokyo": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "东京"
           }
         }
       }
