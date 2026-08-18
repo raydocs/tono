@@ -357,6 +357,7 @@ jobs:
           fi
           xcodebuild \
             -project apps/macos/LiquidClash.xcodeproj \
+            -scheme LiquidClash \
             -resolvePackageDependencies \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
           sign_update=$(
