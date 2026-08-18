@@ -118,9 +118,12 @@ test('normalizes a Tauri action NSIS API asset to its immutable release URL', as
     windowsRelease(),
     async () => signedResponse,
   )
+  // 33cb8d5: the channel points users at the R2 mirror, which mainland
+  // networks can reach, not at github.com — the GitHub asset URL is only the
+  // provenance check upstream of this rewrite.
   assert.equal(
     manifest.platforms['windows-x86_64-nsis'].url,
-    windowsRelease().assets[0].browser_download_url,
+    'https://releases.afk.ccwu.cc/download/Tono_0.0.19_x64-setup.nsis.zip',
   )
 })
 
@@ -159,14 +162,16 @@ test('signing and channel write jobs require the protected Windows release line'
     ),
   ])
 
-  assert.match(
-    releaseWorkflow,
-    /if: github\.ref == 'refs\/heads\/release\/windows'/,
-  )
+  // The wrong-ref guard is a dedicated `branch` job that exits nonzero, not a
+  // job-level `if:` — a skipped job records as success, which is how a wrong-ref
+  // dispatch used to go green while doing nothing. Assert the guard job fails
+  // the run and that the privileged job cannot start without it.
+  for (const workflow of [releaseWorkflow, promotionWorkflow]) {
+    assert.match(workflow, /EXPECTED: refs\/heads\/release\/windows/)
+    assert.match(workflow, /\[ "\$GITHUB_REF" != "\$EXPECTED" \]/)
+    assert.match(workflow, /needs: branch/)
+    assert.doesNotMatch(workflow, /if: github\.ref ==/)
+  }
   assert.match(releaseWorkflow, /environment: windows-release/)
-  assert.match(
-    promotionWorkflow,
-    /if: github\.ref == 'refs\/heads\/release\/windows'/,
-  )
   assert.match(promotionWorkflow, /environment: windows-update-channel/)
 })
