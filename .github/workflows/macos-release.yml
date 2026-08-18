@@ -86,12 +86,17 @@ jobs:
       # only, and why it has never completed once. `$RUNNER_TEMP` is the same
       # directory and is a plain environment variable, which is what the rest of
       # this file already uses.
-      KEYCHAIN_PATH: ${{ runner.temp }}/tono-macos-release.keychain-db
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+
+      - name: Resolve the release keychain path
+        # A workflow-env value is never shell-expanded, and the runner context
+        # is not available to job-level env — write the real path at runtime
+        # so every later step reads an existing file.
+        run: echo "KEYCHAIN_PATH=$RUNNER_TEMP/tono-macos-release.keychain-db" >> "$GITHUB_ENV"
 
       - name: Require the macOS release line
         run: |
