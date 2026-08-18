@@ -63,7 +63,7 @@ nonisolated struct ConfigPipeline {
         let webDomainPins: [DirectDomainPin]
         let webDomainSuffixes: [DirectDomainSuffix]
         let mediaEndpoints: [DirectEndpoint]
-        /// Exact reviewed TCP IP endpoints used by native WeChat HTTPDNS.
+        /// Exact reviewed TCP IP endpoints used by native-app HTTPDNS.
         /// These receive TCP rules and per-endpoint health fallbacks; UDP
         /// media endpoints remain isolated in `mediaEndpoints`.
         let tcpEndpoints: [DirectEndpoint]
@@ -75,6 +75,10 @@ nonisolated struct ConfigPipeline {
         /// runtime metadata is what lets a signed policy carry a new reviewed
         /// hostname through every validation layer, not merely the decoder.
         let trusted: Bool
+        /// Whether this policy contains the native-app direct surface. Web-only
+        /// policies may still use exact/suffix web routes, but must not arm the
+        /// address-free reviewed-bundle port permit or route office processes.
+        let nativeAppDirect: Bool
 
         init(
             physicalInterface: String,
@@ -84,7 +88,8 @@ nonisolated struct ConfigPipeline {
             mediaEndpoints: [DirectEndpoint],
             tcpEndpoints: [DirectEndpoint] = [],
             directResolverHosts: [String] = [],
-            trusted: Bool = false
+            trusted: Bool = false,
+            nativeAppDirect: Bool = true
         ) {
             self.physicalInterface = physicalInterface
             self.domainPins = domainPins
@@ -94,6 +99,15 @@ nonisolated struct ConfigPipeline {
             self.tcpEndpoints = tcpEndpoints
             self.directResolverHosts = directResolverHosts
             self.trusted = trusted
+            self.nativeAppDirect = nativeAppDirect
+        }
+
+        /// PF has no hostname-aware rule. A suffix route therefore needs the
+        /// bounded root-originated port permit even when this policy contains
+        /// no native-app surface. Exact web pins use session endpoints and do
+        /// not need this wider permit.
+        var requiresAddressFreeDirectPermit: Bool {
+            nativeAppDirect || !webDomainSuffixes.isEmpty
         }
 
         var sessionEndpoints: [DirectEndpoint] {
@@ -138,12 +152,10 @@ nonisolated struct ConfigPipeline {
     static let webDirectProxyName = "Tono-China-Web-Direct"
     /// Wraps the interface-bound web direct outbound so a China path that is
     /// unreachable from where the user actually sits degrades to the tunnel
-    /// instead of killing the flow. A bare `direct` outbound has no failover:
-    /// that is why suffix routes were withheld even after PF stopped being the
-    /// obstacle. The probe is class-level, not per destination — mihomo scores
-    /// fallback members by URL — which answers "can this machine reach China
-    /// directly at all", the question that actually distinguishes the two
-    /// members.
+    /// instead of killing the flow. A bare `direct` outbound has no failover;
+    /// the probe is class-level, not per destination — mihomo scores fallback
+    /// members by URL — which answers "can this machine reach China directly
+    /// at all", the question that actually distinguishes the two members.
     static let webDirectGroupName = "Tono-China-Web"
     /// Same failover the web routes got, for the reviewed bundle's own direct
     /// path. Without it the bundle-wide process rule pointed at a bare `direct`
@@ -345,6 +357,15 @@ nonisolated struct ConfigPipeline {
         "qiyipic.com", "iqiyipic.com", "youku.com", "ykimg.com",
         "xiaohongshu.com", "xhslink.com", "xhscdn.com",
         "feishu.cn", "feishucdn.com", "larksuite.com", "larkoffice.com",
+        "feishu.net", "feishuapp.cn", "feishuapp.com", "feishudoc.cn",
+        "feishudoc.com", "feishumeetings.cn", "feishumeetings.com",
+        "feishuimg.com", "feishukacdn.com", "larkofficecdn.com",
+        "larkofficeimg.com", "larkcloud.com", "larkcloud.net",
+        "getfeishu.cn", "getfeishu.com", "feishupkg.com", "feishuvc.cn",
+        "feishuvc.com", "securityfeishu.cn", "securityfs.cn",
+        "statusfeishu.cn",
+        "dingtalk.cn", "dingtalk.com", "dingtalk.net", "dingtalkapps.com",
+        "dingtalkcloud.com", "dingding.xin", "ztna-dingtalk.com", "ddurl.to",
         "baidu.com", "baidupcs.com", "bcebos.com", "baidubcs.com",
         "bdstatic.com", "bdimg.com", "aliyuncs.com", "10jqka.com.cn",
         "iwencai.com", "eastmoney.com", "dfcfw.com", "sina.com.cn",
@@ -360,6 +381,39 @@ nonisolated struct ConfigPipeline {
         "pushplus.plus", "baostock.com", "sse.com.cn", "szse.cn",
         "zoom.us", "zoom.com", "zoomgov.com", "oray.com", "sunlogin.com",
         "edu.cn",
+    ]
+
+    /// Exact host families that may be placed in the application-direct
+    /// `domains` field. This is intentionally narrower than the web suffix
+    /// list: the caller is asking for a signed desktop application's raw-IP
+    /// traffic to leave the tunnel, not for every browser tab under a public
+    /// namespace.
+    static let managedNativeDirectSuffixAllowlist = [
+        "qq.com", "qq.com.cn", "qpic.cn", "qlogo.cn", "gtimg.cn",
+        "gtimg.com", "wechat.com", "weixin.com", "weixinbridge.com",
+        "wxs.qq.com",
+        "feishu.cn", "feishucdn.com", "larksuite.com", "larkoffice.com",
+        "feishu.net", "feishuapp.cn", "feishuapp.com", "feishudoc.cn",
+        "feishudoc.com", "feishumeetings.cn", "feishumeetings.com",
+        "feishuimg.com", "feishukacdn.com", "larkofficecdn.com",
+        "larkofficeimg.com", "larkcloud.com", "larkcloud.net",
+        "getfeishu.cn", "getfeishu.com", "feishupkg.com", "feishuvc.cn",
+        "feishuvc.com", "securityfeishu.cn", "securityfs.cn",
+        "statusfeishu.cn",
+        // Feishu's official client firewall list also includes these shared
+        // ByteDance/Feishu service namespaces. They stay in the native-app
+        // list only; putting them in web suffix policy would bypass the
+        // process boundary for ordinary browser traffic.
+        "zjurl.cn", "snssdk.com", "pstatp.com", "byteimg.com",
+        "bytedance.net", "bytedance.com", "byted-static.com",
+        "bytegoofy.com", "feishu-3rd-party-services.com", "bytehwm.com",
+        "ttwebview.com", "bytegecko.com", "bytescm.com", "kundou.cn",
+        "bytetos.com", "zijieapi.com", "byteeffecttos.com", "bytednsdoc.com",
+        "bytedanceapi.com", "volcvideo.com", "feelgood.cn", "baseopendev.com",
+        "bytedapm.com", "ibytedapm.com", "larkenterprise.com", "aiforce.cloud",
+        "aiforce.run",
+        "dingtalk.cn", "dingtalk.com", "dingtalk.net", "dingtalkapps.com",
+        "dingtalkcloud.com", "dingding.xin", "ztna-dingtalk.com", "ddurl.to",
     ]
     /// Domain families the reviewed WeChat bundle dials, resolved through China
     /// DoH on the interface-bound direct outbound.
@@ -418,13 +472,11 @@ nonisolated struct ConfigPipeline {
         DirectEndpoint(address: "223.5.5.5", port: 443, transport: "tcp"),
         DirectEndpoint(address: "223.6.6.6", port: 443, transport: "tcp"),
     ]
-    /// WeChat 4.x performs image/media/CDN transfer in helper executables that
-    /// live inside the app bundle but are not the main binary (WeChatAppEx, its
-    /// dedicated NetworkService helper, WeChatHelper, wxplayer, wxocr). Process
-    /// matching therefore covers the whole reviewed bundle prefix, not one
-    /// exact executable path. The standard install location is always present;
-    /// a Launch Services lookup adds the real install path so a non-standard
-    /// install keeps routing and audit attribution.
+    /// WeChat 4.x, DingTalk and Feishu/Lark all perform important work in
+    /// helper executables inside their app bundles. Process matching therefore
+    /// covers the whole reviewed bundle prefix, not one exact executable path.
+    /// The standard install locations are always present; Launch Services adds
+    /// a non-standard install only after its bundle identity is checked.
     ///
     /// Adoption is gated on the code signature and on being safe to embed in a
     /// Mihomo rule payload — and on nothing else. It used to also require the
@@ -464,8 +516,54 @@ nonisolated struct ConfigPipeline {
     /// invisible, and the list is sampled when the runtime is generated, so a
     /// move mid-session is picked up on the next connect or policy refresh
     /// rather than immediately.
-    static var managedDirectProcessBundlePaths: [String] {
-        var paths = ["/Applications/WeChat.app/"]
+    static let reviewedDirectDefaultBundlePaths = [
+        "/Applications/WeChat.app/",
+        "/Applications/微信.app/",
+        "/Applications/DingTalk.app/",
+        "/Applications/钉钉.app/",
+        "/Applications/Feishu.app/",
+        "/Applications/飞书.app/",
+        "/Applications/Lark.app/",
+    ]
+
+    /// Bundle identifiers seen in macOS distributions. The standard
+    /// `/Applications` paths above remain the primary compatibility path; this
+    /// list lets a Launch Services-registered relocation work without trusting
+    /// an arbitrary process name or path. A relocation is admitted only for
+    /// vendors whose signing team has been captured below; otherwise it stays
+    /// on the tunnel until a real signed bundle is reviewed.
+    static let reviewedDirectBundleIdentifiers = [
+        "com.tencent.xinWeChat",
+        "com.alibaba.DingTalk",
+        "com.alibaba.DingTalkMac",
+        "com.alibaba.dingtalk",
+        "com.dingtalk.DingTalk",
+        "com.dingtalk.DingTalkMac",
+        "com.bytedance.feishu",
+        "com.bytedance.lark",
+        "com.bytedance.Feishu",
+        "com.bytedance.Lark",
+        "com.larksuite.Feishu",
+        "com.larksuite.Lark",
+        "com.feishu.Feishu",
+    ]
+
+    /// Team identity captured from the official DingTalk macOS distribution.
+    /// Feishu/Lark relocations stay fail-closed until a real signed bundle is
+    /// inspected on a target Mac; the standard `/Applications` paths remain
+    /// supported meanwhile.
+    static let reviewedDirectTeamIdentifiers = [
+        "com.alibaba.DingTalk": "XN6U3EV979",
+        "com.alibaba.DingTalkMac": "XN6U3EV979",
+        "com.alibaba.dingtalk": "XN6U3EV979",
+        "com.dingtalk.DingTalk": "XN6U3EV979",
+        "com.dingtalk.DingTalkMac": "XN6U3EV979",
+    ]
+
+    /// WeChat-only paths are kept separate because the audit counters are
+    /// deliberately WeChat-specific. Routing uses the broader reviewed list.
+    static var wechatProcessBundlePaths: [String] {
+        var paths = ["/Applications/WeChat.app/", "/Applications/微信.app/"]
         let discovered = NSWorkspace.shared.urlsForApplications(
             withBundleIdentifier: "com.tencent.xinWeChat"
         )
@@ -475,6 +573,25 @@ nonisolated struct ConfigPipeline {
                   !paths.contains(path),
                   isSignedWeChatBundle(at: url) else { continue }
             paths.append(path)
+        }
+        return paths
+    }
+
+    static var managedDirectProcessBundlePaths: [String] {
+        var paths = reviewedDirectDefaultBundlePaths
+        for identifier in reviewedDirectBundleIdentifiers {
+            let discovered = NSWorkspace.shared.urlsForApplications(
+                withBundleIdentifier: identifier
+            )
+            for url in discovered {
+                let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
+                guard isRulePayloadSafeBundlePath(path),
+                      !paths.contains(path),
+                      isSignedReviewedDirectBundle(at: url, identifier: identifier) else {
+                    continue
+                }
+                paths.append(path)
+            }
         }
         return paths
     }
@@ -536,6 +653,47 @@ nonisolated struct ConfigPipeline {
            }), !team.isEmpty {
             requirementText += #" and certificate leaf[subject.OU] = ""# + team + #"""#
         }
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            url as CFURL,
+            SecCSFlags(rawValue: 0),
+            &code
+        ) == errSecSuccess, let code else { return false }
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(
+            requirementText as CFString,
+            SecCSFlags(rawValue: 0),
+            &requirement
+        ) == errSecSuccess, let requirement else { return false }
+        return SecStaticCodeCheckValidity(
+            code,
+            SecCSFlags(rawValue: kSecCSBasicValidateOnly),
+            requirement
+        ) == errSecSuccess
+    }
+
+    /// Relocated office bundles get an Apple-anchored signature and an exact
+    /// known bundle identifier. We do not grant arbitrary paths by basename;
+    /// if a vendor changes its identifier, the path is omitted and traffic
+    /// safely remains on the tunnel until the allowlist is updated.
+    private static func isSignedReviewedDirectBundle(
+        at url: URL,
+        identifier: String
+    ) -> Bool {
+        if identifier == "com.tencent.xinWeChat" {
+            return isSignedWeChatBundle(at: url)
+        }
+        guard reviewedDirectBundleIdentifiers.contains(identifier),
+              identifier.range(
+                  of: #"^[A-Za-z0-9.-]+$"#,
+                  options: .regularExpression
+              ) != nil,
+              let team = reviewedDirectTeamIdentifiers[identifier] else {
+            return false
+        }
+        let requirementText =
+            #"anchor apple generic and identifier "# + identifier
+            + #""" and certificate leaf[subject.OU] = ""# + team + #"""#
         var code: SecStaticCode?
         guard SecStaticCodeCreateWithPath(
             url as CFURL,
@@ -1219,43 +1377,32 @@ nonisolated struct ConfigPipeline {
         \(choiceLines)
 
         """
-        // The residential hop is a consumer uplink behind NAT and is itself
-        // dialed through the protected exit (dialer-proxy), so a stall there
-        // used to kill every Claude connection mid-response with nowhere to go:
-        // a one-member `select` group has no failover and no health check, and
-        // the exit probe only ever tested the exit, never this chained path.
-        // Keep the residential hop first so a healthy session is unchanged, and
-        // fall back to the protected exit rather than stranding the request.
-        // Both members are protected exits, so fail-closed is unaffected —
-        // only the egress identity changes while the residential hop is down.
+        // The residential hop is an egress-identity requirement, not an
+        // availability preference. A fallback to Tono-Exit would keep the
+        // request inside TUN but silently change the public IP from the home
+        // broadband address to the datacenter address. Keep this group to one
+        // member so a home-path failure is visible as an assistant failure,
+        // never as a successful request with the wrong egress identity.
         if claudeHomeSocks5 != nil {
             yaml += """
               - name: "\(claudeHomeGroupName)"
-                type: fallback
+                type: select
                 proxies:
                   - "\(homeResidentialProxyName)"
-                  - "\(exitGroupName)"
-                url: "\(claudeHomeHealthURL)"
-                interval: \(managedDirectHealthIntervalSeconds)
-                timeout: \(managedDirectHealthTimeoutMilliseconds)
-                lazy: false
 
             """
         } else if let claudeHome {
             yaml += """
               - name: "\(claudeHomeGroupName)"
-                type: fallback
+                type: select
                 proxies:
                   - "\(yamlScalar(claudeHome))"
-                  - "\(exitGroupName)"
-                url: "\(claudeHomeHealthURL)"
-                interval: \(managedDirectHealthIntervalSeconds)
-                timeout: \(managedDirectHealthTimeoutMilliseconds)
-                lazy: false
 
             """
         }
-        if directPolicy != nil, !managedDirectProcessPathRegexes.isEmpty {
+        if let directPolicy,
+           directPolicy.nativeAppDirect,
+           !managedDirectProcessPathRegexes.isEmpty {
             yaml += """
               - name: "\(appDirectGroupName)"
                 type: fallback
@@ -1287,8 +1434,9 @@ nonisolated struct ConfigPipeline {
         }
         yaml += "\nrules:\n"
         // Claude App/Code are permanently protected before every trial
-        // exception. The native WeChat rules below additionally require an
-        // executable inside the reviewed /Applications/WeChat.app bundle; the
+        // exception. The native reviewed-app rules below additionally require
+        // an executable inside one of the reviewed WeChat/DingTalk/Feishu
+        // bundle paths; the
         // separate web rules remain bounded to an exact reviewed hostname and
         // TCP/443. Native WeChat rules emit DOMAIN and separate IP-literal
         // variants, never an impossible DOMAIN+IP-CIDR conjunction. The
@@ -1326,7 +1474,7 @@ nonisolated struct ConfigPipeline {
             yaml += "  - PROCESS-NAME,tailscaled,DIRECT\n"
             yaml += "  - PROCESS-NAME,tailscale,DIRECT\n"
         }
-        if let directPolicy {
+        if let directPolicy, directPolicy.nativeAppDirect {
             // WeChat resolves its message channel through its own HTTPDNS and
             // dials raw addresses, so the pinned DOMAIN rules below can only
             // ever match its CDN traffic: 84% of observed dials carried no
@@ -1377,6 +1525,8 @@ nonisolated struct ConfigPipeline {
                 yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
                 yaml += "  - AND,((NETWORK,UDP),(PROCESS-PATH-REGEX,\(processPathRegex))),\(appDirectGroupName)\n"
             }
+        }
+        if let directPolicy {
             // The exact host/port pins that used to live here are gone. Every
             // one of them carried the same PROCESS-PATH-REGEX as the
             // bundle-wide rule emitted above plus a narrower port, domain or
@@ -1417,7 +1567,7 @@ nonisolated struct ConfigPipeline {
             // so it produced no `sessionEndpoints` and no exact-address permit,
             // and `block drop out quick all` discarded every dial it sent to
             // the interface-bound direct outbound. That is no longer how the
-            // ruleset works. The reviewed-bundle permit passes root-originated
+            // ruleset works. The reviewed native-app permit passes root-originated
             // direct dials on the ports this policy uses, which is why WeChat's
             // HTTPDNS addresses — never pinned, never PF-listed — moved 1.6 MB,
             // 1.3 MB and 1.1 MB directly in a single measured session.
@@ -1748,12 +1898,7 @@ nonisolated struct ConfigPipeline {
             throw TonoInjectionError.unsafeNode("managed direct domain")
         }
         if trusted { return host }
-        let allowedSuffixes = [
-            "qq.com", "qq.com.cn", "qpic.cn", "qlogo.cn", "gtimg.cn",
-            "gtimg.com", "wechat.com", "weixin.com", "weixinbridge.com",
-            "wxs.qq.com",
-        ]
-        guard allowedSuffixes.contains(where: {
+        guard managedNativeDirectSuffixAllowlist.contains(where: {
             host == $0 || host.hasSuffix(".\($0)")
         }) else {
             throw TonoInjectionError.unsafeNode("managed direct domain")
@@ -1956,7 +2101,8 @@ nonisolated struct ConfigPipeline {
             mediaEndpoints: uniqueMedia,
             tcpEndpoints: uniqueTCP,
             directResolverHosts: resolverHosts.sorted(),
-            trusted: policy.trusted
+            trusted: policy.trusted,
+            nativeAppDirect: policy.nativeAppDirect
         )
     }
 

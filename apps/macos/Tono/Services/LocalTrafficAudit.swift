@@ -765,7 +765,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         // and media traffic comes from helper executables inside the bundle,
         // not the main binary.
         let path = processPath.lowercased()
-        return ConfigPipeline.managedDirectProcessBundlePaths.contains {
+        return ConfigPipeline.wechatProcessBundlePaths.contains {
             path.hasPrefix($0.lowercased())
         }
     }

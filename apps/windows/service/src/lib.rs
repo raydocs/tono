@@ -115,7 +115,7 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// App then keeps only the compiled pins.
 /// Revision 14 adds the reviewed-port DIRECT permit (`wfp_model` rule H) and widens the
 /// bootstrap API channel to `CONTROL_PLANE_PORTS`. Both are Service capabilities the App now
-/// relies on: an App that emits process-scoped WeChat rules against a revision-13 Service gets
+/// relies on: an App that emits process-scoped reviewed-app rules against a revision-13 Service gets
 /// the routing without the permit, which is precisely the silent black hole rule H exists to
 /// end. MIN_REQUIRED moves with it for that reason — this is not an additive field a client can
 /// ignore, it is a behaviour the client's own rules assume.

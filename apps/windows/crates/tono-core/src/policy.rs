@@ -36,7 +36,7 @@ pub const MAX_POLICY_MEDIA: usize = 64;
 pub const MAX_POLICY_WEB_DOMAINS: usize = 32;
 pub const MAX_POLICY_DIRECT_SUFFIXES: usize = 64;
 
-pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 50] = [
+pub const ALLOWED_WEB_DOMAIN_SUFFIXES: &[&str] = &[
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
@@ -57,6 +57,35 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 50] = [
     "feishucdn.com",
     "larksuite.com",
     "larkoffice.com",
+    "feishu.net",
+    "feishuapp.cn",
+    "feishuapp.com",
+    "feishudoc.cn",
+    "feishudoc.com",
+    "feishumeetings.cn",
+    "feishumeetings.com",
+    "feishuimg.com",
+    "feishukacdn.com",
+    "larkofficecdn.com",
+    "larkofficeimg.com",
+    "larkcloud.com",
+    "larkcloud.net",
+    "getfeishu.cn",
+    "getfeishu.com",
+    "feishupkg.com",
+    "feishuvc.cn",
+    "feishuvc.com",
+    "securityfeishu.cn",
+    "securityfs.cn",
+    "statusfeishu.cn",
+    "dingtalk.cn",
+    "dingtalk.com",
+    "dingtalk.net",
+    "dingtalkapps.com",
+    "dingtalkcloud.com",
+    "dingding.xin",
+    "ztna-dingtalk.com",
+    "ddurl.to",
     "baidu.com",
     "baidupcs.com",
     "bcebos.com",
@@ -93,7 +122,7 @@ pub const ALLOWED_WEB_DOMAIN_SUFFIXES: [&str; 50] = [
 /// `validatedManagedDirectDomain` parity). A host must equal a suffix or be
 /// a subdomain of it — strict DNS label boundaries, so `evil-qq.com` and
 /// `qq.com.evil.com` never qualify.
-pub const ALLOWED_DOMAIN_SUFFIXES: [&str; 10] = [
+pub const ALLOWED_DOMAIN_SUFFIXES: &[&str] = &[
     "qq.com",
     "qq.com.cn",
     "qpic.cn",
@@ -104,6 +133,69 @@ pub const ALLOWED_DOMAIN_SUFFIXES: [&str; 10] = [
     "weixin.com",
     "weixinbridge.com",
     "wxs.qq.com",
+    "feishu.cn",
+    "feishucdn.com",
+    "larksuite.com",
+    "larkoffice.com",
+    "feishu.net",
+    "feishuapp.cn",
+    "feishuapp.com",
+    "feishudoc.cn",
+    "feishudoc.com",
+    "feishumeetings.cn",
+    "feishumeetings.com",
+    "feishuimg.com",
+    "feishukacdn.com",
+    "larkofficecdn.com",
+    "larkofficeimg.com",
+    "larkcloud.com",
+    "larkcloud.net",
+    "getfeishu.cn",
+    "getfeishu.com",
+    "feishupkg.com",
+    "feishuvc.cn",
+    "feishuvc.com",
+    "securityfeishu.cn",
+    "securityfs.cn",
+    "statusfeishu.cn",
+    // Feishu's official client firewall list also includes these shared
+    // ByteDance/Feishu service namespaces. Keep them in the native-app
+    // allowlist only; the web suffix list remains narrower by design.
+    "zjurl.cn",
+    "snssdk.com",
+    "pstatp.com",
+    "byteimg.com",
+    "bytedance.net",
+    "bytedance.com",
+    "byted-static.com",
+    "bytegoofy.com",
+    "feishu-3rd-party-services.com",
+    "bytehwm.com",
+    "ttwebview.com",
+    "bytegecko.com",
+    "bytescm.com",
+    "kundou.cn",
+    "bytetos.com",
+    "zijieapi.com",
+    "byteeffecttos.com",
+    "bytednsdoc.com",
+    "bytedanceapi.com",
+    "volcvideo.com",
+    "feelgood.cn",
+    "baseopendev.com",
+    "bytedapm.com",
+    "ibytedapm.com",
+    "larkenterprise.com",
+    "aiforce.cloud",
+    "aiforce.run",
+    "dingtalk.cn",
+    "dingtalk.com",
+    "dingtalk.net",
+    "dingtalkapps.com",
+    "dingtalkcloud.com",
+    "dingding.xin",
+    "ztna-dingtalk.com",
+    "ddurl.to",
 ];
 
 /// Addresses that may never receive a DIRECT permit (the pinned DoH
@@ -712,6 +804,10 @@ mod tests {
             "cdn.a.gtimg.com",
             "Qpic.CN.",
             "a.b.wxs.qq.com",
+            "open.dingtalk.com",
+            "open.feishu.cn",
+            "open.larksuite.com",
+            "api.snssdk.com",
         ] {
             assert!(is_allowed_direct_domain(good), "{good}");
         }
@@ -724,9 +820,28 @@ mod tests {
             "",
             "qq .com",
             "q q.com",
+            "evil-dingtalk.com",
+            "dingtalk.com.evil.com",
         ] {
             assert!(!is_allowed_direct_domain(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn accepts_reviewed_office_app_domains() {
+        let document = policy_json(
+            r#"{"host":"open.dingtalk.com","ports":[80,443]},{"host":"open.feishu.cn","ports":[443]},{"host":"api.snssdk.com","ports":[443]}"#,
+            "",
+        );
+        let policy = validate_policy(&response(1, &document), &no_protected()).unwrap();
+        assert_eq!(
+            policy.domains.iter().map(|entry| entry.host.as_str()).collect::<Vec<_>>(),
+            ["api.snssdk.com", "open.dingtalk.com", "open.feishu.cn"]
+        );
+        assert!(is_allowed_direct_suffix("dingtalk.com"));
+        assert!(is_allowed_direct_suffix("feishu.cn"));
+        assert!(!is_allowed_direct_suffix("snssdk.com"));
+        assert!(!is_allowed_direct_suffix("evil-dingtalk.com"));
     }
 
     #[test]

@@ -27,6 +27,7 @@ import getSystem from '@/utils/get-system'
 import { MeshBackground } from './MeshBackground'
 import { TONO_FONT_STACK, tonoText } from './theme'
 import { TonoSidebar } from './TonoSidebar'
+import { TonoToastProvider } from './TonoToast'
 
 import './tono.css'
 import 'dayjs/locale/ru'
@@ -103,7 +104,8 @@ const TonoLayout = () => {
         // that is a software Gaussian blur at 60Hz. Give up the glass exactly
         // while something is animating — the states a real machine froze in.
         className={`tono-root ${OS}${
-          status?.uiState === 'connecting' || status?.uiState === 'disconnecting'
+          status?.uiState === 'connecting' ||
+          status?.uiState === 'disconnecting'
             ? ' tono-root--transacting'
             : ''
         }`}
@@ -120,30 +122,37 @@ const TonoLayout = () => {
           </>
         )}
 
-        <TonoAuthGuard>
-          {/* Structural layout is also inline (see TonoSidebar): a real
-              machine was found rendering with no layout stylesheet, which
-              turned the shell into a single unstyled column. */}
-          <div
-            className="tono-shell"
-            style={{
-              position: 'relative',
-              zIndex: 1,
-              display: 'flex',
-              height: '100%',
-            }}
-          >
-            {!isLoginRoute && <TonoSidebar />}
-            <main
-              className="tono-main"
-              style={{ flex: 1, minWidth: 0, overflowY: 'auto', position: 'relative' }}
+        <TonoToastProvider>
+          <TonoAuthGuard>
+            {/* Structural layout is also inline (see TonoSidebar): a real
+                machine was found rendering with no layout stylesheet, which
+                turned the shell into a single unstyled column. */}
+            <div
+              className="tono-shell"
+              style={{
+                position: 'relative',
+                zIndex: 1,
+                display: 'flex',
+                height: '100%',
+              }}
             >
-              <BaseErrorBoundary>
-                <Outlet />
-              </BaseErrorBoundary>
-            </main>
-          </div>
-        </TonoAuthGuard>
+              {!isLoginRoute && <TonoSidebar />}
+              <main
+                className="tono-main"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflowY: 'auto',
+                  position: 'relative',
+                }}
+              >
+                <BaseErrorBoundary>
+                  <Outlet />
+                </BaseErrorBoundary>
+              </main>
+            </div>
+          </TonoAuthGuard>
+        </TonoToastProvider>
       </div>
     </ThemeProvider>
   )

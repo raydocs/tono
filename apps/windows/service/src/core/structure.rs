@@ -253,7 +253,7 @@ pub struct ReplaceDirectEndpointsRequest {
     /// Ports the App actually emitted process-scoped DIRECT rules for.
     ///
     /// Declared rather than inferred, because the Service cannot tell one pin from another:
-    /// `direct_endpoints` is the union of the WeChat, web and media pins, and a web pin is
+    /// `direct_endpoints` is the union of the native-app, web and media pins, and a web pin is
     /// 80/443 exactly like a WeChat one. Gating the reviewed-port permit on "some pin exists"
     /// therefore rendered it for policies that route nothing to it — a web-only or media-only
     /// plan got the permit with no process rule anywhere.

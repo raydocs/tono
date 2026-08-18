@@ -147,7 +147,7 @@ struct SettingsView: View {
         .background(
             LinearGradient(
                 colors: [
-                    Color(hex: "4B6EFF").opacity(0.1),
+                    TonoBrand.accent.opacity(0.1),
                     Color(hex: "FF6E52").opacity(0.1)
                 ],
                 startPoint: .topLeading,
@@ -392,7 +392,7 @@ private struct SettingToggleRow: View {
         SettingRow(label: label, subtitle: subtitle) {
             Toggle("", isOn: $isOn)
                 .toggleStyle(.switch)
-                .tint(.accentColor)
+                .tint(TonoBrand.accent)
                 .labelsHidden()
         }
     }

@@ -146,11 +146,7 @@ enum RuntimeCleanup {
                 try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
             } catch {
                 throw ClashError.startFailed(
-                    "The installed network helper no longer accepts this copy "
-                    + "of Tono. Click Retry and approve the administrator "
-                    + "prompt to repair it, or run the documented sudo "
-                    + "emergency-disarm command and reopen Tono. "
-                    + error.localizedDescription
+                    String(localized: "The installed network helper no longer accepts this copy of Tono. Click Retry and approve the administrator prompt to repair it, or run the documented sudo emergency-disarm command and reopen Tono. \(error.localizedDescription)")
                 )
             }
         }
@@ -783,6 +779,7 @@ struct LiquidClashApp: App {
             }
             .preferredColorScheme(preferredScheme)
             .environment(\.locale, appLocale)
+            .tonoToastHost()
             .onOpenURL { url in
                 handleIncomingURL(url)
             }

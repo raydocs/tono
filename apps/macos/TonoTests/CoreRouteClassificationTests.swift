@@ -56,6 +56,99 @@ final class CoreRouteClassificationTests: XCTestCase {
         }
     }
 
+    func testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary() {
+        let bundlePaths = ConfigPipeline.managedDirectProcessBundlePaths
+        XCTAssertTrue(bundlePaths.contains("/Applications/WeChat.app/"))
+        XCTAssertTrue(bundlePaths.contains("/Applications/DingTalk.app/"))
+        XCTAssertTrue(bundlePaths.contains("/Applications/Feishu.app/"))
+        XCTAssertTrue(bundlePaths.contains("/Applications/Lark.app/"))
+
+        let regexes = ConfigPipeline.managedDirectProcessPathRegexes
+        XCTAssertTrue(regexes.contains(
+            ConfigPipeline.rulePathRegex(for: "/Applications/DingTalk.app/")
+        ))
+        XCTAssertTrue(regexes.contains(
+            ConfigPipeline.rulePathRegex(for: "/Applications/Feishu.app/")
+        ))
+        XCTAssertTrue(regexes.contains(
+            ConfigPipeline.rulePathRegex(for: "/Applications/Lark.app/")
+        ))
+
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectDomain(
+            "open.dingtalk.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectDomain(
+            "open.feishu.cn"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectDomain(
+            "api.snssdk.com"
+        ))
+        XCTAssertNoThrow(try ConfigPipeline.validatedManagedDirectSuffix(
+            "dingtalk.com"
+        ))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectSuffix(
+            "snssdk.com"
+        ))
+        XCTAssertThrowsError(try ConfigPipeline.validatedManagedDirectDomain(
+            "evil-dingtalk.com"
+        ))
+
+        let node = Fixture.realityNode()
+        let runtimePolicy = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0",
+            domainPins: [
+                .init(
+                    host: "open.dingtalk.com",
+                    addresses: ["9.0.0.10"],
+                    ports: [443]
+                ),
+            ],
+            mediaEndpoints: [],
+            directResolverHosts: ["open.dingtalk.com"]
+        )
+        let runtime = try! Fixture.ownedRuntime(
+            overlay: Fixture.overlay(selectedNodeName: node.name),
+            nodes: [node],
+            directPolicy: runtimePolicy
+        )
+        let dingRegex = ConfigPipeline.rulePathRegex(
+            for: "/Applications/DingTalk.app/"
+        )
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(dingRegex))),Tono-China-App"
+        ))
+    }
+
+    func testWebOnlySuffixDoesNotArmOfficeProcessRouting() {
+        let node = Fixture.realityNode()
+        let runtimePolicy = ConfigPipeline.ManagedDirectRuntimePolicy(
+            physicalInterface: "en0",
+            domainPins: [],
+            webDomainPins: [],
+            webDomainSuffixes: [
+                .init(host: "feishu.cn", ports: [443]),
+            ],
+            mediaEndpoints: [],
+            directResolverHosts: ["feishu.cn"],
+            nativeAppDirect: false
+        )
+        let runtime = try! Fixture.ownedRuntime(
+            overlay: Fixture.overlay(selectedNodeName: node.name),
+            nodes: [node],
+            directPolicy: runtimePolicy
+        )
+        let dingRegex = ConfigPipeline.rulePathRegex(
+            for: "/Applications/DingTalk.app/"
+        )
+        XCTAssertFalse(runtime.contains(
+            "PROCESS-PATH-REGEX,\(dingRegex)"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,feishu.cn)),Tono-China-Web"
+        ))
+        XCTAssertTrue(runtimePolicy.requiresAddressFreeDirectPermit)
+    }
+
     func testExitAndResidentialAreProxied() {
         XCTAssertEqual(
             classify(

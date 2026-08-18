@@ -1,9 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Moves the Feishu/Lark domain family in the managed traffic policy from
-# `webDomains` (exact-host pins that need a DNS answer and a PF endpoint
-# permit) to `directSuffixes` (DOMAIN-SUFFIX matching, no DNS dependency).
+# Moves the Feishu/Lark and Bilibili domain families in the managed traffic
+# policy from `webDomains` (exact-host pins that need a DNS answer and a PF
+# endpoint permit) to `directSuffixes` (DOMAIN-SUFFIX matching, no DNS
+# dependency).
 #
 # Why: an exact pin covers only the apex, while a CDN serves from
 # `*.feishucdn.com`, so the pinned route never matched the real traffic. On top
@@ -11,25 +12,15 @@
 # (`managed_direct_answers_filtered`), leaving the policy permanently
 # part-applied and burning the whole DNS retry ladder on every connect.
 #
-# STOP — read before running this again. The premise that suffix rules "sidestep
-# that failure mode" because they need no DNS pin or PF permit is wrong, and it
-# is the direction of the mistake that matters: a suffix route produces no
-# resolved address, therefore no `sessionEndpoints` entry, therefore no PF pass
-# rule — and PF ends its ruleset with `block drop out quick all`. Mihomo would
-# match the DOMAIN-SUFFIX rule, dial the interface-bound direct outbound, and
-# have the packet dropped, with no failover (a bare `direct` outbound has none,
-# and a fallback group scores members by probe URL, not per destination). A host
-# survived only when its address happened to coincide with one some *other*
-# exact pin had already permitted, which is why the measurement below looked
-# like it worked for `vd3.bdstatic.com` but not for the Feishu family.
-#
-# ConfigPipeline therefore no longer renders `directSuffixes` as routing rules
-# at all: suffix entries stay part of the accepted v3/v4 contract but fall
-# through to `MATCH,Tono-Exit` — tunnelled rather than black-holed. Running this
-# script today retires working exact pins in exchange for entries that grant no
-# direct route, so it costs acceleration and buys nothing. Re-pin the CDN
-# subdomains you actually need (`i0/i1/s1/static.hdslb.com`, etc.) as exact
-# `webDomains` instead, or change the PF contract first.
+# The clients now handle this asymmetrically. macOS renders the reviewed
+# suffixes through its interface-bound fallback group and arms a bounded PF
+# port permit. Windows currently emits only the Bilibili family, and only when
+# a signed reviewed native-app path has staged the matching WFP port permit;
+# other accepted suffixes remain tunnelled there. Do not read a successful
+# policy write as proof that every platform will route every suffix directly.
+# Before that contract existed, a suffix route produced no `sessionEndpoints`
+# entry and PF's block-all floor dropped the dial. That historical failure is
+# why the Windows client keeps its suffix allowlist deliberately narrow.
 
 require "json"
 require "net/http"

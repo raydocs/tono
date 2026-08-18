@@ -20,14 +20,15 @@ actor TonoAPIClient {
         case deviceLimit, server(status: Int, message: String), invalidResponse
         var errorDescription: String? {
             switch self {
-            case .invalidConfiguration: "Tono service is not configured."
-            case .transport: "Could not reach Tono. Check your connection and try again."
-            case .unauthorized: "Your session has expired. Please sign in again."
-            case .forbidden: "This account does not have permission for that action."
-            case .notFound: "The requested item no longer exists."
-            case .deviceLimit: "This Tono account has reached its device allowance. Revoke another device first."
+            case .invalidConfiguration: String(localized: "Tono service is not configured.")
+            case .transport: String(localized: "Could not reach Tono. Check your connection and try again.")
+            case .unauthorized: String(localized: "Your session has expired. Please sign in again.")
+            case .forbidden: String(localized: "This account does not have permission for that action.")
+            case .notFound: String(localized: "The requested item no longer exists.")
+            case .deviceLimit: String(localized: "This Tono account has reached its device allowance. Revoke another device first.")
+            // Server-provided text is shown verbatim; not a catalog key.
             case let .server(_, message): message
-            case .invalidResponse: "Tono returned an invalid response."
+            case .invalidResponse: String(localized: "Tono returned an invalid response.")
             }
         }
     }

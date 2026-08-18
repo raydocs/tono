@@ -2773,6 +2773,52 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await duplicateSuffix.json() as any).error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('accepts reviewed DingTalk and Feishu native-app domains', async () => {
+    // Native app domains feed the signed process/path route on both clients;
+    // suffixes cover the macOS browser/CDN policy, while Windows keeps its
+    // address-free suffixes disabled until WFP has an equivalent class.
+    const officePolicy = {
+      version: 4,
+      domains: [
+        { host: 'open.dingtalk.com', ports: [443, 80] },
+        { host: 'open.feishu.cn', ports: [443, 80] },
+        { host: 'open.larksuite.com', ports: [443] },
+        { host: 'api.snssdk.com', ports: [443] },
+      ],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [
+        { host: 'dingtalk.com', ports: [80, 443] },
+        { host: 'feishu.cn', ports: [80, 443] },
+        { host: 'larksuite.com', ports: [443] },
+      ],
+      tcpEndpoints: [],
+    };
+    const written = await admin('traffic-policy', {
+      policy: officePolicy,
+      expectedRevision: 0,
+    }, 'PUT');
+    expect(written.status).toBe(200);
+    const stored = JSON.parse((await written.json() as any).json);
+    expect(stored.domains.map((entry: any) => entry.host)).toEqual([
+      'api.snssdk.com', 'open.dingtalk.com', 'open.feishu.cn', 'open.larksuite.com',
+    ]);
+    expect(stored.directSuffixes.map((entry: any) => entry.host)).toEqual([
+      'dingtalk.com', 'feishu.cn', 'larksuite.com',
+    ]);
+
+    const boundary = await admin('traffic-policy', {
+      policy: {
+        ...officePolicy,
+        domains: [{ host: 'evil-dingtalk.com', ports: [443] }],
+        directSuffixes: [],
+      },
+      expectedRevision: 1,
+    }, 'PUT');
+    expect(boundary.status).toBe(400);
+    expect((await boundary.json() as any).error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('rejects unexpected top-level fields on the managed policy and catalog writes', async () => {
     const policy = {
       version: 1,

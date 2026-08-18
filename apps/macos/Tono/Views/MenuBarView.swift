@@ -20,15 +20,15 @@ struct MenuBarView: View {
                         Circle()
                             .fill(
                                 appState.isProtectionBlocked
-                                    ? Color(hex: "FF9F0A")
+                                    ? TonoStatus.blocked
                                     : appState.isProxyDegraded
-                                        ? Color(hex: "FFD60A")
+                                        ? TonoStatus.connecting
                                         : appState.isConnected
-                                            ? Color(hex: "32D74B")
-                                            : Color(hex: "A2A3C4")
+                                            ? TonoStatus.connected
+                                            : TonoStatus.neutral
                             )
                             .frame(width: 5, height: 5)
-                            .shadow(color: appState.isConnected ? Color(hex: "32D74B").opacity(0.6) : .clear, radius: 3)
+                            .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
                         Text(LocalizedStringKey(
                             appState.isDisconnecting ? "Disconnecting…"
                                 : appState.isConnecting ? appState.connectionStage.rawValue
@@ -131,7 +131,7 @@ struct MenuBarView: View {
                 }
             } icon: {
                 Image(systemName: "lock.shield.fill")
-                    .foregroundStyle(Color(hex: "4B6EFF"))
+                    .foregroundStyle(TonoBrand.accent)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
@@ -185,7 +185,7 @@ struct MenuBarView: View {
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(
                             appState.isConnected
-                                ? Color(hex: "32D74B")
+                                ? TonoStatus.connected
                                 : .secondary
                         )
                     Text(
@@ -284,8 +284,21 @@ private struct NodeSelectorMenu: View {
         }
         let name = selectedName
         guard !name.isEmpty else { return String(localized: "No Server Selected") }
+        // Flags left the card UI in the redesign; the menu bar follows the
+        // same identity language (display name + region code).
         let (flag, clean) = ConfigParser.extractFlag(from: name)
-        return "\(flag) \(ProxyNode.displayName(for: clean))"
+        return "\(ProxyNode.displayName(for: clean)) · \(nodeRegionCode(flag: flag, name: clean))"
+    }
+
+    /// Runtime latency of the currently selected node, if probed.
+    private var selectedRuntimeNode: ProxyService.MihomoNode? {
+        let name = selectedName
+        guard !name.isEmpty else { return nil }
+        return appState.proxyService.nodes.first {
+            $0.name == name
+                || ConfigParser.extractFlag(from: $0.name).cleanName
+                    == ConfigParser.extractFlag(from: name).cleanName
+        }
     }
 
     var body: some View {
@@ -303,8 +316,11 @@ private struct NodeSelectorMenu: View {
                                 || ConfigParser.extractFlag(from: $0.name).cleanName
                                     == ConfigParser.extractFlag(from: node.name).cleanName
                         }
-                        let delay = runtimeNode.map { $0.latency > 0 ? "\($0.latency)ms" : "—" } ?? "—"
-                        let label = "\(node.flag) \(node.displayName)   · \(delay)"
+                        let delay = runtimeNode.flatMap {
+                            $0.latency > 0 ? "\($0.latency)ms" : nil
+                        } ?? String(localized: "Not tested")
+                        let code = nodeRegionCode(flag: node.flag, name: node.name)
+                        let label = "\(node.displayName) · \(code)   · \(delay)"
                         Button {
                             appState.selectNode(node.name)
                         } label: {
@@ -336,12 +352,30 @@ private struct NodeSelectorMenu: View {
                 }
             }
         } label: {
-            HStack {
+            HStack(spacing: 6) {
+                if appState.switchingNodeId != nil {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
                 Text(displayLabel)
                     .font(.system(size: 13))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer()
+                if appState.switchingNodeId == nil, !selectedName.isEmpty {
+                    let latency = selectedRuntimeNode?.latency ?? 0
+                    let tint = latency > 0
+                        ? Color(hex: LatencyLevel.level(for: latency).color)
+                        : Color.secondary
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(tint)
+                            .frame(width: 5, height: 5)
+                        Text(latency > 0 ? "\(latency)ms" : String(localized: "Not tested"))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(latency > 0 ? tint : Color.secondary)
+                    }
+                }
             }
         }
         .disabled(appState.isConnecting || appState.isDisconnecting)

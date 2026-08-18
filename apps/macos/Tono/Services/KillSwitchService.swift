@@ -16,15 +16,15 @@ nonisolated enum KillSwitchService {
         var errorDescription: String? {
             switch self {
             case .installFailed(let message):
-                "Kill Switch install failed: \(message)"
+                String(localized: "Kill Switch install failed: \(message)")
             case .notInstalled:
-                "The authenticated network helper is unavailable."
+                String(localized: "The authenticated network helper is unavailable.")
             case .commandFailed(let message):
-                "Kill Switch command failed: \(message)"
+                String(localized: "Kill Switch command failed: \(message)")
             case .helperRejected:
-                "The installed network helper rejected this copy of Tono."
+                String(localized: "The installed network helper rejected this copy of Tono.")
             case .userDenied:
-                "Administrator privileges were denied for the Kill Switch."
+                String(localized: "Administrator privileges were denied for the Kill Switch.")
             }
         }
     }

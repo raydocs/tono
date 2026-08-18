@@ -30,15 +30,21 @@ final class TonoAccountRulesTests: XCTestCase {
     }
 
     func testQuotaTextRendersUsedOverLimit() {
-        XCTAssertEqual(TonoAccountRules.quotaText(used: 1, limit: 2), "1 / 2 devices")
+        // The strings are localized now, so build the expectation through the
+        // same catalog lookup: the assertion checks the numbers land in the
+        // format regardless of the runner's language.
+        XCTAssertEqual(
+            TonoAccountRules.quotaText(used: 1, limit: 2),
+            String(localized: "\(1) / \(2) devices")
+        )
         XCTAssertEqual(
             TonoAccountRules.quotaText(used: 0, limit: TonoAccountRules.maximumDevices),
-            "0 / 2 devices"
+            String(localized: "\(0) / \(TonoAccountRules.maximumDevices) devices")
         )
     }
 
     func testExpiryTextWithoutDateReportsNoExpiration() {
-        XCTAssertEqual(TonoAccountRules.expiryText(nil), "No expiration")
+        XCTAssertEqual(TonoAccountRules.expiryText(nil), String(localized: "No expiration"))
     }
 
     func testExpiryTextFormatsCalendarDateForLocale() {

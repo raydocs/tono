@@ -722,6 +722,7 @@ export const translationKeys = [
   'tono.nodes.refresh',
   'tono.nodes.refreshing',
   'tono.nodes.refreshSuccess',
+  'tono.nodes.switchedTo',
   'tono.nodes.cloudServers',
   'tono.nodes.empty',
   'tono.nodes.timeout',

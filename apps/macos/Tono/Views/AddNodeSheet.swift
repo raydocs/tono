@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AddNodeSheet: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var isPresented: Bool
     var onAdd: ((ProxyNode) -> Void)?
     var editingNode: ProxyNode?
@@ -43,7 +44,10 @@ struct AddNodeSheet: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.tint(.white.opacity(0.1)), in: Circle())
+                    .glassEffect(
+                        .regular.tint(.white.opacity(colorScheme == .dark ? 0.10 : 0.42)),
+                        in: Circle()
+                    )
                 }
                 .padding(.bottom, 22)
 
@@ -137,7 +141,10 @@ struct AddNodeSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .glassEffect(.regular.tint(.white.opacity(0.06)), in: Capsule())
+                    .glassEffect(
+                        .regular.tint(.white.opacity(colorScheme == .dark ? 0.06 : 0.32)),
+                        in: Capsule()
+                    )
 
                     Button {
                         addNode()
@@ -149,7 +156,7 @@ struct AddNodeSheet: View {
                             .padding(.vertical, 9)
                             .background(
                                 LinearGradient(
-                                    colors: [Color(hex: "4B6EFF"), Color(hex: "6B8CFF")],
+                                    colors: [TonoBrand.accent, Color(hex: "6B8CFF")],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 ),
@@ -158,13 +165,16 @@ struct AddNodeSheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .shadow(color: Color(hex: "4B6EFF").opacity(0.25), radius: 8, y: 3)
+                    .shadow(color: TonoBrand.accent.opacity(0.25), radius: 8, y: 3)
                 }
             }
             .padding(28)
             .frame(width: 440)
             .fixedSize(horizontal: false, vertical: true)
-            .glassEffect(.regular.tint(.white.opacity(0.15)), in: RoundedRectangle(cornerRadius: 20))
+            .glassEffect(
+                .regular.tint(.white.opacity(colorScheme == .dark ? 0.15 : 0.45)),
+                in: RoundedRectangle(cornerRadius: 20)
+            )
             .contentShape(Rectangle())
             .onTapGesture { }  // Prevent tap-through to backdrop
             .shadow(color: .black.opacity(0.12), radius: 30, y: 10)
@@ -244,8 +254,14 @@ struct AddNodeSheet: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.07 : 0.35),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.5), lineWidth: 0.5)
+        )
     }
 
     // MARK: - Form Field

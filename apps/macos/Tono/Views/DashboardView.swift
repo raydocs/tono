@@ -3,6 +3,8 @@ import SwiftUI
 
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
 
@@ -36,7 +38,11 @@ struct DashboardView: View {
                        isDisconnecting: appState.isDisconnecting,
                        isProtectionBlocked: appState.isProtectionBlocked,
                        connectionStage: appState.connectionStage,
-                       disconnectionStage: appState.disconnectionStage)
+                       disconnectionStage: appState.disconnectionStage,
+                       nodeName: appState.activeNode?.name ?? appState.proxyService.activeNodeName,
+                       nodeLatency: appState.proxyService.nodes.first(
+                           where: { $0.name == (appState.activeNode?.name ?? appState.proxyService.activeNodeName) }
+                       )?.latency ?? 0)
                         .glassEffectID("pill", in: dashboardNS)
 
                     if showsConnectionDetails {
@@ -74,7 +80,7 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .contentShape(Rectangle())
-        .animation(.spring(duration: 0.5, bounce: 0.15), value: appState.isConnected)
+        .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.15), value: appState.isConnected)
         .onChange(of: appState.isConnected) { _, connected in
             if !connected {
                 appState.networkInfo = NetworkInfo()
@@ -122,7 +128,7 @@ struct DashboardView: View {
                 value: protectionValue,
                 detail: protectionDetail,
                 systemImage: appState.isConnected ? "checkmark.shield.fill" : "shield",
-                tint: appState.isConnected ? Color(hex: "30D158") : Color(hex: "8E8E93")
+                tint: appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
             )
 
             DashboardStatCard(
@@ -152,10 +158,10 @@ struct DashboardView: View {
     }
 
     private var statusBadgeColor: Color {
-        if appState.isConnecting || appState.isDisconnecting { return Color(hex: "B29500") }
-        if appState.isProtectionBlocked { return Color(hex: "FF9F0A") }
-        if isDegradedWhileConnected { return Color(hex: "FF9F0A") }
-        return appState.isConnected ? Color(hex: "30D158") : Color(hex: "8E8E93")
+        if appState.isConnecting || appState.isDisconnecting { return TonoStatus.connecting }
+        if appState.isProtectionBlocked { return TonoStatus.blocked }
+        if isDegradedWhileConnected { return TonoStatus.blocked }
+        return appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
     }
 
     /// The health loop marks a degraded exit on its first failed probe, well
@@ -233,6 +239,19 @@ struct DashboardView: View {
                     "System DNS: \(ProtectedDNSContract.server) · "
                         + "Upstream: 1.1.1.1 / 8.8.8.8 DoH via the protected exit"
                 )
+            // The residential lane carries the assistant traffic (Claude,
+            // ChatGPT, Grok). Whenever the cloud has assigned one, keep its
+            // address visible — the customer paid for that line to exist.
+            if let homeHost = appState.residentialHomeHost {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "wifi")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color(hex: "BF5AF2"))
+                        .padding(.top, 1)
+                    infoItem(label: "Home line", value: homeHost)
+                }
+                .help("Claude, ChatGPT and Grok egress through this residential line.")
+            }
 
             Spacer(minLength: 8)
 
@@ -259,11 +278,22 @@ struct DashboardView: View {
             }
             .layoutPriority(1)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
+        // Same width and glass as the stat cards above — the bar is part of
+        // the same bottom cluster, not a separate patch.
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    .white.opacity(colorScheme == .dark ? 0.10 : 0.7),
+                    lineWidth: 0.5
+                )
+        }
+        .padding(.top, 10)
         .task {
             // AppState publishes only the newest reading, so sample on a fixed
             // cadence: an idle stretch is as meaningful to the series as a spike.
@@ -277,7 +307,7 @@ struct DashboardView: View {
         }
     }
 
-    private func infoItem(label: String, value: String) -> some View {
+    private func infoItem(label: LocalizedStringKey, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.system(size: 9, weight: .semibold))
@@ -356,7 +386,7 @@ private struct ConnectionProgressCard: View {
         if appState.lastConnectionFailure != nil, !appState.isConnecting {
             return .orange.opacity(0.08)
         }
-        return Color(hex: "4B6EFF").opacity(0.06)
+        return TonoBrand.accent.opacity(0.06)
     }
 
     @ViewBuilder
@@ -448,7 +478,7 @@ private struct ConnectionProgressCard: View {
     private var headerColor: Color {
         appState.lastConnectionFailure != nil && !appState.isConnecting
             ? .orange
-            : Color(hex: "FFD60A")
+            : TonoStatus.connecting
     }
 
     private var activeStartedAt: Date? {
@@ -480,7 +510,7 @@ private struct ConnectionProgressCard: View {
         } else if appState.completedConnectionStages.contains(stage) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12))
-                .foregroundStyle(Color(hex: "2ED573"))
+                .foregroundStyle(TonoStatus.connected)
         } else if !appState.isConnecting,
                   appState.lastConnectionFailure?.stage == stage {
             Image(systemName: "xmark.circle.fill")
@@ -592,6 +622,7 @@ private struct ConnectionProgressCard: View {
 }
 
 private struct DashboardStatCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: LocalizedStringKey
     let value: String
     let detail: String
@@ -628,10 +659,20 @@ private struct DashboardStatCard: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
-        .glassEffect(
-            .regular.tint(tint.opacity(0.045)),
-            in: RoundedRectangle(cornerRadius: 14)
+        // One neutral glass for all three cards: the status color lives only
+        // in the icon chip. Tinted glass side by side read as mismatched
+        // patches, and adjacent Liquid Glass shapes render merge bridges.
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    .white.opacity(colorScheme == .dark ? 0.10 : 0.7),
+                    lineWidth: 0.5
+                )
+        }
     }
 }
 

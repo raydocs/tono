@@ -22,6 +22,23 @@ pub const DNS_LISTEN: &str = "127.0.0.1:53";
 /// the corresponding DirectPlan rules exist).
 pub const DIRECT_GROUP_NAME: &str = "Tono-China-Direct";
 pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
+/// Web suffixes that may use an address-free DIRECT rule on Windows.
+///
+/// Windows can only make this safe when the WFP reviewed-port permit is live
+/// for the staged core. Keep this deliberately smaller than the policy
+/// allowlist: a suffix such as `edu.cn` or `aliyuncs.com` is a namespace, not
+/// an identity, and routing every tenant on it to the physical interface
+/// would widen the user's DIRECT surface unexpectedly.
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 4] = [
+    "bilibili.com",
+    "biliapi.net",
+    "bilivideo.com",
+    "hdslb.com",
+];
+
+pub fn is_address_free_web_suffix(host: &str) -> bool {
+    ADDRESS_FREE_WEB_SUFFIXES.contains(&host)
+}
 /// Reviewed WeChat product executables. Keep this list narrow: WFP remains
 /// the exact IP:port security boundary for each generated DIRECT rule.
 pub const WECHAT_PROCESS_NAMES: [&str; 9] = [
@@ -34,6 +51,29 @@ pub const WECHAT_PROCESS_NAMES: [&str; 9] = [
     "WeChatApp.exe",
     "WeixinApp.exe",
     "WeChatBrowser.exe",
+];
+/// Main and known helper executables for the three reviewed China-office
+/// clients. These names are used only alongside exact cloud-approved media
+/// IP/port tuples; TCP raw-IP traffic uses the signature-verified path regexes
+/// discovered by `signed_apps`.
+pub const REVIEWED_DIRECT_PROCESS_NAMES: [&str; 17] = [
+    "WeChat.exe",
+    "Weixin.exe",
+    "xwechat.exe",
+    "WeChatAppEx.exe",
+    "WeChatPlayer.exe",
+    "WeixinPlay.exe",
+    "WeChatApp.exe",
+    "WeixinApp.exe",
+    "WeChatBrowser.exe",
+    "DingTalk.exe",
+    "dingtalk.exe",
+    "DingTalkHelper.exe",
+    "DingTalkLauncher.exe",
+    "Feishu.exe",
+    "feishu.exe",
+    "Lark.exe",
+    "lark.exe",
 ];
 /// Desktop assistants that should share Claude's residential (or exit) path.
 /// Command-line `node.exe` is deliberately absent: it would capture every
@@ -61,9 +101,10 @@ const HOME_PROCESS_PATH_FRAGMENTS: [&str; 7] = [
     "ChatGPT",
     r"openai\codex",
 ];
-/// Signed WeChat install prefixes that may join a DirectPlan. Discovery is
-/// bounded so a poisoned registry cannot grow the rule table without limit.
-pub const MAX_WECHAT_PROCESS_PATH_REGEXES: usize = 8;
+/// Signed WeChat/DingTalk/Feishu install prefixes that may join a DirectPlan.
+/// Discovery is bounded so a poisoned registry cannot grow the rule table
+/// without limit.
+pub const MAX_WECHAT_PROCESS_PATH_REGEXES: usize = 16;
 /// Name of the Claude→home-broadband select group, present only when the
 /// catalog carries a verified `homeProxy` or `homeSocks5` routing directive.
 pub const CLAUDE_HOME_GROUP_NAME: &str = "Tono-Claude-Home";
@@ -168,15 +209,16 @@ impl Default for RuntimePorts {
 ///
 /// - `hosts`: (domain, pinned IP) pairs rendered into the top-level
 ///   `hosts:` section (grouped per domain, sorted).
-/// - `tcp_wechat_rules`: exact (host, IP, port) tuples for WeChat TCP rules.
+/// - `tcp_wechat_rules`: exact (host, IP, port) tuples for reviewed native-app
+///   TCP rules (the field name is retained for wire/API compatibility).
 /// - `tcp_web_rules`: exact (host, IP, TCP/443) tuples for reviewed web rules.
 /// - `web_suffix_rules`: (suffix, TCP port) tuples for suffix-level web
 ///   direct rules — no pinned IP, TCP only, sorted by (suffix, port).
-/// - `udp_wechat_rules`: exact (IP, port) tuples for the WeChat media UDP
-///   rules (ports ⊆ {443, 8000}).
+/// - `udp_wechat_rules`: exact (IP, port) tuples for reviewed native-app media
+///   UDP rules (ports ⊆ {443, 8000}).
 /// - `wechat_process_path_regexes`: extra PROCESS-PATH-REGEX rows for signed
-///   WeChat install trees. Empty keeps name-only matching. Each pattern is
-///   re-checked at build time so a bad payload cannot ship.
+///   WeChat, DingTalk and Feishu install trees. Empty keeps name-only matching.
+///   Each pattern is re-checked at build time so a bad payload cannot ship.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectPlan {
     pub physical_interface: String,
@@ -346,14 +388,14 @@ fn push_windows_path_regex_char(pattern: &mut String, character: char) {
 fn validate_wechat_process_path_regexes(patterns: &[String]) -> Result<(), ConfigError> {
     if patterns.len() > MAX_WECHAT_PROCESS_PATH_REGEXES {
         return Err(ConfigError::DirectPlan(format!(
-            "too many WeChat process-path regexes: {}",
+            "too many reviewed direct process-path regexes: {}",
             patterns.len()
         )));
     }
     for pattern in patterns {
         if !pattern.starts_with('^') || !is_rule_payload_safe(pattern) {
             return Err(ConfigError::DirectPlan(format!(
-                "WeChat process-path regex is not safe to emit: {pattern:?}"
+                "reviewed direct process-path regex is not safe to emit: {pattern:?}"
             )));
         }
     }
@@ -720,7 +762,17 @@ fn runtime_value(
     }
     if let Some(plan) = direct {
         let has_wechat = !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty();
-        let has_web = !plan.tcp_web_rules.is_empty();
+        // Address-free suffix routes are enabled only alongside the signed
+        // native-app path permit. That permit is what gives the staged core a
+        // bounded TCP port escape through WFP; without it, a suffix route
+        // would match in Mihomo and then be dropped by the kill switch.
+        let has_address_free_web = !plan.tcp_wechat_rules.is_empty()
+            && !plan.wechat_process_path_regexes.is_empty()
+            && plan
+                .web_suffix_rules
+                .iter()
+                .any(|(suffix, _)| is_address_free_web_suffix(suffix));
+        let has_web = !plan.tcp_web_rules.is_empty() || has_address_free_web;
         if has_wechat {
             proxies.push(direct_outbound(DIRECT_GROUP_NAME, &plan.physical_interface));
         }
@@ -836,26 +888,11 @@ fn runtime_value(
     if let Some(plan) = direct {
         // WeChat TCP is pinned per resolved endpoint, exactly like the web rules below.
         //
-        // It used to be process-scoped — `(NETWORK,TCP),(PROCESS-NAME,WeChat.exe)` and the
-        // signature-verified path regexes — on the reasoning that WeChat dials its file/CDN
-        // endpoints by raw IP, so domain pins cannot cover file transfer. That reasoning is
-        // right about the routing and wrong about what happens next. "WFP remains the exact
-        // IP:port boundary" does not mean unpinned dials fall back to the tunnel; it means
-        // they are *dropped*. `wfp_model::session_rules` renders one ALE permit per entry in
-        // `direct_endpoints` (class G) and a `session/block-all` floor, and there is no
-        // port-scoped, address-free permit for the core — class A's own comment forbids one.
-        // A process rule therefore sent every WeChat TCP flow out the physical interface,
-        // where only the handful of connect-time pins had a permit and everything else hit
-        // the floor. `Tono-China-Direct` is a bare `direct` outbound with nowhere to retreat,
-        // so images, file send/receive and every HTTPDNS-derived address stopped working
-        // while connected — a regression from working-but-hairpinned to hard-blocked.
-        //
-        // Routing only what the permit set actually covers restores the pre-policy-v3
-        // behaviour for the rest: unpinned WeChat traffic rides the tunnel again.
-        // `wechat_process_path_regexes` stays computed and plumbed so that reinstating
-        // process scope is one block here once WFP grows an app-scoped port permit to match
-        // (see apps/macos ConfigPipeline.swift:1221-1231 and its PF reviewed-bundle permit
-        // for the shape that makes process scope safe).
+        // WeChat TCP is pinned per resolved endpoint, while the signed path
+        // rules below cover the raw-IP file/CDN dials that cannot carry a
+        // hostname. The latter are bounded to `reviewed_direct_ports`, and
+        // the Service installs the matching staged-core WFP permit only for
+        // that reviewed path. An unreviewed filename never inherits it.
         for (host, address, port) in &plan.tcp_wechat_rules {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{DIRECT_GROUP_NAME}"
@@ -896,7 +933,7 @@ fn runtime_value(
             }
         }
         for (address, port) in &plan.udp_wechat_rules {
-            for process in WECHAT_PROCESS_NAMES {
+            for process in REVIEWED_DIRECT_PROCESS_NAMES {
                 rules.push(format!(
                     "AND,((NETWORK,UDP),(DST-PORT,{port}),(IP-CIDR,{address}/32,no-resolve),(PROCESS-NAME,{process})),{DIRECT_GROUP_NAME}"
                 ));
@@ -912,21 +949,20 @@ fn runtime_value(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{WEB_DIRECT_GROUP_NAME}"
             ));
         }
-        // Suffix-level web direct is deliberately not emitted on Windows. A suffix rule
-        // carries no resolved address by design, so it contributes nothing to
-        // `endpoint_keys` and therefore nothing to `direct_endpoints` — there is no WFP
-        // permit it can ever match. Every suffix-routed host was a black hole while
-        // connected: DNS resolved through the tunnel, the browser got an address, and the
-        // physical-interface connect was silently dropped until it timed out. That is the
-        // whole Feishu/Lark family, Baidu netdisk, `aliyuncs.com` tenant storage, Zoom and
-        // `edu.cn`. Leaving the traffic on the tunnel is slower than the feature intended
-        // and faster than not working.
-        //
-        // macOS carries the same rules safely because PF grants the reviewed bundle a
-        // port permit that is not tied to an address (ConfigPipeline.swift:1428-1440
-        // documents this exact bug and that fix). Emitting them here again needs the
-        // equivalent WFP class first.
-        let _ = &plan.web_suffix_rules;
+        // Only the Bilibili family is currently admitted to the Windows
+        // address-free path. The signed native-app path permit above is the
+        // WFP boundary; arbitrary policy suffixes stay tunnelled until they
+        // receive an equivalent reviewed route.
+        if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
+            for (suffix, port) in &plan.web_suffix_rules {
+                if !is_address_free_web_suffix(suffix) {
+                    continue;
+                }
+                rules.push(format!(
+                    "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN-SUFFIX,{suffix})),{WEB_DIRECT_GROUP_NAME}"
+                ));
+            }
+        }
     }
     // Every node is VLESS+Vision today, and Vision cannot carry UDP — Mihomo
     // marks the exit group "UDP is not supported" and *falls back to a
@@ -1379,7 +1415,7 @@ reality-opts:
                 ));
             }
         }
-        for process in WECHAT_PROCESS_NAMES {
+        for process in REVIEWED_DIRECT_PROCESS_NAMES {
             rules.push(format!(
                 "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"
             ));
@@ -1426,8 +1462,9 @@ reality-opts:
         }
         rules.extend(expected_wechat_direct_rules());
         rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
-        // No DOMAIN-SUFFIX rows: a suffix rule carries no resolved address, so no WFP
-        // permit can ever match it and the dial would be dropped by the block-all floor.
+        // This fixture has no signed native-app path regex, so its suffix rows are
+        // intentionally withheld; without the matching WFP port permit the dial
+        // would be dropped by the block-all floor.
         rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
         rules.push("MATCH,Tono-Exit".to_string());
         rules
@@ -1583,6 +1620,89 @@ reality-opts:
         )
         .unwrap();
         assert_eq!(runtime.yaml(), reordered_runtime.yaml());
+    }
+
+    #[test]
+    fn bilibili_suffix_direct_is_bounded_by_the_signed_native_path_permit() {
+        let mut plan = direct_plan();
+        plan.web_suffix_rules = vec![
+            ("bilibili.com".to_string(), 80),
+            ("bilibili.com".to_string(), 443),
+        ];
+        plan.wechat_process_path_regexes = vec![
+            wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
+                .expect("reviewed prefix"),
+        ];
+        let runtime = build_owned_runtime(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&plan),
+        )
+        .expect("runtime");
+        let yaml = runtime.yaml();
+        assert!(yaml.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,80),(DOMAIN-SUFFIX,bilibili.com)),Tono-China-Web-Direct"
+        ));
+        assert!(yaml.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,bilibili.com)),Tono-China-Web-Direct"
+        ));
+        assert!(!yaml.contains("DOMAIN-SUFFIX,baidu.com"));
+
+        let suffix_index = yaml
+            .find("DOMAIN-SUFFIX,bilibili.com")
+            .expect("Bilibili suffix rule");
+        let reject_index = yaml
+            .find("AND,((NETWORK,UDP)),REJECT")
+            .expect("UDP floor");
+        assert!(suffix_index < reject_index);
+
+        let home_runtime = build_owned_runtime_with_ports(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&plan),
+            Some("US Reality 01"),
+            None,
+            RuntimePorts::default(),
+        )
+        .expect("home runtime");
+        let home_yaml = home_runtime.yaml();
+        let assistant_index = home_yaml
+            .find("DOMAIN-SUFFIX,chatgpt.com")
+            .expect("ChatGPT home rule");
+        let home_bilibili_index = home_yaml
+            .find("DOMAIN-SUFFIX,bilibili.com")
+            .expect("Bilibili web rule");
+        assert!(assistant_index < home_bilibili_index);
+        let home_value = parsed(&home_runtime);
+        let groups = get(&home_value, &["proxy-groups"]).as_sequence().unwrap();
+        let home_group = groups
+            .iter()
+            .find(|group| group[string("name")].as_str() == Some(CLAUDE_HOME_GROUP_NAME))
+            .expect("home group");
+        assert_eq!(home_group[string("type")].as_str(), Some("select"));
+        let home_choices: Vec<&str> = home_group[string("proxies")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap())
+            .collect();
+        assert_eq!(home_choices, ["US Reality 01"]);
+
+        // Without the signed native path discovery there is no address-free
+        // WFP permit, so the same suffix remains tunnelled.
+        plan.wechat_process_path_regexes.clear();
+        let runtime_without_permit = build_owned_runtime(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&plan),
+        )
+        .expect("runtime");
+        assert!(!runtime_without_permit
+            .yaml()
+            .contains("DOMAIN-SUFFIX,bilibili.com"));
     }
 
     #[test]
@@ -1929,6 +2049,30 @@ reality-opts:
         assert!(rules.contains(
             &"AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve)),Tono-China-Direct"
         ));
+    }
+
+    #[test]
+    fn reviewed_office_process_names_share_exact_media_permits() {
+        let runtime = build_owned_runtime(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&direct_plan()),
+        )
+        .unwrap();
+        let parsed_runtime = parsed(&runtime);
+        let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        for process in ["DingTalk.exe", "Feishu.exe", "Lark.exe"] {
+            let expected = format!(
+                "AND,((NETWORK,UDP),(DST-PORT,443),(IP-CIDR,9.0.0.20/32,no-resolve),(PROCESS-NAME,{process})),Tono-China-Direct"
+            );
+            assert!(rules.contains(&expected.as_str()), "{process}");
+        }
     }
 
     #[test]

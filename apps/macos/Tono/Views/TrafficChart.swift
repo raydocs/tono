@@ -38,8 +38,8 @@ struct TrafficSparkline: View {
     let history: TrafficHistory
     let isLive: Bool
 
-    private static let uploadColor = Color(hex: "64D2FF")
-    private static let downloadColor = Color(hex: "2ED573")
+    private static let uploadColor = TonoTraffic.upload
+    private static let downloadColor = TonoTraffic.download
 
     var body: some View {
         Chart {
