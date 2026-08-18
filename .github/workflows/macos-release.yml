@@ -350,7 +350,7 @@ jobs:
         run: |
           set -eu
           resolved=apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if ! grep -q '"version" : "2.9.4"' "$resolved"; then
+          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.4"' "$resolved"; then
             echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.4"
             echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
             exit 1
