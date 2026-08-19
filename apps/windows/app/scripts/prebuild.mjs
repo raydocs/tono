@@ -823,6 +823,13 @@ async function writeCoreDigestPin() {
     'utf8',
   )
   log_success(`wrote resources/core-sha256.txt (${digest})`)
+  const identitySource = path.join(cwd, 'src-tauri', 'core-identity.json')
+  const identityDest = path.join(RESOURCES_DIR, 'core-identity.json')
+  if (!fs.existsSync(identitySource)) {
+    throw new Error(`cannot write core-identity.json: missing ${identitySource}`)
+  }
+  await fsp.copyFile(identitySource, identityDest)
+  log_success('wrote resources/core-identity.json')
 }
 
 runTask()
