@@ -32,7 +32,7 @@ final class WebViewDownloader: NSObject, WKNavigationDelegate {
     /// - Parameters:
     ///   - url: The URL to download
     ///   - timeout: Maximum time to wait
-    ///   - userAgent: Custom UA (e.g. "clash-verge/v2.4.7" for YAML format). Defaults to Safari UA.
+    ///   - userAgent: Optional override. Defaults to Safari UA.
     static func download(url: String, timeout: TimeInterval = 30, userAgent: String? = nil) async throws -> WebViewDownloadResult {
         guard let parsedURL = URL(string: url) else {
             throw SubscriptionError.invalidURL

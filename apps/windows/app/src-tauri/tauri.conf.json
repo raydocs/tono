@@ -1,5 +1,5 @@
 {
-  "version": "0.0.34",
+  "version": "0.0.35",
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "bundle": {
     "active": true,
@@ -12,10 +12,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/Country.mmdb",
-      "resources/geoip.dat",
-      "resources/geosite.dat",
       "resources/enableLoopback.exe",
+      "resources/core-identity.json",
       "resources/tono-service.exe",
       "resources/tono-service-install.exe",
       "resources/tono-service-uninstall.exe",
@@ -23,7 +21,7 @@
     ],
     "publisher": "Raydocs",
     "externalBin": [
-      "sidecar/verge-mihomo"
+      "sidecar/tono-core"
     ],
     "copyright": "GNU General Public License v3.0",
     "category": "DeveloperTool",

@@ -1,6 +1,6 @@
 import { useLocalStorage } from 'foxact/use-local-storage'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
-import { type Message, type MihomoWebSocket } from 'tauri-plugin-mihomo-api'
+import { type Message, type MihomoWebSocket } from 'tono-plugin-core-api'
 
 import {
   getCacheData,

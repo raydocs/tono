@@ -251,7 +251,7 @@ encodeIfPresent 省略该键所以只有 Windows 踩得到）——加
 - 数据目录 `com.raydocs.tono`（dev 为 `.dev`）——与 CVR 彻底分离（此前
   冒烟期间共享了本机 CVR 数据目录的问题同步消除）；计划任务名
   "Tono"/"Tono (Admin)"；publisher/描述 "Raydocs"/"Tono"。
-- 保留：`verge-mihomo*` sidecar 名（第三方组件）、`clash_verge_service_ipc`
+- 保留：`verge-mihomo*` sidecar 名（第三方组件）、`tono_service_protocol`
   crate 名、deep-link scheme（协议兼容面）、NSIS 旧版清理逻辑的旧名
   （清 CVR 残迹用）。
 - macOS 冒烟终验：进程 "Tono"、窗口 "Tono"、a11y 树读出登录页

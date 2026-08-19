@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
  * that a group has settled — the granularity that decides whether a sorted list re-orders
  * once per test or once per result.
  */
-vi.mock('tauri-plugin-mihomo-api', () => ({
+vi.mock('tono-plugin-core-api', () => ({
   delayProxyByName: vi.fn(async () => ({ delay: 120 })),
   healthcheckNodeInProvider: vi.fn(async () => ({ delay: 120 })),
 }))

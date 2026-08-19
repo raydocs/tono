@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Traffic } from 'tauri-plugin-mihomo-api'
+import { Traffic } from 'tono-plugin-core-api'
 
 import { useVisibility } from '@/hooks/use-visibility'
 import { debugLog } from '@/utils/debug'

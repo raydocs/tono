@@ -11,7 +11,7 @@ $appRoot = Join-Path $repositoryRoot 'apps\windows\app'
 $serviceManifest = Join-Path $repositoryRoot 'apps\windows\service\Cargo.toml'
 $serviceTarget = Join-Path $repositoryRoot 'apps\windows\service\target\release'
 $resourceRoot = Join-Path $appRoot 'src-tauri\resources'
-$mihomoPath = Join-Path $appRoot 'src-tauri\sidecar\verge-mihomo-x86_64-pc-windows-msvc.exe'
+$mihomoPath = Join-Path $appRoot 'src-tauri\sidecar\tono-core-x86_64-pc-windows-msvc.exe'
 $installerPath = Join-Path $appRoot "target\release\bundle\nsis\Tono_${Version}_x64-setup.exe"
 
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'

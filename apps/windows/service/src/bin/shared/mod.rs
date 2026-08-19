@@ -8,12 +8,12 @@
 
 use anyhow::Error;
 
-pub(crate) fn enter_repair_gate() -> Result<clash_verge_service_ipc::ServiceRepairGate, Error> {
-    match clash_verge_service_ipc::acquire_service_repair_gate()? {
+pub(crate) fn enter_repair_gate() -> Result<tono_service_protocol::ServiceRepairGate, Error> {
+    match tono_service_protocol::acquire_service_repair_gate()? {
         Some(gate) => Ok(gate),
         None => {
             eprintln!("Service repair is already in progress");
-            std::process::exit(clash_verge_service_ipc::REPAIR_IN_PROGRESS_EXIT_CODE);
+            std::process::exit(tono_service_protocol::REPAIR_IN_PROGRESS_EXIT_CODE);
         }
     }
 }
@@ -22,7 +22,7 @@ pub(crate) fn run_maintenance_if_requested() -> Result<bool, Error> {
     if !std::env::args().any(|argument| argument == "--cleanup-stale-owners") {
         return Ok(false);
     }
-    let removed = clash_verge_service_ipc::cleanup_stale_owner_state()?;
+    let removed = tono_service_protocol::cleanup_stale_owner_state()?;
     println!("Removed {} stale owner state directories", removed.len());
     Ok(true)
 }
@@ -160,7 +160,7 @@ pub(crate) fn force_stop_windows_service(
 /// or killed process, making it the pid source of last resort for escalations.
 #[cfg(windows)]
 pub(crate) fn read_service_pid_file() -> Option<u32> {
-    std::fs::read_to_string(clash_verge_service_ipc::service_paths().pid_file_path())
+    std::fs::read_to_string(tono_service_protocol::service_paths().pid_file_path())
         .ok()
         .and_then(|content| content.trim().parse().ok())
 }
@@ -220,27 +220,35 @@ pub(crate) fn terminate_process_by_pid(pid: u32) -> Result<(), Error> {
 pub fn uninstall_old_service() -> Result<(), Error> {
     use std::path::Path;
 
-    let target_binary_path = "/Library/PrivilegedHelperTools/io.github.clashverge.helper";
-    let plist_file = "/Library/LaunchDaemons/io.github.clashverge.helper.plist";
+    for service_id in tono_service_protocol::LEGACY_MACOS_SERVICE_IDS {
+        let plist_file = format!("/Library/LaunchDaemons/{service_id}.plist");
+        let bundle_path = format!("/Library/PrivilegedHelperTools/{service_id}.bundle");
+        let flat_binary = format!("/Library/PrivilegedHelperTools/{service_id}");
 
-    // Stop and unload service
-    run_command("launchctl", &["stop", "io.github.clashverge.helper"], false)?;
-    run_command("launchctl", &["bootout", "system", plist_file], false)?;
-    run_command(
-        "launchctl",
-        &["disable", "system/io.github.clashverge.helper"],
-        false,
-    )?;
+        // Leftover helpers are often already gone. launchctl failure must not
+        // skip the remaining identities or the file cleanup below.
+        let _ = run_command("launchctl", &["stop", service_id], false);
+        let _ = run_command("launchctl", &["bootout", "system", &plist_file], false);
+        let _ = run_command(
+            "launchctl",
+            &["disable", &format!("system/{service_id}")],
+            false,
+        );
 
-    // Remove files
-    if Path::new(plist_file).exists() {
-        std::fs::remove_file(plist_file)
-            .map_err(|e| anyhow::anyhow!("Failed to remove plist file: {}", e))?;
-    }
-
-    if Path::new(target_binary_path).exists() {
-        std::fs::remove_file(target_binary_path)
-            .map_err(|e| anyhow::anyhow!("Failed to remove service binary: {}", e))?;
+        if Path::new(&plist_file).exists() {
+            std::fs::remove_file(&plist_file)
+                .map_err(|e| anyhow::anyhow!("Failed to remove leftover plist {plist_file}: {e}"))?;
+        }
+        if Path::new(&bundle_path).exists() {
+            std::fs::remove_dir_all(&bundle_path).map_err(|e| {
+                anyhow::anyhow!("Failed to remove leftover helper bundle {bundle_path}: {e}")
+            })?;
+        }
+        if Path::new(&flat_binary).exists() {
+            std::fs::remove_file(&flat_binary).map_err(|e| {
+                anyhow::anyhow!("Failed to remove leftover helper binary {flat_binary}: {e}")
+            })?;
+        }
     }
 
     Ok(())

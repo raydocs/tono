@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
-import { MihomoWebSocket } from 'tauri-plugin-mihomo-api'
+import { MihomoWebSocket } from 'tono-plugin-core-api'
 
 const MAX_CLOSED_CONNS_NUM = 500
 const MAX_ACTIVE_CONNS_NUM = 2_000

@@ -5,7 +5,7 @@ use crate::{
     utils::{dirs, window_manager::WindowManager},
 };
 use anyhow::{Context as _, Result, bail};
-use clash_verge_logging::{Type, logging, logging_error};
+use tono_logging::{Type, logging, logging_error};
 use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use reqwest::ClientBuilder;
@@ -174,8 +174,8 @@ where
 }
 
 #[cfg(feature = "verge-dev")]
-fn release_dev_quit_latch(quit_requested: &AtomicBool, outcome: clash_verge_signal::ShutdownOutcome) {
-    if matches!(outcome, clash_verge_signal::ShutdownOutcome::Canceled) {
+fn release_dev_quit_latch(quit_requested: &AtomicBool, outcome: tono_signal::ShutdownOutcome) {
+    if matches!(outcome, tono_signal::ShutdownOutcome::Canceled) {
         quit_requested.store(false, Ordering::Release);
     }
 }
@@ -543,7 +543,7 @@ mod tests {
         }
         assert_eq!(dispatches.load(Ordering::Acquire), 1);
 
-        release_dev_quit_latch(&REQUESTED, clash_verge_signal::ShutdownOutcome::Canceled);
+        release_dev_quit_latch(&REQUESTED, tono_signal::ShutdownOutcome::Canceled);
         assert!(!REQUESTED.load(Ordering::Acquire));
         let retry = warp::test::request()
             .method("POST")

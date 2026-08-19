@@ -650,7 +650,7 @@ test('externalBin accepts only the stable sidecar', () => {
   assert.equal(validateExternalBin([STABLE_EXTERNAL_BIN]), null)
   assert.match(validateExternalBin(['sidecar/verge-mihomo-alpha']), /alpha/)
   assert.match(
-    validateExternalBin(['sidecar/verge-mihomo', 'sidecar/verge-mihomo-alpha']),
+    validateExternalBin(['sidecar/tono-core', 'sidecar/verge-mihomo-alpha']),
     /exactly one/,
   )
   assert.match(validateExternalBin([]), /exactly one/)
@@ -681,7 +681,7 @@ test('resources whitelist rejects whole-directory packaging', () => {
     /mismatch/,
   )
   assert.match(
-    validateResourcesWhitelist(['resources/Country.mmdb']),
+    validateResourcesWhitelist(['resources/enableLoopback.exe']),
     /mismatch/,
   )
 })
@@ -689,12 +689,12 @@ test('resources whitelist rejects whole-directory packaging', () => {
 test('payload validator requires staged executables and rejects legacy junk', () => {
   const good = [
     { name: 'Tono.exe.next' },
-    { name: 'verge-mihomo.exe.next' },
+    { name: 'tono-core.exe.next' },
     { name: 'resources/tono-service.exe' },
     { name: 'resources/tono-service-install.exe' },
     { name: 'resources/tono-service-uninstall.exe' },
     { name: 'resources/core-sha256.txt' },
-    { name: 'resources/Country.mmdb' },
+    { name: 'resources/core-identity.json' },
   ]
   assert.equal(validatePayloadEntries(good), null)
 
@@ -715,9 +715,9 @@ test('payload validator requires staged executables and rejects legacy junk', ()
   )
   assert.match(
     validatePayloadEntries(
-      good.filter((entry) => entry.name !== 'verge-mihomo.exe.next'),
+      good.filter((entry) => entry.name !== 'tono-core.exe.next'),
     ),
-    /missing stable Mihomo/,
+    /missing stable Tono Core/,
   )
   assert.match(
     validatePayloadEntries(

@@ -46,6 +46,14 @@ describe('admin console helpers', () => {
     expect(catalogProxyNames('proxies:\n  - name: "Los Angeles"\n    type: ss\n')).toEqual(['Los Angeles']);
   });
 
+  it('extracts an unquoted plain-scalar name containing spaces', () => {
+    // Regression: rev 39 shipped `name: Los Angeles · Mesa` unquoted, the reader
+    // regex saw no name, and the whole catalog failed closed for filtered accounts.
+    expect(
+      catalogProxyNames('proxies:\n  - name: Los Angeles · Mesa\n    type: vless\n'),
+    ).toEqual(['Los Angeles · Mesa']);
+  });
+
   it('formats byte counts without inventing units', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(2048)).toBe('2.0 KB');

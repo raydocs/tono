@@ -1,7 +1,7 @@
 use crate::{config::Config, singleton, utils::dirs};
 use anyhow::Result;
 use chrono::Utc;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -211,7 +211,7 @@ impl SilentUpdater {
         #[cfg(target_os = "windows")]
         let updater_builder = {
             let verge_lang = Config::verge().await.latest_arc().language.clone();
-            let lang_id = nsis_language_id(&clash_verge_i18n::current_language(verge_lang.as_deref()));
+            let lang_id = nsis_language_id(&tono_i18n::current_language(verge_lang.as_deref()));
             updater_builder.installer_arg(format!("/LANG={lang_id}"))
         };
         let update = match updater_builder.build() {
@@ -322,10 +322,10 @@ impl SilentUpdater {
     async fn ask_user_to_install(app_handle: &tauri::AppHandle, version: &str) -> bool {
         use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
 
-        let title = clash_verge_i18n::t!("notifications.updateReady.title");
-        let body = clash_verge_i18n::t!("notifications.updateReady.body").replace("{version}", version);
-        let install_now = clash_verge_i18n::t!("notifications.updateReady.installNow").into_owned();
-        let later = clash_verge_i18n::t!("notifications.updateReady.later").into_owned();
+        let title = tono_i18n::t!("notifications.updateReady.title");
+        let body = tono_i18n::t!("notifications.updateReady.body").replace("{version}", version);
+        let install_now = tono_i18n::t!("notifications.updateReady.installNow").into_owned();
+        let later = tono_i18n::t!("notifications.updateReady.later").into_owned();
 
         let (tx, rx) = tokio::sync::oneshot::channel();
 

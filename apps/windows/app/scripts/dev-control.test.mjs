@@ -48,7 +48,7 @@ test('development startup preserves the installed service state unless service m
 })
 
 test('Windows elevation passes the installer path outside PowerShell source', () => {
-  const installer = String.raw`C:\ssp\path with spaces\clash-verge-service-install.exe`
+  const installer = String.raw`C:\ssp\path with spaces\tono-service-install.exe`
   const baseEnvironment = { SYSTEMROOT: String.raw`C:\Windows` }
 
   const invocation = windowsElevationInvocation(installer, baseEnvironment)
@@ -56,12 +56,12 @@ test('Windows elevation passes the installer path outside PowerShell source', ()
   assert.equal(invocation.command, 'powershell.exe')
   assert.equal(invocation.args.at(-2), '-Command')
   assert.equal(invocation.args.includes(installer), false)
-  assert.equal(invocation.env.CLASH_VERGE_DEV_SERVICE_INSTALLER, installer)
-  assert.equal(baseEnvironment.CLASH_VERGE_DEV_SERVICE_INSTALLER, undefined)
+  assert.equal(invocation.env.TONO_DEV_SERVICE_INSTALLER, installer)
+  assert.equal(baseEnvironment.TONO_DEV_SERVICE_INSTALLER, undefined)
 })
 
 async function withTemporaryDirectory(run) {
-  const root = await mkdtemp(join(tmpdir(), 'clash-verge-dev-control-'))
+  const root = await mkdtemp(join(tmpdir(), 'tono-dev-control-'))
   try {
     await run(root)
   } finally {

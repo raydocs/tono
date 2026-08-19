@@ -67,7 +67,7 @@ mod tests {
     #[tokio::test]
     async fn replace_overwrites_an_existing_destination() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
-            "clash-verge-service-atomic-replace-{}",
+            "tono-service-atomic-replace-{}",
             std::process::id()
         ));
         let source = root.join("state.json.tmp");
@@ -87,7 +87,7 @@ mod tests {
     #[tokio::test]
     async fn replace_reports_a_missing_source_instead_of_waiting() {
         let root = std::env::temp_dir().join(format!(
-            "clash-verge-service-atomic-missing-{}",
+            "tono-service-atomic-missing-{}",
             std::process::id()
         ));
 

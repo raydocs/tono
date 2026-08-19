@@ -5,8 +5,8 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use arc_swap::ArcSwapOption;
-use clash_verge_logging::{Type, logging};
-use clash_verge_service_ipc::KillSwitchStatus;
+use tono_logging::{Type, logging};
+use tono_service_protocol::KillSwitchStatus;
 use futures::{StreamExt as _, stream};
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -1053,6 +1053,7 @@ fn unknown_protection_message(reason: &str) -> String {
 /// process obtains a new Service session/controller; weaker evidence continues to wait for the
 /// user and is never promoted directly to Connected.
 pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
+    let _ = crate::tono::update_handoff::begin_first_launch_migration();
     let restore_deadline = tokio::time::Instant::now() + RESTORE_TRANSACTION_TIMEOUT;
     let generation = {
         let mut inner = state.lock().await;
@@ -1444,7 +1445,7 @@ async fn collect_diagnostics_report(
     app: &AppHandle,
 ) -> crate::tono::diagnostics::DiagnosticsReport {
     // Probes first, with no product lock held: they talk to the Service.
-    let protocol = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, clash_verge_service_ipc::get_version())
+    let protocol = tokio::time::timeout(DIAGNOSTICS_PROBE_TIMEOUT, tono_service_protocol::get_version())
         .await
         .ok()
         .and_then(Result::ok)
@@ -1457,8 +1458,8 @@ async fn collect_diagnostics_report(
     // sysinfo's adapter walk and OS query are blocking syscalls.
     let (os_version, adapters) = AsyncHandler::spawn_blocking(|| {
         (
-            tauri_plugin_clash_verge_sysinfo::os_long_version(),
-            tauri_plugin_clash_verge_sysinfo::list_network_interfaces(),
+            tauri_plugin_tono_sysinfo::os_long_version(),
+            tauri_plugin_tono_sysinfo::list_network_interfaces(),
         )
     })
     .await

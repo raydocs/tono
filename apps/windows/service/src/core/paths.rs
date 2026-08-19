@@ -144,7 +144,7 @@ fn runtime_dir() -> PathBuf {
         Path::new(crate::IPC_PATH)
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("/run/clash-verge-service"))
+            .unwrap_or_else(|| PathBuf::from("/run/tono-service"))
     }
 
     #[cfg(windows)]
@@ -156,7 +156,7 @@ fn runtime_dir() -> PathBuf {
 fn persistent_state_dir() -> PathBuf {
     #[cfg(feature = "test")]
     {
-        std::env::temp_dir().join("clash-verge-service-ipc-test-state")
+        std::env::temp_dir().join("tono-service-ipc-test-state")
     }
 
     // macOS：系统 daemon 以 root 运行,状态目录用系统级稳定位置,不依赖 launchd 下不可靠的
@@ -208,7 +208,7 @@ pub(crate) fn unix_mihomo_ipc_path(runtime_root: &Path, uid: u32) -> PathBuf {
     runtime_root
         .join("users")
         .join(uid.to_string())
-        .join("verge-mihomo.sock")
+        .join("tono-core.sock")
 }
 
 pub fn mihomo_ipc_path(identity: &OwnerIdentity) -> String {
@@ -222,7 +222,7 @@ pub fn mihomo_ipc_path(identity: &OwnerIdentity) -> String {
                     crate::CHANNEL_IDENTITY.id
                 };
                 format!(
-                    r"\\.\pipe\verge-mihomo-{}-{}",
+                    r"\\.\pipe\tono-core-{}-{}",
                     channel_id,
                     owner_key(identity)
                 )
@@ -231,7 +231,7 @@ pub fn mihomo_ipc_path(identity: &OwnerIdentity) -> String {
             #[cfg(unix)]
             {
                 #[cfg(feature = "test")]
-                let runtime_root = PathBuf::from("/tmp/clash-verge-service-ipc-test");
+                let runtime_root = PathBuf::from("/tmp/tono-service-ipc-test");
                 #[cfg(not(feature = "test"))]
                 let runtime_root = service_paths().runtime_dir().to_path_buf();
 
@@ -247,7 +247,7 @@ pub fn mihomo_ipc_path(identity: &OwnerIdentity) -> String {
                 crate::CHANNEL_IDENTITY.id
             };
             format!(
-                r"\\.\pipe\verge-mihomo-{}-{}",
+                r"\\.\pipe\tono-core-{}-{}",
                 channel_id,
                 owner_key(identity)
             )
@@ -267,11 +267,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn unix_mihomo_ipc_path_is_owner_scoped_and_below_sun_path_limit() {
-        let path = unix_mihomo_ipc_path(Path::new("/var/run/clash-verge-service"), 501);
+        let path = unix_mihomo_ipc_path(Path::new("/var/run/tono-service"), 501);
 
         assert_eq!(
             path,
-            Path::new("/var/run/clash-verge-service/users/501/verge-mihomo.sock")
+            Path::new("/var/run/tono-service/users/501/tono-core.sock")
         );
         assert!(path.as_os_str().as_encoded_bytes().len() < 104);
     }
@@ -301,7 +301,7 @@ mod tests {
             sid: "S-1-5-21-1-2-3-1001".to_owned(),
         });
 
-        assert!(path.starts_with(r"\\.\pipe\verge-mihomo-test-"));
-        assert!(!path.contains("verge-mihomo-production"));
+        assert!(path.starts_with(r"\\.\pipe\tono-core-test-"));
+        assert!(!path.contains("tono-core-production"));
     }
 }

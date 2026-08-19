@@ -757,11 +757,11 @@ fn registry_reviewed_direct_install_locations() -> Vec<PathBuf> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 
     let mut locations = Vec::new();
-    let mut push = |raw: &str| {
+    fn push_sanitized(locations: &mut Vec<PathBuf>, raw: &str) {
         if let Some(path) = sanitize_windows_registry_path(raw) {
             locations.push(PathBuf::from(path));
         }
-    };
+    }
     let hives = [
         (
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -789,7 +789,7 @@ fn registry_reviewed_direct_install_locations() -> Vec<PathBuf> {
                 continue;
             }
             if let Ok(install) = key.get_value::<String, _>("InstallLocation") {
-                push(&install);
+                push_sanitized(&mut locations, &install);
             }
             if let Ok(icon) = key.get_value::<String, _>("DisplayIcon") {
                 if let Some(path) = sanitize_windows_registry_path(&icon) {

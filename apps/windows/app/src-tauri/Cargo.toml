@@ -1,17 +1,16 @@
 [package]
-name = "clash-verge"
-version = "0.0.34"
-description = "clash verge"
-authors = ["zzzgydi", "Tunglies", "wonfen", "MystiPanda"]
+name = "tono-windows"
+version = "0.0.35"
+description = "Tono Windows app"
+authors = ["Tono"]
 license = "GPL-3.0-only"
-repository = "https://github.com/clash-verge-rev/clash-verge-rev.git"
+repository = "https://github.com/raydocs/tono.git"
 default-run = "Tono"
 build = "build.rs"
 edition = "2024"
 rust-version = "1.95"
 
-# The shipped binary is `Tono` (Tono.exe); the package name stays
-# `clash-verge` to keep the crate graph untouched.
+# The shipped binary is `Tono` (Tono.exe). The crate is tono-windows.
 [[bin]]
 name = "Tono"
 path = "src/main.rs"
@@ -23,7 +22,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-verge-dev = ["clash_verge_logger/color", "clash_verge_service_ipc/development-channel"]
+verge-dev = ["tono-logger/color", "tono-service-protocol/development-channel"]
 dev-sidecar = ["verge-dev"]
 tauri-dev = ["dep:tauri-plugin-devtools"]
 # Real-machine App -> installed Service testing. This never relaxes the Service's
@@ -46,12 +45,12 @@ tauri-build = { version = "2.6.3", features = [] }
 # costs roughly eighteen times the bytes on the customer's own tunnel — measured
 # on real audit data — and leaves the two clients behaving differently.
 flate2 = "1"
-clash-verge-draft = { workspace = true }
-clash-verge-logging = { workspace = true }
-clash-verge-signal = { workspace = true }
-clash-verge-i18n = { workspace = true }
-clash-verge-limiter = { workspace = true }
-tauri-plugin-clash-verge-sysinfo = { workspace = true }
+tono-draft = { workspace = true }
+tono-logging = { workspace = true }
+tono-signal = { workspace = true }
+tono-i18n = { workspace = true }
+tono-limiter = { workspace = true }
+tauri-plugin-tono-sysinfo = { workspace = true }
 tauri-plugin-clipboard-manager = { workspace = true }
 tauri = { workspace = true, features = [
   "tray-icon",
@@ -80,7 +79,7 @@ once_cell = { version = "1.21.4", features = ["parking_lot"] }
 percent-encoding = "2.3.2"
 reqwest = { version = "0.13.4", features = ["json", "cookies", "gzip", "rustls", "form"] }
 regex = "1.13.1"
-sysproxy = { git = "https://github.com/clash-verge-rev/sysproxy-rs", branch = "main", features = [
+sysproxy = { path = "../../vendor/sysproxy", features = [
   "guard",
 ] }
 network-interface = { version = "2.0.5", features = ["serde"] }
@@ -107,10 +106,10 @@ console-subscriber = { version = "0.5.0", optional = true }
 # WebView JavaScript dispatch synchronous, so it must not be feature-unified
 # into production builds that never register the plugin.
 tauri-plugin-devtools = { version = "2.1.0", optional = true }
-tauri-plugin-mihomo = { git = "https://github.com/clash-verge-rev/tauri-plugin-mihomo", branch = "refactor-use-reqwest-ipc" }
-clash_verge_logger = { git = "https://github.com/clash-verge-rev/clash-verge-logger" }
+tono-plugin-core = { path = "../../crates/tono-plugin-core" }
+tono-logger = { path = "../../crates/tono-logger" }
 async-trait = "0.1.91"
-clash_verge_service_ipc = { path = "../../service", version = "2.6.7", features = [
+tono-service-protocol = { path = "../../service", version = "2.6.7", features = [
   "client",
 ] }
 arc-swap = "1.9.2"

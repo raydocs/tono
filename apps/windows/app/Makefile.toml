@@ -79,7 +79,7 @@ command = "git"
 args = [
   "add",
   "src/locales",
-  "crates/clash-verge-i18n/locales",
+  "crates/tono-i18n/locales",
   "src/types/generated",
 ]
 
@@ -90,7 +90,7 @@ description = "Frontend format checks"
 script_runner = "@duckscript"
 script = '''
 # i18n related changes
-has_i18n = exec git diff --cached --quiet -- src/locales crates/clash-verge-i18n/locales
+has_i18n = exec git diff --cached --quiet -- src/locales crates/tono-i18n/locales
 if eq ${has_i18n.code} 1
   cm_run_task i18n-format
   cm_run_task i18n-types

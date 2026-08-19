@@ -2,14 +2,14 @@
 
 use anyhow::Context as _;
 #[cfg(feature = "test")]
-use clash_verge_service_ipc::test_owner_credentials;
-use clash_verge_service_ipc::{
+use tono_service_protocol::test_owner_credentials;
+use tono_service_protocol::{
     IpcConfig, MIN_REQUIRED_SERVICE_REVISION, OwnerSessionProof, ProtocolVersion, RuntimeBundle,
     StartClashRequest, get_clash_logs, get_kill_switch_status, get_protected_dns_status,
     get_status, get_version, set_config, start_clash, stop_clash,
 };
 #[cfg(not(feature = "test"))]
-use clash_verge_service_ipc::{OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity};
+use tono_service_protocol::{OWNER_TOKEN_FILE_NAME, OwnerCredentials, OwnerIdentity};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -339,7 +339,7 @@ async fn wait_ipc_ready() -> anyhow::Result<()> {
 }
 
 #[cfg(feature = "test")]
-fn owner_credentials() -> anyhow::Result<clash_verge_service_ipc::OwnerCredentials> {
+fn owner_credentials() -> anyhow::Result<tono_service_protocol::OwnerCredentials> {
     test_owner_credentials(&std::env::current_dir()?)
 }
 

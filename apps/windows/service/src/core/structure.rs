@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-pub const OWNER_TOKEN_FILE_NAME: &str = ".clash-verge-service-owner-token";
+pub const OWNER_TOKEN_FILE_NAME: &str = ".tono-service-owner-token";
+pub const LEGACY_OWNER_TOKEN_FILE_NAME: &str = ".clash-verge-service-owner-token";
 pub const SERVICE_PROTOCOL_HEADER: &str = "X-Clash-Verge-Service-Protocol";
 pub const SESSION_TOKEN_HEX_LEN: usize = 64;
 
@@ -762,13 +763,13 @@ pub struct Response<T> {
 impl Default for CoreConfig {
     fn default() -> Self {
         let core_ipc_path = if cfg!(windows) {
-            format!(r"\\.\pipe\verge-mihomo-{}", crate::CHANNEL_IDENTITY.id)
+            format!(r"\\.\pipe\tono-core-{}", crate::CHANNEL_IDENTITY.id)
         } else if cfg!(feature = "test") {
-            "/tmp/clash-verge-service-ipc-test/mihomo.sock".to_string()
+            "/tmp/tono-service-ipc-test/tono-core.sock".to_string()
         } else if cfg!(target_os = "macos") {
-            format!("/var/run/{}/users/0/verge-mihomo.sock", crate::SERVICE_SLUG)
+            format!("/var/run/{}/users/0/tono-core.sock", crate::SERVICE_SLUG)
         } else {
-            format!("/run/{}/users/0/verge-mihomo.sock", crate::SERVICE_SLUG)
+            format!("/run/{}/users/0/tono-core.sock", crate::SERVICE_SLUG)
         };
         Self {
             core_path: "./clash".to_string(),

@@ -1,4 +1,4 @@
-import type { MihomoWebSocket } from 'tauri-plugin-mihomo-api'
+import type { MihomoWebSocket } from 'tono-plugin-core-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createSharedSubscriptionEntry } from './use-mihomo-ws-subscription'

@@ -11,24 +11,23 @@
  */
 
 export const WINDOWS_RESOURCE_ALLOWLIST = Object.freeze([
-  'Country.mmdb',
-  'geoip.dat',
-  'geosite.dat',
   'enableLoopback.exe',
   'tono-service.exe',
   'tono-service-install.exe',
   'tono-service-uninstall.exe',
   'core-sha256.txt',
+  'core-identity.json',
 ])
 
 export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
   WINDOWS_RESOURCE_ALLOWLIST.map((name) => `resources/${name}`),
 )
 
-export const STABLE_EXTERNAL_BIN = 'sidecar/verge-mihomo'
+export const STABLE_EXTERNAL_BIN = 'sidecar/tono-core'
 
 export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
   /verge-mihomo-alpha/i,
+  /^verge-mihomo(\.exe)?$/i,
   /clash-verge-service/i,
   /^set_dns\.sh$/i,
   /^unset_dns\.sh$/i,
@@ -38,7 +37,12 @@ export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
 // payload allowlist. Because generated NSIS removal only knows the *current* manifest, the custom
 // template must delete these names explicitly on upgrade and uninstall.
 export const KNOWN_LEGACY_WINDOWS_PAYLOAD = Object.freeze([
+  'verge-mihomo.exe',
   'verge-mihomo-alpha.exe',
+  'verge-mihomo.exe.next',
+  'verge-mihomo.exe.rollback',
+  'verge-mihomo.exe.restore',
+  'verge-mihomo.exe.publish',
   'resources/clash-verge-service',
   'resources/clash-verge-service-install',
   'resources/clash-verge-service-uninstall',
@@ -47,13 +51,16 @@ export const KNOWN_LEGACY_WINDOWS_PAYLOAD = Object.freeze([
   'resources/clash-verge-service-uninstall.exe',
   'resources/set_dns.sh',
   'resources/unset_dns.sh',
+  'resources/Country.mmdb',
+  'resources/geoip.dat',
+  'resources/geosite.dat',
 ])
 
 export const WINDOWS_RUNTIME_REPAIR_ARTIFACTS = Object.freeze([
-  'verge-mihomo.exe.next',
-  'verge-mihomo.exe.rollback',
-  'verge-mihomo.exe.restore',
-  'verge-mihomo.exe.publish',
+  'tono-core.exe.next',
+  'tono-core.exe.rollback',
+  'tono-core.exe.restore',
+  'tono-core.exe.publish',
 ])
 
 // These inherited Clash Verge commands are not used by any route in the Tono
@@ -803,14 +810,14 @@ export function validatePayloadEntries(entries) {
   }
 
   const stagedMihomo = bases.filter((base) =>
-    /^verge-mihomo\.exe\.next$/i.test(base),
+    /^tono-core\.exe\.next$/i.test(base),
   )
   if (stagedMihomo.length !== 1) {
-    return `installer payload is missing stable Mihomo staging contract (expected exactly one verge-mihomo.exe.next, found ${stagedMihomo.length})`
+    return `installer payload is missing stable Tono Core staging contract (expected exactly one tono-core.exe.next, found ${stagedMihomo.length})`
   }
   const unexpectedMihomo = bases.filter(
     (base) =>
-      /^verge-mihomo/i.test(base) && !/^verge-mihomo\.exe\.next$/i.test(base),
+      /^(verge-mihomo|tono-core)/i.test(base) && !/^tono-core\.exe\.next$/i.test(base),
   )
   if (unexpectedMihomo.length) {
     return `installer payload must not contain a live, repair, or alternate stable Mihomo basename: ${[...new Set(unexpectedMihomo)].join(', ')}`

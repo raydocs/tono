@@ -4,8 +4,8 @@ mod common;
 
 use anyhow::{Context as _, Result};
 #[cfg(windows)]
-use clash_verge_service_ipc::service_paths;
-use clash_verge_service_ipc::{
+use tono_service_protocol::service_paths;
+use tono_service_protocol::{
     IpcCommand, OwnerCredentials, OwnerSessionProof, RuntimeBundle, ServiceErrorCode,
     ServiceStatusSnapshot, StartClashRequest, StartClashResult, get_status as client_get_status,
     load_active_owner, load_owner_desired_state, owner_key, run_ipc_server,
@@ -13,7 +13,7 @@ use clash_verge_service_ipc::{
     test_client,
 };
 #[cfg(unix)]
-use clash_verge_service_ipc::{
+use tono_service_protocol::{
     MacosProxyConfig, ProxyApplyOutcome, WriterConfig,
     get_clash_log_snapshot as client_get_clash_log_snapshot,
     get_clash_logs as client_get_clash_logs, restore_desired_state,
@@ -38,10 +38,10 @@ const RUNTIME_LOCK_READY_ENV: &str = "SERVICE_IPC_TEST_RUNTIME_LOCK_READY";
 static RUNTIME_LOCK_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(unix)]
-fn owner_credentials_for_uid(name: &str, uid: u32) -> clash_verge_service_ipc::OwnerCredentials {
+fn owner_credentials_for_uid(name: &str, uid: u32) -> tono_service_protocol::OwnerCredentials {
     let app_data_dir =
         std::env::temp_dir().join(format!("service-ipc-owner-{}-{name}", std::process::id()));
-    clash_verge_service_ipc::test_owner_credentials_for_uid(&app_data_dir, uid)
+    tono_service_protocol::test_owner_credentials_for_uid(&app_data_dir, uid)
         .expect("synthetic test owner credentials should be valid")
 }
 

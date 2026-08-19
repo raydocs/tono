@@ -14,14 +14,14 @@
 
 use std::{error::Error as _, future::Future, net::IpAddr, sync::Arc, time::Duration};
 
-use clash_verge_logging::{Type, logging};
-use clash_verge_service_ipc::{
+use tono_logging::{Type, logging};
+use tono_service_protocol::{
     DnsProtectionStatus, KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint,
     ProxyProtocol, RuntimeBundle, ServiceLifecycleState, ServiceStatusSnapshot, StageRuntimeOutcome,
 };
 use futures::{StreamExt as _, stream::FuturesUnordered};
 use tauri::AppHandle;
-use tauri_plugin_mihomo::{MihomoExt as _, models::Protocol};
+use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use tokio_util::sync::CancellationToken;
 use tono_core::{
     EXIT_GROUP_NAME,
@@ -65,12 +65,9 @@ const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 /// §6.7 DNS verification retry count.
 const VERIFY_ATTEMPTS: u32 = 3;
 const VERIFY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-/// C2 — §6.8 exit-probe budgets. The generated runtime sets `unified-delay: true`
-/// (`crates/tono-core/src/config.rs`), under which mihomo performs the measured request **twice**
-/// inside the single `timeout` the delay endpoint is handed. On a distant REALITY exit one
-/// request is realistically 1.5–3.5 s, so the old 5 s core budget was marginal for the pair and
-/// routinely lost to the client's own 6 s ceiling — which discarded mihomo's diagnosis and
-/// reported a transport timeout instead. 8 s gives the doubled request room.
+/// C2 — §6.8 exit-probe budgets. `unified-delay` is off in the owned runtime, so `/delay`
+/// is a single measurement used only for UI/advisory. One Reality handshake plus the
+/// generate_204 is typically 1.5–3.5 s; 8 s still covers a cold distant exit.
 const EXIT_PROBE_CORE_TIMEOUT_MS: u64 = 8_000;
 /// The HTTP client must always outlast the core budget by a real margin, so the *core* decides
 /// the verdict of an exit probe. 3 s over the core budget covers the loopback round trip, the
@@ -102,6 +99,10 @@ const FAKE_IP_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
 // origin status.
 const TUN_DATA_PLANE_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
 const TUN_DATA_PLANE_TIMEOUT: Duration = Duration::from_secs(18);
+/// Happy-eyeballs spacing between the three TLS origins. Starting them in the
+/// same millisecond on a cold Reality path made the first verification round
+/// lose to self-congestion even when the node was healthy.
+const TUN_PROBE_STAGGER: Duration = Duration::from_millis(100);
 /// A single public origin is not a data plane. The controller probe and 0.0.7's App probe both
 /// targeted Google, so one node-to-Google failure made two nominally independent checks fail
 /// together on a mainland tester. Race independent TLS origins and accept the first exact,
@@ -156,7 +157,7 @@ const VERIFY_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(700);
 /// the decision table, the verification latch, and the release rules are untouched, and an
 /// exhausted group still falls through to exactly the old `FullRelease`.
 const POST_LOCK_VERIFY_ROUNDS: u32 = 2;
-const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_secs(1);
+const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_millis(500);
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
 /// lookup so a broken adapter/resolver cannot strand Connecting forever.
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
@@ -175,27 +176,24 @@ const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// | StartClash #1 — cold WinTUN install + WFP arm             |  60 s | Service handler budget
 /// | controller readiness (`CONTROLLER_READY_TIMEOUT`)         |  15 s |
 /// | lock ladder (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL`)     |  10 s |
-/// | cloud policy — DNS + stage/reload + read-back + relock     | 120 s |
 /// | securingDNS — PowerShell batches + read-back              |  30 s |
 /// | fake-ip verification (3 × (5 s + 0.5 s), cancellable)     |  16 s |
 /// | checkingExit (one advisory controller delay request)      |  16 s |
 /// | verifyingTraffic (WFP status + mainland App HTTP over TUN) |  26 s |
 /// | C3 second TUN round + concurrent proxy check + delay       |  27 s |
 /// | MarkVerified commit IPC                                   |   5 s |
-/// | **total**                                                 | 328 s |
+/// | **total**                                                 | 208 s |
 ///
-/// 360 s leaves margin over that sum. It is a backstop for a wedged stage, not an expected
-/// duration: every leg above has its own tighter budget, so a real hang surfaces as that stage's
-/// error long before this deadline — whose own expiry is the one failure with no retry left.
-const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(360);
+/// Optional DIRECT resolution runs after Connected and no longer sits on this clock.
+/// 240 s leaves margin over the remaining critical-path sum.
+const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(240);
 /// The accounting table above, machine-checked by `connect_budget_covers_a_cold_first_connect`.
 #[cfg(test)]
-const CONNECT_BUDGET_LEGS: [(&str, u64); 11] = [
+const CONNECT_BUDGET_LEGS: [(&str, u64); 10] = [
     ("service readiness", 3),
     ("StartClash #1 (cold WinTUN + WFP arm)", 60),
     ("controller readiness", 15),
     ("lock ladder", 10),
-    ("cloud policy (DNS + fail-closed hot reload + read-back/relock)", 120),
     ("securingDNS", 30),
     ("fake-ip verification", 16),
     ("checkingExit", 16),
@@ -465,7 +463,7 @@ pub fn protected_dns_unhealthy(status: Option<&DnsProtectionStatus>) -> bool {
 /// Connected. The new process still has to create a fresh Service session/controller secret and
 /// pass every ordinary DNS, WFP, exit, and real-data-plane verification stage.
 pub fn startup_runtime_is_resume_candidate(snapshot: &ServiceStatusSnapshot, dns: &DnsProtectionStatus) -> bool {
-    clash_verge_service_ipc::is_protected_startup_replacement_candidate(snapshot, dns)
+    tono_service_protocol::is_protected_startup_replacement_candidate(snapshot, dns)
 }
 
 /// Re-prove the complete current-owner runtime immediately before either scheduling or admitting
@@ -533,6 +531,7 @@ enum Attempt {
 }
 
 /// Why `run_stages` ended.
+#[derive(Debug)]
 enum StageFailure {
     /// Generation moved; see [`Attempt::Stale`].
     Stale,
@@ -1122,45 +1121,23 @@ async fn run_stages(
     // node switch's replacement session.
     let service_session = service::active_service_session().map_err(StageFailure::error)?;
 
-    // §6.4: startingTunnel — poll the controller (≤ 40 × 250 ms).
+    // §6.4 + §6.5: the controller bind and the WinTUN LUID appear independently
+    // after StartClash. Waiting for them in series paid the lock ladder on
+    // every connect even when `/version` was already answering.
     set_stage(state, app, ConnectStage::StartingTunnel, generation, true, started).await?;
-    transaction
-        .wait("controller readiness", wait_controller(&secret, controller_port))
-        .await?
-        .map_err(StageFailure::error)?;
-
-    // §6.5+§6.6: lockingTraffic — the lock call doubles as the TUN adapter
-    // existence check and is idempotent on the Service side (≤ 20 × 100 ms).
     set_stage(state, app, ConnectStage::LockingTraffic, generation, true, started).await?;
-    transaction
-        .wait("locking traffic", lock_kill_switch_with_retries(&service_session))
-        .await?
-        .map_err(StageFailure::error)?;
+    let (controller_ready, lock_ready) = transaction
+        .wait("controller readiness and lock", async {
+            tokio::join!(
+                wait_controller(&secret, controller_port),
+                lock_kill_switch_with_retries(&service_session),
+            )
+        })
+        .await?;
+    controller_ready.map_err(StageFailure::error)?;
+    lock_ready.map_err(StageFailure::error)?;
 
-    // Build 28: applyingCloudPolicy — resolve the cloud WeChat-DIRECT
-    // policy through the now-running controller and, when a plan exists, enter the rev-10
-    // fail-closed hot-reload bracket. Exact physical endpoint permits remain absent until the
-    // reloaded selector, DNS, and ordinary tunnel data plane all pass their proofs below.
-    set_stage(state, app, ConnectStage::ApplyingCloudPolicy, generation, true, started).await?;
-    let pending_direct = transaction
-        .wait(
-            "cloud traffic policy",
-            apply_cloud_policy(
-                state,
-                &node,
-                nodes,
-                home_node,
-                home_socks5,
-                generation,
-                &secret,
-                controller_port,
-                mixed_port,
-                traffic_policy,
-                physical_interface,
-                &service_session,
-            ),
-        )
-        .await??;
+    // Optional DIRECT is applied only after Connected. The critical path stays full-tunnel.
 
     // §6.7: securingDNS — snapshot + point resolvers at the protected TUN endpoint, then prove
     // an ordinary lookup returns a fake-ip address.
@@ -1191,33 +1168,6 @@ async fn run_stages(
         transaction,
     )
     .await?;
-    let mut direct_lease_heartbeat = None;
-
-    // The direct-enabled selector has been active behind a zero-DIRECT WFP set throughout DNS
-    // and the full existing verification barrier. Only now install the exact endpoint permits,
-    // then re-prove the ordinary tunnel before the durable verified-session latch can commit.
-    if let Some(pending) = pending_direct {
-        let applied_wechat_paths = pending.wechat_process_path_regexes.clone();
-        let (committed_status, heartbeat) = transaction
-            .wait(
-                "committing exact DIRECT endpoints",
-                commit_direct_policy_cancellation_safe(state, generation, pending),
-            )
-            .await??;
-        kill_status = committed_status;
-        direct_lease_heartbeat = Some(heartbeat);
-        let mut inner = state.lock().await;
-        if inner.connect_generation == generation {
-            inner.applied_wechat_path_regexes = Some(applied_wechat_paths);
-            inner.optional_direct_active = true;
-            inner.optional_direct_skip = None;
-        }
-    } else {
-        let mut inner = state.lock().await;
-        if inner.connect_generation == generation {
-            inner.applied_wechat_path_regexes = None;
-        }
-    }
 
     // The durable logical-session latch is committed only after every existing check and a
     // final generation guard. A failure remains an ordinary connect failure.
@@ -1248,6 +1198,7 @@ async fn run_stages(
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
         inner.fsm.mark_session_verified();
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        crate::tono::update_handoff::mark_committed();
         inner.exit_ip = None;
         inner.exit_org = None;
         inner.exit_location = None;
@@ -1279,12 +1230,24 @@ async fn run_stages(
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
     });
-    if let Some(heartbeat) = direct_lease_heartbeat {
-        spawn_direct_lease_heartbeat(state, generation, heartbeat).await;
-    }
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);
     spawn_control_plane_pin_refresh(state, app, generation).await;
+    spawn_optional_direct_after_connected(
+        state,
+        app,
+        node.clone(),
+        nodes.to_vec(),
+        home_node.cloned(),
+        home_socks5.cloned(),
+        secret,
+        controller_port,
+        mixed_port,
+        generation,
+        traffic_policy,
+        physical_interface,
+        service_session,
+    );
     Ok(())
 }
 
@@ -1724,25 +1687,24 @@ async fn verify_post_lock(
     // §6.8 is deliberately one advisory measurement for the whole verification group. Repeating
     // Mihomo's doubled `unified-delay` request on every TUN retry used to spend another full
     // cross-border round without adding any connection proof.
+    // CheckingExit is only a UI label. The real TUN race starts immediately;
+    // controller /delay may finish later and is never required for Connected.
     set_stage(state, app, ConnectStage::CheckingExit, generation, true, started).await?;
-    let controller_probe = transaction
-        .wait("advisory exit measurement", probe_exit_once(secret, controller_port))
-        .await?
-        .map(|_| ());
-
-    // §6.9 owns the verdict: first prove the barrier is wanted/live/locked, then make a fresh
-    // request from this App through system DNS and WinTUN.
+    let controller_secret = secret.to_string();
+    let mut controller_task = Some(tokio::spawn(async move {
+        probe_exit_once(&controller_secret, controller_port).await
+    }));
     set_stage(state, app, ConnectStage::VerifyingTraffic, generation, true, started).await?;
     let mut last = String::from("post-lock verification did not run");
     for round in 0..POST_LOCK_VERIFY_ROUNDS {
         if round > 0 && state.lock().await.connect_generation != generation {
+            if let Some(task) = controller_task.take() {
+                task.abort();
+            }
             return Err(stale_after_arm(state, generation).await);
         }
         let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
         let (data_plane, proxy_cross_check) = if final_round {
-            // Only an exhausted TUN path needs diagnosis. Run the loopback proxy check beside the
-            // last mandatory TUN attempt so a broken machine does not pay another serial network
-            // timeout. Success here remains diagnostic only and can never mark Connected.
             let (data_plane, proxy) = transaction
                 .wait("real TUN verification with proxy cross-check", async {
                     tokio::join!(verify_locked_data_plane(), verify_mixed_proxy_data_plane(mixed_port))
@@ -1758,6 +1720,30 @@ async fn verify_post_lock(
             )
         };
         let data_plane_error = data_plane.as_ref().err().cloned();
+        let controller_probe = if data_plane.is_ok() {
+            match controller_task.as_ref() {
+                Some(task) if task.is_finished() => match controller_task.take().unwrap().await {
+                    Ok(result) => result.map(|_| ()),
+                    Err(_) => Ok(()),
+                },
+                _ => Ok(()),
+            }
+        } else if final_round {
+            let task = controller_task.take();
+            transaction
+                .wait("advisory exit measurement", async {
+                    match task {
+                        Some(task) => match task.await {
+                            Ok(result) => result.map(|_| ()),
+                            Err(_) => Err("controller probe cancelled".to_string()),
+                        },
+                        None => Ok(()),
+                    }
+                })
+                .await?
+        } else {
+            Ok(())
+        };
 
         match classify_post_lock_verification(controller_probe.clone(), data_plane) {
             PostLockVerification::Verified {
@@ -1781,7 +1767,7 @@ async fn verify_post_lock(
             PostLockVerification::Retry { error } => {
                 last = match (proxy_cross_check, data_plane_error) {
                     (Some(proxy), Some(data_plane)) => {
-                        classify_exhausted_data_plane(controller_probe.clone(), data_plane, proxy)
+                        classify_exhausted_data_plane(controller_probe, data_plane, proxy)
                     }
                     _ => error,
                 };
@@ -1822,21 +1808,15 @@ fn classify_post_lock_verification<T>(
     controller_probe: Result<(), String>,
     data_plane: Result<T, String>,
 ) -> PostLockVerification<T> {
-    match (controller_probe, data_plane) {
-        (Ok(()), Ok(status)) => PostLockVerification::Verified {
+    match tono_core::classify_post_lock(controller_probe, data_plane) {
+        tono_core::PostLockDecision::Connected {
             status,
-            controller_warning: None,
-        },
-        (Err(error), Ok(status)) => PostLockVerification::Verified {
+            controller_advisory,
+        } => PostLockVerification::Verified {
             status,
-            controller_warning: Some(error),
+            controller_warning: controller_advisory,
         },
-        (Ok(()), Err(error)) => PostLockVerification::Retry { error },
-        (Err(controller), Err(data_plane)) => PostLockVerification::Retry {
-            error: format!(
-                "controller exit measurement failed: {controller}; real TUN data plane failed: {data_plane}"
-            ),
-        },
+        tono_core::PostLockDecision::Retry { error, .. } => PostLockVerification::Retry { error },
     }
 }
 
@@ -1845,7 +1825,13 @@ fn classify_exhausted_data_plane(
     data_plane: String,
     proxy_cross_check: Result<(), String>,
 ) -> String {
-    match (controller_probe, proxy_cross_check) {
+    let (code, _) = tono_core::classify_exhausted_data_plane(
+        controller_probe.clone(),
+        data_plane.clone(),
+        proxy_cross_check.clone(),
+        false,
+    );
+    let body = match (controller_probe, proxy_cross_check) {
         (Ok(()), Ok(())) => format!(
             "{TUN_DATA_PLANE_BROKEN_PREFIX}: selected node and Mihomo proxy egress passed, but the Windows TUN data plane failed: {data_plane}"
         ),
@@ -1858,7 +1844,8 @@ fn classify_exhausted_data_plane(
         (Err(controller), Err(proxy)) => format!(
             "{NODE_OR_CORE_UNREACHABLE_PREFIX}: controller, Windows TUN, and loopback proxy checks all failed; controller: {controller}; TUN: {data_plane}; loopback proxy: {proxy}"
         ),
-    }
+    };
+    format!("{body} [{}]", code.as_str())
 }
 
 /// The generation guard used between the long I/O steps.
@@ -3355,17 +3342,18 @@ async fn lock_kill_switch_with_retries(session: &OwnerSessionProof) -> Result<()
 async fn verify_fake_ip() -> Result<(), String> {
     let mut last = String::from("no answer");
     for attempt in 0..VERIFY_ATTEMPTS {
+        let lookup_timeout = fake_ip_attempt_timeout(attempt);
         #[cfg(windows)]
-        let lookup = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, FAKE_IP_LOOKUP_TIMEOUT)
+        let lookup = crate::tono::windows_dns::query_a(FAKE_IP_LOOKUP_HOST, lookup_timeout)
             .await
             .map(|addrs| addrs.into_iter().map(IpAddr::V4).collect::<Vec<_>>());
         #[cfg(not(windows))]
         let lookup = tokio::time::timeout(
-            FAKE_IP_LOOKUP_TIMEOUT,
+            lookup_timeout,
             tokio::net::lookup_host((FAKE_IP_LOOKUP_HOST, 443)),
         )
         .await
-        .map_err(|_| format!("system DNS lookup exceeded {FAKE_IP_LOOKUP_TIMEOUT:?}"))
+        .map_err(|_| format!("system DNS lookup exceeded {lookup_timeout:?}"))
         .and_then(|result| {
             result
                 .map(|addrs| addrs.map(|addr| addr.ip()).collect::<Vec<_>>())
@@ -3386,6 +3374,14 @@ async fn verify_fake_ip() -> Result<(), String> {
         }
     }
     Err(format!("fake-ip verification failed: {last}"))
+}
+
+fn fake_ip_attempt_timeout(attempt: u32) -> Duration {
+    if attempt == 0 {
+        Duration::from_secs(2)
+    } else {
+        FAKE_IP_LOOKUP_TIMEOUT
+    }
 }
 
 /// One exit probe: `GET /proxies/Tono-Exit/delay` against the generate_204 target with an
@@ -3529,10 +3525,21 @@ async fn verify_mixed_proxy_data_plane(mixed_port: u16) -> Result<(), String> {
     })
 }
 
+fn tun_probe_stagger(index: usize) -> Duration {
+    TUN_PROBE_STAGGER * (index as u32)
+}
+
 async fn race_data_plane_probes(client: &reqwest::Client) -> Result<(), Vec<String>> {
     let mut in_flight = FuturesUnordered::new();
-    for probe in TUN_DATA_PLANE_PROBES {
-        in_flight.push(probe_tun_endpoint(&client, probe));
+    for (index, probe) in TUN_DATA_PLANE_PROBES.into_iter().enumerate() {
+        let client = client.clone();
+        in_flight.push(async move {
+            let delay = tun_probe_stagger(index);
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            probe_tun_endpoint(&client, probe).await
+        });
     }
 
     let mut failures = Vec::with_capacity(TUN_DATA_PLANE_PROBES.len());
@@ -3775,6 +3782,85 @@ struct PendingDirectCommit {
 /// every later failure is fail-closed: no second StartClash and no fallback-to-restart path exist.
 /// The returned commit keeps the policy read guard and exact endpoints until DNS plus the existing
 /// post-lock barrier pass; only then may WFP install the physical-interface permits.
+fn spawn_optional_direct_after_connected(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    node: ValidatedNode,
+    nodes: Vec<ValidatedNode>,
+    home_node: Option<ValidatedNode>,
+    home_socks5: Option<tono_core::CatalogHomeSocks5>,
+    secret: String,
+    controller_port: u16,
+    mixed_port: u16,
+    generation: u64,
+    traffic_policy: Option<CapturedTrafficPolicy>,
+    physical_interface: Option<String>,
+    service_session: OwnerSessionProof,
+) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    AsyncHandler::spawn(move || async move {
+        if state.lock().await.connect_generation != generation {
+            return;
+        }
+        let pending = match apply_cloud_policy(
+            &state,
+            &node,
+            &nodes,
+            home_node.as_ref(),
+            home_socks5.as_ref(),
+            generation,
+            &secret,
+            controller_port,
+            mixed_port,
+            traffic_policy,
+            physical_interface,
+            &service_session,
+        )
+        .await
+        {
+            Ok(pending) => pending,
+            Err(error) => {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: optional DIRECT after Connected skipped: {error:?}"
+                );
+                return;
+            }
+        };
+        let Some(pending) = pending else {
+            return;
+        };
+        if state.lock().await.connect_generation != generation {
+            return;
+        }
+        let wechat_paths = pending.wechat_process_path_regexes.clone();
+        match commit_direct_policy_cancellation_safe(&state, generation, pending).await {
+            Ok((status, heartbeat)) => {
+                let mut inner = state.lock().await;
+                if inner.connect_generation != generation || !inner.fsm.status().is_connected {
+                    return;
+                }
+                inner.kill_switch = Some(status);
+                inner.applied_wechat_path_regexes = Some(wechat_paths);
+                inner.optional_direct_active = true;
+                inner.optional_direct_skip = None;
+                commands::emit_status(&app, &commands::status_of(&inner));
+                drop(inner);
+                spawn_direct_lease_heartbeat(&state, generation, heartbeat).await;
+            }
+            Err(error) => {
+                logging!(
+                    warn,
+                    Type::Service,
+                    "Tono: optional DIRECT commit rolled back to full tunnel: {error:?}"
+                );
+            }
+        }
+    });
+}
+
 async fn apply_cloud_policy(
     state: &Arc<TonoState>,
     node: &ValidatedNode,
@@ -3926,7 +4012,7 @@ async fn apply_cloud_policy(
         remote_providers: Vec::new(),
         core_path: core_path.to_string_lossy().into_owned(),
     };
-    let endpoint_digest = match clash_verge_service_ipc::direct_endpoint_digest(&direct_endpoints) {
+    let endpoint_digest = match tono_service_protocol::direct_endpoint_digest(&direct_endpoints) {
         Ok(digest) => digest,
         Err(error) => {
             skip_optional_direct_policy(
@@ -4006,7 +4092,7 @@ async fn direct_context_is_current(
 }
 
 fn validate_direct_reload_result(
-    result: &clash_verge_service_ipc::DirectRuntimeReloadResult,
+    result: &tono_service_protocol::DirectRuntimeReloadResult,
     session: &OwnerSessionProof,
     expected_reload_id: Option<u64>,
     expected_digest: &str,
@@ -4422,7 +4508,7 @@ async fn reconcile_direct_reload_failure(session: &OwnerSessionProof) -> Result<
     let result = service::tono_begin_direct_runtime_reload(session)
         .await
         .map_err(|error| format!("cannot restore the fail-closed DIRECT bracket: {error:#}"))?;
-    let empty_digest = clash_verge_service_ipc::direct_endpoint_digest(&[])
+    let empty_digest = tono_service_protocol::direct_endpoint_digest(&[])
         .map_err(|error| format!("cannot calculate empty DIRECT digest: {error}"))?;
     validate_direct_reload_result(&result, session, None, &empty_digest)?;
     let snapshot = service::tono_service_status_snapshot()
@@ -4468,7 +4554,7 @@ async fn activate_direct_runtime_cancellation_safe(
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let _mutation_guard = mutation_guard;
-        let empty_digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
+        let empty_digest = tono_service_protocol::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
         let reconcile_session = session.clone();
         let mut begin_attempted = false;
         let activation = async {
@@ -4632,7 +4718,7 @@ async fn commit_direct_policy_cancellation_safe(
         let _mutation_guard = mutation_guard;
         let reconcile_session = pending.session.clone();
         let result = async {
-            let empty_digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
+            let empty_digest = tono_service_protocol::direct_endpoint_digest(&[]).map_err(StageFailure::error)?;
             let before = service::tono_service_status_snapshot()
                 .await
                 .map_err(StageFailure::error)?;
@@ -5086,8 +5172,8 @@ pub fn build_direct_plan(
         // Straight from the Service crate, not a second copy of the numbers: the rules emitted
         // from this plan and the WFP permit the Service renders are then the same surface by
         // construction. That is the whole reason the constant lives in
-        // `clash_verge_service_ipc` rather than once in each crate that needs it.
-        reviewed_direct_ports: clash_verge_service_ipc::REVIEWED_DIRECT_PORTS.to_vec(),
+        // `tono_service_protocol` rather than once in each crate that needs it.
+        reviewed_direct_ports: tono_service_protocol::REVIEWED_DIRECT_PORTS.to_vec(),
     };
     Ok((plan, endpoints))
 }
@@ -5381,7 +5467,9 @@ mod tests {
         LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL,
         POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
         SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction, TRANSITION_IN_FLIGHT_REJECTION,
-        TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT, VERIFY_LOCK_ATTEMPTS,
+        FAKE_IP_LOOKUP_TIMEOUT, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT,
+        TUN_PROBE_STAGGER,
+        VERIFY_LOCK_ATTEMPTS,
         WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan, classify_core_sample,
         collect_ipv4_literals, controller_direct_graph_is_active, controller_error_detail, core_change_fires,
         dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
@@ -5390,9 +5478,10 @@ mod tests {
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
         reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
         stale_exit_needs_release, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
-        stop_core_before_release, validate_direct_reload_result, verify_lock_retry_window,
+        fake_ip_attempt_timeout, stop_core_before_release, tun_probe_stagger, validate_direct_reload_result,
+        verify_lock_retry_window,
     };
-    use clash_verge_service_ipc::{
+    use tono_service_protocol::{
         DirectRuntimeReloadResult, DnsProtectionStatus, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof,
         ServiceLifecycleState, ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot,
     };
@@ -5728,6 +5817,29 @@ mod tests {
     }
 
     #[test]
+    fn fake_ip_first_attempt_fails_fast_then_uses_full_budget() {
+        assert_eq!(fake_ip_attempt_timeout(0), Duration::from_secs(2));
+        assert_eq!(fake_ip_attempt_timeout(1), FAKE_IP_LOOKUP_TIMEOUT);
+        assert_eq!(fake_ip_attempt_timeout(2), FAKE_IP_LOOKUP_TIMEOUT);
+        assert!(fake_ip_attempt_timeout(0) < FAKE_IP_LOOKUP_TIMEOUT);
+    }
+
+    #[test]
+    fn tun_probe_origins_are_staggered_not_bursted() {
+        assert_eq!(tun_probe_stagger(0), Duration::ZERO);
+        assert_eq!(tun_probe_stagger(1), TUN_PROBE_STAGGER);
+        assert_eq!(
+            tun_probe_stagger(2),
+            TUN_PROBE_STAGGER + TUN_PROBE_STAGGER
+        );
+        assert!(
+            tun_probe_stagger(TUN_DATA_PLANE_PROBES.len() - 1) < TUN_DATA_PLANE_CONNECT_TIMEOUT,
+            "stagger is only spacing, not a second timeout"
+        );
+        assert!(POST_LOCK_VERIFY_ROUND_DELAY <= Duration::from_millis(500));
+    }
+
+    #[test]
     fn real_data_plane_probes_independent_https_origins() {
         assert!(
             TUN_DATA_PLANE_PROBES.len() >= 3,
@@ -5790,7 +5902,7 @@ mod tests {
     #[test]
     fn connect_budget_covers_a_cold_first_connect() {
         let accounted: u64 = CONNECT_BUDGET_LEGS.iter().map(|(_, secs)| secs).sum();
-        assert_eq!(accounted, 328, "the table in the doc comment must stay in sync");
+        assert_eq!(accounted, 208, "the table in the doc comment must stay in sync");
         assert!(
             Duration::from_secs(accounted) <= CONNECT_TRANSACTION_TIMEOUT,
             "the accounted cold-connect worst case ({accounted} s) must fit the budget"
@@ -5805,14 +5917,6 @@ mod tests {
         };
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
-        assert!(
-            leg("cloud policy (DNS + fail-closed hot reload + read-back/relock)")
-                >= CLOUD_POLICY_RESOLUTION_TIMEOUT
-                    + Duration::from_secs(60)
-                    + CONTROLLER_READY_TIMEOUT
-                    + LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS,
-            "the cloud-policy leg must cover DNS, in-place stage/reload, controller read-back, and relock"
-        );
         assert!(leg("checkingExit") >= EXIT_PROBE_ADVISORY_BUDGET);
         assert!(
             leg("verifyingTraffic") >= verify_lock_retry_window() + TUN_DATA_PLANE_TIMEOUT,
@@ -5972,7 +6076,7 @@ mod tests {
                     mode: KillSwitchStatusMode::Locked,
                     endpoints: Vec::new(),
                     tunnel_permit_rendered: true,
-                    direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
+                    direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                     last_error: None,
                 }),
                 network_events: Default::default(),
@@ -6104,7 +6208,7 @@ mod tests {
         let endpoint = proxy_endpoint_of(&node());
         assert_eq!(endpoint.ip, "203.0.113.7");
         assert_eq!(endpoint.port, 8443);
-        assert_eq!(endpoint.protocol, clash_verge_service_ipc::ProxyProtocol::Tcp);
+        assert_eq!(endpoint.protocol, tono_service_protocol::ProxyProtocol::Tcp);
     }
 
     #[test]
@@ -6420,7 +6524,7 @@ mod tests {
 
     #[test]
     fn kill_switch_health_requires_wanted_live_locked() {
-        use clash_verge_service_ipc::{KillSwitchStatus, KillSwitchStatusMode, ProxyEndpoint, ProxyProtocol};
+        use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode, ProxyEndpoint, ProxyProtocol};
         let endpoint = ProxyEndpoint {
             ip: "203.0.113.7".to_string(),
             port: 443,
@@ -6433,7 +6537,7 @@ mod tests {
             mode: KillSwitchStatusMode::Locked,
             endpoints: vec![endpoint.clone()],
             tunnel_permit_rendered: true,
-            direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
+            direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
         };
         assert!(!kill_switch_unhealthy(Some(&healthy)));
@@ -6451,7 +6555,7 @@ mod tests {
                 mode,
                 endpoints: vec![endpoint.clone()],
                 tunnel_permit_rendered: true,
-                direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
+                direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
                 last_error: None,
             };
             assert!(kill_switch_unhealthy(Some(&status)), "{wanted} {live} {mode:?}");
@@ -6471,7 +6575,7 @@ mod tests {
 
     #[test]
     fn protected_dns_health_requires_a_clean_nonempty_snapshot() {
-        use clash_verge_service_ipc::DnsProtectionStatus;
+        use tono_service_protocol::DnsProtectionStatus;
 
         let healthy = DnsProtectionStatus {
             enabled: true,
@@ -6692,7 +6796,7 @@ mod tests {
             generation: 42,
             token: "test-session-token".to_owned(),
         };
-        let digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap();
+        let digest = tono_service_protocol::direct_endpoint_digest(&[]).unwrap();
         let valid = DirectRuntimeReloadResult {
             owner_generation: 42,
             reload_id: 7,
@@ -6740,7 +6844,7 @@ mod tests {
 
     #[test]
     fn service_direct_proof_rejects_malformed_or_different_endpoint_digests() {
-        let digest = clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap();
+        let digest = tono_service_protocol::direct_endpoint_digest(&[]).unwrap();
         let mut status = KillSwitchStatus {
             wanted: true,
             verified: true,
@@ -7189,7 +7293,7 @@ mod tests {
         assert_eq!(
             endpoints
                 .iter()
-                .filter(|endpoint| endpoint.protocol == clash_verge_service_ipc::ProxyProtocol::Udp)
+                .filter(|endpoint| endpoint.protocol == tono_service_protocol::ProxyProtocol::Udp)
                 .count(),
             2
         );
@@ -7481,7 +7585,7 @@ mod tests {
                 .and_then(|rest| rest.split(')').next())
                 .and_then(|value| value.parse::<u16>().ok());
             let covered_by_port = port
-                .is_some_and(|port| clash_verge_service_ipc::REVIEWED_DIRECT_PORTS.contains(&port));
+                .is_some_and(|port| tono_service_protocol::REVIEWED_DIRECT_PORTS.contains(&port));
             let pin = rule
                 .payload
                 .split("(IPCIDR,")

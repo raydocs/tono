@@ -42,7 +42,7 @@
 
 use std::path::{Path, PathBuf};
 
-use clash_verge_service_ipc::{DnsProtectionStatus, KillSwitchStatus, ProtocolInfo};
+use tono_service_protocol::{DnsProtectionStatus, KillSwitchStatus, ProtocolInfo};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use tono_core::auth::{DIAGNOSTICS_SCHEMA_VERSION, DiagnosticsStep};
@@ -210,7 +210,7 @@ pub fn classify_virtual_adapters(names: &[String]) -> Vec<String> {
 /// Where the Service writes its own log. The app cannot read it (see the
 /// module docs); only the path travels.
 pub fn service_log_path() -> PathBuf {
-    clash_verge_service_ipc::service_paths()
+    tono_service_protocol::service_paths()
         .persistent_state_dir()
         .join("logs")
         .join("tono-service.log")
@@ -312,7 +312,7 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
 #[expect(clippy::unwrap_used, reason = "tests assert by panicking")]
 mod tests {
     use super::*;
-    use clash_verge_service_ipc::{KillSwitchStatusMode, ProtocolVersion, ProxyEndpoint, ProxyProtocol};
+    use tono_service_protocol::{KillSwitchStatusMode, ProtocolVersion, ProxyEndpoint, ProxyProtocol};
     use tono_core::connection::ConnectStage;
 
     /// Every key the payload is allowed to contain. Kept spelled out so a new

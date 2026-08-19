@@ -129,7 +129,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path sidecar, resources | Out-Null
           $paths = @(
-            'sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe',
+            'sidecar/tono-core-x86_64-pc-windows-msvc.exe',
             'resources/Country.mmdb',
             'resources/geoip.dat',
             'resources/geosite.dat',

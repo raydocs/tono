@@ -64,6 +64,7 @@ xcrun swiftc \
   "$protocol_version_source" \
   -framework IOKit \
   -framework Security \
+  -framework SystemConfiguration \
   -o "$temporary_file"
 # This is an ad-hoc signature for local compilation only. The Release archive
 # must re-sign the helper with the Tono Developer ID through CodeSignOnCopy;

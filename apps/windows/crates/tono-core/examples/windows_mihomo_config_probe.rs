@@ -1,5 +1,5 @@
 //! Emit a credential-free runtime fixture for validation with the pinned
-//! Windows Mihomo binary (`verge-mihomo.exe -t -f <output>`).
+//! Windows Mihomo binary (`tono-core.exe -t -f <output>`).
 
 use std::{net::Ipv4Addr, path::PathBuf};
 

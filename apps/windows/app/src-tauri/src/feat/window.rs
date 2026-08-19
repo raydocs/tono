@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::core::{CoreManager, handle};
 use crate::utils;
 use crate::utils::window_manager::WindowManager;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use tokio::time::Duration;
 #[cfg(target_os = "macos")]
 use tokio::time::timeout;
@@ -200,7 +200,7 @@ async fn ask_to_quit_without_release(error: &str) -> bool {
     rx.await.unwrap_or(false)
 }
 
-pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
+pub async fn quit() -> tono_signal::ShutdownOutcome {
     logging!(debug, Type::System, "启动退出流程");
     // 设置退出标志
     handle::Handle::global().set_is_exiting();
@@ -238,7 +238,7 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
             // Bringing the window back is what makes the notice below, and Disconnect, reachable.
             surface_cancelled_quit().await;
             handle::Handle::notice_message("app_quit::core_stop_failed", "");
-            return clash_verge_signal::ShutdownOutcome::Canceled;
+            return tono_signal::ShutdownOutcome::Canceled;
         }
         logging!(
             warn,
@@ -263,7 +263,7 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
         handle::Handle::global().clear_is_exiting();
         surface_cancelled_quit().await;
         handle::Handle::notice_message("app_quit::core_stop_failed", "");
-        return clash_verge_signal::ShutdownOutcome::Canceled;
+        return tono_signal::ShutdownOutcome::Canceled;
     }
 
     // Tono: an unprotected quit leaves nothing for the Service to do — the kill switch is not
@@ -278,7 +278,7 @@ pub async fn quit() -> clash_verge_signal::ShutdownOutcome {
     utils::server::shutdown_embedded_server();
     let app_handle = handle::Handle::app_handle();
     app_handle.exit(if cleanup_result.all_success { 0 } else { 1 });
-    clash_verge_signal::ShutdownOutcome::Committed
+    tono_signal::ShutdownOutcome::Committed
 }
 
 pub async fn clean_async() -> CleanupResult {

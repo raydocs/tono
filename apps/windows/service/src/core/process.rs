@@ -406,7 +406,7 @@ fn core_image_candidates() -> Result<Vec<(u32, String)>> {
         TH32CS_SNAPPROCESS,
     };
 
-    const CORE_IMAGE_FILE_NAME: &str = "verge-mihomo.exe";
+    const CORE_IMAGE_FILE_NAMES: &[&str] = &["tono-core.exe", "verge-mihomo.exe"];
 
     // SAFETY: a snapshot of the process table has no caller-supplied pointers to invalidate.
     let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
@@ -437,7 +437,10 @@ fn core_image_candidates() -> Result<Vec<(u32, String)>> {
             .position(|unit| *unit == 0)
             .unwrap_or(entry.szExeFile.len());
         let image_name = String::from_utf16_lossy(&entry.szExeFile[..name_end]);
-        if image_name.eq_ignore_ascii_case(CORE_IMAGE_FILE_NAME) {
+        if CORE_IMAGE_FILE_NAMES
+            .iter()
+            .any(|name| image_name.eq_ignore_ascii_case(name))
+        {
             // `process_identity` re-derives and canonicalizes the full image path; a process
             // that exited mid-sweep or refuses inspection is skipped, never guessed at.
             if let Ok(Some(identity)) = process_identity(entry.th32ProcessID) {

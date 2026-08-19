@@ -1,7 +1,7 @@
 {
  "schemaVersion": 1,
  "channel": "test",
- "generatedAt": "2026-08-15T04:44:00Z",
+ "generatedAt": "2026-08-18T12:02:18Z",
  "generator": "tooling/scripts/generate-release-center.mjs",
  "releaseCenter": "https://releases.afk.ccwu.cc/",
  "controlPlane": {
@@ -18,16 +18,16 @@
   "repository": "Published from Tono’s own repository. Everything before 0.0.66 and 0.0.33 was released from a fork of another project, and the Windows updater asked a host blocked from mainland China, so a PC that could not connect was told no update existed."
  },
  "releaseSet": {
-  "id": "2026-08-15-macos-build66-windows-0.0.33",
+  "id": "2026-08-18-macos-build67-windows-0.0.34",
   "status": "both-lines-published-and-reachable",
-  "reason": "macOS Build 66 is the newest item in the Sparkle feed and Windows 0.0.33 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
+  "reason": "macOS Build 67 is the newest item in the Sparkle feed and Windows 0.0.34 is what the audited update channel serves. Both were read from those sources, not recorded by hand."
  },
  "platforms": {
   "macos": {
    "current": {
-    "releaseId": "macos-0.0.66-build66",
-    "version": "0.0.66",
-    "build": 66,
+    "releaseId": "macos-0.0.67-build67",
+    "version": "0.0.67",
+    "build": 67,
     "architecture": "arm64",
     "minimumOS": "26.3",
     "availability": "sparkle-published",
@@ -40,8 +40,8 @@
     },
     "provenance": {
      "releaseLine": "release/macos",
-     "sourceCommit": "524a1e18335f8c8780a55d9d5c3fbfeb3457cd00",
-     "immutableTagCommit": "524a1e18335f8c8780a55d9d5c3fbfeb3457cd00",
+     "sourceCommit": "952b4b6db1cd007607f64f8812f46a4d10dc4d9c",
+     "immutableTagCommit": "952b4b6db1cd007607f64f8812f46a4d10dc4d9c",
      "tagStatus": "exact"
     },
     "helperContract": "3.12.2",
@@ -50,66 +50,86 @@
      "IPv6 全程关闭：TUN 与 fake-ip 只走 IPv4，AAAA 拨号由 Kill Switch 丢弃后客户端改试 IPv4"
     ],
     "artifact": {
-     "name": "Tono-0.0.66-build66-arm64.zip",
-     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.66-build66-arm64.zip",
-     "size": 19895679,
-     "sha256": "188541f808e8a8a260fa7eef4a536ccb914a6703ace1da10b5a0898ba363d548",
-     "sparkleEdSignature": "t7gtZDOMa1y0n/tRdahaDdFETeJpST8Y8jkyoLycXnjrseHGarjREzgkyI9i6+K0E4oIrW8AUxA//ug0EdR0BQ=="
+     "name": "Tono-0.0.67-build67-arm64.zip",
+     "url": "https://releases.afk.ccwu.cc/download/Tono-0.0.67-build67-arm64.zip",
+     "size": 20394392,
+     "sha256": "91917b5f56dfd778881d35723383cd4896e9292de188670ffe1ae0c22fc67cf2",
+     "sparkleEdSignature": "L7hXiezkO6lLeLr4HZ2O17x7P2plMAU4Svl4bawitei2KA9LGnktsAenydkplabeijzBezIz/JO023wYxxzGBw=="
     },
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.66-build66"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.67-build67"
    }
   },
   "windows": {
    "current": {
-    "releaseId": "windows-0.0.33",
-    "version": "0.0.33",
+    "releaseId": "windows-0.0.34",
+    "version": "0.0.34",
     "architecture": "x86_64",
     "installer": "nsis",
     "availability": "published-stable",
     "update": {
      "mechanism": "tauri-updater-v2",
      "automaticUpdaterEnabled": true,
-     "channelVersion": "0.0.33"
+     "channelVersion": "0.0.34"
     },
-    "commit": "a4fb0d9f8aad7b0939727fcc8e345d93bc104631",
+    "commit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
     "releaseLine": "release/windows",
     "serviceProtocolRevision": 14,
     "minimumServiceRevision": 14,
     "recommended": true,
     "artifact": {
-     "name": "Tono_0.0.33_x64-setup.exe",
-     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.33_x64-setup.exe",
-     "size": 31491532,
-     "sha256": "a1384aa391ba93e8afaf5ea443bb6fda09537931c846802e459a3eb9a884f749",
+     "name": "Tono_0.0.34_x64-setup.exe",
+     "url": "https://releases.afk.ccwu.cc/download/Tono_0.0.34_x64-setup.exe",
+     "size": 32337730,
+     "sha256": "b746d353a11a86ca3bc61f06ac866a6ab0f32961f26bab0a56212d703263f427",
      "authenticodeSigned": false,
      "authenticodeStatus": "not-signed"
     },
     "knownLimitations": [
-     "已安装的旧版本无法自动更新到本版，必须手动安装一次；此后自动更新恢复",
      "安装包未附 Authenticode 证书，全新安装时 Windows SmartScreen 会告警",
-     "App 与 Service 必须同版：本版要求服务协议 14，安装器在一次提权事务里同时替换两者"
+     "App 与 Service 必须同版；从 0.0.33 自动更新会在一次提权事务里同时替换两者"
     ],
-    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.33"
+    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.34"
    }
   }
  },
  "archive": [
   {
-   "releaseId": "macos-0.0.66-build66",
+   "releaseId": "macos-0.0.67-build67",
    "platform": "macos",
-   "version": "0.0.66",
-   "build": 66,
-   "publishedAt": "2026-08-15T01:18:03Z",
+   "version": "0.0.67",
+   "build": 67,
+   "publishedAt": "2026-08-18T10:49:44Z",
    "status": "published-sparkle-current",
-   "sourceCommit": "524a1e18335f8c8780a55d9d5c3fbfeb3457cd00",
-   "tagCommit": "524a1e18335f8c8780a55d9d5c3fbfeb3457cd00",
+   "sourceCommit": "952b4b6db1cd007607f64f8812f46a4d10dc4d9c",
+   "tagCommit": "952b4b6db1cd007607f64f8812f46a4d10dc4d9c",
    "summary": [
-    "Build 65 的代码，改从 Tono 自己的独立仓库发布。此前的仓库是别人项目的 fork，所有下载与更新地址都挂在那个名下；同一轮 Windows 也一起迁移，并把更新查询从被屏蔽的地址挪到了自己的服务器。应用本身没有任何改动，helper 仍为 3.12.2，升级不需要输入管理员密码。",
-    "下载与更新地址改为指向 Tono 自己的仓库。Build 65 发布自一个 fork，它链接到的一切都挂在那个 fork 的名下",
-    "同一轮里 Windows 也一起搬了，并且它的更新查询不再走在中国大陆被屏蔽的地址。这一点不影响本版，但正是两个平台一起搬的原因",
-    "特权 helper 仍是 3.12.2，本次更新不会要求输入管理员密码"
+    "界面整体重做与完整中文化：登录页重新设计并内嵌设备管理（修复设备满额时无法自助处理的死循环），节点改为城市命名并配城市地标图标，深色模式改为黑玻璃质感，全部界面、错误信息完成简体中文本地化。helper 没有变化，升级不需要输入管理员密码。",
+    "全应用中文化：每个界面、每条错误信息、菜单栏，包括启动时网络组件报告的错误",
+    "登录页重新设计：更干净的欢迎页，邮箱与 Apple 登录并排，六位验证码输满自动提交，错误信息可读并补上了缺失的\"重试\"按钮",
+    "账户设备数达到上限时，登录页会直接列出你的设备并允许当场移除——此前它让你去一个根本进不去的页面处理",
+    "节点按城市命名（洛杉矶、东京、盐湖城……），每个城市有自己的地标图标——棕榈、鸟居、天守阁、雪山盐湖、瀑布——不再是一排一模一样的条目；列表随窗口宽度自动排列",
+    "深色模式改为真正的黑玻璃质感；状态颜色、延迟分档、强调色在所有界面保持一致",
+    "连接控件显示所选城市与延迟，隧道建立时 Tono 标志会点亮；首页会标出你的 AI 流量（Claude、ChatGPT、Grok）所走的家宽线路",
+    "切换节点、导出日志有轻提示确认；测速结果逐个滚动出现；动效遵循\"减弱动态效果\"设置"
    ],
-   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.66-build66"
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.67-build67"
+  },
+  {
+   "releaseId": "windows-0.0.34",
+   "platform": "windows",
+   "version": "0.0.34",
+   "publishedAt": "2026-08-18T11:59:54Z",
+   "status": "published-stable-channel-current",
+   "sourceCommit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
+   "tagCommit": "ded3ecd78e2ce0bdd68c657481a9513e4a9f895b",
+   "summary": [
+    "以打磨与中文质量为主的版本：切换节点有轻提示确认、全面梳理简体中文文案（统一\"节点\"术语与全角标点）、节点徽章与 macOS 品牌标识逐像素对齐。服务协议不变，可从 0.0.33 自动更新。",
+    "切换节点后会弹出轻提示，标明已切换到哪个节点，不再无声切换",
+    "全面梳理中文文案：统一称\"节点\"，中文语境使用全角标点，重写了若干生硬的翻译",
+    "节点徽章图形重制为与 macOS 逐像素一致的品牌标识",
+    "选中节点的高亮与卡片描边的一致性小修"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.34"
   },
   {
    "releaseId": "windows-0.0.33",
@@ -126,6 +146,23 @@
     "其余与 0.0.32 完全一致，包括服务协议，所以 App 与 Service 的配对关系不变"
    ],
    "releaseURL": "https://github.com/raydocs/tono/releases/tag/v0.0.33"
+  },
+  {
+   "releaseId": "macos-0.0.66-build66",
+   "platform": "macos",
+   "version": "0.0.66",
+   "build": 66,
+   "publishedAt": "2026-08-15T01:18:03Z",
+   "status": "published-sparkle-current",
+   "sourceCommit": "524a1e18335f8c8780a55d9d5c3fbfeb3457cd00",
+   "tagCommit": "524a1e18335f8c8780a55d9d5c3fbfeb3457cd00",
+   "summary": [
+    "Build 65 的代码，改从 Tono 自己的独立仓库发布。此前的仓库是别人项目的 fork，所有下载与更新地址都挂在那个名下；同一轮 Windows 也一起迁移，并把更新查询从被屏蔽的地址挪到了自己的服务器。应用本身没有任何改动，helper 仍为 3.12.2，升级不需要输入管理员密码。",
+    "下载与更新地址改为指向 Tono 自己的仓库。Build 65 发布自一个 fork，它链接到的一切都挂在那个 fork 的名下",
+    "同一轮里 Windows 也一起搬了，并且它的更新查询不再走在中国大陆被屏蔽的地址。这一点不影响本版，但正是两个平台一起搬的原因",
+    "特权 helper 仍是 3.12.2，本次更新不会要求输入管理员密码"
+   ],
+   "releaseURL": "https://github.com/raydocs/tono/releases/tag/tono-macos-0.0.66-build66"
   }
  ]
 }

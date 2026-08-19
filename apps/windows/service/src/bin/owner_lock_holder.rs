@@ -1,6 +1,6 @@
 #![cfg(all(feature = "standalone", feature = "test"))]
 
-use clash_verge_service_ipc::acquire_service_owner;
+use tono_service_protocol::acquire_service_owner;
 use std::time::Duration;
 
 #[tokio::main(flavor = "current_thread")]

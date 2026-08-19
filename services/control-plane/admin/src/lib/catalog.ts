@@ -25,7 +25,7 @@ export function catalogProxyNames(yaml: string): string[] {
       continue;
     }
     const match = line.match(
-      /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#]+))\s*(?:#.*)?$/,
+      /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#"'][^#]*?))\s*(?:#.*)?$/,
     );
     if (match) {
       const raw = match[1] ?? match[2] ?? match[3] ?? '';

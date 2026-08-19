@@ -3,7 +3,7 @@ use crate::{
     core::{CoreManager, manager::RunningMode, service, sysopt::Sysopt},
 };
 use anyhow::{Result, bail, ensure};
-use clash_verge_service_ipc::{MacosProxyConfig, OwnerSessionProof, ProxyApplyOutcome};
+use tono_service_protocol::{MacosProxyConfig, OwnerSessionProof, ProxyApplyOutcome};
 use std::{
     future::Future,
     sync::atomic::{AtomicU64, Ordering},
@@ -193,7 +193,7 @@ mod tests {
         service_proxy_config,
     };
     use crate::{config::IVerge, core::manager::RunningMode};
-    use clash_verge_service_ipc::{MacosProxyConfig, OwnerSessionProof, ProxyApplyOutcome};
+    use tono_service_protocol::{MacosProxyConfig, OwnerSessionProof, ProxyApplyOutcome};
     use parking_lot::Mutex;
     use std::sync::{
         Arc,

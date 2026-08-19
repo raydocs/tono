@@ -1,6 +1,6 @@
 use crate::utils::dirs;
 use anyhow::{Context as _, Result};
-use clash_verge_service_ipc::{OwnerCredentials, OwnerIdentity};
+use tono_service_protocol::{OwnerCredentials, OwnerIdentity};
 use std::path::Path;
 
 pub(crate) fn current_owner_credentials() -> Result<OwnerCredentials> {
@@ -85,8 +85,8 @@ pub(crate) fn current_user_pipe_sddl() -> Result<String> {
 #[cfg(windows)]
 mod windows_owner {
     use anyhow::{Context as _, Result, bail};
-    use clash_verge_logging::{Type, logging};
-    use clash_verge_service_ipc::OWNER_TOKEN_FILE_NAME;
+    use tono_logging::{Type, logging};
+    use tono_service_protocol::{LEGACY_OWNER_TOKEN_FILE_NAME, OWNER_TOKEN_FILE_NAME};
     use std::ffi::c_void;
     use std::io::{Read as _, Write as _};
     use std::os::windows::ffi::OsStrExt as _;
@@ -148,6 +148,12 @@ mod windows_owner {
 
     pub(super) fn load_or_create_token(app_data_root: &Path, sid: &str) -> Result<String> {
         let token_path = app_data_root.join(OWNER_TOKEN_FILE_NAME);
+        let legacy_path = app_data_root.join(LEGACY_OWNER_TOKEN_FILE_NAME);
+        if !token_path.exists() && legacy_path.is_file() {
+            if let Ok(bytes) = std::fs::read(&legacy_path) {
+                let _ = std::fs::write(&token_path, bytes);
+            }
+        }
         match try_load_or_create_token(&token_path, sid) {
             Ok(token) => Ok(token),
             Err(error) if format!("{error:#}").contains(UNUSABLE_TOKEN_MARKER) => {
@@ -547,7 +553,7 @@ mod windows_owner {
 #[cfg(test)]
 mod tests {
     use super::current_owner_credentials_for_root;
-    use clash_verge_service_ipc::OwnerIdentity;
+    use tono_service_protocol::OwnerIdentity;
 
     #[cfg(unix)]
     #[test]

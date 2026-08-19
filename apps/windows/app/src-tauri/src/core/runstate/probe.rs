@@ -4,7 +4,7 @@
 //! on [`super::env::RunStateEnv`], so these classifications are testable without IPC,
 //! systemd, SCM or launchd.
 
-use clash_verge_service_ipc::{MIN_REQUIRED_SERVICE_REVISION, ProtocolInfo, ProtocolVersion};
+use tono_service_protocol::{MIN_REQUIRED_SERVICE_REVISION, ProtocolInfo, ProtocolVersion};
 
 use super::health::ServiceHealth;
 

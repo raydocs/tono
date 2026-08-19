@@ -9,7 +9,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router'
 import { SWRConfig } from 'swr'
-import { MihomoWebSocket } from 'tauri-plugin-mihomo-api'
+import { MihomoWebSocket } from 'tono-plugin-core-api'
 
 import { BaseErrorBoundary } from './components/base/base-error-boundary'
 import { router } from './pages/_routers'

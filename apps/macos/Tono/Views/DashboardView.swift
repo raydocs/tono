@@ -37,6 +37,7 @@ struct DashboardView: View {
                     ), isConnecting: appState.isConnecting,
                        isDisconnecting: appState.isDisconnecting,
                        isProtectionBlocked: appState.isProtectionBlocked,
+                       isRecovering: appState.isRecoveringProtectedConnection,
                        connectionStage: appState.connectionStage,
                        disconnectionStage: appState.disconnectionStage,
                        nodeName: appState.activeNode?.name ?? appState.proxyService.activeNodeName,
@@ -605,12 +606,14 @@ private struct ConnectionProgressCard: View {
         let server = appState.activeNode?.name
             ?? appState.proxyService.activeNodeName
             ?? "unknown"
+        let classified = appState.lastClassifiedFailure?.copyableDetail ?? "none"
         let summary = """
         Tono connection report
         Build: \(build)
         Server: \(server)
         Failed step: \(failure.stage.rawValue)
         Error: \(failure.message)
+        Classified: \(classified)
         Retry attempt: \(appState.protectedReconnectAttempt)
         Kill Switch: \(KillSwitchService.isArmed ? "active" : "inactive")
         Recovery command (last resort, restores normal internet):

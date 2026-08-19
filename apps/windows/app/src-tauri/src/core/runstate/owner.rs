@@ -9,7 +9,7 @@
 //! decides that the Service can no longer be trusted, and `CoreManager` is what tears the Core
 //! down in response.
 
-use clash_verge_service_ipc::ServiceLifecycleState;
+use tono_service_protocol::ServiceLifecycleState;
 
 /// How many consecutive bad samples we tolerate before acting.
 ///

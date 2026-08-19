@@ -175,8 +175,8 @@ struct MultiExitPolicyTests {
             ("ipv6-off", "\nipv6: false\n"),
             ("udp-rule-engine", "\nudp: true\n"),
             ("rule-mode", "\nmode: rule\n"),
-            ("unified-delay", "\nunified-delay: true\n"),
-            ("demand-process-lookup", "\nfind-process-mode: strict\n"),
+            ("unified-delay", "\nunified-delay: false\n"),
+            ("demand-process-lookup", "\nfind-process-mode: off\n"),
             ("disable-stale-selection-cache", "\n  store-selected: false\n"),
             ("disable-direct-icmp", "\n  disable-icmp-forwarding: true\n"),
             (

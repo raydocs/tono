@@ -23,7 +23,7 @@ use std::path::Path;
 ///
 /// `option_env!` rather than `env!` so a build that has not been given a pin still compiles; what
 /// it does *not* do is still start a core, because an absent pin is a refusal below and not a
-/// waiver. Release builds set `TONO_CORE_SHA256` to the digest of the `verge-mihomo.exe` the
+/// waiver. Release builds set `TONO_CORE_SHA256` to the digest of the `tono-core.exe` the
 /// installer ships.
 const COMPILED_IN_CORE_SHA256: Option<&str> = option_env!("TONO_CORE_SHA256");
 /// Publisher thumbprint of a signed core. Absent on official unsigned Mihomo builds.

@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import SystemConfiguration
 
 /// Owns the temporary macOS DNS override required by Mihomo TUN.
 ///
@@ -36,8 +37,17 @@ final class ProtectedDNSManager {
         defer { lock.unlock() }
 
         let service = try Self.validateService(rawService)
-        guard try Self.availableServices().contains(service) else {
-            throw HelperFailure.invalid("The selected network service is unavailable.")
+        // `networksetup -getdnsservers` already fails for a missing service.
+        // Listing every service first was a second process spawn on every
+        // connect just to answer the same question.
+        let existingServers: [String]
+        do {
+            existingServers = try Self.currentDNS(for: service)
+        } catch {
+            guard try Self.availableServices().contains(service) else {
+                throw HelperFailure.invalid("The selected network service is unavailable.")
+            }
+            throw error
         }
 
         if let previous = try loadSnapshot() {
@@ -56,7 +66,7 @@ final class ProtectedDNSManager {
             }
         }
 
-        var servers = try Self.currentDNS(for: service)
+        var servers = existingServers
         if servers == [Self.protectedDNSServer] {
             // A previous session left the Mihomo listener in place without a
             // snapshot. Recording that as "original DNS" makes Restore Internet
@@ -291,9 +301,12 @@ final class ProtectedDNSManager {
         }
     }
 
-    // MARK: - networksetup
+    // MARK: - System Configuration (networksetup fallback)
 
     private static func currentDNS(for service: String) throws -> [String] {
+        if let servers = try? scCurrentDNS(for: service) {
+            return servers
+        }
         let result = try runNetworkSetup(["-getdnsservers", service])
         guard result.status == 0 else {
             throw HelperFailure.system("Could not read the current DNS settings.")
@@ -304,6 +317,9 @@ final class ProtectedDNSManager {
     private static func setDNS(_ servers: [String], for service: String) throws {
         guard servers.count <= 8, servers.allSatisfy(isIPAddress) else {
             throw HelperFailure.invalid("A protected DNS snapshot is invalid.")
+        }
+        if (try? scSetDNS(servers, for: service)) != nil {
+            return
         }
         let values = servers.isEmpty ? ["Empty"] : servers
         let result = try runNetworkSetup(["-setdnsservers", service] + values)
@@ -325,11 +341,119 @@ final class ProtectedDNSManager {
     }
 
     private static func listServices(includingDisabled: Bool) throws -> Set<String> {
+        if let services = try? scListServices(includingDisabled: includingDisabled),
+           !services.isEmpty {
+            return services
+        }
         let result = try runNetworkSetup(["-listallnetworkservices"])
         guard result.status == 0 else {
             throw HelperFailure.system("Could not enumerate network services.")
         }
         return parseServices(result.output, includingDisabled: includingDisabled)
+    }
+
+    private static func scCurrentDNS(for service: String) throws -> [String] {
+        try withPreferences(lock: false) { prefs in
+            guard let networkService = namedService(prefs, service) else {
+                throw HelperFailure.invalid("The selected network service is unavailable.")
+            }
+            return dnsServers(on: networkService)
+        }
+    }
+
+    private static func scSetDNS(_ servers: [String], for service: String) throws {
+        try withPreferences(lock: true) { prefs in
+            guard let networkService = namedService(prefs, service) else {
+                throw HelperFailure.invalid("The selected network service is unavailable.")
+            }
+            guard let protocolRef = SCNetworkServiceCopyProtocol(
+                networkService,
+                kSCNetworkProtocolTypeDNS
+            ) else {
+                throw HelperFailure.system("Could not open the DNS protocol.")
+            }
+            var configuration: [String: Any] = [:]
+            if let existing = SCNetworkProtocolGetConfiguration(protocolRef) {
+                configuration = (existing as NSDictionary as? [String: Any]) ?? [:]
+            }
+            if servers.isEmpty {
+                // Same as `networksetup -setdnsservers <service> Empty`:
+                // drop the explicit list so DHCP/automatic resolvers return.
+                configuration.removeValue(forKey: kSCPropNetDNSServerAddresses as String)
+            } else {
+                configuration[kSCPropNetDNSServerAddresses as String] = servers
+            }
+            guard SCNetworkProtocolSetConfiguration(protocolRef, configuration as CFDictionary),
+                  SCPreferencesCommitChanges(prefs),
+                  SCPreferencesApplyChanges(prefs) else {
+                throw HelperFailure.system("Could not update the protected DNS settings.")
+            }
+        }
+    }
+
+    private static func scListServices(includingDisabled: Bool) throws -> Set<String> {
+        try withPreferences(lock: false) { prefs in
+            guard let array = SCNetworkServiceCopyAll(prefs) else {
+                throw HelperFailure.system("Could not enumerate network services.")
+            }
+            var services = Set<String>()
+            let count = CFArrayGetCount(array)
+            for index in 0..<count {
+                let service = unsafeBitCast(
+                    CFArrayGetValueAtIndex(array, index),
+                    to: SCNetworkService.self
+                )
+                guard let name = SCNetworkServiceGetName(service) as String?,
+                      (try? validateService(name)) != nil else { continue }
+                if !includingDisabled, !SCNetworkServiceGetEnabled(service) {
+                    continue
+                }
+                services.insert(name)
+            }
+            return services
+        }
+    }
+
+    private static func namedService(_ prefs: SCPreferences, _ name: String) -> SCNetworkService? {
+        guard let array = SCNetworkServiceCopyAll(prefs) else { return nil }
+        let count = CFArrayGetCount(array)
+        for index in 0..<count {
+            let service = unsafeBitCast(
+                CFArrayGetValueAtIndex(array, index),
+                to: SCNetworkService.self
+            )
+            if SCNetworkServiceGetName(service) as String? == name {
+                return service
+            }
+        }
+        return nil
+    }
+
+    private static func dnsServers(on service: SCNetworkService) -> [String] {
+        guard let protocolRef = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeDNS),
+              let configuration = SCNetworkProtocolGetConfiguration(protocolRef) as NSDictionary?,
+              let servers = configuration[kSCPropNetDNSServerAddresses] as? [String]
+        else {
+            return []
+        }
+        return servers.filter { !$0.isEmpty && isIPAddress($0) }
+    }
+
+    private static func withPreferences<T>(lock: Bool, _ body: (SCPreferences) throws -> T) throws -> T {
+        guard let prefs = SCPreferencesCreate(nil, "tono-core-helper" as CFString, nil) else {
+            throw HelperFailure.system("Could not open network preferences.")
+        }
+        if lock {
+            guard SCPreferencesLock(prefs, true) else {
+                throw HelperFailure.system("Could not lock network preferences.")
+            }
+        }
+        defer {
+            if lock {
+                SCPreferencesUnlock(prefs)
+            }
+        }
+        return try body(prefs)
     }
 
     static func parseServices(

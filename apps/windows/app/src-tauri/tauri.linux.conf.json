@@ -27,8 +27,8 @@
       "./sidecar/tono-service",
       "./sidecar/tono-service-install",
       "./sidecar/tono-service-uninstall",
-      "./sidecar/verge-mihomo",
-      "./sidecar/verge-mihomo-alpha"
+      "./sidecar/tono-core",
+      "./sidecar/tono-core-alpha"
     ]
   }
 }
