@@ -840,7 +840,7 @@ final class AppState {
     func handleSystemNetworkChange() {
         if !isConnected {
             guard KillSwitchService.isArmed, isTonoReady,
-                  !isDisconnecting else { return }
+                  !isConnecting, !isDisconnecting else { return }
             // Wake recovery owns its barrier/retry sequence. Dynamic Store
             // emits several route and DNS notifications during the same wake;
             // they must not create a second coordinator that races its connect.
@@ -1497,7 +1497,14 @@ final class AppState {
                         committedDirectPolicy = nil
                         LocalTrafficAudit.shared.recordEvent(
                             "managed_direct_policy_invalid",
-                            details: ["error": String(describing: error)]
+                            details: [
+                                "error": String(describing: error),
+                                "interface": physicalInterface,
+                                "suffixes": String(trafficPolicy.directSuffixes.count),
+                                "web_domains": String(trafficPolicy.webDomains.count),
+                                "domains": String(trafficPolicy.domains.count),
+                                "trusted": trafficPolicy.trusted ? "true" : "false",
+                            ]
                         )
                     }
                 } else {
@@ -1616,7 +1623,7 @@ final class AppState {
                 // user's original Internet untouched.
                 self.connectionStage = .securingDNS
                 guard await localDNSReady else {
-                    throw CoreControllerError.requestFailed(
+                    throw CoreControllerError.protectionFailed(
                         "Mihomo's protected local DNS listener did not pass its preflight check."
                     )
                 }
@@ -1639,7 +1646,7 @@ final class AppState {
                 // receive Mihomo's fake IP through macOS's active resolver
                 // before the UI can ever report Connected.
                 guard await self.testSystemProtectedDNS() else {
-                    throw CoreControllerError.requestFailed(
+                    throw CoreControllerError.protectionFailed(
                         "The macOS protected DNS path did not pass its end-to-end check."
                     )
                 }
@@ -1683,7 +1690,7 @@ final class AppState {
                     }
                 case .failed(let failure):
                     self.lastClassifiedFailure = failure
-                    throw CoreControllerError.requestFailed(failure.userMessage)
+                    throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
                 LocalTrafficAudit.shared.recordEvent(
                     "system_data_plane_verified",
@@ -3038,15 +3045,15 @@ final class AppState {
                     if case .failed(let failure) = rollback {
                         self.lastClassifiedFailure = failure
                         self.isRecoveringProtectedConnection = true
-                        throw CoreControllerError.requestFailed(failure.userMessage)
+                        throw CoreControllerError.protectionFailed(failure.userMessage)
                     }
-                    throw CoreControllerError.requestFailed(
+                    throw CoreControllerError.protectionFailed(
                         String(localized: "新节点验证失败，已切回原节点。")
                     )
                 }
                 if case .failed(let failure) = switchVerdict {
                     self.lastClassifiedFailure = failure
-                    throw CoreControllerError.requestFailed(failure.userMessage)
+                    throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
                 // New exit is proven. Drop leftover sockets still bound to
                 // the previous node so long-lived clients migrate once.
@@ -3390,14 +3397,14 @@ final class AppState {
                 if ownedRuntime, selectedExitName != nil, !pinsOnlyRefresh {
                     try await api.closeAllConnections()
                     try Task.checkCancellation()
-                    let health = await api.testProxyDelayWithRetry(
-                        name: ConfigPipeline.exitGroupName,
-                        url: "https://www.gstatic.com/generate_204",
-                        timeout: 5_000
+                    // `/delay` is advisory. A 504 after reload must not tear
+                    // a tunnel the real TUN probe still proves.
+                    let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                        timeoutSeconds: 8
                     )
                     try Task.checkCancellation()
-                    guard let delay = health.delay, delay > 0 else {
-                        throw CoreControllerError.requestFailed(
+                    if case .lost = tun {
+                        throw CoreControllerError.protectionFailed(
                             "Updated cloud server health check failed"
                         )
                     }
@@ -5647,7 +5654,7 @@ final class AppState {
     }
 
     nonisolated private static func waitForOwnedTunnelInterface(
-        attempts: Int = 20,
+        attempts: Int = 50,
         intervalMs: UInt64 = 100
     ) async -> Bool {
         for _ in 0..<max(1, attempts) {
