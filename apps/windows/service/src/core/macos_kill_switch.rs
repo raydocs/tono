@@ -15,17 +15,11 @@ const GID_ENV: &str = "TONO_CORE_GID";
 const GID_ENV_LEGACY: &str = "CLASH_VERGE_MIHOMO_GID";
 const GID_MIN: u32 = 60_000;
 const GID_MAX: u32 = 64_999;
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 const ANCHOR: &str = "com.raydocs.tono.service.kill-switch";
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 const LEGACY_ANCHOR: &str = "com.clash-verge.service.kill-switch";
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 const BEGIN: &str = "# BEGIN TONO MANAGED KILL SWITCH";
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 const END: &str = "# END TONO MANAGED KILL SWITCH";
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 const LEGACY_BEGIN: &str = "# BEGIN CLASH VERGE MANAGED KILL SWITCH";
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 const LEGACY_END: &str = "# END CLASH VERGE MANAGED KILL SWITCH";
 #[cfg(all(target_os = "macos", not(feature = "test")))]
 const PF_COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
@@ -372,7 +366,6 @@ fn normalize_pf_rules(value: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
 fn strip_marked_block(existing: &str, begin: &str, end: &str) -> Result<Option<String>> {
     match (existing.find(begin), existing.find(end)) {
         (None, None) => Ok(None),
