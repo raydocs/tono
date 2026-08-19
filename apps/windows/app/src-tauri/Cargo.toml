@@ -1,6 +1,6 @@
 [package]
 name = "tono-windows"
-version = "0.0.35"
+version = "0.0.36"
 description = "Tono Windows app"
 authors = ["Tono"]
 license = "GPL-3.0-only"
