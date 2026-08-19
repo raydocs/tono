@@ -37,7 +37,7 @@ use crate::{
     process::AsyncHandler,
     tono::{
         audit::{self, AuditEvent},
-        bootstrap, commands, signed_apps,
+        bootstrap, catalog_sync, commands, signed_apps,
         state::{AccountState, TonoInner, TonoState},
     },
 };
@@ -594,7 +594,7 @@ impl ConnectTransaction {
 /// arm keeps blocking and schedules the protected reconnect.
 pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
     {
-        let inner = state.lock().await;
+        let mut inner = state.lock().await;
         match &inner.account_state {
             AccountState::Ready => {}
             AccountState::Suspended => return Err("account is suspended".to_string()),
@@ -606,6 +606,14 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         if inner.fsm.status().is_connecting {
             return Err("already connecting".to_string());
         }
+        inner.catalog_failover_tried.clear();
+        if let Some(replacement) = catalog_sync::ensure_usable_selection(&mut inner) {
+            logging!(
+                info,
+                Type::Service,
+                "Tono: connect retargeted leftover selection onto catalog exit {replacement}"
+            );
+        }
     }
     match attempt(&state, &app).await {
         Attempt::Connected => Ok(()),
@@ -613,6 +621,7 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
         Attempt::Failed(err) => {
             let err = fail_connect(&state, &app, err).await;
+            rotate_catalog_exit_if_node_dead(&state, &app, &err).await;
             schedule_reconnect(&state, &app).await;
             Err(err)
         }
@@ -2255,6 +2264,7 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
     }
     let task_state = state.clone();
     let task_app = app.clone();
+    inner.catalog_failover_tried.clear();
     let handle =
         AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO)) as BoxedTask);
     inner.tasks.reconnect = Some(handle);
@@ -2481,7 +2491,8 @@ async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Dura
                 }
             }
             Attempt::Failed(err) => {
-                let _ = fail_connect(&state, &app, err).await;
+                let err = fail_connect(&state, &app, err).await;
+                rotate_catalog_exit_if_node_dead(&state, &app, &err).await;
                 let next = {
                     let mut inner = state.lock().await;
                     if inner.catalog_requires_choice {
@@ -3373,7 +3384,44 @@ async fn verify_fake_ip() -> Result<(), String> {
             tokio::time::sleep(VERIFY_RETRY_INTERVAL).await;
         }
     }
-    Err(format!("fake-ip verification failed: {last}"))
+    Err(fake_ip_verification_error(&last))
+}
+
+fn fake_ip_verification_error(last: &str) -> String {
+    if last.contains("no fake-ip in") {
+        format!(
+            "fake-ip verification failed: {last}. Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1. Turn Encrypted DNS off in Settings → Network & internet → Ethernet/Wi-Fi → DNS, then reconnect."
+        )
+    } else {
+        format!("fake-ip verification failed: {last}")
+    }
+}
+
+fn connect_failure_is_dead_exit(error: &str) -> bool {
+    error.contains(NODE_OR_CORE_UNREACHABLE_PREFIX)
+        || error.contains(tono_core::ProtectedFailureCode::CoreExitUnreachable.as_str())
+}
+
+async fn rotate_catalog_exit_if_node_dead(state: &Arc<TonoState>, app: &AppHandle, error: &str) {
+    if !connect_failure_is_dead_exit(error) {
+        return;
+    }
+    let rotated = {
+        let mut inner = state.lock().await;
+        catalog_sync::rotate_catalog_exit_after_failure(&mut inner)
+    };
+    if let Some((from, to)) = rotated {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: catalog failover after dead exit: {from} -> {to}"
+        );
+        state
+            .audit()
+            .log(AuditEvent::ConnectCatalogFailover { from, to });
+        let inner = state.lock().await;
+        commands::emit_status(app, &commands::status_of(&inner));
+    }
 }
 
 fn fake_ip_attempt_timeout(attempt: u32) -> Duration {
@@ -5764,7 +5812,7 @@ mod tests {
     fn exhausted_tun_failure_uses_the_independent_proxy_cross_check() {
         use super::{
             NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
-            classify_exhausted_data_plane,
+            classify_exhausted_data_plane, connect_failure_is_dead_exit, fake_ip_verification_error,
         };
 
         let tun = "all real TUN probes timed out".to_string();
@@ -5785,6 +5833,17 @@ mod tests {
             Err("proxy CONNECT timeout".to_string()),
         );
         assert!(unreachable.starts_with(NODE_OR_CORE_UNREACHABLE_PREFIX));
+        assert!(connect_failure_is_dead_exit(&unreachable));
+        assert!(!connect_failure_is_dead_exit(
+            &classify_exhausted_data_plane(Ok(()), "tun timeout".into(), Ok(()))
+        ));
+        assert!(
+            fake_ip_verification_error("no fake-ip in [1.1.1.1]")
+                .contains("Encrypted DNS")
+        );
+        assert!(
+            !fake_ip_verification_error("Windows DNS worker failed").contains("Encrypted DNS")
+        );
     }
 
     #[test]

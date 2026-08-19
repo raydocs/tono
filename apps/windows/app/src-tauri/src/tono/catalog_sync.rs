@@ -294,6 +294,67 @@ pub fn is_exit_blocked(name: &str) -> bool {
         .any(|blocked| name.eq_ignore_ascii_case(blocked))
 }
 
+/// Old catalog wire names (`US-VLESS-Reality`) that a China Mac/Win customer
+/// kept selecting. City-form names in the current signed catalog are the
+/// fleet they can actually reach.
+pub fn is_legacy_wire_name(name: &str) -> bool {
+    let compact = compact_exit_name(name);
+    compact == "USVLESSREALITY" || compact == "JPVLESSREALITY"
+}
+
+fn compact_exit_name(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .flat_map(|ch| ch.to_uppercase())
+        .collect()
+}
+
+pub fn names_equivalent(left: &str, right: &str) -> bool {
+    left == right || compact_exit_name(left) == compact_exit_name(right)
+}
+
+fn node_named<'a>(nodes: &'a [ValidatedNode], name: &str) -> Option<&'a ValidatedNode> {
+    nodes
+        .iter()
+        .find(|node| names_equivalent(&node.name, name))
+}
+
+/// Next unused signed catalog city. Legacy leftover names are never kept.
+pub fn next_catalog_exit(
+    current: Option<&str>,
+    nodes: &[ValidatedNode],
+    tried: &std::collections::BTreeSet<String>,
+) -> Option<String> {
+    let names = sort_server_names(nodes);
+    names.into_iter().find(|name| {
+        if is_exit_blocked(name) || tried.contains(name) {
+            return false;
+        }
+        match current {
+            None => true,
+            Some(current) => !names_equivalent(name, current),
+        }
+    })
+}
+
+/// Whether the saved selection must move onto a signed usable catalog city.
+pub fn replacement_for_selection(
+    selected: Option<&str>,
+    nodes: &[ValidatedNode],
+    default_proxy: Option<&str>,
+) -> Option<String> {
+    let preferred = default_usable_exit(nodes, default_proxy)?;
+    match selected {
+        None => Some(preferred),
+        Some(name) if is_exit_blocked(name) => Some(preferred),
+        Some(name) if node_named(nodes, name).is_none() => Some(preferred),
+        Some(name) if is_legacy_wire_name(name) && !names_equivalent(name, &preferred) => {
+            Some(preferred)
+        }
+        Some(_) => None,
+    }
+}
+
 /// Pick the best usable exit: the admin-designated `defaultProxy` routing
 /// directive first (when it names a catalog node), then the preferred list,
 /// then the first unblocked name in sort order.
@@ -318,20 +379,13 @@ pub fn default_usable_exit(nodes: &[ValidatedNode], default_proxy: Option<&str>)
 /// If selection is missing or points at a blocked exit, move the user to a usable default
 /// and persist. Returns the name that was applied (if any).
 pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
-    let needs_replacement = match inner.selected_node.as_deref() {
-        None => true,
-        Some(name) if is_exit_blocked(name) => true,
-        Some(name) if !inner.nodes.iter().any(|node| node.name == name) => true,
-        Some(_) => false,
-    };
-    if !needs_replacement {
-        return None;
-    }
     let default_proxy = inner
         .routing
         .as_ref()
         .and_then(|routing| routing.default_proxy.as_deref());
-    let Some(replacement) = default_usable_exit(&inner.nodes, default_proxy) else {
+    let Some(replacement) =
+        replacement_for_selection(inner.selected_node.as_deref(), &inner.nodes, default_proxy)
+    else {
         return None;
     };
     inner.selected_node = Some(replacement.clone());
@@ -344,6 +398,34 @@ pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
         );
     }
     Some(replacement)
+}
+
+/// After a connect that proved the selected city dead, persist the next unused
+/// catalog exit so the fail-closed reconnect does not hammer the same node.
+pub fn rotate_catalog_exit_after_failure(inner: &mut TonoInner) -> Option<(String, String)> {
+    let from = inner.selected_node.clone().unwrap_or_default();
+    if !from.is_empty() {
+        inner.catalog_failover_tried.insert(from.clone());
+    }
+    let next = next_catalog_exit(
+        inner.selected_node.as_deref(),
+        &inner.nodes,
+        &inner.catalog_failover_tried,
+    )?;
+    if inner.catalog_failover_tried.contains(&next) {
+        return None;
+    }
+    inner.catalog_failover_tried.insert(next.clone());
+    inner.selected_node = Some(next.clone());
+    inner.catalog_requires_choice = false;
+    if let Err(error) = crate::tono::state::save_selection(&inner.catalog_dir, &next) {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: failed to persist catalog failover exit: {error}"
+        );
+    }
+    Some((from, next))
 }
 
 /// Region ordering for the server list: usable nodes first (US → JP → other), blocked last.
@@ -392,7 +474,12 @@ pub fn region_rank(name: &str) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_usable_exit, install_and_persist, is_exit_blocked, region_rank, sort_server_names};
+    use super::{
+        default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name,
+        names_equivalent, next_catalog_exit, region_rank, replacement_for_selection,
+        sort_server_names,
+    };
+    use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
     use std::path::{Path, PathBuf};
     use tono_core::catalog::{CatalogCache, catalog_digest};
@@ -503,6 +590,50 @@ mod tests {
             default_usable_exit(&nodes, Some("No Such Node")).as_deref(),
             Some("Salt Lake City · Summit")
         );
+    }
+
+    #[test]
+    fn leftover_wire_name_is_replaced_by_the_city_catalog() {
+        assert!(is_legacy_wire_name("US-VLESS-Reality"));
+        assert!(is_legacy_wire_name("🇺🇸 US-VLESS-Reality"));
+        assert!(names_equivalent("🇺🇸 US-VLESS-Reality", "US-VLESS-Reality"));
+        assert!(!is_legacy_wire_name("Salt Lake City · Summit"));
+        let nodes = vec![
+            node("US-VLESS-Reality"),
+            node("Salt Lake City · Summit"),
+            node("Buffalo · Niagara"),
+        ];
+        assert_eq!(
+            replacement_for_selection(Some("US-VLESS-Reality"), &nodes, None).as_deref(),
+            Some("Salt Lake City · Summit")
+        );
+        assert_eq!(
+            replacement_for_selection(Some("Salt Lake City · Summit"), &nodes, None),
+            None
+        );
+        assert_eq!(
+            replacement_for_selection(Some("imported leftover"), &nodes, None).as_deref(),
+            Some("Salt Lake City · Summit")
+        );
+    }
+
+    #[test]
+    fn catalog_failover_walks_unused_cities_once() {
+        let nodes = vec![
+            node("Salt Lake City · Summit"),
+            node("Buffalo · Niagara"),
+            node("Los Angeles · Harbor"),
+        ];
+        let mut tried = BTreeSet::new();
+        let first = next_catalog_exit(Some("Salt Lake City · Summit"), &nodes, &tried)
+            .expect("next city");
+        assert_ne!(first, "Salt Lake City · Summit");
+        tried.insert("Salt Lake City · Summit".into());
+        tried.insert(first.clone());
+        let second = next_catalog_exit(Some(&first), &nodes, &tried).expect("third city");
+        assert_ne!(second, first);
+        tried.insert(second);
+        assert_eq!(next_catalog_exit(Some("Los Angeles · Harbor"), &nodes, &tried), None);
     }
 
     #[test]
