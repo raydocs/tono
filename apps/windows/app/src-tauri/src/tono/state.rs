@@ -18,7 +18,7 @@ use std::{
 const RETIRED_INTENT_HISTORY: usize = 16;
 
 use anyhow::{Context as _, Result};
-use clash_verge_service_ipc::KillSwitchStatus;
+use tono_service_protocol::KillSwitchStatus;
 use tauri::async_runtime::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tono_core::{
@@ -882,7 +882,7 @@ fn is_valid_sid_text(sid: &str) -> bool {
 fn current_user_sid_text() -> Result<String, tono_core::CatalogError> {
     let identity = crate::core::owner_identity::current_owner_identity()
         .map_err(|err| tono_core::CatalogError::Io(err.to_string()))?;
-    let clash_verge_service_ipc::OwnerIdentity::Windows { sid } = identity else {
+    let tono_service_protocol::OwnerIdentity::Windows { sid } = identity else {
         return Err(tono_core::CatalogError::Io("not a Windows identity".to_string()));
     };
     if !is_valid_sid_text(&sid) {

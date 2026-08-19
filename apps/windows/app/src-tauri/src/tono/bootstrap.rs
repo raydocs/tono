@@ -143,7 +143,7 @@ pub async fn hydrate_learned_pins_from_service() {
     let Ok(credentials) = crate::core::owner_identity::current_owner_credentials() else {
         return;
     };
-    let Ok(response) = clash_verge_service_ipc::get_bootstrap_pins(&credentials).await else {
+    let Ok(response) = tono_service_protocol::get_bootstrap_pins(&credentials).await else {
         return;
     };
     if response.code != 0 {
@@ -170,12 +170,12 @@ pub async fn persist_learned_pins_to_service() {
     let Ok(session) = crate::core::service::active_service_session() else {
         return;
     };
-    let body = clash_verge_service_ipc::BootstrapPins {
+    let body = tono_service_protocol::BootstrapPins {
         host: API_HOST.to_string(),
         addresses,
     };
     let Ok(response) =
-        clash_verge_service_ipc::remember_bootstrap_pins(&credentials, &session, &body).await
+        tono_service_protocol::remember_bootstrap_pins(&credentials, &session, &body).await
     else {
         return;
     };
@@ -195,7 +195,7 @@ async fn service_supports_bootstrap_pins() -> bool {
     if SERVICE_HAS_BOOTSTRAP_PINS.load(Ordering::Relaxed) {
         return true;
     }
-    let supported = clash_verge_service_ipc::get_version()
+    let supported = tono_service_protocol::get_version()
         .await
         .ok()
         .and_then(|response| response.data)

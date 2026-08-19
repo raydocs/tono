@@ -229,7 +229,7 @@ pub struct DirectPlan {
     pub udp_wechat_rules: Vec<(std::net::Ipv4Addr, u16)>,
     pub wechat_process_path_regexes: Vec<String>,
     /// Ports the kill switch will let the staged core reach directly, straight from
-    /// `clash_verge_service_ipc::REVIEWED_DIRECT_PORTS`. The process rules below are
+    /// `tono_service_protocol::REVIEWED_DIRECT_PORTS`. The process rules below are
     /// constrained to exactly this set, so what gets *routed* to the physical interface and
     /// what the WFP permit *lets out* are the same surface by construction. Empty means the
     /// caller declared no permit, and no process rule is emitted at all — the fail-closed
@@ -650,14 +650,19 @@ fn runtime_value(
     // IPv6 would be a second data plane. AAAA dials fail-close and retry IPv4.
     put(&mut root, "ipv6", Value::Bool(false));
     put(&mut root, "mode", string("rule"));
-    put(&mut root, "log-level", string("info"));
+    put(&mut root, "log-level", string("warning"));
     // Without the top-level udp flag Mihomo shortcuts TUN UDP sessions to a
     // ruleless DIRECT dial (QUIC, Discord STUN, …) — the real egress leaks
     // past the tunnel and the MATCH fallback never runs. Every UDP packet
     // must face the rule engine like TCP does.
     put(&mut root, "udp", Value::Bool(true));
-    put(&mut root, "unified-delay", Value::Bool(true));
-    put(&mut root, "find-process-mode", string("strict"));
+    put(&mut root, "unified-delay", Value::Bool(false));
+    let process_lookup = home.is_some() || home_socks5.is_some() || direct.is_some();
+    put(
+        &mut root,
+        "find-process-mode",
+        string(if process_lookup { "strict" } else { "off" }),
+    );
     let mut profile = Mapping::new();
     // Never let a stale cache.db choice resurrect an old selection.
     put(&mut profile, "store-selected", Value::Bool(false));
@@ -1041,9 +1046,9 @@ reality-opts:
         assert_eq!(get(&value, &["allow-lan"]).as_bool(), Some(false));
         assert_eq!(get(&value, &["ipv6"]).as_bool(), Some(false));
         assert_eq!(get(&value, &["mode"]).as_str(), Some("rule"));
-        assert_eq!(get(&value, &["log-level"]).as_str(), Some("info"));
-        assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(true));
-        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("strict"));
+        assert_eq!(get(&value, &["log-level"]).as_str(), Some("warning"));
+        assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(false));
+        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("off"));
         assert_eq!(
             get(&value, &["profile", "store-selected"]).as_bool(),
             Some(false)
@@ -1373,7 +1378,7 @@ reality-opts:
             web_suffix_rules: vec![("baidu.com".to_string(), 80), ("baidu.com".to_string(), 443)],
             udp_wechat_rules: vec![(std::net::Ipv4Addr::new(9, 0, 0, 20), 443)],
             wechat_process_path_regexes: Vec::new(),
-            // Mirrors what the App passes from `clash_verge_service_ipc::REVIEWED_DIRECT_PORTS`.
+            // Mirrors what the App passes from `tono_service_protocol::REVIEWED_DIRECT_PORTS`.
             reviewed_direct_ports: vec![80, 443, 8000, 8080],
         }
     }
@@ -2149,6 +2154,7 @@ reality-opts:
     #[test]
     fn home_build_adds_the_dedicated_group_rules_and_route_exclusion() {
         let value = parsed(&build_with_home(Some("US Reality 01")));
+        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("strict"));
 
         let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 2);

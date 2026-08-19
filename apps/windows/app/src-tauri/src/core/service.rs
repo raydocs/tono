@@ -17,10 +17,10 @@ use crate::{
     process::AsyncHandler,
 };
 use anyhow::{Context as _, Result, bail};
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 #[cfg(target_os = "macos")]
-use clash_verge_service_ipc::MacosKillSwitchMode;
-use clash_verge_service_ipc::{
+use tono_service_protocol::MacosKillSwitchMode;
+use tono_service_protocol::{
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
     KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosProxyConfig, OwnerCredentials,
     OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
@@ -108,11 +108,11 @@ pub(crate) fn clear_active_service_session() {
 /// A failure here is not a failure to start: it only costs the fast path, so it is reported as
 /// "no" and logged rather than propagated.
 async fn probe_runtime_staging_support() -> bool {
-    match clash_verge_service_ipc::get_version().await {
+    match tono_service_protocol::get_version().await {
         Ok(response) if response.code == 0 => response
             .data
             .as_ref()
-            .is_some_and(clash_verge_service_ipc::ProtocolInfo::supports_runtime_staging),
+            .is_some_and(tono_service_protocol::ProtocolInfo::supports_runtime_staging),
         Ok(response) => {
             logging!(
                 warn,
@@ -136,32 +136,32 @@ async fn probe_runtime_staging_support() -> bool {
 
 async fn probe_direct_runtime_reload_support() -> bool {
     matches!(
-        clash_verge_service_ipc::get_version().await,
+        tono_service_protocol::get_version().await,
         Ok(response)
             if response.code == 0
                 && response
                     .data
                     .as_ref()
-                    .is_some_and(clash_verge_service_ipc::ProtocolInfo::supports_direct_runtime_reload)
+                    .is_some_and(tono_service_protocol::ProtocolInfo::supports_direct_runtime_reload)
     )
 }
 
 #[cfg(target_os = "macos")]
 pub(crate) async fn preflight_macos_kill_switch() -> Result<()> {
-    let version = clash_verge_service_ipc::get_version()
+    let version = tono_service_protocol::get_version()
         .await
         .context("无法查询 Tono Service 协议版本")?;
     let supported = version.code == 0
         && version
             .data
             .as_ref()
-            .is_some_and(clash_verge_service_ipc::ProtocolInfo::supports_macos_kill_switch_preflight);
+            .is_some_and(tono_service_protocol::ProtocolInfo::supports_macos_kill_switch_preflight);
     if !supported {
         bail!("当前 Tono Service 不支持 Kill Switch 预检，请先重新安装服务");
     }
 
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::preflight_macos_kill_switch(&credentials)
+    let response = tono_service_protocol::preflight_macos_kill_switch(&credentials)
         .await
         .context("无法连接到 Tono Service")?;
     if response.code > 0 {
@@ -230,11 +230,11 @@ fn macos_service_install_markers() -> Vec<String> {
     vec![
         format!(
             "/Library/LaunchDaemons/{}.plist",
-            clash_verge_service_ipc::MACOS_SERVICE_ID
+            tono_service_protocol::MACOS_SERVICE_ID
         ),
         format!(
             "/Library/PrivilegedHelperTools/{}.bundle",
-            clash_verge_service_ipc::MACOS_SERVICE_ID
+            tono_service_protocol::MACOS_SERVICE_ID
         ),
         #[cfg(not(feature = "verge-dev"))]
         "/Library/LaunchDaemons/io.github.clashverge.helper.plist".to_owned(),
@@ -264,7 +264,7 @@ pub(crate) fn trusted_service_evidence() -> Result<bool> {
     const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
     let manager = WindowsServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     match manager.open_service(
-        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
         ServiceAccess::QUERY_STATUS,
     ) {
         Ok(service) => {
@@ -288,7 +288,7 @@ pub(crate) fn trusted_service_evidence() -> Result<bool> {
 #[cfg(windows)]
 pub(crate) async fn tono_request_service_owner_goodbye() -> Result<()> {
     let credentials = current_owner_credentials().context("无法读取 owner 凭证")?;
-    let response = clash_verge_service_ipc::owner_goodbye(&credentials)
+    let response = tono_service_protocol::owner_goodbye(&credentials)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -299,7 +299,7 @@ pub(crate) async fn tono_request_service_owner_goodbye() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn trusted_service_evidence() -> Result<bool> {
-    let unit = format!("{}.service", clash_verge_service_ipc::SERVICE_SLUG);
+    let unit = format!("{}.service", tono_service_protocol::SERVICE_SLUG);
     let output = StdCommand::new("systemctl")
         .args(["show", "--property=LoadState", "--value", &unit])
         .output()
@@ -435,7 +435,7 @@ where
         .with_context(|| format!("failed to open development Service core source {}", source.display()))?;
 
     let staging_directory = home
-        .join("Applications/.clash-verge-rev-dev")
+        .join("Applications/.tono-dev")
         .join(staging_directory_name);
     std::fs::create_dir_all(&staging_directory).with_context(|| {
         format!(
@@ -532,9 +532,9 @@ fn service_core_path(clash_core: &str, bin_ext: &str) -> Result<PathBuf> {
         if !path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("verge-mihomo.exe"))
+            .is_some_and(|name| name.eq_ignore_ascii_case("tono-core.exe"))
         {
-            bail!("TONO_WINDOWS_INTEGRATION_CORE_PATH must name verge-mihomo.exe");
+            bail!("TONO_WINDOWS_INTEGRATION_CORE_PATH must name tono-core.exe");
         }
         return Ok(path);
     }
@@ -586,18 +586,19 @@ fn shell_single_quote(value: &str) -> String {
 #[cfg(any(target_os = "macos", test))]
 fn macos_install_shell(install_path: &Path, gid: u32) -> String {
     let install_quoted = shell_single_quote(&install_path.to_string_lossy());
-    format!("cd /; CLASH_VERGE_SERVICE_GID={gid} {install_quoted}")
+    format!("cd /; TONO_SERVICE_GID={gid} {install_quoted}")
 }
 
 fn packaged_service_tool_path(file_name: &str, packaged_path: impl FnOnce() -> Result<PathBuf>) -> Result<PathBuf> {
     #[cfg(feature = "verge-dev")]
     {
         drop(packaged_path);
-        let directory = std::env::var_os("CLASH_VERGE_DEV_SERVICE_DIR")
-            .context("CLASH_VERGE_DEV_SERVICE_DIR is missing from the development session")?;
+        let directory = std::env::var_os("TONO_DEV_SERVICE_DIR")
+            .or_else(|| std::env::var_os("CLASH_VERGE_DEV_SERVICE_DIR"))
+            .context("TONO_DEV_SERVICE_DIR is missing from the development session")?;
         let directory = PathBuf::from(directory);
         if !directory.is_absolute() {
-            bail!("CLASH_VERGE_DEV_SERVICE_DIR must be an absolute path");
+            bail!("TONO_DEV_SERVICE_DIR must be an absolute path");
         }
         Ok(directory.join(file_name))
     }
@@ -810,7 +811,7 @@ fn install_service() -> Result<()> {
 #[cfg(target_os = "linux")]
 fn linux_running_as_root() -> bool {
     use crate::core::handle;
-    use tauri_plugin_clash_verge_sysinfo::is_current_app_handle_admin;
+    use tauri_plugin_tono_sysinfo::is_current_app_handle_admin;
     let app_handle = handle::Handle::app_handle();
     is_current_app_handle_admin(app_handle)
 }
@@ -830,9 +831,9 @@ fn uninstall_service() -> Result<()> {
     let uninstall_path = macos_service_tool_path(&uninstall_path)?;
     let uninstall_shell: String = uninstall_path.to_string_lossy().into_owned();
 
-    // clash_verge_i18n::sync_locale(Config::verge().await.latest_arc().language.as_deref());
+    // tono_i18n::sync_locale(Config::verge().await.latest_arc().language.as_deref());
 
-    let prompt = clash_verge_i18n::t!("service.adminUninstallPrompt");
+    let prompt = tono_i18n::t!("service.adminUninstallPrompt");
     // 先清理服务残留,再执行卸载器。
     let uninstall_quoted = shell_single_quote(&uninstall_shell);
     let shell = format!("cd /; {}; {uninstall_quoted}", macos_force_stop_core_shell());
@@ -869,10 +870,10 @@ fn install_service() -> Result<()> {
     macos_service_tool_path(&binary_path)?;
     let install_path = macos_service_tool_path(&install_path)?;
 
-    // clash_verge_i18n::sync_locale(Config::verge().await.latest_arc().language.as_deref());
+    // tono_i18n::sync_locale(Config::verge().await.latest_arc().language.as_deref());
 
-    let gid = tauri_plugin_clash_verge_sysinfo::current_gid();
-    let prompt = clash_verge_i18n::t!("service.adminInstallPrompt");
+    let gid = tauri_plugin_tono_sysinfo::current_gid();
+    let prompt = tono_i18n::t!("service.adminInstallPrompt");
     let shell = macos_install_shell(&install_path, gid);
     let shell = escape_osascript_double_quoted_string(&shell);
     let command = format!(r#"do shell script "{shell}" with administrator privileges with prompt "{prompt}""#);
@@ -945,7 +946,7 @@ pub(crate) async fn tono_stage_runtime_for_direct_reload(
     let credentials = current_owner_credentials()?;
     let mut last_ambiguous = None;
     for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
-        match clash_verge_service_ipc::stage_runtime(&credentials, session, runtime).await {
+        match tono_service_protocol::stage_runtime(&credentials, session, runtime).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -981,12 +982,12 @@ where
 pub(crate) async fn get_clash_log_snapshot_by_service() -> Result<String> {
     let credentials = current_owner_credentials()?;
     let (generation, response) = capture_generation_before(&OWNER_MONITOR_GENERATION, || {
-        clash_verge_service_ipc::get_clash_log_snapshot(&credentials)
+        tono_service_protocol::get_clash_log_snapshot(&credentials)
     })
     .await;
     let response = response.context("无法连接到Tono Service")?;
     if response.code > 0 {
-        if response.code == clash_verge_service_ipc::ServiceErrorCode::NotActive as u16 {
+        if response.code == tono_service_protocol::ServiceErrorCode::NotActive as u16 {
             recover_after_owner_loss(generation, OwnerRecoveryReason::Displaced).await;
         }
         bail!(response.message);
@@ -1022,14 +1023,14 @@ pub(super) async fn stop_core_by_service(release_kill_switch: bool) -> Result<()
         }
     };
     let response = match if active_service_supports_macos_kill_switch() {
-        clash_verge_service_ipc::stop_clash_with_options(
+        tono_service_protocol::stop_clash_with_options(
             &credentials,
             &session,
             StopClashOptions { release_kill_switch },
         )
         .await
     } else {
-        clash_verge_service_ipc::stop_clash(&credentials, &session).await
+        tono_service_protocol::stop_clash(&credentials, &session).await
     } {
         Ok(response) => response,
         Err(error) => {
@@ -1041,8 +1042,8 @@ pub(super) async fn stop_core_by_service(release_kill_switch: bool) -> Result<()
     if response.code > 0 {
         if matches!(
             response.code,
-            code if code == clash_verge_service_ipc::ServiceErrorCode::NotActive as u16
-                || code == clash_verge_service_ipc::ServiceErrorCode::StaleOwnerSession as u16
+            code if code == tono_service_protocol::ServiceErrorCode::NotActive as u16
+                || code == tono_service_protocol::ServiceErrorCode::StaleOwnerSession as u16
         ) {
             recover_after_owner_loss_while_locked(OwnerRecoveryReason::Displaced).await;
         } else {
@@ -1070,7 +1071,7 @@ pub(super) async fn stop_core_by_service(release_kill_switch: bool) -> Result<()
 /// orphan sweep. The App never enumerates or terminates processes itself.
 pub(crate) async fn tono_prepare_core_start() -> Result<u32> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::prepare_core_start(&credentials)
+    let response = tono_service_protocol::prepare_core_start(&credentials)
         .await
         .context("无法连接到 Tono Service 以准备核心")?;
     if response.code > 0 {
@@ -1084,7 +1085,7 @@ pub(crate) async fn tono_core_binary_path() -> Result<PathBuf> {
     let bin_ext = if cfg!(windows) { ".exe" } else { "" };
     // The managed Tono product has one audited data-plane binary. A legacy Verge setting must not
     // silently select the alpha sidecar, which would also force every installer to ship two cores.
-    service_core_path("verge-mihomo", bin_ext)
+    service_core_path("tono-core", bin_ext)
 }
 
 /// Whether the Tono Service is installed, running, and protocol-compatible.
@@ -1166,18 +1167,18 @@ async fn repair_registered_stopped_service() -> bool {
 /// newer Service to reinstall the thing that is already ahead. The detail comes from
 /// `classify_service_version_reply`, which prints both sides' numbers.
 pub(crate) async fn tono_probe_kill_switch_release_support() -> Result<Option<String>> {
-    let response = clash_verge_service_ipc::get_version()
+    let response = tono_service_protocol::get_version()
         .await
         .context("无法连接到 Tono Service")?;
     let supported = response.code == 0
         && response.data.as_ref().is_some_and(|info| {
             info.supports_client(
-                clash_verge_service_ipc::ProtocolVersion::current(),
-                clash_verge_service_ipc::MIN_REQUIRED_SERVICE_REVISION,
-            ) && clash_verge_service_ipc::ProtocolInfo::supports_windows_kill_switch(info)
-                && clash_verge_service_ipc::ProtocolInfo::supports_kill_switch_release(info)
-                && clash_verge_service_ipc::ProtocolInfo::supports_kill_switch_verification(info)
-                && clash_verge_service_ipc::ProtocolInfo::supports_direct_runtime_reload(info)
+                tono_service_protocol::ProtocolVersion::current(),
+                tono_service_protocol::MIN_REQUIRED_SERVICE_REVISION,
+            ) && tono_service_protocol::ProtocolInfo::supports_windows_kill_switch(info)
+                && tono_service_protocol::ProtocolInfo::supports_kill_switch_release(info)
+                && tono_service_protocol::ProtocolInfo::supports_kill_switch_verification(info)
+                && tono_service_protocol::ProtocolInfo::supports_direct_runtime_reload(info)
         });
     if supported {
         return Ok(None);
@@ -1235,7 +1236,7 @@ pub(crate) async fn tono_start_core_with_kill_switch(
         windows_kill_switch: Some(kill_switch),
     };
 
-    let response = match clash_verge_service_ipc::start_clash(&credentials, &request).await {
+    let response = match tono_service_protocol::start_clash(&credentials, &request).await {
         Ok(response) => response,
         Err(error) => {
             if let Some(generation) = reconcile_lost_tono_start(&credentials, generation_before).await {
@@ -1278,7 +1279,7 @@ pub(crate) async fn tono_start_core_with_kill_switch(
 }
 
 async fn tono_active_generation(credentials: &OwnerCredentials) -> Result<Option<u64>> {
-    let response = clash_verge_service_ipc::get_status(credentials)
+    let response = tono_service_protocol::get_status(credentials)
         .await
         .context("无法查询 Tono Service 状态")?;
     if response.code > 0 {
@@ -1335,7 +1336,7 @@ pub(crate) async fn tono_stop_core(release_kill_switch: bool) -> Result<()> {
 
     let credentials = current_owner_credentials()?;
     let session = active_service_session()?;
-    let response = clash_verge_service_ipc::stop_clash_with_options(
+    let response = tono_service_protocol::stop_clash_with_options(
         &credentials,
         &session,
         StopClashOptions { release_kill_switch },
@@ -1346,8 +1347,8 @@ pub(crate) async fn tono_stop_core(release_kill_switch: bool) -> Result<()> {
     if response.code > 0 {
         if matches!(
             response.code,
-            code if code == clash_verge_service_ipc::ServiceErrorCode::NotActive as u16
-                || code == clash_verge_service_ipc::ServiceErrorCode::StaleOwnerSession as u16
+            code if code == tono_service_protocol::ServiceErrorCode::NotActive as u16
+                || code == tono_service_protocol::ServiceErrorCode::StaleOwnerSession as u16
         ) {
             recover_after_owner_loss_while_locked(OwnerRecoveryReason::Displaced).await;
         } else {
@@ -1367,7 +1368,7 @@ pub(crate) async fn tono_stop_core(release_kill_switch: bool) -> Result<()> {
 /// `GET /kill-switch/status` (session owner required): which arm phase is live.
 pub(crate) async fn tono_kill_switch_status() -> Result<KillSwitchStatus> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::get_kill_switch_status(&credentials)
+    let response = tono_service_protocol::get_kill_switch_status(&credentials)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -1381,7 +1382,7 @@ pub(crate) async fn tono_begin_direct_runtime_reload(session: &OwnerSessionProof
     let credentials = current_owner_credentials()?;
     let mut last_ambiguous = None;
     for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
-        match clash_verge_service_ipc::begin_direct_runtime_reload(&credentials, session).await {
+        match tono_service_protocol::begin_direct_runtime_reload(&credentials, session).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -1409,7 +1410,7 @@ pub(crate) async fn tono_begin_direct_runtime_reload(session: &OwnerSessionProof
 pub(crate) async fn tono_replace_direct_endpoints(
     session: &OwnerSessionProof,
     reload_id: u64,
-    direct_endpoints: Vec<clash_verge_service_ipc::ProxyEndpoint>,
+    direct_endpoints: Vec<tono_service_protocol::ProxyEndpoint>,
     reviewed_direct_ports: Vec<u16>,
 ) -> Result<DirectRuntimeReloadResult> {
     let credentials = current_owner_credentials()?;
@@ -1423,7 +1424,7 @@ pub(crate) async fn tono_replace_direct_endpoints(
     };
     let mut last_ambiguous = None;
     for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
-        match clash_verge_service_ipc::replace_direct_endpoints(&credentials, session, request.clone()).await {
+        match tono_service_protocol::replace_direct_endpoints(&credentials, session, request.clone()).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -1462,7 +1463,7 @@ pub(crate) async fn tono_finalize_direct_runtime_reload(
     };
     let mut last_ambiguous = None;
     for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
-        match clash_verge_service_ipc::finalize_direct_runtime_reload(&credentials, session, request.clone()).await {
+        match tono_service_protocol::finalize_direct_runtime_reload(&credentials, session, request.clone()).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -1500,7 +1501,7 @@ pub(crate) async fn tono_renew_direct_runtime_reload(
     };
     let mut last_ambiguous = None;
     for attempt in 1..=DIRECT_MUTATION_ATTEMPTS {
-        match clash_verge_service_ipc::renew_direct_runtime_reload(&credentials, session, request.clone()).await {
+        match tono_service_protocol::renew_direct_runtime_reload(&credentials, session, request.clone()).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -1528,7 +1529,7 @@ pub(crate) async fn tono_renew_direct_runtime_reload(
 /// Idempotent on the Service side; doubles as the TUN adapter existence check.
 pub(crate) async fn tono_lock_kill_switch_for_session(session: &OwnerSessionProof) -> Result<()> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::lock_kill_switch(
+    let response = tono_service_protocol::lock_kill_switch(
         &credentials,
         session,
         KillSwitchLockRequest { tunnel_interface: None },
@@ -1545,7 +1546,7 @@ pub(crate) async fn tono_mark_kill_switch_verified_for_session(session: &OwnerSe
     let credentials = current_owner_credentials()?;
     let mut last_transport_error = None;
     for attempt in 1..=MARK_VERIFIED_ATTEMPTS {
-        match clash_verge_service_ipc::mark_kill_switch_verified(&credentials, session).await {
+        match tono_service_protocol::mark_kill_switch_verified(&credentials, session).await {
             Ok(response) => {
                 if response.code > 0 {
                     bail!(response.message);
@@ -1558,7 +1559,7 @@ pub(crate) async fn tono_mark_kill_switch_verified_for_session(session: &OwnerSe
                 // The response may be the only thing that was lost. A fully locked, live,
                 // verified read-back proves the idempotent mutation committed and is stronger
                 // evidence than replaying it blindly.
-                if let Ok(status_response) = clash_verge_service_ipc::get_kill_switch_status(&credentials).await
+                if let Ok(status_response) = tono_service_protocol::get_kill_switch_status(&credentials).await
                     && status_response.code == 0
                     && status_response.data.as_ref().is_some_and(mark_verified_committed)
                 {
@@ -1594,7 +1595,7 @@ fn mark_verified_committed(status: &KillSwitchStatus) -> bool {
 /// `POST /kill-switch/restrict-bootstrap`: keep blocking, reopen only the API recovery channel.
 pub(crate) async fn tono_restrict_bootstrap() -> Result<()> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::restrict_kill_switch_bootstrap(&credentials)
+    let response = tono_service_protocol::restrict_kill_switch_bootstrap(&credentials)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -1606,13 +1607,13 @@ pub(crate) async fn tono_restrict_bootstrap() -> Result<()> {
 /// `POST /dns/enable`: snapshot adapter DNS and point resolvers at loopback.
 pub(crate) async fn tono_enable_protected_dns_for_session(session: &OwnerSessionProof) -> Result<DnsProtectionStatus> {
     let credentials = current_owner_credentials()?;
-    let response = match clash_verge_service_ipc::enable_protected_dns(&credentials, session).await {
+    let response = match tono_service_protocol::enable_protected_dns(&credentials, session).await {
         Ok(response) => response,
         Err(error) => {
             // A write can commit even when its response is lost. This operation is idempotent,
             // but the IPC layer deliberately does not retry writes; instead prove the complete
             // postcondition with a read before reporting failure to the connection transaction.
-            if let Ok(status_response) = clash_verge_service_ipc::get_protected_dns_status(&credentials).await
+            if let Ok(status_response) = tono_service_protocol::get_protected_dns_status(&credentials).await
                 && status_response.code == 0
                 && let Some(status) = status_response.data
                 && status.enabled
@@ -1641,7 +1642,7 @@ pub(crate) async fn tono_enable_protected_dns_for_session(session: &OwnerSession
 /// was seeding its event counter.
 pub(crate) async fn tono_protected_dns_status() -> Result<DnsProtectionStatus> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::get_protected_dns_status(&credentials)
+    let response = tono_service_protocol::get_protected_dns_status(&credentials)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -1654,12 +1655,12 @@ pub(crate) async fn tono_protected_dns_status() -> Result<DnsProtectionStatus> {
 /// switch is disarmed; a failure here keeps the system armed (product contract §6).
 pub(crate) async fn tono_restore_protected_dns() -> Result<DnsProtectionStatus> {
     let credentials = current_owner_credentials()?;
-    let response = match clash_verge_service_ipc::restore_protected_dns(&credentials).await {
+    let response = match tono_service_protocol::restore_protected_dns(&credentials).await {
         Ok(response) => response,
         Err(error) => {
             // A transport error may mean only the response was lost. Prove the idempotent
             // postcondition before telling Disconnect that protection must remain armed.
-            if let Ok(status_response) = clash_verge_service_ipc::get_protected_dns_status(&credentials).await
+            if let Ok(status_response) = tono_service_protocol::get_protected_dns_status(&credentials).await
                 && status_response.code == 0
                 && let Some(status) = status_response.data
                 && !status.snapshot_present
@@ -1684,7 +1685,7 @@ pub(crate) async fn tono_restore_protected_dns() -> Result<DnsProtectionStatus> 
 /// `GET /status`: the full Service snapshot (kill switch aggregate + network event feed).
 pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapshot> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::get_status(&credentials)
+    let response = tono_service_protocol::get_status(&credentials)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -1699,12 +1700,12 @@ pub(crate) async fn tono_service_status_snapshot() -> Result<ServiceStatusSnapsh
 /// the Service side and itself enforces DNS-before-disarm.
 pub(crate) async fn tono_release_kill_switch() -> Result<KillSwitchStatus> {
     let credentials = current_owner_credentials()?;
-    let response = match clash_verge_service_ipc::release_kill_switch(&credentials).await {
+    let response = match tono_service_protocol::release_kill_switch(&credentials).await {
         Ok(response) => response,
         Err(error) => {
             // Release is idempotent. If only its response was lost, a read-back prevents the UI
             // from falsely claiming protection remains on after WFP was already disarmed.
-            if let Ok(status_response) = clash_verge_service_ipc::get_kill_switch_status(&credentials).await
+            if let Ok(status_response) = tono_service_protocol::get_kill_switch_status(&credentials).await
                 && status_response.code == 0
                 && let Some(status) = status_response.data
                 && !status.wanted
@@ -1749,7 +1750,7 @@ pub(crate) fn tono_session_live() -> bool {
 pub(crate) async fn update_writer_by_service(writer: &WriterConfig) -> Result<()> {
     let credentials = current_owner_credentials()?;
     let session = active_service_session()?;
-    let response = clash_verge_service_ipc::update_writer(&credentials, &session, writer)
+    let response = tono_service_protocol::update_writer(&credentials, &session, writer)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -1768,7 +1769,7 @@ pub(super) async fn set_system_proxy_by_service_with_session(
     session: &OwnerSessionProof,
 ) -> Result<ProxyApplyOutcome> {
     let credentials = current_owner_credentials()?;
-    let response = clash_verge_service_ipc::set_system_proxy(&credentials, session, proxy)
+    let response = tono_service_protocol::set_system_proxy(&credentials, session, proxy)
         .await
         .context("无法连接到Tono Service")?;
     if response.code > 0 {
@@ -1843,7 +1844,7 @@ fn start_owner_monitor() {
 /// we did not learn anything. Only the log line distinguishes them.
 async fn read_owner_sample() -> OwnerSample {
     let response = match current_owner_credentials() {
-        Ok(credentials) => clash_verge_service_ipc::get_status(&credentials).await,
+        Ok(credentials) => tono_service_protocol::get_status(&credentials).await,
         Err(error) => Err(error),
     };
 
@@ -1855,7 +1856,7 @@ async fn read_owner_sample() -> OwnerSample {
         }
     };
 
-    if response.code == clash_verge_service_ipc::ServiceErrorCode::NotActive as u16 {
+    if response.code == tono_service_protocol::ServiceErrorCode::NotActive as u16 {
         return OwnerSample::NotActive;
     }
     if response.code != 0 {
@@ -1987,8 +1988,8 @@ async fn wait_for_service_ipc() -> Result<()> {
 }
 
 impl ServiceManager {
-    pub const fn config() -> clash_verge_service_ipc::IpcConfig {
-        clash_verge_service_ipc::IpcConfig {
+    pub const fn config() -> tono_service_protocol::IpcConfig {
+        tono_service_protocol::IpcConfig {
             default_timeout: Duration::from_millis(150),
             retry_delay: Duration::from_millis(250),
             max_retries: 20,
@@ -2209,7 +2210,7 @@ mod tests {
     use super::{service_core_path_for_with_publisher, service_tool_path_for};
     use crate::core::runstate::{FakeEnv, OwnerRecoveryReason, PendingAction, RunStateStore};
     use anyhow::bail;
-    use clash_verge_service_ipc::{
+    use tono_service_protocol::{
         KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint, ProxyProtocol,
     };
     #[cfg(unix)]
@@ -2242,7 +2243,7 @@ mod tests {
                 protocol: ProxyProtocol::Tcp,
             }],
             tunnel_permit_rendered: true,
-            direct_endpoint_digest: clash_verge_service_ipc::direct_endpoint_digest(&[]).unwrap(),
+            direct_endpoint_digest: tono_service_protocol::direct_endpoint_digest(&[]).unwrap(),
             last_error: None,
         };
         assert!(mark_verified_committed(&status));
@@ -2286,7 +2287,7 @@ mod tests {
         fn new(label: &str) -> anyhow::Result<Self> {
             let generation = TEST_DIRECTORY_GENERATION.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "clash-verge-rev-service-{label}-{}-{generation}",
+                "tono-service-{label}-{}-{generation}",
                 std::process::id()
             ));
             std::fs::create_dir(&path)?;
@@ -2305,12 +2306,12 @@ mod tests {
     }
 
     fn staging_directory(home: &Path) -> PathBuf {
-        home.join("Applications/.clash-verge-rev-dev/service-core")
+        home.join("Applications/.tono-dev/service-core")
     }
 
     #[cfg(unix)]
     fn service_tools_staging_directory(home: &Path) -> PathBuf {
-        home.join("Applications/.clash-verge-rev-dev/service-tools")
+        home.join("Applications/.tono-dev/service-tools")
     }
 
     #[cfg(unix)]
@@ -2334,7 +2335,7 @@ mod tests {
     fn nondevelopment_service_core_selection_preserves_sibling_without_staging() -> anyhow::Result<()> {
         let root = TestDirectory::new("release-path")?;
         let home = root.path().join("home");
-        let source = root.path().join("target/debug/verge-mihomo");
+        let source = root.path().join("target/debug/tono-core");
 
         let selected = service_core_path_for(&source, Some(&home), false)?;
 
@@ -2350,14 +2351,14 @@ mod tests {
 
         let root = TestDirectory::new("development-path")?;
         let home = root.path().join("home");
-        let source = root.path().join("verge-mihomo");
+        let source = root.path().join("tono-core");
         std::fs::write(&source, b"development core")?;
 
         let selected = service_core_path_for(&source, Some(&home), true)?;
 
         assert_eq!(
             selected,
-            home.join("Applications/.clash-verge-rev-dev/service-core/verge-mihomo")
+            home.join("Applications/.tono-dev/service-core/tono-core")
         );
         assert_eq!(std::fs::read(&selected)?, b"development core");
         let metadata = std::fs::symlink_metadata(&selected)?;
@@ -2373,14 +2374,14 @@ mod tests {
 
         let root = TestDirectory::new("development-service-tool")?;
         let home = root.path().join("home");
-        let source = root.path().join("clash-verge-service-install");
+        let source = root.path().join("tono-service-install");
         std::fs::write(&source, b"development installer")?;
 
         let selected = service_tool_path_for(&source, Some(&home), true)?;
 
         assert_eq!(
             selected,
-            service_tools_staging_directory(&home).join("clash-verge-service-install")
+            service_tools_staging_directory(&home).join("tono-service-install")
         );
         assert_eq!(std::fs::read(&selected)?, b"development installer");
         assert_ne!(std::fs::metadata(&selected)?.permissions().mode() & 0o111, 0);
@@ -2389,11 +2390,11 @@ mod tests {
 
     #[test]
     fn macos_install_shell_starts_from_root_without_nested_sudo() {
-        let shell = macos_install_shell(Path::new("/safe/service-tools/clash-verge-service-install"), 20);
+        let shell = macos_install_shell(Path::new("/safe/service-tools/tono-service-install"), 20);
 
         assert_eq!(
             shell,
-            "cd /; CLASH_VERGE_SERVICE_GID=20 '/safe/service-tools/clash-verge-service-install'"
+            "cd /; TONO_SERVICE_GID=20 '/safe/service-tools/tono-service-install'"
         );
         assert!(!shell.contains("sudo"));
     }
@@ -2403,12 +2404,12 @@ mod tests {
     fn development_service_core_refresh_atomically_replaces_bytes() -> anyhow::Result<()> {
         let root = TestDirectory::new("refresh")?;
         let home = root.path().join("home");
-        let source = root.path().join("verge-mihomo");
+        let source = root.path().join("tono-core");
         std::fs::write(&source, b"first core")?;
         let selected = service_core_path_for(&source, Some(&home), true)?;
         assert_eq!(
             selected,
-            home.join("Applications/.clash-verge-rev-dev/service-core/verge-mihomo")
+            home.join("Applications/.tono-dev/service-core/tono-core")
         );
 
         std::fs::write(&source, b"second core")?;
@@ -2416,7 +2417,7 @@ mod tests {
 
         assert_eq!(refreshed, selected);
         assert_eq!(std::fs::read(&refreshed)?, b"second core");
-        assert!(staging_temporary_entries(&home, "verge-mihomo")?.is_empty());
+        assert!(staging_temporary_entries(&home, "tono-core")?.is_empty());
         Ok(())
     }
 
@@ -2425,7 +2426,7 @@ mod tests {
     fn failed_development_refresh_preserves_good_core_and_cleans_temporary_entry() -> anyhow::Result<()> {
         let root = TestDirectory::new("failed-refresh")?;
         let home = root.path().join("home");
-        let source = root.path().join("verge-mihomo");
+        let source = root.path().join("tono-core");
         std::fs::write(&source, b"known good core")?;
         let selected = service_core_path_for(&source, Some(&home), true)?;
 
@@ -2452,7 +2453,7 @@ mod tests {
         assert!(publish_attempted.get());
         assert!(error.contains("injected post-creation publish failure"));
         assert_eq!(std::fs::read(&selected)?, b"known good core");
-        assert!(staging_temporary_entries(&home, "verge-mihomo")?.is_empty());
+        assert!(staging_temporary_entries(&home, "tono-core")?.is_empty());
         Ok(())
     }
 
@@ -2463,9 +2464,9 @@ mod tests {
 
         let root = TestDirectory::new("symlink")?;
         let home = root.path().join("home");
-        let source = root.path().join("verge-mihomo");
+        let source = root.path().join("tono-core");
         std::fs::write(&source, b"selected core")?;
-        let final_path = home.join("Applications/.clash-verge-rev-dev/service-core/verge-mihomo");
+        let final_path = home.join("Applications/.tono-dev/service-core/tono-core");
         std::fs::create_dir_all(final_path.parent().unwrap_or_else(|| Path::new(".")))?;
         let symlink_target = root.path().join("must-not-change");
         std::fs::write(&symlink_target, b"target bytes")?;

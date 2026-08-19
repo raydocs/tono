@@ -37,7 +37,7 @@ pub const SERVICE_OPERATION_BUSY: &str = "service operation already running";
 pub const PRIVILEGED_OUTCOME_UNCERTAIN: &str =
     "the previous privileged service operation may still be running; restart Tono before retrying";
 use arc_swap::ArcSwap;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
@@ -730,7 +730,7 @@ mod tests {
         ServiceVersionReply {
             code: 0,
             message: "ok".to_owned(),
-            protocol: Some(clash_verge_service_ipc::ProtocolInfo::current()),
+            protocol: Some(tono_service_protocol::ProtocolInfo::current()),
         }
     }
 

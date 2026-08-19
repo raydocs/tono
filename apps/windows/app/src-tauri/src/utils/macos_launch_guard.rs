@@ -166,12 +166,12 @@ pub const fn move_decision(
 }
 
 pub fn enforce_before_initialization() -> LaunchDisposition {
-    clash_verge_i18n::sync_locale(None);
+    tono_i18n::sync_locale(None);
 
     let executable = match std::env::current_exe() {
         Ok(executable) => executable,
         Err(error) => {
-            let message = clash_verge_i18n::t!("launchGuard.currentExeError").replace("{error}", &error.to_string());
+            let message = tono_i18n::t!("launchGuard.currentExeError").replace("{error}", &error.to_string());
             show_message(&message);
             return LaunchDisposition::Exit;
         }
@@ -179,7 +179,7 @@ pub fn enforce_before_initialization() -> LaunchDisposition {
     let home = match current_user_home() {
         Ok(home) => home,
         Err(error) => {
-            let message = clash_verge_i18n::t!("launchGuard.homeDirError").replace("{error}", &error.to_string());
+            let message = tono_i18n::t!("launchGuard.homeDirError").replace("{error}", &error.to_string());
             show_message(&message);
             return LaunchDisposition::Exit;
         }
@@ -188,19 +188,19 @@ pub fn enforce_before_initialization() -> LaunchDisposition {
     match evaluate_install_location(&executable, &home) {
         LaunchLocation::Allowed { .. } => LaunchDisposition::Continue,
         LaunchLocation::Translocated => {
-            show_message(&clash_verge_i18n::t!("launchGuard.translocated"));
+            show_message(&tono_i18n::t!("launchGuard.translocated"));
             LaunchDisposition::Exit
         }
         LaunchLocation::Rejected { reason } => {
             let reason = match reason {
                 LaunchRejectionReason::NotInApplicationBundle => {
-                    clash_verge_i18n::t!("launchGuard.notInBundle").into_owned()
+                    tono_i18n::t!("launchGuard.notInBundle").into_owned()
                 }
                 LaunchRejectionReason::CanonicalizeBundleFailed { error } => {
-                    clash_verge_i18n::t!("launchGuard.canonicalizeBundleError").replace("{error}", &error)
+                    tono_i18n::t!("launchGuard.canonicalizeBundleError").replace("{error}", &error)
                 }
             };
-            let message = clash_verge_i18n::t!("launchGuard.rejected").replace("{reason}", &reason);
+            let message = tono_i18n::t!("launchGuard.rejected").replace("{reason}", &reason);
             show_message(&message);
             LaunchDisposition::Exit
         }
@@ -217,23 +217,23 @@ fn move_and_relaunch(bundle: &Path, home: &Path) -> LaunchDisposition {
         home.join("Applications")
     };
     let Some(bundle_name) = bundle.file_name() else {
-        show_message(&clash_verge_i18n::t!("launchGuard.bundleNameError"));
+        show_message(&tono_i18n::t!("launchGuard.bundleNameError"));
         return LaunchDisposition::Exit;
     };
     let destination = destination_root.join(bundle_name);
     let exists = destination.exists();
     let destination_display = destination.display().to_string();
     let prompt = if exists {
-        clash_verge_i18n::t!("launchGuard.replacePrompt").replace("{destination}", &destination_display)
+        tono_i18n::t!("launchGuard.replacePrompt").replace("{destination}", &destination_display)
     } else {
-        clash_verge_i18n::t!("launchGuard.movePrompt").replace("{destination}", &destination_display)
+        tono_i18n::t!("launchGuard.movePrompt").replace("{destination}", &destination_display)
     };
     if !confirm(&prompt) {
         return LaunchDisposition::Exit;
     }
     if let Err(error) = std::fs::create_dir_all(&destination_root) {
         let message =
-            clash_verge_i18n::t!("launchGuard.createApplicationsDirError").replace("{error}", &error.to_string());
+            tono_i18n::t!("launchGuard.createApplicationsDirError").replace("{error}", &error.to_string());
         show_message(&message);
         return LaunchDisposition::Exit;
     }
@@ -247,14 +247,14 @@ fn move_and_relaunch(bundle: &Path, home: &Path) -> LaunchDisposition {
         .status();
     if !copy.is_ok_and(|status| status.success()) {
         let _ = remove_existing_target(&staging);
-        show_message(&clash_verge_i18n::t!("launchGuard.moveFailed"));
+        show_message(&tono_i18n::t!("launchGuard.moveFailed"));
         return LaunchDisposition::Exit;
     }
     let backup = match activate_staged_bundle(&staging, &destination, &backup) {
         Ok(backup) => backup,
         Err(error) => {
             let _ = remove_existing_target(&staging);
-            let message = clash_verge_i18n::t!("launchGuard.replaceFailed").replace("{error}", &error.to_string());
+            let message = tono_i18n::t!("launchGuard.replaceFailed").replace("{error}", &error.to_string());
             show_message(&message);
             return LaunchDisposition::Exit;
         }
@@ -272,7 +272,7 @@ fn move_and_relaunch(bundle: &Path, home: &Path) -> LaunchDisposition {
                 let _ = remove_existing_target(&staging);
             }
         }
-        show_message(&clash_verge_i18n::t!("launchGuard.relaunchFailed"));
+        show_message(&tono_i18n::t!("launchGuard.relaunchFailed"));
         return LaunchDisposition::Exit;
     }
     if let Some(backup) = backup {
@@ -333,8 +333,8 @@ fn path_is_writable(path: &Path) -> bool {
 }
 
 fn confirm(message: &str) -> bool {
-    let cancel_button = clash_verge_i18n::t!("launchGuard.cancel");
-    let move_button = clash_verge_i18n::t!("launchGuard.move");
+    let cancel_button = tono_i18n::t!("launchGuard.cancel");
+    let move_button = tono_i18n::t!("launchGuard.move");
     let script = format!(
         "display dialog \"{}\" buttons {{\"{}\", \"{}\"}} default button \"{}\" with icon caution",
         escape_osascript(message),
@@ -352,7 +352,7 @@ fn confirm(message: &str) -> bool {
 }
 
 fn show_message(message: &str) {
-    let ok_button = clash_verge_i18n::t!("launchGuard.ok");
+    let ok_button = tono_i18n::t!("launchGuard.ok");
     let script = format!(
         "display dialog \"{}\" buttons {{\"{}\"}} default button \"{}\" with icon caution",
         escape_osascript(message),

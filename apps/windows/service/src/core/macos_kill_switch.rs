@@ -11,15 +11,22 @@ use std::time::Duration;
 #[cfg(all(target_os = "macos", not(feature = "test")))]
 use tokio::io::AsyncReadExt as _;
 
-const GID_ENV: &str = "CLASH_VERGE_MIHOMO_GID";
+const GID_ENV: &str = "TONO_CORE_GID";
+const GID_ENV_LEGACY: &str = "CLASH_VERGE_MIHOMO_GID";
 const GID_MIN: u32 = 60_000;
 const GID_MAX: u32 = 64_999;
 #[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
-const ANCHOR: &str = "com.clash-verge.service.kill-switch";
+const ANCHOR: &str = "com.raydocs.tono.service.kill-switch";
 #[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
-const BEGIN: &str = "# BEGIN CLASH VERGE MANAGED KILL SWITCH";
+const LEGACY_ANCHOR: &str = "com.clash-verge.service.kill-switch";
 #[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
-const END: &str = "# END CLASH VERGE MANAGED KILL SWITCH";
+const BEGIN: &str = "# BEGIN TONO MANAGED KILL SWITCH";
+#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
+const END: &str = "# END TONO MANAGED KILL SWITCH";
+#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
+const LEGACY_BEGIN: &str = "# BEGIN CLASH VERGE MANAGED KILL SWITCH";
+#[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
+const LEGACY_END: &str = "# END CLASH VERGE MANAGED KILL SWITCH";
 #[cfg(all(target_os = "macos", not(feature = "test")))]
 const PF_COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -37,7 +44,9 @@ static PF_COMMAND_OPERATION: Lazy<tokio::sync::Mutex<()>> =
     Lazy::new(|| tokio::sync::Mutex::new(()));
 
 pub(crate) fn dedicated_gid() -> Result<u32> {
-    let raw = std::env::var(GID_ENV).context("dedicated Mihomo GID is not configured")?;
+    let raw = std::env::var(GID_ENV)
+        .or_else(|_| std::env::var(GID_ENV_LEGACY))
+        .context("dedicated core GID is not configured")?;
     let gid: u32 = raw.parse().context("dedicated Mihomo GID is malformed")?;
     if !(GID_MIN..=GID_MAX).contains(&gid) {
         bail!("dedicated Mihomo GID is outside the installer range");
@@ -114,7 +123,11 @@ fn stage_pf_config_preserving_metadata(contents: &[u8]) -> Result<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
 
     let path = Path::new("/etc/pf.conf");
-    let temporary = Path::new("/etc/.pf.conf.clash-verge.tmp");
+    let temporary = Path::new("/etc/.pf.conf.tono.tmp");
+    let leftover = Path::new("/etc/.pf.conf.clash-verge.tmp");
+    if leftover.is_file() {
+        let _ = std::fs::remove_file(leftover);
+    }
     let metadata = std::fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() {
         bail!("/etc/pf.conf is not a regular file");
@@ -307,7 +320,11 @@ async fn replace_and_reload_pf_config(next: &[u8], previous: &[u8]) -> Result<()
 fn parent_anchor_is_first(main: &str) -> bool {
     main.lines()
         .find(|line| !line.trim().is_empty())
-        .is_some_and(|line| line.trim() == format!("anchor \"{ANCHOR}\" all"))
+        .is_some_and(|line| {
+            let line = line.trim();
+            line == format!("anchor \"{ANCHOR}\" all")
+                || line == format!("anchor \"{LEGACY_ANCHOR}\" all")
+        })
 }
 
 #[cfg(all(target_os = "macos", not(feature = "test")))]
@@ -356,30 +373,40 @@ fn normalize_pf_rules(value: &str) -> Vec<String> {
 }
 
 #[cfg(any(all(target_os = "macos", not(feature = "test")), test))]
-fn replace_managed(existing: &str, managed: &str) -> Result<String> {
-    let mut cleaned = match (existing.find(BEGIN), existing.find(END)) {
-        (None, None) => existing.to_owned(),
-        (Some(begin), Some(end)) if begin < end => {
-            let tail = end + END.len();
-            format!(
+fn strip_marked_block(existing: &str, begin: &str, end: &str) -> Result<Option<String>> {
+    match (existing.find(begin), existing.find(end)) {
+        (None, None) => Ok(None),
+        (Some(begin_at), Some(end_at)) if begin_at < end_at => {
+            let tail = end_at + end.len();
+            Ok(Some(format!(
                 "{}{}",
-                &existing[..begin],
+                &existing[..begin_at],
                 existing[tail..].trim_start_matches('\n')
-            )
+            )))
         }
-        _ => {
-            return Err(anyhow::anyhow!(
-                "pf.conf contains damaged Clash Verge managed markers"
-            ));
+        _ => Err(anyhow::anyhow!(
+            "pf.conf contains damaged Tono managed markers"
+        )),
+    }
+}
+
+fn has_unmanaged_anchor(cleaned: &str, anchor: &str) -> bool {
+    cleaned.contains(&format!("anchor \"{anchor}\""))
+        || cleaned.contains(&format!("load anchor \"{anchor}\""))
+}
+
+fn replace_managed(existing: &str, managed: &str) -> Result<String> {
+    let mut cleaned = existing.to_owned();
+    for (begin, end) in [(BEGIN, END), (LEGACY_BEGIN, LEGACY_END)] {
+        if let Some(next) = strip_marked_block(&cleaned, begin, end)? {
+            cleaned = next;
         }
-    };
+    }
     if managed.is_empty() {
         return Ok(cleaned);
     }
-    if cleaned.contains(&format!("anchor \"{ANCHOR}\""))
-        || cleaned.contains(&format!("load anchor \"{ANCHOR}\""))
-    {
-        bail!("pf.conf contains an unmanaged Clash Verge kill-switch anchor");
+    if has_unmanaged_anchor(&cleaned, ANCHOR) || has_unmanaged_anchor(&cleaned, LEGACY_ANCHOR) {
+        bail!("pf.conf contains an unmanaged Tono kill-switch anchor");
     }
 
     // PF evaluates the last matching filter rule unless a rule is `quick`. The child anchor must
@@ -438,7 +465,7 @@ fn reject_competing_pf_filter_policy(existing: &str) -> Result<()> {
             );
         if filter_policy && !apple_anchor {
             bail!(
-                "an unsupported external PF filter policy is configured ({statement}); disable its PF manager before enabling Clash Verge protection"
+                "an unsupported external PF filter policy is configured ({statement}); disable its PF manager before enabling Tono protection"
             );
         }
     }
@@ -545,6 +572,7 @@ async fn release_unlocked() -> Result<()> {
             }
             return Err(error.context("failed to clear live kill-switch rules"));
         }
+        let _ = run_pf(&["-a", LEGACY_ANCHOR, "-F", "all"]).await;
     }
     match tokio::fs::remove_file(state_path()).await {
         Ok(()) => {}
@@ -723,6 +751,19 @@ mod tests {
     #[test]
     fn markers_must_be_consistent() {
         assert!(replace_managed(BEGIN, "x").is_err());
+    }
+
+    #[test]
+    fn replace_managed_strips_legacy_clash_verge_markers() {
+        let existing = format!(
+            "{LEGACY_BEGIN}\nanchor \"{LEGACY_ANCHOR}\"\nload anchor \"{LEGACY_ANCHOR}\" from \"/tmp/clash.pf\"\n{LEGACY_END}\nanchor \"com.apple/*\"\n"
+        );
+        let managed = format!("{BEGIN}\nanchor \"{ANCHOR}\"\n{END}\n");
+        let result = replace_managed(&existing, &managed).unwrap();
+        assert!(!result.contains(LEGACY_BEGIN));
+        assert!(!result.contains(LEGACY_ANCHOR));
+        assert!(result.contains(BEGIN));
+        assert!(result.contains(&format!("anchor \"{ANCHOR}\"")));
     }
 
     #[test]

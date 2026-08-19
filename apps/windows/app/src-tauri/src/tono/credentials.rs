@@ -141,9 +141,9 @@ impl SessionCredentialStore {
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
                 if let Err(err) = TonoCredentialStore::set_async(key, &value).await {
-                    clash_verge_logging::logging!(
+                    tono_logging::logging!(
                         warn,
-                        clash_verge_logging::Type::Service,
+                        tono_logging::Type::Service,
                         "Tono: 凭据回写系统钥匙串失败: {err}"
                     );
                 }

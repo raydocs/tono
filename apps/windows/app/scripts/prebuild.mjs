@@ -313,8 +313,8 @@ function clashMeta() {
   const isWin = platform === 'win32'
   const urlExt = isWin ? 'zip' : 'gz'
   return {
-    name: 'verge-mihomo',
-    targetFile: `verge-mihomo-${SIDECAR_HOST}${isWin ? '.exe' : ''}`,
+    name: 'tono-core',
+    targetFile: `tono-core-${SIDECAR_HOST}${isWin ? '.exe' : ''}`,
     exeFile: `${name}${isWin ? '.exe' : ''}`,
     zipFile: `${name}-${META_VERSION}.${urlExt}`,
     downloadURL: `${META_URL_PREFIX}/${META_VERSION}/${name}-${META_VERSION}.${urlExt}`,
@@ -721,9 +721,8 @@ const tasks = [
     retry: platform === 'win32' ? 1 : 5,
     skipWindowsService: true,
   },
-  { name: 'mmdb', func: resolveMmdb, retry: 5 },
-  { name: 'geosite', func: resolveGeosite, retry: 5 },
-  { name: 'geoip', func: resolveGeoIP, retry: 5 },
+  // Owned runtime never references GEOIP/GEOSITE/MMDB. Do not download or
+  // ship those ~28 MB assets in the Tono payload.
   {
     name: 'enableLoopback',
     func: resolveEnableLoopback,
@@ -810,7 +809,7 @@ async function assertWindowsPackagingConfig() {
 
 async function writeCoreDigestPin() {
   if (platform !== 'win32') return
-  const sidecar = path.join(SIDECAR_DIR, `verge-mihomo-${SIDECAR_HOST}.exe`)
+  const sidecar = path.join(SIDECAR_DIR, `tono-core-${SIDECAR_HOST}.exe`)
   if (!fs.existsSync(sidecar)) {
     throw new Error(`cannot write core-sha256.txt: missing ${sidecar}`)
   }

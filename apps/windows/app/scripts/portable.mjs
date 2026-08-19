@@ -44,7 +44,7 @@ async function resolvePortable() {
 
   zip.addLocalFile(path.join(releaseDir, 'Tono.exe'))
   // Stable-only: never zip verge-mihomo-alpha even if a leftover sits in releaseDir.
-  const stableMihomo = path.join(releaseDir, 'verge-mihomo.exe')
+  const stableMihomo = path.join(releaseDir, 'tono-core.exe')
   if (!fs.existsSync(stableMihomo)) {
     throw new Error(`missing stable Mihomo at ${stableMihomo}`)
   }

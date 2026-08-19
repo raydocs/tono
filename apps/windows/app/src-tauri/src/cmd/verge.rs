@@ -1,6 +1,6 @@
 use super::CmdResult;
 use crate::{cmd::StringifyErr as _, config::IVerge, feat};
-use clash_verge_draft::SharedDraft;
+use tono_draft::SharedDraft;
 
 /// 获取Verge配置
 #[tauri::command]
@@ -152,7 +152,7 @@ mod tests {
                 ..IVerge::default()
             },
             IVerge {
-                clash_core: Some("verge-mihomo".into()),
+                clash_core: Some("tono-core".into()),
                 ..IVerge::default()
             },
             IVerge {

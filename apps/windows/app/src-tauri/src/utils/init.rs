@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::Result;
 use chrono::{Local, TimeZone as _};
-use clash_verge_logging::Type;
+use tono_logging::Type;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::path::Path;
 use std::{path::PathBuf, str::FromStr as _};
@@ -134,7 +134,7 @@ async fn is_logs_dir_writable(log_dir: &Path) -> bool {
     }
 
     let probe_path = log_dir.join(format!(
-        ".clash-verge-write-test-{}-{}",
+        ".tono-write-test-{}-{}",
         std::process::id(),
         Local::now().timestamp_nanos_opt().unwrap_or_default()
     ));
@@ -528,7 +528,7 @@ pub fn init_scheme() -> Result<()> {
 }
 #[cfg(target_os = "linux")]
 pub fn init_scheme() -> Result<()> {
-    const DESKTOP_FILE: &str = "clash-verge.desktop";
+    const DESKTOP_FILE: &str = "tono.desktop";
 
     for scheme in DEEP_LINK_SCHEMES {
         let handler = format!("x-scheme-handler/{scheme}");
@@ -554,7 +554,7 @@ pub const fn init_scheme() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-const DEEP_LINK_SCHEMES: &[&str] = &["clash", "clash-verge"];
+const DEEP_LINK_SCHEMES: &[&str] = &["tono"];
 
 pub async fn startup_script() -> Result<()> {
     // Tono: user startup scripts are disabled (P0-14) — nothing outside the

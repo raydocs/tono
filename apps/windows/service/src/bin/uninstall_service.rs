@@ -211,13 +211,13 @@ fn main() -> Result<(), Error> {
     // 定义路径
     let bundle_path = format!(
         "/Library/PrivilegedHelperTools/{}.bundle",
-        clash_verge_service_ipc::MACOS_SERVICE_ID
+        tono_service_protocol::MACOS_SERVICE_ID
     );
     let plist_file = format!(
         "/Library/LaunchDaemons/{}.plist",
-        clash_verge_service_ipc::MACOS_SERVICE_ID
+        tono_service_protocol::MACOS_SERVICE_ID
     );
-    let service_id = clash_verge_service_ipc::MACOS_SERVICE_ID;
+    let service_id = tono_service_protocol::MACOS_SERVICE_ID;
 
     // A separate recovery process must never open PF while KeepAlive can still relaunch the
     // service/core. Require a verified bootout; only a positively absent service is skippable.
@@ -265,7 +265,7 @@ fn main() -> Result<(), Error> {
     }
     let _gate = enter_repair_gate()?;
     let debug = env::args().any(|arg| arg == "--debug");
-    let service_name = clash_verge_service_ipc::SERVICE_SLUG;
+    let service_name = tono_service_protocol::SERVICE_SLUG;
 
     // Stop and disable service
     let _ = run_command(
@@ -288,7 +288,7 @@ fn main() -> Result<(), Error> {
 
     // Reload systemd
     let _ = run_command("systemctl", &["daemon-reload"], debug);
-    let target = clash_verge_service_ipc::prepare_service_install_directory()?.join("tono-service");
+    let target = tono_service_protocol::prepare_service_install_directory()?.join("tono-service");
     if target.exists() {
         std::fs::remove_file(&target).map_err(|error| {
             anyhow::anyhow!("Failed to remove service binary {target:?}: {error}")
@@ -378,7 +378,7 @@ fn windows_cleanup() -> CleanupOutcome {
         | ServiceAccess::DELETE
         | ServiceAccess::CHANGE_CONFIG;
     let service = match service_manager.open_service(
-        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
         service_access,
     ) {
         Ok(service) => Some(service),
@@ -400,7 +400,7 @@ fn windows_cleanup() -> CleanupOutcome {
             .build()
         {
             Ok(runtime) => {
-                match runtime.block_on(clash_verge_service_ipc::residual_filters_present()) {
+                match runtime.block_on(tono_service_protocol::residual_filters_present()) {
                     Ok(present) => present,
                     // 0x80320005 = FWP_E_PROVIDER_NOT_FOUND: no Tono provider → not residual, CLEAN.
                     // Treating this as "unknown, force disarm" was the result-3 loop on customer PCs.
@@ -491,7 +491,7 @@ fn windows_cleanup() -> CleanupOutcome {
             // after the SCM stop (ProgramData ACL damage, missing pid file, stuck lock), still
             // attempt the disarm: the uninstall ladder removes WFP even when tombstone writes
             // fail, and refusing here is exactly the result-3 install/uninstall deadlock.
-            let owner_guard = match clash_verge_service_ipc::acquire_service_owner().await {
+            let owner_guard = match tono_service_protocol::acquire_service_owner().await {
                 Ok(Some(guard)) => Some(guard),
                 Ok(None) => match read_service_pid_file() {
                     Some(pid) => {
@@ -499,7 +499,7 @@ fn windows_cleanup() -> CleanupOutcome {
                             "Owner lock is held by live daemon {pid}; terminating it before disarm."
                         );
                         terminate_process_by_pid(pid)?;
-                        clash_verge_service_ipc::acquire_service_owner()
+                        tono_service_protocol::acquire_service_owner()
                             .await
                             .ok()
                             .flatten()
@@ -527,7 +527,7 @@ fn windows_cleanup() -> CleanupOutcome {
                 );
             }
             let _owner_guard = owner_guard;
-            clash_verge_service_ipc::emergency_disarm_windows_kill_switch().await
+            tono_service_protocol::emergency_disarm_windows_kill_switch().await
         })
     })();
     // The escalation ladder collapses back into two questions here: are the WFP filters gone,
@@ -561,7 +561,7 @@ fn windows_cleanup() -> CleanupOutcome {
                         .ok()
                         .and_then(|runtime| {
                             runtime
-                                .block_on(clash_verge_service_ipc::residual_filters_present())
+                                .block_on(tono_service_protocol::residual_filters_present())
                                 .ok()
                         });
                     match residual {
@@ -623,7 +623,7 @@ fn windows_cleanup() -> CleanupOutcome {
                 if let Err(error) = poll_until(
                     POLL_ATTEMPTS,
                     || match service_manager.open_service(
-                        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+                        tono_service_protocol::WINDOWS_SERVICE_NAME,
                         ServiceAccess::QUERY_STATUS,
                     ) {
                         Ok(service) => {
@@ -689,7 +689,7 @@ fn windows_recovery_state_present() -> bool {
         path.try_exists().unwrap_or(true)
     }
 
-    let paths = clash_verge_service_ipc::service_paths();
+    let paths = tono_service_protocol::service_paths();
     let state = paths.persistent_state_dir();
     may_exist(&state.join("kill-switch.json"))
         || may_exist(&state.join("protected-dns.json"))
@@ -701,7 +701,7 @@ fn windows_recovery_state_present() -> bool {
 /// re-ACL the install directory just to look inside it.
 #[cfg(windows)]
 fn remove_windows_service_binary() -> Result<(), Error> {
-    let install_dir = clash_verge_service_ipc::service_paths().install_dir();
+    let install_dir = tono_service_protocol::service_paths().install_dir();
     let target = install_dir.join("tono-service.exe");
     if target.exists() {
         std::fs::remove_file(&target).map_err(|error| {

@@ -44,14 +44,15 @@
 
         <article class="card">
           <div class="card-title"><span class="platform">Windows</span><span class="status good">已发布 · 自动更新</span></div>
-          <h3>0.0.33 · Stable</h3>
-          <p>x64、NSIS 安装包。**这一版需要手动安装**——Tono 无法自行更新到它。证明更新确实来自我们的那把密钥已经更换，而你电脑上已装的 Tono 只信任旧的那把。装上 0.0.33 之后，自动更新恢复正常并持续可用。</p>
+          <h3>0.0.34</h3>
+          <p>可从 0.0.33 自动更新。本版以打磨与中文质量为主。</p>
           <ul>
-            <li>Tono 现在向一个能访问到的地址查询更新。此前每一个版本问的都是 <code>raw.githubusercontent.com</code>，而它在中国大陆是被屏蔽的——所以更新检查只有在 Tono 已经连上的时候才可能成功，一台连不上的电脑会被告知没有更新可装。而那恰恰是最需要更新的时刻。现在查询走 Tono 自己的服务器，和 Mac 一直用的是同一个</li>
-            <li>更新签名密钥已更换，并且不再只存放在一个可能丢失的地方。这也是本版必须手动安装的原因：已安装的程序会用它构建时的那把公钥校验签名，认不出来就会拒绝——这是正确行为</li>
-            <li>其余与 0.0.32 完全一致，包括服务协议，所以 App 与 Service 的配对关系不变</li>
+            <li>切换节点后会弹出轻提示，标明已切换到哪个节点，不再无声切换</li>
+            <li>全面梳理中文文案：统一称&quot;节点&quot;，中文语境使用全角标点，重写了若干生硬的翻译</li>
+            <li>节点徽章图形重制为与 macOS 逐像素一致的品牌标识</li>
+            <li>选中节点的高亮与卡片描边的一致性小修</li>
           </ul>
-          <a class="text-link" href="https://releases.afk.ccwu.cc/download/Tono_0.0.33_x64-setup.exe">下载 Windows 0.0.33 →</a>
+          <a class="text-link" href="https://releases.afk.ccwu.cc/download/Tono_0.0.34_x64-setup.exe">下载 Windows 0.0.34 →</a>
         </article>
       <!-- /generated:cards -->
       </div>
@@ -66,8 +67,8 @@
       <!-- generated:contract -->
         <div><strong>macOS</strong><span>Build 67 · helper 3.12.2</span></div>
         <div><strong>macOS 更新 feed</strong><span>0.0.67 · Sparkle 已指向</span></div>
-        <div><strong>Windows 已发布包</strong><span>0.0.33 · 服务协议 14</span></div>
-        <div><strong>Windows 更新通道</strong><span>0.0.33 · 与安装包一致</span></div>
+        <div><strong>Windows 已发布包</strong><span>0.0.34 · 服务协议 14</span></div>
+        <div><strong>Windows 更新通道</strong><span>0.0.34 · 与安装包一致</span></div>
       <!-- /generated:contract -->
       </div>
       <p class="note">两个平台现在都能自动送达既有用户。此前 macOS 的 feed 停在 Build 62、Windows 的通道停在 0.0.25，中间发布的每一版都只存在于 GitHub 上——「发布过」和「用户拿得到」在这里是两件事，判断依据是本页的 Manifest，不是 GitHub 的发布列表。</p>
@@ -81,7 +82,7 @@
       <div class="timeline">
       <!-- generated:timeline -->
         <article><time>2026-08-18</time><h3>macOS 0.0.67 · Build 67</h3><p>界面整体重做与完整中文化：登录页重新设计并内嵌设备管理（修复设备满额时无法自助处理的死循环），节点改为城市命名并配城市地标图标，深色模式改为黑玻璃质感，全部界面、错误信息完成简体中文本地化。helper 没有变化，升级不需要输入管理员密码。</p></article>
-        <article><time>2026-08-15</time><h3>Windows 0.0.33</h3><p>把更新查询从被屏蔽的 <code>raw.githubusercontent.com</code> 挪到 Tono 自己的服务器。此前的更新检查只有在隧道已经工作时才能成功，也就是说最需要修复的用户恰恰是被告知“没有更新”的那批。同时更换了更新签名密钥并留了备份——旧密钥只存在于一处只写的 GitHub secret 中，仓库一删就永久消失。因为密钥更换，本版必须手动安装一次。</p></article>
+        <article><time>2026-08-18</time><h3>Windows 0.0.34</h3><p>以打磨与中文质量为主的版本：切换节点有轻提示确认、全面梳理简体中文文案（统一&quot;节点&quot;术语与全角标点）、节点徽章与 macOS 品牌标识逐像素对齐。服务协议不变，可从 0.0.33 自动更新。</p></article>
       <!-- /generated:timeline -->
         <p class="note">这两版是基准。之前的每一个构建都已撤下——它们带着这两版修好的缺陷：微信在连接后自行找到的服务器被静默丢弃、Kill Switch 解除后会自行重新武装、隧道明明出不去却仍显示已连接；其中若干版本因为更新通道从未推进，任何客户都不曾拿到过。旧版本的 tag 已一并删除，但源码没有丢失——每个被撤下的构建都已合入主线，仍可按 commit 检出重建。删掉的只是“它仍是一个选项”这层暗示。</p>
       </div>

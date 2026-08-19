@@ -136,6 +136,17 @@ final class AccountSession {
         hasStartedRestore = true
         state = .restoring
         do {
+            if var journal = UpdateHandoffStore.load() {
+                ConnectionTelemetryBuffer.shared.record(
+                    "updateResumeBegin",
+                    stage: journal.phase.rawValue,
+                    mode: "updateResume",
+                    generation: Int(journal.connectionGeneration),
+                    updateResume: true
+                )
+                journal = journal.advancing(to: .firstLaunchMigration)
+                try? UpdateHandoffStore.write(journal)
+            }
             // Crash recovery can invoke networksetup and helper IPC. Run it on
             // the serialized runtime actor so the first window paints
             // immediately instead of blocking AppKit's launch callback.
@@ -867,6 +878,7 @@ final class AccountSession {
             return
         }
         lastPeriodicTelemetryAt = now
+        let drained = ConnectionTelemetryBuffer.shared.drain()
         let snapshot = diagnosticSnapshotConsumer()
         let nowMs = Int64(now.timeIntervalSince1970 * 1_000)
         let uiState: String
@@ -906,9 +918,9 @@ final class AccountSession {
             killSwitchWanted: snapshot.killSwitchArmed || snapshot.connected,
             killSwitchLive: snapshot.killSwitchArmed,
             dnsEnabled: snapshot.protectedDNSConfigured,
-            eventCount: 0,
-            eventsDropped: 0,
-            events: []
+            eventCount: drained.events.count,
+            eventsDropped: drained.dropped,
+            events: drained.events
         )
         do {
             _ = try await api.uploadTelemetryWindow(window)

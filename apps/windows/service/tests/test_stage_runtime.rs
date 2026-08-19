@@ -10,7 +10,7 @@
 mod common;
 
 use anyhow::{Context as _, Result};
-use clash_verge_service_ipc::{
+use tono_service_protocol::{
     OwnerCredentials, OwnerSessionProof, RemoteProvider, RuntimeAsset, RuntimeBundle,
     ServiceErrorCode, StageRejection, StageRuntimeOutcome, StartClashRequest, get_status,
     run_ipc_server, service_paths, stage_runtime, start_clash, stop_clash, stop_ipc_server,

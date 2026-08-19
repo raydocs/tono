@@ -1,4 +1,4 @@
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use serde_json::json;
 use smartstring::alias::String;
 

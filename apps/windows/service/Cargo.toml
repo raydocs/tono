@@ -1,8 +1,8 @@
 [package]
-name = "clash_verge_service_ipc"
+name = "tono-service-protocol"
 version = "2.6.7"
 edition = "2024"
-authors = ["Tunglies"]
+authors = ["Tono"]
 license = "GPL-3.0"
 
 # This crate is a self-contained fork with its own lockfile; keep it out of the
@@ -10,7 +10,7 @@ license = "GPL-3.0"
 [workspace]
 
 [lib]
-name = "clash_verge_service_ipc"
+name = "tono_service_protocol"
 path = "src/lib.rs"
 
 [[bin]]
@@ -70,7 +70,7 @@ standalone = [
     "anyhow",
     "once_cell",
     "serde_json",
-    "clash_verge_logger",
+    "tono-logger",
     "flexi_logger",
     "log",
     "response",
@@ -125,7 +125,7 @@ tokio = { version = "1.52", features = [
 ], optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true }
-clash_verge_logger = { git = "https://github.com/clash-verge-rev/clash-verge-logger.git", version = "0.2.0", optional = true }
+tono-logger = { path = "../crates/tono-logger", optional = true }
 flexi_logger = { version = "0.31", optional = true }
 log = { version = "0.4.28", optional = true }
 tracing-log = { version = "0.2", optional = true }
@@ -133,7 +133,7 @@ compact_str = { version = "0.10", features = ["serde"], optional = true }
 url = "2.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-sysproxy = { git = "https://github.com/clash-verge-rev/sysproxy-rs", branch = "main" }
+sysproxy = { path = "../vendor/sysproxy" }
 
 [target.'cfg(unix)'.dependencies]
 platform_lib = { package = "libc", version = "0.2", optional = true }

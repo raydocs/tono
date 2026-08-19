@@ -9,7 +9,7 @@ use crate::core::state::set_core_lifecycle_state;
 use crate::core::structure::ServiceLifecycleState;
 use crate::{OwnerIdentity, WriterConfig};
 use anyhow::{Context as _, Result, anyhow};
-use clash_verge_logger::AsyncLogger;
+use tono_logger::AsyncLogger;
 use compact_str::CompactString;
 use flexi_logger::writers::LogWriter;
 use flexi_logger::{DeferredNow, Record};
@@ -551,7 +551,7 @@ impl CoreManager {
 
     /// Reconcile only Tono-owned Core processes before the unprivileged App tests the fixed DNS
     /// listener. This is intentionally exposed separately from `start_core`: if an interrupted
-    /// upgrade leaves an installed `verge-mihomo.exe` holding loopback port 53, the App's DNS
+    /// upgrade leaves an installed leftover `verge-mihomo.exe` holding loopback port 53, the App's DNS
     /// preflight otherwise fails before `start_core` can reach this same safe process sweep.
     ///
     /// A supervised Core is preserved only when the caller has just proved the complete active,
@@ -1672,7 +1672,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("cvs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir(&directory)?;
-        let path = directory.join("verge-mihomo.sock");
+        let path = directory.join("tono-core.sock");
         let listener = tokio::net::UnixListener::bind(&path)?;
         let owner = OwnerIdentity::Unix {
             uid: unsafe { platform_lib::geteuid() },
@@ -1708,7 +1708,7 @@ mod tests {
         let config = ClashConfig {
             core_config: CoreConfig {
                 core_path: path_of("missing-core"),
-                core_ipc_path: path_of("verge-mihomo.sock"),
+                core_ipc_path: path_of("tono-core.sock"),
                 config_path: path_of("config.yaml"),
                 config_dir: directory.to_string_lossy().into_owned(),
             },

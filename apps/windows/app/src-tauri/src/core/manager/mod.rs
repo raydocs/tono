@@ -3,7 +3,7 @@ mod state;
 
 use anyhow::Result;
 use arc_swap::{ArcSwap, ArcSwapOption};
-use clash_verge_logger::AsyncLogger;
+use tono_logger::AsyncLogger;
 use once_cell::sync::Lazy;
 use std::{
     fmt,

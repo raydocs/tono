@@ -3,7 +3,7 @@ use crate::constants::{network, tun as tun_const};
 use crate::utils::dirs::{path_to_str, sidecar_ipc_path};
 use crate::utils::{dirs, help};
 use anyhow::Result;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 use std::{
@@ -70,9 +70,9 @@ impl IClashTemp {
         map.insert("mixed-port".into(), network::ports::DEFAULT_MIXED.into());
         map.insert("socks-port".into(), network::ports::DEFAULT_SOCKS.into());
         map.insert("port".into(), network::ports::DEFAULT_HTTP.into());
-        map.insert("log-level".into(), "info".into());
+        map.insert("log-level".into(), "warning".into());
         map.insert("allow-lan".into(), false.into());
-        map.insert("ipv6".into(), true.into());
+        map.insert("ipv6".into(), false.into());
         map.insert("mode".into(), "rule".into());
         map.insert(
             "external-controller".into(),
@@ -89,7 +89,7 @@ impl IClashTemp {
             Self::guard_external_controller_ipc().into(),
         );
         map.insert("tun".into(), tun_config.into());
-        cors_map.insert("allow-private-network".into(), true.into());
+        cors_map.insert("allow-private-network".into(), false.into());
         cors_map.insert(
             "allow-origins".into(),
             vec![
@@ -98,15 +98,12 @@ impl IClashTemp {
                 // Only enable this in dev mode
                 #[cfg(feature = "verge-dev")]
                 "http://localhost:3000",
-                "https://yacd.metacubex.one",
-                "https://metacubex.github.io",
-                "https://board.zash.run.place",
             ]
             .into(),
         );
         map.insert("secret".into(), "set-your-secret".into());
         map.insert("external-controller-cors".into(), cors_map.into());
-        map.insert("unified-delay".into(), true.into());
+        map.insert("unified-delay".into(), false.into());
         Self(map)
     }
 
@@ -137,6 +134,22 @@ impl IClashTemp {
         config.insert("external-controller-unix".into(), external_controller_unix.into());
         #[cfg(windows)]
         config.insert("external-controller-pipe".into(), external_controller_pipe.into());
+        config.insert("ipv6".into(), false.into());
+        config.insert("unified-delay".into(), false.into());
+        config.insert("log-level".into(), "warning".into());
+        let mut cors_map = Mapping::new();
+        cors_map.insert("allow-private-network".into(), false.into());
+        cors_map.insert(
+            "allow-origins".into(),
+            vec![
+                "tauri://localhost",
+                "http://tauri.localhost",
+                #[cfg(feature = "verge-dev")]
+                "http://localhost:3000",
+            ]
+            .into(),
+        );
+        config.insert("external-controller-cors".into(), cors_map.into());
         config
     }
 
@@ -392,6 +405,56 @@ fn test_clash_info() {
     assert_eq!(get_case(8888, "192.168.1.1:8080"), get_result(8888, "192.168.1.1:8080"));
 
     assert_eq!(get_case(8888, "192.168.1.1:80800"), get_result(8888, "127.0.0.1:9097"));
+}
+
+#[test]
+fn guard_overrides_leftover_clash_runtime_knobs() {
+    let mut map = Mapping::new();
+    map.insert("ipv6".into(), true.into());
+    map.insert("unified-delay".into(), true.into());
+    map.insert("log-level".into(), "debug".into());
+    let mut cors_map = Mapping::new();
+    cors_map.insert("allow-private-network".into(), true.into());
+    cors_map.insert(
+        "allow-origins".into(),
+        vec!["https://yacd.metacubex.one", "https://metacubex.github.io"].into(),
+    );
+    map.insert("external-controller-cors".into(), cors_map.into());
+
+    let guarded = IClashTemp::guard(map);
+    assert_eq!(guarded.get("ipv6").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        guarded.get("unified-delay").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        guarded.get("log-level").and_then(Value::as_str),
+        Some("warning")
+    );
+    let cors = guarded
+        .get("external-controller-cors")
+        .and_then(Value::as_mapping)
+        .expect("cors map");
+    assert_eq!(
+        cors.get("allow-private-network").and_then(Value::as_bool),
+        Some(false)
+    );
+    let origins = cors
+        .get("allow-origins")
+        .and_then(Value::as_sequence)
+        .expect("origins");
+    assert!(
+        origins
+            .iter()
+            .filter_map(Value::as_str)
+            .all(|origin| origin.contains("tauri") || origin.contains("localhost"))
+    );
+    assert!(
+        origins
+            .iter()
+            .filter_map(Value::as_str)
+            .all(|origin| !origin.contains("yacd") && !origin.contains("metacubex"))
+    );
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

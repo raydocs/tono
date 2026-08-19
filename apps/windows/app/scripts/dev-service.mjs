@@ -5,9 +5,9 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const developmentServiceDirectoryEnvironment =
-  'CLASH_VERGE_DEV_SERVICE_DIR'
+  'TONO_DEV_SERVICE_DIR'
 const developmentServiceInstallerEnvironment =
-  'CLASH_VERGE_DEV_SERVICE_INSTALLER'
+  'TONO_DEV_SERVICE_INSTALLER'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const appRoot = resolve(scriptDirectory, '..')
@@ -105,7 +105,7 @@ async function elevateInstaller(installer, platform) {
 
   if (platform === 'darwin') {
     const script =
-      'on run argv\nset toolPath to item 1 of argv\nset groupId to item 2 of argv\ndo shell script "CLASH_VERGE_SERVICE_GID=" & quoted form of groupId & " " & quoted form of toolPath with administrator privileges\nend run'
+      'on run argv\nset toolPath to item 1 of argv\nset groupId to item 2 of argv\ndo shell script "TONO_SERVICE_GID=" & quoted form of groupId & " " & quoted form of toolPath with administrator privileges\nend run'
     return run('osascript', ['-e', script, installer, String(process.getgid())])
   }
 
@@ -113,7 +113,7 @@ async function elevateInstaller(installer, platform) {
     return run(installer, [], {
       env: {
         ...process.env,
-        CLASH_VERGE_SERVICE_GID: String(process.getgid()),
+        TONO_SERVICE_GID: String(process.getgid()),
       },
     })
   }

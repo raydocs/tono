@@ -6,8 +6,8 @@ mod common;
 mod tests {
     use anyhow::{Context, Result};
     #[cfg(unix)]
-    use clash_verge_service_ipc::acquire_service_owner;
-    use clash_verge_service_ipc::{
+    use tono_service_protocol::acquire_service_owner;
+    use tono_service_protocol::{
         CoreWatchdogTestConfig, OwnerSessionProof, RuntimeBundle, ServiceLifecycleState,
         StartClashRequest, connect, get_status, reconcile_service_startup, run_ipc_server,
         run_ipc_supervisor_until_shutdown, service_lifecycle_state, service_paths,

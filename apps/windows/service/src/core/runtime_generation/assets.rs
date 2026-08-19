@@ -667,7 +667,11 @@ pub(super) fn classify_windows_core_path(
 pub(crate) fn is_installed_core_image_path(canonical: &Path) -> bool {
     let is_core_image = canonical
         .file_name()
-        .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("verge-mihomo.exe"));
+        .is_some_and(|name| {
+            let name = name.to_string_lossy();
+            name.eq_ignore_ascii_case("tono-core.exe")
+                || name.eq_ignore_ascii_case("verge-mihomo.exe")
+        });
     is_core_image && is_permitted_windows_core_location(canonical)
 }
 

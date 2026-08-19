@@ -276,7 +276,7 @@ final class KillSwitchManager {
                 + "protection remains fail-closed."
             )
         }
-        try Self.writeRules(state: state, allowedUID: allowedUID)
+        let renderedRules = try Self.writeRules(state: state, allowedUID: allowedUID)
         // Persist fail-closed intent before activating the new rules.
         try saveState(state)
         try Self.ensureHostsMappings(state: state)
@@ -285,9 +285,7 @@ final class KillSwitchManager {
         // and config reloads re-arm with identical or wider rules; flushing
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
-        let passRules = Self.passRules(
-            in: Self.renderRules(state: state, allowedUID: allowedUID)
-        )
+        let passRules = Self.passRules(in: renderedRules)
         let withdrawn = lastLoadedPassRules.map { $0.subtracting(passRules) }
         // A first arm after daemon start has no baseline, so it cannot know what
         // it is replacing and takes the machine-wide flush.
@@ -1310,10 +1308,11 @@ final class KillSwitchManager {
         return candidate
     }
 
+    @discardableResult
     private static func writeRules(
         state: KillSwitchState,
         allowedUID: uid_t
-    ) throws {
+    ) throws -> String {
         let rules = renderRules(state: state, allowedUID: allowedUID)
         try atomicWrite(
             path: killSwitchPFPath,
@@ -1326,6 +1325,7 @@ final class KillSwitchManager {
                 checked.message.isEmpty ? "PF rule validation failed." : checked.message
             )
         }
+        return rules
     }
 
     private static func renderRules(
@@ -1533,6 +1533,13 @@ final class KillSwitchManager {
             candidate = cleaned
         }
 
+        // Second arm / reassert almost always leaves /etc/pf.conf unchanged.
+        // Re-validating the same text with two `pfctl -nf` runs does not
+        // change the hook and only delays the child-anchor reload.
+        if candidate == original {
+            return false
+        }
+
         let candidatePath = "/etc/.tono-pf-\(UUID().uuidString)"
         defer { unlink(candidatePath) }
         try atomicWrite(
@@ -1646,9 +1653,6 @@ final class KillSwitchManager {
                     enabled.message.isEmpty ? "PF enable failed." : enabled.message
                 )
             }
-        }
-        guard effectiveStatus() else {
-            throw HelperFailure.system("Kill Switch rules are not active.")
         }
         switch disposal {
         case .keep:

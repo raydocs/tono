@@ -3,7 +3,7 @@
 mod common;
 
 use anyhow::{Context as _, Result};
-use clash_verge_service_ipc::{
+use tono_service_protocol::{
     OwnerCredentials, OwnerSessionProof, RuntimeBundle, ServiceErrorCode, StartClashRequest,
     StopClashOptions, get_kill_switch_status as client_get_kill_switch_status,
     get_protected_dns_status as client_get_protected_dns_status,

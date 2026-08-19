@@ -4,7 +4,7 @@ use crate::{
     utils::{dirs, help},
 };
 use anyhow::Result;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use smartstring::alias::String;
@@ -88,7 +88,7 @@ pub struct IVerge {
     /// macOS PF kill switch policy
     #[cfg(target_os = "macos")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub macos_kill_switch_mode: Option<clash_verge_service_ipc::MacosKillSwitchMode>,
+    pub macos_kill_switch_mode: Option<tono_service_protocol::MacosKillSwitchMode>,
 
     /// can the app auto startup
     pub enable_auto_launch: Option<bool>,
@@ -295,9 +295,9 @@ impl IVerge {
     /// `verge-mihomo-alpha` here would reintroduce a second ~47 MB data-plane
     /// (and a silent product path that Test 5 accidentally packaged).
     #[cfg(windows)]
-    pub const VALID_CLASH_CORES: &'static [&'static str] = &["verge-mihomo"];
+    pub const VALID_CLASH_CORES: &'static [&'static str] = &["tono-core"];
     #[cfg(not(windows))]
-    pub const VALID_CLASH_CORES: &'static [&'static str] = &["verge-mihomo", "verge-mihomo-alpha"];
+    pub const VALID_CLASH_CORES: &'static [&'static str] = &["tono-core"];
 
     /// 验证并修正配置文件中的clash_core值
     pub async fn validate_and_fix_config() -> Result<()> {
@@ -311,23 +311,32 @@ impl IVerge {
 
         if let Some(ref core) = config.clash_core {
             let core_str = core.trim();
-            if core_str.is_empty() || !Self::VALID_CLASH_CORES.contains(&core_str) {
+            if core_str == "verge-mihomo" || core_str == "verge-mihomo-alpha" {
                 logging!(
                     warn,
                     Type::Config,
-                    "启动时发现无效的clash_core配置: '{}', 将自动修正为 'verge-mihomo'",
+                    "migrating leftover clash_core '{}' to tono-core",
                     core
                 );
-                config.clash_core = Some("verge-mihomo".into());
+                config.clash_core = Some("tono-core".into());
+                needs_fix = true;
+            } else if core_str.is_empty() || !Self::VALID_CLASH_CORES.contains(&core_str) {
+                logging!(
+                    warn,
+                    Type::Config,
+                    "启动时发现无效的clash_core配置: '{}', 将自动修正为 'tono-core'",
+                    core
+                );
+                config.clash_core = Some("tono-core".into());
                 needs_fix = true;
             }
         } else {
             logging!(
                 info,
                 Type::Config,
-                "启动时发现未配置clash_core, 将设置为默认值 'verge-mihomo'"
+                "启动时发现未配置clash_core, 将设置为默认值 'tono-core'"
             );
-            config.clash_core = Some("verge-mihomo".into());
+            config.clash_core = Some("tono-core".into());
             needs_fix = true;
         }
 
@@ -364,7 +373,7 @@ impl IVerge {
     }
 
     pub fn get_valid_clash_core(&self) -> String {
-        self.clash_core.clone().unwrap_or_else(|| "verge-mihomo".into())
+        self.clash_core.clone().unwrap_or_else(|| "tono-core".into())
     }
 
     pub async fn new() -> Self {
@@ -395,8 +404,8 @@ impl IVerge {
         Self {
             app_log_max_size: Some(128),
             app_log_max_count: Some(8),
-            clash_core: Some("verge-mihomo".into()),
-            language: Some(clash_verge_i18n::system_language().into()),
+            clash_core: Some("tono-core".into()),
+            language: Some(tono_i18n::system_language().into()),
             theme_mode: Some("system".into()),
             #[cfg(not(target_os = "windows"))]
             env_type: Some("bash".into()),
@@ -416,7 +425,7 @@ impl IVerge {
             sysproxy_tray_icon: Some(false),
             tun_tray_icon: Some(false),
             #[cfg(target_os = "macos")]
-            macos_kill_switch_mode: Some(clash_verge_service_ipc::MacosKillSwitchMode::Disabled),
+            macos_kill_switch_mode: Some(tono_service_protocol::MacosKillSwitchMode::Disabled),
             enable_auto_launch: Some(false),
             enable_silent_start: Some(false),
             enable_hover_jump_navigator: Some(true),

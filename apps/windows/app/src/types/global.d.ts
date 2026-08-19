@@ -168,7 +168,7 @@ interface ILogItem {
   payload: string
 }
 
-type LogLevel = import('tauri-plugin-mihomo-api').LogLevel
+type LogLevel = import('tono-plugin-core-api').LogLevel
 type LogFilter = 'all' | 'debug' | 'info' | 'warn' | 'err'
 type LogOrder = 'asc' | 'desc'
 

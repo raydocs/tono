@@ -4,7 +4,7 @@ import Security
 import CryptoKit
 import Darwin
 
-nonisolated private final class CancellableProcessBox: @unchecked Sendable {
+nonisolated final class CancellableProcessBox: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
     private var cancelled = false
@@ -642,6 +642,9 @@ final class AppState {
     /// flap, or the credential dialog would re-appear uninvited.
     private var protectedReconnectPauseLiftsOnNetworkChange = false
     private var lastProtectedFailureSignature: String?
+    /// Last TUN origin that proved the data plane. Health checks start this
+    /// one first so a live session is not hit by three cold TLS races.
+    private var lastSuccessfulProbeOrigin: String?
     private var consecutiveProtectedFailureCount = 0
     private var connectAttemptID: UUID?
     private var connectWatchdogTask: Task<Void, Never>?
@@ -665,6 +668,9 @@ final class AppState {
         }
     }
     var isProxyDegraded: Bool = false
+    var isRecoveringProtectedConnection: Bool = false
+    private(set) var lastClassifiedFailure: ProtectedFailure?
+    private var healthCounters = ProtectedHealthCounters()
     var tonoTransport: TonoTransportDescriptor? = nil
     private(set) var cloudOnlyTransportReady = false
     var isTonoReady: Bool {
@@ -764,11 +770,11 @@ final class AppState {
     var config: ClashConfig = ClashConfig()
 
     // Core components
-    let clashManager = ClashManager()
+    let coreRuntime = CoreRuntimeManager()
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
-    private var clashAPI: ClashAPI?
+    private var coreController: CoreControllerClient?
     private var webSocket: ClashWebSocket?
     private var connectTask: Task<Void, Never>?
     private var configReloadTask: Task<Void, Never>?
@@ -893,6 +899,46 @@ final class AppState {
     /// the helper's bootstrap-only PF state before macOS powers networking
     /// down. The root helper independently installs an emergency all-block on
     /// the power event, so a delayed GUI callback cannot create an egress gap.
+    /// Quiesce connect/health/switch work before a Sparkle install. PF stays
+    /// armed until cleanup proves DNS + core stop, or the journal records a
+    /// fail-closed handoff.
+    func prepareForSoftwareUpdate(nextVersion: String) async -> UpdateHandoffJournal {
+        protectionOperationGeneration &+= 1
+        coreMonitorTask?.cancel()
+        nodeSwitchTask?.cancel()
+        protectedReconnectTask?.cancel()
+        connectTask?.cancel()
+        isProtectedReconnectScheduled = false
+        let journal = UpdateHandoffJournal(
+            phase: .updatePrepared,
+            previousAppVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String ?? "unknown",
+            nextAppVersion: nextVersion,
+            coreVersion: "v1.19.29-tono-gvisor-adaptive.1",
+            coreSHA256: "",
+            buildCommit: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            helperProtocolVersion: HelperProtocolVersion.current,
+            wasConnected: isConnected || isConnecting || isProtectionBlocked,
+            keepKillSwitchArmed: isConnected || isConnecting || isProtectionBlocked || KillSwitchService.isArmed,
+            selectedNodeAnonymousId: selectedExitNode()?.id,
+            catalogRevision: nil,
+            connectionGeneration: protectionOperationGeneration
+        )
+        try? UpdateHandoffStore.write(journal.advancing(to: .connectionQuiescing))
+        if isConnected || isConnecting {
+            await disconnectAndWait(releaseKillSwitch: false)
+        }
+        var next = journal.advancing(to: .cleanShutdownCompleted)
+        try? UpdateHandoffStore.write(next)
+        return next
+    }
+
+    func markProtectedUpdateHandoff(_ journal: UpdateHandoffJournal) {
+        let next = journal.advancing(to: .protectedHandoffRecorded)
+        try? UpdateHandoffStore.write(next)
+    }
+
     func prepareForSystemSleep() {
         let shouldResume = isConnected || isConnecting || isProtectionBlocked
             || KillSwitchService.isArmed
@@ -916,7 +962,7 @@ final class AppState {
         isProtectedReconnectScheduled = false
         protectedReconnectAttempt = 0
         protectedReconnectNextAttemptAt = nil
-        if isConnected || isConnecting || clashManager.isRunning {
+        if isConnected || isConnecting || coreRuntime.isRunning {
             disconnect(releaseKillSwitch: false)
         } else if KillSwitchService.isArmed || isProtectionBlocked {
             sleepRestrictTask?.cancel()
@@ -945,7 +991,7 @@ final class AppState {
         wakeRecoveryTask?.cancel()
         wakeRecoveryTask = Task { [weak self] in
             guard let self else { return }
-            if self.isConnected || self.isConnecting || self.clashManager.isRunning {
+            if self.isConnected || self.isConnecting || self.coreRuntime.isRunning {
                 self.disconnect(releaseKillSwitch: false)
             }
             _ = await self.sleepRestrictTask?.value
@@ -1020,7 +1066,7 @@ final class AppState {
             autoConnectRequested = false
             if isDisconnecting {
                 await finishPendingDisconnect()
-            } else if isConnected || isConnecting || clashManager.isRunning {
+            } else if isConnected || isConnecting || coreRuntime.isRunning {
                 await disconnectAndWait(releaseKillSwitch: false)
             }
             return
@@ -1083,7 +1129,7 @@ final class AppState {
     }
 
     var isCoreAvailable: Bool {
-        clashManager.findBinary() != nil
+        coreRuntime.findBinary() != nil
     }
 
     var customNodes: [ProxyNode] {
@@ -1319,13 +1365,12 @@ final class AppState {
         // reconnect loop re-pauses if the same user-action failure repeats.
         protectedReconnectPausedForUserAction = false
 
-        // Sync settings from UserDefaults to config. The Settings field can
-        // persist partial input (focus loss skips its onSubmit validation), so
-        // the same 1024...65535 contract is enforced here: anything else —
-        // including a privileged port like "78" — falls back to the default.
-        let portString = AppProfile.defaults.string(forKey: SettingsKey.mixedPort) ?? "7890"
-        let port = Int(portString).flatMap { (1024...65535).contains($0) ? $0 : nil } ?? 7890
+        // Session-dynamic mixed/controller ports avoid collisions with leftover
+        // 7890/9090 listeners from other proxies or a previous core.
+        let sessionPorts = SessionRuntimePorts.allocatePair()
+        let port = sessionPorts.mixed
         config.mixedPort = port
+        config.externalController = "127.0.0.1:\(sessionPorts.controller)"
         // Tono always requires TUN; LAN exposure is never allowed.
         config.tunEnabled = true
         config.allowLan = false
@@ -1343,14 +1388,23 @@ final class AppState {
                     : managedCatalogRouting?.homeProxy != nil
                         ? "homeProxy"
                         : "absent",
+                "mixed_port": String(port),
+                "controller_port": String(sessionPorts.controller),
             ]
+        )
+        ConnectionTelemetryBuffer.shared.record(
+            "connectBegin",
+            stage: ConnectionStage.preparing.rawValue,
+            node: selectedExit?.id,
+            generation: Int(protectionOperationGeneration)
         )
 
         let overlay = ConfigPipeline.OverlayConfig(
             mixedPort: port,
+            externalController: config.externalController,
             secret: config.secret,
             mode: "rule",
-            logLevel: "info",
+            logLevel: "warning",
             allowLan: false,
             tunEnabled: true,
             selectedNodeName: selectedExitName,
@@ -1364,7 +1418,7 @@ final class AppState {
 
         // Health-check: poll /version until mihomo is ready
         let apiPort = config.externalController.split(separator: ":").last.flatMap { Int($0) } ?? 9090
-        let api = ClashAPI(port: apiPort, secret: config.secret)
+        let api = CoreControllerClient(port: apiPort, secret: config.secret)
         let runtimeNodes = importedExitNodes
         let usesHomeBootstrap = AppProfile.homeExitEnabled && tonoTransport != nil
         let trafficPolicy = managedTrafficPolicy
@@ -1408,7 +1462,7 @@ final class AppState {
                 self.disconnect(releaseKillSwitch: true)
             }
         }
-        connectTask = Task { [weak self, clashManager] in
+        connectTask = Task { [weak self, coreRuntime] in
             guard let self else { return }
             do {
                 guard let networkService =
@@ -1456,6 +1510,14 @@ final class AppState {
                 }
                 let proxyEndpoints = try ConfigPipeline.dialEndpoints(for: selectedExit)
                     + self.claudeHomeDialEndpoints(excluding: selectedExit)
+                // YAML generation only touches the app-support directory. Overlap
+                // it with helper install and the first PF arm — those go through
+                // the privileged actor and cannot run beside each other.
+                async let runtimeDigest = coreRuntime.writeRuntimeConfig(
+                    overlay: overlay,
+                    customNodes: runtimeNodes,
+                    directPolicy: committedDirectPolicy
+                )
                 // Always arm before TUN comes up so a crash mid-connect cannot
                 // leak the real IP. The actor keeps this blocking PF/helper work
                 // off SwiftUI and ordered with a possible cancel/disconnect.
@@ -1497,27 +1559,29 @@ final class AppState {
                         committedDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
+                let digest = try await runtimeDigest
                 self.connectionStage = .startingTunnel
-                try await clashManager.start(
+                // /core/start only waits ~150 ms after spawn. Controller bind,
+                // utun, and the loopback DNS listener appear after that IPC
+                // returns — poll them as soon as the process exists.
+                async let started: Void = coreRuntime.start(
                     overlay: overlay,
                     customNodes: runtimeNodes,
                     directPolicy: committedDirectPolicy,
-                    helperPrepared: true
+                    helperPrepared: true,
+                    precomputedDigest: digest
                 )
+                try await api.waitUntilReady()
+                // Controller answering means the process exists. Start the
+                // utun poll and loopback DNS now — not before spawn, or the
+                // 2 s interface budget can expire while /core/start is still
+                // snapshotting.
+                async let tunReady = Self.waitForOwnedTunnelInterface()
+                async let localDNSReady = self.testLocalProtectedDNS()
+                try await started
                 RuntimeCleanup.markCoreStarted(tunEnabled: self.config.tunEnabled)
                 try Task.checkCancellation()
-                try await api.waitUntilReady()
-                try Task.checkCancellation()
-                var ownedInterfaceReady = false
-                for _ in 0..<20 {
-                    if KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface) {
-                        ownedInterfaceReady = true
-                        break
-                    }
-                    try await Task.sleep(for: .milliseconds(100))
-                }
-                try Task.checkCancellation()
-                guard ownedInterfaceReady else {
+                guard await tunReady else {
                     throw KillSwitchService.Error.commandFailed(
                         "Mihomo did not create the owned \(ConfigPipeline.tonoTunInterface) interface."
                     )
@@ -1541,138 +1605,18 @@ final class AppState {
                         committedDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
-                self.connectionStage = .applyingCloudPolicy
-                if !trafficPolicy.domains.isEmpty
-                    || !trafficPolicy.webDomains.isEmpty,
-                   committedDirectPolicy != nil {
-                    let resolvedPolicy = await self.resolveManagedDirectDomains(
-                        policy: trafficPolicy,
-                        base: committedDirectPolicy,
-                        api: api
-                    )
-                    try Task.checkCancellation()
-                    // Surface partial or total resolution failure instead of
-                    // letting the stage report success with zero direct pins.
-                    //
-                    // Counts only what is actually attempted. The reviewed
-                    // bundle's own hosts are no longer resolved — its rule
-                    // matches by process path — so including them reported
-                    // "expected 38, resolved 26" for a run that tried 27 and got
-                    // 26. An instrument that overstates the denominator invents a
-                    // failure, and during this session that one sent the
-                    // investigation looking for eleven missing answers.
-                    let expectedDomains = trafficPolicy.webDomains.count
-                    let resolvedDomains = (resolvedPolicy?.domainPins.count ?? 0)
-                        + (resolvedPolicy?.webDomainPins.count ?? 0)
-                    if resolvedDomains < expectedDomains {
-                        LocalTrafficAudit.shared.recordEvent(
-                            "managed_direct_domains_unresolved",
-                            details: [
-                                "expected": String(expectedDomains),
-                                "resolved": String(resolvedDomains),
-                            ]
-                        )
-                    }
-                    if resolvedPolicy != committedDirectPolicy,
-                       let resolvedPolicy {
-                        // Permit only the exact resolved tuples before the
-                        // runtime can select its interface-bound DIRECT path.
-                        try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
-                            apiHosts: [],
-                            tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                            proxyEndpoints: proxyEndpoints,
-                            sessionDirectEndpoints: resolvedPolicy.sessionEndpoints,
-                            tailscaleBootstrapEnabled: usesHomeBootstrap,
-                            helperPrepared: true,
-                            reviewedBundleDirect:
-                                resolvedPolicy.requiresAddressFreeDirectPermit
-                        )
-                        try Task.checkCancellation()
-                        try await clashManager.rewriteConfig(
-                            overlay: overlay,
-                            customNodes: runtimeNodes,
-                            directPolicy: resolvedPolicy
-                        )
-                        let runtimeConfigPath = try await
-                            PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
-                                configDirectory: clashManager.configDirectory.path,
-                                configSHA256: try self.requireRuntimeConfigDigest()
-                            )
-                        try Task.checkCancellation()
-                        try await api.reloadConfig(path: runtimeConfigPath)
-                        try Task.checkCancellation()
-                        committedDirectPolicy = resolvedPolicy
-                        LocalTrafficAudit.shared.recordEvent(
-                            "managed_direct_policy_activated",
-                            details: [
-                                // Always 0 on macOS, and that is correct rather
-                                // than broken: the bundle-wide process rule
-                                // matches first, so emitting the per-host pins
-                                // would add fallback groups and PF entries for
-                                // rules Mihomo never reaches. Windows *does* use
-                                // the same field — it turns those hosts into
-                                // `hosts:` SNI recovery and per-host rules — so
-                                // the entries are not dead weight in the policy,
-                                // only unused here. Reporting received alongside
-                                // emitted stops the pair reading as a fault, as
-                                // it did to the last person who went looking.
-                                "domains_emitted": String(resolvedPolicy.domainPins.count),
-                                "domains_received": String(trafficPolicy.domains.count),
-                                "web_domains": String(
-                                    resolvedPolicy.webDomainPins.count
-                                ),
-                                "endpoints": String(
-                                    resolvedPolicy.sessionEndpoints.count
-                                ),
-                            ]
-                        )
-                    }
-                }
-                // The selected-exit handshake and protected DNS preflight are
-                // independent once PF and utun199 are live. Running them in
-                // parallel removes a cold-handshake round trip from first-run
-                // startup without allowing either check to be skipped.
-                let exitHealthTask = Task { [api, selectedExit] in
-                    guard let selectedExit else { return true }
-                    let healthStartedAt = Date()
-                    let health = await api.testProxyDelayWithRetry(
-                        // Probe the selector itself rather than a proxy by
-                        // name, proving the active data path matches the
-                        // runtime's committed selection.
-                        name: ConfigPipeline.exitGroupName,
-                        url: "https://www.gstatic.com/generate_204",
-                        timeout: 5_000
-                    )
-                    let succeeded = health.delay.map { $0 > 0 } == true
-                    var details = [
-                        "selected_exit": selectedExit.name,
-                        "target": ConfigPipeline.exitGroupName,
-                        "succeeded": String(succeeded),
-                        "duration_ms": String(
-                            max(0, Int(Date().timeIntervalSince(healthStartedAt) * 1_000))
-                        ),
-                    ]
-                    if let delay = health.delay {
-                        details["delay_ms"] = String(delay)
-                    }
-                    if let message = health.message, !message.isEmpty {
-                        details["message"] = String(message.prefix(200))
-                    }
-                    LocalTrafficAudit.shared.recordEvent(
-                        "exit_health_check_finished",
-                        details: details
-                    )
-                    return succeeded
-                }
-                defer { exitHealthTask.cancel() }
+                // Optional WeChat/Web DIRECT resolution is no longer on the
+                // Connected critical path. Start with the last suffix/process
+                // policy (or full tunnel) and apply resolved pins only after
+                // the real TUN data plane has been proven.
                 // Prove the root-owned loopback DNS listener can resolve through
                 // the selected protected exit before changing any system DNS
                 // setting. This makes the transition transactional: a port
                 // conflict, broken DoH route, or node failure still leaves the
                 // user's original Internet untouched.
                 self.connectionStage = .securingDNS
-                guard await self.testLocalProtectedDNS() else {
-                    throw ClashAPIError.requestFailed(
+                guard await localDNSReady else {
+                    throw CoreControllerError.requestFailed(
                         "Mihomo's protected local DNS listener did not pass its preflight check."
                     )
                 }
@@ -1695,7 +1639,7 @@ final class AppState {
                 // receive Mihomo's fake IP through macOS's active resolver
                 // before the UI can ever report Connected.
                 guard await self.testSystemProtectedDNS() else {
-                    throw ClashAPIError.requestFailed(
+                    throw CoreControllerError.requestFailed(
                         "The macOS protected DNS path did not pass its end-to-end check."
                     )
                 }
@@ -1704,70 +1648,59 @@ final class AppState {
                     details: self.auditProtectionDetails()
                 )
                 try Task.checkCancellation()
-                // This is the same signed-in-user curl check that previously
-                // ran only after the controller's exit probe. Both checks are
-                // independent once PF, TUN, and protected system DNS are live,
-                // so overlap their network waits without skipping either
-                // safety gate. Weak networks can otherwise add two full
-                // sequential timeouts to every reconnect.
-                let dataPlaneTask = Task { [weak self] in
-                    guard let self else { return false }
-                    return await self.testSystemTUNDataPlaneWithRetry()
-                }
-                defer { dataPlaneTask.cancel() }
+                // Controller /delay is advisory. Two in-place TUN rounds keep
+                // the core and PF live; only an exhausted real data plane can
+                // refuse Connected.
                 self.connectionStage = .checkingExit
-                let exitReady = await withTaskCancellationHandler {
-                    await exitHealthTask.value
-                } onCancel: {
-                    exitHealthTask.cancel()
-                    dataPlaneTask.cancel()
-                }
-                try Task.checkCancellation()
-                guard exitReady else {
-                    throw ClashAPIError.requestFailed(
-                        "The selected Reality server did not pass its protected health check."
+                let controllerTask = Task {
+                    await self.advisoryControllerExitProbe(
+                        api: api,
+                        selectedExit: selectedExit
                     )
                 }
-                try Task.checkCancellation()
-                // A controller delay probe only proves that Mihomo can dial the
-                // selected exit. It does not prove that ordinary applications
-                // can enter the TUN. Build 13 could therefore report Connected
-                // while every browser request stalled on utun199. Exercise the
-                // same no-proxy system route an application uses before
-                // committing the connected UI state.
                 self.connectionStage = .verifyingTraffic
-                let dataPlaneReady = await withTaskCancellationHandler {
-                    await dataPlaneTask.value
-                } onCancel: {
-                    exitHealthTask.cancel()
-                    dataPlaneTask.cancel()
-                }
+                let verdict = await self.verifyProtectedConnection(
+                    controllerTask: controllerTask,
+                    mixedPort: self.config.mixedPort,
+                    generation: self.protectionOperationGeneration,
+                    rounds: ProtectedConnectivity.postLockVerifyRounds
+                )
                 try Task.checkCancellation()
-                guard dataPlaneReady else {
-                    throw ClashAPIError.requestFailed(
-                        "The protected system data path did not pass its end-to-end check."
-                    )
+                switch verdict {
+                case .connected(let advisory):
+                    if let advisory {
+                        LocalTrafficAudit.shared.recordEvent(
+                            "controller_exit_advisory",
+                            details: ["warning": String(advisory.prefix(200))]
+                        )
+                        ConnectionTelemetryBuffer.shared.record(
+                            "controllerExitAdvisory",
+                            stage: ConnectionStage.checkingExit.rawValue,
+                            error: advisory,
+                            node: selectedExit?.id,
+                            generation: Int(self.protectionOperationGeneration)
+                        )
+                    }
+                case .failed(let failure):
+                    self.lastClassifiedFailure = failure
+                    throw CoreControllerError.requestFailed(failure.userMessage)
                 }
                 LocalTrafficAudit.shared.recordEvent(
                     "system_data_plane_verified",
                     details: self.auditProtectionDetails()
                 )
                 self.activeDirectPolicy = committedDirectPolicy
-                // Learn the control plane's current addresses while a safe
-                // resolver exists. Nothing uses them now — the arm above cleared
-                // `apiHosts`, so API traffic goes through the exit like
-                // everything else — they are for the next fail-closed window
-                // where no tunnel exists and system DNS is blocked. Without this
-                // that window can only offer addresses compiled into the build,
-                // and an address rotation between two releases leaves a machine
-                // that has to be rescued by finding the restore button.
-                await self.refreshControlPlanePinCache(api: api)
                 // /core/start already snapshots the exact digested config into
                 // the root-owned runtime directory before launching Mihomo.
                 // Reloading that identical file here added another helper/API
                 // round trip and could interrupt a healthy first connection.
                 let committed = await self.onCoreStarted(api: api)
                 guard committed else { return }
+                // Pins are for the *next* fail-closed window, not this
+                // Connected commit. Resolving them here used to hold the UI
+                // on Connecting after the real TUN path was already proven.
+                let pinAPI = api
+                Task { await self.refreshControlPlanePinCache(api: pinAPI) }
                 if let started = self.connectionStageStartedAt {
                     let elapsedMs = max(
                         0,
@@ -1936,7 +1869,7 @@ final class AppState {
                 || HelperManager.hasInstalledHelperArtifact
         let shouldStopCore = isConnected
             || isConnecting
-            || clashManager.isRunning
+            || coreRuntime.isRunning
             || AppProfile.defaults.bool(forKey: SettingsKey.didStartCore)
         if releaseKillSwitch {
             // A released host starts a genuinely new story; stale failure
@@ -2007,7 +1940,7 @@ final class AppState {
         // Stop WebSocket streams
         webSocket?.stopAll()
         webSocket = nil
-        clashAPI = nil
+        coreController = nil
         proxyService.setAPI(nil)
 
         // Stop UI-side streams/timers immediately; blocking system operations
@@ -2033,7 +1966,7 @@ final class AppState {
         disconnectRequestID += 1
         let requestID = disconnectRequestID
         let previousDisconnect = disconnectSequence
-        disconnectSequence = Task { [weak self, clashManager] in
+        disconnectSequence = Task { [weak self, coreRuntime] in
             _ = await previousDisconnect?.value
             _ = await pendingConnect?.value
             _ = await pendingNodeSwitch?.value
@@ -2067,7 +2000,7 @@ final class AppState {
                 self?.disconnectionStage = .stoppingTunnel
             }
             let stopped = helperReadyForRelease
-                ? (shouldStopCore ? await clashManager.stopAsync() : true)
+                ? (shouldStopCore ? await coreRuntime.stopAsync() : true)
                 : false
             let coreStillRunning: Bool
             if helperReadyForRelease && shouldStopCore {
@@ -2175,9 +2108,9 @@ final class AppState {
         _ = await pending?.value
     }
 
-    private func onCoreStarted(api: ClashAPI) async -> Bool {
+    private func onCoreStarted(api: CoreControllerClient) async -> Bool {
         guard isConnecting, !Task.isCancelled else { return false }
-        clashAPI = api
+        coreController = api
         proxyService.setAPI(api)
 
         // Auto-enable system proxy (skip for TUN mode — TUN handles routing itself)
@@ -2201,7 +2134,27 @@ final class AppState {
         guard isConnecting, !Task.isCancelled else { return false }
         isConnected = true
         isProtectionBlocked = false
+        isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
+        healthCounters = ProtectedHealthCounters()
+        ConnectionTelemetryBuffer.shared.record(
+            "connectOk",
+            stage: ConnectionStage.verifyingTraffic.rawValue,
+            node: selectedExitNode()?.id,
+            generation: Int(protectionOperationGeneration)
+        )
+        if var journal = UpdateHandoffStore.load(),
+           journal.phase != .committed {
+            journal = journal.advancing(to: .verified)
+            try? UpdateHandoffStore.write(journal.advancing(to: .committed))
+            UpdateHandoffStore.clear()
+            ConnectionTelemetryBuffer.shared.record(
+                "updateResumeOk",
+                generation: Int(protectionOperationGeneration),
+                updateResume: true
+            )
+        }
+        scheduleBackgroundOptionalPolicy()
         startCoreMonitor()
         if managedCatalogReloadPending {
             managedCatalogReloadPending = false
@@ -2301,12 +2254,12 @@ final class AppState {
                     self.restoreProxySelection(persistFallback: true)
                 }
             }
-            // PF permits only the selected endpoint, so never fan out latency
-            // probes to every imported node.
+            try? await Task.sleep(for: .milliseconds(1_500))
+            guard !Task.isCancelled, self.isConnected else { return }
             if let selected = self.proxyService.activeNodeName {
                 _ = await self.proxyService.testLatency(name: selected)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, self.isConnected else { return }
             await self.fetchNetworkInfo()
         }
         Task { await fetchActiveRules() }
@@ -2528,24 +2481,28 @@ final class AppState {
                 guard healthCycle.isMultiple(of: 3),
                       self.switchingNodeId == nil,
                       self.configReloadTask == nil,
-                      let api = self.clashAPI
+                      let api = self.coreController
                 else { continue }
 
-                let health = await api.testProxyDelayWithRetry(
-                    name: ConfigPipeline.exitGroupName,
-                    url: "https://www.gstatic.com/generate_204",
-                    timeout: 4_000,
-                    attempts: 2,
-                    retryIntervalMs: 300
-                )
-                let dataPlaneReady = if let delay = health.delay, delay > 0 {
-                    await self.testSystemTUNDataPlaneWithRetry(
-                        timeout: 6,
-                        attempts: 2,
-                        retryIntervalMs: 300
+                let controllerTask = Task {
+                    await self.advisoryControllerExitProbe(
+                        api: api,
+                        selectedExit: self.selectedExitNode()
                     )
+                }
+                let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                    timeoutSeconds: 6,
+                    preferredLabel: self.lastSuccessfulProbeOrigin
+                )
+                if case .won(let label) = tun {
+                    self.lastSuccessfulProbeOrigin = label
+                }
+                let controller: ProbeCheck
+                if case .won = tun {
+                    controllerTask.cancel()
+                    controller = .ok
                 } else {
-                    false
+                    controller = await controllerTask.value
                 }
                 guard !Task.isCancelled, self.isConnected else { return }
                 guard self.switchingNodeId == nil,
@@ -2553,40 +2510,93 @@ final class AppState {
                     consecutiveHealthFailures = 0
                     continue
                 }
-                if let delay = health.delay, delay > 0, dataPlaneReady {
+                let decision = ProtectedConnectivity.classifyPostLock(
+                    controller: controller,
+                    tun: tun.tunCheck,
+                    stage: "health",
+                    attempt: healthCycle,
+                    generation: self.protectionOperationGeneration
+                )
+                switch decision {
+                case .connected(let advisory):
                     consecutiveHealthFailures = 0
-                    self.isProxyDegraded = false
+                    self.healthCounters.recordSuccess(
+                        controller: advisory == nil,
+                        dns: true,
+                        tun: true,
+                        core: true
+                    )
+                    if let advisory {
+                        self.healthCounters.recordFailure(
+                            controller: true, dns: false, tun: false, core: false
+                        )
+                        ConnectionTelemetryBuffer.shared.record(
+                            "controllerExitAdvisory",
+                            reason: "PROBE_ORIGIN_DEGRADED",
+                            error: advisory,
+                            generation: Int(self.protectionOperationGeneration)
+                        )
+                    }
+                    self.isProxyDegraded = advisory != nil
+                    self.isRecoveringProtectedConnection = false
                     continue
+                case .retry(let failure):
+                    self.lastClassifiedFailure = failure
+                    let controllerFailed: Bool
+                    if case .failed = controller {
+                        controllerFailed = true
+                    } else {
+                        controllerFailed = false
+                    }
+                    self.healthCounters.recordFailure(
+                        controller: controllerFailed,
+                        dns: failure.code == .protectedDnsNotReady,
+                        tun: true,
+                        core: failure.code == .coreExitUnreachable
+                    )
+                    consecutiveHealthFailures += 1
+                    self.isProxyDegraded = true
+                    ConnectionTelemetryBuffer.shared.record(
+                        "probeResult",
+                        reason: failure.code.rawValue,
+                        error: failure.detail,
+                        counter: consecutiveHealthFailures,
+                        generation: Int(self.protectionOperationGeneration)
+                    )
+                    guard self.healthCounters.shouldEnterRecovering
+                        || consecutiveHealthFailures >= 2 else {
+                        continue
+                    }
+                    self.isRecoveringProtectedConnection = true
+                    ConnectionTelemetryBuffer.shared.record(
+                        "recoveryBegin",
+                        reason: failure.code.rawValue,
+                        generation: Int(self.protectionOperationGeneration)
+                    )
+                    // Recover in place first. Restart the core only when the
+                    // node/core path itself is proven unreachable.
+                    if failure.code == .coreExitUnreachable,
+                       await self.attemptAutomaticCloudFailover() {
+                        consecutiveHealthFailures = 0
+                        self.healthCounters = ProtectedHealthCounters()
+                        self.isProxyDegraded = false
+                        self.isRecoveringProtectedConnection = false
+                        continue
+                    }
+                    if failure.code == .networkEnvironmentOffline {
+                        self.errorMessage = failure.userMessage
+                        continue
+                    }
+                    if failure.code != .coreExitUnreachable {
+                        self.errorMessage = String(localized: "正在恢复受保护连接")
+                        continue
+                    }
+                    guard self.isConnected, !self.isDisconnecting else { return }
+                    self.disconnect(releaseKillSwitch: false)
+                    self.errorMessage = failure.userMessage
+                    self.scheduleProtectedReconnect()
+                    return
                 }
-
-                consecutiveHealthFailures += 1
-                self.isProxyDegraded = true
-                guard consecutiveHealthFailures >= 2 else { continue }
-
-                // A failed managed cloud exit should not force Claude to wait
-                // through the full reconnect backoff while the same node is
-                // retried. This also applies when Home-US is enabled: the
-                // Home/Claude route stays on Tono-Home-Residential, while its
-                // dialer-proxy and the ordinary Tono-Exit traffic both depend
-                // on the selected managed cloud exit. Try one other validated
-                // catalog node while TUN and PF remain live. The node-switch
-                // transaction moves the exact root-only endpoint permit first,
-                // verifies both Mihomo and ordinary user traffic, and only
-                // then commits the new selection. If it cannot complete, the
-                // existing fail-closed reconnect path below remains the only
-                // recovery route.
-                if await self.attemptAutomaticCloudFailover() {
-                    consecutiveHealthFailures = 0
-                    self.isProxyDegraded = false
-                    continue
-                }
-                guard self.isConnected, !self.isDisconnecting else { return }
-                self.disconnect(releaseKillSwitch: false)
-                self.errorMessage = self.importedExitNodes.count > 1
-                    ? String(localized: "Protected system traffic stopped responding; Kill Switch is blocking traffic while Tono reconnects.")
-                    : String(localized: "Protected system traffic stopped responding and no alternate server is available; Kill Switch is blocking traffic while Tono reconnects.")
-                self.scheduleProtectedReconnect()
-                return
             }
         }
     }
@@ -2944,7 +2954,7 @@ final class AppState {
         networkInfoTask?.cancel()
         networkInfo = NetworkInfo()
         switchingNodeId = desiredNode?.id ?? nodeName
-        let api = clashAPI
+        let api = coreController
         let switchStartedAt = Date()
         LocalTrafficAudit.shared.recordEvent(
             "node_switch_requested",
@@ -2977,53 +2987,82 @@ final class AppState {
                         activeDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
+                let previousName = self.proxyService.activeNodeName
+                ConnectionTelemetryBuffer.shared.record(
+                    "switchBegin",
+                    node: desiredNode?.id,
+                    generation: Int(self.protectionOperationGeneration)
+                )
                 try await api.selectProxy(
                     group: ConfigPipeline.exitGroupName,
                     proxy: nodeName
                 )
                 try Task.checkCancellation()
-                try await api.closeAllConnections()
+                // Prove the new exit before tearing every live TCP. Closing
+                // first dumped the whole session onto a still-unverified node
+                // and made Claude/browser drop even when the switch later
+                // rolled back.
+                let switchVerdict = await self.verifyProtectedConnection(
+                    controllerTask: Task {
+                        await self.advisoryControllerExitProbe(
+                            api: api,
+                            selectedExit: desiredNode
+                        )
+                    },
+                    mixedPort: self.config.mixedPort,
+                    generation: self.protectionOperationGeneration,
+                    rounds: 1
+                )
                 try Task.checkCancellation()
-                // Prove both the selector handshake and ordinary signed-in-user
-                // traffic before committing the new route. Run the independent
-                // probes together so the stronger check does not add a healthy
-                // path round trip; retrying the data plane only affects a weak
-                // or briefly cold Reality path.
-                let dataPlaneTask = Task { [weak self] in
-                    guard let self else { return false }
-                    return await self.testSystemTUNDataPlaneWithRetry()
-                }
-                defer { dataPlaneTask.cancel() }
-                let health = await withTaskCancellationHandler {
-                    await api.testProxyDelayWithRetry(
-                        name: ConfigPipeline.exitGroupName,
-                        url: "https://www.gstatic.com/generate_204",
-                        timeout: 5_000
+                if case .failed = switchVerdict, let previousName {
+                    try await api.selectProxy(
+                        group: ConfigPipeline.exitGroupName,
+                        proxy: previousName
                     )
-                } onCancel: {
-                    dataPlaneTask.cancel()
-                }
-                try Task.checkCancellation()
-                guard let delay = health.delay, delay > 0 else {
-                    throw ClashAPIError.requestFailed("Selected node health check failed")
-                }
-                let dataPlaneReady = await withTaskCancellationHandler {
-                    await dataPlaneTask.value
-                } onCancel: {
-                    dataPlaneTask.cancel()
-                }
-                try Task.checkCancellation()
-                guard dataPlaneReady else {
-                    throw ClashAPIError.requestFailed(
-                        "Selected node system data path failed"
+                    let rollback = await self.verifyProtectedConnection(
+                        controllerTask: Task {
+                            await self.advisoryControllerExitProbe(
+                                api: api,
+                                selectedExit: self.selectedExitNode()
+                            )
+                        },
+                        mixedPort: self.config.mixedPort,
+                        generation: self.protectionOperationGeneration,
+                        rounds: 1
+                    )
+                    ConnectionTelemetryBuffer.shared.record(
+                        "switchRollback",
+                        node: desiredNode?.id,
+                        generation: Int(self.protectionOperationGeneration)
+                    )
+                    if case .failed(let failure) = rollback {
+                        self.lastClassifiedFailure = failure
+                        self.isRecoveringProtectedConnection = true
+                        throw CoreControllerError.requestFailed(failure.userMessage)
+                    }
+                    throw CoreControllerError.requestFailed(
+                        String(localized: "新节点验证失败，已切回原节点。")
                     )
                 }
+                if case .failed(let failure) = switchVerdict {
+                    self.lastClassifiedFailure = failure
+                    throw CoreControllerError.requestFailed(failure.userMessage)
+                }
+                // New exit is proven. Drop leftover sockets still bound to
+                // the previous node so long-lived clients migrate once.
+                try? await api.closeAllConnections()
                 await proxyService.refresh()
                 selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
                 activeNode = desiredNode
                 proxyService.activeGroupName = ConfigPipeline.exitGroupName
                 proxyService.activeNodeName = nodeName
                 persistProxySelection(nodeName)
+                ConnectionTelemetryBuffer.shared.record(
+                    "switchOk",
+                    elapsedMs: max(0, Int(Date().timeIntervalSince(switchStartedAt) * 1_000)),
+                    node: desiredNode?.id,
+                    generation: Int(self.protectionOperationGeneration)
+                )
                 LocalTrafficAudit.shared.recordEvent(
                     "node_switch_succeeded",
                     details: [
@@ -3054,16 +3093,14 @@ final class AppState {
                         "error": error.localizedDescription,
                     ]
                 )
-                // The new endpoint remains the only PF exception, and stopping
-                // Mihomo removes the TUN exception. Never fall back to the old
-                // node or direct networking without a verified transition.
-                // Reconnect the previously committed selection; if that
-                // transaction also fails, connect() remains Protected Offline.
-                disconnect(releaseKillSwitch: false)
-                errorMessage =
-                    "Node switch failed; Tono is restoring the previous protected route. "
-                    + error.localizedDescription
-                scheduleProtectedReconnect()
+                if isRecoveringProtectedConnection {
+                    disconnect(releaseKillSwitch: false)
+                    errorMessage = lastClassifiedFailure?.userMessage
+                        ?? error.localizedDescription
+                    scheduleProtectedReconnect()
+                } else {
+                    errorMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -3110,7 +3147,7 @@ final class AppState {
             return
         }
         proxyMode = mode
-        if isConnected, let api = clashAPI {
+        if isConnected, let api = coreController {
             Task {
                 try? await api.updateMode(mode.rawValue.lowercased())
                 await MainActor.run { self.networkInfo = NetworkInfo() }
@@ -3231,10 +3268,9 @@ final class AppState {
             }
             return
         }
-        let portString = AppProfile.defaults.string(forKey: SettingsKey.mixedPort) ?? "7890"
-        let port = Int(portString).flatMap { (1024...65535).contains($0) ? $0 : nil } ?? 7890
         let overlay = ConfigPipeline.OverlayConfig(
-            mixedPort: port,
+            mixedPort: config.mixedPort,
+            externalController: config.externalController,
             secret: config.secret,
             mode: config.mode,
             logLevel: config.logLevel,
@@ -3250,7 +3286,7 @@ final class AppState {
         let selectedExitName = selectedExit?.name
         let runtimeNodes = importedExitNodes
         let transport = tonoTransport
-        let api = clashAPI
+        let api = coreController
         let ownedRuntime = isOwnedTonoMode
         configReloadRequestID += 1
         let requestID = configReloadRequestID
@@ -3289,7 +3325,7 @@ final class AppState {
                         effectiveDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
-                try await clashManager.rewriteConfig(
+                try await coreRuntime.rewriteConfig(
                     overlay: overlay,
                     customNodes: runtimeNodes,
                     directPolicy: effectiveDirectPolicy
@@ -3300,7 +3336,7 @@ final class AppState {
                     return
                 }
                 let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared.syncCoreConfig(
-                    configDirectory: clashManager.configDirectory.path,
+                    configDirectory: coreRuntime.configDirectory.path,
                     configSHA256: try requireRuntimeConfigDigest()
                 )
                 try Task.checkCancellation()
@@ -3361,7 +3397,7 @@ final class AppState {
                     )
                     try Task.checkCancellation()
                     guard let delay = health.delay, delay > 0 else {
-                        throw ClashAPIError.requestFailed(
+                        throw CoreControllerError.requestFailed(
                             "Updated cloud server health check failed"
                         )
                     }
@@ -3461,7 +3497,7 @@ final class AppState {
     }
 
     private func requireRuntimeConfigDigest() throws -> String {
-        guard let digest = clashManager.runtimeConfigSHA256 else {
+        guard let digest = coreRuntime.runtimeConfigSHA256 else {
             throw HelperIPCError.invalidResponse
         }
         return digest
@@ -3470,7 +3506,7 @@ final class AppState {
     // MARK: - Connection Management
 
     func closeConnection(_ connectionId: String) async {
-        guard let api = clashAPI else { return }
+        guard let api = coreController else { return }
         do {
             try await api.closeConnection(id: connectionId)
             await MainActor.run {
@@ -3487,7 +3523,7 @@ final class AppState {
     }
 
     func closeAllConnections() async {
-        guard let api = clashAPI else { return }
+        guard let api = coreController else { return }
         do {
             try await api.closeAllConnections()
             await MainActor.run {
@@ -3503,7 +3539,7 @@ final class AppState {
     // MARK: - Latency Testing
 
     func testNodeLatency(_ name: String) async {
-        guard isOwnedTonoMode, clashAPI != nil else { return }
+        guard isOwnedTonoMode, coreController != nil else { return }
         guard proxyTarget(name, matches: proxyService.activeNodeName ?? "") else { return }
         _ = await proxyService.testLatency(name: proxyService.activeNodeName ?? name)
     }
@@ -3511,7 +3547,7 @@ final class AppState {
     func testAllLatency() async {
         // Testing all imported endpoints would require opening all of them in
         // PF. Protected mode probes only the current selection.
-        guard isOwnedTonoMode, clashAPI != nil else { return }
+        guard isOwnedTonoMode, coreController != nil else { return }
         guard let selected = proxyService.activeNodeName else { return }
         _ = await proxyService.testLatency(name: selected)
     }
@@ -4066,7 +4102,7 @@ final class AppState {
         guard isConnected, isOwnedTonoMode,
               switchingNodeId == nil,
               configReloadTask == nil,
-              let api = clashAPI,
+              let api = coreController,
               let base = activeDirectPolicy,
               !managedTrafficPolicy.domains.isEmpty
                 || !managedTrafficPolicy.webDomains.isEmpty
@@ -4217,7 +4253,7 @@ final class AppState {
     /// turns that into a short wait. Any non-throwing reply proves the resolver
     /// answers — an empty answer counts, since emptiness is a verdict about the
     /// name, not about readiness.
-    private func awaitResolverReadiness(probeHost: String?, api: ClashAPI) async {
+    private func awaitResolverReadiness(probeHost: String?, api: CoreControllerClient) async {
         guard let probeHost else { return }
         let startedAt = Date()
         let deadline = startedAt.addingTimeInterval(5)
@@ -4250,7 +4286,7 @@ final class AppState {
     private func resolveManagedDirectDomains(
         policy: TonoTrafficPolicy,
         base: ConfigPipeline.ManagedDirectRuntimePolicy?,
-        api: ClashAPI
+        api: CoreControllerClient
     ) async -> ConfigPipeline.ManagedDirectRuntimePolicy? {
         guard !policy.webDomains.isEmpty,
               let physicalInterface = base?.physicalInterface else {
@@ -4364,7 +4400,7 @@ final class AppState {
     private func resolveManagedDirectDomainPins(
         _ domains: [TonoTrafficPolicyDomain],
         protectedAddresses: Set<String>,
-        api: ClashAPI
+        api: CoreControllerClient
     ) async -> [ConfigPipeline.DirectDomainPin] {
         let pins = await withTaskGroup(
             of: ConfigPipeline.DirectDomainPin?.self
@@ -4878,7 +4914,7 @@ final class AppState {
                 return
             }
         }
-        guard isConnected, let api = clashAPI else { return }
+        guard isConnected, let api = coreController else { return }
 
         Task {
             do {
@@ -4952,7 +4988,7 @@ final class AppState {
 
 
     private func fetchActiveRules() async {
-        guard let api = clashAPI else {
+        guard let api = coreController else {
             print("[LiquidClash]","fetchActiveRules: no API")
             return
         }
@@ -4985,7 +5021,7 @@ final class AppState {
 
         let providers = ruleProviders
         let inlineRules = activeRules
-        let rulesetDir = clashManager.configDirectory.appendingPathComponent("ruleset")
+        let rulesetDir = coreRuntime.configDirectory.appendingPathComponent("ruleset")
         Task { [weak self] in
             guard let self else { return }
             let allRules = await providerRuleLoader.load(
@@ -5095,7 +5131,11 @@ final class AppState {
         let attemptCount = max(1, attempts)
         for attempt in 0..<attemptCount {
             if Task.isCancelled { return false }
-            if await testSystemTUNDataPlane(timeout: timeout) { return true }
+            if case .won = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                timeoutSeconds: timeout
+            ) {
+                return true
+            }
 
             guard attempt + 1 < attemptCount else { break }
             do {
@@ -5105,6 +5145,254 @@ final class AppState {
             }
         }
         return false
+    }
+
+    private func advisoryControllerExitProbe(
+        api: CoreControllerClient,
+        selectedExit: ProxyNode?
+    ) async -> ProbeCheck {
+        guard selectedExit != nil else { return .ok }
+        let health = await api.testProxyDelay(
+            name: ConfigPipeline.exitGroupName,
+            url: ProtectedProbeOrigin.google.url,
+            timeout: 5_000
+        )
+        if let delay = health.delay, delay > 0 {
+            return .ok
+        }
+        return .failed(health.message ?? "controller delay unavailable")
+    }
+
+    private func verifyProtectedConnection(
+        controller: ProbeCheck? = nil,
+        controllerTask: Task<ProbeCheck, Never>? = nil,
+        mixedPort: Int,
+        generation: UInt64,
+        rounds: Int
+    ) async -> ConnectivityVerdict {
+        var lastFailure: ProtectedFailure?
+        for round in 1...max(1, rounds) {
+            if Task.isCancelled {
+                controllerTask?.cancel()
+                return .failed(
+                    ProtectedConnectivity.failure(
+                        .unknownClassifiedFailure,
+                        stage: "verifyingTraffic",
+                        attempt: round,
+                        generation: generation,
+                        detail: "cancelled"
+                    )
+                )
+            }
+            if generation != protectionOperationGeneration {
+                controllerTask?.cancel()
+                return .failed(
+                    ProtectedConnectivity.failure(
+                        .unknownClassifiedFailure,
+                        stage: "verifyingTraffic",
+                        attempt: round,
+                        generation: generation,
+                        detail: "stale generation"
+                    )
+                )
+            }
+            let includeMixed = round == max(1, rounds)
+            let race = await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                timeoutSeconds: 12,
+                preferredLabel: lastSuccessfulProbeOrigin
+            )
+            if case .won(let label) = race {
+                lastSuccessfulProbeOrigin = label
+            }
+            let tun = race.tunCheck
+            let mixed: ProbeCheck?
+            if includeMixed, case .failed = tun {
+                switch await ProtectedConnectivityVerifier.raceSystemTUNProbes(
+                    timeoutSeconds: 8,
+                    mixedProxyPort: mixedPort
+                ) {
+                case .won:
+                    mixed = .ok
+                case .lost(let probes):
+                    mixed = .failed(probes.map(\.redactedDetail).joined(separator: "; "))
+                }
+            } else {
+                mixed = nil
+            }
+            let controllerResult: ProbeCheck
+            if case .ok = tun {
+                controllerResult = controller ?? .ok
+            } else if includeMixed {
+                if let controller {
+                    controllerResult = controller
+                } else if let controllerTask {
+                    controllerResult = await controllerTask.value
+                } else {
+                    controllerResult = .ok
+                }
+            } else {
+                controllerResult = controller ?? .ok
+            }
+            let decision = ProtectedConnectivity.classifyPostLock(
+                controller: controllerResult,
+                tun: tun,
+                mixed: mixed,
+                stage: "verifyingTraffic",
+                attempt: round,
+                generation: generation
+            )
+            switch decision {
+            case .connected(let advisory):
+                ConnectionTelemetryBuffer.shared.record(
+                    "probeResult",
+                    reason: "ok",
+                    counter: round,
+                    generation: Int(generation)
+                )
+                return .connected(controllerAdvisory: advisory)
+            case .retry(let failure):
+                lastFailure = failure
+                ConnectionTelemetryBuffer.shared.record(
+                    "probeResult",
+                    reason: failure.code.rawValue,
+                    error: failure.detail,
+                    counter: round,
+                    generation: Int(generation)
+                )
+                if round < max(1, rounds) {
+                    let delayRange = ProtectedConnectivity.postLockRoundDelayMsRange
+                    let delay = UInt64.random(
+                        in: UInt64(delayRange.lowerBound)...UInt64(delayRange.upperBound)
+                    )
+                    try? await Task.sleep(for: .milliseconds(delay))
+                }
+            }
+        }
+        return .failed(
+            lastFailure ?? ProtectedConnectivity.failure(
+                .unknownClassifiedFailure,
+                stage: "verifyingTraffic",
+                attempt: rounds,
+                generation: generation,
+                detail: "verification exhausted"
+            )
+        )
+    }
+
+    private func scheduleBackgroundOptionalPolicy() {
+        let policy = managedTrafficPolicy
+        guard !policy.domains.isEmpty || !policy.webDomains.isEmpty else { return }
+        ConnectionTelemetryBuffer.shared.record(
+            "optionalPolicyBegin",
+            revision: managedTrafficPolicyRevision,
+            generation: Int(protectionOperationGeneration)
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            await self.applyOptionalDirectPolicyInBackground(policy: policy)
+        }
+    }
+
+    private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
+        guard isConnected, !isDisconnecting, let api = coreController else { return }
+        let generation = protectionOperationGeneration
+        ConnectionTelemetryBuffer.shared.record(
+            "optionalPolicyBegin",
+            action: "resolve",
+            revision: managedTrafficPolicyRevision,
+            generation: Int(generation)
+        )
+        let base = activeDirectPolicy
+        let resolved = await resolveManagedDirectDomains(
+            policy: policy,
+            base: base,
+            api: api
+        )
+        guard generation == protectionOperationGeneration, isConnected else { return }
+        guard let resolved, resolved != base else {
+            ConnectionTelemetryBuffer.shared.record(
+                "optionalPolicyRollback",
+                reason: "unchanged_or_unresolved",
+                generation: Int(generation)
+            )
+            return
+        }
+        do {
+            try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                apiHosts: [],
+                tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                proxyEndpoints: currentProxyEndpoints(),
+                sessionDirectEndpoints: resolved.sessionEndpoints,
+                tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+                helperPrepared: true,
+                reviewedBundleDirect: resolved.requiresAddressFreeDirectPermit
+            )
+            guard generation == protectionOperationGeneration else { return }
+            try await coreRuntime.rewriteConfig(
+                overlay: ConfigPipeline.OverlayConfig(
+                    mixedPort: config.mixedPort,
+                    externalController: config.externalController,
+                    secret: config.secret,
+                    mode: "rule",
+                    logLevel: "warning",
+                    allowLan: false,
+                    tunEnabled: true,
+                    selectedNodeName: selectedExitNode()?.name ?? ConfigPipeline.homeNodeName,
+                    tonoTransport: tonoTransport,
+                    claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+                    defaultNodeName: managedCatalogRouting?.defaultProxy,
+                    claudeHomeSocks5: managedCatalogRouting?.homeSocks5
+                ),
+                customNodes: importedExitNodes,
+                directPolicy: resolved
+            )
+            let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared
+                .syncCoreConfig(
+                    configDirectory: coreRuntime.configDirectory.path,
+                    configSHA256: try requireRuntimeConfigDigest()
+                )
+            try await api.reloadConfig(path: runtimeConfigPath)
+            let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
+            guard generation == protectionOperationGeneration else { return }
+            if case .lost = tun {
+                ConnectionTelemetryBuffer.shared.record(
+                    "optionalPolicyRollback",
+                    reason: "tun_failed_after_reload",
+                    generation: Int(generation)
+                )
+                if let base {
+                    try? await coreRuntime.rewriteConfig(
+                        overlay: ConfigPipeline.OverlayConfig(
+                            mixedPort: config.mixedPort,
+                            externalController: config.externalController,
+                            secret: config.secret,
+                            mode: "rule",
+                            logLevel: "warning",
+                            allowLan: false,
+                            tunEnabled: true,
+                            selectedNodeName: selectedExitNode()?.name
+                                ?? ConfigPipeline.homeNodeName,
+                            tonoTransport: tonoTransport
+                        ),
+                        customNodes: importedExitNodes,
+                        directPolicy: base
+                    )
+                }
+                return
+            }
+            activeDirectPolicy = resolved
+            ConnectionTelemetryBuffer.shared.record(
+                "optionalPolicyCommit",
+                revision: managedTrafficPolicyRevision,
+                generation: Int(generation)
+            )
+        } catch {
+            ConnectionTelemetryBuffer.shared.record(
+                "optionalPolicyRollback",
+                error: error.localizedDescription,
+                generation: Int(generation)
+            )
+        }
     }
 
     private func testSystemTUNDataPlane(
@@ -5217,7 +5505,7 @@ final class AppState {
     }
 
     private func probePhysicalInterfaceBypass() async -> String {
-        guard isConnected, !isProtectionBlocked, let api = clashAPI,
+        guard isConnected, !isProtectionBlocked, let api = coreController,
               let address = try? await api.resolveIPv4("www.gstatic.com").first,
               await testSystemTUNDataPlane(
                 timeout: 6,
@@ -5358,21 +5646,50 @@ final class AppState {
         return ip
     }
 
+    nonisolated private static func waitForOwnedTunnelInterface(
+        attempts: Int = 20,
+        intervalMs: UInt64 = 100
+    ) async -> Bool {
+        for _ in 0..<max(1, attempts) {
+            if Task.isCancelled { return false }
+            if KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(intervalMs))
+        }
+        return KillSwitchService.interfaceExists(ConfigPipeline.tonoTunInterface)
+    }
+
     /// Query Mihomo's DNS listener directly while macOS is still using its
     /// original resolver. A fake-IP answer proves all of the following before
     /// the system mutation: port 53 is owned by this core, its internal DNS
     /// module is active, and its DoH request can traverse Tono-Exit.
+    ///
+    /// The listener can lag the controller bind by a few hundred milliseconds.
+    /// Keep the same 5 s ceiling, but spend it on short retries instead of one
+    /// long `dig` that treats "not bound yet" the same as a dead exit.
     private func testLocalProtectedDNS(timeout: Int = 5) async -> Bool {
-        await testProtectedDNS(
-            server: ProtectedDNSContract.server,
-            port: ProtectedDNSContract.port,
-            timeout: timeout
-        )
+        let deadline = Date().addingTimeInterval(TimeInterval(max(1, timeout)))
+        while Date() < deadline {
+            if Task.isCancelled { return false }
+            let remaining = max(1, Int(deadline.timeIntervalSinceNow.rounded(.up)))
+            if await testProtectedDNS(
+                server: ProtectedDNSContract.server,
+                port: ProtectedDNSContract.port,
+                timeout: min(2, remaining)
+            ) {
+                return true
+            }
+            if Date() >= deadline { break }
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return false
     }
 
     private func testSystemProtectedDNS() async -> Bool {
         for attempt in 0..<3 {
-            if await testProtectedDNS(server: nil, port: nil, timeout: 2) {
+            let timeout = attempt == 0 ? 1 : 2
+            if await testProtectedDNS(server: nil, port: nil, timeout: timeout) {
                 return true
             }
             guard attempt < 2, !Task.isCancelled else { return false }
@@ -5386,69 +5703,18 @@ final class AppState {
         port: Int?,
         timeout: Int
     ) async -> Bool {
-        let processBox = CancellableProcessBox()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let proc = Process()
-                    guard processBox.register(proc) else {
-                        continuation.resume(returning: false)
-                        return
-                    }
-                    defer { processBox.clear(proc) }
-                    proc.executableURL = URL(fileURLWithPath: "/usr/bin/dig")
-                    proc.environment = [
-                        "PATH": "/usr/bin:/bin",
-                        "LC_ALL": "C",
-                    ]
-                    var arguments: [String] = []
-                    if let server {
-                        arguments.append("@\(server)")
-                    }
-                    if let port {
-                        arguments.append(contentsOf: ["-p", "\(port)"])
-                    }
-                    arguments.append(contentsOf: [
-                        "www.gstatic.com",
-                        "A",
-                        "+short",
-                        "+time=\(max(1, timeout))",
-                        "+tries=1",
-                    ])
-                    proc.arguments = arguments
-                    let output = Pipe()
-                    proc.standardOutput = output
-                    proc.standardError = FileHandle.nullDevice
-                    do {
-                        try proc.run()
-                        proc.waitUntilExit()
-                        let data = output.fileHandleForReading.readDataToEndOfFile()
-                        guard data.count <= 4 * 1_024 else {
-                            continuation.resume(returning: false)
-                            return
-                        }
-                        let values = String(decoding: data, as: UTF8.self)
-                            .split(whereSeparator: \.isNewline)
-                            .map {
-                                $0.trimmingCharacters(
-                                    in: .whitespacesAndNewlines
-                                )
-                            }
-                        continuation.resume(
-                            returning: proc.terminationStatus == 0
-                                && values.contains(where: {
-                                    $0.hasPrefix("198.18.")
-                                })
-                        )
-                    } catch {
-                        if proc.isRunning { proc.terminate() }
-                        continuation.resume(returning: false)
-                    }
-                }
-            }
-        } onCancel: {
-            processBox.cancel()
+        let budget = TimeInterval(max(1, timeout))
+        let answers: [String]
+        if let server, let port {
+            answers = await ProtectedDNSProbe.queryListener(
+                server: server,
+                port: port,
+                timeout: budget
+            )
+        } else {
+            answers = await ProtectedDNSProbe.querySystemResolver(timeout: budget)
         }
+        return ProtectedDNSProbe.containsFakeIP(answers)
     }
 
     private func fetchNetworkInfo() async {
@@ -5587,7 +5853,7 @@ final class AppState {
     /// here is Mihomo's, over the tunnel, so this never queries the physical
     /// network's DNS — the exact thing `allowSystemResolution: false` exists to
     /// prevent during protected recovery.
-    private func refreshControlPlanePinCache(api: ClashAPI) async {
+    private func refreshControlPlanePinCache(api: CoreControllerClient) async {
         guard let host = TonoAPIClient.configuredBaseURL().host?.lowercased(),
               !host.isEmpty else { return }
         guard let answers = try? await api.resolveIPv4(host), !answers.isEmpty else {

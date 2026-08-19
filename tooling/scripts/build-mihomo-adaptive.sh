@@ -3,8 +3,8 @@ set -euo pipefail
 
 repo_root=${0:A:h:h:h}
 mac_target="$repo_root/apps/macos/Tono/Resources/mihomo"
-windows_target="$repo_root/apps/windows/app/src-tauri/sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe"
-windows_alpha_target="$repo_root/apps/windows/app/src-tauri/sidecar/verge-mihomo-alpha-x86_64-pc-windows-msvc.exe"
+windows_target="$repo_root/apps/windows/app/src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe"
+windows_alpha_target="$repo_root/apps/windows/app/src-tauri/sidecar/tono-core-alpha-x86_64-pc-windows-msvc.exe"
 patch_file="$repo_root/tooling/scripts/mihomo-adaptive/gvisor-adaptive-buffer.patch"
 mode=${1:---install-adaptive}
 
@@ -159,7 +159,6 @@ install_adaptive() {
       exit 1
     fi
     atomic_install "$output" "$windows_target"
-    atomic_install "$output" "$windows_alpha_target"
     echo "adaptive Windows Mihomo SHA-256: $(sha256 "$windows_target")"
   else
     (
@@ -183,6 +182,25 @@ install_adaptive() {
     echo "$version_output"
     echo "adaptive Mihomo SHA-256: $(sha256 "$mac_target")"
   fi
+  python3 - <<PY
+import json
+from pathlib import Path
+identity = {
+    "tonoCoreVersion": "$adaptive_version",
+    "mihomoUpstreamTag": "$upstream_tag",
+    "upstreamCommit": "$upstream_commit",
+    "tonoPatchRevision": "gvisor-adaptive.1",
+    "goVersion": "$go_version",
+    "buildTags": ["with_gvisor"],
+    "singTun": "$sing_tun_version",
+    "tcpBufferBytes": {"min": 4096, "default": 32768, "max": 131072},
+}
+for dest in [
+    Path("$repo_root") / "apps/macos/Tono/Resources/core-identity.json",
+    Path("$repo_root") / "apps/windows/app/src-tauri/resources/core-identity.json",
+]:
+    dest.write_text(json.dumps(identity, indent=2) + "\n")
+PY
 }
 
 case $mode in

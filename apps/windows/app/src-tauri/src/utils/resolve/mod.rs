@@ -14,8 +14,8 @@ use crate::{
     process::AsyncHandler,
     utils::{init, server, window_manager::WindowManager},
 };
-use clash_verge_logging::{Type, logging, logging_error};
-use clash_verge_signal;
+use tono_logging::{Type, logging, logging_error};
+use tono_signal;
 
 pub mod dns;
 pub mod scheme;
@@ -43,7 +43,7 @@ pub fn resolve_setup_sync() {
 
 pub fn resolve_setup_async() {
     AsyncHandler::spawn(|| async {
-        logging!(info, Type::ClashVergeRev, "Version: {}", env!("CARGO_PKG_VERSION"));
+        logging!(info, Type::Tono, "Version: {}", env!("CARGO_PKG_VERSION"));
 
         #[cfg(target_os = "macos")]
         resolve_dock_show().await;
@@ -99,7 +99,7 @@ pub(super) async fn init_resources() {
 
 pub fn init_signal() {
     logging!(info, Type::Setup, "Initializing signal handlers...");
-    clash_verge_signal::register(feat::quit);
+    tono_signal::register(feat::quit);
 }
 
 pub async fn init_work_config() {
@@ -116,7 +116,7 @@ pub(super) async fn init_verge_config_before_window() {
 }
 
 pub(super) async fn init_service_manager() {
-    clash_verge_service_ipc::set_config(Some(ServiceManager::config())).await;
+    tono_service_protocol::set_config(Some(ServiceManager::config())).await;
 
     SERVICE_MANAGER.detect_startup_status().await;
 }

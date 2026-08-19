@@ -10,8 +10,8 @@ use crate::{
     feat, logging,
     utils::{dirs::find_target_icons, help},
 };
-use clash_verge_limiter::{Limiter, SystemClock, SystemLimiter};
-use clash_verge_logging::logging_error;
+use tono_limiter::{Limiter, SystemClock, SystemLimiter};
+use tono_logging::logging_error;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tokio::fs;
 
@@ -32,7 +32,7 @@ use menu_def::{MenuCommand, MenuIds, MenuTexts};
 // TODO: 是否需要将可变菜单抽离存储起来，后续直接更新对应菜单实例，无需重新创建菜单(待考虑)
 
 const TRAY_CLICK_DEBOUNCE_MS: u64 = 300;
-pub const TRAY_ID: &str = "clash-verge-rev-tray";
+pub const TRAY_ID: &str = "tono-tray";
 
 #[derive(Clone)]
 struct TrayState {}
@@ -381,7 +381,7 @@ impl TonoMenuState {
     }
 
     fn protection_label(&self) -> Cow<'static, str> {
-        clash_verge_i18n::t!(match self.ui_state.as_str() {
+        tono_i18n::t!(match self.ui_state.as_str() {
             "connecting" => "tray.tono.state.connecting",
             "connected" => "tray.tono.state.connected",
             "protectedOffline" => "tray.tono.state.protectedOffline",
@@ -391,7 +391,7 @@ impl TonoMenuState {
     }
 
     fn protection_text(&self) -> String {
-        clash_verge_i18n::t!("tray.tono.protectionValue", value = self.protection_label()).into_owned()
+        tono_i18n::t!("tray.tono.protectionValue", value = self.protection_label()).into_owned()
     }
 
     fn server_text(&self) -> String {
@@ -399,8 +399,8 @@ impl TonoMenuState {
             .selected_server
             .as_deref()
             .map(Cow::Borrowed)
-            .unwrap_or_else(|| clash_verge_i18n::t!("tray.tono.noServer"));
-        clash_verge_i18n::t!("tray.tono.serverValue", value = value).into_owned()
+            .unwrap_or_else(|| tono_i18n::t!("tray.tono.noServer"));
+        tono_i18n::t!("tray.tono.serverValue", value = value).into_owned()
     }
 
     fn can_connect(&self) -> bool {

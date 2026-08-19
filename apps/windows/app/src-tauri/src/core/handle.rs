@@ -2,7 +2,7 @@ use crate::{APP_HANDLE, singleton};
 use smartstring::alias::String;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
-use tauri_plugin_mihomo::{Mihomo, MihomoExt as _};
+use tono_plugin_core::{Mihomo, MihomoExt as _};
 
 use super::notification::{FrontendEvent, NotificationSystem};
 

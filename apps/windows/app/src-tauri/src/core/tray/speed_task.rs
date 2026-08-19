@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::async_runtime::JoinHandle;
-use tauri_plugin_mihomo::models::WsConnectionId;
+use tono_plugin_core::models::WsConnectionId;
 
 /// 托盘速率流异常后的重连间隔。
 const TRAY_SPEED_RETRY_DELAY: Duration = Duration::from_secs(1);
