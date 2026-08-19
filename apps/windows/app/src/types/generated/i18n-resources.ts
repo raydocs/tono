@@ -998,6 +998,7 @@ export interface TranslationResources {
           coreUnpinned: string
           dnsPortBusy: string
           nodeUnreachable: string
+          protectedHttpsFailed: string
           releaseReconciling: string
           sendDiagnostics: string
           serviceBusy: string

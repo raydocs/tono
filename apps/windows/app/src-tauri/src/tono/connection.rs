@@ -606,7 +606,6 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         if inner.fsm.status().is_connecting {
             return Err("already connecting".to_string());
         }
-        inner.catalog_failover_tried.clear();
         if let Some(replacement) = catalog_sync::ensure_usable_selection(&mut inner) {
             logging!(
                 info,
@@ -621,7 +620,6 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
         Attempt::Failed(err) => {
             let err = fail_connect(&state, &app, err).await;
-            rotate_catalog_exit_if_node_dead(&state, &app, &err).await;
             schedule_reconnect(&state, &app).await;
             Err(err)
         }
@@ -2492,7 +2490,6 @@ async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Dura
             }
             Attempt::Failed(err) => {
                 let err = fail_connect(&state, &app, err).await;
-                rotate_catalog_exit_if_node_dead(&state, &app, &err).await;
                 let next = {
                     let mut inner = state.lock().await;
                     if inner.catalog_requires_choice {
@@ -3400,28 +3397,6 @@ fn fake_ip_verification_error(last: &str) -> String {
 fn connect_failure_is_dead_exit(error: &str) -> bool {
     error.contains(NODE_OR_CORE_UNREACHABLE_PREFIX)
         || error.contains(tono_core::ProtectedFailureCode::CoreExitUnreachable.as_str())
-}
-
-async fn rotate_catalog_exit_if_node_dead(state: &Arc<TonoState>, app: &AppHandle, error: &str) {
-    if !connect_failure_is_dead_exit(error) {
-        return;
-    }
-    let rotated = {
-        let mut inner = state.lock().await;
-        catalog_sync::rotate_catalog_exit_after_failure(&mut inner)
-    };
-    if let Some((from, to)) = rotated {
-        logging!(
-            warn,
-            Type::Service,
-            "Tono: catalog failover after dead exit: {from} -> {to}"
-        );
-        state
-            .audit()
-            .log(AuditEvent::ConnectCatalogFailover { from, to });
-        let inner = state.lock().await;
-        commands::emit_status(app, &commands::status_of(&inner));
-    }
 }
 
 fn fake_ip_attempt_timeout(attempt: u32) -> Duration {

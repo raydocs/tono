@@ -196,6 +196,16 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
   })
 
+  it('does not tell the user to switch cities when every probe dies at TLS', () => {
+    const error = new Error(
+      'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+    )
+    expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
+    expect(
+      formatTonoActionError(error, (key) => `translated:${key}`),
+    ).toBe('translated:tono.dashboard.errors.protectedHttpsFailed')
+  })
+
   it('maps kernel pin and DNS-port failures to user-facing keys', () => {
     expect(
       formatTonoActionError(

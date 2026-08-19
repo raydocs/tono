@@ -666,6 +666,7 @@ export const translationKeys = [
   'tono.dashboard.errors.releaseReconciling',
   'tono.dashboard.errors.serviceTooOld',
   'tono.dashboard.errors.nodeUnreachable',
+  'tono.dashboard.errors.protectedHttpsFailed',
   'tono.dashboard.errors.coreUnpinned',
   'tono.dashboard.errors.coreMismatch',
   'tono.dashboard.errors.dnsPortBusy',

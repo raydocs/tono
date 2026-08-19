@@ -187,6 +187,15 @@ export const formatTonoActionError = (
       : typeof error === 'string'
         ? error
         : String(error)
+  if (
+    (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
+      raw.includes('CORE_EXIT_UNREACHABLE')) &&
+    /tls handshake eof/i.test(raw)
+  ) {
+    return t
+      ? t('tono.dashboard.errors.protectedHttpsFailed')
+      : raw
+  }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
       return t ? t(key) : raw
@@ -222,6 +231,10 @@ export const connectRejectionNeedsServerChoice = (error: unknown): boolean => {
 /** True when the failure is likely a blocked/dead exit the user should switch. */
 export const connectErrorSuggestsServerSwitch = (error: unknown): boolean => {
   const raw = error instanceof Error ? error.message : String(error ?? '')
+  // Same TLS close on every city is not a "pick another server" problem.
+  if (/tls handshake eof/i.test(raw)) {
+    return false
+  }
   return (
     raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
     raw.toLowerCase().includes('node or core unreachable') ||

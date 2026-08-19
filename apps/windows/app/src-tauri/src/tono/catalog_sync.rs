@@ -338,6 +338,8 @@ pub fn next_catalog_exit(
 }
 
 /// Whether the saved selection must move onto a signed usable catalog city.
+/// A catalog city the user just picked is never replaced. Only a missing,
+/// blocked, or leftover imported name (not in this catalog) is retargeted.
 pub fn replacement_for_selection(
     selected: Option<&str>,
     nodes: &[ValidatedNode],
@@ -348,9 +350,6 @@ pub fn replacement_for_selection(
         None => Some(preferred),
         Some(name) if is_exit_blocked(name) => Some(preferred),
         Some(name) if node_named(nodes, name).is_none() => Some(preferred),
-        Some(name) if is_legacy_wire_name(name) && !names_equivalent(name, &preferred) => {
-            Some(preferred)
-        }
         Some(_) => None,
     }
 }
@@ -401,7 +400,10 @@ pub fn ensure_usable_selection(inner: &mut TonoInner) -> Option<String> {
 }
 
 /// After a connect that proved the selected city dead, persist the next unused
-/// catalog exit so the fail-closed reconnect does not hammer the same node.
+/// catalog exit. Not called on the live connect path: every US city from one
+/// China Windows tester failed the same TLS close, and rotating only jumped
+/// the picker.
+#[allow(dead_code)]
 pub fn rotate_catalog_exit_after_failure(inner: &mut TonoInner) -> Option<(String, String)> {
     let from = inner.selected_node.clone().unwrap_or_default();
     if !from.is_empty() {
@@ -603,9 +605,11 @@ mod tests {
             node("Salt Lake City · Summit"),
             node("Buffalo · Niagara"),
         ];
+        // A leftover name that is still in this catalog stays put. Auto-hopping
+        // after every CORE_EXIT made China testers' manual Salt Lake pick jump.
         assert_eq!(
-            replacement_for_selection(Some("US-VLESS-Reality"), &nodes, None).as_deref(),
-            Some("Salt Lake City · Summit")
+            replacement_for_selection(Some("US-VLESS-Reality"), &nodes, None),
+            None
         );
         assert_eq!(
             replacement_for_selection(Some("Salt Lake City · Summit"), &nodes, None),

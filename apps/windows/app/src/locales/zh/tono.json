@@ -145,6 +145,7 @@
       "releaseReconciling": "网络保护仍在释放中。请稍候再连接，避免拆掉新连接。",
       "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。",
       "nodeUnreachable": "无法连接此节点。请重试，或切换到其他节点。",
+      "protectedHttpsFailed": "受保护的 HTTPS 未能完成（TLS 握手被断开）。多个节点出现同一结果时，换节点通常没用，请把诊断发给支持。",
       "coreUnpinned": "此安装缺少内核校验。请安装最新版 Tono，重装同一份安装包无效。",
       "coreMismatch": "内核与此安装不匹配。请安装最新版 Tono。",
       "dnsPortBusy": "本机 53 端口已被其他程序占用。请关闭该程序后重试。",

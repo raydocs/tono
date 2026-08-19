@@ -145,6 +145,7 @@
       "releaseReconciling": "Network protection is still releasing. Wait a moment, then connect again.",
       "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced.",
       "nodeUnreachable": "This server could not be reached. Try again, or switch to another server.",
+      "protectedHttpsFailed": "Protected HTTPS did not complete (TLS handshake closed). If every server fails the same way, switching cities will not help — send diagnostics to support.",
       "coreUnpinned": "This Tono install is missing its kernel check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "The Tono kernel does not match this install. Install the latest Tono.",
       "dnsPortBusy": "Another app is using local DNS port 53. Close that app and try again.",
