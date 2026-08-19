@@ -128,9 +128,9 @@ importers:
       swr:
         specifier: ^2.4.2
         version: 2.4.2(react@19.2.8)
-      tauri-plugin-mihomo-api:
-        specifier: clash-verge-rev/tauri-plugin-mihomo#refactor-use-reqwest-ipc
-        version: https://codeload.github.com/clash-verge-rev/tauri-plugin-mihomo/tar.gz/34abd64fd3c28442f183be39f0124cb08629f443
+      tono-plugin-core-api:
+        specifier: file:../crates/tono-plugin-core
+        version: file:../crates/tono-plugin-core
       types-pac:
         specifier: ^1.0.3
         version: 1.0.3
@@ -3786,10 +3786,6 @@ packages:
     resolution: {integrity: sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA==}
     engines: {node: '>=18'}
 
-  tauri-plugin-mihomo-api@https://codeload.github.com/clash-verge-rev/tauri-plugin-mihomo/tar.gz/34abd64fd3c28442f183be39f0124cb08629f443:
-    resolution: {gitHosted: true, integrity: sha512-XTm8+iLqI+zyG4uG3yWu5xHziD+CM3KuCcJAA3pedau7tL/it4Q1KKDSlcXmdUm3KddJRQgxDnj84VMgGyFV1g==, tarball: https://codeload.github.com/clash-verge-rev/tauri-plugin-mihomo/tar.gz/34abd64fd3c28442f183be39f0124cb08629f443}
-    version: 0.5.4
-
   terser@5.49.0:
     resolution: {integrity: sha512-SNiDnXyHSrxVcIOtVbULzcTmniUiwcV7Nwdyj1twVubeTmbjoa8p69KKDpfkdoOavuM4/GRm1+ykI8qqnavHoA==}
     engines: {node: '>=10'}
@@ -3820,6 +3816,9 @@ packages:
   tldts@7.4.9:
     resolution: {integrity: sha512-3kZ8wQQ/k5DrChD4X4FVvr2D7E5uoRgAqkPyLpSCGUvqOvqu+JEdr3mwMUaVWb+vMHZaKhF5fp2PBigKsui7hA==}
     hasBin: true
+
+  tono-plugin-core-api@file:../crates/tono-plugin-core:
+    resolution: {directory: ../crates/tono-plugin-core, type: directory}
 
   tough-cookie@6.0.2:
     resolution: {integrity: sha512-exgYmnmL/sJpR3upZfXG5PoatXQii55xAiXGXzY+sROLZ/Y+SLcp9PgJNI9Vz37HpQ74WvDcLT8eqm+kV3FzrA==}
@@ -7959,10 +7958,6 @@ snapshots:
       minizlib: 3.1.0
       yallist: 5.0.0
 
-  tauri-plugin-mihomo-api@https://codeload.github.com/clash-verge-rev/tauri-plugin-mihomo/tar.gz/34abd64fd3c28442f183be39f0124cb08629f443:
-    dependencies:
-      '@tauri-apps/api': 2.11.1
-
   terser@5.49.0:
     dependencies:
       '@jridgewell/source-map': 0.3.11
@@ -7991,6 +7986,10 @@ snapshots:
   tldts@7.4.9:
     dependencies:
       tldts-core: 7.4.9
+
+  tono-plugin-core-api@file:../crates/tono-plugin-core:
+    dependencies:
+      '@tauri-apps/api': 2.11.1
 
   tough-cookie@6.0.2:
     dependencies:
