@@ -71,6 +71,7 @@ export interface UserDto {
   notes?: string;
   contact?: string;
   firstEntitledAt?: number;
+  hasExitIdentity?: boolean;
   product?: {
     accountRef: string | null;
     status: string | null;
@@ -577,6 +578,7 @@ export const operationsApi = {
     email: string;
     userId: string | null;
     allowlisted: boolean;
+    exitIdentityIssued: boolean;
     binding: HomeBindingDto | null;
     account: ProductAccountDto | null;
     incomplete: string[];

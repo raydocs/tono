@@ -2305,7 +2305,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       }),
     });
     expect(pending.status).toBe(202);
-    expect((await pending.json() as any).incomplete).toContain('user_not_registered');
+    const pendingBody = await pending.json() as any;
+    expect(pendingBody.incomplete).toContain('user_not_registered');
+    expect(pendingBody.exitIdentityIssued).toBe(false);
+    expect(pendingBody.userId).toBeNull();
 
     const ready = await api('ops/users/onboard', {
       method: 'POST',
@@ -2318,6 +2321,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     // owner currently has no assigned Claude (banned), so this should assign.
     expect([200, 202, 409]).toContain(ready.status);
+    if (ready.status !== 409) {
+      const readyBody = await ready.json() as any;
+      expect(readyBody.exitIdentityIssued).toBe(true);
+      expect(readyBody.userId).toBe(owner.user.id);
+    }
+    const listedReady = await operations('users');
+    const readyRow = ((await listedReady.json() as any).users as any[]).find((item: any) => item.id === owner.user.id);
+    expect(readyRow.hasExitIdentity).toBe(true);
 
     const closed = await api(`ops/users/${owner.user.id}/close`, {
       method: 'POST',

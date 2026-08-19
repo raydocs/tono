@@ -3288,10 +3288,21 @@ async function operationsUsers(e: Env) {
       replaceByUser.set(String(row.user_id), Number(row.total));
     }
   }
+  const exitByUser = new Set<string>();
+  if (userIds.length > 0) {
+    const placeholders = userIds.map(() => '?').join(',');
+    const issued = await e.DB.prepare(
+      `SELECT user_id FROM exit_credentials WHERE user_id IN (${placeholders})`,
+    ).bind(...userIds).all<Row>();
+    for (const row of issued.results) {
+      exitByUser.add(String(row.user_id));
+    }
+  }
   return rows.results.map((row) => {
     const account = productByUser.get(String(row.id));
     return {
       ...publicUser(row),
+      hasExitIdentity: exitByUser.has(String(row.id)),
       homeBinding: row.home_exit_id
         ? {
           homeExitId: String(row.home_exit_id),
@@ -6296,7 +6307,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!user) incomplete.push('user_not_registered');
       let binding = null;
       let account = null;
+      let exitIdentityIssued = false;
       if (user) {
+        await exitClientUUID(e, String(user.id));
+        exitIdentityIssued = true;
         if (b.notes !== undefined || b.contact !== undefined) {
           await e.DB.prepare(
             `UPDATE users SET
@@ -6363,6 +6377,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         email: address,
         userId: user ? String(user.id) : null,
         allowlisted: true,
+        exitIdentityIssued,
         binding: binding ? publicHomeBinding(binding) : null,
         account: account ? publicProductAccount(account) : null,
         incomplete,

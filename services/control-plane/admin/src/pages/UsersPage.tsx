@@ -11,6 +11,51 @@ import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { useRefresh, useResource } from '../hooks';
 import { Banner, DataHealth, StateBoundary, Status } from '../ui';
 
+type OnboardResult = {
+  email: string;
+  allowlisted: boolean;
+  registered: boolean;
+  exitIdentityIssued: boolean;
+  hasHome: boolean;
+  hasClaude: boolean;
+};
+
+function OnboardChecklist({ result }: { result: OnboardResult }) {
+  const rows: Array<{ ok: boolean; text: string }> = [
+    { ok: result.allowlisted, text: '已加入登录白名单' },
+    {
+      ok: result.registered,
+      text: result.registered
+        ? '客户已在 App 登录过'
+        : '客户还没登录 — 让他用这个邮箱在 Tono 里收验证码',
+    },
+    {
+      ok: result.exitIdentityIssued,
+      text: result.exitIdentityIssued
+        ? '出口身份已签发（还要等节点同步，同步停了会连不上）'
+        : '出口身份未签发 — 登录后再点一次「补全」',
+    },
+    {
+      ok: result.hasHome,
+      text: result.hasHome ? '已派家宽' : '家宽未派（可选）',
+    },
+    {
+      ok: result.hasClaude,
+      text: result.hasClaude ? '已开 Claude' : 'Claude 未开（可选）',
+    },
+  ];
+  return (
+    <ul className="onboard-check">
+      {rows.map((row) => (
+        <li key={row.text} className={row.ok ? 'ok' : 'wait'}>
+          <span aria-hidden>{row.ok ? '✓' : '○'}</span>
+          {row.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
   unusedHomes: HomeExitDto[];
   pooledAccounts: ProductAccountDto[];
@@ -23,16 +68,15 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
   const [productAccountId, setProductAccountId] = useState('');
   const [contact, setContact] = useState('');
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<OnboardResult | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    setMessage(null);
     try {
-      const result = await operationsApi.onboardUser({
+      const response = await operationsApi.onboardUser({
         email: email.trim(),
         line: line.trim() || undefined,
         homeExitId: homeExitId || undefined,
@@ -40,14 +84,16 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
         productAccountId: productAccountId || undefined,
         contact: contact.trim() || undefined,
       });
-      if (result.incomplete.includes('user_not_registered')) {
-        setMessage(`已授权 ${result.email}。客户登录后再回来派线和开号。`);
-      } else if (result.incomplete.length > 0) {
-        const missing = result.incomplete.map((item) => item === 'claude' ? 'Claude 号' : item).join('、');
-        setMessage(`${result.email} 已处理，仍缺：${missing}`);
-      } else {
-        setMessage(`${result.email} 已开通`);
-        setEmail('');
+      const next: OnboardResult = {
+        email: response.email,
+        allowlisted: response.allowlisted,
+        registered: response.userId != null,
+        exitIdentityIssued: Boolean(response.exitIdentityIssued),
+        hasHome: response.binding != null,
+        hasClaude: response.account != null,
+      };
+      setResult(next);
+      if (next.registered && next.exitIdentityIssued) {
         setLine('');
         setHomeExitId('');
         setAccountRef('');
@@ -56,7 +102,7 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
       }
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '开通失败');
+      setError(err instanceof Error ? err.message : '保存失败');
     } finally {
       setBusy(false);
     }
@@ -67,23 +113,36 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
       <div className="card-header">
         <div>
           <h2>新开一单</h2>
-          <p>邮箱进白名单。已注册的用户可以同时粘贴家宽并登记 Claude 号。</p>
+          <p>
+            先让客户能登录。出口 UUID 只在客户已经注册时签发；
+            家宽和 Claude 是可选项，写在下面。
+          </p>
         </div>
       </div>
       <div className="card-body">
         <Banner message={error} tone="error" />
-        <Banner message={message} tone="ok" />
         <form className="onboard-form" onSubmit={submit}>
-          <input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="客户邮箱" disabled={busy} />
-          <input className="input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="家宽 host:port:user:pass" disabled={busy} spellCheck={false} autoComplete="off" />
-          <input className="input" value={accountRef} onChange={(e) => setAccountRef(e.target.value)} placeholder="Claude 账号标识" disabled={busy} />
-          <button className="btn" type="submit" disabled={busy || !email.trim()}>开通</button>
+          <label className="onboard-email">
+            <span>客户邮箱</span>
+            <input
+              className="input"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="客户用来收验证码的邮箱"
+              disabled={busy}
+            />
+          </label>
+          <button className="btn" type="submit" disabled={busy || !email.trim()}>
+            {busy ? '保存中…' : '加入白名单 / 补全'}
+          </button>
           <details className="onboard-more">
-            <summary>更多选项</summary>
+            <summary>客户已登录后可同时派家宽、开 Claude</summary>
             <div className="form-grid">
               <label>
-                <span>微信 / 联系</span>
-                <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} disabled={busy} />
+                <span>家宽（粘贴）</span>
+                <input className="input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="host:port:user:pass" disabled={busy} spellCheck={false} autoComplete="off" />
               </label>
               <label>
                 <span>库存家宽</span>
@@ -95,6 +154,10 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
                 </select>
               </label>
               <label>
+                <span>Claude 账号</span>
+                <input className="input" value={accountRef} onChange={(e) => setAccountRef(e.target.value)} placeholder="账号标识" disabled={busy} />
+              </label>
+              <label>
                 <span>号池</span>
                 <select className="input" value={productAccountId} onChange={(e) => setProductAccountId(e.target.value)} disabled={busy || pooledAccounts.length === 0}>
                   <option value="">{pooledAccounts.length ? '不从号池选' : '号池为空'}</option>
@@ -103,9 +166,19 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
                   ))}
                 </select>
               </label>
+              <label>
+                <span>微信 / 联系</span>
+                <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} disabled={busy} />
+              </label>
             </div>
           </details>
         </form>
+        {result && (
+          <div className="onboard-result">
+            <strong>{result.email}</strong>
+            <OnboardChecklist result={result} />
+          </div>
+        )}
       </div>
     </section>
   );
@@ -128,6 +201,7 @@ export function UsersPage() {
   const [expiryPick, setExpiryPick] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
+  const [onlyMissingExit, setOnlyMissingExit] = useState(false);
   const [showAllowlist, setShowAllowlist] = useState(false);
 
   const reloadAll = () => {
@@ -379,7 +453,11 @@ export function UsersPage() {
           />
           <label className="filter-check">
             <input type="checkbox" checked={onlyIncomplete} onChange={(e) => setOnlyIncomplete(e.target.checked)} />
-            只看未开号
+            只看未开 Claude
+          </label>
+          <label className="filter-check">
+            <input type="checkbox" checked={onlyMissingExit} onChange={(e) => setOnlyMissingExit(e.target.checked)} />
+            只看未发出口身份
           </label>
           <button type="button" className="btn btn-outline btn-sm" onClick={reloadAll} disabled={busy}>刷新</button>
         </div>
@@ -390,6 +468,7 @@ export function UsersPage() {
             const needle = query.trim().toLowerCase();
             const visible = rows.filter((user) => {
               if (onlyIncomplete && !user.product?.incomplete) return false;
+              if (onlyMissingExit && user.hasExitIdentity) return false;
               if (!needle) return true;
               const hay = [
                 user.email,
@@ -409,6 +488,7 @@ export function UsersPage() {
               <tr>
                 <th>客户</th>
                 <th>状态</th>
+                <th>出口</th>
                 <th>用量</th>
                 <th>家宽</th>
                 <th>Claude</th>
@@ -433,6 +513,11 @@ export function UsersPage() {
                 <td>
                   <Status value={user.status} />
                   {expired && <span className="expired-flag">已过期</span>}
+                </td>
+                <td>
+                  {user.hasExitIdentity
+                    ? <span className="muted">已签发</span>
+                    : <span className="expired-flag">未签发</span>}
                 </td>
                 <td className="mono">{formatBytes(user.usageBytes)}</td>
                 <td>
@@ -478,7 +563,7 @@ export function UsersPage() {
                 </tr>
                 {opened && (
                   <tr className="detail-row">
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <UserWorkbench
                         user={user}
                         busy={busy}
