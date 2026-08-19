@@ -656,6 +656,13 @@ FunctionEnd
   Delete /REBOOTOK "$INSTDIR\resources\clash-verge-service-uninstall.exe"
   Delete /REBOOTOK "$INSTDIR\resources\set_dns.sh"
   Delete /REBOOTOK "$INSTDIR\resources\unset_dns.sh"
+  Delete /REBOOTOK "$INSTDIR\resources\Country.mmdb"
+  Delete /REBOOTOK "$INSTDIR\resources\geoip.dat"
+  Delete /REBOOTOK "$INSTDIR\resources\geosite.dat"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.next"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.rollback"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.restore"
+  Delete /REBOOTOK "$INSTDIR\tono-core.exe.publish"
 !macroend
 
 Section CheckAndInstallVSRuntime
