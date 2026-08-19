@@ -153,12 +153,38 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
 
     var isExpired: Bool { Date() > expiresAt }
 
+    static func allowedNext(_ from: UpdateHandoffPhase, _ to: UpdateHandoffPhase) -> Bool {
+        if from == to { return true }
+        switch (from, to) {
+        case (.idle, .updatePrepared),
+             (.updatePrepared, .connectionQuiescing),
+             (.connectionQuiescing, .cleanShutdownCompleted),
+             (.cleanShutdownCompleted, .protectedHandoffRecorded),
+             (.protectedHandoffRecorded, .installStarted),
+             (.installStarted, .firstLaunchMigration),
+             (.firstLaunchMigration, .protectionResuming),
+             (.protectionResuming, .verified),
+             (.verified, .committed):
+            return true
+        case (_, .failed):
+            return true
+        default:
+            return false
+        }
+    }
+
     func advancing(to phase: UpdateHandoffPhase, errorCode: String? = nil, errorStage: String? = nil) -> UpdateHandoffJournal {
         var next = self
-        next.phase = phase
+        if Self.allowedNext(self.phase, phase) {
+            next.phase = phase
+            next.lastErrorCode = errorCode
+            next.lastErrorStage = errorStage
+        } else {
+            next.phase = .failed
+            next.lastErrorCode = errorCode ?? "TONO_JOURNAL_ILLEGAL_PHASE"
+            next.lastErrorStage = errorStage ?? "\(self.phase.rawValue)->\(phase.rawValue)"
+        }
         next.updatedAt = Date()
-        next.lastErrorCode = errorCode
-        next.lastErrorStage = errorStage
         return next
     }
 }
@@ -182,7 +208,7 @@ enum UpdateHandoffStore {
             let journal = try decoder.decode(UpdateHandoffJournal.self, from: data)
             if journal.isExpired || journal.phase == .committed || journal.phase == .idle {
                 try? FileManager.default.removeItem(at: url)
-                return journal.phase == .committed || journal.phase == .idle ? nil : journal
+                return nil
             }
             return journal
         } catch {

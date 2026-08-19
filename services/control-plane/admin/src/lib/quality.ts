@@ -7,9 +7,9 @@ export const blockLabels: Record<string, string> = {
   EDGE_OK: '边缘可达',
   EDGE_FAIL: '边缘不通',
   DOWN: '不通',
-  UNPROBED: '未测大陆',
-  PROBE_PARTIAL: '未测大陆',
-  CHECK_FAILED: '基线失败',
+  UNPROBED: '大陆未测',
+  PROBE_PARTIAL: '大陆未测',
+  CHECK_FAILED: '探测失败',
 };
 
 export function blockStatus(node: LiveQualityNodeDto) {

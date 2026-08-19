@@ -1,10 +1,39 @@
 /* shadcn/ui zinc dark tokens — close to satnaing/shadcn-admin */
 :root {
+  --background: 230 28% 96%;
+  --foreground: 228 22% 14%;
+  --card: 0 0% 100%;
+  --card-foreground: 228 22% 14%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 228 22% 14%;
+  --primary: 228 22% 14%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 228 20% 92%;
+  --secondary-foreground: 228 22% 18%;
+  --muted: 228 16% 92%;
+  --muted-foreground: 228 10% 40%;
+  --accent: 228 20% 92%;
+  --accent-foreground: 228 22% 14%;
+  --destructive: 0 62.8% 50%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 228 16% 84%;
+  --input: 228 16% 84%;
+  --ring: 228 60% 48%;
+  --success: 142 71% 38%;
+  --warning: 38 92% 46%;
+  --radius: 1rem;
+  --sidebar-width: 16rem;
+  --header-height: 3.5rem;
+  --glass: rgb(255 255 255 / 0.62);
+}
+
+@media (prefers-color-scheme: dark) {
+:root {
   --background: 240 10% 3.9%;
   --foreground: 0 0% 98%;
-  --card: 240 10% 3.9%;
+  --card: 240 10% 8%;
   --card-foreground: 0 0% 98%;
-  --popover: 240 10% 3.9%;
+  --popover: 240 10% 8%;
   --popover-foreground: 0 0% 98%;
   --primary: 0 0% 98%;
   --primary-foreground: 240 5.9% 10%;
@@ -16,14 +45,16 @@
   --accent-foreground: 0 0% 98%;
   --destructive: 0 62.8% 50%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
+  --border: 240 3.7% 22%;
+  --input: 240 3.7% 22%;
   --ring: 240 4.9% 83.9%;
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
-  --radius: 0.5rem;
-  --sidebar-width: 16rem;
-  --header-height: 3.5rem;
+  --glass: rgb(18 18 28 / 0.55);
+}
+}
+
+:root {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-feature-settings: "rlig" 1, "calt" 1;
   font-synthesis: none;
@@ -914,6 +945,34 @@ dd { margin: 0; text-align: right; font-weight: 500; }
 .node-blocked, .node-down { border-color: hsl(0 40% 28%); }
 
 .catalog-footnote { font-size: 0.75rem; }
+
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16.5rem, 1fr));
+  gap: 0.85rem;
+  padding: 1rem 1.15rem 1.2rem;
+}
+.server-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  cursor: pointer;
+  text-align: left;
+}
+.server-card:hover { border-color: hsl(var(--ring) / 0.45); }
+.server-card.open { outline: 2px solid hsl(var(--ring) / 0.35); }
+.server-card-top { display: flex; justify-content: space-between; gap: 0.5rem; align-items: flex-start; }
+.server-card-top strong { font-size: 0.95rem; }
+.server-card-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 0.75rem; font-size: 0.75rem; color: hsl(var(--muted-foreground)); }
+@media (prefers-reduced-transparency: reduce), (prefers-reduced-motion: reduce) {
+  .server-card { backdrop-filter: none; -webkit-backdrop-filter: none; background: hsl(var(--card)); }
+}
 
 /* —— Dashboard split cards —— */
 .dash-split {

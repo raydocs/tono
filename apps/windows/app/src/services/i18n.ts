@@ -4,7 +4,8 @@ import { initReactI18next } from 'react-i18next'
 export const supportedLanguages = ['en', 'zh']
 
 export const FALLBACK_LANGUAGE = 'zh'
-const LANGUAGE_STORAGE_KEY = 'verge-language'
+const LANGUAGE_STORAGE_KEY = 'tono-language'
+const LEGACY_LANGUAGE_STORAGE_KEY = 'verge-language'
 
 const normalizeLanguage = (language?: string) =>
   language?.toLowerCase().replace(/_/g, '-')
@@ -45,7 +46,9 @@ export const cacheLanguage = (language: string) => {
   if (!storage) return
 
   try {
-    storage.setItem(LANGUAGE_STORAGE_KEY, resolveLanguage(language))
+    const resolved = resolveLanguage(language)
+    storage.setItem(LANGUAGE_STORAGE_KEY, resolved)
+    storage.removeItem(LEGACY_LANGUAGE_STORAGE_KEY)
   } catch (error) {
     console.warn('[i18n] Failed to cache language:', error)
   }
@@ -56,7 +59,9 @@ export const getCachedLanguage = () => {
   if (!storage) return undefined
 
   try {
-    const cached = storage.getItem(LANGUAGE_STORAGE_KEY)
+    const cached =
+      storage.getItem(LANGUAGE_STORAGE_KEY) ??
+      storage.getItem(LEGACY_LANGUAGE_STORAGE_KEY)
     return cached ? resolveLanguage(cached) : undefined
   } catch (error) {
     console.warn('[i18n] Failed to read cached language:', error)

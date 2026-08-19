@@ -29,11 +29,11 @@ function App() {
           <span className="brand-mark">T</span>
           <div className="brand-text">
             <strong>Tono</strong>
-            <small>运维</small>
+            <small>后台</small>
           </div>
         </div>
 
-        <nav className="sidebar-nav" aria-label="运维页面">
+        <nav className="sidebar-nav" aria-label="后台页面">
           {groups.map(([group, items]) => (
             <div key={group} className="nav-block">
               <div className="nav-group">{group}</div>
@@ -52,7 +52,7 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <span className="muted">唯一运维入口</span>
+          <span className="muted">内部后台</span>
         </div>
       </aside>
 
@@ -78,7 +78,7 @@ function App() {
                 ))}
               </select>
             </label>
-            <span className="badge">Access admin</span>
+            <span className="badge">已登录</span>
           </div>
         </header>
 
@@ -87,10 +87,10 @@ function App() {
             <div>
               <h1>{selected.label}</h1>
               <p>
-                {page === 'dashboard' && '红条、库存、谁在线、该处理谁'}
-                {page === 'monitor' && '探测、指标、余量、续费、打开账单'}
-                {page === 'users' && '开通、派线、Claude 账本'}
-                {page === 'control' && '替换节点目录和精确直连策略'}
+                {page === 'dashboard' && '看告警、库存和谁在线'}
+                {page === 'monitor' && '看节点状态、余量和续费'}
+                {page === 'users' && '开通客户、绑家宽、管 Claude'}
+                {page === 'control' && '更新节点目录和国内直连规则'}
               </p>
             </div>
           </div>

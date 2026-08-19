@@ -125,7 +125,32 @@ const ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS = 3;
 // Release-host aliases rewrite to the same static asset path. Include an
 // explicit revision in the inner asset request so a previously cached alias
 // cannot keep serving an older Sparkle feed after an asset-only deployment.
-const RELEASE_ASSET_REVISION = 'macos-build62-20260812';
+const RELEASE_ASSET_REVISION = 'site-public-pages-20260819';
+
+export function parseBytesRange(header: string | null, size: number): { offset: number; length: number } | null {
+  if (!header || size <= 0) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match) return null;
+  const startText = match[1];
+  const endText = match[2];
+  if (startText === '' && endText === '') return null;
+  let start: number;
+  let end: number;
+  if (startText === '') {
+    const suffix = Number(endText);
+    if (!Number.isFinite(suffix) || suffix <= 0) return null;
+    start = Math.max(0, size - suffix);
+    end = size - 1;
+  } else {
+    start = Number(startText);
+    end = endText === '' ? size - 1 : Number(endText);
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= size) {
+    return null;
+  }
+  if (end >= size) end = size - 1;
+  return { offset: start, length: end - start + 1 };
+}
 const deviceActions = ['diagnostic_snapshot', 'claude_traffic_snapshot', 'refresh_catalog', 'retry_protection'] as const;
 /** Failure vocabulary for device-action snapshots. (Diagnostics uploads carry
  *  the client's own free-text `error`/`failedStage` instead; see
@@ -7110,6 +7135,13 @@ export default {
       if (path.startsWith('/api/') || path === '/' || path === '/ops' || path === '/ops/' || path.endsWith('.html')) {
         h.set('cache-control', 'no-store');
       }
+      if (isReleaseHost) {
+        h.set('strict-transport-security', 'max-age=31536000; includeSubDomains');
+        h.set(
+          'content-security-policy',
+          "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'",
+        );
+      }
       if (includeCors && origin) {
         h.set('access-control-allow-origin', origin);
         h.append('vary', 'Origin');
@@ -7131,16 +7163,34 @@ export default {
       // from here is verified exactly as before.
       const download = /^\/download\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/.exec(path);
       if (download) {
-        const object = await e.RELEASES.get(download[1]);
+        const key = download[1];
+        const sizeHint = (await e.RELEASES.head(key))?.size ?? 0;
+        const range = parseBytesRange(req.headers.get('range'), sizeHint);
+        const object = range
+          ? await e.RELEASES.get(key, { range: { offset: range.offset, length: range.length } })
+          : await e.RELEASES.get(key);
         if (!object) return secure(new Response('Not found', { status: 404 }), false);
         const headers = new Headers();
         object.writeHttpMetadata(headers);
         headers.set('etag', object.httpEtag);
-        headers.set('content-length', String(object.size));
-        // An installer at a given filename never changes: a new build is a new
-        // name. Caching it hard is what keeps a 30 MB download off the origin.
+        headers.set('accept-ranges', 'bytes');
         headers.set('cache-control', 'public, max-age=31536000, immutable');
-        headers.set('content-disposition', `attachment; filename="${download[1]}"`);
+        headers.set('content-disposition', `attachment; filename="${key}"`);
+        if (range) {
+          const end = range.offset + range.length - 1;
+          headers.set('content-range', `bytes ${range.offset}-${end}/${sizeHint || '*'}`);
+          headers.set('content-length', String(range.length));
+          if (req.method === 'HEAD') {
+            return secure(new Response(null, { status: 206, headers }), false);
+          }
+          const bytes = await object.arrayBuffer();
+          const start = bytes.byteLength === sizeHint ? range.offset : 0;
+          return secure(new Response(bytes.slice(start, start + range.length), {
+            status: 206,
+            headers,
+          }), false);
+        }
+        headers.set('content-length', String(object.size));
         return secure(new Response(req.method === 'HEAD' ? null : object.body, { headers }), false);
       }
 
@@ -7158,6 +7208,17 @@ export default {
         // were the ones who could not be told one existed, unless they were
         // already connected through the product being fixed.
         ['/windows/latest.json', '/windows/latest.json'],
+        ['/favicon.svg', '/releases/favicon.svg'],
+        ['/favicon.ico', '/releases/favicon.svg'],
+        ['/robots.txt', '/releases/robots.txt'],
+        ['/sitemap.xml', '/releases/sitemap.xml'],
+        ['/.well-known/security.txt', '/releases/security.txt'],
+        ['/help', '/releases/help.html'],
+        ['/help/', '/releases/help.html'],
+        ['/status', '/releases/status.html'],
+        ['/status/', '/releases/status.html'],
+        ['/archive', '/releases/archive.html'],
+        ['/archive/', '/releases/archive.html'],
       ]).get(path);
       if (!assetPath) {
         return secure(new Response('Not found', { status: 404 }), false);

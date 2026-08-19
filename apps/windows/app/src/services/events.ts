@@ -10,20 +10,25 @@ import type { RunState } from './cmds'
  * itself, but it does mean the frontend has exactly one place to look and one payload type
  * per name instead of a `listen<T>` guess at each call site.
  */
-interface VergeEvents {
+interface TonoEvents {
   /** The core's own configuration changed. */
+  'tono://refresh-core-config': string
   'verge://refresh-clash-config': string
   /** The app's configuration changed. */
+  'tono://refresh-preferences': string
   'verge://refresh-verge-config': string
   /** The set of profiles changed. */
+  'tono://refresh-profiles': string
   'verge://refresh-profiles': string
   /** The active profile's proxies changed. */
   'verge://refresh-proxy-config': null
   /** A backend message for the user: `[status, message]`. */
+  'tono://notice-message': [string, string]
   'verge://notice-message': [string, string]
   /** A profile's auto-update timer was rescheduled. */
   'verge://timer-updated': string
   /** How the core is running changed; carries the whole snapshot. */
+  'tono://run-state-changed': RunState
   'verge://run-state-changed': RunState
   /** Which profile is active changed. */
   'profile-changed': string
@@ -33,10 +38,10 @@ interface VergeEvents {
   'verge://test-all': null
 }
 
-type VergeEventName = keyof VergeEvents
+type TonoEventName = keyof TonoEvents
 
-type VergeEventHandlers = {
-  [Name in VergeEventName]?: (payload: VergeEvents[Name]) => void
+type TonoEventHandlers = {
+  [Name in TonoEventName]?: (payload: TonoEvents[Name]) => void
 }
 
 /**
@@ -52,8 +57,8 @@ type VergeEventHandlers = {
  * whenever the backend happens to move again. Re-reading at that point closes the gap without
  * going back to polling for it.
  */
-export const subscribeVergeEvents = (
-  handlers: VergeEventHandlers,
+export const subscribeTonoEvents = (
+  handlers: TonoEventHandlers,
   onSubscribed?: () => void,
 ): (() => void) => {
   let disposed = false
@@ -96,3 +101,6 @@ export const subscribeVergeEvents = (
     }
   }
 }
+
+/** @deprecated use subscribeTonoEvents */
+export const subscribeVergeEvents = subscribeTonoEvents

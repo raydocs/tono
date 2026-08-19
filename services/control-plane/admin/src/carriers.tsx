@@ -63,7 +63,7 @@ export function CarrierPing({ carriers }: { carriers: CarrierPingMapDto }) {
         // Same rule as the exposure panel next to it: an empty measurement is
         // not a good one.
         <p className="muted">
-          还没有三网 Ping 样本。这一栏空着不代表通畅——它只说明没测过。
+          还没测过三网延迟。空着不代表通，只是没测。
         </p>
       ) : (
         <>
@@ -73,13 +73,13 @@ export function CarrierPing({ carriers }: { carriers: CarrierPingMapDto }) {
           </div>
           {probed.length < rows.length && (
             <p className="muted carrier-note">
-              {rows.filter((row) => !row.probed).map((row) => row.label).join('、')}没有样本，不是 0。
+              {rows.filter((row) => !row.probed).map((row) => row.label).join('、')}还没有数据，不是 0。
             </p>
           )}
         </>
       )}
       <p className="muted carrier-note">
-        这是节点打向大陆的方向。大陆能否连进来是上面「状态」的判定，两者不能互相替代。
+        这是从节点打回大陆的延迟。大陆能不能连进来，看上面的状态，两回事。
       </p>
     </div>
   );

@@ -253,21 +253,16 @@ describe('ConnectProgressCard', () => {
     renderCard()
 
     await waitFor(() =>
-      expect(screen.getByTestId('tono-step-preparing')).toBeDefined(),
+      expect(screen.getByTestId('tono-step-startingTunnel')).toBeDefined(),
     )
-    expect(screen.getByTestId('tono-step-preparing').dataset.state).toBe(
-      'completed',
-    )
+    expect(screen.queryByTestId('tono-step-preparing')).toBeNull()
     expect(screen.getByTestId('tono-step-startingTunnel').dataset.state).toBe(
       'current',
     )
-    expect(screen.getByTestId('tono-step-lockingTraffic').dataset.state).toBe(
-      'pending',
-    )
-    // Localized step labels and the current step's elapsed time.
-    expect(screen.getByText('Preparing protection…')).toBeDefined()
+    expect(screen.queryByTestId('tono-step-lockingTraffic')).toBeNull()
+    expect(screen.getByText('Starting the protected tunnel…')).toBeDefined()
     expect(screen.getByText('3.4s')).toBeDefined()
-    expect(screen.getByText('TOTAL 4.6s')).toBeDefined()
+    expect(screen.getByText('1 completed')).toBeDefined()
   })
 
   it('shows the failure block for an uncleared failure even when idle', async () => {
@@ -286,11 +281,13 @@ describe('ConnectProgressCard', () => {
     // keeps the card visible.
     renderCard({ uiState: 'connected' })
 
+    expect(
+      await screen.findByText('This route did not pass the connection check'),
+    ).toBeDefined()
+    fireEvent.click(screen.getByText(/Technical details/))
     const errorBlock = await screen.findByTestId('tono-progress-error')
     expect(errorBlock.textContent).toContain('dns probe failed: exit refused')
-    expect(
-      screen.getByText('Failed at Securing and verifying DNS…'),
-    ).toBeDefined()
+    expect(screen.getByText(/Failed at Securing and verifying DNS/)).toBeDefined()
     expect(screen.getByTestId('tono-step-securingDNS').dataset.state).toBe(
       'failed',
     )
@@ -391,7 +388,7 @@ describe('ConnectProgressCard', () => {
     expect(copied).toContain('Tono v0.0.3 diagnostics')
     expect(copied).toContain('Server: US West 1')
     expect(copied).toContain(
-      'Kill switch: inactive (reported mode=blocked, wanted=false, live=false)',
+      'Protection: inactive (reported mode=blocked, wanted=false, live=false)',
     )
     expect(copied).toContain('Failed stage: startingTunnel')
     expect(copied).toContain('Error: dns probe failed')
@@ -556,7 +553,7 @@ describe('ConnectProgressCard', () => {
       ],
       [
         'TONO_DIAG_UNREACHABLE: could not reach Tono: connection refused',
-        'Could not reach Tono. Check that you are online — if the kill switch is blocking everything, Restore Normal Internet first, then retry.',
+        'Could not reach Tono. Check that you are online — if leak protection is blocking everything, restore normal internet first, then retry.',
       ],
     ])(
       'explains %s actionably and keeps the action available',

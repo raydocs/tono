@@ -1292,6 +1292,8 @@ const MAX_DIRECT_SAMPLES: usize = 512;
 #[derive(Debug, Clone, serde::Deserialize)]
 struct SampledConnection {
     #[serde(default)]
+    id: String,
+    #[serde(default)]
     metadata: SampledMetadata,
     #[serde(default)]
     chains: Vec<String>,
@@ -2628,15 +2630,134 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle) {
     });
 }
 
-/// §6 node switch while a tunnel is up. The WFP endpoint permit can only
-/// move through `StartClash` (runtime staging carries no kill-switch
-/// config), so the switch is a keep-blocking teardown followed by the full
-/// transaction: the new permit is armed before the new selector starts. On
-/// failure the core stays down and blocking — never a fall back (§6).
+/// Connected node switch: keep the core and WinTUN, widen WFP to old ∪ new,
+/// move the Mihomo selector, prove the new exit, then drop leftover sockets
+/// on the previous destination and shrink WFP to new-only.
 ///
 /// `generation` is the connect generation the switch was spawned under; a
 /// newer bump (another switch, disconnect, sign-out) retires it silently.
-pub async fn switch_selected_node(state: Arc<TonoState>, app: AppHandle, generation: u64) {
+pub async fn switch_selected_node(
+    state: Arc<TonoState>,
+    app: AppHandle,
+    generation: u64,
+    previous_name: String,
+    next_name: String,
+) {
+    let snapshot = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return;
+        }
+        if !inner.fsm.status().is_connected {
+            return;
+        }
+        let previous = inner
+            .nodes
+            .iter()
+            .find(|node| node.name == previous_name)
+            .cloned();
+        let next = inner.nodes.iter().find(|node| node.name == next_name).cloned();
+        let routing = inner.routing.clone();
+        let nodes = inner.nodes.clone();
+        let secret = inner.controller_secret.clone();
+        let port = inner.controller_port;
+        (previous, next, routing, nodes, secret, port)
+    };
+    let (previous, next, routing, nodes, secret, port) = snapshot;
+    let Some(next) = next else {
+        return;
+    };
+    let old_endpoints = previous
+        .as_ref()
+        .map(|node| proxy_endpoints_for(node, &nodes, routing.as_ref()))
+        .unwrap_or_default();
+    let new_endpoints = proxy_endpoints_for(&next, &nodes, routing.as_ref());
+    let union = unique_proxy_endpoints([&old_endpoints[..], &new_endpoints[..]].concat());
+    if union.is_empty() {
+        return;
+    }
+
+    let session = match service::active_service_session() {
+        Ok(session) => session,
+        Err(error) => {
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: hot switch missing Service session ({error:#}); falling back to cold switch"
+            );
+            cold_switch_selected_node(state, app, generation).await;
+            return;
+        }
+    };
+    if let Err(error) = service::tono_replace_proxy_endpoints(&session, union).await {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: hot switch could not widen WFP ({error:#}); falling back to cold switch"
+        );
+        cold_switch_selected_node(state, app, generation).await;
+        return;
+    }
+    if state.lock().await.connect_generation != generation {
+        let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
+        return;
+    }
+
+    let Some((secret, port)) = secret.zip(port) else {
+        let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
+        cold_switch_selected_node(state, app, generation).await;
+        return;
+    };
+    if let Err(error) = select_exit_group(&secret, port, &next_name).await {
+        logging!(warn, Type::Service, "Tono: selector switch failed: {error}");
+        let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
+        return;
+    }
+    if state.lock().await.connect_generation != generation {
+        let _ = select_exit_group(&secret, port, &previous_name).await;
+        let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
+        return;
+    }
+
+    if let Err(error) = verify_tun_data_plane().await {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: new exit failed protected probe ({error}); rolling back"
+        );
+        if !previous_name.is_empty() {
+            let _ = select_exit_group(&secret, port, &previous_name).await;
+        }
+        let rollback_ok = verify_tun_data_plane().await.is_ok();
+        let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints.clone()).await;
+        if !rollback_ok {
+            let mut inner = state.lock().await;
+            if inner.connect_generation != generation {
+                return;
+            }
+            inner.fsm.tunnel_died();
+            commands::emit_status(&app, &commands::status_of(&inner));
+            drop(inner);
+            schedule_reconnect(&state, &app).await;
+        }
+        return;
+    }
+
+    close_connections_bound_to(&state, generation, &previous_name).await;
+    if let Err(error) = service::tono_replace_proxy_endpoints(&session, new_endpoints).await {
+        logging!(
+            warn,
+            Type::Service,
+            "Tono: could not shrink WFP to the new exit ({error:#}); leaving old∪new permits"
+        );
+    }
+    let inner = state.lock().await;
+    if inner.connect_generation == generation {
+        commands::emit_status(&app, &commands::status_of(&inner));
+    }
+}
+
+async fn cold_switch_selected_node(state: Arc<TonoState>, app: AppHandle, generation: u64) {
     {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation {
@@ -2650,18 +2771,11 @@ pub async fn switch_selected_node(state: Arc<TonoState>, app: AppHandle, generat
         if inner.fsm.status().is_connected {
             inner.fsm.tunnel_died();
         } else {
-            // Keep-blocking teardown: see the note in `selected_node_vanished`. A switch that
-            // interrupts an armed-but-unverified attempt must not let the decision table
-            // release the latch the Service is still enforcing.
             inner.fsm.initial_release_failed();
         }
         commands::emit_status(&app, &commands::status_of(&inner));
     }
-    // Keep the barrier up between the old and the new tunnel.
     let _ = service::tono_stop_core(false).await;
-    // The entry check above is not enough: that stop is an IPC that can take seconds, and a
-    // disconnect landing inside it owns the machine from that point on. Without this the switch
-    // would re-arm WFP and start a core after the user's release had already completed.
     if state.lock().await.connect_generation != generation {
         return;
     }
@@ -2670,8 +2784,6 @@ pub async fn switch_selected_node(state: Arc<TonoState>, app: AppHandle, generat
             let _ = fail_connect(&state, &app, err).await;
             schedule_reconnect(&state, &app).await;
         }
-        // Same reason as in `reconnect_loop`: a guard that clears on its own must leave a retry
-        // behind, or the switch ends with the machine blocked and idle.
         Attempt::GuardRejected(reason) if guard_rejection_is_transient(&reason) => {
             logging!(info, Type::Service, "Tono: 节点切换被暂态守卫拒绝，稍后重试: {reason}");
             schedule_reconnect(&state, &app).await;
@@ -2973,10 +3085,28 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
         if !status.is_connected || status.is_disconnecting {
             return;
         }
-        inner.fsm.tunnel_died();
-        commands::emit_status(&app, &commands::status_of(&inner));
         inner.connect_generation
     };
+    // Prefer an in-place proof while the core is still the same process.
+    // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
+    // first reconnect on "DNS 53 busy" because the just-killed listener was
+    // the one we needed.
+    if verify_tun_data_plane().await.is_ok() {
+        logging!(
+            info,
+            Type::Service,
+            "Tono: network change recovered in place; core was not restarted"
+        );
+        return;
+    }
+    {
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
+            return;
+        }
+        inner.fsm.tunnel_died();
+        commands::emit_status(&app, &commands::status_of(&inner));
+    }
     state.audit().log(AuditEvent::ProtectedOffline {
         reason: "networkChange",
     });
@@ -3026,6 +3156,114 @@ pub fn proxy_endpoint_of(node: &ValidatedNode) -> ProxyEndpoint {
         ip: node.server.to_string(),
         port: node.port,
         protocol: ProxyProtocol::Tcp,
+    }
+}
+
+fn proxy_endpoints_for(
+    node: &ValidatedNode,
+    nodes: &[ValidatedNode],
+    routing: Option<&tono_core::CatalogRouting>,
+) -> Vec<ProxyEndpoint> {
+    let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
+    let home_node = if home_socks5.is_some() {
+        None
+    } else {
+        routing
+            .and_then(|routing| routing.home_proxy.as_deref())
+            .and_then(|name| nodes.iter().find(|entry| entry.name == name))
+    };
+    let mut endpoints = vec![proxy_endpoint_of(node)];
+    if let Some(home) = home_node
+        && (home.server != node.server || home.port != node.port)
+    {
+        endpoints.push(proxy_endpoint_of(home));
+    }
+    endpoints
+}
+
+pub fn unique_proxy_endpoints(endpoints: Vec<ProxyEndpoint>) -> Vec<ProxyEndpoint> {
+    let mut unique = Vec::new();
+    for endpoint in endpoints {
+        if !unique.iter().any(|existing: &ProxyEndpoint| {
+            existing.ip == endpoint.ip
+                && existing.port == endpoint.port
+                && existing.protocol == endpoint.protocol
+        }) {
+            unique.push(endpoint);
+        }
+    }
+    unique
+}
+
+async fn select_exit_group(secret: &str, port: u16, name: &str) -> Result<(), String> {
+    let client = controller_client(Duration::from_secs(3))?;
+    let url = controller_url(port, &format!("/proxies/{EXIT_GROUP_NAME}"));
+    let response = client
+        .put(url)
+        .bearer_auth(secret)
+        .json(&serde_json::json!({ "name": name }))
+        .send()
+        .await
+        .map_err(|error| format!("selector request failed: {error}"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("selector returned {}", response.status()))
+    }
+}
+
+async fn close_connections_bound_to(state: &Arc<TonoState>, generation: u64, exit_name: &str) {
+    if exit_name.is_empty() {
+        return;
+    }
+    let (secret, port) = {
+        let inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return;
+        }
+        match inner.controller_secret.clone().zip(inner.controller_port) {
+            Some(pair) => pair,
+            None => return,
+        }
+    };
+    let Ok(client) = controller_client(Duration::from_secs(2)) else {
+        return;
+    };
+    let Ok(response) = client
+        .get(controller_url(port, "/connections"))
+        .bearer_auth(&secret)
+        .send()
+        .await
+    else {
+        return;
+    };
+    let Ok(payload) = response.json::<SampledConnections>().await else {
+        return;
+    };
+    for connection in payload.connections {
+        if !connection
+            .chains
+            .iter()
+            .any(|hop| hop.eq_ignore_ascii_case(exit_name))
+        {
+            continue;
+        }
+        if connection.id.is_empty() {
+            continue;
+        }
+        let Ok(mut url) = reqwest::Url::parse(&controller_url(port, "/connections")) else {
+            continue;
+        };
+        if url.path_segments_mut().is_ok() {
+            let _ = url.path_segments_mut().map(|mut segments| {
+                segments.push(&connection.id);
+            });
+        }
+        let _ = client
+            .delete(url)
+            .bearer_auth(&secret)
+            .send()
+            .await;
     }
 }
 
@@ -3507,18 +3745,15 @@ async fn verify_locked_data_plane() -> Result<KillSwitchStatus, String> {
 }
 
 async fn verify_tun_data_plane() -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(TUN_DATA_PLANE_CONNECT_TIMEOUT)
-        .timeout(TUN_DATA_PLANE_TIMEOUT)
-        .build()
-        .map_err(|error| format!("cannot create TUN data-plane probe: {error}"))?;
     crate::tono::integration_profile::delay_remote_operation().await;
-
-    race_data_plane_probes(&client)
-        .await
-        .map_err(|failures| format_tun_probe_failures(&failures))
+    crate::tono::protected_probe::verify_protected_origins(
+        TUN_DATA_PLANE_CONNECT_TIMEOUT,
+        TUN_DATA_PLANE_TIMEOUT,
+        TUN_PROBE_STAGGER,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|failures| crate::tono::protected_probe::format_failures(&failures))
 }
 
 /// Diagnostic-only App ingress through Mihomo's ephemeral loopback mixed listener. This bypasses
@@ -5499,6 +5734,7 @@ mod tests {
         health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
+        unique_proxy_endpoints,
         reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
         stale_exit_needs_release, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
         fake_ip_attempt_timeout, stop_core_before_release, tun_probe_stagger, validate_direct_reload_result,
@@ -6036,6 +6272,25 @@ mod tests {
         assert!(stopped.contains("Stopped"));
 
         assert!(map_wfp_engine_error("kill switch lock failed: owner mismatch").is_none());
+    }
+
+    #[test]
+    fn unique_proxy_endpoints_keep_order_and_drop_duplicates() {
+        use tono_service_protocol::{ProxyEndpoint, ProxyProtocol};
+        let a = ProxyEndpoint {
+            ip: "203.0.113.10".into(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        };
+        let b = ProxyEndpoint {
+            ip: "198.51.100.20".into(),
+            port: 443,
+            protocol: ProxyProtocol::Tcp,
+        };
+        assert_eq!(
+            unique_proxy_endpoints(vec![a.clone(), b.clone(), a.clone()]),
+            vec![a, b]
+        );
     }
 
     #[test]

@@ -489,6 +489,10 @@ nonisolated struct APIConnection: Codable, Sendable {
     let chains: [String]
     let rule: String
     let rulePayload: String?
+
+    func isBoundToExit(_ exitName: String) -> Bool {
+        chains.contains { $0.caseInsensitiveCompare(exitName) == .orderedSame }
+    }
 }
 
 nonisolated struct APIConnectionMetadata: Codable, Sendable {

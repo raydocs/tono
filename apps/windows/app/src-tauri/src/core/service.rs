@@ -24,6 +24,7 @@ use tono_service_protocol::{
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, KillSwitchConfig,
     KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode, MacosProxyConfig, OwnerCredentials,
     OwnerSessionProof, ProxyApplyOutcome, RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest,
+    ReplaceProxyEndpointsRequest,
     RuntimeBundle, ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StopClashOptions, WriterConfig,
 };
 use once_cell::sync::Lazy;
@@ -1404,6 +1405,19 @@ pub(crate) async fn tono_begin_direct_runtime_reload(session: &OwnerSessionProof
         "DIRECT begin remained ambiguous after replay: {}",
         last_ambiguous.unwrap_or_else(|| "no response".to_owned())
     )
+}
+
+pub(crate) async fn tono_replace_proxy_endpoints(
+    session: &OwnerSessionProof,
+    proxy_endpoints: Vec<tono_service_protocol::ProxyEndpoint>,
+) -> Result<()> {
+    let credentials = current_owner_credentials()?;
+    let request = ReplaceProxyEndpointsRequest { proxy_endpoints };
+    match tono_service_protocol::replace_proxy_endpoints(&credentials, session, request).await {
+        Ok(response) if response.code > 0 => bail!(response.message),
+        Ok(_) => Ok(()),
+        Err(error) => Err(error).context("无法连接到Tono Service"),
+    }
 }
 
 /// Atomically commit the complete exact DIRECT endpoint set with one captured owner session.

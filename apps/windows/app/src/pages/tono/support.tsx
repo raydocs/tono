@@ -16,8 +16,11 @@ import {
   type TonoDiagnosticsReport,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { PageHeader } from '@/tono-ui/PageHeader'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+
+import { nodeCityTitleKey, nodeDisplayName } from './node-meta'
 
 const diagnosticsQueryKey = ['tonoDiagnosticsReport'] as const
 const auditLogPathQueryKey = ['tonoAuditLogPath'] as const
@@ -32,14 +35,32 @@ const boolStatus = (
   disabled: string,
 ) => (value == null ? '—' : value ? enabled : disabled)
 
+const protectionModeKey = (mode: string) => {
+  switch (mode) {
+    case 'locked':
+      return 'tono.support.protection.locked' as const
+    case 'blocked':
+      return 'tono.support.protection.blocked' as const
+    case 'bootstrap':
+      return 'tono.support.protection.bootstrap' as const
+    default:
+      return null
+  }
+}
+
 const protectionSummary = (
   report: TonoDiagnosticsReport,
-  enabled: string,
-  disabled: string,
+  translate: (key: string) => string,
 ) => {
   if (report.killSwitchMode == null) return '—'
-  const live = boolStatus(report.killSwitchLive, enabled, disabled)
-  return `${report.killSwitchMode} · ${live}`
+  const modeKey = protectionModeKey(report.killSwitchMode)
+  const mode = modeKey ? translate(modeKey) : report.killSwitchMode
+  const live = boolStatus(
+    report.killSwitchLive,
+    translate('tono.support.enabled'),
+    translate('tono.support.disabled'),
+  )
+  return `${mode} · ${live}`
 }
 
 const SummaryRow = ({
@@ -184,33 +205,22 @@ const SupportPage = () => {
 
   return (
     <div className="tono-page">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 18,
-        }}
-      >
-        <div>
-          <h1 className="tono-page-title" style={{ color: text.primary }}>
-            {t('tono.support.title')}
-          </h1>
-          <p style={{ margin: '6px 0 0', fontSize: 12, color: text.secondary }}>
-            {t('tono.support.subtitle')}
-          </p>
-        </div>
-        <button
-          type="button"
-          className="tono-button"
-          onClick={() => void refreshReport()}
-          disabled={isLoading}
-          style={buttonStyle}
-        >
-          <RefreshRoundedIcon style={{ fontSize: 15 }} />
-          {t('tono.support.refresh')}
-        </button>
-      </div>
+      <PageHeader
+        title={t('tono.support.title')}
+        subtitle={t('tono.support.subtitle')}
+        trailing={
+          <button
+            type="button"
+            className="tono-button"
+            onClick={() => void refreshReport()}
+            disabled={isLoading}
+            style={buttonStyle}
+          >
+            <RefreshRoundedIcon style={{ fontSize: 15 }} />
+            {t('tono.support.refresh')}
+          </button>
+        }
+      />
 
       <div style={{ display: 'grid', gap: 14, maxWidth: 680 }}>
         <GlassCard radius={18} padding={18}>
@@ -238,15 +248,7 @@ const SupportPage = () => {
           />
           <SummaryRow
             label={t('tono.support.summary.protection')}
-            value={
-              report
-                ? protectionSummary(
-                    report,
-                    t('tono.support.enabled'),
-                    t('tono.support.disabled'),
-                  )
-                : '—'
-            }
+            value={report ? protectionSummary(report, t) : '—'}
           />
           <SummaryRow
             label={t('tono.support.summary.dns')}
@@ -262,7 +264,13 @@ const SupportPage = () => {
           />
           <SummaryRow
             label={t('tono.support.summary.node')}
-            value={report ? valueOrUnknown(report.selectedServer) : '—'}
+            value={
+              report?.selectedServer
+                ? nodeCityTitleKey(report.selectedServer)
+                  ? t(nodeCityTitleKey(report.selectedServer)!)
+                  : nodeDisplayName(report.selectedServer)
+                : '—'
+            }
           />
           <SummaryRow
             label={t('tono.support.summary.lastError')}

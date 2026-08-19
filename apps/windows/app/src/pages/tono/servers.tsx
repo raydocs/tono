@@ -20,15 +20,18 @@ import {
   TONO_MONO_STACK,
   tonoText,
 } from '@/tono-ui/theme'
+import { PageHeader } from '@/tono-ui/PageHeader'
 import { useTonoToast } from '@/tono-ui/tono-toast-context'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 
 import { latencyColor, readNodeLatency } from './node-latency'
+
 import {
+  nodeCityParts,
+  nodeCityTitleKey,
   nodeCode,
   nodeDisplayName,
   nodeProtocol,
-  nodeRegion,
 } from './node-meta'
 
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
@@ -69,6 +72,8 @@ const ServersPage = () => {
   const [testingAll, setTestingAll] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null)
+  const [searchText, setSearchText] = useState('')
+  const [regionFilter, setRegionFilter] = useState<string | null>(null)
   const cancelRequestedRef = useRef(false)
   const [currentExitTest, setCurrentExitTest] = useState<{
     name: string
@@ -183,33 +188,45 @@ const ServersPage = () => {
   })
 
   const selected = (servers ?? []).find((server) => server.selected)
+  const query = searchText.trim().toLowerCase()
+  const visibleServers = useMemo(() => {
+    return (servers ?? []).filter((server) => {
+      const display = nodeDisplayName(server.name)
+      const parts = nodeCityParts(server.name)
+      const matchesQuery =
+        !query ||
+        display.toLowerCase().includes(query) ||
+        server.name.toLowerCase().includes(query) ||
+        parts.city.toLowerCase().includes(query) ||
+        (parts.codename?.toLowerCase().includes(query) ?? false)
+      const matchesRegion =
+        !regionFilter || nodeCode(server.name) === regionFilter
+      return matchesQuery && matchesRegion
+    })
+  }, [query, regionFilter, servers])
+  const regionOptions = useMemo(() => {
+    return Array.from(
+      new Set((servers ?? []).map((server) => nodeCode(server.name))),
+    ).sort()
+  }, [servers])
   const serverGroups = useMemo(() => {
-    const usable = (servers ?? []).filter(
-      (server) => server.available !== false,
-    )
+    const usable = visibleServers.filter((server) => server.available !== false)
+    const codes = Array.from(
+      new Set(usable.map((server) => nodeCode(server.name))),
+    ).sort()
     return [
-      {
-        key: 'us',
-        label: 'tono.nodes.regions.us' as const,
-        servers: usable.filter((server) => nodeRegion(server.name) === 'us'),
-      },
-      {
-        key: 'jp',
-        label: 'tono.nodes.regions.jp' as const,
-        servers: usable.filter((server) => nodeRegion(server.name) === 'jp'),
-      },
-      {
-        key: 'other',
-        label: 'tono.nodes.regions.other' as const,
-        servers: usable.filter((server) => nodeRegion(server.name) === 'other'),
-      },
+      ...codes.map((code) => ({
+        key: code,
+        label: code,
+        servers: usable.filter((server) => nodeCode(server.name) === code),
+      })),
       {
         key: 'unavailable',
-        label: 'tono.nodes.regions.unavailable' as const,
-        servers: (servers ?? []).filter((server) => server.available === false),
+        label: t('tono.nodes.regions.unavailable'),
+        servers: visibleServers.filter((server) => server.available === false),
       },
     ].filter((group) => group.servers.length > 0)
-  }, [servers])
+  }, [t, visibleServers])
   const canTestAll =
     status?.uiState === 'notConnected' &&
     catalog?.revision !== null &&
@@ -218,58 +235,49 @@ const ServersPage = () => {
 
   return (
     <div className="tono-page">
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 24,
-        }}
-      >
-        <h1 className="tono-page-title" style={{ color: text.primary }}>
-          {t('tono.nodes.title')}
-        </h1>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          <button
-            type="button"
-            className="tono-button"
-            onClick={() => void handleRefresh()}
-            disabled={refreshing || status?.accountState !== 'ready'}
-          >
-            {refreshing ? t('tono.nodes.refreshing') : t('tono.nodes.refresh')}
-          </button>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={testingAll ? handleCancelTests : handleTestAll}
-            disabled={testing || (!testingAll && !canTestAll)}
-          >
-            <TonoTestIcon />
-            {testingAll ? t('tono.nodes.cancelTest') : t('tono.nodes.testAll')}
-          </button>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={handleTestCurrent}
-            disabled={
-              testing ||
-              testingAll ||
-              !selected ||
-              status?.uiState !== 'connected'
-            }
-          >
-            <TonoTestIcon />
-            {testing ? '…' : t('tono.nodes.testCurrent')}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={t('tono.nodes.title')}
+        subtitle={t('tono.nodes.subtitle')}
+        trailing={
+          <>
+            <button
+              type="button"
+              className="tono-button"
+              onClick={testingAll ? handleCancelTests : handleTestAll}
+              disabled={testing || (!testingAll && !canTestAll)}
+              style={{
+                padding: '8px 14px',
+                color: text.primary,
+                background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.62)',
+                border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
+              }}
+            >
+              <TonoTestIcon />
+              {testingAll ? t('tono.nodes.cancelTest') : t('tono.nodes.testAll')}
+            </button>
+            <button
+              type="button"
+              className="tono-button"
+              onClick={handleTestCurrent}
+              disabled={
+                testing ||
+                testingAll ||
+                !selected ||
+                status?.uiState !== 'connected'
+              }
+              style={{
+                padding: '8px 14px',
+                color: text.primary,
+                background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.62)',
+                border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
+              }}
+            >
+              <TonoTestIcon />
+              {testing ? '…' : t('tono.nodes.testCurrent')}
+            </button>
+          </>
+        }
+      />
 
       <div
         style={{
@@ -282,27 +290,47 @@ const ServersPage = () => {
           fontSize: 12,
         }}
       >
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          <span>
-            {t('tono.nodes.catalogRevision', {
-              revision: catalog?.revision ?? '—',
-            })}
-          </span>
-          <span>
-            {t('tono.nodes.catalogNodes', {
-              count: catalog?.nodeCount ?? (servers ?? []).length,
-            })}
-          </span>
-          <span>
-            {catalog?.lastSyncedAtMs
-              ? t('tono.nodes.lastSynced', {
-                  time: new Date(catalog.lastSyncedAtMs).toLocaleString(),
-                })
-              : t('tono.nodes.waitingForSync')}
-          </span>
-        </div>
-        <div style={{ marginTop: 5, color: text.tertiary }}>
-          {t('tono.nodes.verifiedSyncHint')}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 650, color: text.primary }}>
+              {t('tono.nodes.catalogNodes', {
+                count: catalog?.nodeCount ?? (servers ?? []).length,
+              })}
+            </div>
+            <div style={{ marginTop: 2, color: text.tertiary, fontSize: 11 }}>
+              {catalog?.lastSyncedAtMs
+                ? t('tono.nodes.lastSynced', {
+                    time: new Date(catalog.lastSyncedAtMs).toLocaleString(),
+                  })
+                : t('tono.nodes.waitingForSync')}
+              {' · '}
+              {t('tono.nodes.catalogRevision', {
+                revision: catalog?.revision ?? '—',
+              })}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="tono-button"
+            onClick={() => void handleRefresh()}
+            disabled={refreshing || status?.accountState !== 'ready'}
+            style={{
+              padding: '7px 12px',
+              fontSize: 11,
+              color: text.primary,
+              background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)',
+            }}
+          >
+            {refreshing ? t('tono.nodes.refreshing') : t('tono.nodes.refresh')}
+          </button>
         </div>
         {(catalog?.error || refreshFeedback) && (
           <div
@@ -323,14 +351,75 @@ const ServersPage = () => {
 
       <div
         style={{
-          fontSize: 12,
-          fontWeight: 600,
-          letterSpacing: 0.15,
-          color: text.tertiary,
-          marginBottom: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          marginBottom: 16,
+          flexWrap: 'wrap',
         }}
       >
-        {t('tono.nodes.cloudServers')}
+        <label
+          className="tono-search"
+          style={{
+            flex: 1,
+            minWidth: 180,
+            color: text.secondary,
+            background: dark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.42)',
+            border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 12 }}>⌕</span>
+          <input
+            className="tono-input"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            placeholder={t('tono.nodes.search')}
+            aria-label={t('tono.nodes.search')}
+            style={{
+              padding: '8px 0',
+              border: 'none',
+              background: 'transparent',
+              color: text.primary,
+            }}
+          />
+        </label>
+        <div
+          className="tono-chip-row"
+          role="group"
+          aria-label={t('tono.nodes.regions.all')}
+          style={{
+            background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.32)',
+            border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(56,72,108,0.1)'}`,
+          }}
+        >
+          <button
+            type="button"
+            className="tono-chip"
+            aria-pressed={regionFilter === null}
+            onClick={() => setRegionFilter(null)}
+            style={{
+              color: regionFilter === null ? '#fff' : text.secondary,
+              background: regionFilter === null ? TONO_COLORS.accent : 'transparent',
+            }}
+          >
+            {t('tono.nodes.regions.all')}
+          </button>
+          {regionOptions.map((code) => (
+            <button
+              key={code}
+              type="button"
+              className="tono-chip"
+              aria-pressed={regionFilter === code}
+              onClick={() => setRegionFilter(code)}
+              style={{
+                color: regionFilter === code ? '#fff' : text.secondary,
+                background: regionFilter === code ? TONO_COLORS.accent : 'transparent',
+              }}
+            >
+              {code}
+            </button>
+          ))}
+        </div>
       </div>
 
       {selectError && (
@@ -346,6 +435,10 @@ const ServersPage = () => {
         <p style={{ fontSize: 13, color: text.secondary }}>
           {t('tono.nodes.empty')}
         </p>
+      ) : visibleServers.length === 0 ? (
+        <p style={{ fontSize: 13, color: text.secondary }}>
+          {t('tono.nodes.noMatches')}
+        </p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           {serverGroups.map((group) => (
@@ -360,7 +453,9 @@ const ServersPage = () => {
                   textTransform: 'uppercase',
                 }}
               >
-                {t(group.label)}
+                {group.key === 'unavailable'
+                  ? t('tono.nodes.regions.unavailable')
+                  : group.label}
               </div>
               {group.key === 'unavailable' && (
                 <p
@@ -423,7 +518,7 @@ const ServersPage = () => {
                         ? t('tono.nodes.testFailed')
                         : server.selected
                           ? t('tono.node.activeServer')
-                          : t('tono.node.group')
+                          : t('tono.nodes.readyToConnect')
                   return (
                     <button
                       key={server.name}
@@ -447,7 +542,7 @@ const ServersPage = () => {
                         gap: 14,
                         minHeight: 126,
                         padding: '16px 16px 14px',
-                        borderRadius: 16,
+                        borderRadius: 18,
                         fontFamily: 'inherit',
                         textAlign: 'left',
                         cursor: !available
@@ -471,6 +566,20 @@ const ServersPage = () => {
                         transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}, transform 0.15s ${TONO_EASE}`,
                       }}
                     >
+                      {server.selected && (
+                        <span
+                          aria-hidden
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 18,
+                            right: 18,
+                            height: 2,
+                            borderRadius: 999,
+                            background: `linear-gradient(90deg, ${TONO_COLORS.accent}, ${TONO_COLORS.accentSoft}, ${TONO_COLORS.accentWarm})`,
+                          }}
+                        />
+                      )}
                       <span
                         style={{
                           display: 'flex',
@@ -488,7 +597,10 @@ const ServersPage = () => {
                             flex: 1,
                           }}
                         >
-                          <TonoNodeBadge size={44} />
+                          <TonoNodeBadge
+                            size={44}
+                            city={nodeCityParts(server.name).city}
+                          />
                           <span
                             style={{
                               display: 'flex',
@@ -515,8 +627,27 @@ const ServersPage = () => {
                                   whiteSpace: 'nowrap',
                                 }}
                               >
-                                {nodeDisplayName(server.name)}
+                                {nodeCityTitleKey(server.name)
+                                  ? t(nodeCityTitleKey(server.name)!)
+                                  : nodeDisplayName(server.name)}
                               </span>
+                              {nodeCityParts(server.name).codename && (
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    padding: '2px 6px',
+                                    borderRadius: 999,
+                                    color: text.secondary,
+                                    background: dark
+                                      ? 'rgba(255,255,255,0.08)'
+                                      : 'rgba(20,22,30,0.05)',
+                                    fontSize: 9,
+                                    fontWeight: 650,
+                                  }}
+                                >
+                                  {nodeCityParts(server.name).codename}
+                                </span>
+                              )}
                               {server.selected && (
                                 <span
                                   style={{

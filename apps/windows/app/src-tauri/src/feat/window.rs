@@ -149,6 +149,15 @@ pub async fn restart_app() {
     app_handle.restart();
 }
 
+/// Restart for a prepared update. Keep WFP armed; do not quit_release.
+pub async fn restart_for_update() {
+    logging!(info, Type::System, "Tono: restarting for a prepared update without releasing protection");
+    handle::Handle::global().set_is_exiting();
+    Config::apply_all_and_save_file().await;
+    utils::server::shutdown_embedded_server();
+    handle::Handle::app_handle().restart();
+}
+
 /// Make a refused Quit visible: the exit flag is already cleared, so this restores (or
 /// recreates) the main window that the close button hid. Best-effort by design — the window
 /// operation debouncer may swallow it right after another window action, and that is still

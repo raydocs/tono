@@ -26,8 +26,10 @@ use crate::{
     FinalizeDirectRuntimeReloadRequest, IpcCommand, KillSwitchLockRequest,
     MIN_SUPPORTED_CLIENT_REVISION, MacosProxyConfig,
     OwnerSessionHandle, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeBundle,
-    SERVICE_PROTOCOL_HEADER, ServiceOperationKind, StartClashRequest, StartClashResult,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    RuntimeBundle,
+    LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, ServiceOperationKind,
+    StartClashRequest, StartClashResult,
     StopClashPayload, WriterConfig,
 };
 use anyhow::{Context as _, Result as AnyResult, anyhow};
@@ -686,6 +688,7 @@ fn require_protocol_version(
     let supplied = ctx
         .headers
         .get(SERVICE_PROTOCOL_HEADER)
+        .or_else(|| ctx.headers.get(LEGACY_SERVICE_PROTOCOL_HEADER))
         .and_then(|value| value.to_str().ok());
     let Some(supplied) = supplied.and_then(ProtocolVersion::parse_header) else {
         return Err(ServiceError::protocol_mismatch());
@@ -946,6 +949,42 @@ fn create_ipc_router() -> Result<Router> {
                 Ok(result) => ok_json(result),
                 Err(error) => service_unavailable(format!(
                     "Failed to replace DIRECT endpoints: {error:#}"
+                )),
+            }
+        })
+        .post(IpcCommand::ReplaceProxyEndpoints.as_ref(), |ctx| async move {
+            let (request, owner) = match authenticate_request::<
+                AuthenticatedSessionRequest<ReplaceProxyEndpointsRequest>,
+            >(&ctx)
+            .await
+            {
+                ControlFlow::Continue(authenticated) => authenticated,
+                ControlFlow::Break(response) => return response,
+            };
+            let _lifecycle_guard = match enter_owner_lifecycle(
+                &owner,
+                OwnerLifecycleGate::ActiveSession(&request.session),
+            )
+            .await
+            {
+                ControlFlow::Continue(guard) => guard,
+                ControlFlow::Break(response) => return response,
+            };
+            let active = match require_active_session(&owner, &request.session).await {
+                Ok(active) => active,
+                Err(error) => return service_error(error),
+            };
+            let _ = active;
+            let _operation_guard = OperationGuard::begin(
+                ServiceOperationKind::ReplaceProxyEndpoints,
+                IPC_HANDLER_TIMEOUT,
+            );
+            match windows_kill_switch::replace_proxy_endpoints(&request.payload.proxy_endpoints)
+                .await
+            {
+                Ok(()) => ok_json(()),
+                Err(error) => service_unavailable(format!(
+                    "Failed to replace proxy endpoints: {error:#}"
                 )),
             }
         })

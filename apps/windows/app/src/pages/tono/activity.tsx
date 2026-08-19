@@ -10,6 +10,7 @@ import { showNotice } from '@/services/notice-service'
 import { useThemeMode } from '@/services/states'
 import { tonoCloseAllConnections, tonoCloseConnection } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { PageHeader } from '@/tono-ui/PageHeader'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
@@ -250,38 +251,27 @@ const ActivityPage = () => {
         gap: 18,
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-        }}
-      >
-        <div>
-          <h1 className="tono-page-title" style={{ color: text.primary }}>
-            {t('tono.activity.title')}
-          </h1>
-          <p style={{ margin: '6px 0 0', color: text.secondary, fontSize: 13 }}>
-            {t('tono.activity.subtitle')}
-          </p>
-        </div>
-        <button
-          type="button"
-          className="tono-button"
-          disabled={!connected || activeConnections.length === 0 || closingAll}
-          onClick={() => void handleCloseAll()}
-          style={{
-            padding: '8px 13px',
-            color: '#fff',
-            background: TONO_COLORS.error,
-          }}
-        >
-          {closingAll
-            ? t('tono.activity.closingAll')
-            : t('shared.actions.closeAll')}
-        </button>
-      </div>
+      <PageHeader
+        title={t('tono.activity.title')}
+        subtitle={t('tono.activity.subtitle')}
+        trailing={
+          <button
+            type="button"
+            className="tono-button"
+            disabled={!connected || activeConnections.length === 0 || closingAll}
+            onClick={() => void handleCloseAll()}
+            style={{
+              padding: '8px 13px',
+              color: '#fff',
+              background: TONO_COLORS.error,
+            }}
+          >
+            {closingAll
+              ? t('tono.activity.closingAll')
+              : t('shared.actions.closeAll')}
+          </button>
+        }
+      />
 
       <GlassCard
         radius={18}

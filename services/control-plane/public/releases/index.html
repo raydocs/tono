@@ -4,18 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tono 发布档案</title>
+  <meta name="description" content="下载 Tono 的 Mac 和 Windows 安装包。版本、校验值和更新入口都在这里。">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="canonical" href="https://releases.afk.ccwu.cc/">
+  <meta property="og:title" content="Tono 发布档案">
+  <meta property="og:description" content="下载 Tono 的 Mac 和 Windows 安装包。版本、校验值和更新入口都在这里。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://releases.afk.ccwu.cc/">
+  <meta property="og:locale" content="zh_CN">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <main>
+    <nav class="site-nav" aria-label="站点">
+      <a href="/" aria-current="page">下载</a>
+      <a href="/help">帮助</a>
+      <a href="/status">运行状态</a>
+      <a href="/archive">往期版本</a>
+    </nav>
     <header class="hero">
-      <p class="eyebrow">TONO RELEASE CENTER</p>
+      <p class="eyebrow">TONO</p>
       <h1>Tono 发布档案</h1>
-      <p class="lede">Mac 与 Windows 使用独立发布支线；版本、改动、兼容关系、校验值和下载入口统一保存在这里。安装包由 GitHub Release 提供不可变存档，Cloudflare 保存跨平台发布合同。</p>
+      <p class="lede">在这里下载 Mac 和 Windows 安装包。当前版本、改动说明、兼容关系和文件校验值都写在本页。安装包由本站提供；GitHub 只保留发布记录，不作为日常下载入口。</p>
       <nav>
-        <a class="button primary" href="/manifest.json">机器可读 Manifest</a>
-        <a class="button" href="/macos/appcast.xml">macOS Appcast</a>
-        <a class="button" href="https://github.com/raydocs/tono/releases">GitHub 安装包</a>
+        <a class="button primary" href="/help">安装说明</a>
+        <a class="button" href="/manifest.json">版本清单</a>
+        <a class="button" href="/macos/appcast.xml">Mac 更新源</a>
       </nav>
     </header>
 
@@ -61,7 +75,7 @@
     <section>
       <div class="section-heading">
         <p class="eyebrow">COMPATIBILITY CONTRACT</p>
-        <h2>每次发布必须一起核对</h2>
+        <h2>每次发布都要对齐的几件事</h2>
       </div>
       <div class="contract">
       <!-- generated:contract -->
@@ -71,13 +85,13 @@
         <div><strong>Windows 更新通道</strong><span>0.0.34 · 与安装包一致</span></div>
       <!-- /generated:contract -->
       </div>
-      <p class="note">两个平台现在都能自动送达既有用户。此前 macOS 的 feed 停在 Build 62、Windows 的通道停在 0.0.25，中间发布的每一版都只存在于 GitHub 上——「发布过」和「用户拿得到」在这里是两件事，判断依据是本页的 Manifest，不是 GitHub 的发布列表。</p>
+      <p class="note">已经装过的用户现在可以从应用内更新。早些时候 Mac 更新源停在 Build 62、Windows 更新通道停在 0.0.25，中间打出来的包只躺在 GitHub 上——「打过包」和「用户拿得到」不是一回事。以本页清单为准，不要只看 GitHub 的发布列表。</p>
     </section>
 
     <section>
       <div class="section-heading">
         <p class="eyebrow">CHANGE ARCHIVE</p>
-        <h2>版本改动备份</h2>
+        <h2>近期改动</h2>
       </div>
       <div class="timeline">
       <!-- generated:timeline -->
@@ -89,7 +103,7 @@
     </section>
 
     <footer>
-      <p>下载前核对 Manifest 中的 SHA-256。私有 draft 只保留回滚与审计记录，不作为客户下载渠道。</p>
+      <p>安装前请核对本页清单里的 SHA-256。未公开的草稿只留给回滚和审计，不给用户下载。</p>
     </footer>
   </main>
 </body>

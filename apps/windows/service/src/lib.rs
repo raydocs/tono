@@ -17,8 +17,10 @@ pub use core::{
     OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
     ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeAsset, RuntimeBundle,
-    SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN, ServiceErrorCode, ServiceLifecycleState,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    RuntimeAsset, RuntimeBundle,
+    LEGACY_SERVICE_PROTOCOL_HEADER, SERVICE_PROTOCOL_HEADER, SESSION_TOKEN_HEX_LEN,
+    ServiceErrorCode, ServiceLifecycleState,
     ServiceOperationKind, ServiceOperationSnapshot, ServiceStatusSnapshot, StageRejection,
     StageRuntimeOutcome, StartClashRequest, StartClashResult, StopClashOptions, StopClashPayload,
     WriterConfig, canonical_direct_endpoints, direct_endpoint_digest,
@@ -121,7 +123,10 @@ pub const PROTOCOL_EPOCH: u16 = 2;
 /// the routing without the permit, which is precisely the silent black hole rule H exists to
 /// end. MIN_REQUIRED moves with it for that reason — this is not an additive field a client can
 /// ignore, it is a behaviour the client's own rules assume.
-pub const PROTOCOL_REVISION: u16 = 14;
+/// Revision 15 adds `/kill-switch/proxy-endpoints` so a live node switch can widen or
+/// shrink the Reality destination permit without restarting the core. MIN_REQUIRED stays 14:
+/// an older Service is still fail-closed; the App falls back to a cold switch.
+pub const PROTOCOL_REVISION: u16 = 15;
 /// Revisions 7 through 12 are wire/behaviour incompatible with older peers. Reject a mismatch at
 /// the protocol probe rather than failing later during a required mutation. Revision 13 is
 /// additive: a revision-12 client may still pair.

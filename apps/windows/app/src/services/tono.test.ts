@@ -223,5 +223,17 @@ describe('connectErrorSuggestsServerSwitch', () => {
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.dnsPortBusy')
+    expect(
+      formatTonoActionError(
+        new Error('TONO_AUTH_DEVICE_LIMIT: this Tono account has reached its device allowance'),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.login.errors.deviceLimit')
+    expect(
+      formatTonoActionError(
+        new Error('kill switch release failed; protection stays on: owner mismatch'),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.dashboard.errors.protectionReleaseFailed')
   })
 })

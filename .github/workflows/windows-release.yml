@@ -16,6 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  qualify:
+    uses: ./.github/workflows/release-qualification.yml
+
   # A job-level `if:` on the branch is a guard that cannot fail. GitHub records a
   # skipped job as a success, so dispatching this workflow from the wrong ref
   # produced a green run that did nothing — which is precisely how this
@@ -25,6 +28,7 @@ jobs:
   # `needs:` keeps the real job from starting or requesting its environment
   # approval.
   branch:
+    needs: qualify
     runs-on: ubuntu-24.04
     steps:
       - name: Refuse a ref that is not the release line

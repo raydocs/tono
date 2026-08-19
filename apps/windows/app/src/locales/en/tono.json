@@ -4,7 +4,8 @@
     "activity": "Activity",
     "nodes": "Nodes",
     "account": "Account",
-    "support": "Support"
+    "support": "Support",
+    "settings": "Settings"
   },
   "activity": {
     "title": "Activity",
@@ -60,9 +61,10 @@
     "subtitle": "Enter your email to receive a sign-in code.",
     "welcome": "Welcome to Tono",
     "intro": "Sign in with a verified email to continue. No password is required.",
+    "continueWithEmail": "Continue with email",
     "emailLabel": "Email address",
     "emailPlaceholder": "you@example.com",
-    "sendCode": "Email me a sign-in code",
+    "sendCode": "Send sign-in code",
     "sendNewCode": "Send a new code",
     "sending": "Sending…",
     "resendIn": "Resend in {{seconds}}s",
@@ -92,15 +94,17 @@
     },
     "errors": {
       "unreachable": "Tono's server could not be reached. Your network closed the connection — this is the network in the way, not a problem with your account or the code. Signing in only has to succeed once: do it on a network that works (a phone hotspot, or with another VPN running in TUN or global mode), and it stays signed in afterwards.",
-      "rateLimited": "Too many sign-in attempts. Wait a few minutes and try again."
+      "rateLimited": "Too many sign-in attempts. Wait a few minutes and try again.",
+      "deviceLimit": "This account is already on the maximum number of devices. Remove one from a signed-in device, then try again.",
+      "sessionExpired": "That sign-in expired. Request a new code."
     }
   },
   "pill": {
     "title": {
-      "notConnected": "Not Connected",
+      "notConnected": "Standby",
       "connecting": "Connecting…",
       "connected": "Connected",
-      "protectedOffline": "Protected Offline",
+      "protectedOffline": "Protected, not connected",
       "disconnecting": "Disconnecting…"
     },
     "subtitle": {
@@ -110,21 +114,22 @@
       "restoringAccess": "Restoring network access",
       "starting": "Starting…"
     },
-    "statusProtected": "Protected cloud route",
-    "statusProtectedOffline": "Protected offline — traffic blocked",
-    "statusReality": "Reality cloud protection"
+    "statusProtected": "Protection is on",
+    "statusProtectedOffline": "Protected, not connected",
+    "statusReality": "Cloud route"
   },
   "dashboard": {
     "title": "Dashboard",
+    "subtitle": "Reality cloud protection",
     "connect": "Connect",
     "connecting": "Connecting…",
     "connected": "Connected",
     "disconnecting": "Disconnecting…",
-    "protectedOffline": "Protected Offline",
-    "protectedOfflineDescription": "Your internet is blocked to prevent leaks. Click to restore.",
+    "protectedOffline": "Protected, not connected",
+    "protectedOfflineDescription": "Tono is blocking a direct leak. It will switch to a working route and retry.",
     "server": "Server",
     "noServer": "No server selected",
-    "killSwitchMode": "Kill switch: {{mode}}",
+    "killSwitchMode": "Leak protection: {{mode}}",
     "killSwitchModes": {
       "bootstrap": "Bootstrap",
       "locked": "Locked",
@@ -140,7 +145,7 @@
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "Your server is no longer available — please reselect",
-    "killSwitchError": "Kill switch: {{message}}",
+    "killSwitchError": "Leak protection: {{message}}",
     "killSwitchErrorNote": "Most recent error — it may already be resolved.",
     "errors": {
       "serviceBusy": "Tono Service is installing or repairing. Approve any pending admin prompt, or restart Tono.",
@@ -151,7 +156,27 @@
       "coreUnpinned": "This Tono install is missing its kernel check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "The Tono kernel does not match this install. Install the latest Tono.",
       "dnsPortBusy": "Another app is using local DNS port 53. Close that app and try again.",
+      "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
       "sendDiagnostics": "Send to support"
+    },
+    "status": {
+      "connecting": "Connecting",
+      "disconnecting": "Disconnecting",
+      "offline": "Protected offline",
+      "protected": "Protected",
+      "standby": "Standby"
+    },
+    "overview": {
+      "protection": "Protection",
+      "serverPool": "Server pool",
+      "liveTraffic": "Live traffic",
+      "trafficRouted": "Traffic is routed",
+      "ready": "Ready to connect",
+      "directBlocked": "Direct traffic blocked",
+      "verifiedCatalog": "Verified catalog",
+      "refreshingCatalog": "Refreshing catalog",
+      "idle": "Idle",
+      "noActiveRoute": "No active route"
     },
     "info": {
       "protection": "Traffic protection",
@@ -173,6 +198,11 @@
     "tryBadge": "TRY {{count}}",
     "failedAt": "Failed at {{stage}}",
     "unknownStage": "Unknown stage",
+    "statusTitle": "This route did not pass the connection check",
+    "statusBody": "Tono is blocking a direct leak. It will switch to a working route and retry.",
+    "completedCount": "{{count}} completed",
+    "technicalDetails": "Technical details",
+    "switchRoute": "Choose another route",
     "retryIn": "Retry {{n}} in {{seconds}}s",
     "retrying": "Retrying…",
     "retryNow": "Retry Now",
@@ -194,7 +224,7 @@
       "errors": {
         "signedOut": "You are signed out, so the report could not be linked to an account. Sign in and try again, or use Copy details and send the text to support.",
         "rateLimited": "Too many reports were uploaded recently. Wait a few minutes and try again, or use Copy details and send the text to support.",
-        "unreachable": "Could not reach Tono. Check that you are online — if the kill switch is blocking everything, Restore Normal Internet first, then retry.",
+        "unreachable": "Could not reach Tono. Check that you are online — if leak protection is blocking everything, restore normal internet first, then retry.",
         "unavailable": "Diagnostics upload is not available on this account yet. Use Copy details and send the text to support.",
         "failed": "The upload failed. Use Copy details and send the text to support."
       }
@@ -213,6 +243,10 @@
   },
   "nodes": {
     "title": "Nodes",
+    "subtitle": "Choose a secure exit for your protected traffic.",
+    "search": "Search servers",
+    "noMatches": "No servers match this search.",
+    "readyToConnect": "Ready to connect",
     "testCurrent": "Test Current",
     "testAll": "Test All",
     "cancelTest": "Cancel Test",
@@ -236,6 +270,7 @@
     "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. Test All is available while disconnected.",
     "catalogError": "Latest refresh failed: {{error}}",
     "regions": {
+      "all": "All",
       "us": "United States",
       "jp": "Japan",
       "other": "Other regions",
@@ -250,6 +285,7 @@
   },
   "account": {
     "title": "Account",
+    "subtitle": "The signed-in mailbox and devices on this account.",
     "email": "Email",
     "devices": "Devices",
     "deviceLimit": "{{count}} / {{limit}} devices",
@@ -268,6 +304,11 @@
     "loadFailed": "Couldn't load the diagnostics summary. Refresh to try again.",
     "enabled": "Enabled",
     "disabled": "Disabled",
+    "protection": {
+      "locked": "Locked",
+      "blocked": "Blocked",
+      "bootstrap": "Starting"
+    },
     "none": "None",
     "detailsCopied": "Diagnostics details copied",
     "auditPathCopied": "Audit path copied",
@@ -296,6 +337,12 @@
   "settings": {
     "title": "Settings",
     "account": "Tono Account",
+    "preferences": {
+      "title": "Preferences"
+    },
+    "privacy": {
+      "title": "Privacy"
+    },
     "general": {
       "title": "General",
       "launchAtStartup": "Launch at Startup",
@@ -324,8 +371,23 @@
     "about": {
       "title": "About",
       "tagline": "Protected cloud connection",
-      "description": "Authenticated VLESS Reality routing with a fail-closed Kill Switch"
+      "description": "Authenticated VLESS Reality routing with fail-closed leak protection",
+      "checkUpdates": "Check for updates",
+      "latestVersion": "You're already on the latest version"
     }
+  },
+  "cities": {
+    "losAngeles": "Los Angeles",
+    "saltLakeCity": "Salt Lake City",
+    "buffalo": "Buffalo",
+    "newYork": "New York",
+    "sanJose": "San Jose",
+    "seattle": "Seattle",
+    "chicago": "Chicago",
+    "dallas": "Dallas",
+    "miami": "Miami",
+    "tokyo": "Tokyo",
+    "osaka": "Osaka"
   },
   "startup": {
     "stateInitRetrying": "Tono cannot open its own data folder yet, and is retrying. This is usually a full disk or a user profile that is still coming online. It recovers on its own if the cause clears.",

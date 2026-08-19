@@ -352,7 +352,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kill Switch 未获得管理员权限。"
+            "value": "断网保护未获得管理员权限。"
           }
         }
       }
@@ -1814,7 +1814,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kill Switch 命令执行失败：%@"
+            "value": "断网保护命令执行失败：%@"
           }
         }
       }
@@ -1824,7 +1824,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kill Switch 安装失败：%@"
+            "value": "断网保护安装失败：%@"
           }
         }
       }
@@ -1834,7 +1834,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上一次会话的 Kill Switch 仍在拦截直接联网。"
+            "value": "上一次会话的断网保护仍在拦截直接联网。"
           }
         }
       }
@@ -1844,7 +1844,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kill Switch 正在拦截流量，Tono 将自动重试。点按「受保护的离线状态」可恢复正常网络。"
+            "value": "断网保护正在拦截流量，Tono 将自动重试。点按「恢复正常网络」可恢复上网。"
           }
         }
       }
@@ -1854,7 +1854,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kill Switch 正在拦截流量。此问题需要你处理，自动重试已暂停——解决后点按「立即重试」，或点按「受保护的离线状态」恢复正常网络。"
+            "value": "断网保护正在拦截流量。这件事需要你处理，自动重试已暂停。解决后点按「立即重试」，或点按「恢复正常网络」恢复上网。"
           }
         }
       }
@@ -2731,7 +2731,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "受保护的离线状态"
+            "value": "保护已开启，当前未连接"
           }
         }
       }
@@ -2742,7 +2742,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "受保护的离线状态 · 重试已暂停"
+            "value": "保护已开启，当前未连接 · 重试已暂停"
           }
         }
       }
@@ -3822,7 +3822,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在启动 Kill Switch…"
+            "value": "正在开启断网保护…"
           }
         }
       }
@@ -4028,7 +4028,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "系统事件（helper、Kill Switch、重连）记录在本地审计日志中。"
+            "value": "系统事件（网络组件、断网保护、重连）记录在本地审计日志中。"
           }
         }
       }
@@ -4295,7 +4295,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tono 家宽传输已停止，且没有可用的云端出口。Kill Switch 仍在阻断互联网。"
+            "value": "家宽线路已中断，而且现在没有可用的云端节点。断网保护仍在拦住直接上网。"
           }
         }
       }
@@ -4406,7 +4406,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "同一错误已连续出现三次，自动重试已暂停。点按「立即重试」再试一次，或点按「受保护的离线状态」恢复正常网络。"
+            "value": "同一错误已连续出现三次，自动重试已暂停。点按「立即重试」再试一次，或点按「恢复正常网络」恢复上网。"
           }
         }
       }

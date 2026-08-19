@@ -1,4 +1,4 @@
-use super::{IClashTemp, IVerge};
+use super::{IClashTemp, TonoPreferences};
 use crate::{
     core::{handle::Handle, tray},
     process::AsyncHandler,
@@ -11,7 +11,7 @@ use tokio::sync::OnceCell;
 
 pub struct Config {
     clash_config: Draft<IClashTemp>,
-    verge_config: Draft<IVerge>,
+    preferences: Draft<TonoPreferences>,
 }
 
 static TUN_SESSION_SUPPRESSED: AtomicBool = AtomicBool::new(false);
@@ -23,7 +23,7 @@ impl Config {
             .get_or_init(|| async {
                 Self {
                     clash_config: Draft::new(IClashTemp::new().await),
-                    verge_config: Draft::new(IVerge::new().await),
+                    preferences: Draft::new(TonoPreferences::new().await),
                 }
             })
             .await
@@ -33,8 +33,12 @@ impl Config {
         Self::global().await.clash_config.clone()
     }
 
-    pub async fn verge() -> Draft<IVerge> {
-        Self::global().await.verge_config.clone()
+    pub async fn preferences() -> Draft<TonoPreferences> {
+        Self::global().await.preferences.clone()
+    }
+
+    pub async fn verge() -> Draft<TonoPreferences> {
+        Self::preferences().await
     }
 
     pub async fn init_config_before_window() -> Result<()> {
@@ -50,7 +54,7 @@ impl Config {
 
     pub(crate) async fn restore_tun_for_session() {
         TUN_SESSION_SUPPRESSED.store(false, Ordering::Release);
-        Handle::refresh_verge();
+        Handle::refresh_tono_preferences();
         let _ = tray::Tray::global().update_menu().await;
     }
 

@@ -56,6 +56,26 @@ final class CoreRouteClassificationTests: XCTestCase {
         }
     }
 
+    func testApplicationSubfolderScanFindsWeChatOneLevelDown() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-wechat-scan-\(UUID().uuidString)", isDirectory: true)
+        let nested = root.appendingPathComponent("联系软件", isDirectory: true)
+        let wechat = nested.appendingPathComponent("微信.app", isDirectory: true)
+        let siblingApp = root.appendingPathComponent("WeChat.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: wechat, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: siblingApp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let found = ConfigPipeline.applicationSubfolderBundles(
+            named: ["WeChat.app", "微信.app"],
+            under: root
+        )
+        XCTAssertEqual(
+            found.map { $0.resolvingSymlinksInPath().path }.sorted(),
+            [wechat.resolvingSymlinksInPath().path]
+        )
+    }
+
     func testReviewedChinaOfficeAppsShareTheWeChatDirectBoundary() {
         let bundlePaths = ConfigPipeline.managedDirectProcessBundlePaths
         XCTAssertTrue(bundlePaths.contains("/Applications/WeChat.app/"))

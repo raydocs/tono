@@ -19,7 +19,7 @@ function sparkPath(values: Array<number | null>, width: number, height: number) 
 
 function Sparkline({ values, label }: { values: Array<number | null>; label: string }) {
   const d = sparkPath(values, 160, 36);
-  if (!d) return <span className="muted">尚无{label}历史</span>;
+  if (!d) return <span className="muted">还没有{label}记录</span>;
   return (
     <svg className="sparkline" viewBox="0 0 160 36" width="160" height="36" aria-label={label} role="img">
       <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -35,7 +35,7 @@ export function AgentTrends({ metrics }: { metrics: MetricsDto }) {
         <div className="card-header">
           <div>
             <h2>24 小时趋势</h2>
-            <p>采集器每分钟推一次。部署这次之后才会开始留点，现在还没有历史。</p>
+            <p>每分钟记一次。刚部署，还没有历史数据。</p>
           </div>
         </div>
       </section>

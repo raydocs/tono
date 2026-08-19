@@ -10,10 +10,10 @@ export type Page = 'dashboard' | 'users' | 'monitor' | 'control';
 export type Resource<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: T };
 
 export const pages: Array<{ id: Page; label: string; group: string }> = [
-  { id: 'dashboard', label: '今日', group: '日常' },
+  { id: 'dashboard', label: '总览', group: '日常' },
   { id: 'users', label: '客户', group: '日常' },
   { id: 'monitor', label: '服务器', group: '日常' },
-  { id: 'control', label: '目录与策略', group: '配置' },
+  { id: 'control', label: '目录和规则', group: '配置' },
 ];
 
 function currentPage(): Page {
@@ -68,7 +68,7 @@ export function useResource<T>(
       },
       (error: unknown) => active && setResource({
         state: 'error',
-        message: error instanceof Error ? error.message : 'Unable to load operations data',
+        message: error instanceof Error ? error.message : '数据加载失败',
       }),
     );
     return () => { active = false; };

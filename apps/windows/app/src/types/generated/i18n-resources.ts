@@ -933,6 +933,7 @@ export interface TranslationResources {
         signOut: string
         signOutConfirmMessage: string
         signOutConfirmTitle: string
+        subtitle: string
         title: string
       }
       activity: {
@@ -984,15 +985,28 @@ export interface TranslationResources {
           connections: string
         }
       }
+      cities: {
+        buffalo: string
+        chicago: string
+        dallas: string
+        losAngeles: string
+        miami: string
+        newYork: string
+        osaka: string
+        saltLakeCity: string
+        sanJose: string
+        seattle: string
+        tokyo: string
+      }
       dashboard: {
         catalogRequiresChoice: string
         connect: string
         connected: string
         connecting: string
+        copyDetails: string
         directOn: string
         directSkipped: string
         disconnecting: string
-        copyDetails: string
         errorRetry: string
         errors: {
           coreMismatch: string
@@ -1000,13 +1014,13 @@ export interface TranslationResources {
           dnsPortBusy: string
           nodeUnreachable: string
           protectedHttpsFailed: string
+          protectionReleaseFailed: string
           releaseReconciling: string
           sendDiagnostics: string
           serviceBusy: string
           serviceTooOld: string
         }
         errorSwitchServer: string
-        whatFailed: string
         info: {
           country: string
           dns: string
@@ -1024,23 +1038,47 @@ export interface TranslationResources {
           locked: string
         }
         noServer: string
+        overview: {
+          directBlocked: string
+          idle: string
+          liveTraffic: string
+          noActiveRoute: string
+          protection: string
+          ready: string
+          refreshingCatalog: string
+          serverPool: string
+          trafficRouted: string
+          verifiedCatalog: string
+        }
         pickServer: string
         protectedOffline: string
         protectedOfflineDescription: string
         server: string
+        status: {
+          connecting: string
+          disconnecting: string
+          offline: string
+          protected: string
+          standby: string
+        }
+        subtitle: string
         taglineConnected: string
         taglineIdle: string
         title: string
+        whatFailed: string
       }
       login: {
         changeEmail: string
         codeLabel: string
         codePlaceholder: string
         codeSent: string
+        continueWithEmail: string
         emailLabel: string
         emailPlaceholder: string
         errors: {
+          deviceLimit: string
           rateLimited: string
+          sessionExpired: string
           unreachable: string
         }
         intro: string
@@ -1077,6 +1115,7 @@ export interface TranslationResources {
         activity: string
         dashboard: string
         nodes: string
+        settings: string
         support: string
       }
       node: {
@@ -1095,15 +1134,20 @@ export interface TranslationResources {
         empty: string
         exitLatency: string
         lastSynced: string
+        noMatches: string
+        readyToConnect: string
         refresh: string
         refreshing: string
         refreshSuccess: string
         regions: {
+          all: string
           jp: string
           other: string
           unavailable: string
           us: string
         }
+        search: string
+        subtitle: string
         switchedTo: string
         tcpLatency: string
         testAll: string
@@ -1136,6 +1180,7 @@ export interface TranslationResources {
         }
       }
       progress: {
+        completedCount: string
         copied: string
         copyDetails: string
         copyFailed: string
@@ -1146,6 +1191,8 @@ export interface TranslationResources {
         retryIn: string
         retrying: string
         retryNow: string
+        statusBody: string
+        statusTitle: string
         steps: {
           applyingCloudPolicy: string
           checkingExit: string
@@ -1157,6 +1204,8 @@ export interface TranslationResources {
           startingTunnel: string
           verifyingTraffic: string
         }
+        switchRoute: string
+        technicalDetails: string
         total: string
         tryBadge: string
         unknownStage: string
@@ -1186,7 +1235,9 @@ export interface TranslationResources {
       }
       settings: {
         about: {
+          checkUpdates: string
           description: string
+          latestVersion: string
           tagline: string
           title: string
         }
@@ -1205,6 +1256,12 @@ export interface TranslationResources {
         general: {
           language: string
           launchAtStartup: string
+          title: string
+        }
+        preferences: {
+          title: string
+        }
+        privacy: {
           title: string
         }
         proxyEngine: {
@@ -1240,6 +1297,11 @@ export interface TranslationResources {
         enabled: string
         loadFailed: string
         none: string
+        protection: {
+          blocked: string
+          bootstrap: string
+          locked: string
+        }
         refresh: string
         subtitle: string
         summary: {

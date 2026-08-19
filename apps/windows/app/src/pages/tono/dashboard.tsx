@@ -33,26 +33,9 @@ import parseTraffic from '@/utils/parse-traffic'
 
 import { ConnectProgressCard } from './connect-progress'
 import { latencyColor, readNodeLatency } from './node-latency'
-import { nodeCode, nodeDisplayName } from './node-meta'
+import { PageHeader } from '@/tono-ui/PageHeader'
 
-const TONO_PROTECTED_DNS_V4 = '198.18.0.2'
-
-const LockIcon = ({ locked }: { locked: boolean }) => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="currentColor"
-    aria-hidden
-  >
-    <title>Lock status</title>
-    {locked ? (
-      <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9z" />
-    ) : (
-      <path d="M12 2a5 5 0 0 1 5 5v2h-2V7a3 3 0 1 0-6 0v3h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a5 5 0 0 1 5-5z" />
-    )}
-  </svg>
-)
+import { nodeCityParts, nodeCityTitleKey, nodeCode, nodeDisplayName } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -167,7 +150,7 @@ const ActiveNodeCard = ({
             border: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(56,72,108,0.08)'}`,
           }}
         >
-          <TonoNodeBadge size={36} />
+          <TonoNodeBadge size={36} city={nodeCityParts(serverName).city} />
           <span
             style={{
               display: 'flex',
@@ -187,10 +170,14 @@ const ActiveNodeCard = ({
                 whiteSpace: 'nowrap',
               }}
             >
-              {nodeDisplayName(serverName)}
+              {nodeCityTitleKey(serverName)
+                ? t(nodeCityTitleKey(serverName)!)
+                : nodeDisplayName(serverName)}
             </span>
             <span style={{ fontSize: 11, color: text.tertiary }}>
-              {t('tono.node.group')} · {nodeCode(serverName)}
+              {nodeCityParts(serverName).codename
+                ? `${nodeCityParts(serverName).codename} · ${nodeCode(serverName)}`
+                : `${t('tono.node.group')} · ${nodeCode(serverName)}`}
             </span>
           </span>
           <span
@@ -325,6 +312,12 @@ const DashboardPage = () => {
     uiState === 'connecting' ||
     uiState === 'disconnecting' ||
     uiState === 'protectedOffline'
+  // Connect/protected-offline failures belong on the progress card. Showing
+  // them here as well triples the same error (action box + steps + details).
+  const showActionError =
+    actionError != null &&
+    uiState !== 'protectedOffline' &&
+    uiState !== 'connecting'
 
   // A failed protected-offline attempt can reconnect on the backend's timer
   // without running one of this component's click handlers. Adjust the stale
@@ -422,6 +415,37 @@ const DashboardPage = () => {
 
   const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
+  const statusBadge =
+    uiState === 'connecting'
+      ? { label: t('tono.dashboard.status.connecting'), color: TONO_COLORS.connecting }
+      : uiState === 'disconnecting'
+        ? { label: t('tono.dashboard.status.disconnecting'), color: TONO_COLORS.connecting }
+        : uiState === 'protectedOffline'
+          ? {
+              label: t('tono.dashboard.status.offline'),
+              color: TONO_COLORS.protectedOffline,
+            }
+          : connected
+            ? { label: t('tono.dashboard.status.protected'), color: TONO_COLORS.connected }
+            : { label: t('tono.dashboard.status.standby'), color: TONO_COLORS.gray }
+  const protectionValue = statusBadge.label
+  const protectionDetail =
+    uiState === 'protectedOffline'
+      ? t('tono.dashboard.overview.directBlocked')
+      : connected
+        ? t('tono.dashboard.overview.trafficRouted')
+        : t('tono.dashboard.overview.ready')
+  const selectedCity = status?.selectedServer
+    ? nodeCityTitleKey(status.selectedServer)
+      ? t(nodeCityTitleKey(status.selectedServer)!)
+      : nodeDisplayName(status.selectedServer)
+    : t('tono.dashboard.noServer')
+  const trafficValue = connected
+    ? `${down} ${downUnit}/s`
+    : t('tono.dashboard.overview.idle')
+  const trafficDetail = connected
+    ? `↑ ${up} ${upUnit}/s`
+    : t('tono.dashboard.overview.noActiveRoute')
 
   return (
     // Structural layout inline as well as in the stylesheet (see TonoSidebar):
@@ -429,8 +453,31 @@ const DashboardPage = () => {
     // card jammed into the window's left edge.
     <div
       className="tono-page tono-dashboard"
-      style={{ ...TONO_PAGE_LAYOUT, height: '100vh', paddingTop: 42 }}
+      style={{ ...TONO_PAGE_LAYOUT, height: '100vh', paddingTop: 18 }}
     >
+      <PageHeader
+        title={t('tono.dashboard.title')}
+        subtitle={t('tono.dashboard.subtitle')}
+        trailing={
+          <span
+            className="tono-status-badge"
+            style={{
+              color: statusBadge.color,
+              background: hex(statusBadge.color, dark ? 0.14 : 0.1),
+              border: `1px solid ${hex(statusBadge.color, 0.18)}`,
+            }}
+          >
+            <span
+              className="tono-status-badge__dot"
+              style={{
+                background: statusBadge.color,
+                boxShadow: `0 0 6px ${hex(statusBadge.color, 0.45)}`,
+              }}
+            />
+            {statusBadge.label}
+          </span>
+        }
+      />
       {status?.catalogRequiresChoice && (
         <div
           style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}
@@ -490,72 +537,6 @@ const DashboardPage = () => {
           padding: '24px 0',
         }}
       >
-        {!busy && !actionError && (
-          <p
-            style={{
-              margin: 0,
-              maxWidth: 420,
-              textAlign: 'center',
-              fontSize: 13,
-              lineHeight: 1.45,
-              fontWeight: 500,
-              color: text.tertiary,
-            }}
-          >
-            {connected
-              ? status?.directOverlay === 'on'
-                ? t('tono.dashboard.directOn')
-                : status?.directOverlay === 'skipped'
-                  ? t('tono.dashboard.directSkipped')
-                  : t('tono.dashboard.taglineConnected')
-              : t('tono.dashboard.taglineIdle')}
-          </p>
-        )}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 7,
-            minHeight: 30,
-            padding: '5px 12px',
-            borderRadius: 999,
-            fontSize: 12,
-            fontWeight: 600,
-            color:
-              uiState === 'protectedOffline'
-                ? TONO_COLORS.protectedOffline
-                : connected
-                  ? TONO_COLORS.connected
-                  : text.secondary,
-            background:
-              uiState === 'protectedOffline'
-                ? hex(TONO_COLORS.protectedOffline, dark ? 0.14 : 0.1)
-                : connected
-                  ? hex(TONO_COLORS.connected, dark ? 0.12 : 0.09)
-                  : dark
-                    ? 'rgba(255,255,255,0.06)'
-                    : 'rgba(255,255,255,0.58)',
-            border: `1px solid ${
-              uiState === 'protectedOffline'
-                ? hex(TONO_COLORS.protectedOffline, 0.22)
-                : connected
-                  ? hex(TONO_COLORS.connected, 0.18)
-                  : dark
-                    ? 'rgba(255,255,255,0.08)'
-                    : 'rgba(40,54,86,0.08)'
-            }`,
-          }}
-        >
-          <LockIcon locked={connected || uiState === 'protectedOffline'} />
-          <span>
-            {uiState === 'protectedOffline'
-              ? t('tono.pill.statusProtectedOffline')
-              : connected
-                ? t('tono.pill.statusProtected')
-                : t('tono.pill.statusReality')}
-          </span>
-        </div>
         <div style={{ transition: `all 0.5s ${TONO_SPRING}` }}>
           <ConnectPill
             uiState={uiState}
@@ -566,7 +547,7 @@ const DashboardPage = () => {
         </div>
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}
-        {actionError && (
+        {showActionError && (
           <div
             role="alert"
             style={{
@@ -702,6 +683,7 @@ const DashboardPage = () => {
         <ConnectProgressCard
           uiState={uiState}
           onRefreshStatus={mutateTonoStatus}
+          onChooseRoute={() => navigate('/servers')}
         />
         {status?.selectedServer && (
           <ActiveNodeCard
@@ -733,46 +715,38 @@ const DashboardPage = () => {
         )}
       </div>
 
-      {/* Bottom info bar, connected only */}
-      {connected && (
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 22,
-              width: 520,
-              maxWidth: '100%',
-              borderRadius: 16,
-              padding: '12px 16px',
-              background: dark
-                ? 'rgba(16,21,33,0.58)'
-                : 'rgba(255,255,255,0.62)',
-              border: `1px solid ${dark ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.72)'}`,
-              backdropFilter: 'blur(18px)',
-            }}
-          >
-            <InfoItem
-              label={t('tono.dashboard.info.protection')}
-              value={t('tono.dashboard.killSwitchModes.locked')}
-              valueColor={TONO_COLORS.connected}
-            />
-            <InfoItem
-              label={t('tono.dashboard.info.dns')}
-              value={TONO_PROTECTED_DNS_V4}
-            />
-            <InfoItem
-              label={t('tono.dashboard.info.upload')}
-              value={`↑ ${up} ${upUnit}/s`}
-            />
-            <InfoItem
-              label={t('tono.dashboard.info.download')}
-              value={`↓ ${down} ${downUnit}/s`}
-            />
-          </div>
-        </div>
-      )}
+      <div className="tono-stat-grid">
+        <GlassCard radius={16} padding={14}>
+          <InfoItem
+            label={t('tono.dashboard.overview.protection')}
+            value={protectionValue}
+            valueColor={statusBadge.color}
+          />
+          <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: text.tertiary }}>
+            {protectionDetail}
+          </span>
+        </GlassCard>
+        <GlassCard radius={16} padding={14}>
+          <InfoItem
+            label={t('tono.dashboard.overview.serverPool')}
+            value={selectedCity}
+          />
+          <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: text.tertiary }}>
+            {status?.catalogRevision != null
+              ? t('tono.dashboard.overview.verifiedCatalog')
+              : t('tono.dashboard.overview.refreshingCatalog')}
+          </span>
+        </GlassCard>
+        <GlassCard radius={16} padding={14}>
+          <InfoItem
+            label={t('tono.dashboard.overview.liveTraffic')}
+            value={trafficValue}
+          />
+          <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: text.tertiary }}>
+            {trafficDetail}
+          </span>
+        </GlassCard>
+      </div>
       {confirmingDiagnostics && (
         <TonoConfirmDialog
           dark={dark}

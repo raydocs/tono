@@ -39,8 +39,12 @@ impl Handle {
         Self::send_event(FrontendEvent::RefreshClash);
     }
 
-    pub fn refresh_verge() {
+    pub fn refresh_tono_preferences() {
         Self::send_event(FrontendEvent::RefreshVerge);
+    }
+
+    pub fn refresh_verge() {
+        Self::refresh_tono_preferences();
     }
 
     pub fn refresh_profiles() {

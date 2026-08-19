@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运行状态 · Tono</title>
+  <meta name="description" content="Tono 当前对外提供的版本，以本站 Manifest 和更新通道为准。">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <nav class="site-nav" aria-label="站点">
+      <a href="/">下载</a>
+      <a href="/help">帮助</a>
+      <a href="/status" aria-current="page">运行状态</a>
+      <a href="/archive">往期版本</a>
+    </nav>
+    <header class="hero compact">
+      <p class="eyebrow">STATUS</p>
+      <h1>现在对外提供的版本</h1>
+      <p class="lede">「已发布」只表示代码打过包。「用户拿得到」要看本站的 Manifest、macOS 更新源和 Windows 更新通道是否指向同一版。</p>
+    </header>
+    <section>
+      <div class="section-heading">
+        <p class="eyebrow">HOW TO READ</p>
+        <h2>以哪里为准</h2>
+      </div>
+      <div class="prose">
+        <p>看首页两张卡片，或直接打开机器可读的 <a href="/manifest.json">Manifest</a>。Mac 更新看 <a href="/macos/appcast.xml">Appcast</a>，Windows 更新看 <a href="/windows/latest.json">latest.json</a>。</p>
+        <p>GitHub 的 Releases 列表不是判断依据。曾经有过「仓库里有新包，更新通道还停在旧版」的情况，结果已安装的用户根本收不到。</p>
+        <p>本页不实时探测每台服务器是否在线。节点健康在客户端连接时核对，不在下载站上承诺。</p>
+      </div>
+    </section>
+    <footer>
+      <p>版本数字以 Manifest 为准。本页只解释怎么读，不另记一套数字。</p>
+    </footer>
+  </main>
+</body>
+</html>

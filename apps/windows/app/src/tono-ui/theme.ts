@@ -46,7 +46,7 @@ export const TONO_PAGE_LAYOUT = {
   boxSizing: 'border-box',
   display: 'flex',
   flexDirection: 'column',
-  padding: '48px 40px 36px',
+  padding: '28px 32px 28px',
 } as const
 
 /** Text/foreground ramps. macOS resolves these from semantic colors. */

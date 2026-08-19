@@ -37,12 +37,12 @@
       },
       "tooltips": {
         "silentStart": "程序启动时以后台模式运行，不显示程序面板",
-        "killSwitch": "TUN 隧道不可用时通过 macOS PF 阻断所有直连流量。标准模式会在主动断开或退出时解除；永久模式会持续阻断，直到手动关闭。"
+        "killSwitch": "隧道不通时拦住所有直连流量。标准模式会在断开或退出时解除；永久模式会一直拦住，直到手动关闭。"
       },
       "fields": {
         "autoLaunch": "开机自启",
         "silentStart": "静默启动",
-        "killSwitch": "网络终止开关"
+        "killSwitch": "断网保护"
       },
       "options": {
         "killSwitch": {
@@ -53,8 +53,8 @@
       },
       "notifications": {
         "killSwitch": {
-          "requiresTun": "请先开启 TUN 模式，再启用网络终止开关",
-          "requiresServiceUpdate": "请先重新安装 Tono Service，再启用网络终止开关"
+          "requiresTun": "请先开启 TUN 模式，再启用断网保护",
+          "requiresServiceUpdate": "请先重新安装 Tono 服务，再启用断网保护"
         },
         "tunMode": {
           "autoDisabled": "由于服务不可用，TUN 模式已自动关闭",
@@ -69,7 +69,7 @@
           "blocking": "已断开，正在持续阻断网络流量",
           "unhealthy": "保护需要恢复 — PF 规则当前未生效",
           "unavailable": "无法获取保护状态 — 请勿假定流量已被阻断",
-          "updateService": "请重新安装 Tono Service 以使用网络终止开关"
+          "updateService": "请重新安装 Tono 服务以使用断网保护"
         }
       }
     },

@@ -78,7 +78,7 @@ export function carrierRows(carriers: CarrierPingMapDto): CarrierRow[] {
       lossTone: lossTone(lossPct),
       detail: probed
         ? `${entry!.targets.join(' / ')}\n${entry!.samples} 次探测（近 1 小时）`
-        : `没有匹配到${CARRIER_LABELS[key]}的 Ping 任务，或还没有样本`,
+        : `没有匹配到${CARRIER_LABELS[key]}的 Ping 任务，或还没有数据`,
       history: probed ? entry!.history : [],
     };
   });

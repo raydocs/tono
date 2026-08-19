@@ -130,6 +130,13 @@ struct MultiExitPolicyTests {
             return node
         }
         let sanitizedNode = sanitizedNodes[0]
+        let switchOld = try ConfigPipeline.dialEndpoints(for: sanitizedNodes[0])
+        let switchNew = try ConfigPipeline.dialEndpoints(for: sanitizedNodes[min(1, sanitizedNodes.count - 1)])
+        let switchUnion = ConfigPipeline.uniqueDialEndpoints(switchOld + switchNew + switchOld)
+        guard switchUnion.count == Set(switchOld + switchNew).count,
+              switchUnion.starts(with: switchOld) else {
+            throw TestFailure("old ∪ new PF endpoints must keep order and drop duplicates")
+        }
         let stableRouteAddresses = Array(Set(sanitizedNodes.map(\.server))).sorted()
         let stableRouteExclusionBlock =
             "\n  route-exclude-address:\n"
@@ -176,7 +183,7 @@ struct MultiExitPolicyTests {
             ("udp-rule-engine", "\nudp: true\n"),
             ("rule-mode", "\nmode: rule\n"),
             ("unified-delay", "\nunified-delay: false\n"),
-            ("demand-process-lookup", "\nfind-process-mode: off\n"),
+            ("demand-process-lookup", "\nfind-process-mode: strict\n"),
             ("disable-stale-selection-cache", "\n  store-selected: false\n"),
             ("disable-direct-icmp", "\n  disable-icmp-forwarding: true\n"),
             (
@@ -238,6 +245,7 @@ struct MultiExitPolicyTests {
               cloudRuntime.contains("\n  - MATCH,Tono-Exit"),
               cloudRuntime.contains("\n      - \"\(escaped(selected.name))\""),
               cloudRuntime.contains(stableRouteExclusionBlock),
+              cloudRuntime.contains("\nfind-process-mode: off\n"),
               !cloudRuntime.contains(ConfigPipeline.homeNodeName),
               !cloudRuntime.contains("PROCESS-NAME,tailscale"),
               !cloudRuntime.contains("PROCESS-NAME,tono-core-helper"),
@@ -391,6 +399,9 @@ struct MultiExitPolicyTests {
             customNodes: sanitizedNodes,
             directPolicy: managedDirectPolicy
         )
+        guard managedDirectRuntime.contains("\nfind-process-mode: strict\n") else {
+            throw TestFailure("managed DIRECT runtime must look up processes")
+        }
         let claudeProtectedRuntime = try ConfigPipeline.buildOwnedTonoRuntime(
             subscriptionYAML: "proxies: []\n",
             overlay: claudeSocks5Overlay,

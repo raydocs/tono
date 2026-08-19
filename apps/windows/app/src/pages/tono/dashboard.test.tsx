@@ -106,16 +106,15 @@ describe('dashboard action-error ownership', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
-  it('uses retry-now for an unreachable connect that entered protected offline', async () => {
+  it('does not render a second error box once protected offline owns the failure', async () => {
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
-    const failedStatus = makeStatus({
-      uiState: 'protectedOffline',
-      selectedServer: 'US West 1',
-      protectionBlocked: true,
+    mocks.mutateTonoStatus.mockResolvedValue({
+      data: makeStatus({
+        uiState: 'protectedOffline',
+        selectedServer: 'US West 1',
+        protectionBlocked: true,
+      }),
     })
-    // The rendered hook remains stale; only the explicit post-failure status
-    // read observes Protected Offline and assigns retry ownership.
-    mocks.mutateTonoStatus.mockResolvedValue({ data: failedStatus })
     mocks.tonoConnect.mockRejectedValue(
       new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
     )
@@ -123,16 +122,13 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Not Connected — Click to connect',
+        name: 'Standby — Click to connect',
       }),
     )
-    await screen.findByRole('alert')
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
 
-    expect(screen.getByRole('button', { name: 'Switch server' })).toBeDefined()
-    // A later push can advance the scheduled reconnect. Retry must keep the
-    // command owner captured with the failure rather than consult this state.
     mocks.status = makeStatus({
-      uiState: 'connecting',
+      uiState: 'protectedOffline',
       selectedServer: 'US West 1',
       protectionBlocked: true,
     })
@@ -141,11 +137,9 @@ describe('dashboard action-error ownership', () => {
         <DashboardPage />
       </MemoryRouter>,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
 
-    await waitFor(() => expect(mocks.tonoRetryNow).toHaveBeenCalledTimes(1))
-    expect(mocks.tonoConnect).toHaveBeenCalledTimes(1)
-    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('tono-action-error-message')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('retires a protected-offline error after the scheduled reconnect succeeds', async () => {
@@ -164,10 +158,10 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Not Connected — Click to connect',
+        name: 'Standby — Click to connect',
       }),
     )
-    await screen.findByRole('alert')
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
 
     mocks.status = makeStatus({
       uiState: 'connected',
@@ -192,7 +186,7 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Not Connected — Click to connect',
+        name: 'Standby — Click to connect',
       }),
     )
     const alert = await screen.findByRole('alert')
@@ -220,7 +214,7 @@ describe('dashboard action-error ownership', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Not Connected — Click to connect',
+        name: 'Standby — Click to connect',
       }),
     )
     await screen.findByRole('alert')

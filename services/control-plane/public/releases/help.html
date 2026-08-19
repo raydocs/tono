@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>安装与更新 · Tono</title>
+  <meta name="description" content="如何下载、安装和核对 Tono。安装包只从本站提供。">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <nav class="site-nav" aria-label="站点">
+      <a href="/">下载</a>
+      <a href="/help" aria-current="page">帮助</a>
+      <a href="/status">运行状态</a>
+      <a href="/archive">往期版本</a>
+    </nav>
+    <header class="hero compact">
+      <p class="eyebrow">HELP</p>
+      <h1>安装与更新</h1>
+      <p class="lede">安装包只从本站下载。GitHub 上的发布记录是存档，不作为日常下载入口。</p>
+    </header>
+    <section>
+      <div class="section-heading">
+        <p class="eyebrow">MAC</p>
+        <h2>在 Mac 上安装</h2>
+      </div>
+      <div class="prose">
+        <p>下载当前 ZIP，解压后把 Tono 拖进「应用程序」。首次连接时，系统会请你批准网络组件和管理员权限，用来开启断网保护。</p>
+        <p>已经装过 Tono 的电脑一般会自己检查更新。不想等的话，打开应用里的检查更新即可。</p>
+      </div>
+    </section>
+    <section>
+      <div class="section-heading">
+        <p class="eyebrow">WINDOWS</p>
+        <h2>在 Windows 上安装</h2>
+      </div>
+      <div class="prose">
+        <p>下载安装包后按提示完成安装。首次连接同样需要批准系统服务，用来在断线时拦住直连流量。</p>
+        <p>已安装的版本会从本站读取更新信息。不要改成从 GitHub 或其他地址拉安装包。</p>
+      </div>
+    </section>
+    <section>
+      <div class="section-heading">
+        <p class="eyebrow">VERIFY</p>
+        <h2>下载后怎么核对</h2>
+      </div>
+      <div class="prose">
+        <p>首页卡片上的文件名，应和 <a href="/manifest.json">manifest.json</a> 里当前版本的文件名、大小、SHA-256 一致。对不上就不要安装。</p>
+        <p>macOS 可用 <code>shasum -a 256 文件名.zip</code>；Windows 可用 PowerShell 的 <code>Get-FileHash</code>。</p>
+      </div>
+    </section>
+    <footer>
+      <p>安全问题请通过 GitHub Security Advisory 私下报告，不要发到公开 issue。</p>
+    </footer>
+  </main>
+</body>
+</html>

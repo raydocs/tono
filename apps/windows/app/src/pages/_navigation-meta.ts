@@ -5,7 +5,7 @@ export const navigationItems = {
   account: { label: 'tono.nav.account', path: '/account' },
   support: { label: 'tono.nav.support', path: '/support' },
   settings: {
-    label: 'layout.components.navigation.tabs.settings',
+    label: 'tono.nav.settings',
     path: '/settings',
   },
 } as const

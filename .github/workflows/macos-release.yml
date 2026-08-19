@@ -48,12 +48,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  qualify:
+    uses: ./.github/workflows/release-qualification.yml
+
   # A job-level `if:` on the branch is a guard that cannot fail. GitHub records a
   # skipped job as a success, so dispatching this workflow from the wrong ref
   # produced a green run that had built and released nothing — the same shape
   # that once left the Windows channel unadvanced for days while every run
   # reported success. This job carries no condition, so a wrong ref goes red.
   branch:
+    needs: qualify
     runs-on: macos-26
     steps:
       - name: Refuse a ref that is not the release line

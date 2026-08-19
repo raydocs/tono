@@ -19,9 +19,9 @@ export const icons = {
 
 export const statusLabels: Record<string, string> = {
   active: '正常',
-  disabled: '已销户',
+  disabled: '已注销',
   retired: '停用',
-  banned: '已封',
+  banned: '已封号',
   assigned: '在用',
   pooled: '库存',
   pending: '待确认',
@@ -44,13 +44,13 @@ export function StateBoundary<T>({ resource, empty, children }: {
   children: (data: T) => ReactNode;
 }) {
   if (resource.state === 'loading') {
-    return <div className="state"><span className="spinner" /><strong>加载中</strong><span>正在读取控制面数据…</span></div>;
+    return <div className="state"><span className="spinner" /><strong>加载中</strong><span>正在加载…</span></div>;
   }
   if (resource.state === 'error') {
     return <div className="state state-error"><strong>无法加载</strong><span>{resource.message}</span></div>;
   }
   if (empty?.(resource.data)) {
-    return <div className="state"><strong>暂无数据</strong><span>当前没有记录。</span></div>;
+    return <div className="state"><strong>还没有内容</strong><span>这里暂时是空的。</span></div>;
   }
   return children(resource.data);
 }

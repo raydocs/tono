@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 use crate::core::service;
 use crate::{
-    config::{Config, IVerge},
+    config::{Config, IVerge, TonoPreferences},
     core::{CoreManager, autostart, handle, logger::Logger, tray},
 };
 use anyhow::Result;
@@ -228,6 +228,10 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
 /// The reconciliation writes configuration of its own, so it goes through
 /// [`apply_verge_patch`] rather than back through here. That makes the absence of a cycle a
 /// property of the call graph rather than of a runtime early-return.
+pub async fn patch_preferences(patch: &TonoPreferences, not_save_file: bool) -> Result<()> {
+    patch_verge(patch, not_save_file).await
+}
+
 pub async fn patch_verge(patch: &IVerge, not_save_file: bool) -> Result<()> {
     apply_verge_patch(patch, not_save_file).await?;
     if patch.enable_tun_mode.is_some() {

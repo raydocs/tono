@@ -21,7 +21,7 @@ use std::borrow::Cow;
 use std::time::Duration;
 use tauri::{
     AppHandle, Manager as _, Wry,
-    menu::{MenuEvent, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{MenuEvent, MenuItem},
 };
 
 mod menu_def;
@@ -43,6 +43,47 @@ enum IconKind {
     Tun,
 }
 
+fn tray_icon_kind(ui_state: &str) -> IconKind {
+    match ui_state {
+        "connected" | "connecting" | "disconnecting" => IconKind::Tun,
+        "protectedOffline" => IconKind::SysProxy,
+        _ => IconKind::Common,
+    }
+}
+
+const WIRE_DISPLAY_NAMES: &[(&str, &str)] = &[
+    ("US-VLESS-Reality", "Los Angeles · Grove"),
+    ("JP-VLESS-Reality", "Tokyo · Dawn"),
+];
+
+fn tray_node_display(wire: &str) -> String {
+    let display = WIRE_DISPLAY_NAMES
+        .iter()
+        .find(|(name, _)| *name == wire)
+        .map(|(_, value)| *value)
+        .unwrap_or(wire);
+    let mut parts = display.split('·');
+    let city = parts.next().unwrap_or(display).trim();
+    let localized = match city.to_ascii_lowercase().as_str() {
+        "los angeles" => tono_i18n::t!("tray.tono.cities.losAngeles"),
+        "salt lake city" => tono_i18n::t!("tray.tono.cities.saltLakeCity"),
+        "buffalo" => tono_i18n::t!("tray.tono.cities.buffalo"),
+        "new york" => tono_i18n::t!("tray.tono.cities.newYork"),
+        "san jose" => tono_i18n::t!("tray.tono.cities.sanJose"),
+        "seattle" => tono_i18n::t!("tray.tono.cities.seattle"),
+        "chicago" => tono_i18n::t!("tray.tono.cities.chicago"),
+        "dallas" => tono_i18n::t!("tray.tono.cities.dallas"),
+        "miami" => tono_i18n::t!("tray.tono.cities.miami"),
+        "tokyo" => tono_i18n::t!("tray.tono.cities.tokyo"),
+        "osaka" => tono_i18n::t!("tray.tono.cities.osaka"),
+        _ => Cow::Borrowed(city),
+    };
+    match parts.next() {
+        Some(code) => format!("{} · {}", localized, code.trim()),
+        None => localized.into_owned(),
+    }
+}
+
 pub struct Tray {
     limiter: SystemLimiter,
     /// Serializes native menu/tooltip snapshots. The guard is acquired before reading TonoState,
@@ -53,20 +94,11 @@ pub struct Tray {
 }
 
 impl TrayState {
-    async fn get_tray_icon(verge: &IVerge) -> (bool, Cow<'_, [u8]>) {
-        let tun_mode = verge.enable_tun_mode.unwrap_or(false);
-        let system_mode = verge.enable_system_proxy.unwrap_or(false);
-        let kind = if tun_mode {
-            IconKind::Tun
-        } else if system_mode {
-            IconKind::SysProxy
-        } else {
-            IconKind::Common
-        };
-        Self::load_icon(verge, kind).await
+    async fn get_tray_icon(verge: &IVerge, ui_state: &str) -> (bool, Cow<'static, [u8]>) {
+        Self::load_icon(verge, tray_icon_kind(ui_state)).await
     }
 
-    async fn load_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'_, [u8]>) {
+    async fn load_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'static, [u8]>) {
         let (custom_enabled, icon_name) = match kind {
             IconKind::Common => (verge.common_tray_icon.unwrap_or(false), "common"),
             IconKind::SysProxy => (verge.sysproxy_tray_icon.unwrap_or(false), "sysproxy"),
@@ -84,7 +116,7 @@ impl TrayState {
     }
 
     #[allow(clippy::missing_const_for_fn)]
-    fn default_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'_, [u8]>) {
+    fn default_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'static, [u8]>) {
         #[cfg(target_os = "macos")]
         {
             let is_mono = verge.tray_icon.as_deref().unwrap_or("monochrome") == "monochrome";
@@ -216,7 +248,9 @@ impl Tray {
             return Ok(());
         };
 
-        let (_is_custom_icon, icon_bytes) = TrayState::get_tray_icon(verge).await;
+        let menu_state = tono_menu_state(app_handle).await;
+        let (_is_custom_icon, icon_bytes) =
+            TrayState::get_tray_icon(verge, &menu_state.ui_state).await;
 
         let template = {
             #[cfg(target_os = "macos")]
@@ -297,7 +331,8 @@ impl Tray {
 
         let verge = Config::verge().await.data_arc();
 
-        let icon_bytes = TrayState::get_tray_icon(&verge).await.1;
+        let menu_state = tono_menu_state(app_handle).await;
+        let icon_bytes = TrayState::get_tray_icon(&verge, &menu_state.ui_state).await.1;
         let icon = tauri::image::Image::from_bytes(&icon_bytes)?;
 
         #[cfg(target_os = "linux")]
@@ -398,7 +433,8 @@ impl TonoMenuState {
         let value = self
             .selected_server
             .as_deref()
-            .map(Cow::Borrowed)
+            .map(tray_node_display)
+            .map(Cow::Owned)
             .unwrap_or_else(|| tono_i18n::t!("tray.tono.noServer"));
         tono_i18n::t!("tray.tono.serverValue", value = value).into_owned()
     }
@@ -442,89 +478,73 @@ async fn tono_menu_state(app_handle: &AppHandle) -> TonoMenuState {
     TonoMenuState::from_status(status, selected_server_available, release_in_progress)
 }
 
-/// Tono-owned controls only: connection actions enter the same transaction as frontend IPC.
-/// Legacy modes, proxies/profiles, system proxy/TUN and core restart remain
-/// absent. The retained directory/log/version entries are read-only diagnostics.
+/// Product tray only: live status, the one safe connection action, dashboard, quit.
+/// Directory, log and Clash leftovers stay out of the menu a customer sees.
 async fn create_tray_menu(app_handle: &AppHandle) -> Result<tauri::menu::Menu<Wry>> {
-    let version = env!("CARGO_PKG_VERSION");
     let texts = MenuTexts::new();
     let state = tono_menu_state(app_handle).await;
 
-    let protection = &MenuItem::with_id(
+    let protection = MenuItem::with_id(
         app_handle,
         MenuIds::PROTECTION,
         state.protection_text(),
         false,
         None::<&str>,
     )?;
-    let server = &MenuItem::with_id(app_handle, MenuIds::SERVER, state.server_text(), false, None::<&str>)?;
-    let connect = &MenuItem::with_id(
+    let server = MenuItem::with_id(app_handle, MenuIds::SERVER, state.server_text(), false, None::<&str>)?;
+    let connect = MenuItem::with_id(
         app_handle,
         MenuIds::CONNECT,
         &texts.connect,
         state.can_connect(),
         None::<&str>,
     )?;
-    let disconnect = &MenuItem::with_id(
+    let disconnect_label = if state.protection_blocked || state.ui_state == "protectedOffline" {
+        tono_i18n::t!("tray.tono.restoreInternet")
+    } else {
+        texts.disconnect.clone()
+    };
+    let disconnect = MenuItem::with_id(
         app_handle,
         MenuIds::DISCONNECT,
-        &texts.disconnect,
+        disconnect_label.as_ref(),
         state.can_disconnect(),
         None::<&str>,
     )?;
-    let retry = &MenuItem::with_id(
+    let retry = MenuItem::with_id(
         app_handle,
         MenuIds::RETRY,
         &texts.retry,
         state.can_retry(),
         None::<&str>,
     )?;
-    let open_window = &MenuItem::with_id(app_handle, MenuIds::DASHBOARD, &texts.dashboard, true, None::<&str>)?;
-    let open_app_dir = &MenuItem::with_id(app_handle, MenuIds::CONF_DIR, &texts.conf_dir, true, None::<&str>)?;
-    let open_core_dir = &MenuItem::with_id(app_handle, MenuIds::CORE_DIR, &texts.core_dir, true, None::<&str>)?;
-    let open_logs_dir = &MenuItem::with_id(app_handle, MenuIds::LOGS_DIR, &texts.logs_dir, true, None::<&str>)?;
-    let open_app_log = &MenuItem::with_id(app_handle, MenuIds::APP_LOG, &texts.app_log, true, None::<&str>)?;
-    let open_core_log = &MenuItem::with_id(app_handle, MenuIds::CORE_LOG, &texts.core_log, true, None::<&str>)?;
-    let open_dir = &Submenu::with_id_and_items(
-        app_handle,
-        MenuIds::OPEN_DIR,
-        &texts.open_dir,
-        true,
-        &[open_app_dir, open_core_dir, open_logs_dir, open_app_log, open_core_log],
-    )?;
-    let app_version = &MenuItem::with_id(
-        app_handle,
-        MenuIds::VERGE_VERSION,
-        format!("{} {version}", texts.verge_version),
-        true,
-        None::<&str>,
-    )?;
+    let open_window = MenuItem::with_id(app_handle, MenuIds::DASHBOARD, &texts.dashboard, true, None::<&str>)?;
 
     #[cfg(target_os = "macos")]
     let quit_accelerator = Some("Cmd+Q");
     #[cfg(not(target_os = "macos"))]
     let quit_accelerator = None::<&str>;
-    let quit = &MenuItem::with_id(app_handle, MenuIds::EXIT, &texts.exit, true, quit_accelerator)?;
+    let quit = MenuItem::with_id(app_handle, MenuIds::EXIT, &texts.exit, true, quit_accelerator)?;
 
-    let separator = &PredefinedMenuItem::separator(app_handle)?;
-    let menu = tauri::menu::MenuBuilder::new(app_handle)
-        .items(&[
-            protection,
-            server,
-            separator,
-            connect,
-            disconnect,
-            retry,
-            separator,
-            open_window,
-            separator,
-            open_dir,
-            app_version,
-            separator,
-            quit,
-        ])
-        .build()?;
-    Ok(menu)
+    let mut builder = tauri::menu::MenuBuilder::new(app_handle)
+        .item(&protection)
+        .item(&server)
+        .separator();
+    if state.can_connect() {
+        builder = builder.item(&connect);
+    }
+    if state.can_retry() {
+        builder = builder.item(&retry);
+    }
+    if state.can_disconnect() {
+        builder = builder.item(&disconnect);
+    }
+    Ok(builder
+        .separator()
+        .item(&open_window)
+        .separator()
+        .item(&quit)
+        .build()?)
 }
 
 fn on_tray_icon_event(_tray_icon: &TrayIcon, tray_event: TrayIconEvent) {
@@ -632,6 +652,30 @@ mod tests {
             release_in_progress: false,
             protection_blocked: blocked,
         }
+    }
+
+    #[test]
+    fn tray_icon_follows_protection_state_not_legacy_proxy_modes() {
+        assert!(matches!(super::tray_icon_kind("notConnected"), super::IconKind::Common));
+        assert!(matches!(super::tray_icon_kind("connected"), super::IconKind::Tun));
+        assert!(matches!(super::tray_icon_kind("connecting"), super::IconKind::Tun));
+        assert!(matches!(
+            super::tray_icon_kind("protectedOffline"),
+            super::IconKind::SysProxy
+        ));
+    }
+
+    #[test]
+    fn tray_node_label_uses_city_not_wire_name() {
+        assert_eq!(
+            super::tray_node_display("Los Angeles · Sunset"),
+            format!(
+                "{} · Sunset",
+                tono_i18n::t!("tray.tono.cities.losAngeles")
+            )
+        );
+        assert!(super::tray_node_display("US-VLESS-Reality").contains('·'));
+        assert_eq!(super::tray_node_display("Paris · Seine"), "Paris · Seine");
     }
 
     #[test]

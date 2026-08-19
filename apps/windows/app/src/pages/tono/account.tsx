@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
+import { PageHeader } from '@/tono-ui/PageHeader'
 import { TonoAccountCard } from '@/tono-ui/TonoAccountCard'
 
 const AccountPage = () => {
@@ -7,12 +8,10 @@ const AccountPage = () => {
 
   return (
     <div className="tono-page">
-      <h1
-        className="tono-page-title"
-        style={{ marginBottom: 18 }}
-      >
-        {t('tono.account.title')}
-      </h1>
+      <PageHeader
+        title={t('tono.account.title')}
+        subtitle={t('tono.account.subtitle')}
+      />
       <div style={{ maxWidth: 520 }}>
         <TonoAccountCard />
       </div>

@@ -9,9 +9,10 @@ use log::LevelFilter;
 use serde::{Deserialize, Serialize};
 use smartstring::alias::String;
 
-/// ### `verge.yaml` schema
+/// Application preferences. Written as `tono.yaml`; `verge.yaml` is still read
+/// once on upgrade and adopted into the new name.
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
-pub struct IVerge {
+pub struct TonoPreferences {
     /// app log level
     /// silent | error | warn | info | debug | trace
     pub app_log_level: Option<String>,
@@ -127,7 +128,7 @@ pub struct IVerge {
     pub proxy_host: Option<String>,
 
     /// theme setting
-    pub theme_setting: Option<IVergeTheme>,
+    pub theme_setting: Option<TonoTheme>,
 
     /// web ui list
     pub web_ui_list: Option<Vec<String>>,
@@ -173,7 +174,7 @@ pub struct IVerge {
     pub proxy_layout_column: Option<u8>,
 
     /// 测试站列表
-    pub test_list: Option<Vec<IVergeTestItem>>,
+    pub test_list: Option<Vec<TonoTestItem>>,
 
     /// 日志清理
     /// 0: 不清理; 1: 1天；2: 7天; 3: 30天; 4: 90天
@@ -265,7 +266,7 @@ pub struct IVerge {
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
-pub struct IVergeTestItem {
+pub struct TonoTestItem {
     pub uid: Option<String>,
     pub name: Option<String>,
     pub icon: Option<String>,
@@ -273,7 +274,7 @@ pub struct IVergeTestItem {
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
-pub struct IVergeTheme {
+pub struct TonoTheme {
     pub primary_color: Option<String>,
     pub secondary_color: Option<String>,
     pub primary_text: Option<String>,
@@ -288,7 +289,7 @@ pub struct IVergeTheme {
     pub css_injection: Option<String>,
 }
 
-impl IVerge {
+impl TonoPreferences {
     /// Valid clash core names.
     ///
     /// Windows Tono installs ship a single audited stable binary. Accepting
@@ -476,7 +477,7 @@ impl IVerge {
         }
     }
 
-    /// Save IVerge App Config
+    /// Persist Tono preferences.
     pub async fn save_file(&self) -> Result<()> {
         help::save_yaml(&dirs::verge_path()?, &self, Some("# Tono Config")).await
     }
@@ -598,3 +599,6 @@ impl IVerge {
         }
     }
 }
+
+/// Temporary name while remaining call sites move to [`TonoPreferences`].
+pub type IVerge = TonoPreferences;

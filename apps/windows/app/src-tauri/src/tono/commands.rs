@@ -798,11 +798,8 @@ pub async fn tono_select_server(
         inner.selected_node = Some(name.clone());
         // A fresh user choice re-arms auto-reconnect (§3).
         inner.catalog_requires_choice = false;
-        if matches!(
-            action,
-            connection::SelectAction::Switch | connection::SelectAction::Reconnect
-        ) {
-            // The switch/reconnect re-arms rather than releases (H-1 intent).
+        if action == connection::SelectAction::Reconnect {
+            // The reconnect re-arms rather than releases (H-1 intent).
             inner.invalidate_connection(false);
         }
         let generation = inner.connect_generation;
@@ -819,8 +816,10 @@ pub async fn tono_select_server(
         if action == connection::SelectAction::Switch {
             let task_state = state.inner().clone();
             let task_app = app.clone();
+            let from = previous.clone().unwrap_or_default();
+            let to = name.clone();
             inner.tasks.switch = Some(AsyncHandler::spawn(move || async move {
-                connection::switch_selected_node(task_state, task_app, generation).await;
+                connection::switch_selected_node(task_state, task_app, generation, from, to).await;
             }));
         }
         drop(inner);
@@ -1247,6 +1246,11 @@ pub async fn restore_session(app: AppHandle, state: Arc<TonoState>) {
                 // current-owner runtime, then schedule the ordinary fully verified replacement;
                 // the restore task does not await that potentially long connection transaction.
                 connection::schedule_startup_resume_if_proven(&state, &app, generation).await;
+                if crate::tono::update_handoff::load_pending()
+                    .is_some_and(|journal| !journal.was_connected)
+                {
+                    crate::tono::update_handoff::mark_committed();
+                }
                 crate::tono::telemetry::spawn_periodic_for_auth_generation(&state, &app, generation)
                     .await;
                 crate::tono::log_upload::spawn_periodic_for_auth_generation(
@@ -1588,6 +1592,8 @@ fn auth_error(err: &ApiError) -> String {
     let prefix = match err {
         ApiError::Transport { .. } => "TONO_AUTH_UNREACHABLE",
         ApiError::RateLimited => "TONO_AUTH_RATE_LIMITED",
+        ApiError::DeviceLimit => "TONO_AUTH_DEVICE_LIMIT",
+        ApiError::Unauthorized => "TONO_AUTH_UNAUTHORIZED",
         _ => return err.to_string(),
     };
     format!("{prefix}: {err}")
@@ -1698,6 +1704,35 @@ pub async fn stop_service_on_unprotected_quit() {
             ),
         }
     }
+}
+
+#[tauri::command]
+pub async fn tono_prepare_update(
+    state: tauri::State<'_, Arc<TonoState>>,
+    next_version: String,
+) -> Result<(), String> {
+    let inner = state.lock().await;
+    if next_version.trim().is_empty() {
+        return Err("TONO_UPDATE_VERSION_REQUIRED".into());
+    }
+    let previous = env!("CARGO_PKG_VERSION");
+    let mut journal = crate::tono::update_handoff::prepare(
+        previous,
+        next_version.trim(),
+        inner.connect_generation,
+        inner.fsm.status().is_connected,
+        inner.fsm.kill_switch_armed(),
+    );
+    journal.selected_node_anonymous_id = inner.selected_node.clone();
+    journal.catalog_revision = Some(inner.catalog_tracker.current_revision());
+    journal.helper_protocol_version = tono_service_protocol::PROTOCOL_REVISION.to_string();
+    journal.build_commit = option_env!("VERGEN_GIT_SHA")
+        .or(option_env!("GITHUB_SHA"))
+        .unwrap_or("")
+        .to_string();
+    crate::tono::update_handoff::save(&journal)
+        .map_err(|error| format!("TONO_UPDATE_JOURNAL: {error}"))?;
+    Ok(())
 }
 
 /// Explicit Quit/restart release (§6, L1): bump the generation, abort every task, then join the

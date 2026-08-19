@@ -1,15 +1,33 @@
 import { invoke } from '@tauri-apps/api/core'
 
-export async function getVergeConfig() {
-  return invoke<IVergeConfig>('get_verge_config')
+export async function getTonoPreferences() {
+  return invoke<TonoPreferences>('get_tono_preferences')
 }
 
-export async function patchVergeConfig(payload: IVergeConfig) {
-  return invoke<void>('patch_verge_config', { payload })
+export async function patchTonoPreferences(payload: TonoPreferences) {
+  return invoke<void>('patch_tono_preferences', { payload })
+}
+
+/** @deprecated use getTonoPreferences */
+export async function getVergeConfig() {
+  return getTonoPreferences()
+}
+
+/** @deprecated use patchTonoPreferences */
+export async function patchVergeConfig(payload: TonoPreferences) {
+  return patchTonoPreferences(payload)
 }
 
 export async function restartApp() {
   return invoke<void>('restart_app')
+}
+
+export async function prepareUpdate(nextVersion: string) {
+  return invoke<void>('tono_prepare_update', { nextVersion })
+}
+
+export async function restartForUpdate() {
+  return invoke<void>('restart_for_update')
 }
 
 // 获取当前运行模式

@@ -861,7 +861,7 @@ interface IProxyConfig
     | 'sudoku'
 }
 
-interface IVergeConfig {
+interface TonoPreferences {
   app_log_level?: 'trace' | 'debug' | 'info' | 'warn' | 'error' | string
   app_log_max_size?: number // KB
   app_log_max_count?: number
@@ -958,6 +958,9 @@ interface IVergeConfig {
   hover_jump_navigator_delay?: number
   enable_external_controller?: boolean
 }
+
+/** @deprecated use TonoPreferences */
+type IVergeConfig = TonoPreferences
 
 interface IWebDavFile {
   filename: string

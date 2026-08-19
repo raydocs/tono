@@ -37,11 +37,11 @@ export function dataHealthLines(sources: HealthSource[], nowMs: number): string[
   const stale = sources.filter((source) => source.state !== 'error' && source.stale);
   const lines: string[] = [];
   if (failed.length) {
-    lines.push(`${failed.map((source) => source.label).join('、')}没能加载，这一页里由它们得出的数字都不作数。`);
+    lines.push(`${failed.map((source) => source.label).join('、')}没加载上来，这一页里靠它们算出来的数字都不作数。`);
   }
   if (stale.length) {
     const oldest = Math.min(...stale.map((source) => source.refreshedAt || 0));
-    lines.push(`${stale.map((source) => source.label).join('、')}的自动刷新失败（${stale[0].stale}），显示的是${sinceLabel(oldest, nowMs)}的快照。`);
+    lines.push(`${stale.map((source) => source.label).join('、')}自动刷新失败（${stale[0].stale}），现在看到的是${sinceLabel(oldest, nowMs)}的数据。`);
   }
   return lines;
 }

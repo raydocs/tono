@@ -14,13 +14,13 @@ export const handleNoticeMessage = (
       // 空 msg 传入，我们不希望导致 后端-前端-后端 死循环，这里只做提醒。
       // 未来细分事件通知时，可以考虑传入订阅 ID 或其他标识符
       // navigate("/profile", { state: { current: msg } });
-      navigate('/profile')
+      navigate('/')
       showNotice.success(
         'shared.feedback.notifications.importSubscriptionSuccess',
       )
     },
     'import_sub_url::error': () => {
-      navigate('/profile')
+      navigate('/')
       showNotice.error(msg)
     },
     'set_config::error': () => showNotice.error(msg),

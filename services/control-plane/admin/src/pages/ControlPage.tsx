@@ -66,12 +66,12 @@ export function ControlPage() {
     setMessage(null);
     try {
       const result = await operationsApi.replaceCatalog(yaml, catalogGate.expectedRevision);
-      setMessage(`节点目录已更新到版本 ${result.revision}`);
+      setMessage(`节点目录已更新到第 ${result.revision} 版`);
       setYaml('');
       setYamlBase(null);
       catalog.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '替换目录失败');
+      setError(err instanceof Error ? err.message : '目录没更新成');
     } finally {
       setBusy(false);
     }
@@ -80,7 +80,7 @@ export function ControlPage() {
   async function publishPolicy(next: unknown) {
     if (!policyGate.allow) throw new Error(policyGate.reason);
     const result = await operationsApi.replaceTrafficPolicy(next, policyGate.expectedRevision);
-    setMessage(`精确直连策略已更新到版本 ${result.revision}`);
+    setMessage(`国内直连规则已更新到第 ${result.revision} 版`);
     setPolicyBase(null);
     policy.reload();
   }
@@ -93,7 +93,7 @@ export function ControlPage() {
     try {
       await publishPolicy(JSON.parse(policyText));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存策略失败');
+      setError(err instanceof Error ? err.message : '规则没保存成');
     } finally {
       setBusy(false);
     }
@@ -102,38 +102,38 @@ export function ControlPage() {
   return <div className="stack">
     <DataHealth sources={[
       { label: '节点目录', resource: catalog },
-      { label: '直连策略', resource: policy },
+      { label: '直连规则', resource: policy },
     ]} />
     <Banner message={error} tone="error" />
     <Banner message={message} tone="ok" />
     <Banner
       tone="error"
       message={catalogDrifted
-        ? `云端目录已经是版本 ${catalogRevision}，这份草稿基于版本 ${yamlBase}。现在替换会被服务端拒绝——先取回版本 ${catalogRevision} 合并你的改动。`
+        ? `线上目录已经是第 ${catalogRevision} 版，你这份是按第 ${yamlBase} 版改的。现在提交会被拒。先把第 ${catalogRevision} 版拉下来，再把你的改动合进去。`
         : null}
     />
     <Banner
       tone="error"
       message={policyDrifted
-        ? `云端策略已经是版本 ${policyRevision}，编辑框里的是版本 ${policyBase}。保存会被拒绝——点「重新载入」取回最新版本，你现在的改动会被丢弃。`
+        ? `线上规则已经是第 ${policyRevision} 版，编辑框里的是第 ${policyBase} 版。保存会被拒。点「重新加载」拿回最新版，你现在改的会丢掉。`
         : null}
     />
 
     <section className="card">
       <div className="card-header">
         <div>
-          <h2>云端节点目录</h2>
+          <h2>节点目录</h2>
           <p>
             {catalog.state === 'ready' && catalog.data.revision > 0
-              ? `当前版本 ${catalog.data.revision} · ${timestamp(catalog.data.updatedAt)}`
-              : '尚未上传云端节点目录'}
+              ? `当前第 ${catalog.data.revision} 版 · ${timestamp(catalog.data.updatedAt)}`
+              : '还没有上传节点目录'}
           </p>
         </div>
       </div>
       <div className="card-body">
         <form className="stack" onSubmit={replaceCatalog}>
           <label>
-            <span className="muted">从本机载入完整 Clash YAML</span>
+            <span className="muted">从电脑选择 Clash YAML</span>
             <input
               className="input"
               type="file"
@@ -143,12 +143,12 @@ export function ControlPage() {
                 const file = event.target.files?.[0];
                 if (!file) return;
                 if (file.size < 11 || file.size > 1024 * 1024) {
-                  setError('目录文件必须为 11 bytes–1 MiB');
+                  setError('文件要在 11 字节到 1 MB 之间');
                   event.target.value = '';
                   return;
                 }
                 editYaml(await file.text());
-                setMessage('目录已在本机载入；确认后再替换云端版本。');
+                setMessage('文件已读入，确认无误后再提交。');
               }}
             />
           </label>
@@ -163,7 +163,7 @@ export function ControlPage() {
             disabled={busy}
           />
           <div className="form-actions">
-            <button className="btn" type="submit" disabled={busy || !yaml.trim()}>替换云端节点目录</button>
+            <button className="btn" type="submit" disabled={busy || !yaml.trim()}>更新节点目录</button>
           </div>
         </form>
       </div>
@@ -172,11 +172,11 @@ export function ControlPage() {
     <section className="card">
       <div className="card-header">
         <div>
-          <h2>精确直连策略</h2>
+          <h2>国内直连规则</h2>
           <p>
             {policy.state === 'ready' && policy.data.revision > 0
-              ? `当前版本 ${policy.data.revision} · ${timestamp(policy.data.updatedAt)}`
-              : '尚未启用国内精确直连'}
+              ? `当前第 ${policy.data.revision} 版 · ${timestamp(policy.data.updatedAt)}`
+              : '还没开国内直连'}
           </p>
         </div>
       </div>
@@ -192,19 +192,19 @@ export function ControlPage() {
             disabled={busy || policy.state !== 'ready'}
           />
           <div className="form-actions">
-            <button className="btn" type="submit" disabled={busy || policy.state !== 'ready'}>替换精确直连策略</button>
+            <button className="btn" type="submit" disabled={busy || policy.state !== 'ready'}>保存规则</button>
             <button
               className="btn btn-outline"
               type="button"
               disabled={busy || policy.state !== 'ready'}
               onClick={() => { setPolicyBase(null); policy.reload(); }}
-            >重新载入</button>
+            >重新加载</button>
             <button
               className="btn btn-outline"
               type="button"
               disabled={busy || policy.state !== 'ready'}
               onClick={async () => {
-                if (!confirm('只停止视频网页直连，保留原生微信试验？')) return;
+                if (!confirm('只关掉视频网页直连，微信原生先留着？')) return;
                 setBusy(true);
                 setError(null);
                 try {
@@ -227,7 +227,7 @@ export function ControlPage() {
               type="button"
               disabled={busy || policy.state !== 'ready'}
               onClick={async () => {
-                if (!confirm('立即停止全部国内精确直连并让客户端安全重连？')) return;
+                if (!confirm('马上关掉全部国内直连？客户端会安全重连。')) return;
                 setBusy(true);
                 setError(null);
                 try {
@@ -238,7 +238,7 @@ export function ControlPage() {
                   setBusy(false);
                 }
               }}
-            >立即停止全部直连</button>
+            >关掉全部直连</button>
           </div>
         </form>
       </div>

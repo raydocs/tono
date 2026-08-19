@@ -13,14 +13,8 @@ import { TonoLogo } from './TonoLogo'
  * Nodes / Account / Support in order, Settings pinned to the bottom.
  */
 
-const SIDEBAR_MAIN_PATHS = [
-  '/',
-  '/activity',
-  '/servers',
-  '/account',
-  '/support',
-]
-const SETTINGS_PATH = '/settings'
+const SIDEBAR_MAIN_PATHS = ['/', '/servers', '/activity', '/account']
+const SIDEBAR_FOOTER_PATHS = ['/support', '/settings']
 
 export const TonoSidebar = () => {
   const { t } = useTranslation()
@@ -29,10 +23,14 @@ export const TonoSidebar = () => {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const mainItems = navItems.filter(
-    (item) => item.group === 'main' && SIDEBAR_MAIN_PATHS.includes(item.path),
+  const itemByPath = (path: string) =>
+    navItems.find((item) => item.path === path)
+  const mainItems = SIDEBAR_MAIN_PATHS.map(itemByPath).filter(
+    (item): item is (typeof navItems)[number] => Boolean(item),
   )
-  const settingsItem = navItems.find((item) => item.path === SETTINGS_PATH)
+  const footerItems = SIDEBAR_FOOTER_PATHS.map(itemByPath).filter(
+    (item): item is (typeof navItems)[number] => Boolean(item),
+  )
 
   const isActive = (path: string) =>
     path === '/'
@@ -57,23 +55,34 @@ export const TonoSidebar = () => {
           alignItems: 'center',
           gap: 10,
           width: '100%',
-          minHeight: 40,
-          padding: '9px 11px',
+          minHeight: 42,
+          padding: '10px 12px',
           border: 'none',
-          borderRadius: 11,
+          borderRadius: 12,
           textAlign: 'left',
           cursor: 'pointer',
           fontFamily: 'inherit',
           fontSize: 13,
-          background: active ? `${TONO_COLORS.accent}1F` : 'transparent',
-          color: active ? (dark ? '#A9B7FF' : '#3453D5') : text.secondary,
+          background: active
+            ? dark
+              ? 'rgba(255,255,255,0.13)'
+              : 'rgba(255,255,255,0.78)'
+            : 'transparent',
+          color: text.primary,
           fontWeight: active ? 600 : 400,
           boxShadow: active
-            ? `inset 0 0 0 1px ${TONO_COLORS.accent}2E`
+            ? `inset 0 0 0 0.5px ${dark ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.9)'}, 0 8px 16px -10px rgba(0,0,0,${dark ? 0.45 : 0.18})`
             : 'none',
         }}
       >
-        <span className="tono-nav__icon">{item.icon[0]}</span>
+        <span
+          className="tono-nav__icon"
+          style={{
+            color: active ? TONO_COLORS.accent : text.primary,
+          }}
+        >
+          {item.icon[0]}
+        </span>
         <span>{t(item.label)}</span>
       </button>
     )
@@ -85,20 +94,23 @@ export const TonoSidebar = () => {
       style={{
         // See the note on the nav buttons: structural layout is inline so a
         // missing stylesheet cannot collapse the shell.
-        width: 190,
+        width: 220,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        padding: '18px 12px',
+        padding: '12px 6px 12px',
         boxSizing: 'border-box',
         background: dark ? 'rgba(8,11,19,0.58)' : 'rgba(248,250,255,0.56)',
         borderRight: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(35,48,78,0.08)'}`,
       }}
     >
       <div className="tono-brand">
-        <TonoLogo connected={false} compact size={26} />
+        <TonoLogo connected={false} compact size={22} />
         <span className="tono-brand-name" style={{ color: text.primary }}>
           Tono
+        </span>
+        <span className="tono-sidebar__version" style={{ color: text.tertiary }}>
+          v{appVersion}
         </span>
       </div>
 
@@ -106,12 +118,14 @@ export const TonoSidebar = () => {
 
       <div className="tono-nav__spacer" />
 
-      {settingsItem && navButton(settingsItem, SETTINGS_PATH)}
-
-      {/* Support builds are identified from customer photos, so the running
-          version has to be readable on screen without opening a menu. */}
-      <div className="tono-sidebar__version" style={{ color: text.secondary }}>
-        v{appVersion}
+      <div
+        className="tono-sidebar__divider"
+        style={{
+          background: dark ? 'rgba(255,255,255,0.14)' : 'rgba(20,22,30,0.12)',
+        }}
+      />
+      <div className="tono-nav">
+        {footerItems.map((item) => navButton(item))}
       </div>
     </nav>
   )

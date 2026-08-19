@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { subscribeVergeEvents } from './events'
+import { subscribeTonoEvents } from './events'
 
 const listen = vi.hoisted(() => vi.fn())
 
@@ -28,12 +28,12 @@ beforeEach(() => {
   listen.mockReset()
 })
 
-describe('subscribeVergeEvents', () => {
+describe('subscribeTonoEvents', () => {
   it('reports subscribed only once every listener is live', async () => {
     const { registrations, settleAll } = deferredListen()
     const onSubscribed = vi.fn()
 
-    subscribeVergeEvents(
+    subscribeTonoEvents(
       {
         'verge://run-state-changed': () => {},
         'verge://notice-message': () => {},
@@ -57,7 +57,7 @@ describe('subscribeVergeEvents', () => {
     const { settleAll } = deferredListen()
     const onSubscribed = vi.fn()
 
-    const teardown = subscribeVergeEvents(
+    const teardown = subscribeTonoEvents(
       { 'verge://run-state-changed': () => {} },
       onSubscribed,
     )
@@ -74,7 +74,7 @@ describe('subscribeVergeEvents', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const onSubscribed = vi.fn()
 
-    subscribeVergeEvents(
+    subscribeTonoEvents(
       { 'verge://run-state-changed': () => {} },
       onSubscribed,
     )
@@ -93,7 +93,7 @@ describe('subscribeVergeEvents', () => {
     const onRunState = vi.fn()
     const onNotice = vi.fn()
 
-    subscribeVergeEvents({
+    subscribeTonoEvents({
       'verge://run-state-changed': onRunState,
       'verge://notice-message': onNotice,
     })

@@ -5,7 +5,8 @@ use sha2::{Digest as _, Sha256};
 
 pub const OWNER_TOKEN_FILE_NAME: &str = ".tono-service-owner-token";
 pub const LEGACY_OWNER_TOKEN_FILE_NAME: &str = ".clash-verge-service-owner-token";
-pub const SERVICE_PROTOCOL_HEADER: &str = "X-Clash-Verge-Service-Protocol";
+pub const SERVICE_PROTOCOL_HEADER: &str = "X-Tono-Service-Protocol";
+pub const LEGACY_SERVICE_PROTOCOL_HEADER: &str = "X-Clash-Verge-Service-Protocol";
 pub const SESSION_TOKEN_HEX_LEN: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,6 +245,11 @@ pub struct ProxyEndpoint {
     pub port: u16,
     #[serde(default)]
     pub protocol: ProxyProtocol,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplaceProxyEndpointsRequest {
+    pub proxy_endpoints: Vec<ProxyEndpoint>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -653,6 +659,7 @@ pub enum ServiceOperationKind {
     ReplaceDirectEndpoints,
     FinalizeDirectRuntimeReload,
     RenewDirectRuntimeReload,
+    ReplaceProxyEndpoints,
     VerifyKillSwitch,
     RestrictKillSwitch,
     ReleaseKillSwitch,

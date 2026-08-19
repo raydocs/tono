@@ -23,7 +23,7 @@ export function publishGate(base: number | null, current: number | null): Publis
     // Deliberately not 0. Without a base there is nothing to compare against,
     // and a page that does not know what it is replacing has no business
     // replacing it — 0 would have been a guess dressed as an answer.
-    return { allow: false, reason: '还不知道这份草稿基于哪个版本——版本号没读到。刷新本页后重新载入再替换。' };
+    return { allow: false, reason: '还不知道这份改动是基于哪个版本，先刷新页面，重新加载后再提交。' };
   }
   return { allow: true, expectedRevision: base, drifted: current !== null && current !== base };
 }

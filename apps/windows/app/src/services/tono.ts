@@ -121,6 +121,8 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   // chain reached the login screen verbatim.
   { prefix: 'TONO_AUTH_UNREACHABLE', key: 'tono.login.errors.unreachable' },
   { prefix: 'TONO_AUTH_RATE_LIMITED', key: 'tono.login.errors.rateLimited' },
+  { prefix: 'TONO_AUTH_DEVICE_LIMIT', key: 'tono.login.errors.deviceLimit' },
+  { prefix: 'TONO_AUTH_UNAUTHORIZED', key: 'tono.login.errors.sessionExpired' },
   { prefix: 'TONO_SERVICE_BUSY', key: 'tono.dashboard.errors.serviceBusy' },
   {
     prefix: 'TONO_RELEASE_RECONCILING',
@@ -166,6 +168,14 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
   {
     match: /DNS port 127\.0\.0\.1:53 is unavailable|Another DNS or proxy process/i,
     key: 'tono.dashboard.errors.dnsPortBusy',
+  },
+  {
+    match: /kill switch release failed|protection stays on/i,
+    key: 'tono.dashboard.errors.protectionReleaseFailed',
+  },
+  {
+    match: /device allowance|DEVICE_LIMIT|device limit/i,
+    key: 'tono.login.errors.deviceLimit',
   },
   {
     match: /reinstall Tono|install the latest Tono/i,
@@ -439,8 +449,8 @@ export const formatTonoDiagnostics = (
     `Server: ${report.selectedServer ?? '(none)'}`,
     `UI state: ${report.uiState}`,
     `Account state: ${report.accountState}`,
-    `Kill switch: ${killSwitch}`,
-    `Kill switch last error: ${report.killSwitchLastError ?? '(none)'}`,
+    `Protection: ${killSwitch}`,
+    `Protection last error: ${report.killSwitchLastError ?? '(none)'}`,
     `Protected DNS: ${
       report.dnsEnabled == null ? '(unknown)' : report.dnsEnabled
     }`,

@@ -1,8 +1,8 @@
 _version: 1
 notifications:
   dashboardToggled:
-    title: 仪表板
-    body: 仪表板显示状态已更新。
+    title: Tono
+    body: 窗口显示状态已更新。
   clashModeChanged:
     title: 模式切换
     body: 已切换至 {mode}。
@@ -55,19 +55,32 @@ launchGuard:
   move: 移动
   ok: 好
 tray:
-  dashboard: 仪表板
+  dashboard: 打开 Tono
   tono:
-    protectionValue: '保护状态：{value}'
-    serverValue: '当前服务器：{value}'
+    protectionValue: '{value}'
+    serverValue: '{value}'
     connect: 连接
-    disconnect: 断开并恢复互联网
-    retry: 重试“受保护的离线”
-    noServer: 未选择服务器
+    disconnect: 断开并恢复网络
+    restoreInternet: 恢复正常网络
+    retry: 立即重试
+    noServer: 未选择节点
+    cities:
+      losAngeles: 洛杉矶
+      saltLakeCity: 盐湖城
+      buffalo: 布法罗
+      newYork: 纽约
+      sanJose: 圣何塞
+      seattle: 西雅图
+      chicago: 芝加哥
+      dallas: 达拉斯
+      miami: 迈阿密
+      tokyo: 东京
+      osaka: 大阪
     state:
-      notConnected: 未连接
+      notConnected: 待机
       connecting: 正在连接
-      connected: 已连接
-      protectedOffline: 受保护的离线
+      connected: 保护中
+      protectedOffline: 保护已开启，当前未连接
       disconnecting: 正在断开
   ruleMode: 规则模式
   globalMode: 全局模式
@@ -93,7 +106,7 @@ tray:
   restartApp: 重启应用
   vergeVersion: Tono 版本
   more: 更多
-  exit: 退出
+  exit: 退出 Tono
   tooltip:
     systemProxy: 系统代理
     tun: TUN

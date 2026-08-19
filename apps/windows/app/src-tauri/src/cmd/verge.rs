@@ -2,10 +2,16 @@ use super::CmdResult;
 use crate::{cmd::StringifyErr as _, config::IVerge, feat};
 use tono_draft::SharedDraft;
 
-/// 获取Verge配置
+/// Display/behavior preferences. The Tauri command name is Tono's; the
+/// stored document is still migrated from the legacy Verge file once.
+#[tauri::command]
+pub async fn get_tono_preferences() -> CmdResult<SharedDraft<IVerge>> {
+    feat::fetch_verge_config().await.stringify_err()
+}
+
 #[tauri::command]
 pub async fn get_verge_config() -> CmdResult<SharedDraft<IVerge>> {
-    feat::fetch_verge_config().await.stringify_err()
+    get_tono_preferences().await
 }
 
 /// Tono whitelist: `patch_verge_config` only accepts display/behavior
@@ -76,13 +82,17 @@ fn forbidden_field_present(patch: &IVerge) -> Option<&'static str> {
         .find_map(|(field, present)| present.then_some(field))
 }
 
-/// 修改Verge配置
 #[tauri::command]
-pub async fn patch_verge_config(payload: IVerge) -> CmdResult {
+pub async fn patch_tono_preferences(payload: IVerge) -> CmdResult {
     if let Some(field) = forbidden_field_present(&payload) {
         return Err(format!("disabled by Tono: {field}").into());
     }
-    feat::patch_verge(&payload, false).await.stringify_err()
+    feat::patch_preferences(&payload, false).await.stringify_err()
+}
+
+#[tauri::command]
+pub async fn patch_verge_config(payload: IVerge) -> CmdResult {
+    patch_tono_preferences(payload).await
 }
 
 #[cfg(test)]

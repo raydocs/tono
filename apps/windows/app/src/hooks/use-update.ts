@@ -1,7 +1,7 @@
 import { setCacheData, useQuery } from '@/services/query-client'
 import { checkUpdateSafe } from '@/services/update'
 
-import { useVerge } from './use-verge'
+import { useTonoPreferences } from './use-tono-preferences'
 
 const LAST_CHECK_KEY = 'last_check_update'
 
@@ -22,8 +22,8 @@ export const updateLastCheckTime = (timestamp?: number): number => {
 // --- useUpdate hook ---
 
 export const useUpdate = (enabled: boolean = true) => {
-  const { verge } = useVerge()
-  const { auto_check_update } = verge || {}
+  const { preferences } = useTonoPreferences()
+  const { auto_check_update } = preferences || {}
 
   // Determine if we should check for updates
   // If enabled is explicitly false, don't check

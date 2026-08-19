@@ -1151,6 +1151,57 @@ pub(crate) async fn mark_verified(owner_key: &str) -> Result<()> {
     Ok(())
 }
 
+/// Replace the live Reality destination permits without stopping the core.
+///
+/// Used by a connected node switch: the App first sends old ∪ new, then after
+/// the selector and data-plane proof succeed, sends new-only. Install failure
+/// restores the previous permit set. Restore failure goes Blocked — never open.
+pub(crate) async fn replace_proxy_endpoints(endpoints: &[ProxyEndpoint]) -> Result<()> {
+    ensure_supported()?;
+    if endpoints.is_empty() {
+        bail!("enabled kill switch requires at least one proxy endpoint");
+    }
+    if endpoints.len() > MAX_PROXY_ENDPOINTS {
+        bail!("proxy_endpoints exceeds the {MAX_PROXY_ENDPOINTS}-entry bound");
+    }
+    for endpoint in endpoints {
+        if wfp_model::parse_endpoint(endpoint).is_none() {
+            bail!("invalid proxy endpoint {}:{}", endpoint.ip, endpoint.port);
+        }
+    }
+    let _operation = WFP_OPERATION.lock().await;
+    let mut armed = armed_guard().clone().context("kill switch is not armed")?;
+    if armed.intent.mode != KillSwitchStatusMode::Locked {
+        bail!("kill switch must be locked before replacing proxy endpoints");
+    }
+    let Some(core) = current_core_instance_authoritative().await else {
+        bail!("proxy endpoint replace has no running Core");
+    };
+    if armed.core_instance.is_some() && armed.core_instance != Some(core) {
+        bail!("core identity changed; a fresh lock is required");
+    }
+    let previous = armed.intent.endpoints.clone();
+    armed.intent.endpoints = endpoints.to_vec();
+    armed.intent.updated_at = now_unix();
+    atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await?;
+    *armed_guard() = Some(armed.clone());
+    if let Err(error) = install_unlocked_for(&armed, Some(core)).await {
+        armed.intent.endpoints = previous;
+        armed.intent.updated_at = now_unix();
+        let _ = atomic_write(&intent_path(), &serde_json::to_vec_pretty(&armed.intent)?).await;
+        *armed_guard() = Some(armed.clone());
+        if let Err(restore) = install_unlocked_for(&armed, Some(core)).await {
+            let current = current_core_instance_authoritative().await;
+            let _ = transition_direct_to_blocked_unlocked(armed, current, None).await;
+            return Err(restore.context(format!(
+                "proxy endpoint install failed ({error:#}) and previous permit could not be restored"
+            )));
+        }
+        return Err(error.context("proxy endpoint install failed; previous permit restored"));
+    }
+    Ok(())
+}
+
 /// Whether `caller_key` may mutate the armed protection (release / restrict / DNS restore).
 ///
 /// The pipe authenticates *a* local user; the armed WFP policy is machine-global and belongs
@@ -5124,6 +5175,11 @@ mod tests {
     /// runs. An unbounded list therefore arms the machine fail-closed with an install too
     /// large to finish, replayed at every service start. Every sibling list is bounded;
     /// this one must be too.
+    #[tokio::test]
+    async fn replace_proxy_endpoints_rejects_empty() {
+        assert!(replace_proxy_endpoints(&[]).await.is_err());
+    }
+
     #[test]
     fn proxy_endpoints_are_bounded_like_every_sibling_list() {
         let mut config = test_config();

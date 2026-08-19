@@ -7,7 +7,7 @@ import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useI18n } from '@/hooks/use-i18n'
 import { useUpdate } from '@/hooks/use-update'
-import { useVerge } from '@/hooks/use-verge'
+import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { resolveLanguage, supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
 import { setCacheData, useQuery } from '@/services/query-client'
@@ -22,6 +22,7 @@ import {
   tonoSetNetworkLogUploadEnabled,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { PageHeader } from '@/tono-ui/PageHeader'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
@@ -130,36 +131,23 @@ const GeneralCard = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
-  const { verge, mutateVerge, patchVerge } = useVerge()
+  const { preferences, mutatePreferences, patchPreferences } =
+    useTonoPreferences()
   const { switchLanguage } = useI18n()
-
-  const { data: auditEnabled } = useQuery({
-    queryKey: tonoAuditEnabledQueryKey,
-    queryFn: tonoAuditEnabled,
-  })
-  const { data: auditLogInfo } = useQuery({
-    queryKey: tonoAuditLogPathQueryKey,
-    queryFn: tonoAuditLogPath,
-  })
-  const { data: periodicTelemetryEnabled } = useQuery({
-    queryKey: tonoPeriodicTelemetryEnabledQueryKey,
-    queryFn: tonoPeriodicTelemetryEnabled,
-  })
-  const { data: networkLogUploadEnabled } = useQuery({
-    queryKey: tonoNetworkLogUploadEnabledQueryKey,
-    queryFn: tonoNetworkLogUploadEnabled,
-  })
-  const logPath = auditLogInfo?.path
+  const transparency = useGlassTransparency()
+  const [slider, setSlider] = useState<number | null>(null)
+  const themeMode = preferences?.theme_mode ?? 'system'
+  const sliderValue = slider ?? transparency
 
   const handleAutostart = useLockFn(async (value: boolean) => {
-    const previous = verge?.enable_auto_launch ?? false
-    mutateVerge((prev) =>
+    const previous = preferences?.enable_auto_launch ?? false
+    mutatePreferences((prev) =>
       prev ? { ...prev, enable_auto_launch: value } : prev,
     )
     try {
-      await patchVerge({ enable_auto_launch: value })
+      await patchPreferences({ enable_auto_launch: value })
     } catch (error) {
-      mutateVerge((prev) =>
+      mutatePreferences((prev) =>
         prev ? { ...prev, enable_auto_launch: previous } : prev,
       )
       showNotice.error(error instanceof Error ? error.message : String(error))
@@ -169,66 +157,39 @@ const GeneralCard = () => {
   const handleLanguage = useLockFn(async (language: string) => {
     try {
       await switchLanguage(language)
-      await patchVerge({ language })
+      await patchPreferences({ language })
     } catch (error) {
       showNotice.error(error instanceof Error ? error.message : String(error))
     }
   })
 
-  const handleAudit = useLockFn(async (value: boolean) => {
-    const previous = auditEnabled ?? true
-    setCacheData(tonoAuditEnabledQueryKey, value)
-    try {
-      await tonoSetAuditEnabled(value)
-    } catch (error) {
-      setCacheData(tonoAuditEnabledQueryKey, previous)
-      showNotice.error(error instanceof Error ? error.message : String(error))
-    }
-  })
+  const handleThemeMode = useLockFn(
+    async (value: 'light' | 'dark' | 'system') => {
+      try {
+        await patchPreferences({ theme_mode: value })
+      } catch (error) {
+        showNotice.error(error instanceof Error ? error.message : String(error))
+      }
+    },
+  )
 
-  const handlePeriodicTelemetry = useLockFn(async (value: boolean) => {
-    const previous = periodicTelemetryEnabled ?? true
-    setCacheData(tonoPeriodicTelemetryEnabledQueryKey, value)
-    try {
-      await tonoSetPeriodicTelemetryEnabled(value)
-    } catch (error) {
-      setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
-      showNotice.error(error instanceof Error ? error.message : String(error))
+  const commitSlider = () => {
+    if (slider !== null) {
+      setGlassTransparency(slider)
+      setSlider(null)
     }
-  })
-
-  const handleNetworkLogUpload = useLockFn(async (value: boolean) => {
-    const previous = networkLogUploadEnabled ?? true
-    setCacheData(tonoNetworkLogUploadEnabledQueryKey, value)
-    try {
-      await tonoSetNetworkLogUploadEnabled(value)
-    } catch (error) {
-      setCacheData(tonoNetworkLogUploadEnabledQueryKey, previous)
-      showNotice.error(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  const handleCopyPath = useLockFn(async () => {
-    if (!logPath) return
-    try {
-      await navigator.clipboard.writeText(logPath)
-      showNotice.success('settings.sections.tono.auditLog.copied')
-    } catch (error) {
-      console.warn('[Settings] copy to clipboard failed:', error)
-      showNotice.error('settings.sections.tono.auditLog.copyFailed')
-    }
-  })
+  }
 
   return (
     <GlassCard>
       <CardHeader
         icon="⚙️"
-        title={t('tono.settings.general.title')}
+        title={t('tono.settings.preferences.title')}
         tint={`${TONO_COLORS.accent}26`}
       />
       <Row label={t('tono.settings.general.launchAtStartup')}>
         <TonoToggle
-          checked={verge?.enable_auto_launch ?? false}
+          checked={preferences?.enable_auto_launch ?? false}
           onChange={(value) => void handleAutostart(value)}
           label={t('tono.settings.general.launchAtStartup')}
         />
@@ -240,7 +201,7 @@ const GeneralCard = () => {
           // 'zhtw', which resolveLanguage maps to 'zh' — matched no option and left the
           // control blank, showing nothing while the app was plainly running in some
           // language. This shows whichever one is actually running.
-          value={resolveLanguage(verge?.language)}
+          value={resolveLanguage(preferences?.language)}
           onChange={(event) => void handleLanguage(event.target.value)}
           style={{
             fontFamily: 'inherit',
@@ -261,111 +222,6 @@ const GeneralCard = () => {
           ))}
         </select>
       </Row>
-      <Row
-        label={t('settings.sections.tono.auditLog.label')}
-        subtitle={t('settings.sections.tono.auditLog.description')}
-      >
-        <TonoToggle
-          checked={auditEnabled ?? true}
-          onChange={(value) => void handleAudit(value)}
-          label={t('settings.sections.tono.auditLog.label')}
-        />
-      </Row>
-      <Row
-        label={t('settings.sections.tono.periodicTelemetry.label')}
-        subtitle={t('settings.sections.tono.periodicTelemetry.description')}
-      >
-        <TonoToggle
-          checked={periodicTelemetryEnabled ?? true}
-          onChange={(value) => void handlePeriodicTelemetry(value)}
-          label={t('settings.sections.tono.periodicTelemetry.label')}
-        />
-      </Row>
-      <Row
-        label={t('settings.sections.tono.networkLogUpload.label')}
-        subtitle={t('settings.sections.tono.networkLogUpload.description')}
-      >
-        <TonoToggle
-          checked={networkLogUploadEnabled ?? true}
-          onChange={(value) => void handleNetworkLogUpload(value)}
-          label={t('settings.sections.tono.networkLogUpload.label')}
-        />
-      </Row>
-      <Row label={t('settings.sections.tono.auditLog.pathLabel')}>
-        <span
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            maxWidth: 220,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              fontFamily: TONO_MONO_STACK,
-              color: text.tertiary,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              direction: 'rtl',
-            }}
-            title={logPath ?? undefined}
-          >
-            {logPath ?? '—'}
-          </span>
-          <button
-            type="button"
-            className="tono-link"
-            aria-label={t('settings.sections.tono.auditLog.copyPath')}
-            title={t('settings.sections.tono.auditLog.copyPath')}
-            disabled={!logPath}
-            style={{ color: TONO_COLORS.accent, display: 'flex' }}
-            onClick={handleCopyPath}
-          >
-            <ContentCopyRoundedIcon style={{ fontSize: 14 }} />
-          </button>
-        </span>
-      </Row>
-    </GlassCard>
-  )
-}
-
-const AppearanceCard = () => {
-  const { t } = useTranslation()
-  const dark = useThemeMode() !== 'light'
-  const text = tonoText(dark)
-  const { verge, patchVerge } = useVerge()
-  const transparency = useGlassTransparency()
-  const [slider, setSlider] = useState<number | null>(null)
-
-  const themeMode = verge?.theme_mode ?? 'system'
-  const sliderValue = slider ?? transparency
-
-  const handleThemeMode = useLockFn(
-    async (value: 'light' | 'dark' | 'system') => {
-      try {
-        await patchVerge({ theme_mode: value })
-      } catch (error) {
-        showNotice.error(error instanceof Error ? error.message : String(error))
-      }
-    },
-  )
-
-  const commitSlider = () => {
-    if (slider !== null) {
-      setGlassTransparency(slider)
-      setSlider(null)
-    }
-  }
-
-  return (
-    <GlassCard>
-      <CardHeader
-        icon="🎨"
-        title={t('tono.settings.appearance.title')}
-        tint={`${TONO_COLORS.protectedOffline}26`}
-      />
       <Row label={t('tono.settings.appearance.themeMode')}>
         <span
           style={{
@@ -432,6 +288,149 @@ const AppearanceCard = () => {
   )
 }
 
+const PrivacyCard = () => {
+  const { t } = useTranslation()
+  const dark = useThemeMode() !== 'light'
+  const text = tonoText(dark)
+  const { data: auditEnabled } = useQuery({
+    queryKey: tonoAuditEnabledQueryKey,
+    queryFn: tonoAuditEnabled,
+  })
+  const { data: auditLogInfo } = useQuery({
+    queryKey: tonoAuditLogPathQueryKey,
+    queryFn: tonoAuditLogPath,
+  })
+  const { data: periodicTelemetryEnabled } = useQuery({
+    queryKey: tonoPeriodicTelemetryEnabledQueryKey,
+    queryFn: tonoPeriodicTelemetryEnabled,
+  })
+  const { data: networkLogUploadEnabled } = useQuery({
+    queryKey: tonoNetworkLogUploadEnabledQueryKey,
+    queryFn: tonoNetworkLogUploadEnabled,
+  })
+  const logPath = auditLogInfo?.path
+
+  const handleAudit = useLockFn(async (value: boolean) => {
+    const previous = auditEnabled ?? true
+    setCacheData(tonoAuditEnabledQueryKey, value)
+    try {
+      await tonoSetAuditEnabled(value)
+    } catch (error) {
+      setCacheData(tonoAuditEnabledQueryKey, previous)
+      showNotice.error(error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  const handlePeriodicTelemetry = useLockFn(async (value: boolean) => {
+    const previous = periodicTelemetryEnabled ?? true
+    setCacheData(tonoPeriodicTelemetryEnabledQueryKey, value)
+    try {
+      await tonoSetPeriodicTelemetryEnabled(value)
+    } catch (error) {
+      setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
+      showNotice.error(error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  const handleNetworkLogUpload = useLockFn(async (value: boolean) => {
+    const previous = networkLogUploadEnabled ?? true
+    setCacheData(tonoNetworkLogUploadEnabledQueryKey, value)
+    try {
+      await tonoSetNetworkLogUploadEnabled(value)
+    } catch (error) {
+      setCacheData(tonoNetworkLogUploadEnabledQueryKey, previous)
+      showNotice.error(error instanceof Error ? error.message : String(error))
+    }
+  })
+
+  const handleCopyPath = useLockFn(async () => {
+    if (!logPath) return
+    try {
+      await navigator.clipboard.writeText(logPath)
+      showNotice.success('settings.sections.tono.auditLog.copied')
+    } catch (error) {
+      console.warn('[Settings] copy to clipboard failed:', error)
+      showNotice.error('settings.sections.tono.auditLog.copyFailed')
+    }
+  })
+
+  return (
+    <GlassCard>
+      <CardHeader
+        icon="🔒"
+        title={t('tono.settings.privacy.title')}
+        tint={`${TONO_COLORS.protectedOffline}26`}
+      />
+      <Row
+        label={t('settings.sections.tono.auditLog.label')}
+        subtitle={t('settings.sections.tono.auditLog.description')}
+      >
+        <TonoToggle
+          checked={auditEnabled ?? true}
+          onChange={(value) => void handleAudit(value)}
+          label={t('settings.sections.tono.auditLog.label')}
+        />
+      </Row>
+      <Row
+        label={t('settings.sections.tono.periodicTelemetry.label')}
+        subtitle={t('settings.sections.tono.periodicTelemetry.description')}
+      >
+        <TonoToggle
+          checked={periodicTelemetryEnabled ?? true}
+          onChange={(value) => void handlePeriodicTelemetry(value)}
+          label={t('settings.sections.tono.periodicTelemetry.label')}
+        />
+      </Row>
+      <Row
+        label={t('settings.sections.tono.networkLogUpload.label')}
+        subtitle={t('settings.sections.tono.networkLogUpload.description')}
+      >
+        <TonoToggle
+          checked={networkLogUploadEnabled ?? true}
+          onChange={(value) => void handleNetworkLogUpload(value)}
+          label={t('settings.sections.tono.networkLogUpload.label')}
+        />
+      </Row>
+      <Row label={t('settings.sections.tono.auditLog.pathLabel')}>
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            maxWidth: 280,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontFamily: TONO_MONO_STACK,
+              color: text.tertiary,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              direction: 'rtl',
+            }}
+            title={logPath ?? undefined}
+          >
+            {logPath ?? '—'}
+          </span>
+          <button
+            type="button"
+            className="tono-link"
+            aria-label={t('settings.sections.tono.auditLog.copyPath')}
+            title={t('settings.sections.tono.auditLog.copyPath')}
+            disabled={!logPath}
+            style={{ color: TONO_COLORS.accent, display: 'flex' }}
+            onClick={handleCopyPath}
+          >
+            <ContentCopyRoundedIcon style={{ fontSize: 14 }} />
+          </button>
+        </span>
+      </Row>
+    </GlassCard>
+  )
+}
+
 const AboutCard = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -445,9 +444,7 @@ const AboutCard = () => {
       if (result.data?.available) {
         updateRef.current?.open()
       } else {
-        showNotice.success(
-          'settings.components.verge.advanced.notifications.latestVersion',
-        )
+        showNotice.success('tono.settings.about.latestVersion')
       }
     } catch (error) {
       showNotice.error(error)
@@ -486,7 +483,7 @@ const AboutCard = () => {
           disabled={loading}
           onClick={() => void onCheckUpdate()}
         >
-          {t('settings.components.verge.advanced.fields.checkUpdates')}
+          {t('tono.settings.about.checkUpdates')}
         </button>
       </GlassCard>
     </>
@@ -498,11 +495,9 @@ const SettingPage = () => {
 
   return (
     <div className="tono-page">
-      <h1 className="tono-page-title" style={{ marginBottom: 18 }}>
-        {t('tono.settings.title')}
-      </h1>
+      <PageHeader title={t('tono.settings.title')} />
 
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 20 }}>
         <TonoAccountCard />
       </div>
 
@@ -511,13 +506,14 @@ const SettingPage = () => {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
           gap: 18,
-          alignItems: 'start',
+          alignItems: 'stretch',
+          marginBottom: 18,
         }}
       >
         <GeneralCard />
-        <AppearanceCard />
         <AboutCard />
       </div>
+      <PrivacyCard />
     </div>
   )
 }

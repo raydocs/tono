@@ -46,3 +46,9 @@ pub async fn restart_app() -> CmdResult<()> {
     feat::restart_app().await;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn restart_for_update() -> CmdResult<()> {
+    feat::restart_for_update().await;
+    Ok(())
+}

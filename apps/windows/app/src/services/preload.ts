@@ -1,4 +1,4 @@
-import { getVergeConfig } from './cmds'
+import { getTonoPreferences } from './cmds'
 import {
   cacheLanguage,
   getCachedLanguage,
@@ -6,7 +6,7 @@ import {
   resolveLanguage,
 } from './i18n'
 
-let vergeConfigCache: IVergeConfig | null | undefined
+let preferencesCache: TonoPreferences | null | undefined
 
 const detectSystemTheme = (): 'light' | 'dark' => {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function')
@@ -16,13 +16,19 @@ const detectSystemTheme = (): 'light' | 'dark' => {
     : 'light'
 }
 
-const getThemeModeFromWindow = (): IVergeConfig['theme_mode'] | undefined => {
+const getThemeModeFromWindow = (): TonoPreferences['theme_mode'] | undefined => {
   if (typeof window === 'undefined') return undefined
   const mode = (
     window as typeof window & {
+      __TONO_INITIAL_THEME_MODE?: unknown
       __VERGE_INITIAL_THEME_MODE?: unknown
     }
-  ).__VERGE_INITIAL_THEME_MODE
+  ).__TONO_INITIAL_THEME_MODE ??
+    (
+      window as typeof window & {
+        __VERGE_INITIAL_THEME_MODE?: unknown
+      }
+    ).__VERGE_INITIAL_THEME_MODE
   if (mode === 'light' || mode === 'dark' || mode === 'system') {
     return mode
   }
@@ -30,50 +36,50 @@ const getThemeModeFromWindow = (): IVergeConfig['theme_mode'] | undefined => {
 }
 
 export const resolveThemeMode = (
-  vergeConfig?: IVergeConfig | null,
+  preferences?: TonoPreferences | null,
 ): 'light' | 'dark' => {
-  const initialMode = vergeConfig?.theme_mode ?? getThemeModeFromWindow()
+  const initialMode = preferences?.theme_mode ?? getThemeModeFromWindow()
   if (initialMode === 'dark' || initialMode === 'light') {
     return initialMode
   }
   return detectSystemTheme()
 }
 
-export const setPreloadConfig = (config: IVergeConfig | null) => {
-  vergeConfigCache = config
+export const setPreloadConfig = (config: TonoPreferences | null) => {
+  preferencesCache = config
 }
 
-export const getPreloadConfig = () => vergeConfigCache
+export const getPreloadConfig = () => preferencesCache
 
 const preloadConfig = async () => {
   try {
-    const config = await getVergeConfig()
+    const config = await getTonoPreferences()
     setPreloadConfig(config)
     return config
   } catch (error) {
-    console.warn('[preload.ts] Failed to read Verge config:', error)
+    console.warn('[preload.ts] Failed to read Tono preferences:', error)
     setPreloadConfig(null)
     return null
   }
 }
 
 const preloadLanguage = async (
-  vergeConfig?: IVergeConfig | null,
-  loadConfig: () => Promise<IVergeConfig | null> = preloadConfig,
+  preferences?: TonoPreferences | null,
+  loadConfig: () => Promise<TonoPreferences | null> = preloadConfig,
 ) => {
   const cachedLanguage = getCachedLanguage()
   if (cachedLanguage) {
     return cachedLanguage
   }
 
-  let resolvedConfig = vergeConfig
+  let resolvedConfig = preferences
 
   if (resolvedConfig === undefined) {
     try {
       resolvedConfig = await loadConfig()
     } catch (error) {
       console.warn(
-        '[preload.ts] Failed to read language from Verge config:',
+        '[preload.ts] Failed to read language from Tono preferences:',
         error,
       )
       resolvedConfig = null

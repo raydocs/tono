@@ -4,6 +4,8 @@
  * server address itself is never shown — that is Tono's idea of redaction.
  */
 
+import type { TranslationKey } from '@/types/generated/i18n-keys'
+
 const NODE_DISPLAY_NAMES: Record<string, string> = {
   'US-VLESS-Reality': 'Los Angeles · Grove',
   'JP-VLESS-Reality': 'Tokyo · Dawn',
@@ -89,6 +91,32 @@ const CITY_REGIONS: Record<string, NodeRegion> = {
 }
 
 const cityOf = (wireName: string) => wireName.split('·')[0].trim().toLowerCase()
+
+export const nodeCityParts = (wireName: string) => {
+  const displayName = nodeDisplayName(wireName)
+  const [city, rest] = displayName.split('·')
+  return {
+    city: (city ?? displayName).trim(),
+    codename: rest?.trim() || null,
+  }
+}
+
+const CITY_TITLE_KEYS: Record<string, TranslationKey> = {
+  'los angeles': 'tono.cities.losAngeles',
+  'salt lake city': 'tono.cities.saltLakeCity',
+  buffalo: 'tono.cities.buffalo',
+  'new york': 'tono.cities.newYork',
+  'san jose': 'tono.cities.sanJose',
+  seattle: 'tono.cities.seattle',
+  chicago: 'tono.cities.chicago',
+  dallas: 'tono.cities.dallas',
+  miami: 'tono.cities.miami',
+  tokyo: 'tono.cities.tokyo',
+  osaka: 'tono.cities.osaka',
+}
+
+export const nodeCityTitleKey = (wireName: string) =>
+  CITY_TITLE_KEYS[nodeCityParts(wireName).city.toLowerCase()] ?? null
 
 /** Keep the UI's groups aligned with the backend's region ranking. */
 export const nodeRegion = (wireName: string): NodeRegion => {

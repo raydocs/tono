@@ -52,7 +52,7 @@ function NodeExpand({ node, agent, profile, onProfile }: {
       || trafficUsedBytes === 'invalid'
       || renewsAt === 'invalid'
     ) {
-      setError(`${bad.join('、')}不是有效数值，什么都没有保存。`);
+      setError(`${bad.join('、')}格式不对，这次什么都没保存。`);
       return;
     }
     setError(null);
@@ -106,7 +106,7 @@ function NodeExpand({ node, agent, profile, onProfile }: {
       setUsed('');
       onProfile();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '重置计费周期失败');
+      setError(err instanceof Error ? err.message : '这期没清掉');
     } finally {
       setBusy(false);
     }
@@ -115,22 +115,22 @@ function NodeExpand({ node, agent, profile, onProfile }: {
   return (
     <div className="monitor-detail">
       <div>
-        <h4>结论</h4>
+        <h4>概况</h4>
         <p>状态：{blockLabel(node)}</p>
         <p>质量：{node.quality === 'poor' ? '差' : '正常'}</p>
         {node.block?.rule ? <p className="muted">{node.block.rule}</p> : null}
-        <h4>大陆路径</h4>
+        <h4>回大陆延迟</h4>
         <CarrierPing carriers={agent?.carriers ?? null} />
-        <h4>对外暴露</h4>
+        <h4>对外端口</h4>
         {!node.exposure ? (
-          <p className="muted">尚未探测。这一栏空着不代表干净——泄露的面板正是在没人看的状态下开了几周。</p>
+          <p className="muted">还没扫过端口。空着不代表安全。</p>
         ) : (
           <>
             {node.exposure.unexpected.length === 0 ? (
-              <p>只对外开放 SSH（:{node.exposure.sshPorts.join('、:') || '—'}）与服务端口。</p>
+              <p>对外只开了 SSH（:{node.exposure.sshPorts.join('、:') || '—'}）和服务端口。</p>
             ) : (
               <p>
-                意外对外开放 {node.exposure.unexpected.length} 个端口：
+                多开了 {node.exposure.unexpected.length} 个端口：
                 {node.exposure.unexpected.map((listener) => (
                   <span className="chip chip-risk" key={`exp-${listener.port}`}>
                     :{listener.port}{listener.process ? ` ${listener.process}` : ''}
@@ -140,7 +140,7 @@ function NodeExpand({ node, agent, profile, onProfile }: {
             )}
             {node.exposure.acknowledged.map((listener) => (
               <p className="muted" key={`ack-${listener.port}`}>
-                已具名豁免 :{listener.port}
+                已允许 :{listener.port}
                 {listener.process ? ` ${listener.process}` : ''}
                 {listener.reason ? ` —— ${listener.reason}` : ''}
               </p>
@@ -149,17 +149,17 @@ function NodeExpand({ node, agent, profile, onProfile }: {
         )}
         {node.riskSignals.length > 0 && (
           <>
-            <h4>IP 信誉</h4>
+            <h4>IP 黑名单</h4>
             <p className="muted">
-              securityCheck 询问十七家数据库，下面是各自的答案；少数派不构成判定。
+              查过 17 家名单，少数说有问题先不算。
             </p>
             {node.riskSignals.map((signal) => (
               <p key={`sig-${signal.tag}`}>
                 {RISK_SIGNAL_LABELS[signal.tag] ?? signal.tag}：
                 {signal.no === 0
-                  ? `${signal.yes} 个来源提出`
-                  : `${signal.yes} 家认为是，${signal.no} 家认为否`}
-                {node.riskKeywords.includes(signal.tag) ? '（已判定）' : '（证据不足，未判定）'}
+                  ? `${signal.yes} 家标了这个`
+                  : `${signal.yes} 家说是，${signal.no} 家说不是`}
+                {node.riskKeywords.includes(signal.tag) ? '（算）' : '（证据不够，先不算）'}
               </p>
             ))}
           </>
@@ -177,9 +177,9 @@ function NodeExpand({ node, agent, profile, onProfile }: {
           const billing = mergedBilling(profile, agent);
           return billing.source !== 'none' ? (
             <p className="muted">
-              {billing.price != null ? `${billing.currency || ''}${billing.price}` : '价格未接'}
-              {billing.billingCycle ? ` · ${billing.billingCycle} 天周期` : ''}
-              {billing.source === 'komari' ? ' · 来自 Komari' : billing.source === 'mixed' ? ' · 手工档案优先，缺口用 Komari 补' : ' · 手工档案'}
+              {billing.price != null ? `${billing.currency || ''}${billing.price}` : '没有价格'}
+              {billing.billingCycle ? ` · ${billing.billingCycle} 天一期` : ''}
+              {billing.source === 'komari' ? ' · 来自 Komari' : billing.source === 'mixed' ? ' · 自己填的优先，缺的用 Komari 补' : ' · 自己填的'}
             </p>
           ) : null;
         })()}
@@ -188,16 +188,16 @@ function NodeExpand({ node, agent, profile, onProfile }: {
           <input className="input compact" type="number" min={0} placeholder="套餐 GB" value={quota} onChange={(e) => setQuota(e.target.value)} />
           <input className="input compact" type="number" min={0} placeholder="已用 GB（手填）" value={used} onChange={(e) => setUsed(e.target.value)} />
           <input className="input compact" type="date" value={renew} onChange={(e) => setRenew(e.target.value)} />
-          <small className="muted">清空一格再保存即清除该项；填错格式会被拒绝，不会当成清除。</small>
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void save()}>保存档案</button>
+          <small className="muted">某项要清空：把格子清空再保存。填错不会被当成清空。</small>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void save()}>保存</button>
           {profile && (
             <button
               type="button"
               className="btn btn-outline btn-sm"
               disabled={busy || !agent}
-              title={agent ? undefined : '这台没有探针，读不到当前计数器'}
+              title={agent ? undefined : '这台没装探针，看不到当前用量'}
               onClick={() => void startNewCycle()}
-            >把本周期已用归零</button>
+            >这期用量清零</button>
           )}
           {profile?.billingUrl && (
             <a className="btn btn-outline btn-sm" href={profile.billingUrl} target="_blank" rel="noreferrer">打开账单</a>
@@ -211,9 +211,9 @@ function NodeExpand({ node, agent, profile, onProfile }: {
           ? <ul className="detail-list">{incident.data.affected.map((user) => (
             <li key={user.userId}><strong>{user.email}</strong><span className="muted">{user.online ? '在线' : '离线'}</span></li>
           ))}</ul>
-          : <span className="muted">当前没有在线用户连这台</span>)}
+          : <span className="muted">现在没人连这台</span>)}
         <details>
-          <summary>回程 / IP 质量</summary>
+          <summary>线路 / 黑名单原文</summary>
           <pre>{node.backtrace || '无'}</pre>
           <pre>{node.securityCheck || '无'}</pre>
         </details>
@@ -241,7 +241,7 @@ function MachinePressure({ agents }: { agents: LiveAgentDto[] }) {
     <div className="card-header">
       <div>
         <h2>机器负载</h2>
-        <p>{troubled ? `${troubled} 台有信号，已排在最前` : '全部正常'}</p>
+        <p>{troubled ? `${troubled} 台有告警，排在前面` : '全部正常'}</p>
       </div>
     </div>
     <div className="card-body">
@@ -297,6 +297,8 @@ export function MonitorPage() {
   const metrics = useResource(() => operationsApi.metrics('24h'), [], refreshMs);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
+  const [focus, setFocus] = useState<'all' | 'needs' | 'expiring' | 'noprobe'>('all');
+  const [view, setView] = useState<'cards' | 'table'>('cards');
   const [open, setOpen] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
@@ -333,9 +335,22 @@ export function MonitorPage() {
     const reachable = qualityNodes.filter((node) => ['OK', 'EDGE_OK'].includes(blockStatus(node)));
     const poor = qualityNodes.filter((node) => node.quality === 'poor');
     const needle = query.trim().toLowerCase();
+    const nowSec = Math.floor(Date.now() / 1_000);
     const visible = qualityNodes.filter((node) => {
       const status = blockStatus(node);
       if (filter !== 'all' && status !== filter) return false;
+      const agent = agentByName.get(node.name);
+      const profile = profileByName.get(node.name);
+      const billing = mergedBilling(profile, agent);
+      if (focus === 'noprobe' && agent) return false;
+      if (focus === 'expiring') {
+        if (!billing.renewsAt || billing.renewsAt - nowSec > 7 * 86_400) return false;
+      }
+      if (focus === 'needs') {
+        const troubled = status === 'LIKELY_BLOCKED' || status === 'DOWN' || status === 'EDGE_FAIL'
+          || node.quality === 'poor' || !agent;
+        if (!troubled) return false;
+      }
       if (!needle) return true;
       return `${node.name} ${node.host ?? ''} ${node.publicIp ?? ''}`.toLowerCase().includes(needle);
     });
@@ -378,7 +393,7 @@ export function MonitorPage() {
     // Absent is not clean. A node no collector run has looked at is exactly the
     // state the leaked panel lived in for weeks, so it reads as unknown.
     const exposureChip = (node: LiveQualityNodeDto) => {
-      if (!node.exposure) return { label: '暴露面未探测', tone: 'muted' as const };
+      if (!node.exposure) return { label: '还没扫端口', tone: 'muted' as const };
       const { unexpected } = node.exposure;
       if (!unexpected.length) return null;
       const first = unexpected[0];
@@ -390,35 +405,35 @@ export function MonitorPage() {
     };
     return <div className="stack">
       <DataHealth sources={[
-        { label: '服务器档案', resource: profilesRes },
-        { label: '在线活动', resource: activityRes },
-        { label: '趋势指标', resource: metrics },
+        { label: '账单资料', resource: profilesRes },
+        { label: '谁在线', resource: activityRes },
+        { label: '趋势', resource: metrics },
         { label: '节点质量', resource },
       ]} />
       {(live.agentsError || live.qualityError) && (
         <Banner
           tone="error"
           message={[
-            live.agentsError ? `探针库存：${live.agentsError}` : null,
-            live.qualityError ? `质量报告：${live.qualityError}` : null,
+            live.agentsError ? `探针：${live.agentsError}` : null,
+            live.qualityError ? `质量：${live.qualityError}` : null,
           ].filter(Boolean).join('；')}
         />
       )}
 
       {agentsConfigured === 0 && (
-        <Banner tone="info" message="大陆三网 agent 未配置 — 当前用 HK/JP/SG 边缘 TCP 表示「边缘可达」，不会把海外探测误判为被墙。" />
+        <Banner tone="info" message="大陆三网探针还没配。现在用香港、日本、新加坡测通，不会把海外测通当成没被墙。" />
       )}
 
       <div className="metrics">
         <article className="metric">
           <div className="metric-label"><span>节点</span></div>
           <div className="metric-value">{qualityNodes.length}</div>
-          <div className="metric-hint">采集于 {timestamp(live.quality?.updatedAt)}</div>
+          <div className="metric-hint">更新于 {timestamp(live.quality?.updatedAt)}</div>
         </article>
         <article className="metric">
           <div className="metric-label"><span>可达</span></div>
           <div className="metric-value">{reachable.length}</div>
-          <div className="metric-hint">大陆正常或边缘可达 · 探针 {agents.length}</div>
+          <div className="metric-hint">大陆正常或边缘能通 · 探针 {agents.length}</div>
         </article>
         <article className={`metric${blocked.length ? ' metric-alert' : ''}`}>
           <div className="metric-label"><span>疑似被墙</span></div>
@@ -428,7 +443,7 @@ export function MonitorPage() {
         <article className={`metric${poor.length ? ' metric-warn' : ''}`}>
           <div className="metric-label"><span>质量差</span></div>
           <div className="metric-value">{poor.length}</div>
-          <div className="metric-hint">{poor.length ? poor.map((n) => n.name).join('、') : '仅严重风险才标'}</div>
+          <div className="metric-hint">{poor.length ? poor.map((n) => n.name).join('、') : '只有问题比较大才会标'}</div>
         </article>
       </div>
 
@@ -438,8 +453,8 @@ export function MonitorPage() {
       <section className="card">
         <div className="card-header">
           <div>
-            <h2>补服务器档案</h2>
-            <p>账单页和手填余量写在这里。到期日、流量额度以这份手填档案为准，档案里空着的才回落到 Komari；价格和计费周期只有 Komari 有。</p>
+            <h2>补账单资料</h2>
+            <p>到期日和流量额度以这里填的为准，没填的才用 Komari。价格和周期只有 Komari 有。</p>
           </div>
         </div>
         <div className="card-body">
@@ -451,7 +466,7 @@ export function MonitorPage() {
               const trafficQuotaBytes = gibibytes(newQuota);
               const renewsAt = unixDate(newRenew);
               if (trafficQuotaBytes === 'invalid' || renewsAt === 'invalid') {
-                setNewError('套餐 GB 或续费日期不是有效数值，档案没有建立。');
+                setNewError('套餐或续费日期格式不对，没保存。');
                 return;
               }
               setNewError(null);
@@ -469,17 +484,17 @@ export function MonitorPage() {
                 setNewRenew('');
                 profilesRes.reload();
               } catch (err) {
-                setNewError(err instanceof Error ? err.message : '建立档案失败');
+                setNewError(err instanceof Error ? err.message : '没保存成');
               } finally {
                 setBusy(false);
               }
             }}
           >
-            <input className="input compact" placeholder="节点名（对齐探测名）" value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy} />
+            <input className="input compact" placeholder="节点名（要和探测里的名字一致）" value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy} />
             <input className="input compact" placeholder="https://账单页" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} disabled={busy} />
             <input className="input compact" type="number" min={0} placeholder="套餐 GB" value={newQuota} onChange={(e) => setNewQuota(e.target.value)} disabled={busy} />
             <input className="input compact" type="date" value={newRenew} onChange={(e) => setNewRenew(e.target.value)} disabled={busy} />
-            <button className="btn btn-sm" type="submit" disabled={busy || !newName.trim()}>保存档案</button>
+            <button className="btn btn-sm" type="submit" disabled={busy || !newName.trim()}>保存</button>
           </form>
           <Banner message={newError} tone="error" />
         </div>
@@ -489,10 +504,16 @@ export function MonitorPage() {
         <div className="card-header monitor-toolbar">
           <div>
             <h2>服务器</h2>
-            <p>点行展开回程、账单和谁在用这台</p>
+            <p>卡片看状态，表格做批量对照</p>
           </div>
           <div className="form-row">
             <input className="input compact" type="search" placeholder="搜索名称 / IP" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <select className="input compact" value={focus} onChange={(event) => setFocus(event.target.value as typeof focus)}>
+              <option value="all">全部</option>
+              <option value="needs">需要处理</option>
+              <option value="expiring">即将到期</option>
+              <option value="noprobe">未安装探针</option>
+            </select>
             <select className="input compact" value={filter} onChange={(event) => setFilter(event.target.value)}>
               <option value="all">全部状态</option>
               <option value="LIKELY_BLOCKED">疑似被墙</option>
@@ -501,11 +522,63 @@ export function MonitorPage() {
               <option value="EDGE_FAIL">边缘不通</option>
               <option value="DOWN">不通</option>
             </select>
+            <button type="button" className={`btn btn-sm ${view === 'cards' ? '' : 'btn-outline'}`} onClick={() => setView('cards')}>卡片</button>
+            <button type="button" className={`btn btn-sm ${view === 'table' ? '' : 'btn-outline'}`} onClick={() => setView('table')}>表格</button>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => resource.reload()}>刷新</button>
           </div>
         </div>
         {visible.length === 0 ? (
-          <div className="state"><strong>没有匹配的节点</strong></div>
+          <div className="state"><strong>没有符合条件的节点</strong></div>
+        ) : view === 'cards' ? (
+          <div className="server-grid">
+            {visible.map((node) => {
+              const agent = agentByName.get(node.name);
+              const profile = profileByName.get(node.name);
+              const remain = trafficRemaining(profile, agent);
+              const billing = mergedBilling(profile, agent);
+              const opened = open === keyOf(node);
+              const worst = worstCarrier(agent?.carriers ?? null);
+              return (
+                <button
+                  type="button"
+                  key={keyOf(node)}
+                  className={`server-card${opened ? ' open' : ''}`}
+                  onClick={() => setOpen(opened ? null : keyOf(node))}
+                >
+                  <div className="server-card-top">
+                    <div>
+                      <strong>{node.name}</strong>
+                      <div className="muted">{node.publicIp || node.host || '—'}</div>
+                    </div>
+                    <span className={`status status-${blockStatus(node) === 'OK' || blockStatus(node) === 'EDGE_OK' ? 'active' : blockStatus(node) === 'LIKELY_BLOCKED' ? 'degraded' : 'planned'}`}>
+                      {blockLabel(node)}
+                    </span>
+                  </div>
+                  <div className="server-card-meta">
+                    <span>探针 {agent ? `CPU ${agent.cpu != null ? `${Math.round(agent.cpu)}%` : '—'}` : '没装'}</span>
+                    <span>在用 {activityRes.state === 'ready' ? (occupancy.get(node.name) ?? 0) : '—'}</span>
+                    <span>余量 {remain == null ? '—' : formatBytes(remain)}</span>
+                    <span>续费 {billing.renewsAt ? timestamp(billing.renewsAt) : '—'}</span>
+                    <span>{worst ? `${worst.label} ${worst.latencyText}` : '延迟未测'}</span>
+                    <span>内存 {agent?.memUsed != null && agent.memTotal ? `${Math.round((agent.memUsed / agent.memTotal) * 100)}%` : '—'}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {open && visible.some((node) => keyOf(node) === open) && (
+            <div className="card-body">
+              {visible.filter((node) => keyOf(node) === open).map((node) => (
+                <NodeExpand
+                  key={keyOf(node)}
+                  node={node}
+                  agent={agentByName.get(node.name)}
+                  profile={profileByName.get(node.name)}
+                  onProfile={profilesRes.reload}
+                />
+              ))}
+            </div>
+          )}
         ) : (
           <div className="table-wrap">
             <table className="monitor-table">
@@ -527,7 +600,7 @@ export function MonitorPage() {
                     </td>
                     <td><span className={`status status-${status === 'OK' || status === 'EDGE_OK' ? 'active' : status === 'LIKELY_BLOCKED' ? 'degraded' : 'planned'}`}>{blockLabel(node)}</span></td>
                     <td>
-                      {agent ? <Status value="active" /> : <span className="muted">未安装</span>}
+                      {agent ? <Status value="active" /> : <span className="muted">没装探针</span>}
                       {agent?.cpu != null && <small className="muted">CPU {Math.round(agent.cpu)}%</small>}
                     </td>
                     <td className="mono">
@@ -558,7 +631,7 @@ export function MonitorPage() {
                               title={worst.detail}
                             >
                               {worst.label} {worst.latencyText}
-                              {worst.lossPct ? ` · 丢 ${worst.lossText}` : ''}
+                              {worst.lossPct ? ` · 丢包 ${worst.lossText}` : ''}
                             </span>
                           );
                         })()}

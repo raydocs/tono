@@ -3066,23 +3066,19 @@ final class AppState {
             }
             guard let api else { return }
             do {
-                let endpoints = try ConfigPipeline.dialEndpoints(for: desiredNode)
-                    + self.claudeHomeDialEndpoints(excluding: desiredNode)
-                // The owned runtime excludes every validated catalog address,
-                // so its TUN route fingerprint is stable across selections.
-                // Move the exact PF permission first; until the selector moves,
-                // the old route is simply blocked rather than sent directly.
-                try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
-                    tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
-                    proxyEndpoints: endpoints,
-                    sessionDirectEndpoints:
-                        activeDirectPolicy?.sessionEndpoints ?? [],
-                    tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
-                    reviewedBundleDirect:
-                        activeDirectPolicy?.requiresAddressFreeDirectPermit == true
-                )
-                try Task.checkCancellation()
                 let previousName = self.proxyService.activeNodeName
+                let previousNode = previousName.flatMap { self.localProxyNode(matching: $0) }
+                let previousEndpoints = self.currentProxyEndpoints()
+                let nextEndpoints = try ConfigPipeline.dialEndpoints(for: desiredNode)
+                    + self.claudeHomeDialEndpoints(excluding: desiredNode)
+                let transitionEndpoints = ConfigPipeline.uniqueDialEndpoints(
+                    previousEndpoints + nextEndpoints
+                )
+                // Old ∪ new first. Arming only the new destination blocked the
+                // still-selected old exit; a failed switch then rolled the
+                // selector back without restoring that PF permit.
+                try await self.armSwitchKillSwitch(proxyEndpoints: transitionEndpoints)
+                try Task.checkCancellation()
                 ConnectionTelemetryBuffer.shared.record(
                     "switchBegin",
                     node: desiredNode?.id,
@@ -3093,10 +3089,9 @@ final class AppState {
                     proxy: nodeName
                 )
                 try Task.checkCancellation()
-                // Prove the new exit before tearing every live TCP. Closing
-                // first dumped the whole session onto a still-unverified node
-                // and made Claude/browser drop even when the switch later
-                // rolled back.
+                // Prove the new exit before tearing leftover sockets on the
+                // previous destination. Closing everything first dumped the
+                // session onto an unverified node.
                 let switchVerdict = await self.verifyProtectedConnection(
                     controllerTask: Task {
                         await self.advisoryControllerExitProbe(
@@ -3118,7 +3113,7 @@ final class AppState {
                         controllerTask: Task {
                             await self.advisoryControllerExitProbe(
                                 api: api,
-                                selectedExit: self.selectedExitNode()
+                                selectedExit: previousNode ?? self.selectedExitNode()
                             )
                         },
                         mixedPort: self.config.mixedPort,
@@ -3130,6 +3125,7 @@ final class AppState {
                         node: desiredNode?.id,
                         generation: Int(self.protectionOperationGeneration)
                     )
+                    try await self.armSwitchKillSwitch(proxyEndpoints: previousEndpoints)
                     if case .failed(let failure) = rollback {
                         self.lastClassifiedFailure = failure
                         self.isRecoveringProtectedConnection = true
@@ -3143,9 +3139,8 @@ final class AppState {
                     self.lastClassifiedFailure = failure
                     throw CoreControllerError.protectionFailed(failure.userMessage)
                 }
-                // New exit is proven. Drop leftover sockets still bound to
-                // the previous node so long-lived clients migrate once.
-                try? await api.closeAllConnections()
+                await self.closeConnectionsBoundToExit(previousName, using: api)
+                try await self.armSwitchKillSwitch(proxyEndpoints: nextEndpoints)
                 await proxyService.refresh()
                 selectedNodeId = desiredNode?.id ?? ConfigPipeline.homeNodeName
                 activeNode = desiredNode
@@ -4083,6 +4078,33 @@ final class AppState {
             runtime,
             excluding: managedDirectProtectedAddresses()
         )
+    }
+
+    private func armSwitchKillSwitch(
+        proxyEndpoints: [ConfigPipeline.DialEndpoint]
+    ) async throws {
+        try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+            tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+            proxyEndpoints: proxyEndpoints,
+            sessionDirectEndpoints: activeDirectPolicy?.sessionEndpoints ?? [],
+            tailscaleBootstrapEnabled: AppProfile.homeExitEnabled && tonoTransport != nil,
+            reviewedBundleDirect:
+                activeDirectPolicy?.requiresAddressFreeDirectPermit == true
+        )
+    }
+
+    /// Close leftover sockets still pinned to the previous exit. Do not
+    /// `closeAllConnections`: that severs WeChat/Claude flows that already
+    /// moved, and is not a silent switch.
+    private func closeConnectionsBoundToExit(
+        _ exitName: String?,
+        using api: CoreControllerClient
+    ) async {
+        guard let exitName, !exitName.isEmpty else { return }
+        let tracked = (try? await api.getConnections())?.connections ?? []
+        for connection in tracked where connection.isBoundToExit(exitName) {
+            try? await api.closeConnection(id: connection.id)
+        }
     }
 
     /// PF proxy permits for the currently selected exit, matching what the

@@ -55,19 +55,32 @@ launchGuard:
   move: Move
   ok: OK
 tray:
-  dashboard: Dashboard
+  dashboard: Open Tono
   tono:
-    protectionValue: 'Protection: {value}'
-    serverValue: 'Server: {value}'
+    protectionValue: '{value}'
+    serverValue: '{value}'
     connect: Connect
-    disconnect: Disconnect and Restore Internet
-    retry: Retry Protected Offline
+    disconnect: Disconnect and restore internet
+    restoreInternet: Restore normal internet
+    retry: Retry now
     noServer: No server selected
+    cities:
+      losAngeles: Los Angeles
+      saltLakeCity: Salt Lake City
+      buffalo: Buffalo
+      newYork: New York
+      sanJose: San Jose
+      seattle: Seattle
+      chicago: Chicago
+      dallas: Dallas
+      miami: Miami
+      tokyo: Tokyo
+      osaka: Osaka
     state:
-      notConnected: Not connected
+      notConnected: Standby
       connecting: Connecting
-      connected: Connected
-      protectedOffline: Protected Offline
+      connected: Protected
+      protectedOffline: Protected, not connected
       disconnecting: Disconnecting
   ruleMode: Rule Mode
   globalMode: Global Mode
@@ -93,7 +106,7 @@ tray:
   restartApp: Restart Application
   vergeVersion: Tono Version
   more: More
-  exit: Exit
+  exit: Quit Tono
   tooltip:
     systemProxy: System Proxy
     tun: TUN

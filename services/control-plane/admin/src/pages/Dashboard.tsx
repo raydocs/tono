@@ -12,7 +12,7 @@ function UsageLeaderboard({ users }: { users: UserDto[] }) {
     [users],
   );
   if (!top.some((user) => user.usageBytes > 0)) {
-    return <div className="state"><strong>暂无按用户流量</strong><span>计量链是通的（每台节点持有独立凭据，采集器每十分钟上报一次跨节点累计值）。这里为空只说明这一批账号还没有计到量：刚重置过周期，或者他们仍在用旧的共享凭据，要等客户端下次拉取目录才会换过去。</span></div>;
+    return <div className="state"><strong>还没有按客户统计的流量</strong><span>计量本身是通的。这里空着，多半是刚清过这期，或者客户还在用旧凭证，等他们下次拉目录就会换过来。</span></div>;
   }
   const max = top[0]?.usageBytes || 1;
   return (
@@ -62,14 +62,14 @@ export function Dashboard() {
 
     const alerts: Array<{ tone: 'error' | 'warn'; text: string }> = [];
     if (liveData) {
-      for (const node of offline) alerts.push({ tone: 'error', text: `${node.name} 大陆探测失败` });
+      for (const node of offline) alerts.push({ tone: 'error', text: `${node.name} 大陆测不通` });
       for (const node of blocked) {
         alerts.push({ tone: 'error', text: `${node.name} 疑似被墙（${node.block?.label ?? '异常'}）` });
       }
-      for (const node of degraded) alerts.push({ tone: 'warn', text: `${node.name} IP 质量异常（${node.quality}）` });
+      for (const node of degraded) alerts.push({ tone: 'warn', text: `${node.name} 出口质量有问题（${node.quality}）` });
       const probeless = qualityNodes.filter((node) => !agentNames.has(node.name));
       if (probeless.length > 0) {
-        alerts.push({ tone: 'warn', text: `${probeless.length} 台未装探针：${probeless.map((node) => node.name).join('、')}` });
+        alerts.push({ tone: 'warn', text: `${probeless.length} 台还没装探针：${probeless.map((node) => node.name).join('、')}` });
       }
     }
     // Absence is not health. This card used to render whenever *either* source
@@ -79,11 +79,11 @@ export function Dashboard() {
     // expiry lockouts are what this card exists to catch.
     const unchecked: string[] = [];
     if (live.state === 'error') {
-      alerts.push({ tone: 'warn', text: `节点数据没能加载（${live.message}）——被墙、探测失败、质量异常这三类没有检查` });
+      alerts.push({ tone: 'warn', text: `节点数据没加载上来（${live.message}），被墙、测不通、质量问题这次没查` });
     } else if (live.state !== 'ready') unchecked.push('节点');
     if (usersRes.state === 'error') {
-      alerts.push({ tone: 'warn', text: `用户数据没能加载（${usersRes.message}）——配额与到期没有检查` });
-    } else if (usersRes.state !== 'ready') unchecked.push('用户');
+      alerts.push({ tone: 'warn', text: `客户数据没加载上来（${usersRes.message}），配额和到期这次没查` });
+    } else if (usersRes.state !== 'ready') unchecked.push('客户');
 
     if (usersRes.state === 'ready') {
       for (const user of usersRes.data) {
@@ -91,21 +91,21 @@ export function Dashboard() {
         if (user.quotaBytes && user.usageBytes >= user.quotaBytes) {
           alerts.push({
             tone: 'error',
-            text: `${user.email} 已超配额（${formatBytes(user.usageBytes)} / ${formatBytes(user.quotaBytes)}）`,
+            text: `${user.email} 流量超了（${formatBytes(user.usageBytes)} / ${formatBytes(user.quotaBytes)}）`,
           });
         } else if (user.quotaBytes && user.usageBytes / user.quotaBytes >= 0.8) {
           alerts.push({
             tone: 'warn',
-            text: `${user.email} 用量达配额 ${Math.round((user.usageBytes / user.quotaBytes) * 100)}%`,
+            text: `${user.email} 流量用了 ${Math.round((user.usageBytes / user.quotaBytes) * 100)}%`,
           });
         }
         if (user.expiresAt) {
           const days = (user.expiresAt - nowSec) / 86_400;
-          if (days < 0) alerts.push({ tone: 'error', text: `${user.email} 账号已过期` });
-          else if (days <= 7) alerts.push({ tone: 'warn', text: `${user.email} 账号 ${Math.ceil(days)} 天后到期` });
+          if (days < 0) alerts.push({ tone: 'error', text: `${user.email} 已经过期` });
+          else if (days <= 7) alerts.push({ tone: 'warn', text: `${user.email} ${Math.ceil(days)} 天后到期` });
         }
         if (user.product?.incomplete) {
-          alerts.push({ tone: 'warn', text: `${user.email} 还没开 Claude 号` });
+          alerts.push({ tone: 'warn', text: `${user.email} 还没开 Claude` });
         }
       }
     }
@@ -114,16 +114,16 @@ export function Dashboard() {
       if (inventory.usersWithoutHome > 0) {
         alerts.push({
           tone: 'warn',
-          text: `${inventory.usersWithoutHome} 个在用客户未绑家宽，Claude 会走机房出口`,
+          text: `${inventory.usersWithoutHome} 个在用客户没绑家宽，Claude 会走机房 IP`,
         });
       }
-      if (inventory.unusedHomes === 0) alerts.push({ tone: 'warn', text: '家宽库存见底' });
-      if (inventory.unusedAccounts === 0) alerts.push({ tone: 'warn', text: 'Claude 号池见底' });
+      if (inventory.unusedHomes === 0) alerts.push({ tone: 'warn', text: '家宽库存空了' });
+      if (inventory.unusedAccounts === 0) alerts.push({ tone: 'warn', text: 'Claude 号池空了' });
       if (inventory.bannedUnreplaced > 0) {
-        alerts.push({ tone: 'error', text: `${inventory.bannedUnreplaced} 人封号后未换号` });
+        alerts.push({ tone: 'error', text: `${inventory.bannedUnreplaced} 人封号了还没换` });
       }
       if (inventory.renewingSoon > 0) {
-        alerts.push({ tone: 'warn', text: `${inventory.renewingSoon} 台 VPS 7 天内到期` });
+        alerts.push({ tone: 'warn', text: `${inventory.renewingSoon} 台服务器 7 天内到期` });
       }
     }
 
@@ -138,16 +138,16 @@ export function Dashboard() {
     return <>
       <DataHealth sources={[
         { label: '节点质量', resource: live },
-        { label: '用户', resource: usersRes },
-        { label: '在线活动', resource: activityRes },
+        { label: '客户', resource: usersRes },
+        { label: '谁在线', resource: activityRes },
         { label: '操作记录', resource: auditRes },
-        { label: '概览', resource },
+        { label: '总览', resource },
       ]} />
       <div className="metrics metrics-hero">
         <article className={`metric${blocked.length ? ' metric-alert' : ''}`}>
           <div className="metric-label"><span>被墙</span></div>
           <div className="metric-value">{liveData ? blocked.length : '—'}</div>
-          <div className="metric-hint">{blocked.length ? blocked.map((n) => n.name).join('、') : '大陆探测口径'}</div>
+          <div className="metric-hint">{blocked.length ? blocked.map((n) => n.name).join('、') : '从大陆测的结果'}</div>
         </article>
         <article className="metric">
           <div className="metric-label"><span>节点在线</span></div>
@@ -164,23 +164,23 @@ export function Dashboard() {
           <div className="metric-hint">
             {activityRes.state === 'ready'
               ? `${activityRes.data.onlineDevices} 台设备`
-              : '心跳口径'}
+              : '按心跳统计'}
           </div>
         </article>
         <article className={`metric${inventory && inventory.incompleteUsers ? ' metric-warn' : ''}`}>
           <div className="metric-label"><span>未开 Claude</span></div>
           <div className="metric-value">{inventory ? inventory.incompleteUsers : '—'}</div>
-          <div className="metric-hint">Claude 家宽靠绑定，不是靠客户端默认</div>
+          <div className="metric-hint">要绑家宽，客户端不会自己选</div>
         </article>
       </div>
 
       {inventory && (
         <div className="inventory-bar">
-          <a href="#/users" className={`inv-chip${inventory.usersWithoutHome ? ' inv-warn' : ''}`}>客户未绑家宽 {inventory.usersWithoutHome}</a>
-          <a href="#/users" className={`inv-chip${inventory.unusedHomes === 0 ? ' inv-warn' : ''}`}>未派家宽 {inventory.unusedHomes}</a>
-          <a href="#/users" className={`inv-chip${inventory.unusedAccounts === 0 ? ' inv-warn' : ''}`}>未派 Claude {inventory.unusedAccounts}</a>
-          <span className={`inv-chip${inventory.bannedUnreplaced ? ' inv-alert' : ''}`}>封号未换 {inventory.bannedUnreplaced}</span>
-          <a href="#/monitor" className={`inv-chip${inventory.renewingSoon ? ' inv-warn' : ''}`}>7 日内续费 {inventory.renewingSoon}</a>
+          <a href="#/users" className={`inv-chip${inventory.usersWithoutHome ? ' inv-warn' : ''}`}>没绑家宽 {inventory.usersWithoutHome}</a>
+          <a href="#/users" className={`inv-chip${inventory.unusedHomes === 0 ? ' inv-warn' : ''}`}>闲置家宽 {inventory.unusedHomes}</a>
+          <a href="#/users" className={`inv-chip${inventory.unusedAccounts === 0 ? ' inv-warn' : ''}`}>闲置 Claude {inventory.unusedAccounts}</a>
+          <span className={`inv-chip${inventory.bannedUnreplaced ? ' inv-alert' : ''}`}>封号没换 {inventory.bannedUnreplaced}</span>
+          <a href="#/monitor" className={`inv-chip${inventory.renewingSoon ? ' inv-warn' : ''}`}>7 天内续费 {inventory.renewingSoon}</a>
           {degraded.length > 0 && <span className="inv-chip inv-warn">质量异常 {degraded.length}</span>}
         </div>
       )}
@@ -190,13 +190,13 @@ export function Dashboard() {
           <div className="card-header">
             <div>
               <h2>需要关注</h2>
-              <p>被墙 · 探测失败 · 质量异常 · 配额 · 到期</p>
+              <p>被墙、测不通、质量、流量、到期</p>
             </div>
           </div>
           {alerts.length === 0 ? (
             unchecked.length === 0
-              ? <div className="attention-ok">✓ 所有节点与用户状态正常</div>
-              : <div className="attention-ok">{unchecked.join('与')}数据仍在加载，尚未检查完</div>
+              ? <div className="attention-ok">✓ 节点和客户都正常</div>
+              : <div className="attention-ok">{unchecked.join('和')}还在加载，还没查完</div>
           ) : (
             <ul className="attention-list">
               {alerts.map((alert, index) => (
@@ -215,9 +215,9 @@ export function Dashboard() {
           <div className="card-header">
             <div>
               <h2>节点状态</h2>
-              <p>采集于 {timestamp(liveData?.quality?.updatedAt)} · 点任意节点看监控详情</p>
+              <p>更新于 {timestamp(liveData?.quality?.updatedAt)} · 点开看详情</p>
             </div>
-            <a className="btn btn-outline btn-sm" href="#/monitor">节点监控</a>
+            <a className="btn btn-outline btn-sm" href="#/monitor">去服务器页</a>
           </div>
           <div className="card-body node-grid">
             {qualityNodes.map((node) => {
@@ -227,7 +227,7 @@ export function Dashboard() {
                   <span className="node-dot" aria-hidden />
                   <span className="node-tile-main">
                     <strong>{node.name}</strong>
-                    <small>{state.label}{agentNames.has(node.name) ? '' : ' · 无探针'}</small>
+                    <small>{state.label}{agentNames.has(node.name) ? '' : ' · 没装探针'}</small>
                   </span>
                 </a>
               );
@@ -240,14 +240,14 @@ export function Dashboard() {
         <section className="card">
           <div className="card-header">
             <div>
-              <h2>用户在线状态</h2>
-              <p>客户端每 20 分钟心跳 · 谁在用、用的哪个节点、什么版本</p>
+              <h2>谁在线</h2>
+              <p>大约 20 分钟报一次心跳</p>
             </div>
           </div>
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>用户</th><th>状态</th><th>在用节点</th><th>目录</th><th>客户端</th><th>最后心跳</th></tr>
+                <tr><th>客户</th><th>状态</th><th>在用节点</th><th>目录</th><th>客户端</th><th>上次心跳</th></tr>
               </thead>
               <tbody>{activityRes.data.users.map((user) => (
                 <tr key={user.userId}>
@@ -264,13 +264,13 @@ export function Dashboard() {
                     // does not answer "did they pick up what I just published".
                     const lag = catalogLag(user.catalogRevision, data.catalog.revision);
                     if (lag.state === 'unreported') {
-                      return <span className="muted" title="这个客户端版本不上报目录版本,不代表它落后">未上报</span>;
+                      return <span className="muted" title="这个版本不上报目录版本，不代表落后">未上报</span>;
                     }
                     if (lag.state === 'behind') {
                       return <span className="chip chip-risk" title={`已发布 ${data.catalog.revision}`}>r{lag.revision} · 落后 {lag.by}</span>;
                     }
                     if (lag.state === 'ahead') {
-                      return <span className="chip chip-risk" title="客户端比已发布的还新——目录可能被回滚过">r{lag.revision} · 超前</span>;
+                      return <span className="chip chip-risk" title="比线上目录还新，目录可能回滚过">r{lag.revision} · 超前</span>;
                     }
                     return <span className="mono">r{lag.revision}</span>;
                   })()}</td>
@@ -287,10 +287,10 @@ export function Dashboard() {
         <section className="card">
           <div className="card-header">
             <div>
-              <h2>流量榜单</h2>
-              <p>用户累计用量 Top 5</p>
+              <h2>流量最多</h2>
+              <p>用量前 5 的客户</p>
             </div>
-            <a className="btn btn-outline btn-sm" href="#/users">用户管理</a>
+            <a className="btn btn-outline btn-sm" href="#/users">去客户页</a>
           </div>
           <div className="card-body">
             {usersRes.state === 'ready'
@@ -302,10 +302,10 @@ export function Dashboard() {
         <section className="card">
           <div className="card-header">
             <div>
-              <h2>节点实时占用</h2>
-              <p>在线用户当前连接的节点</p>
+              <h2>各节点人数</h2>
+              <p>现在连着哪台</p>
             </div>
-            <a className="btn btn-outline btn-sm" href="#/monitor">节点监控</a>
+            <a className="btn btn-outline btn-sm" href="#/monitor">去服务器页</a>
           </div>
           <div className="card-body">
             {activityRes.state === 'ready' && (occupancyRows.length > 0 ? (
@@ -320,7 +320,7 @@ export function Dashboard() {
                   </div>
                 ))}
               </div>
-            ) : <div className="state"><strong>当前无在线用户</strong><span>有心跳上报后显示节点占用。</span></div>)}
+            ) : <div className="state"><strong>现在没人在线</strong><span>有心跳后这里会显示人数。</span></div>)}
             {activityRes.state !== 'ready' && <div className="state"><span className="spinner" /></div>}
           </div>
         </section>
@@ -332,7 +332,7 @@ export function Dashboard() {
           <div className="card-header">
             <div>
               <h2>最近操作</h2>
-              <p>派线、开户、换号、改档案</p>
+              <p>绑线路、开通、换号、改资料</p>
             </div>
           </div>
           <div className="table-wrap">
@@ -354,7 +354,7 @@ export function Dashboard() {
       )}
 
       <div className="muted catalog-footnote">
-        Catalog revision {data.catalog.revision} · 更新于 {timestamp(data.catalog.updatedAt)}
+        目录版本 {data.catalog.revision} · 更新于 {timestamp(data.catalog.updatedAt)}
       </div>
     </>;
   }}</StateBoundary>;

@@ -108,6 +108,8 @@ mod tests {
         assert_eq!(MenuCommand::from_id(MenuIds::RETRY), Some(MenuCommand::Retry));
         assert_eq!(MenuCommand::from_id(MenuIds::DASHBOARD), Some(MenuCommand::Dashboard));
         assert_eq!(MenuCommand::from_id(MenuIds::EXIT), Some(MenuCommand::Exit));
+        // Directory and log ids still parse so an old menu cannot become a
+        // silent no-op if a leftover event arrives, but they are not shown.
 
         assert_eq!(MenuCommand::from_id("tray_system_proxy"), None);
         assert_eq!(MenuCommand::from_id("tray_tun_mode"), None);

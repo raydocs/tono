@@ -80,8 +80,32 @@ impl UpdateHandoffJournal {
         }
     }
 
+    pub fn allowed_next(from: UpdateHandoffPhase, to: UpdateHandoffPhase) -> bool {
+        use UpdateHandoffPhase::*;
+        from == to
+            || matches!(
+                (from, to),
+                (Idle, UpdatePrepared)
+                    | (UpdatePrepared, ConnectionQuiescing)
+                    | (ConnectionQuiescing, CleanShutdownCompleted)
+                    | (CleanShutdownCompleted, ProtectedHandoffRecorded)
+                    | (ProtectedHandoffRecorded, InstallStarted)
+                    | (InstallStarted, FirstLaunchMigration)
+                    | (FirstLaunchMigration, ProtectionResuming)
+                    | (ProtectionResuming, Verified)
+                    | (Verified, Committed)
+                    | (_, Failed)
+            )
+    }
+
     pub fn advance(&mut self, phase: UpdateHandoffPhase) {
-        self.phase = phase;
+        if !Self::allowed_next(self.phase, phase) {
+            self.last_error_code = Some("TONO_JOURNAL_ILLEGAL_PHASE".into());
+            self.last_error_stage = Some(format!("{:?}->{:?}", self.phase, phase));
+            self.phase = UpdateHandoffPhase::Failed;
+        } else {
+            self.phase = phase;
+        }
         self.updated_at_unix = unix_now();
     }
 
@@ -106,7 +130,15 @@ pub fn write_atomic(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<(
         file.write_all(&payload)?;
         file.sync_all()?;
     }
-    fs::rename(temp, path)
+    fs::rename(&temp, path)?;
+    // Best-effort directory fsync so the rename itself is durable after a crash
+    // during update handoff. Failure here must not undo a successful write.
+    if let Some(parent) = path.parent() {
+        if let Ok(dir_handle) = fs::File::open(parent) {
+            let _ = dir_handle.sync_all();
+        }
+    }
+    Ok(())
 }
 
 pub fn load(path: &Path) -> io::Result<Option<UpdateHandoffJournal>> {
@@ -125,7 +157,8 @@ pub fn load(path: &Path) -> io::Result<Option<UpdateHandoffJournal>> {
     if matches!(
         journal.phase,
         UpdateHandoffPhase::Committed | UpdateHandoffPhase::Idle
-    ) {
+    ) || journal.is_expired()
+    {
         let _ = fs::remove_file(path);
         return Ok(None);
     }
@@ -173,10 +206,36 @@ mod tests {
         let _ = fs::create_dir_all(&dir);
         let path = journal_path(&dir);
         let mut journal = UpdateHandoffJournal::new("0.0.34", "0.0.35", 1, true, true);
+        journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
+        journal.advance(UpdateHandoffPhase::CleanShutdownCompleted);
         journal.advance(UpdateHandoffPhase::ProtectedHandoffRecorded);
         write_atomic(&path, &journal).unwrap();
         let loaded = load(&path).unwrap().unwrap();
         assert_eq!(loaded.phase, UpdateHandoffPhase::ProtectedHandoffRecorded);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn expired_journal_is_cleared() {
+        let dir = env::temp_dir().join(format!("tono-journal-exp-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("0.0.34", "0.0.35", 1, true, true);
+        journal.expires_at_unix = 1;
+        write_atomic(&path, &journal).unwrap();
+        assert!(load(&path).unwrap().is_none());
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn illegal_phase_becomes_failed() {
+        let mut journal = UpdateHandoffJournal::new("0.0.34", "0.0.35", 1, true, true);
+        journal.advance(UpdateHandoffPhase::Verified);
+        assert_eq!(journal.phase, UpdateHandoffPhase::Failed);
+        assert_eq!(
+            journal.last_error_code.as_deref(),
+            Some("TONO_JOURNAL_ILLEGAL_PHASE")
+        );
     }
 }

@@ -1,0 +1,5 @@
+Contact: https://github.com/raydocs/tono/security/advisories/new
+Expires: 2027-08-19T00:00:00.000Z
+Preferred-Languages: zh, en
+Canonical: https://releases.afk.ccwu.cc/.well-known/security.txt
+Policy: https://releases.afk.ccwu.cc/help

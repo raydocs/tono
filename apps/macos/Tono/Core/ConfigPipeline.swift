@@ -32,7 +32,7 @@ nonisolated struct ConfigPipeline {
         var claudeHomeSocks5: TonoExitCatalogHomeSocks5? = nil
     }
 
-    struct DialEndpoint: Equatable, Sendable {
+    struct DialEndpoint: Hashable, Equatable, Sendable {
         let host: String
         let port: UInt16
         let transport: String
@@ -567,7 +567,7 @@ nonisolated struct ConfigPipeline {
         let discovered = NSWorkspace.shared.urlsForApplications(
             withBundleIdentifier: "com.tencent.xinWeChat"
         )
-        for url in discovered {
+        for url in discovered + applicationSubfolderBundles(named: ["WeChat.app", "微信.app"]) {
             let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
             guard isRulePayloadSafeBundlePath(path),
                   !paths.contains(path),
@@ -593,7 +593,53 @@ nonisolated struct ConfigPipeline {
                 paths.append(path)
             }
         }
+        for url in applicationSubfolderBundles(named: [
+            "WeChat.app", "微信.app",
+            "DingTalk.app", "钉钉.app",
+            "Feishu.app", "飞书.app",
+            "Lark.app",
+        ]) {
+            let path = url.standardizedFileURL.resolvingSymlinksInPath().path + "/"
+            let identifier = Bundle(url: url)?.bundleIdentifier
+            guard isRulePayloadSafeBundlePath(path),
+                  !paths.contains(path),
+                  let identifier,
+                  reviewedDirectBundleIdentifiers.contains(identifier),
+                  isSignedReviewedDirectBundle(at: url, identifier: identifier) else {
+                continue
+            }
+            paths.append(path)
+        }
         return paths
+    }
+
+    /// Launch Services sometimes never registers a bundle sitting one folder
+    /// under `/Applications`, which is how `/Applications/联系软件/微信.app`
+    /// disappeared from PROCESS-PATH-REGEX even though the signature was valid.
+    /// Scan that single extra directory level; deeper trees stay fail-closed.
+    static func applicationSubfolderBundles(
+        named names: [String],
+        under root: URL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+    ) -> [URL] {
+        let fileManager = FileManager.default
+        guard let folders = try? fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var found: [URL] = []
+        for folder in folders {
+            guard (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
+                  folder.pathExtension.lowercased() != "app" else { continue }
+            for name in names {
+                let candidate = folder.appendingPathComponent(name, isDirectory: true)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+                      isDirectory.boolValue else { continue }
+                found.append(candidate)
+            }
+        }
+        return found
     }
 
     /// Whether a bundle path can be embedded in a Mihomo rule without changing
@@ -1613,6 +1659,18 @@ nonisolated struct ConfigPipeline {
         return [
             .init(host: validated.server, port: UInt16(validated.port), transport: "tcp"),
         ]
+    }
+
+    /// PF switch permits: keep insertion order, drop exact host/port/transport
+    /// duplicates so old ∪ new can be armed without repeating a tuple.
+    static func uniqueDialEndpoints(_ endpoints: [DialEndpoint]) -> [DialEndpoint] {
+        var seen = Set<DialEndpoint>()
+        var unique: [DialEndpoint] = []
+        unique.reserveCapacity(endpoints.count)
+        for endpoint in endpoints where seen.insert(endpoint).inserted {
+            unique.append(endpoint)
+        }
+        return unique
     }
 
     /// Validate the credential-bearing residential upstream without ever

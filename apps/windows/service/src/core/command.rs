@@ -21,6 +21,8 @@ pub enum IpcCommand {
     FinalizeDirectRuntimeReload,
     #[strum(serialize = "/kill-switch/direct-runtime-reload/renew")]
     RenewDirectRuntimeReload,
+    #[strum(serialize = "/kill-switch/proxy-endpoints")]
+    ReplaceProxyEndpoints,
     #[strum(serialize = "/kill-switch/mark-verified")]
     MarkKillSwitchVerified,
     #[strum(serialize = "/kill-switch/restrict-bootstrap")]

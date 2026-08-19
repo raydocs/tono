@@ -11,8 +11,9 @@ import {
   WindowResizeHandles,
 } from '@/components/layout/window-controller'
 import { useI18n } from '@/hooks/use-i18n'
+import { useUpdate } from '@/hooks/use-update'
 import { useTonoStatus } from '@/hooks/use-tono'
-import { useVerge } from '@/hooks/use-verge'
+import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useWindowDecorations } from '@/hooks/use-window'
 import {
   useCustomTheme,
@@ -38,8 +39,7 @@ const OS = getSystem()
 /**
  * The Tono application shell: frosted window background, 200px sidebar,
  * custom titlebar on undecorated windows, and the existing auth guard. The
- * MUI ThemeProvider stays because the Advanced (legacy Clash Verge) pages
- * render MUI components.
+ * MUI ThemeProvider stays for leftover setting widgets that still use MUI.
  */
 const TonoLayout = () => {
   const mode = useThemeMode()
@@ -48,8 +48,8 @@ const TonoLayout = () => {
   const { t } = useTranslation()
   const { theme } = useCustomTheme()
   const { status } = useTonoStatus()
-  const { verge } = useVerge()
-  const { language } = verge ?? {}
+  const { preferences } = useTonoPreferences()
+  const { language } = preferences ?? {}
   const { switchLanguage } = useI18n()
   const navigate = useNavigate()
   const location = useLocation()
@@ -75,6 +75,7 @@ const TonoLayout = () => {
   )
 
   useLayoutEvents(handleNotice)
+  useUpdate(true)
 
   useEffect(() => {
     if (language) {
@@ -97,7 +98,7 @@ const TonoLayout = () => {
 
   return (
     <ThemeProvider theme={theme}>
-      <NoticeManager position={verge?.notice_position} />
+      <NoticeManager position={preferences?.notice_position} />
       <div
         // A perpetual spinner over a frosted surface makes WebView2 recomposite
         // the whole blurred region every frame; on a GPU-less VM or over RDP

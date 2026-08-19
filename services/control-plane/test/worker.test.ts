@@ -6,7 +6,7 @@ import {
 } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
-import worker, { type Env } from '../src/index';
+import worker, { parseBytesRange, type Env } from '../src/index';
 import adminWorker from '../src/admin-worker';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
@@ -436,7 +436,25 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(page.status).toBe(200);
     expect(page.headers.get('location')).toBeNull();
     expect(page.headers.get('content-security-policy')).toContain("default-src 'self'");
+    expect(page.headers.get('content-security-policy')).toContain("img-src 'self' data:");
+    expect(page.headers.get('strict-transport-security')).toBe('max-age=31536000; includeSubDomains');
     expect(await page.text()).toContain('Tono 发布档案');
+
+    const sitemap = await fetchRelease('/sitemap.xml');
+    expect(sitemap.status).toBe(200);
+    expect(await sitemap.text()).toContain('https://releases.afk.ccwu.cc/help');
+
+    const robots = await fetchRelease('/robots.txt');
+    expect(robots.status).toBe(200);
+    expect(await robots.text()).toContain('Sitemap: https://releases.afk.ccwu.cc/sitemap.xml');
+
+    const security = await fetchRelease('/.well-known/security.txt');
+    expect(security.status).toBe(200);
+    expect(await security.text()).toContain('Canonical: https://releases.afk.ccwu.cc/.well-known/security.txt');
+
+    for (const path of ['/help', '/status', '/archive', '/favicon.svg']) {
+      expect((await fetchRelease(path)).status).toBe(200);
+    }
 
     const canonicalPage = await fetchRelease('/releases/');
     expect(canonicalPage.status).toBe(200);
@@ -515,6 +533,27 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const rejected = await fetchRelease('/manifest.json', { method: 'POST' });
     expect(rejected.status).toBe(405);
     expect(rejected.headers.get('allow')).toBe('GET, HEAD');
+
+    await env.RELEASES.put('Tono_range.bin', 'abcdefghij');
+    const ranged = await fetchRelease('/download/Tono_range.bin', {
+      headers: { range: 'bytes=2-5' },
+    });
+    expect(ranged.status).toBe(206);
+    expect(ranged.headers.get('accept-ranges')).toBe('bytes');
+    expect(ranged.headers.get('content-range')).toBe('bytes 2-5/10');
+    expect(await ranged.text()).toBe('cdef');
+  });
+
+  it('parses a single byte range and rejects the rest', () => {
+    expect(parseBytesRange('bytes=0-0', 10)).toEqual({ offset: 0, length: 1 });
+    expect(parseBytesRange('bytes=2-5', 10)).toEqual({ offset: 2, length: 4 });
+    expect(parseBytesRange('bytes=8-', 10)).toEqual({ offset: 8, length: 2 });
+    expect(parseBytesRange('bytes=-3', 10)).toEqual({ offset: 7, length: 3 });
+    expect(parseBytesRange('bytes=0-99', 10)).toEqual({ offset: 0, length: 10 });
+    expect(parseBytesRange('bytes=10-12', 10)).toBeNull();
+    expect(parseBytesRange('bytes=5-2', 10)).toBeNull();
+    expect(parseBytesRange('bytes=0-1,2-3', 10)).toBeNull();
+    expect(parseBytesRange(null, 10)).toBeNull();
   });
 
   it('does not report success when an admin patches a missing user', async () => {

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 import { runStateQueryKey } from '@/hooks/use-system-state'
 import type { RunState } from '@/services/cmds'
-import { subscribeVergeEvents } from '@/services/events'
+import { subscribeTonoEvents } from '@/services/events'
 import { revalidateQueries, setCacheDataAsync } from '@/services/query-client'
 
 export const useLayoutEvents = (
@@ -12,33 +12,41 @@ export const useLayoutEvents = (
     const revalidateKeys = (keys: readonly string[]) => {
       void revalidateQueries(keys.map((key) => [key]))
     }
+    const refreshCore = () => {
+      revalidateKeys([
+        'getProxyView',
+        'getVersion',
+        'getClashConfig',
+        'getClashInfo',
+        'getClashMode',
+        'getRuntimeConfig',
+        'getRules',
+        'getRuleProviders',
+      ])
+    }
+    const refreshPreferences = () => {
+      revalidateKeys([
+        'getTonoPreferences',
+        'getVergeConfig',
+        'getSystemProxy',
+        'getAutotemProxy',
+      ])
+    }
+    const applyRunState = (payload: RunState) => {
+      void setCacheDataAsync<RunState>(runStateQueryKey, payload)
+    }
 
-    return subscribeVergeEvents(
+    return subscribeTonoEvents(
       {
-        'verge://refresh-clash-config': () => {
-          revalidateKeys([
-            'getProxyView',
-            'getVersion',
-            'getClashConfig',
-            'getClashInfo',
-            'getClashMode',
-            'getRuntimeConfig',
-            'getRules',
-            'getRuleProviders',
-          ])
-        },
-        'verge://refresh-verge-config': () => {
-          revalidateKeys([
-            'getVergeConfig',
-            'getSystemProxy',
-            'getAutotemProxy',
-          ])
-        },
+        'tono://refresh-core-config': refreshCore,
+        'verge://refresh-clash-config': refreshCore,
+        'tono://refresh-preferences': refreshPreferences,
+        'verge://refresh-verge-config': refreshPreferences,
         // The Run State is pushed, not polled: every transition carries the new snapshot, so it
         // is written straight into the cache instead of triggering a fetch.
-        'verge://run-state-changed': (payload) => {
-          void setCacheDataAsync<RunState>(runStateQueryKey, payload)
-        },
+        'tono://run-state-changed': applyRunState,
+        'verge://run-state-changed': applyRunState,
+        'tono://notice-message': handleNotice,
         'verge://notice-message': handleNotice,
       },
       // The Run State is the one thing here that arrives *only* by event, so it is the one

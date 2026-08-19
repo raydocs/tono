@@ -18,7 +18,8 @@ use crate::{
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
     KillSwitchLockRequest, KillSwitchStatus, MIN_REQUIRED_SERVICE_REVISION, MacosProxyConfig,
     OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
-    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeBundle,
+    RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
+    RuntimeBundle,
     ServiceStatusSnapshot, StageRuntimeOutcome, StartClashRequest, StartClashResult, WriterConfig,
     core::structure::{JsonConvert, Response},
 };
@@ -171,10 +172,10 @@ where
 fn protected<'a>(
     request: kode_bridge::HttpRequestBuilder<'a>,
 ) -> kode_bridge::HttpRequestBuilder<'a> {
-    request.header(
-        crate::SERVICE_PROTOCOL_HEADER,
-        ProtocolVersion::current().header_value(),
-    )
+    let version = ProtocolVersion::current().header_value();
+    request
+        .header(crate::SERVICE_PROTOCOL_HEADER, version.clone())
+        .header(crate::LEGACY_SERVICE_PROTOCOL_HEADER, version)
 }
 
 /// The verb a route answers on. Kept beside [`IpcCommand`], which deliberately carries only the
@@ -494,6 +495,22 @@ pub async fn begin_direct_runtime_reload(
         credentials,
         Some(session),
         (),
+        Some(LIFECYCLE_TIMEOUT),
+    )
+    .await
+}
+
+pub async fn replace_proxy_endpoints(
+    credentials: &OwnerCredentials,
+    session: &OwnerSessionProof,
+    body: ReplaceProxyEndpointsRequest,
+) -> Result<Response<()>> {
+    protected_call(
+        Verb::Post,
+        IpcCommand::ReplaceProxyEndpoints,
+        credentials,
+        Some(session),
+        body,
         Some(LIFECYCLE_TIMEOUT),
     )
     .await

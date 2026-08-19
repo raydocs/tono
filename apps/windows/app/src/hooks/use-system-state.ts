@@ -29,7 +29,7 @@ const unknownRunState: RunState = {
 /**
  * The Run State: how the core is running and what backs it.
  *
- * One query key, kept fresh by `verge://run-state-changed` rather than polling. Every derived
+ * One query key, kept fresh by `tono://run-state-changed` rather than polling. Every derived
  * answer is computed in Rust and travels with the snapshot, so there is exactly one definition
  * of "TUN can work" in the app.
  */

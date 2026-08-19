@@ -118,7 +118,7 @@ describe('Tono Support page', () => {
       await screen.findByText('Tono 0.0.18 · Windows 11 Pro 23H2'),
     ).toBeDefined()
     expect(screen.getByText('2.9 · 2.6.2')).toBeDefined()
-    expect(screen.getByText('locked · Enabled')).toBeDefined()
+    expect(screen.getByText('Locked · Enabled')).toBeDefined()
     expect(screen.getByText('US West 1')).toBeDefined()
     expect(screen.getByText('last redacted connection error')).toBeDefined()
     expect(screen.getByTestId('tono-support-audit-path').textContent).toBe(

@@ -6,7 +6,7 @@ import {
 import { Theme as TauriOsTheme } from '@tauri-apps/api/window'
 import { useEffect, useMemo } from 'react'
 
-import { useVerge } from '@/hooks/use-verge'
+import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { defaultDarkTheme, defaultTheme } from '@/pages/_theme'
 import { useSetThemeMode, useThemeMode } from '@/services/states'
 import { createTauriNoncedStyleElement } from '@/utils/csp-style-nonce'
@@ -71,8 +71,8 @@ ${css}
  */
 export const useCustomTheme = () => {
   const appWindow: WebviewWindow = useMemo(() => getCurrentWebviewWindow(), [])
-  const { verge } = useVerge()
-  const { theme_mode, theme_setting } = verge ?? {}
+  const { preferences } = useTonoPreferences()
+  const { theme_mode, theme_setting } = preferences ?? {}
   const mode = useThemeMode()
   const setMode = useSetThemeMode()
   const userBackgroundImage = theme_setting?.background_image || ''
@@ -249,11 +249,11 @@ export const useCustomTheme = () => {
     }
 
     let styleElement = document.querySelector<HTMLStyleElement>(
-      'style#verge-theme',
+      'style#tono-theme',
     )
     if (!styleElement) {
       styleElement = createTauriNoncedStyleElement()
-      styleElement.id = 'verge-theme'
+      styleElement.id = 'tono-theme'
       document.head.appendChild(styleElement)
     }
 

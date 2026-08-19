@@ -1,10 +1,11 @@
 {
   "nav": {
-    "dashboard": "仪表盘",
+    "dashboard": "总览",
     "activity": "活动",
     "nodes": "节点",
     "account": "账号",
-    "support": "支持"
+    "support": "支持",
+    "settings": "设置"
   },
   "activity": {
     "title": "活动",
@@ -59,10 +60,11 @@
     "title": "登录 Tono",
     "subtitle": "输入邮箱以接收登录验证码。",
     "welcome": "欢迎使用 Tono",
-    "intro": "使用已验证的邮箱登录即可继续，无需密码。",
+    "intro": "用已验证的邮箱登录即可，不用设密码。",
+    "continueWithEmail": "用邮箱继续",
     "emailLabel": "邮箱地址",
     "emailPlaceholder": "you@example.com",
-    "sendCode": "将登录码发送到我的邮箱",
+    "sendCode": "发送登录码",
     "sendNewCode": "发送新验证码",
     "sending": "发送中…",
     "resendIn": "{{seconds}} 秒后可重发",
@@ -92,15 +94,17 @@
     },
     "errors": {
       "unreachable": "连不上 Tono 服务器。是你的网络切断了连接——不是账号或验证码的问题。登录只需要成功一次：换一个能用的网络登录（手机热点，或先开着别的翻墙工具的 TUN/全局模式），之后就会一直保持登录状态。",
-      "rateLimited": "登录尝试次数过多，请等几分钟再试。"
+      "rateLimited": "登录尝试次数过多，请等几分钟再试。",
+      "deviceLimit": "这个账号的设备数已经满了。请先在另一台已登录的设备上移除一台，再回来登录。",
+      "sessionExpired": "登录已失效，请重新获取验证码。"
     }
   },
   "pill": {
     "title": {
-      "notConnected": "未连接",
+      "notConnected": "待机",
       "connecting": "连接中…",
       "connected": "已连接",
-      "protectedOffline": "离线保护中",
+      "protectedOffline": "保护已开启，当前未连接",
       "disconnecting": "断开中…"
     },
     "subtitle": {
@@ -110,21 +114,22 @@
       "restoringAccess": "正在恢复网络访问",
       "starting": "正在启动…"
     },
-    "statusProtected": "受保护的云端路由",
-    "statusProtectedOffline": "离线保护中 — 流量已阻断",
-    "statusReality": "Reality 云端保护"
+    "statusProtected": "保护已开启",
+    "statusProtectedOffline": "保护已开启，当前未连接",
+    "statusReality": "云端线路"
   },
   "dashboard": {
-    "title": "仪表盘",
+    "title": "总览",
+    "subtitle": "云端 Reality 保护",
     "connect": "连接",
     "connecting": "连接中…",
     "connected": "已连接",
     "disconnecting": "断开中…",
-    "protectedOffline": "离线保护中",
-    "protectedOfflineDescription": "为防止流量泄漏，你的网络已被阻断。点击恢复连接。",
+    "protectedOffline": "保护已开启，当前未连接",
+    "protectedOfflineDescription": "Tono 已阻止流量直连，避免真实 IP 泄漏。系统会自动换一条可用线路并重试。",
     "server": "节点",
     "noServer": "未选择节点",
-    "killSwitchMode": "Kill switch：{{mode}}",
+    "killSwitchMode": "断网保护：{{mode}}",
     "killSwitchModes": {
       "bootstrap": "引导",
       "locked": "锁定",
@@ -140,7 +145,7 @@
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "你选择的节点已下线 — 请重新选择",
-    "killSwitchError": "Kill switch：{{message}}",
+    "killSwitchError": "断网保护：{{message}}",
     "killSwitchErrorNote": "最近一次错误，可能已恢复。",
     "errors": {
       "serviceBusy": "Tono 服务正在安装或修复。请批准待处理的管理员提示，或重启 Tono。",
@@ -151,7 +156,27 @@
       "coreUnpinned": "此安装缺少内核校验。请安装最新版 Tono，重装同一份安装包无效。",
       "coreMismatch": "内核与此安装不匹配。请安装最新版 Tono。",
       "dnsPortBusy": "本机 53 端口已被其他程序占用。请关闭该程序后重试。",
+      "protectionReleaseFailed": "断网保护还没解除，网络仍被拦住。请再试一次「恢复正常网络」。",
       "sendDiagnostics": "发给支持"
+    },
+    "status": {
+      "connecting": "正在连接",
+      "disconnecting": "正在断开",
+      "offline": "保护已开启，当前未连接",
+      "protected": "保护中",
+      "standby": "待机"
+    },
+    "overview": {
+      "protection": "保护",
+      "serverPool": "节点池",
+      "liveTraffic": "实时流量",
+      "trafficRouted": "流量已走受保护线路",
+      "ready": "可以连接",
+      "directBlocked": "已拦住直连流量",
+      "verifiedCatalog": "目录已校验",
+      "refreshingCatalog": "正在更新目录",
+      "idle": "空闲",
+      "noActiveRoute": "当前没有活动线路"
     },
     "info": {
       "protection": "流量保护",
@@ -173,6 +198,11 @@
     "tryBadge": "第 {{count}} 次",
     "failedAt": "失败于 {{stage}}",
     "unknownStage": "未知阶段",
+    "statusTitle": "当前线路未通过连接检查",
+    "statusBody": "Tono 已阻止流量直连，避免真实 IP 泄漏。系统会自动换一条可用线路并重试。",
+    "completedCount": "已完成 {{count}} 项",
+    "technicalDetails": "技术详情",
+    "switchRoute": "选择其他线路",
     "retryIn": "第 {{n}} 次重试将于 {{seconds}} 秒后发起",
     "retrying": "正在重试…",
     "retryNow": "立即重试",
@@ -186,7 +216,7 @@
       "action": "上传诊断信息",
       "uploading": "正在上传…",
       "confirmTitle": "向 Tono 支持上传诊断信息",
-      "confirmMessage": "将向 Tono 发送一份与你的账号关联的诊断报告：应用与 Windows 版本、Tono 服务协议版本、所选服务器名称、连接状态、Kill Switch 与 DNS 状态及其最近的错误信息、各连接步骤与耗时、是否存在 Hyper-V/WSL 类虚拟网卡，以及本地日志文件的路径。不会发送你的配置、密钥、令牌、服务器地址，也不会发送任何日志文件的内容。若想先查看确切内容，可先使用“复制诊断信息”。",
+      "confirmMessage": "将向 Tono 发送一份与你的账号关联的诊断报告：应用与 Windows 版本、Tono 服务协议版本、所选服务器名称、连接状态、断网保护与 DNS 状态及其最近的错误信息、各连接步骤与耗时、是否存在 Hyper-V/WSL 类虚拟网卡，以及本地日志文件的路径。不会发送你的配置、密钥、令牌、服务器地址，也不会发送任何日志文件的内容。若想先查看确切内容，可先使用“复制诊断信息”。",
       "confirmSend": "发送报告",
       "successHint": "报告已上传。请把这个参考编号提供给 Tono 支持：",
       "copyCode": "复制编号",
@@ -194,7 +224,7 @@
       "errors": {
         "signedOut": "你当前未登录，报告无法关联到账号。请登录后重试，或使用“复制诊断信息”把文本发送给支持人员。",
         "rateLimited": "最近上传的报告过多。请几分钟后再试，或使用“复制诊断信息”把文本发送给支持人员。",
-        "unreachable": "无法连接到 Tono。请检查网络；若 Kill Switch 正在封锁全部流量，请先“恢复正常网络”再重试。",
+        "unreachable": "无法连接到 Tono。请检查网络；若断网保护正在拦住全部流量，请先点「恢复正常网络」再重试。",
         "unavailable": "该账号暂不支持上传诊断信息。请使用“复制诊断信息”把文本发送给支持人员。",
         "failed": "上传失败。请使用“复制诊断信息”把文本发送给支持人员。"
       }
@@ -213,6 +243,10 @@
   },
   "nodes": {
     "title": "节点",
+    "subtitle": "为受保护的流量选一个出口。",
+    "search": "搜索节点",
+    "noMatches": "没有符合条件的节点。",
+    "readyToConnect": "可以连接",
     "testCurrent": "测试当前节点",
     "testAll": "测试全部",
     "cancelTest": "取消测试",
@@ -236,6 +270,7 @@
     "verifiedSyncHint": "每 5 分钟自动同步；无效更新不会替换上次验证副本。断开连接时可测试全部节点。",
     "catalogError": "最近一次刷新失败：{{error}}",
     "regions": {
+      "all": "全部",
       "us": "美国",
       "jp": "日本",
       "other": "其他地区",
@@ -250,6 +285,7 @@
   },
   "account": {
     "title": "账号",
+    "subtitle": "当前登录的邮箱，以及这个账号下的设备。",
     "email": "邮箱",
     "devices": "设备",
     "deviceLimit": "设备 {{count}} / {{limit}}",
@@ -268,6 +304,11 @@
     "loadFailed": "无法加载诊断摘要，请刷新重试。",
     "enabled": "已启用",
     "disabled": "已停用",
+    "protection": {
+      "locked": "已锁定",
+      "blocked": "已阻断",
+      "bootstrap": "引导中"
+    },
     "none": "无",
     "detailsCopied": "诊断详情已复制",
     "auditPathCopied": "审计路径已复制",
@@ -296,6 +337,12 @@
   "settings": {
     "title": "设置",
     "account": "Tono 账号",
+    "preferences": {
+      "title": "偏好设置"
+    },
+    "privacy": {
+      "title": "隐私"
+    },
     "general": {
       "title": "通用",
       "launchAtStartup": "开机自启",
@@ -324,8 +371,23 @@
     "about": {
       "title": "关于",
       "tagline": "受保护的云端连接",
-      "description": "经认证的 VLESS Reality 路由，配备故障关闭式 Kill Switch"
+      "description": "经过认证的云端 Reality 线路，断线时会拦住直连，避免泄漏",
+      "checkUpdates": "检查更新",
+      "latestVersion": "已经是最新版本"
     }
+  },
+  "cities": {
+    "losAngeles": "洛杉矶",
+    "saltLakeCity": "盐湖城",
+    "buffalo": "布法罗",
+    "newYork": "纽约",
+    "sanJose": "圣何塞",
+    "seattle": "西雅图",
+    "chicago": "芝加哥",
+    "dallas": "达拉斯",
+    "miami": "迈阿密",
+    "tokyo": "东京",
+    "osaka": "大阪"
   },
   "startup": {
     "stateInitRetrying": "Tono 暂时无法打开自己的数据文件夹，正在重试。通常是磁盘已满，或者用户配置文件还没挂载好。原因消失后会自动恢复。",
