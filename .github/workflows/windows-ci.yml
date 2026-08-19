@@ -137,7 +137,8 @@ jobs:
             'resources/tono-service.exe',
             'resources/tono-service-install.exe',
             'resources/tono-service-uninstall.exe',
-            'resources/core-sha256.txt'
+            'resources/core-sha256.txt',
+            'resources/core-identity.json'
           )
           foreach ($p in $paths) {
             if (-not (Test-Path $p)) { New-Item -ItemType File -Force -Path $p | Out-Null }
