@@ -298,6 +298,15 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertTrue(failure.userMessage.contains("DNS"))
     }
 
+    func testClassifiedProtectionFailureIsNotPrefixedAsAPIRequest() {
+        let error = CoreControllerError.protectionFailed(
+            ProtectedFailureCode.coreExitUnreachable.userMessage
+        )
+        let text = error.localizedDescription
+        XCTAssertEqual(text, ProtectedFailureCode.coreExitUnreachable.userMessage)
+        XCTAssertFalse(text.contains("API request failed"))
+    }
+
     func testProbeOriginsAreIndependentHTTPS() {
         let origins = ProtectedProbeOrigin.all
         XCTAssertEqual(origins.count, 3)

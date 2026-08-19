@@ -531,11 +531,13 @@ nonisolated private struct APIDNSRecord: Decodable, Sendable {
 
 nonisolated enum CoreControllerError: LocalizedError {
     case requestFailed(String)
+    case protectionFailed(String)
     case decodingFailed
 
     var errorDescription: String? {
         switch self {
         case .requestFailed(let path): "API request failed: \(path)"
+        case .protectionFailed(let message): message
         case .decodingFailed: "Failed to decode API response"
         }
     }
