@@ -2,7 +2,7 @@ use crate::{Type, core::handle, logging};
 use anyhow::Result;
 use serde::Deserialize;
 use std::time::Duration;
-use tauri_plugin_mihomo::models::WsConnectionId;
+use tono_plugin_core::models::WsConnectionId;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 

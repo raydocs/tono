@@ -2,7 +2,7 @@ import {
   delayProxyByName,
   healthcheckNodeInProvider,
   type ProxyDelay,
-} from 'tauri-plugin-mihomo-api'
+} from 'tono-plugin-core-api'
 
 import {
   memberDetails,

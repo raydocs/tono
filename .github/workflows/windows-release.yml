@@ -76,7 +76,7 @@ jobs:
           $packageVersion = node -p "require('./package.json').version"
           $tauriVersion = node -p "require('./src-tauri/tauri.conf.json').version"
           $metadata = cargo metadata --locked --no-deps --manifest-path src-tauri/Cargo.toml --format-version 1 | ConvertFrom-Json
-          $cargoVersion = ($metadata.packages | Where-Object { $_.name -eq 'clash-verge' }).version
+          $cargoVersion = ($metadata.packages | Where-Object { $_.name -eq 'tono-windows' }).version
           foreach ($actual in @($packageVersion, $tauriVersion, $cargoVersion)) {
             if ($actual -ne $env:RELEASE_VERSION) {
               throw "Requested version $env:RELEASE_VERSION does not match App version $actual"
@@ -151,7 +151,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          $core = (Resolve-Path '../app/src-tauri/sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe').Path
+          $core = (Resolve-Path '../app/src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe').Path
           $coreSha256 = (Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($coreSha256 -notmatch '^[0-9a-f]{64}$') {
             throw "Invalid Mihomo SHA-256: $coreSha256"

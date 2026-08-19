@@ -21,7 +21,7 @@ fn main() {
         .pool_max_idle_per_host(0)
         .pool_idle_timeout(None)
         .no_proxy()
-        .user_agent("clash-verge/v2.4.8")
+        .user_agent("Tono/0.0.68")
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(15))
         .build()

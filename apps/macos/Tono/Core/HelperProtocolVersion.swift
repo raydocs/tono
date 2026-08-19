@@ -61,7 +61,12 @@ nonisolated enum HelperProtocolVersion {
     ///   what the bundle permits. Bumped because the daemon's rule text changed:
     ///   a 3.12.1 daemon renders unlabelled rules and the boundary stays
     ///   unmeasurable while every gate above it passes.
-    static let current = "3.12.2"
+    /// - 3.12.2 → 3.13.0: protected DNS reads and writes go through
+    ///   System Configuration instead of forking `networksetup` on every
+    ///   connect. Snapshot, Empty/DHCP restore, and the leftover-loopback
+    ///   sweep are unchanged; `networksetup` remains the fallback if SC
+    ///   refuses. Bumped because the daemon now talks to a different API.
+    static let current = "3.13.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

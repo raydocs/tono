@@ -300,7 +300,7 @@ async fn send(
 /// so the Tauri crate did not compile for Windows at all — the call sits behind
 /// `#[cfg(windows)]`, and no CI job ever compiled this crate for Windows. The
 /// same string is already produced for the telemetry window by
-/// `tauri_plugin_clash_verge_sysinfo::os_long_version`, which is a real
+/// `tauri_plugin_tono_sysinfo::os_long_version`, which is a real
 /// dependency and is cross-platform, so both paths now report the same thing
 /// instead of two different guesses.
 ///
@@ -309,7 +309,7 @@ async fn send(
 /// every log segment over the machine's display language is not a trade worth
 /// making for a display-only field.
 fn os_version_string() -> String {
-    ascii_header(&tauri_plugin_clash_verge_sysinfo::os_long_version(), 80)
+    ascii_header(&tauri_plugin_tono_sysinfo::os_long_version(), 80)
 }
 
 fn ascii_header(value: &str, max_len: usize) -> String {

@@ -14,7 +14,7 @@ use tono_core::auth::{
     TelemetryWindowReport,
 };
 
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 
 use tono_core::connection::UiState;
 
@@ -237,7 +237,7 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
 
     let app_version = env!("CARGO_PKG_VERSION").to_string();
     let os_version = AsyncHandler::spawn_blocking(|| {
-        tauri_plugin_clash_verge_sysinfo::os_long_version()
+        tauri_plugin_tono_sysinfo::os_long_version()
     })
     .await
     .unwrap_or_else(|_| "Unknown".to_string());

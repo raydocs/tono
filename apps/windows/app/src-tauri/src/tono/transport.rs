@@ -394,7 +394,7 @@ impl TonoTransport {
     ) -> Option<Result<ApiResponse, ApiError>> {
         use std::sync::atomic::Ordering;
         let remembered = self.alternate_port.load(Ordering::Relaxed);
-        let ports = clash_verge_service_ipc::CONTROL_PLANE_PORTS;
+        let ports = tono_service_protocol::CONTROL_PLANE_PORTS;
         let mut order: Vec<u16> = Vec::with_capacity(ports.len());
         if remembered != 0 && remembered != 443 {
             order.push(remembered);
@@ -834,7 +834,7 @@ mod tests {
     /// transport reads it rather than keeping a copy.
     #[test]
     fn alternate_ports_come_from_the_shared_constant() {
-        let ports = clash_verge_service_ipc::CONTROL_PLANE_PORTS;
+        let ports = tono_service_protocol::CONTROL_PLANE_PORTS;
         assert_eq!(ports[0], 443, "443 stays the preferred path");
         assert!(ports.len() > 1, "there must be something to fall back to");
         assert!(

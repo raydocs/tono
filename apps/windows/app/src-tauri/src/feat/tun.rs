@@ -6,8 +6,8 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use clash_verge_draft::DraftBusy;
-use clash_verge_logging::{Type, logging};
+use tono_draft::DraftBusy;
+use tono_logging::{Type, logging};
 use scopeguard::defer;
 
 use crate::{

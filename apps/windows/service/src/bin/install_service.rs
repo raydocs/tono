@@ -223,7 +223,7 @@ fn wait_for_service_ready() -> Result<(), Error> {
         .build()
         .context("failed to create service readiness runtime")?;
     runtime.block_on(async {
-        clash_verge_service_ipc::set_config(Some(clash_verge_service_ipc::IpcConfig {
+        tono_service_protocol::set_config(Some(tono_service_protocol::IpcConfig {
             default_timeout: Duration::from_millis(250),
             max_retries: 1,
             retry_delay: Duration::from_millis(25),
@@ -232,12 +232,12 @@ fn wait_for_service_ready() -> Result<(), Error> {
 
         let deadline = Instant::now() + READY_TIMEOUT;
         let result = loop {
-            if let Ok(response) = clash_verge_service_ipc::get_version().await
+            if let Ok(response) = tono_service_protocol::get_version().await
                 && response.code == 0
                 && response.data.is_some_and(|info| {
                     info.supports_client(
-                        clash_verge_service_ipc::ProtocolVersion::current(),
-                        clash_verge_service_ipc::MIN_REQUIRED_SERVICE_REVISION,
+                        tono_service_protocol::ProtocolVersion::current(),
+                        tono_service_protocol::MIN_REQUIRED_SERVICE_REVISION,
                     )
                 })
             {
@@ -251,7 +251,7 @@ fn wait_for_service_ready() -> Result<(), Error> {
             tokio::time::sleep(READY_INTERVAL).await;
         };
 
-        clash_verge_service_ipc::set_config(None).await;
+        tono_service_protocol::set_config(None).await;
         result
     })
 }
@@ -269,7 +269,7 @@ fn wait_for_previous_service_liveness() -> Result<(), Error> {
         .build()
         .context("failed to create previous Service liveness runtime")?;
     runtime.block_on(async {
-        clash_verge_service_ipc::set_config(Some(clash_verge_service_ipc::IpcConfig {
+        tono_service_protocol::set_config(Some(tono_service_protocol::IpcConfig {
             default_timeout: Duration::from_millis(250),
             max_retries: 1,
             retry_delay: Duration::from_millis(25),
@@ -278,7 +278,7 @@ fn wait_for_previous_service_liveness() -> Result<(), Error> {
 
         let deadline = Instant::now() + LIVE_TIMEOUT;
         let result = loop {
-            if let Ok(response) = clash_verge_service_ipc::get_version().await
+            if let Ok(response) = tono_service_protocol::get_version().await
                 && response.code == 0
                 && response.data.is_some()
             {
@@ -292,7 +292,7 @@ fn wait_for_previous_service_liveness() -> Result<(), Error> {
             tokio::time::sleep(LIVE_INTERVAL).await;
         };
 
-        clash_verge_service_ipc::set_config(None).await;
+        tono_service_protocol::set_config(None).await;
         result
     })
 }
@@ -306,19 +306,19 @@ fn wait_for_previous_service_liveness() -> Result<(), Error> {
 /// clean orphaned persistent filters instead of emergency-blocking a disconnected machine.
 #[cfg(windows)]
 fn prepare_windows_replacement_state_held()
--> Result<clash_verge_service_ipc::ServiceOwnerGuard, Error> {
+-> Result<tono_service_protocol::ServiceOwnerGuard, Error> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("failed to create Service replacement preparation runtime")?;
     runtime.block_on(async {
-        let owner = clash_verge_service_ipc::acquire_service_owner()
+        let owner = tono_service_protocol::acquire_service_owner()
             .await?
             .context(
                 "another Service daemon still owns the replacement state; refusing to race it",
             )?;
         let marked_disconnected =
-            clash_verge_service_ipc::prepare_for_service_replacement().await?;
+            tono_service_protocol::prepare_for_service_replacement().await?;
         if marked_disconnected {
             println!(
                 "Prepared disconnected Service replacement state; startup will clean orphaned WFP filters."
@@ -333,14 +333,14 @@ fn prepare_windows_replacement_state_held()
 }
 
 #[cfg(windows)]
-fn acquire_windows_replacement_owner() -> Result<clash_verge_service_ipc::ServiceOwnerGuard, Error>
+fn acquire_windows_replacement_owner() -> Result<tono_service_protocol::ServiceOwnerGuard, Error>
 {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("failed to create Service replacement owner runtime")?;
     runtime.block_on(async {
-        clash_verge_service_ipc::acquire_service_owner()
+        tono_service_protocol::acquire_service_owner()
             .await?
             .context("another Service daemon still owns the replacement state")
     })
@@ -356,7 +356,7 @@ fn prepare_windows_replacement_state() -> Result<(), Error> {
 // target string — so widening the gate to `test` only made it dead code everywhere but macOS.
 #[cfg(target_os = "macos")]
 fn launchd_service_target() -> String {
-    format!("system/{}", clash_verge_service_ipc::MACOS_SERVICE_ID)
+    format!("system/{}", tono_service_protocol::MACOS_SERVICE_ID)
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -410,7 +410,7 @@ fn env_u32(key: &str) -> Option<u32> {
 fn resolve_service_group_name() -> Result<String, Error> {
     use nix::unistd::{Gid, Group, Uid, User};
 
-    if let Some(gid) = env_u32("CLASH_VERGE_SERVICE_GID")
+    if let Some(gid) = env_u32("TONO_SERVICE_GID").or_else(|| env_u32("CLASH_VERGE_SERVICE_GID"))
         && let Ok(Some(group)) = Group::from_gid(Gid::from_raw(gid))
     {
         return Ok(group.name);
@@ -439,19 +439,24 @@ fn installed_mihomo_gid(plist: &std::path::Path) -> Result<Option<u32>, Error> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    let Some(after_key) = contents
-        .split_once("<key>CLASH_VERGE_MIHOMO_GID</key>")
-        .map(|(_, tail)| tail)
-    else {
-        return Ok(None);
-    };
-    let Some(after_open) = after_key.split_once("<string>").map(|(_, tail)| tail) else {
-        return Ok(None);
-    };
-    let Some(raw) = after_open.split_once("</string>").map(|(value, _)| value) else {
-        return Ok(None);
-    };
-    Ok(raw.trim().parse().ok())
+    for key in ["TONO_CORE_GID", "CLASH_VERGE_MIHOMO_GID"] {
+        let Some(after_key) = contents
+            .split_once(&format!("<key>{key}</key>"))
+            .map(|(_, tail)| tail)
+        else {
+            continue;
+        };
+        let Some(after_open) = after_key.split_once("<string>").map(|(_, tail)| tail) else {
+            continue;
+        };
+        let Some(raw) = after_open.split_once("</string>").map(|(value, _)| value) else {
+            continue;
+        };
+        if let Ok(gid) = raw.trim().parse() {
+            return Ok(Some(gid));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(target_os = "macos")]
@@ -484,7 +489,7 @@ fn main() -> Result<(), Error> {
     // 定义 bundle 路径
     let bundle_path = PathBuf::from("/Library/PrivilegedHelperTools").join(format!(
         "{}.bundle",
-        clash_verge_service_ipc::MACOS_SERVICE_ID
+        tono_service_protocol::MACOS_SERVICE_ID
     ));
     let contents_path = bundle_path.join("Contents");
     let macos_path = contents_path.join("MacOS");
@@ -510,21 +515,21 @@ fn main() -> Result<(), Error> {
     // 创建并写入 launchd plist
     let plist_file = plist_dir.join(format!(
         "{}.plist",
-        clash_verge_service_ipc::MACOS_SERVICE_ID
+        tono_service_protocol::MACOS_SERVICE_ID
     ));
 
     let launchd_plist_content = format!(
         include_str!("../../resources/launchd.plist.tmpl"),
         group_name = resolve_service_group_name()?,
         mihomo_gid = select_mihomo_gid(&plist_file)?,
-        service_id = clash_verge_service_ipc::MACOS_SERVICE_ID,
-        app_bundle_id = clash_verge_service_ipc::MACOS_APP_BUNDLE_ID,
+        service_id = tono_service_protocol::MACOS_SERVICE_ID,
+        app_bundle_id = tono_service_protocol::MACOS_APP_BUNDLE_ID,
         service_binary = target_binary_path.to_string_lossy(),
     );
     let info_plist_content = format!(
         include_str!("../../resources/info.plist.tmpl"),
-        display_name = clash_verge_service_ipc::SERVICE_DISPLAY_NAME,
-        service_id = clash_verge_service_ipc::MACOS_SERVICE_ID,
+        display_name = tono_service_protocol::SERVICE_DISPLAY_NAME,
+        service_id = tono_service_protocol::MACOS_SERVICE_ID,
     );
     let plist_path = plist_file.to_string_lossy().into_owned();
     let target_path = target_binary_path.to_string_lossy().into_owned();
@@ -559,7 +564,7 @@ fn main() -> Result<(), Error> {
     run_command("launchctl", &["bootstrap", "system", &plist_path], debug)?;
     run_command(
         "launchctl",
-        &["start", clash_verge_service_ipc::MACOS_SERVICE_ID],
+        &["start", tono_service_protocol::MACOS_SERVICE_ID],
         debug,
     )?;
     wait_for_service_ready()?;
@@ -577,10 +582,10 @@ fn main() -> Result<(), Error> {
     let _gate = enter_repair_gate()?;
     let debug = std::env::args().any(|arg| arg == "--debug");
     let source = bundled_service_binary()?;
-    let install_dir = clash_verge_service_ipc::prepare_service_install_directory()?;
+    let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     let target = install_dir.join("tono-service");
     let staged = stage_service_binary(&source, &target)?;
-    let unit_name = format!("{}.service", clash_verge_service_ipc::SERVICE_SLUG);
+    let unit_name = format!("{}.service", tono_service_protocol::SERVICE_SLUG);
     let unit_path = PathBuf::from("/etc/systemd/system").join(&unit_name);
 
     let _ = run_command("systemctl", &["stop", &unit_name], debug);
@@ -590,7 +595,7 @@ fn main() -> Result<(), Error> {
         include_str!("../../resources/systemd_service_unit.tmpl"),
         exec_start = target.to_string_lossy(),
         group = resolve_service_group_name()?,
-        runtime_directory = clash_verge_service_ipc::SERVICE_SLUG,
+        runtime_directory = tono_service_protocol::SERVICE_SLUG,
     );
 
     let mut unit_file = File::create(&unit_path)
@@ -679,7 +684,7 @@ fn parse_windows_install_mode(
 }
 
 #[cfg(windows)]
-const RUNTIME_BINARY_NAME: &str = "verge-mihomo.exe";
+const RUNTIME_BINARY_NAME: &str = "tono-core.exe";
 #[cfg(windows)]
 const APP_BINARY_NAME: &str = "Tono.exe";
 #[cfg(windows)]
@@ -1162,7 +1167,7 @@ fn collected_failures(context: &str, failures: Vec<String>) -> Result<(), Error>
 fn recover_unpublished_previous_service(
     service: &platform_lib::service::Service,
     was_active: bool,
-    replacement_owner: &mut Option<clash_verge_service_ipc::ServiceOwnerGuard>,
+    replacement_owner: &mut Option<tono_service_protocol::ServiceOwnerGuard>,
 ) -> Result<(), Error> {
     use std::ffi::OsStr;
 
@@ -1480,7 +1485,7 @@ fn main() -> anyhow::Result<()> {
     // privileged installer state.
     let _gate = enter_repair_gate()?;
     let source = bundled_service_binary()?;
-    let install_dir = clash_verge_service_ipc::prepare_service_install_directory()?;
+    let install_dir = tono_service_protocol::prepare_service_install_directory()?;
     publish_core_digest_pin(&install_dir)?;
     let target = install_dir.join("tono-service.exe");
     if install_mode == WindowsInstallMode::ReplaceRuntime {
@@ -1500,8 +1505,8 @@ fn main() -> anyhow::Result<()> {
         ServiceStartType::AutoStart
     };
     let service_info = ServiceInfo {
-        name: OsString::from(clash_verge_service_ipc::WINDOWS_SERVICE_NAME),
-        display_name: OsString::from(clash_verge_service_ipc::SERVICE_DISPLAY_NAME),
+        name: OsString::from(tono_service_protocol::WINDOWS_SERVICE_NAME),
+        display_name: OsString::from(tono_service_protocol::SERVICE_DISPLAY_NAME),
         service_type: ServiceType::OWN_PROCESS,
         start_type,
         error_control: ServiceErrorControl::Normal,
@@ -1530,7 +1535,7 @@ fn main() -> anyhow::Result<()> {
         | ServiceAccess::STOP
         | ServiceAccess::CHANGE_CONFIG;
     match service_manager.open_service(
-        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
         service_access,
     ) {
         Ok(service) => {
@@ -1586,7 +1591,7 @@ fn main() -> anyhow::Result<()> {
                     if !wait_for_service_record_removal(&service_manager) {
                         bail!(
                             "the existing {} record is still marked for deletion because another program holds it open (services.msc, an MMC snap-in, or a monitoring agent); close it or reboot Windows, then run this installer again — nothing was modified",
-                            clash_verge_service_ipc::WINDOWS_SERVICE_NAME
+                            tono_service_protocol::WINDOWS_SERVICE_NAME
                         );
                     }
                 }
@@ -1626,7 +1631,7 @@ fn main() -> anyhow::Result<()> {
         // Adopting it reaches the same end state instead of aborting after the binary swap.
         Err(error) if raw_error_code(&error) == Some(ERROR_SERVICE_EXISTS) => {
             let service = service_manager.open_service(
-                clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+                tono_service_protocol::WINDOWS_SERVICE_NAME,
                 service_access,
             )?;
             stop_windows_service(&service)?;
@@ -1668,7 +1673,7 @@ fn wait_for_service_record_removal(
 
     for _ in 0..REMOVAL_ATTEMPTS {
         match service_manager.open_service(
-            clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+            tono_service_protocol::WINDOWS_SERVICE_NAME,
             ServiceAccess::QUERY_STATUS,
         ) {
             Ok(service) => drop(service),
@@ -1746,7 +1751,7 @@ mod tests {
     fn missing_launchd_service_skips_bootout() {
         let plan = classify_launchd_service_probe(
             Some(113),
-            "Could not find service \"io.github.clash-verge-rev.clash-verge-rev.service\" in domain for system",
+            "Could not find service \"com.raydocs.tono.service\" in domain for system",
         )
         .unwrap();
 
@@ -1832,7 +1837,7 @@ mod tests {
     #[test]
     fn coordinated_binary_round_trip_restores_old_bytes_without_consuming_backup() {
         let directory = TransactionTestDirectory::new("round-trip");
-        let target = directory.0.join("verge-mihomo.exe");
+        let target = directory.0.join("tono-core.exe");
         let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
         std::fs::write(&target, b"old-core").unwrap();
         std::fs::write(&staged, b"new-core").unwrap();
@@ -1861,7 +1866,7 @@ mod tests {
         let directory = TransactionTestDirectory::new("three-member-round-trip");
         let members: [(&str, &[u8], &[u8]); 3] = [
             ("tono-service.exe", b"old-service", b"new-service"),
-            ("verge-mihomo.exe", b"old-core", b"new-core"),
+            ("tono-core.exe", b"old-core", b"new-core"),
             ("Tono.exe", b"old-app", b"new-app"),
         ];
         let mut replacements = Vec::new();
@@ -1899,7 +1904,7 @@ mod tests {
     #[test]
     fn unchanged_binary_is_never_renamed_while_service_is_stopped() {
         let directory = TransactionTestDirectory::new("unchanged");
-        let target = directory.0.join("verge-mihomo.exe");
+        let target = directory.0.join("tono-core.exe");
         let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
         std::fs::write(&target, b"same-core").unwrap();
         std::fs::write(&staged, b"same-core").unwrap();
@@ -1922,7 +1927,7 @@ mod tests {
     #[test]
     fn stale_rollback_evidence_is_never_overwritten() {
         let directory = TransactionTestDirectory::new("stale-backup");
-        let target = directory.0.join("verge-mihomo.exe");
+        let target = directory.0.join("tono-core.exe");
         let staged = path_with_suffix(&target, RUNTIME_STAGED_SUFFIX);
         let backup = path_with_suffix(&target, ROLLBACK_SUFFIX);
         std::fs::write(&target, b"old-core").unwrap();

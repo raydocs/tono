@@ -11,7 +11,7 @@ test('service prebuild release follows the Cargo dependency version', async () =
   )
   const dependencyVersion = cargoManifest
     .split(/\r?\n/)
-    .find((line) => line.startsWith('clash_verge_service_ipc ='))
+    .find((line) => line.startsWith('tono-service-protocol ='))
     ?.match(/\bversion\s*=\s*"([^"]+)"/)?.[1]
 
   assert.ok(dependencyVersion)
@@ -20,8 +20,8 @@ test('service prebuild release follows the Cargo dependency version', async () =
     resolveServiceRelease(cargoManifest, 'x86_64-pc-windows-msvc', 'win32'),
     {
       version: releaseVersion,
-      archiveFile: `clash-verge-service-ipc-${releaseVersion}-x86_64-pc-windows-msvc.zip`,
-      downloadURL: `https://github.com/clash-verge-rev/clash-verge-service-ipc/releases/download/${releaseVersion}/clash-verge-service-ipc-${releaseVersion}-x86_64-pc-windows-msvc.zip`,
+      archiveFile: `tono-service-protocol-${releaseVersion}-x86_64-pc-windows-msvc.zip`,
+      downloadURL: null,
     },
   )
 })
@@ -30,7 +30,7 @@ test('service prebuild rejects a dependency without an explicit version', () => 
   assert.throws(
     () =>
       resolveServiceRelease(
-        'clash_verge_service_ipc = { path = "../service" }',
+        'tono-service-protocol = { path = "../service" }',
         'x86_64-pc-windows-msvc',
         'win32',
       ),

@@ -1,4 +1,4 @@
-import { MihomoWebSocket, Traffic } from 'tauri-plugin-mihomo-api'
+import { MihomoWebSocket, Traffic } from 'tono-plugin-core-api'
 
 import { useMihomoWsSubscription } from './use-mihomo-ws-subscription'
 import { useTrafficMonitorEnhanced } from './use-traffic-monitor'

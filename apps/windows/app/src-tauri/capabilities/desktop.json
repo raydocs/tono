@@ -9,7 +9,7 @@
     "autostart:allow-is-enabled",
     "core:window:allow-set-theme",
     "notification:default",
-    "mihomo:default",
+    "tono-plugin-core:default",
     "updater:default"
   ]
 }

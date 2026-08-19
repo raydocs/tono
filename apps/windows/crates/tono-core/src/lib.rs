@@ -15,6 +15,8 @@ pub mod credentials;
 pub mod node;
 pub mod policy;
 pub mod policy_signature;
+pub mod protected_connectivity;
+pub mod update_journal;
 
 pub use catalog::{
     CatalogError, CatalogHomeSocks5, CatalogRouting, CatalogTracker, ExitCatalogResponse,
@@ -24,5 +26,10 @@ pub use config::{
     DirectPlan, OwnedRuntime, build_owned_runtime, generate_controller_secret, redact_secret,
 };
 pub use connection::{ConnectStage, ConnectionStatus, ReconnectBackoff, UiState};
+pub use protected_connectivity::{
+    PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS, classify_exhausted_data_plane,
+    classify_post_lock,
+};
+pub use update_journal::{UpdateHandoffJournal, UpdateHandoffPhase};
 pub use credentials::{CredentialKey, CredentialStore};
 pub use node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode};

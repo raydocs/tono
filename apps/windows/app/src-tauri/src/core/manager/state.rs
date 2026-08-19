@@ -1,7 +1,7 @@
 use super::CoreManager;
 use crate::{core::service, logging};
 use anyhow::Result;
-use clash_verge_logging::Type;
+use tono_logging::Type;
 use scopeguard::defer;
 
 impl CoreManager {

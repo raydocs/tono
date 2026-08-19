@@ -1,0 +1,10 @@
+{
+  "tonoCoreVersion": "v1.19.29-tono-gvisor-adaptive.1",
+  "mihomoUpstreamTag": "v1.19.29",
+  "upstreamCommit": "e26714a181ac0e2fa803453c0a8e9a9ce94e31cb",
+  "tonoPatchRevision": "gvisor-adaptive.1",
+  "goVersion": "go1.26.5",
+  "buildTags": ["with_gvisor"],
+  "singTun": "v0.4.21",
+  "tcpBufferBytes": { "min": 4096, "default": 32768, "max": 131072 }
+}

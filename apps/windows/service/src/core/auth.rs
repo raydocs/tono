@@ -510,7 +510,14 @@ mod windows_auth {
             allow_administrators_owner,
         )?;
 
-        let token_path = app_data_root.join(OWNER_TOKEN_FILE_NAME);
+        let token_path = {
+            let current = app_data_root.join(OWNER_TOKEN_FILE_NAME);
+            if current.exists() {
+                current
+            } else {
+                app_data_root.join(crate::LEGACY_OWNER_TOKEN_FILE_NAME)
+            }
+        };
         let mut token_file = open_no_reparse(&token_path, false, GENERIC_READ | READ_CONTROL)?;
         validate_file_kind(&token_file, false)?;
         validate_token_security(

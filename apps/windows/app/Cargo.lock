@@ -1107,171 +1107,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "clash-verge"
-version = "0.0.34"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "arc-swap",
- "async-trait",
- "backon",
- "base64 0.23.0",
- "bitflags 2.13.1",
- "boa_engine",
- "bytes",
- "chrono",
- "clash-verge-draft",
- "clash-verge-i18n",
- "clash-verge-limiter",
- "clash-verge-logging",
- "clash-verge-signal",
- "clash_verge_logger",
- "clash_verge_service_ipc",
- "compact_str",
- "console-subscriber",
- "criterion",
- "dark-light",
- "deelevate",
- "dunce",
- "flate2",
- "flexi_logger",
- "futures",
- "gethostname",
- "getrandom 0.4.3",
- "keyring",
- "libc",
- "log",
- "nanoid",
- "network-interface",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "once_cell",
- "open",
- "parking_lot",
- "percent-encoding",
- "regex",
- "reqwest 0.13.4",
- "reqwest_dav",
- "runas",
- "rust_iso3166",
- "rustls",
- "scopeguard",
- "serde",
- "serde_json",
- "serde_yaml_ng",
- "smartstring",
- "socket2 0.6.5",
- "sysproxy",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-clash-verge-sysinfo",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-devtools",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-http",
- "tauri-plugin-mihomo",
- "tauri-plugin-notification",
- "tauri-plugin-process",
- "tauri-plugin-shell",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tokio",
- "tokio-rustls",
- "tokio-stream",
- "tokio-util",
- "tono-authenticode",
- "tono-core",
- "warp",
- "webpki-roots",
- "windows 0.62.2",
- "windows-service",
- "windows-sys 0.61.2",
- "winreg 0.56.0",
- "zip 8.6.0",
-]
-
-[[package]]
-name = "clash-verge-draft"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "criterion",
- "parking_lot",
- "tokio",
-]
-
-[[package]]
-name = "clash-verge-i18n"
-version = "0.1.0"
-dependencies = [
- "rust-i18n",
- "sys-locale",
-]
-
-[[package]]
-name = "clash-verge-limiter"
-version = "0.1.0"
-
-[[package]]
-name = "clash-verge-logging"
-version = "0.1.0"
-dependencies = [
- "compact_str",
- "flexi_logger",
- "log",
- "tokio",
-]
-
-[[package]]
-name = "clash-verge-signal"
-version = "0.1.0"
-dependencies = [
- "clash-verge-logging",
- "log",
- "tokio",
-]
-
-[[package]]
-name = "clash_verge_logger"
-version = "0.2.2"
-source = "git+https://github.com/clash-verge-rev/clash-verge-logger#45adad7ae6dd76baa7457e3b111a0f1927998e22"
-dependencies = [
- "arraydeque",
- "compact_str",
- "flexi_logger",
- "log",
- "nu-ansi-term",
- "tokio",
-]
-
-[[package]]
-name = "clash_verge_service_ipc"
-version = "2.6.7"
-dependencies = [
- "anyhow",
- "compact_str",
- "kode-bridge",
- "libc",
- "log",
- "once_cell",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "strum",
- "strum_macros",
- "sysproxy",
- "tokio",
- "tono-authenticode",
- "url",
- "windows-service",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7033,7 +6868,6 @@ dependencies = [
 [[package]]
 name = "sysproxy"
 version = "0.5.4"
-source = "git+https://github.com/clash-verge-rev/sysproxy-rs?branch=main#d214eba9f61d655d49a35f6ae17c359f7ad68d79"
 dependencies = [
  "iptools",
  "log",
@@ -7306,19 +7140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-clash-verge-sysinfo"
-version = "0.1.0"
-dependencies = [
- "deelevate",
- "libc",
- "parking_lot",
- "serde",
- "sysinfo",
- "tauri",
- "tauri-plugin-clipboard-manager",
-]
-
-[[package]]
 name = "tauri-plugin-clipboard-manager"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7442,30 +7263,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-mihomo"
-version = "0.5.5"
-source = "git+https://github.com/clash-verge-rev/tauri-plugin-mihomo?branch=refactor-use-reqwest-ipc#34abd64fd3c28442f183be39f0124cb08629f443"
-dependencies = [
- "arc-swap",
- "fast-uuid-v7",
- "futures-util",
- "http 1.4.2",
- "log",
- "percent-encoding",
- "pin-project",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "ts-rs",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "tauri-plugin-notification"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7513,6 +7310,19 @@ dependencies = [
  "tauri-plugin",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "tauri-plugin-tono-sysinfo"
+version = "0.1.0"
+dependencies = [
+ "deelevate",
+ "libc",
+ "parking_lot",
+ "serde",
+ "sysinfo",
+ "tauri",
+ "tauri-plugin-clipboard-manager",
 ]
 
 [[package]]
@@ -8248,6 +8058,193 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "tono-draft"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "criterion",
+ "parking_lot",
+ "tokio",
+]
+
+[[package]]
+name = "tono-i18n"
+version = "0.1.0"
+dependencies = [
+ "rust-i18n",
+ "sys-locale",
+]
+
+[[package]]
+name = "tono-limiter"
+version = "0.1.0"
+
+[[package]]
+name = "tono-logger"
+version = "0.2.2"
+dependencies = [
+ "arraydeque",
+ "compact_str",
+ "flexi_logger",
+ "log",
+ "nu-ansi-term",
+ "tokio",
+]
+
+[[package]]
+name = "tono-logging"
+version = "0.1.0"
+dependencies = [
+ "compact_str",
+ "flexi_logger",
+ "log",
+ "tokio",
+]
+
+[[package]]
+name = "tono-plugin-core"
+version = "0.5.5"
+dependencies = [
+ "arc-swap",
+ "fast-uuid-v7",
+ "futures-util",
+ "http 1.4.2",
+ "log",
+ "percent-encoding",
+ "pin-project",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "ts-rs",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tono-service-protocol"
+version = "2.6.7"
+dependencies = [
+ "anyhow",
+ "compact_str",
+ "kode-bridge",
+ "libc",
+ "log",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "strum",
+ "strum_macros",
+ "sysproxy",
+ "tokio",
+ "tono-authenticode",
+ "url",
+ "windows-service",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tono-signal"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "tokio",
+ "tono-logging",
+]
+
+[[package]]
+name = "tono-windows"
+version = "0.0.35"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "arc-swap",
+ "async-trait",
+ "backon",
+ "base64 0.23.0",
+ "bitflags 2.13.1",
+ "boa_engine",
+ "bytes",
+ "chrono",
+ "compact_str",
+ "console-subscriber",
+ "criterion",
+ "dark-light",
+ "deelevate",
+ "dunce",
+ "flate2",
+ "flexi_logger",
+ "futures",
+ "gethostname",
+ "getrandom 0.4.3",
+ "keyring",
+ "libc",
+ "log",
+ "nanoid",
+ "network-interface",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "once_cell",
+ "open",
+ "parking_lot",
+ "percent-encoding",
+ "regex",
+ "reqwest 0.13.4",
+ "reqwest_dav",
+ "runas",
+ "rust_iso3166",
+ "rustls",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "smartstring",
+ "socket2 0.6.5",
+ "sysproxy",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-devtools",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-http",
+ "tauri-plugin-notification",
+ "tauri-plugin-process",
+ "tauri-plugin-shell",
+ "tauri-plugin-tono-sysinfo",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-util",
+ "tono-authenticode",
+ "tono-core",
+ "tono-draft",
+ "tono-i18n",
+ "tono-limiter",
+ "tono-logger",
+ "tono-logging",
+ "tono-plugin-core",
+ "tono-service-protocol",
+ "tono-signal",
+ "warp",
+ "webpki-roots",
+ "windows 0.62.2",
+ "windows-service",
+ "windows-sys 0.61.2",
+ "winreg 0.56.0",
+ "zip 8.6.0",
 ]
 
 [[package]]

@@ -9,7 +9,7 @@ use std::{sync::Arc, time::Duration};
 use tauri::AppHandle;
 use tono_core::{CatalogError, InstallOutcome, node::ValidatedNode};
 
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 
 use crate::{
     process::AsyncHandler,

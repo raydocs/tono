@@ -1,6 +1,6 @@
 use crate::utils::dirs::{self, PathBufExec as _};
 use anyhow::{Result, anyhow};
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use std::fs;
 use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
@@ -22,8 +22,8 @@ const SCHTASKS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const TASK_NAME_USER: &str = "Tono";
 const TASK_NAME_ADMIN: &str = "Tono (Admin)";
 const TASK_XML_DIR: &str = "tasks";
-const TASK_XML_USER: &str = "clash-verge-task-user.xml";
-const TASK_XML_ADMIN: &str = "clash-verge-task-admin.xml";
+const TASK_XML_USER: &str = "tono-task-user.xml";
+const TASK_XML_ADMIN: &str = "tono-task-admin.xml";
 
 #[derive(Clone, Copy)]
 pub enum TaskMode {

@@ -277,6 +277,7 @@ Function DetectExistingInstall
     ; A program file without a valid installer record is an ambiguous partial/foreign install.
     ; Never overwrite it as though this were a clean machine.
     ${If} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+    ${OrIf} ${FileExists} "$INSTDIR\tono-core.exe"
     ${OrIf} ${FileExists} "$INSTDIR\verge-mihomo.exe"
       Goto invalid_existing_version
     ${EndIf}
@@ -634,6 +635,7 @@ FunctionEnd
 ; names on both upgrade and uninstall; /REBOOTOK covers an old core image that Windows still has
 ; mapped without broadening the target beyond Tono's own install directory.
 !macro RemoveKnownLegacyPayload
+  Delete /REBOOTOK "$INSTDIR\verge-mihomo.exe"
   Delete /REBOOTOK "$INSTDIR\verge-mihomo-alpha.exe"
   ; A completed transaction removes these itself. Exact cleanup here covers a pre-publication
   ; installer abort and uninstall; a failed helper never reaches this macro, so recovery evidence
@@ -894,7 +896,7 @@ Section Install
     File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
   {{/each}}
 
-  ; Stage external binaries under a non-live name. A connected Service owns verge-mihomo.exe and
+  ; Stage external binaries under a non-live name. A connected Service owns tono-core.exe and
   ; Windows correctly refuses to overwrite that mapped image. Confirmed repairs leave `.next` for
   ; the Service helper's fail-closed three-executable transaction; a clean install has no live
   ; target and publishes it immediately with one same-volume rename. Packaging gates keep this

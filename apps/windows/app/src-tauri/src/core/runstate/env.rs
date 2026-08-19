@@ -56,7 +56,7 @@ pub struct RealEnv;
 
 impl RunStateEnv for RealEnv {
     async fn probe_service_version(&self) -> Result<ServiceVersionReply> {
-        let response = clash_verge_service_ipc::get_version().await?;
+        let response = tono_service_protocol::get_version().await?;
         Ok(ServiceVersionReply {
             code: response.code,
             message: response.message,
@@ -81,7 +81,7 @@ impl RunStateEnv for RealEnv {
         // degrade to "not elevated" rather than abort the process.
         crate::APP_HANDLE
             .get()
-            .is_some_and(tauri_plugin_clash_verge_sysinfo::is_current_app_handle_admin)
+            .is_some_and(tauri_plugin_tono_sysinfo::is_current_app_handle_admin)
     }
 
     fn set_pac_available(&self, available: bool) {
@@ -103,7 +103,7 @@ impl RunStateEnv for RealEnv {
         let Some(app_handle) = crate::APP_HANDLE.get() else {
             return;
         };
-        tauri_plugin_clash_verge_sysinfo::set_app_core_mode(app_handle, state.mode.to_string());
+        tauri_plugin_tono_sysinfo::set_app_core_mode(app_handle, state.mode.to_string());
         crate::core::handle::Handle::notify_run_state(&state.to_view());
     }
 
@@ -124,7 +124,7 @@ pub use fake::FakeEnv;
 #[cfg(test)]
 mod fake {
     use anyhow::{Result, anyhow};
-    use clash_verge_service_ipc::ProtocolInfo;
+    use tono_service_protocol::ProtocolInfo;
     use parking_lot::Mutex;
 
     use super::{PendingAction, RunState, RunStateEnv, ServiceVersionReply};

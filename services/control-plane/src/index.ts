@@ -3848,14 +3848,14 @@ const telemetryWindowKeys = [
 
 const telemetryEventStringKeys = [
   'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
-  'from', 'to', 'mode', 'reference',
+  'from', 'to', 'mode', 'reference', 'outcome', 'code',
 ];
 const telemetryEventNumberKeys = [
   'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
   'revision', 'domains', 'media', 'webDomains', 'wechatTcp', 'webTcp', 'udp',
-  'endpoints', 'eventCount', 'bytes',
+  'endpoints', 'eventCount', 'bytes', 'generation',
 ];
-const telemetryEventBoolKeys = ['wanted', 'live'];
+const telemetryEventBoolKeys = ['wanted', 'live', 'updateResume'];
 const telemetryEventKeys = [
   ...telemetryEventStringKeys,
   ...telemetryEventNumberKeys,

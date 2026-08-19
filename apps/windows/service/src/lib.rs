@@ -5,14 +5,16 @@ mod core;
 mod client;
 
 pub use channel::{
-    CHANNEL_IDENTITY, ChannelIdentity, MACOS_APP_BUNDLE_ID, MACOS_SERVICE_ID, SERVICE_DISPLAY_NAME,
-    SERVICE_SLUG, WINDOWS_SERVICE_NAME, WINDOWS_STATE_DIR_NAME,
+    CHANNEL_IDENTITY, ChannelIdentity, LEGACY_MACOS_SERVICE_IDS, MACOS_APP_BUNDLE_ID,
+    MACOS_SERVICE_ID, SERVICE_DISPLAY_NAME, SERVICE_SLUG, WINDOWS_SERVICE_NAME,
+    WINDOWS_STATE_DIR_NAME,
 };
 pub use core::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, ClashConfig, CoreConfig,
     DirectRuntimeReloadResult, DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IpcCommand,
     KillSwitchConfig, KillSwitchLockRequest, KillSwitchStatus, KillSwitchStatusMode,
-    MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, OWNER_TOKEN_FILE_NAME,
+    MacosKillSwitchConfig, MacosKillSwitchMode, MacosProxyConfig, LEGACY_OWNER_TOKEN_FILE_NAME,
+    OWNER_TOKEN_FILE_NAME,
     OwnerCredentials, OwnerIdentity, OwnerSessionHandle, OwnerSessionProof, ProtocolInfo,
     ProtocolVersion, ProxyApplyOutcome, ProxyEndpoint, ProxyProtocol, RemoteProvider,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, RuntimeAsset, RuntimeBundle,
@@ -58,34 +60,34 @@ pub use client::*;
     not(feature = "test"),
     not(feature = "development-channel")
 ))]
-pub static IPC_PATH: &str = "/var/run/clash-verge-service/service.sock";
+pub static IPC_PATH: &str = "/var/run/tono-service/service.sock";
 #[cfg(all(
     target_os = "macos",
     not(feature = "test"),
     feature = "development-channel"
 ))]
-pub static IPC_PATH: &str = "/var/run/clash-verge-service-dev/service.sock";
+pub static IPC_PATH: &str = "/var/run/tono-service-dev/service.sock";
 #[cfg(all(
     unix,
     not(target_os = "macos"),
     not(feature = "test"),
     not(feature = "development-channel")
 ))]
-pub static IPC_PATH: &str = "/run/clash-verge-service/service.sock";
+pub static IPC_PATH: &str = "/run/tono-service/service.sock";
 #[cfg(all(
     unix,
     not(target_os = "macos"),
     not(feature = "test"),
     feature = "development-channel"
 ))]
-pub static IPC_PATH: &str = "/run/clash-verge-service-dev/service.sock";
+pub static IPC_PATH: &str = "/run/tono-service-dev/service.sock";
 #[cfg(all(windows, not(feature = "test"), not(feature = "development-channel")))]
 pub static IPC_PATH: &str = r"\\.\pipe\tono-service";
 #[cfg(all(windows, not(feature = "test"), feature = "development-channel"))]
 pub static IPC_PATH: &str = r"\\.\pipe\tono-service-dev";
 
 #[cfg(all(feature = "test", unix))]
-pub static IPC_PATH: &str = "/tmp/clash-verge-service-ipc-test/service.sock";
+pub static IPC_PATH: &str = "/tmp/tono-service-ipc-test/service.sock";
 #[cfg(all(feature = "test", windows))]
 pub static IPC_PATH: &str = r"\\.\pipe\tono-service-test";
 

@@ -18,7 +18,7 @@ pub fn service_writer(config: &WriterConfig) -> Result<FileLogWriter> {
             .basename("service")
             .suppress_timestamp(),
     )
-    .format(clash_verge_logger::file_format_without_level)
+    .format(tono_logger::file_format_without_level)
     .rotate(
         flexi_logger::Criterion::Size(config.max_log_size),
         Naming::TimestampsCustomFormat {

@@ -12,7 +12,7 @@ final class ProxyService {
     var activeGroupName: String?
     var activeNodeName: String?
 
-    private var api: ClashAPI?
+    private var api: CoreControllerClient?
 
     struct MihomoGroup: Identifiable {
         let id: String  // group name
@@ -34,7 +34,7 @@ final class ProxyService {
         var lastTestFailed: Bool = false
     }
 
-    func setAPI(_ api: ClashAPI?) {
+    func setAPI(_ api: CoreControllerClient?) {
         self.api = api
     }
 

@@ -4,7 +4,7 @@ use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Listener, Manager, Theme, WebviewWindow};
 
 use crate::{config::Config, core::handle, utils::resolve::window_script::build_window_initial_script};
-use clash_verge_logging::{Type, logging, logging_error};
+use tono_logging::{Type, logging, logging_error};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 

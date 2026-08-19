@@ -144,9 +144,8 @@ actor SubscriptionManager {
 
     // MARK: - curl with proxy (single attempt)
 
-    /// The User-Agent that subscription backends recognize as a Clash client.
-    /// Must use -A flag in curl (not -H) to properly override default UA.
-    private static let clashUA = "clash-verge/v2.4.7"
+    /// Isolated-dev subscription helper only. Production uses the managed catalog.
+    private static let clashUA = "Tono/0.0.68"
     private static let maximumDownloadBytes = 5 * 1_024 * 1_024
     private static let maximumHeaderBytes = 128 * 1_024
 

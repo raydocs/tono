@@ -164,7 +164,7 @@ export const assertPackagingConfig = () => {
 
   const stableMihomo = path.join(
     sidecarDir,
-    'verge-mihomo-x86_64-pc-windows-msvc.exe',
+    'tono-core-x86_64-pc-windows-msvc.exe',
   )
   if (existsSync(stableMihomo) && !statSync(stableMihomo).isFile()) {
     fail(`stable Mihomo path exists but is not a file: ${stableMihomo}`)
@@ -269,7 +269,7 @@ const readNsisEntry = (sevenZip, installer, entry) => {
 const assertNsisCoreIntegrityPins = (sevenZip, installer, entries) => {
   const entryFor = (base) =>
     entries.find((entry) => entry.base.toLowerCase() === base.toLowerCase())
-  const coreEntry = entryFor('verge-mihomo.exe.next')
+  const coreEntry = entryFor('tono-core.exe.next')
   if (!coreEntry) fail('NSIS payload has no staged Mihomo to hash')
 
   const coreDigest = sha256Bytes(
@@ -392,7 +392,7 @@ if (payloadOnly) {
   const service = path.resolve(appRoot, 'src-tauri/resources/tono-service.exe')
   const mihomo = path.resolve(
     appRoot,
-    'src-tauri/sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe',
+    'src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe',
   )
   for (const [label, file] of [
     ['installer', installer],
@@ -456,7 +456,7 @@ const manifestPath = manifestArgument
 const service = path.resolve(appRoot, 'src-tauri/resources/tono-service.exe')
 const mihomo = path.resolve(
   appRoot,
-  'src-tauri/sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe',
+  'src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe',
 )
 
 for (const [label, file] of [

@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use compact_str::CompactString;
 use flexi_logger::{
     Cleanup, Criterion, DeferredNow, FileSpec, LogSpecBuilder, LogSpecification, LoggerHandle,
@@ -78,8 +78,8 @@ impl Logger {
             let logger = flexi_logger::Logger::with(log_spec)
                 .log_to_file(FileSpec::default().directory(log_dir).basename(""))
                 .duplicate_to_stdout(log_level.into())
-                .format(clash_verge_logger::console_format)
-                .format_for_files(clash_verge_logger::file_format_with_level)
+                .format(tono_logger::console_format)
+                .format_for_files(tono_logger::file_format_with_level)
                 .rotate(
                     Criterion::Size(log_max_size * 1024),
                     flexi_logger::Naming::TimestampsCustomFormat {
@@ -93,8 +93,8 @@ impl Logger {
             #[cfg(not(feature = "tracing"))]
             filter_modules.push("tauri");
             #[cfg(feature = "tracing")]
-            filter_modules.extend(["tauri_plugin_mihomo", "kode_bridge"]);
-            let logger = logger.filter(Box::new(clash_verge_logging::NoModuleFilter(filter_modules)));
+            filter_modules.extend(["tono_plugin_core", "kode_bridge"]);
+            let logger = logger.filter(Box::new(tono_logging::NoModuleFilter(filter_modules)));
 
             let handle = logger.start()?;
             *self.handle.lock() = Some(handle);
@@ -136,7 +136,7 @@ impl Logger {
         #[cfg(feature = "tracing")]
         spec.module("tauri", log::LevelFilter::Debug)
             .module("wry", log::LevelFilter::Off)
-            .module("tauri_plugin_mihomo", log::LevelFilter::Off);
+            .module("tono_plugin_core", log::LevelFilter::Off);
         spec.build()
     }
 
@@ -185,7 +185,7 @@ impl Logger {
         // The service writer is auxiliary to the local logger. Synchronize it only
         // for an active service session and do not roll back local settings on failure.
         if should_sync_service_writer(*CoreManager::global().get_running_mode())
-            && let Err(error) = service::update_writer_by_service(&clash_verge_service_ipc::WriterConfig {
+            && let Err(error) = service::update_writer_by_service(&tono_service_protocol::WriterConfig {
                 directory: String::new(),
                 max_log_size: log_max_size * 1024,
                 max_log_files: log_max_count,
@@ -208,7 +208,7 @@ impl Logger {
                 .basename("sidecar")
                 .suppress_timestamp(),
         )
-        .format(clash_verge_logger::file_format_without_level)
+        .format(tono_logger::file_format_without_level)
         .rotate(
             Criterion::Size(log_max_size * 1024),
             flexi_logger::Naming::TimestampsCustomFormat {

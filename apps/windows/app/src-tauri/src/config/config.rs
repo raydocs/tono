@@ -4,8 +4,8 @@ use crate::{
     process::AsyncHandler,
 };
 use anyhow::Result;
-use clash_verge_draft::Draft;
-use clash_verge_logging::{Type, logging, logging_error};
+use tono_draft::Draft;
+use tono_logging::{Type, logging, logging_error};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::OnceCell;
 
@@ -39,7 +39,7 @@ impl Config {
 
     pub async fn init_config_before_window() -> Result<()> {
         let verge = Self::verge().await.latest_arc();
-        clash_verge_i18n::sync_locale(verge.language.as_deref());
+        tono_i18n::sync_locale(verge.language.as_deref());
 
         Ok(())
     }

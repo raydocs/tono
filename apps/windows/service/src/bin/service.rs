@@ -4,7 +4,7 @@
 //! It listens for shutdown signals (Ctrl+C, SIGTERM, or service stop) to gracefully terminate.
 
 use anyhow::Result;
-use clash_verge_service_ipc::{
+use tono_service_protocol::{
     acquire_service_owner, add_restored_kill_switch_tunnel, initialize_protected_dns_status,
     reconcile_service_startup, restore_desired_state, restore_kill_switch,
     restore_windows_kill_switch, retire_unverified_windows_kill_switch,
@@ -51,12 +51,12 @@ async fn main() -> Result<()> {
         if unsafe { platform_lib::geteuid() } != 0 {
             anyhow::bail!("--emergency-disarm must be run as root");
         }
-        let Some(_owner_guard) = clash_verge_service_ipc::acquire_service_owner().await? else {
+        let Some(_owner_guard) = tono_service_protocol::acquire_service_owner().await? else {
             anyhow::bail!("service daemon is still running; refusing to open the kill switch");
         };
         // Uninstall has verified launchd bootout, and the owner lock proves no daemon/core
         // lifecycle currently owns this state.
-        clash_verge_service_ipc::emergency_disarm_kill_switch().await?;
+        tono_service_protocol::emergency_disarm_kill_switch().await?;
         println!("Kill switch disarmed; network opened");
         return Ok(());
     }
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         return run_emergency_disarm();
     }
     if service_dispatcher::start(
-        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
         ffi_service_main,
     )
     .is_err()
@@ -138,7 +138,7 @@ fn run_emergency_disarm() -> Result<()> {
         // service start comes up in the emergency block. Because the owner
         // answered, the supported route is open, which is exactly what the
         // refusal below tells them to use.
-        let _owner_guard = match clash_verge_service_ipc::acquire_service_owner().await {
+        let _owner_guard = match tono_service_protocol::acquire_service_owner().await {
             Ok(None) => return Ok(false),
             Ok(guard) => guard,
             Err(error) => {
@@ -148,7 +148,7 @@ fn run_emergency_disarm() -> Result<()> {
                 None
             }
         };
-        clash_verge_service_ipc::emergency_disarm_windows_kill_switch()
+        tono_service_protocol::emergency_disarm_windows_kill_switch()
             .await
             .map(|()| true)
     });
@@ -330,7 +330,7 @@ fn run_service() -> platform_lib::Result<()> {
                 ) {
                     // The WFP barrier stays armed; netmon records the event for /status and
                     // the product layer reconnects behind it.
-                    clash_verge_service_ipc::note_power_event();
+                    tono_service_protocol::note_power_event();
                 }
                 ServiceControlHandlerResult::NoError
             }
@@ -339,7 +339,7 @@ fn run_service() -> platform_lib::Result<()> {
     };
 
     let registered = service_control_handler::register(
-        clash_verge_service_ipc::WINDOWS_SERVICE_NAME,
+        tono_service_protocol::WINDOWS_SERVICE_NAME,
         event_handler,
     )?;
     let _ = status_handle.set(registered);
@@ -392,7 +392,7 @@ fn run_service() -> platform_lib::Result<()> {
         initialize_protected_dns_status().await;
         spawn_protected_dns_watchdog();
         spawn_windows_kill_switch_watchdog();
-        clash_verge_service_ipc::start_network_monitor();
+        tono_service_protocol::start_network_monitor();
 
         match reconcile_service_startup().await {
             Ok(()) => restore_reconciled_desired_state().await,
@@ -408,7 +408,7 @@ fn run_service() -> platform_lib::Result<()> {
                 _ = shutdown_rx.recv() => {}
                 // An authenticated owner asked the service to stop itself
                 // (`POST /lifecycle/owner-goodbye`, the App's unprotected-quit path).
-                () = clash_verge_service_ipc::owner_goodbye_requested() => {
+                () = tono_service_protocol::owner_goodbye_requested() => {
                     info!("Authenticated owner goodbye received; the service is stopping itself");
                 }
             }
@@ -513,7 +513,7 @@ fn init_logger() {
 /// with whatever ACL happened to apply.
 #[cfg(windows)]
 fn service_log_writer() -> Option<RotatingLogFile> {
-    let root = clash_verge_service_ipc::service_paths()
+    let root = tono_service_protocol::service_paths()
         .persistent_state_dir()
         .to_path_buf();
     if !root.is_dir() {
@@ -632,7 +632,7 @@ async fn restore_reconciled_desired_state() {
                     "Restored core remains fail-closed because its tunnel could not be authorized: {error:#}"
                 );
             }
-            if let Err(error) = clash_verge_service_ipc::relock_restored_tunnel().await {
+            if let Err(error) = tono_service_protocol::relock_restored_tunnel().await {
                 warn!(
                     "Restored core remains fail-closed because its tunnel could not be re-locked: {error:#}"
                 );
@@ -670,7 +670,7 @@ async fn run_standalone() -> Result<()> {
     spawn_protected_dns_watchdog();
     spawn_windows_kill_switch_watchdog();
     #[cfg(windows)]
-    clash_verge_service_ipc::start_network_monitor();
+    tono_service_protocol::start_network_monitor();
 
     // 启动恢复只做 best-effort；即使失败也要启动 IPC，让 GUI 重连后重推配置自愈。
     // 否则失效的 desired-state 路径会导致进程退出并被 launchd 反复拉起。
@@ -690,7 +690,7 @@ async fn run_standalone() -> Result<()> {
 /// Waits for a shutdown signal appropriate for the current platform, or for an authenticated
 /// owner-goodbye from the IPC route (`POST /lifecycle/owner-goodbye`).
 async fn shutdown_signal() {
-    let goodbye = clash_verge_service_ipc::owner_goodbye_requested();
+    let goodbye = tono_service_protocol::owner_goodbye_requested();
     tokio::pin!(goodbye);
     #[cfg(unix)]
     {

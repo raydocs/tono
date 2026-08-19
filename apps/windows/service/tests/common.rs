@@ -1,6 +1,6 @@
 use std::sync::Once;
 
-use clash_verge_service_ipc::{OwnerCredentials, test_owner_credentials};
+use tono_service_protocol::{OwnerCredentials, test_owner_credentials};
 
 static INIT_TRACING: Once = Once::new();
 
@@ -58,7 +58,7 @@ pub fn test_bin_path(name: &str) -> std::path::PathBuf {
 pub async fn wait_for_ipc() -> anyhow::Result<()> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
-        if clash_verge_service_ipc::connect().await.is_ok() {
+        if tono_service_protocol::connect().await.is_ok() {
             return Ok(());
         }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;

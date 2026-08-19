@@ -35,9 +35,9 @@ export PATH="$CARGO_HOME/bin:$toolchain_root/xwin:/opt/homebrew/opt/llvm/bin:$PA
 
 # The Service refuses to start a core whose SHA-256 does not match a pin, so the pin must be
 # taken from the very binary this build ships. The sidecar is what Tauri installs as
-# verge-mihomo.exe, byte for byte, so hashing it here is hashing what will actually run.
+# tono-core.exe, byte for byte, so hashing it here is hashing what will actually run.
 # Without this the build would produce a Service that fail-closed refuses every connect.
-core_sidecar="$app_root/src-tauri/sidecar/verge-mihomo-x86_64-pc-windows-msvc.exe"
+core_sidecar="$app_root/src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe"
 if [[ ! -f $core_sidecar ]]; then
   echo "core sidecar missing, cannot pin its digest: $core_sidecar" >&2
   exit 1

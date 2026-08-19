@@ -12,16 +12,20 @@ import SystemConfiguration
 final class AppUpdater: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
     private let updaterController: SPUStandardUpdaterController?
+    private let sparkleDelegate: TonoSparkleDelegate?
 
     init(enabled: Bool) {
         guard enabled else {
             updaterController = nil
+            sparkleDelegate = nil
             return
         }
 
+        let delegate = TonoSparkleDelegate()
+        self.sparkleDelegate = delegate
         let controller = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: delegate,
             userDriverDelegate: nil
         )
         updaterController = controller
@@ -29,8 +33,43 @@ final class AppUpdater: ObservableObject {
             .assign(to: &$canCheckForUpdates)
     }
 
+    func attach(appState: AppState) {
+        sparkleDelegate?.appState = appState
+    }
+
     func checkForUpdates() {
         updaterController?.updater.checkForUpdates()
+    }
+}
+
+@MainActor
+final class TonoSparkleDelegate: NSObject, SPUUpdaterDelegate {
+    weak var appState: AppState?
+    private var installPrepared = false
+
+    func updater(
+        _ updater: SPUUpdater,
+        shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+        untilInvokingBlock installHandler: @escaping () -> Void
+    ) -> Bool {
+        guard !installPrepared else { return false }
+        Task { @MainActor in
+            let version = item.displayVersionString
+            if let appState {
+                let journal = await appState.prepareForSoftwareUpdate(nextVersion: version)
+                await appState.finishPendingDisconnect()
+                if KillSwitchService.isArmed {
+                    appState.markProtectedUpdateHandoff(journal)
+                }
+            }
+            if var recorded = UpdateHandoffStore.load() {
+                recorded = recorded.advancing(to: .installStarted)
+                try? UpdateHandoffStore.write(recorded)
+            }
+            self.installPrepared = true
+            installHandler()
+        }
+        return true
     }
 }
 
@@ -145,7 +184,7 @@ enum RuntimeCleanup {
             do {
                 try await PrivilegedRuntimeCoordinator.shared.prepareHelper()
             } catch {
-                throw ClashError.startFailed(
+                throw CoreRuntimeError.startFailed(
                     String(localized: "The installed network helper no longer accepts this copy of Tono. Click Retry and approve the administrator prompt to repair it, or run the documented sudo emergency-disarm command and reopen Tono. \(error.localizedDescription)")
                 )
             }
@@ -188,7 +227,7 @@ enum RuntimeCleanup {
                 let status = await PrivilegedRuntimeCoordinator.shared.coreStatus()
                 let confirmedStopped = status.verified && !status.running
                 guard confirmedStopped else {
-                    throw ClashError.startFailed(
+                    throw CoreRuntimeError.startFailed(
                         "A previous protected core could not be stopped safely."
                     )
                 }
@@ -235,7 +274,7 @@ enum RuntimeCleanup {
                 // Losing the real cause here (most often a cancelled
                 // administrator prompt) would present the unrelated DNS
                 // message below and leave the user guessing.
-                throw ClashError.startFailed(
+                throw CoreRuntimeError.startFailed(
                     "The network helper needs repair before its protected "
                     + "DNS state can be inspected. Click Retry and approve "
                     + "the administrator prompt, or run the documented sudo "
@@ -244,7 +283,7 @@ enum RuntimeCleanup {
                 )
             }
             if !repaired {
-                throw ClashError.startFailed(
+                throw CoreRuntimeError.startFailed(
                     "A previous protected DNS state could not be inspected "
                     + "safely. Click Retry and approve the administrator "
                     + "prompt to repair the network helper, or run the "
@@ -488,7 +527,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.completeTermination(completion)
         }
         terminationDeadlineTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(20))
             guard let self, !Task.isCancelled else { return }
             self.terminationCleanupTask?.cancel()
             self.completeTermination(completion)
@@ -763,6 +802,7 @@ struct LiquidClashApp: App {
                 }
                 appDelegate.appState = appState
                 appDelegate.accountSession = accountSession
+                updater.attach(appState: appState)
                 // Disk only — network remains gated on account + transport ready.
                 await appState.loadInitialData()
                 // Load the verified local catalog before account restoration so

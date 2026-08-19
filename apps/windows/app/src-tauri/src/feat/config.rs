@@ -6,8 +6,8 @@ use crate::{
 };
 use anyhow::Result;
 use bitflags::bitflags;
-use clash_verge_draft::{DraftTransaction, SharedDraft};
-use clash_verge_logging::{Type, logging, logging_error};
+use tono_draft::{DraftTransaction, SharedDraft};
+use tono_logging::{Type, logging, logging_error};
 
 // Define update flags as bitflags for better performance
 bitflags! {
@@ -180,7 +180,7 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
     if update_flags.contains(UpdateFlags::LANGUAGE)
         && let Some(language) = &patch.language
     {
-        clash_verge_i18n::set_locale(language.as_str());
+        tono_i18n::set_locale(language.as_str());
     }
     if update_flags.contains(UpdateFlags::SYS_PROXY) {
         let manager = CoreManager::global();
@@ -242,7 +242,7 @@ pub(super) async fn apply_verge_patch(patch: &IVerge, not_save_file: bool) -> Re
     let mut normalized_patch = patch.clone();
     #[cfg(target_os = "macos")]
     if normalized_patch.enable_tun_mode == Some(false) {
-        normalized_patch.macos_kill_switch_mode = Some(clash_verge_service_ipc::MacosKillSwitchMode::Disabled);
+        normalized_patch.macos_kill_switch_mode = Some(tono_service_protocol::MacosKillSwitchMode::Disabled);
     }
     #[cfg(not(target_os = "macos"))]
     let normalized_patch = patch.clone();
@@ -250,7 +250,7 @@ pub(super) async fn apply_verge_patch(patch: &IVerge, not_save_file: bool) -> Re
     #[cfg(target_os = "macos")]
     if patch
         .macos_kill_switch_mode
-        .is_some_and(|mode| mode != clash_verge_service_ipc::MacosKillSwitchMode::Disabled)
+        .is_some_and(|mode| mode != tono_service_protocol::MacosKillSwitchMode::Disabled)
     {
         // Reject a competing host PF manager before staging durable intent or stopping the
         // currently working Core. StartClash repeats this check immediately before PF mutation.
@@ -331,7 +331,7 @@ pub async fn sanitize_verge_config_for_tono() {
             || data.tray_event.as_deref() != Some("dashboard")
             // Windows (and Tono product) ships one audited stable core. A hand-edited
             // verge.yaml that still names alpha would demand a second ~47 MB binary.
-            || data.clash_core.as_deref().is_some_and(|core| core != "verge-mihomo")
+            || data.clash_core.as_deref().is_some_and(|core| core != "tono-core")
             || data.clash_core.is_none()
     };
     if !needs_fix {
@@ -352,7 +352,7 @@ pub async fn sanitize_verge_config_for_tono() {
         d.enable_silent_start = Some(false);
         d.enable_auto_light_weight_mode = Some(false);
         d.tray_event = Some("dashboard".into());
-        d.clash_core = Some("verge-mihomo".into());
+        d.clash_core = Some("tono-core".into());
     });
     verge.apply();
     let data = verge.data_arc();

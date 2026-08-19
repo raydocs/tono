@@ -1,7 +1,7 @@
 use crate::core::{CoreManager, handle, manager::RunningMode};
 use anyhow::Result;
 use async_trait::async_trait;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use once_cell::sync::OnceCell;
 use std::{fs, path::PathBuf};
 use tauri::Manager as _;
@@ -9,12 +9,16 @@ use tauri::Manager as _;
 #[cfg(not(feature = "verge-dev"))]
 pub static APP_ID: &str = "com.raydocs.tono";
 #[cfg(not(feature = "verge-dev"))]
-pub static BACKUP_DIR: &str = "clash-verge-rev-backup";
+pub static BACKUP_DIR: &str = "tono-backup";
+#[cfg(not(feature = "verge-dev"))]
+pub static LEGACY_BACKUP_DIR: &str = "clash-verge-rev-backup";
 
 #[cfg(feature = "verge-dev")]
 pub static APP_ID: &str = "com.raydocs.tono.dev";
 #[cfg(feature = "verge-dev")]
-pub static BACKUP_DIR: &str = "clash-verge-rev-backup-dev";
+pub static BACKUP_DIR: &str = "tono-backup-dev";
+#[cfg(feature = "verge-dev")]
+pub static LEGACY_BACKUP_DIR: &str = "clash-verge-rev-backup-dev";
 
 pub static PORTABLE_FLAG: OnceCell<bool> = OnceCell::new();
 
@@ -156,7 +160,14 @@ pub fn app_latest_log() -> Result<PathBuf> {
 
 /// local backups dir
 pub fn local_backup_dir() -> Result<PathBuf> {
-    let dir = app_home_dir()?.join(BACKUP_DIR);
+    let home = app_home_dir()?;
+    let dir = home.join(BACKUP_DIR);
+    if !dir.exists() {
+        let legacy = home.join(LEGACY_BACKUP_DIR);
+        if legacy.exists() {
+            let _ = std::fs::rename(&legacy, &dir);
+        }
+    }
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -252,7 +263,7 @@ pub fn get_encryption_key() -> Result<Vec<u8>> {
 }
 
 pub fn ipc_path() -> Result<PathBuf> {
-    Ok(PathBuf::from(clash_verge_service_ipc::mihomo_ipc_path(
+    Ok(PathBuf::from(tono_service_protocol::mihomo_ipc_path(
         &crate::core::owner_identity::current_owner_identity()?,
     )))
 }
@@ -274,14 +285,14 @@ pub fn sidecar_ipc_path() -> Result<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn sidecar_ipc_path_for(app_root: &std::path::Path, _identity: &clash_verge_service_ipc::OwnerIdentity) -> PathBuf {
-    app_root.join("verge-mihomo.sock")
+fn sidecar_ipc_path_for(app_root: &std::path::Path, _identity: &tono_service_protocol::OwnerIdentity) -> PathBuf {
+    app_root.join("tono-core.sock")
 }
 
 #[cfg(target_os = "macos")]
 fn sidecar_ipc_path_for(
     _app_root: &std::path::Path,
-    _identity: &clash_verge_service_ipc::OwnerIdentity,
+    _identity: &tono_service_protocol::OwnerIdentity,
 ) -> Result<PathBuf> {
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
@@ -301,9 +312,9 @@ fn sidecar_ipc_path_for(
     let root = std::ffi::CStr::from_bytes_until_nul(&buffer)
         .map_err(|_| anyhow::anyhow!("macOS per-user temporary directory is not NUL-terminated"))?;
     #[cfg(feature = "verge-dev")]
-    let filename = "verge-mihomo-dev.sock";
+    let filename = "tono-core-dev.sock";
     #[cfg(not(feature = "verge-dev"))]
-    let filename = "verge-mihomo.sock";
+    let filename = "tono-core.sock";
     let path = PathBuf::from(OsStr::from_bytes(root.to_bytes())).join(filename);
 
     let path_len = path.as_os_str().as_bytes().len();
@@ -318,23 +329,23 @@ fn sidecar_ipc_path_for(
 }
 
 #[cfg(windows)]
-fn sidecar_ipc_path_for(_app_root: &std::path::Path, identity: &clash_verge_service_ipc::OwnerIdentity) -> PathBuf {
+fn sidecar_ipc_path_for(_app_root: &std::path::Path, identity: &tono_service_protocol::OwnerIdentity) -> PathBuf {
     PathBuf::from(sidecar_pipe_name(identity, cfg!(feature = "verge-dev")))
 }
 
 #[cfg(any(windows, test))]
-fn sidecar_pipe_name(identity: &clash_verge_service_ipc::OwnerIdentity, is_dev: bool) -> String {
+fn sidecar_pipe_name(identity: &tono_service_protocol::OwnerIdentity, is_dev: bool) -> String {
     let flavor = if is_dev { "dev" } else { "release" };
     format!(
-        r"\\.\pipe\verge-mihomo-sidecar-{flavor}-{}",
-        clash_verge_service_ipc::owner_key(identity)
+        r"\\.\pipe\tono-core-sidecar-{flavor}-{}",
+        tono_service_protocol::owner_key(identity)
     )
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod ipc_tests {
     use super::sidecar_ipc_path_for;
-    use clash_verge_service_ipc::OwnerIdentity;
+    use tono_service_protocol::OwnerIdentity;
     use std::path::Path;
 
     #[test]
@@ -343,10 +354,10 @@ mod ipc_tests {
         let app_root = Path::new("/home/test/.local/share/com.raydocs.tono");
         let path = sidecar_ipc_path_for(app_root, &identity);
 
-        assert_eq!(path, app_root.join("verge-mihomo.sock"));
+        assert_eq!(path, app_root.join("tono-core.sock"));
         assert_ne!(
             path.to_string_lossy(),
-            clash_verge_service_ipc::mihomo_ipc_path(&identity)
+            tono_service_protocol::mihomo_ipc_path(&identity)
         );
     }
 }
@@ -354,7 +365,7 @@ mod ipc_tests {
 #[cfg(all(test, target_os = "macos"))]
 mod ipc_tests {
     use super::sidecar_ipc_path_for;
-    use clash_verge_service_ipc::OwnerIdentity;
+    use tono_service_protocol::OwnerIdentity;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _, path::Path};
 
     #[test]
@@ -366,9 +377,9 @@ mod ipc_tests {
         assert!(!path.starts_with(app_root));
         assert!(path.as_os_str().as_bytes().len() < 104);
         #[cfg(feature = "verge-dev")]
-        assert_eq!(path.file_name(), Some(OsStr::new("verge-mihomo-dev.sock")));
+        assert_eq!(path.file_name(), Some(OsStr::new("tono-core-dev.sock")));
         #[cfg(not(feature = "verge-dev"))]
-        assert_eq!(path.file_name(), Some(OsStr::new("verge-mihomo.sock")));
+        assert_eq!(path.file_name(), Some(OsStr::new("tono-core.sock")));
         assert_eq!(path, sidecar_ipc_path_for(Path::new("/different/root"), &identity)?);
         assert!(path.parent().is_some_and(Path::is_dir));
         Ok(())
@@ -378,7 +389,7 @@ mod ipc_tests {
 #[cfg(all(test, windows))]
 mod ipc_tests {
     use super::sidecar_ipc_path_for;
-    use clash_verge_service_ipc::OwnerIdentity;
+    use tono_service_protocol::OwnerIdentity;
     use std::path::Path;
 
     #[test]
@@ -391,9 +402,9 @@ mod ipc_tests {
         assert_eq!(
             path,
             Path::new(&format!(
-                r"\\.\pipe\verge-mihomo-sidecar-{}-{}",
+                r"\\.\pipe\tono-core-sidecar-{}-{}",
                 if cfg!(feature = "verge-dev") { "dev" } else { "release" },
-                clash_verge_service_ipc::owner_key(&identity)
+                tono_service_protocol::owner_key(&identity)
             ))
         );
     }
@@ -418,22 +429,22 @@ impl PathBufExec for PathBuf {
 #[cfg(test)]
 mod windows_pipe_name_tests {
     use super::sidecar_pipe_name;
-    use clash_verge_service_ipc::OwnerIdentity;
+    use tono_service_protocol::OwnerIdentity;
 
     #[test]
     fn windows_sidecar_pipe_separates_dev_and_release_for_the_same_owner() {
         let identity = OwnerIdentity::Windows {
             sid: "S-1-5-21-1000".to_owned(),
         };
-        let owner_key = clash_verge_service_ipc::owner_key(&identity);
+        let owner_key = tono_service_protocol::owner_key(&identity);
 
         assert_eq!(
             sidecar_pipe_name(&identity, false),
-            format!(r"\\.\pipe\verge-mihomo-sidecar-release-{owner_key}")
+            format!(r"\\.\pipe\tono-core-sidecar-release-{owner_key}")
         );
         assert_eq!(
             sidecar_pipe_name(&identity, true),
-            format!(r"\\.\pipe\verge-mihomo-sidecar-dev-{owner_key}")
+            format!(r"\\.\pipe\tono-core-sidecar-dev-{owner_key}")
         );
     }
 }

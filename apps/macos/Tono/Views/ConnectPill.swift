@@ -21,6 +21,7 @@ struct ConnectPill: View {
     var isConnecting: Bool = false
     var isDisconnecting: Bool = false
     var isProtectionBlocked: Bool = false
+    var isRecovering: Bool = false
     var connectionStage: ConnectionStage = .preparing
     var disconnectionStage: DisconnectionStage = .finishingOperation
     /// Wire name of the selected exit, for the context line under the state.
@@ -30,12 +31,12 @@ struct ConnectPill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var accentColor: Color {
-        if isConnecting || isDisconnecting { return TonoStatus.connecting }
+        if isConnecting || isDisconnecting || isRecovering { return TonoStatus.connecting }
         if isProtectionBlocked { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : TonoStatus.standby
     }
 
-    private var isBusy: Bool { isConnecting || isDisconnecting }
+    private var isBusy: Bool { isConnecting || isDisconnecting || isRecovering }
 
     var body: some View {
         Button {
@@ -140,6 +141,7 @@ struct ConnectPill: View {
     private var statusText: LocalizedStringKey {
         if isConnecting { return "Connecting…" }
         if isDisconnecting { return "Disconnecting…" }
+        if isRecovering { return "正在恢复受保护连接" }
         if isProtectionBlocked { return "Protected Offline" }
         return isConnected ? "Connected" : "Not Connected"
     }
@@ -155,6 +157,7 @@ struct ConnectPill: View {
     private var contextText: String {
         if isConnecting { return String(localized: String.LocalizationValue(connectionStage.rawValue)) }
         if isDisconnecting { return String(localized: String.LocalizationValue(disconnectionStage.rawValue)) }
+        if isRecovering { return String(localized: "正在恢复受保护连接") }
         if isProtectionBlocked { return String(localized: "Tap to restore internet") }
         if isConnected {
             if let nodeDisplay, nodeLatency > 0 {

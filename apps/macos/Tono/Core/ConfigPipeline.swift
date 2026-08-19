@@ -1281,8 +1281,8 @@ nonisolated struct ConfigPipeline {
         udp: true
         mode: rule
         log-level: \(overlay.logLevel)
-        unified-delay: true
-        find-process-mode: strict
+        unified-delay: false
+        find-process-mode: \(directPolicy != nil || overlay.tonoTransport != nil ? "strict" : "off")
         profile:
           # Runtime config order is the committed selection. Never let a stale
           # cache.db choice override it after a protected config reload.

@@ -343,6 +343,84 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
 nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
     let ts: Int64
     let kind: String
+    var stage: String? = nil
+    var error: String? = nil
+    var node: String? = nil
+    var action: String? = nil
+    var reason: String? = nil
+    var probe: String? = nil
+    var from: String? = nil
+    var to: String? = nil
+    var mode: String? = nil
+    var reference: String? = nil
+    var elapsedMs: Int64? = nil
+    var delayMs: Int64? = nil
+    var counter: Int64? = nil
+    var restartCount: Int64? = nil
+    var oldPid: Int64? = nil
+    var newPid: Int64? = nil
+    var revision: Int64? = nil
+    var domains: Int64? = nil
+    var media: Int64? = nil
+    var webDomains: Int64? = nil
+    var wechatTcp: Int64? = nil
+    var webTcp: Int64? = nil
+    var udp: Int64? = nil
+    var endpoints: Int64? = nil
+    var eventCount: Int64? = nil
+    var bytes: Int64? = nil
+    var wanted: Bool? = nil
+    var live: Bool? = nil
+    var generation: Int64? = nil
+    var outcome: String? = nil
+    var code: String? = nil
+    var updateResume: Bool? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case ts, kind, stage, error, node, action, reason, probe, from, to, mode
+        case reference, elapsedMs, delayMs, counter, restartCount, oldPid, newPid
+        case revision, domains, media, webDomains, wechatTcp, webTcp, udp
+        case endpoints, eventCount, bytes, wanted, live, generation, outcome
+        case code, updateResume
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ts, forKey: .ts)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(stage, forKey: .stage)
+        try container.encodeIfPresent(error, forKey: .error)
+        try container.encodeIfPresent(node, forKey: .node)
+        try container.encodeIfPresent(action, forKey: .action)
+        try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encodeIfPresent(probe, forKey: .probe)
+        try container.encodeIfPresent(from, forKey: .from)
+        try container.encodeIfPresent(to, forKey: .to)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encodeIfPresent(reference, forKey: .reference)
+        try container.encodeIfPresent(elapsedMs, forKey: .elapsedMs)
+        try container.encodeIfPresent(delayMs, forKey: .delayMs)
+        try container.encodeIfPresent(counter, forKey: .counter)
+        try container.encodeIfPresent(restartCount, forKey: .restartCount)
+        try container.encodeIfPresent(oldPid, forKey: .oldPid)
+        try container.encodeIfPresent(newPid, forKey: .newPid)
+        try container.encodeIfPresent(revision, forKey: .revision)
+        try container.encodeIfPresent(domains, forKey: .domains)
+        try container.encodeIfPresent(media, forKey: .media)
+        try container.encodeIfPresent(webDomains, forKey: .webDomains)
+        try container.encodeIfPresent(wechatTcp, forKey: .wechatTcp)
+        try container.encodeIfPresent(webTcp, forKey: .webTcp)
+        try container.encodeIfPresent(udp, forKey: .udp)
+        try container.encodeIfPresent(endpoints, forKey: .endpoints)
+        try container.encodeIfPresent(eventCount, forKey: .eventCount)
+        try container.encodeIfPresent(bytes, forKey: .bytes)
+        try container.encodeIfPresent(wanted, forKey: .wanted)
+        try container.encodeIfPresent(live, forKey: .live)
+        try container.encodeIfPresent(generation, forKey: .generation)
+        try container.encodeIfPresent(outcome, forKey: .outcome)
+        try container.encodeIfPresent(code, forKey: .code)
+        try container.encodeIfPresent(updateResume, forKey: .updateResume)
+    }
 }
 
 nonisolated struct TonoTelemetryWindowRequest: Encodable, Sendable {

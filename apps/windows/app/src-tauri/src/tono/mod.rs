@@ -18,6 +18,7 @@ pub mod steps;
 pub mod log_upload;
 pub mod telemetry;
 pub mod transport;
+pub mod update_handoff;
 #[cfg(windows)]
 mod windows_dns;
 

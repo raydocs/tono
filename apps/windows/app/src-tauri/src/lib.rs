@@ -23,7 +23,7 @@ use crate::{
     utils::{resolve, server},
 };
 use anyhow::Result;
-use clash_verge_logging::{Type, logging};
+use tono_logging::{Type, logging};
 use once_cell::sync::OnceCell;
 use tauri::{AppHandle, Manager as _};
 #[cfg(target_os = "macos")]
@@ -37,7 +37,7 @@ pub static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
 /// is represented separately and never reaches this function.
 fn report_pre_ui_startup_failure(stage: &str, error: &dyn std::fmt::Display) {
     let detail = format!("Tono startup failed during {stage}: {error}");
-    eprintln!("[clash-verge] {detail}");
+    eprintln!("[tono] {detail}");
 
     #[cfg(target_os = "windows")]
     {
@@ -74,7 +74,7 @@ mod app_init {
     pub fn setup_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         #[allow(unused_mut)]
         let mut builder = builder
-            .plugin(tauri_plugin_clash_verge_sysinfo::init())
+            .plugin(tauri_plugin_tono_sysinfo::init())
             .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_clipboard_manager::init())
             .plugin(tauri_plugin_process::init())
@@ -85,8 +85,8 @@ mod app_init {
             .plugin(tauri_plugin_http::init())
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(
-                tauri_plugin_mihomo::Builder::new()
-                    .protocol(tauri_plugin_mihomo::models::Protocol::LocalSocket)
+                tono_plugin_core::Builder::new()
+                    .protocol(tono_plugin_core::models::Protocol::LocalSocket)
                     .socket_path(crate::config::IClashTemp::guard_external_controller_ipc())
                     .build(),
             );
@@ -130,10 +130,10 @@ mod app_init {
 
     pub fn generate_handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
         tauri::generate_handler![
-            tauri_plugin_clash_verge_sysinfo::commands::get_system_info,
-            tauri_plugin_clash_verge_sysinfo::commands::get_app_uptime,
-            tauri_plugin_clash_verge_sysinfo::commands::app_is_admin,
-            tauri_plugin_clash_verge_sysinfo::commands::export_diagnostic_info,
+            tauri_plugin_tono_sysinfo::commands::get_system_info,
+            tauri_plugin_tono_sysinfo::commands::get_app_uptime,
+            tauri_plugin_tono_sysinfo::commands::app_is_admin,
+            tauri_plugin_tono_sysinfo::commands::export_diagnostic_info,
             cmd::open_app_dir,
             cmd::open_logs_dir,
             cmd::open_core_dir,
@@ -422,7 +422,7 @@ pub fn run() {
                     .map(|s| (*s).to_string())
                     .or_else(|| panic.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                eprintln!("[clash-verge] panic during app setup ({stage}), continuing in degraded mode: {msg}");
+                eprintln!("[tono] panic during app setup ({stage}), continuing in degraded mode: {msg}");
                 logging!(
                     error,
                     Type::Setup,
@@ -510,7 +510,7 @@ pub fn run() {
     mod event_handlers {
         use crate::utils::window_manager::WindowManager;
         use crate::core::{self, handle};
-        use clash_verge_logging::{Type, logging};
+        use tono_logging::{Type, logging};
         use tauri::AppHandle;
         #[cfg(target_os = "macos")]
         use tauri::Manager as _;
@@ -625,7 +625,7 @@ pub fn run() {
                     AsyncHandler::spawn(move || async move {
                         // `feat::quit` is the sole explicit-release owner. A second release here
                         // used to consume another 2.5 s budget and could race the Service cleanup.
-                        if matches!(feat::quit().await, clash_verge_signal::ShutdownOutcome::Canceled) {
+                        if matches!(feat::quit().await, tono_signal::ShutdownOutcome::Canceled) {
                             // The barrier may already be released while the FSM still claims
                             // protection; re-sync only when quitting was actually cancelled.
                             tono::commands::resync_after_cancelled_quit(app_handle).await;
