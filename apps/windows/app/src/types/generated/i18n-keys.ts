@@ -659,6 +659,8 @@ export const translationKeys = [
   'tono.dashboard.pickServer',
   'tono.dashboard.errorRetry',
   'tono.dashboard.errorSwitchServer',
+  'tono.dashboard.whatFailed',
+  'tono.dashboard.copyDetails',
   'tono.dashboard.catalogRequiresChoice',
   'tono.dashboard.killSwitchError',
   'tono.dashboard.killSwitchErrorNote',

@@ -137,6 +137,8 @@
     "pickServer": "选择节点以开始使用",
     "errorRetry": "重试",
     "errorSwitchServer": "切换节点",
+    "whatFailed": "失败原因",
+    "copyDetails": "复制诊断信息",
     "catalogRequiresChoice": "你选择的节点已下线 — 请重新选择",
     "killSwitchError": "Kill switch：{{message}}",
     "killSwitchErrorNote": "最近一次错误，可能已恢复。",

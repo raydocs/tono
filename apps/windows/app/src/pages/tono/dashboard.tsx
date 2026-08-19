@@ -10,11 +10,14 @@ import {
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   formatTonoActionError,
+  formatTonoDiagnostics,
   tonoConnect,
+  tonoDiagnosticsReport,
   tonoDisconnect,
   tonoRetryNow,
   tonoUploadDiagnostics,
 } from '@/services/tono'
+import { showNotice } from '@/services/notice-service'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import {
@@ -272,6 +275,16 @@ const DashboardPage = () => {
   // fired the same command straight from the click.
   const [sendingDiagnostics, setSendingDiagnostics] = useState(false)
   const [confirmingDiagnostics, setConfirmingDiagnostics] = useState(false)
+
+  const handleCopyDetails = useLockFn(async () => {
+    try {
+      const text = formatTonoDiagnostics(await tonoDiagnosticsReport())
+      await navigator.clipboard.writeText(text)
+      showNotice.success('tono.progress.copied')
+    } catch {
+      showNotice.error('tono.progress.copyFailed')
+    }
+  })
 
   const handleSendDiagnostics = useLockFn(async () => {
     setSendingDiagnostics(true)
@@ -573,6 +586,17 @@ const DashboardPage = () => {
           >
             <span
               style={{
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 0.2,
+                color: dark ? '#FF8A84' : TONO_COLORS.error,
+              }}
+            >
+              {t('tono.dashboard.whatFailed')}
+            </span>
+            <span
+              data-testid="tono-action-error-message"
+              style={{
                 fontSize: 13,
                 fontWeight: 500,
                 lineHeight: 1.45,
@@ -610,6 +634,24 @@ const DashboardPage = () => {
                 }}
               >
                 {t('tono.dashboard.errorRetry')}
+              </button>
+              <button
+                type="button"
+                className="tono-button"
+                onClick={() => void handleCopyDetails()}
+                style={{
+                  minHeight: 32,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 9,
+                  border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+                  cursor: 'pointer',
+                  color: dark ? '#A9B7FF' : '#3453D5',
+                  background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
+                }}
+              >
+                {t('tono.dashboard.copyDetails')}
               </button>
               <button
                 type="button"

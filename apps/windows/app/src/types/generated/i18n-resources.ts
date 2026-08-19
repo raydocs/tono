@@ -992,6 +992,7 @@ export interface TranslationResources {
         directOn: string
         directSkipped: string
         disconnecting: string
+        copyDetails: string
         errorRetry: string
         errors: {
           coreMismatch: string
@@ -1005,6 +1006,7 @@ export interface TranslationResources {
           serviceTooOld: string
         }
         errorSwitchServer: string
+        whatFailed: string
         info: {
           country: string
           dns: string

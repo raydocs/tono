@@ -196,7 +196,9 @@ describe('dashboard action-error ownership', () => {
       }),
     )
     const alert = await screen.findByRole('alert')
-    const message = alert.firstElementChild as HTMLElement
+    const message = alert.querySelector(
+      '[data-testid="tono-action-error-message"]',
+    ) as HTMLElement
     const actions = alert.lastElementChild as HTMLElement
 
     expect(alert.style.boxSizing).toBe('border-box')

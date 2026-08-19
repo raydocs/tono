@@ -137,6 +137,8 @@
     "pickServer": "Choose a server to get started",
     "errorRetry": "Try again",
     "errorSwitchServer": "Switch server",
+    "whatFailed": "What failed",
+    "copyDetails": "Copy details",
     "catalogRequiresChoice": "Your server is no longer available — please reselect",
     "killSwitchError": "Kill switch: {{message}}",
     "killSwitchErrorNote": "Most recent error — it may already be resolved.",
