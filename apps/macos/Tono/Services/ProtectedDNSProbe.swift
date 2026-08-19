@@ -19,10 +19,15 @@ nonisolated enum ProtectedDNSProbe {
         answers.contains(where: isFakeIP)
     }
 
+    static func firstFakeIP(in answers: [String]) -> String? {
+        answers.first(where: isFakeIP)
+    }
+
     static func queryListener(
         server: String,
         port: Int,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        name: String = ProtectedDNSProbe.name
     ) async -> [String] {
         let packet = encodeQuery(name: name)
         let host = NWEndpoint.Host(server)
