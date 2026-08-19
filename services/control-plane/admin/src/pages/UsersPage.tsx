@@ -18,6 +18,7 @@ type OnboardResult = {
   exitIdentityIssued: boolean;
   hasHome: boolean;
   hasClaude: boolean;
+  extrasIgnored: boolean;
 };
 
 function OnboardChecklist({ result }: { result: OnboardResult }) {
@@ -44,6 +45,12 @@ function OnboardChecklist({ result }: { result: OnboardResult }) {
       text: result.hasClaude ? '已开 Claude' : 'Claude 未开（可选）',
     },
   ];
+  if (result.extrasIgnored) {
+    rows.push({
+      ok: false,
+      text: '这次填的家宽 / Claude 没有写入 — 客户还没登录，等他登录后再点一次',
+    });
+  }
   return (
     <ul className="onboard-check">
       {rows.map((row) => (
@@ -84,6 +91,9 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
         productAccountId: productAccountId || undefined,
         contact: contact.trim() || undefined,
       });
+      const extrasOffered = Boolean(
+        line.trim() || homeExitId || accountRef.trim() || productAccountId || contact.trim(),
+      );
       const next: OnboardResult = {
         email: response.email,
         allowlisted: response.allowlisted,
@@ -91,6 +101,7 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
         exitIdentityIssued: Boolean(response.exitIdentityIssued),
         hasHome: response.binding != null,
         hasClaude: response.account != null,
+        extrasIgnored: extrasOffered && response.userId == null,
       };
       setResult(next);
       if (next.registered && next.exitIdentityIssued) {
@@ -634,6 +645,7 @@ function UserWorkbench({
       <div className="workbench-meta">
         <span>注册 {timestamp(user.createdAt)} · {aliveDays} 天</span>
         <span>到期 {user.expiresAt ? `${timestamp(user.expiresAt)}（剩 ${remainDays} 天）` : '不限'}</span>
+        <span>出口身份 {user.hasExitIdentity ? '已签发' : '未签发'}</span>
         <span>用量 {formatBytes(user.usageBytes)}</span>
       </div>
       <div className="workbench-ops">
