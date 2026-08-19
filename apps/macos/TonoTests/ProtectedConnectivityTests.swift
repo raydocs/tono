@@ -245,6 +245,15 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertTrue(ProtectedDNSProbe.isFakeIP("198.18.0.1"))
         XCTAssertFalse(ProtectedDNSProbe.isFakeIP("1.1.1.1"))
         XCTAssertTrue(ProtectedDNSProbe.containsFakeIP(["1.1.1.1", "198.18.12.34"]))
+        XCTAssertEqual(ProtectedDNSProbe.firstFakeIP(in: ["1.1.1.1", "198.18.12.34"]), "198.18.12.34")
+        XCTAssertNil(ProtectedDNSProbe.firstFakeIP(in: ["8.8.8.8"]))
+        XCTAssertEqual(
+            ProtectedConnectivityVerifier.parseHTTPStatus(
+                Data("HTTP/1.1 204 No Content\r\n\r\n".utf8)
+            )?.status,
+            204
+        )
+        XCTAssertNil(ProtectedConnectivityVerifier.parseHTTPStatus(Data("HTTP/1.1".utf8)))
 
         var packet = ProtectedDNSProbe.encodeQuery(name: "www.gstatic.com")
         // Flip to a response with one A answer: keep the question, append
