@@ -380,7 +380,7 @@ nonisolated struct ConfigPipeline {
         "awtmt.com", "cls.cn", "cninfo.com.cn", "ccxe.com.cn",
         "pushplus.plus", "baostock.com", "sse.com.cn", "szse.cn",
         "zoom.us", "zoom.com", "zoomgov.com", "oray.com", "sunlogin.com",
-        "edu.cn",
+        "edu.cn", "163.com", "netease.com", "126.net",
     ]
 
     /// Exact host families that may be placed in the application-direct

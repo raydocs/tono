@@ -1612,7 +1612,7 @@ function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy 
     'legulegu.com', 'optbbs.com', '100ppi.com', 'awtmt.com', 'cls.cn',
     'cninfo.com.cn', 'ccxe.com.cn', 'pushplus.plus', 'baostock.com',
     'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
-    'sunlogin.com', 'edu.cn',
+    'sunlogin.com', 'edu.cn', '163.com', 'netease.com', '126.net',
   ];
   const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];
   const seenHosts = new Set<string>();
