@@ -674,9 +674,12 @@ final class AppState {
     var tonoTransport: TonoTransportDescriptor? = nil
     private(set) var cloudOnlyTransportReady = false
     var isTonoReady: Bool {
+        // Leftover imported names such as `US-VLESS-Reality` used to make
+        // Tono look ready even when the signed catalog had not loaded. Those
+        // imports never completed a China connect in the customer log.
+        if defaultCloudExitNode() != nil { return true }
         if tonoTransport != nil { return true }
-        if selectedExitNode() != nil { return true }
-        return cloudOnlyTransportReady && defaultCloudExitNode() != nil
+        return false
     }
     private var isOwnedTonoMode: Bool {
         tonoTransport != nil || cloudOnlyTransportReady
@@ -733,6 +736,9 @@ final class AppState {
     private var protectedReconnectTask: Task<Void, Never>?
     private var protectedReconnectID: UUID?
     private var lastProtectedReconnectKick: Date?
+    /// Catalog exits already tried in this fail-closed connect loop. Reset on
+    /// a fresh user connect so a China GFW hit on one city can move on.
+    private var catalogFailoverNamesTried: Set<String> = []
     private var networkEnvironmentTask: Task<Void, Never>?
     private var wakeRecoveryTask: Task<Void, Never>?
     private var sleepRestrictTask: Task<Void, Never>?
@@ -1197,10 +1203,40 @@ final class AppState {
     /// Prefer the requested US Reality exit across catalog naming variants. If
     /// it is temporarily absent, retain availability with the first verified
     /// managed-cloud node.
-    private func defaultCloudExitNode() -> ProxyNode? {
-        let nodes = proxyRegions
+    /// Catalog exits are the only ones proven for Tono. A leftover imported
+    /// name such as `US-VLESS-Reality` never passed from a China network in
+    /// the customer log; if the signed catalog is present, use it.
+    private var managedCatalogNodes: [ProxyNode] {
+        proxyRegions
             .first(where: { $0.id == Self.managedCatalogRegionID })?
             .nodes ?? []
+    }
+
+    private func preferManagedCatalogExitForConnect() -> ProxyNode? {
+        let selected = selectedExitNode()
+        let catalog = managedCatalogNodes
+        guard !catalog.isEmpty else { return selected }
+        if let selected,
+           catalog.contains(where: {
+               $0.id == selected.id || proxyTarget($0.name, matches: selected.name)
+           }) {
+            return selected
+        }
+        guard let preferred = defaultCloudExitNode() else { return selected }
+        _ = applyProxySelection(preferred.name)
+        persistProxySelection(preferred.name)
+        LocalTrafficAudit.shared.recordEvent(
+            "connect_retargeted_to_catalog",
+            details: [
+                "from": selected?.name ?? "none",
+                "to": preferred.name,
+            ]
+        )
+        return preferred
+    }
+
+    private func defaultCloudExitNode() -> ProxyNode? {
+        let nodes = managedCatalogNodes
         if let preferred = managedCatalogRouting?.defaultProxy,
            let node = nodes.first(where: { proxyTarget($0.name, matches: preferred) }) {
             return node
@@ -1209,6 +1245,63 @@ final class AppState {
             in: nodes,
             named: AppProfile.defaultCloudExitName
         )
+    }
+
+    /// Next signed catalog city. Leftover imported names are never candidates.
+    private func nextCatalogExit(
+        after current: ProxyNode?,
+        in catalog: [ProxyNode]
+    ) -> ProxyNode? {
+        guard !catalog.isEmpty else { return nil }
+        if let current, let currentIndex = catalog.firstIndex(where: { $0.id == current.id }) {
+            let rotated = Array(catalog.dropFirst(currentIndex + 1))
+                + Array(catalog.prefix(currentIndex + 1))
+            return rotated.first(where: { node in
+                node.id != current.id && !proxyTarget(node.name, matches: current.name)
+            })
+        }
+        if let preferred = defaultCloudExitNode(),
+           current.map({ $0.id != preferred.id && !proxyTarget(preferred.name, matches: $0.name) }) ?? true {
+            return preferred
+        }
+        return catalog.first(where: { node in
+            current.map { $0.id != node.id && !proxyTarget(node.name, matches: $0.name) } ?? true
+        })
+    }
+
+    /// After a China connect that proved the selected city dead, move to the
+    /// next unused catalog exit before the fail-closed reconnect fires.
+    @discardableResult
+    private func rotateCatalogExitAfterConnectFailure() -> Bool {
+        let catalog = managedCatalogNodes
+        let current = selectedExitNode()
+        if let current {
+            catalogFailoverNamesTried.insert(current.name)
+        }
+        guard let next = nextCatalogExit(after: current, in: catalog),
+              !catalogFailoverNamesTried.contains(next.name) else {
+            LocalTrafficAudit.shared.recordEvent(
+                "connect_catalog_failover_exhausted",
+                details: [
+                    "tried": catalogFailoverNamesTried.sorted().joined(separator: ","),
+                    "catalog": String(catalog.count),
+                ]
+            )
+            return false
+        }
+        catalogFailoverNamesTried.insert(next.name)
+        _ = applyProxySelection(next.name)
+        persistProxySelection(next.name)
+        lastProtectedFailureSignature = nil
+        consecutiveProtectedFailureCount = 0
+        LocalTrafficAudit.shared.recordEvent(
+            "connect_catalog_failover",
+            details: [
+                "from": current?.name ?? "none",
+                "to": next.name,
+            ]
+        )
+        return true
     }
 
     /// Build 10 corrects the previous exact-name-only default once. After this
@@ -1358,7 +1451,9 @@ final class AppState {
         if !isProtectedReconnectScheduled {
             protectedReconnectAttempt = 0
             protectedReconnectNextAttemptAt = nil
+            catalogFailoverNamesTried = []
         }
+        lastClassifiedFailure = nil
         isConnecting = true
         errorMessage = nil
         // Any fresh connect attempt is user-visible intent to try again; the
@@ -1377,7 +1472,7 @@ final class AppState {
         config.mode = ProxyMode.rule.rawValue.lowercased()
         proxyMode = .rule
 
-        let selectedExit = selectedExitNode()
+        let selectedExit = preferManagedCatalogExitForConnect()
         let selectedExitName = selectedExit?.name ?? ConfigPipeline.homeNodeName
         LocalTrafficAudit.shared.recordEvent(
             "connect_requested",
@@ -1589,8 +1684,12 @@ final class AppState {
                 RuntimeCleanup.markCoreStarted(tunEnabled: self.config.tunEnabled)
                 try Task.checkCancellation()
                 guard await tunReady else {
+                    let diagnostic = await PrivilegedRuntimeCoordinator.shared
+                        .coreStatus()
+                        .lastError
+                    let suffix = diagnostic.flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""
                     throw KillSwitchService.Error.commandFailed(
-                        "Mihomo did not create the owned \(ConfigPipeline.tonoTunInterface) interface."
+                        "Mihomo did not create the owned \(ConfigPipeline.tonoTunInterface) interface.\(suffix)"
                     )
                 }
                 // The helper refuses arbitrary/nonexistent interfaces. Only after
@@ -1647,7 +1746,7 @@ final class AppState {
                 // before the UI can ever report Connected.
                 guard await self.testSystemProtectedDNS() else {
                     throw CoreControllerError.protectionFailed(
-                        "The macOS protected DNS path did not pass its end-to-end check."
+                        await self.systemProtectedDNSFailureMessage()
                     )
                 }
                 LocalTrafficAudit.shared.recordEvent(
@@ -1791,6 +1890,9 @@ final class AppState {
                         environmentalFailure = true
                     } else {
                         environmentalFailure = false
+                    }
+                    if self.lastClassifiedFailure?.code == .coreExitUnreachable {
+                        _ = self.rotateCatalogExitAfterConnectFailure()
                     }
                     if environmentalFailure {
                         // Leave the counter untouched either way.
@@ -2620,7 +2722,8 @@ final class AppState {
             return false
         }
         let current = selectedExitNode()
-        guard importedExitNodes.count > (current == nil ? 0 : 1) else {
+        let catalog = managedCatalogNodes
+        guard catalog.count > (current == nil ? 0 : 1) else {
             LocalTrafficAudit.shared.recordEvent(
                 "automatic_cloud_failover_unavailable",
                 details: ["reason": current == nil
@@ -2630,23 +2733,7 @@ final class AppState {
             return false
         }
 
-        let candidate: ProxyNode
-        if let current {
-            let nodes = importedExitNodes
-            guard let currentIndex = nodes.firstIndex(where: { $0.id == current.id }) else {
-                return false
-            }
-            let rotated = Array(nodes.dropFirst(currentIndex + 1))
-                + Array(nodes.prefix(currentIndex + 1))
-            guard let next = rotated.first(where: { node in
-                node.id != current.id && !proxyTarget(node.name, matches: current.name)
-            }) else {
-                return false
-            }
-            candidate = next
-        } else if let fallback = defaultCloudExitNode() ?? importedExitNodes.first {
-            candidate = fallback
-        } else {
+        guard let candidate = nextCatalogExit(after: current, in: catalog) else {
             return false
         }
 
@@ -2899,6 +2986,7 @@ final class AppState {
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
+        catalogFailoverNamesTried = []
         protectedReconnectTask?.cancel()
         protectedReconnectTask = nil
         protectedReconnectID = nil
@@ -5703,6 +5791,29 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(200))
         }
         return false
+    }
+
+    /// Distinguish Encrypted DNS / Private Relay hijacks from a dead listener.
+    /// The listener preflight already passed; a public system answer means
+    /// macOS is not using 127.0.0.1:53.
+    private func systemProtectedDNSFailureMessage() async -> String {
+        let listener = await ProtectedDNSProbe.queryListener(
+            server: ProtectedDNSContract.server,
+            port: ProtectedDNSContract.port,
+            timeout: 2
+        )
+        let system = await ProtectedDNSProbe.querySystemResolver(timeout: 2)
+        if ProtectedDNSProbe.systemResolverBypassesProtectedListener(
+            listenerAnswers: listener,
+            systemAnswers: system
+        ) {
+            return String(
+                localized: "This Mac is still using Encrypted DNS or iCloud Private Relay, so apps bypass Tono's protected resolver. Turn Encrypted DNS and Private Relay off, then reconnect."
+            )
+        }
+        return String(
+            localized: "The macOS protected DNS path did not pass its end-to-end check."
+        )
     }
 
     private func testProtectedDNS(

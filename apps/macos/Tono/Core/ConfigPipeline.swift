@@ -1950,7 +1950,7 @@ nonisolated struct ConfigPipeline {
         guard let policy else { return nil }
         let interface = policy.physicalInterface
         guard interface.range(
-            of: #"^[a-z][a-z0-9]{0,14}$"#,
+            of: #"^[a-z][a-z0-9_]{0,14}$"#,
             options: .regularExpression
         ) == interface.startIndex..<interface.endIndex,
               interface != "lo0", !interface.hasPrefix("utun") else {

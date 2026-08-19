@@ -415,6 +415,7 @@ enum GoogleSignInCoordinator {
             URLQueryItem(name: "redirect_uri", value: redirectURI.absoluteString),
         ]
         request.httpBody = Data((form.percentEncodedQuery ?? "").utf8)
+        request.assumesHTTP3Capable = false
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20

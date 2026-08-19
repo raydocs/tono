@@ -271,6 +271,24 @@ final class ProtectedConnectivityTests: XCTestCase {
             198, 18, 1, 2,
         ])
         XCTAssertEqual(ProtectedDNSProbe.decodeAnswers(packet), ["198.18.1.2"])
+        XCTAssertTrue(
+            ProtectedDNSProbe.systemResolverBypassesProtectedListener(
+                listenerAnswers: ["198.18.1.2"],
+                systemAnswers: ["203.107.1.1"]
+            )
+        )
+        XCTAssertFalse(
+            ProtectedDNSProbe.systemResolverBypassesProtectedListener(
+                listenerAnswers: ["198.18.1.2"],
+                systemAnswers: ["198.18.1.2"]
+            )
+        )
+        XCTAssertFalse(
+            ProtectedDNSProbe.systemResolverBypassesProtectedListener(
+                listenerAnswers: ["198.18.1.2"],
+                systemAnswers: []
+            )
+        )
     }
 
     func testHealthCountersNeedTwoFullWindows() {

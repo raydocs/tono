@@ -70,6 +70,7 @@ actor TonoAPIClient {
             configuration.timeoutIntervalForRequest = 30
             configuration.timeoutIntervalForResource = 45
             configuration.waitsForConnectivity = true
+            configuration.allowsExpensiveNetworkAccess = true
             configuration.httpCookieStorage = nil
             configuration.httpShouldSetCookies = false
             self.session = URLSession(
@@ -464,6 +465,9 @@ actor TonoAPIClient {
             details: auditDetails
         )
         var request = URLRequest(url: baseURL.appending(path: "api/v1/\(path)")); request.httpMethod = method; request.httpBody = body
+        // Tono rejects unlisted UDP. HTTP/3 would try QUIC and surface as a
+        // TLS/timeout failure from China while TCP HTTPS still works.
+        request.assumesHTTP3Capable = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }

@@ -23,6 +23,18 @@ nonisolated enum ProtectedDNSProbe {
         answers.first(where: isFakeIP)
     }
 
+    /// Listener returned a fake-IP, but getaddrinfo still produced a public
+    /// address. Encrypted DNS, iCloud Private Relay, or a stale resolver cache
+    /// is ignoring 127.0.0.1:53.
+    static func systemResolverBypassesProtectedListener(
+        listenerAnswers: [String],
+        systemAnswers: [String]
+    ) -> Bool {
+        containsFakeIP(listenerAnswers)
+            && !systemAnswers.isEmpty
+            && !containsFakeIP(systemAnswers)
+    }
+
     static func queryListener(
         server: String,
         port: Int,

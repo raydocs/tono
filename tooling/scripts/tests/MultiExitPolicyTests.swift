@@ -935,6 +935,17 @@ struct MultiExitPolicyTests {
         do {
             _ = try ConfigPipeline.validatedManagedDirectPolicy(
                 .init(
+                    physicalInterface: "pdp_ip0",
+                    domainPins: [],
+                    mediaEndpoints: []
+                )
+            )
+        } catch {
+            throw TestFailure("cellular pdp_ip0 must be a valid China-direct interface")
+        }
+        do {
+            _ = try ConfigPipeline.validatedManagedDirectPolicy(
+                .init(
                     physicalInterface: "utun199",
                     domainPins: managedDirectPolicy.domainPins,
                     mediaEndpoints: managedDirectPolicy.mediaEndpoints
