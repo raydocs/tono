@@ -153,6 +153,12 @@ pub enum AuditEvent {
         from: String,
         to: String,
     },
+    /// Connect proved the selected city dead; the next unused catalog city
+    /// will be used on the fail-closed reconnect.
+    ConnectCatalogFailover {
+        from: String,
+        to: String,
+    },
     ProtectedOffline {
         reason: &'static str,
     },
@@ -263,6 +269,10 @@ impl AuditEvent {
             },
             ReleaseFail { error } => ReleaseFail { error: redact(&error) },
             NodeSwitch { from, to } => NodeSwitch {
+                from: redact(&from),
+                to: redact(&to),
+            },
+            ConnectCatalogFailover { from, to } => ConnectCatalogFailover {
                 from: redact(&from),
                 to: redact(&to),
             },
@@ -847,6 +857,10 @@ mod tests {
                 error: "token=abc".to_string(),
             },
             AuditEvent::NodeSwitch {
+                from: "a token=abc".to_string(),
+                to: "b token=abc".to_string(),
+            },
+            AuditEvent::ConnectCatalogFailover {
                 from: "a token=abc".to_string(),
                 to: "b token=abc".to_string(),
             },

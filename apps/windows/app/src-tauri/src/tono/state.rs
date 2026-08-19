@@ -273,6 +273,9 @@ pub struct TonoInner {
     /// reconnect deadline (epoch millis).
     pub retry_attempt: u32,
     pub next_retry_at_ms: Option<i64>,
+    /// Catalog exits already tried in this fail-closed connect loop. Reset on
+    /// a fresh user connect so a China GFW hit on one city can move on.
+    pub catalog_failover_tried: std::collections::BTreeSet<String>,
     /// Cloud WeChat-DIRECT policy (Build 28): monotonic tracker plus the
     /// latest validated document. The cache shares the catalog's directory
     /// and safety checks (`managed-traffic-policy.json`).
@@ -443,6 +446,7 @@ impl TonoState {
                 connect_error_at_ms: None,
                 retry_attempt: 0,
                 next_retry_at_ms: None,
+                catalog_failover_tried: std::collections::BTreeSet::new(),
                 policy_tracker: tono_core::policy::PolicyTracker::new(),
                 traffic_policy: None,
                 applied_wechat_path_regexes: None,
