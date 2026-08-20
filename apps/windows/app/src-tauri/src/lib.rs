@@ -175,6 +175,8 @@ mod app_init {
             tono::commands::tono_retry_now,
             tono::commands::tono_diagnostics_report,
             tono::commands::tono_upload_diagnostics,
+            crate::core::tray::flyout::tray_flyout_open_dashboard,
+            crate::core::tray::flyout::tray_flyout_quit,
         ]
     }
 }
@@ -651,6 +653,13 @@ pub fn run() {
             }
             _ => {}
         },
+        tauri::RunEvent::WindowEvent { label, event, .. }
+            if label == crate::core::tray::flyout::FLYOUT_LABEL =>
+        {
+            if let tauri::WindowEvent::Focused(false) = event {
+                crate::core::tray::flyout::on_blur();
+            }
+        }
         _ => {}
     });
 }

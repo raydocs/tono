@@ -1,7 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
 
-import { useThemeMode } from '@/services/states'
-
 /**
  * The Tono glass card: white-tinted background at the stepped opacities the
  * macOS design uses (4/6/8/12/24/40%), a 1px white border, rounded corners,
@@ -11,7 +9,7 @@ import { useThemeMode } from '@/services/states'
 
 interface GlassCardProps {
   children: ReactNode
-  radius?: number
+  radius?: number | string
   /** CSS background for the tint; defaults to the settings-card step. */
   tint?: string
   border?: boolean
@@ -22,29 +20,22 @@ interface GlassCardProps {
 
 export const GlassCard = ({
   children,
-  radius = 24,
+  radius = 'var(--tono-radius-card-lg)',
   tint,
   border = true,
   padding = 24,
   style,
   className,
 }: GlassCardProps) => {
-  const dark = useThemeMode() !== 'light'
-
   return (
     <div
       className={['tono-glass-card', className].filter(Boolean).join(' ')}
       style={{
         borderRadius: radius,
         padding,
-        background:
-          tint ?? (dark ? 'rgba(16,21,33,0.72)' : 'rgba(255,255,255,0.72)'),
-        border: border
-          ? `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.78)'}`
-          : 'none',
-        boxShadow: dark
-          ? '0 20px 48px -32px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.04)'
-          : '0 20px 48px -32px rgba(55,72,110,0.3), inset 0 1px 0 rgba(255,255,255,0.5)',
+        background: tint ?? 'var(--tono-surface-card)',
+        border: border ? '1px solid var(--tono-surface-card-border)' : 'none',
+        boxShadow: 'var(--tono-shadow-card)',
         backdropFilter: 'var(--tono-glass-blur)',
         WebkitBackdropFilter: 'var(--tono-glass-blur)',
         ...style,

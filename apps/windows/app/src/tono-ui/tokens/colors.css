@@ -1,0 +1,39 @@
+/* Tono color system — values lifted 1:1 from apps/windows/app/src/tono-ui/theme.ts
+   (TONO_COLORS) and docs/ui-design-system.md. Never introduce a bare hex with
+   state semantics; decorative literals are allowed but must not carry state. */
+:root{
+  /* Brand — the TO monogram gradient: deep blue → violet → warm peach */
+  --tono-accent:#4B6EFF;
+  --tono-accent-soft:#7B5CFF;
+  --tono-accent-warm:#FFB07A;
+  --tono-brand-gradient:linear-gradient(90deg,var(--tono-accent),var(--tono-accent-soft),var(--tono-accent-warm));
+  --tono-brand-gradient-diagonal:linear-gradient(135deg,var(--tono-accent) 0%,var(--tono-accent-soft) 52%,var(--tono-accent-warm) 100%);
+
+  /* Status — connected green and latency/success green are deliberately different */
+  --tono-connected:#2ED573;
+  --tono-latency-good:#30D158;
+  --tono-connecting:#FFD60A;
+  --tono-protected-offline:#FF9F0A;
+  --tono-error:#FF3B30;
+  --tono-error-dark:#FF453A;
+  --tono-not-connected:#E83B3B;
+  --tono-gray:#8E8E93;
+
+  /* Traffic */
+  --tono-traffic-down:#2ED573;
+  --tono-traffic-up:#64D2FF;
+
+  /* Link colors used for tinted text buttons */
+  --tono-link-on-dark:#A9B7FF;
+  --tono-link-on-light:#3453D5;
+
+  /* Text ramps — tonoText(dark) */
+  --tono-text-primary:rgba(255,255,255,0.96);
+  --tono-text-secondary:rgba(255,255,255,0.72);
+  --tono-text-tertiary:rgba(255,255,255,0.5);
+}
+[data-tono-theme="light"],:root[data-tono-theme="light"]{
+  --tono-text-primary:rgba(20,22,30,0.94);
+  --tono-text-secondary:rgba(20,22,30,0.68);
+  --tono-text-tertiary:rgba(20,22,30,0.52);
+}

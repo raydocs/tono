@@ -1130,6 +1130,7 @@ export interface TranslationResources {
         catalogError: string
         catalogNodes: string
         catalogRevision: string
+        catalogVerified: string
         cloudServers: string
         empty: string
         exitLatency: string
@@ -1245,6 +1246,8 @@ export interface TranslationResources {
         appearance: {
           glass: string
           glassSubtitle: string
+          refined: string
+          refinedSubtitle: string
           theme: {
             dark: string
             light: string
@@ -1315,6 +1318,16 @@ export interface TranslationResources {
           title: string
         }
         title: string
+      }
+      tray: {
+        connect: string
+        connecting: string
+        disconnect: string
+        disconnecting: string
+        noServer: string
+        open: string
+        quit: string
+        retry: string
       }
     }
   }

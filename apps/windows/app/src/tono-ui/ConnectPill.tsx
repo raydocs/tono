@@ -1,11 +1,12 @@
+import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useThemeMode } from '@/services/states'
 import type { TonoUiState } from '@/services/tono'
-
 import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 
 import { TONO_COLORS, TONO_EASE, tonoText } from './theme'
+import { TonoIcon } from './TonoIcon'
 import { TonoLogo } from './TonoLogo'
 
 /**
@@ -138,20 +139,16 @@ export const ConnectPill = ({
         minHeight: 96,
         padding: '11px 14px 11px 11px',
         border: `1px solid ${hex(spec.color, dark ? 0.32 : 0.24)}`,
-        borderRadius: 28,
+        borderRadius: 'var(--tono-radius-pill)',
         cursor: spec.disabled ? 'default' : 'pointer',
         color: text.primary,
-        background: `linear-gradient(120deg, ${hex(spec.color, dark ? 0.12 : 0.09)} 0%, ${hex(spec.color, 0)} 58%), ${
-          dark ? 'rgba(13,18,29,0.84)' : 'rgba(255,255,255,0.82)'
-        }`,
+        background: `linear-gradient(120deg, ${hex(spec.color, dark ? 0.12 : 0.09)} 0%, ${hex(spec.color, 0)} 58%), var(--tono-surface-pill)`,
         backdropFilter: 'var(--tono-glass-blur)',
         WebkitBackdropFilter: 'var(--tono-glass-blur)',
         boxShadow:
           uiState === 'connected'
-            ? `0 18px 42px -28px ${hex(TONO_COLORS.connected, 0.72)}, inset 0 1px 0 ${hex('#FFFFFF', dark ? 0.06 : 0.65)}`
-            : dark
-              ? '0 22px 48px -32px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.05)'
-              : '0 22px 48px -32px rgba(55,72,110,0.38), inset 0 1px 0 rgba(255,255,255,0.65)',
+            ? 'var(--tono-shadow-pill-connected)'
+            : 'var(--tono-shadow-pill)',
         transition: `background ${transition}, border-color ${transition}, box-shadow ${transition}, transform ${transition}`,
       }}
     >
@@ -199,10 +196,10 @@ export const ConnectPill = ({
       >
         <span
           style={{
-            fontSize: 21,
-            fontWeight: 650,
-            lineHeight: 1.15,
-            letterSpacing: -0.35,
+            fontSize: 'var(--tono-size-pill-title)',
+            fontWeight: 'var(--tono-weight-title)' as CSSProperties['fontWeight'],
+            lineHeight: 'var(--tono-leading-title)',
+            letterSpacing: 'var(--tono-tracking-pill-title)',
             color: spec.titleColored ? spec.color : text.primary,
             transition: `color ${transition}`,
           }}
@@ -268,21 +265,13 @@ export const ConnectPill = ({
           width: 36,
           height: 36,
           flexShrink: 0,
-          borderRadius: 12,
+          borderRadius: 'var(--tono-radius-button)',
           color: spec.color,
           background: hex(spec.color, dark ? 0.14 : 0.1),
           border: `1px solid ${hex(spec.color, 0.18)}`,
         }}
       >
-        <svg aria-hidden width="17" height="17" viewBox="0 0 24 24" fill="none">
-          <title>Connection power</title>
-          <path
-            d="M12 2v10M5.9 5.9a8.5 8.5 0 1 0 12.2 0"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
+        <TonoIcon name="power" size={17} title="Connection power" />
       </span>
     </button>
   )

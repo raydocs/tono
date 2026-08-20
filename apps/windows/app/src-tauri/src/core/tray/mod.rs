@@ -24,6 +24,7 @@ use tauri::{
     menu::{MenuEvent, MenuItem},
 };
 
+pub mod flyout;
 mod menu_def;
 #[cfg(target_os = "macos")]
 mod speed_task;
@@ -558,6 +559,8 @@ fn on_tray_icon_event(_tray_icon: &TrayIcon, tray_event: TrayIconEvent) {
     if let TrayIconEvent::Click {
         button: MouseButton::Left,
         button_state: MouseButtonState::Down,
+        rect,
+        position,
         ..
     } = tray_event
     {
@@ -567,11 +570,16 @@ fn on_tray_icon_event(_tray_icon: &TrayIcon, tray_event: TrayIconEvent) {
             return;
         }
 
-        AsyncHandler::spawn(|| async move {
-            // Tono: every left-click behavior maps to the dashboard (P0-5) —
-            // no system-proxy/TUN toggles from the tray.
-            logging!(debug, Type::Tray, "tray click: open dashboard");
-            WindowManager::show_main_window().await;
+        AsyncHandler::spawn(move || async move {
+            logging!(debug, Type::Tray, "tray click: toggle flyout");
+            if let Err(err) = flyout::toggle_flyout(rect, position).await {
+                logging!(
+                    warn,
+                    Type::Tray,
+                    "tray flyout failed ({err}); opening dashboard"
+                );
+                WindowManager::show_main_window().await;
+            }
         });
     }
 }

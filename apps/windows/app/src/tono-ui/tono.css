@@ -12,6 +12,7 @@
    glass; anything animating gives it up. */
 .tono-root--transacting {
   --tono-glass-blur: none;
+  --tono-glass-blur-strong: none;
 }
 
 .tono-root {
@@ -431,8 +432,15 @@
   }
 }
 
-/* RDP, VM and accessibility mode: remove expensive compositing and non-essential motion. */
+/* RDP, VM and accessibility mode: remove expensive compositing and non-essential motion.
+   Refined raises blur 12→20px, so this guard must beat [data-tono-refined]. */
 @media (prefers-reduced-motion: reduce) {
+  .tono-root,
+  .tono-root[data-tono-refined],
+  [data-tono-refined] {
+    --tono-glass-blur: none;
+    --tono-glass-blur-strong: none;
+  }
   .tono-root *,
   .tono-root *::before,
   .tono-root *::after {

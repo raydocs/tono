@@ -19,10 +19,11 @@ import {
   type TonoConnectStep,
   type TonoUiState,
 } from '@/services/tono'
+import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
-import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 /**
  * The connect-progress card (Mac Build 29 parity): the eight FSM stages with
@@ -103,13 +104,15 @@ const StepIcon = ({ state }: { state: TonoConnectStep['state'] }) => {
         height: 12,
         borderRadius: '50%',
         flexShrink: 0,
-        fontSize: 9,
-        fontWeight: 700,
         color: '#fff',
         background: color,
       }}
     >
-      {state === 'completed' ? '✓' : state === 'failed' ? '✕' : ''}
+      {state === 'completed' ? (
+        <TonoIcon name="check" size={8} strokeWidth={2.4} />
+      ) : state === 'failed' ? (
+        <TonoIcon name="close" size={8} strokeWidth={2.4} />
+      ) : null}
     </span>
   )
 }
@@ -259,7 +262,10 @@ export const ConnectProgressCard = ({
       ? Math.max(0, Math.ceil((nextRetryAtMs - nowMs) / 1000))
       : null
   const failedStepLabel = progress?.failedStage
-    ? t(CONNECT_STAGE_LABEL_KEYS[progress.failedStage] ?? 'tono.progress.unknownStage')
+    ? t(
+        CONNECT_STAGE_LABEL_KEYS[progress.failedStage] ??
+          'tono.progress.unknownStage',
+      )
     : null
   const completedCount =
     progress?.steps.filter((step) => step.state === 'completed').length ?? 0
@@ -267,11 +273,12 @@ export const ConnectProgressCard = ({
     progress?.steps.filter(
       (step) => step.state === 'current' || step.state === 'failed',
     ) ?? []
-  const showFailureCopy = progress?.error != null || uiState === 'protectedOffline'
+  const showFailureCopy =
+    progress?.error != null || uiState === 'protectedOffline'
 
   return (
     <GlassCard
-      radius={18}
+      radius="var(--tono-radius-card)"
       padding={18}
       style={{
         width: 520,
@@ -372,7 +379,10 @@ export const ConnectProgressCard = ({
                   whiteSpace: 'nowrap',
                 }}
               >
-                {t(CONNECT_STAGE_LABEL_KEYS[step.key] ?? 'tono.progress.unknownStage')}
+                {t(
+                  CONNECT_STAGE_LABEL_KEYS[step.key] ??
+                    'tono.progress.unknownStage',
+                )}
               </span>
               {step.elapsedMs != null && (
                 <span
@@ -491,78 +501,84 @@ export const ConnectProgressCard = ({
         </div>
       )}
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 8,
-          marginTop: 14,
-        }}
-      >
-        {uiState === 'protectedOffline' && (
-          <button
-            type="button"
-            className="tono-button"
-            onClick={() => {
-              setRestoreError(null)
-              setRestoreOpen(true)
-            }}
-            style={{
-              // The escape hatch keeps the full row; the two diagnostics
-              // actions share the next one.
-              flexBasis: '100%',
-              padding: '9px 14px',
-              fontSize: 12,
-              color: '#fff',
-              background: TONO_COLORS.protectedOffline,
-            }}
-          >
-            {t('tono.progress.restore')}
-          </button>
-        )}
-        <button
-          type="button"
-          className="tono-button"
-          onClick={handleCopyDetails}
+      {showFailureCopy && (
+        <div
           style={{
-            flex: 1,
-            padding: '9px 14px',
-            fontSize: 12,
-            color: text.primary,
-            background: secondaryBackground,
-            border: secondaryBorder,
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+            marginTop: 14,
           }}
         >
-          {t('tono.progress.copyDetails')}
-        </button>
-        {referenceCode == null && (
-          <button
-            type="button"
-            className="tono-button"
-            data-testid="tono-upload-diagnostics"
-            onClick={() => {
-              setUploadError(null)
-              setUploadPhase('confirming')
-            }}
-            // In flight: no second request, no queue of confirmations.
-            disabled={uploadPhase === 'uploading'}
-            style={{
-              flex: 1,
-              padding: '9px 14px',
-              fontSize: 12,
-              color: text.primary,
-              background: secondaryBackground,
-              border: secondaryBorder,
-              opacity: uploadPhase === 'uploading' ? 0.6 : 1,
-            }}
-          >
-            {uploadPhase === 'uploading'
-              ? t('tono.progress.upload.uploading')
-              : t('tono.progress.upload.action')}
-          </button>
-        )}
-      </div>
+          {uiState === 'protectedOffline' && (
+            <button
+              type="button"
+              className="tono-button"
+              onClick={() => {
+                setRestoreError(null)
+                setRestoreOpen(true)
+              }}
+              style={{
+                // The escape hatch keeps the full row; the two diagnostics
+                // actions share the next one.
+                flexBasis: '100%',
+                padding: '9px 14px',
+                fontSize: 12,
+                color: '#fff',
+                background: TONO_COLORS.protectedOffline,
+              }}
+            >
+              {t('tono.progress.restore')}
+            </button>
+          )}
+          {showFailureCopy && (
+            <>
+              <button
+                type="button"
+                className="tono-button"
+                onClick={handleCopyDetails}
+                style={{
+                  flex: 1,
+                  padding: '9px 14px',
+                  fontSize: 12,
+                  color: text.primary,
+                  background: secondaryBackground,
+                  border: secondaryBorder,
+                }}
+              >
+                {t('tono.progress.copyDetails')}
+              </button>
+              {referenceCode == null && (
+                <button
+                  type="button"
+                  className="tono-button"
+                  data-testid="tono-upload-diagnostics"
+                  onClick={() => {
+                    setUploadError(null)
+                    setUploadPhase('confirming')
+                  }}
+                  // In flight: no second request, no queue of confirmations.
+                  disabled={uploadPhase === 'uploading'}
+                  style={{
+                    flex: 1,
+                    padding: '9px 14px',
+                    fontSize: 12,
+                    color: text.primary,
+                    background: secondaryBackground,
+                    border: secondaryBorder,
+                    opacity: uploadPhase === 'uploading' ? 0.6 : 1,
+                  }}
+                >
+                  {uploadPhase === 'uploading'
+                    ? t('tono.progress.upload.uploading')
+                    : t('tono.progress.upload.action')}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* The receipt replaces the button: after a successful upload the user
           is given a code to quote, not another chance to press send. */}

@@ -5,6 +5,7 @@ import { useThemeMode } from '@/services/states'
 
 import { TONO_COLORS, tonoText } from './theme'
 import { TonoToastContext } from './tono-toast-context'
+import { TonoIcon } from './TonoIcon'
 
 /**
  * App-wide transient confirmations ("Switched to …"), the Windows twin of the
@@ -18,24 +19,6 @@ const SHOW_MS = 2500
 const EXIT_MS = 200
 
 type TonoToast = { id: number; message: string; leaving: boolean }
-
-const CheckIcon = () => (
-  <svg
-    aria-hidden
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <title>Done</title>
-    <circle cx="12" cy="12" r="9" opacity="0.45" />
-    <path d="m8.5 12.5 2.5 2.5 4.5-5.5" />
-  </svg>
-)
 
 export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
   const dark = useThemeMode() !== 'light'
@@ -97,11 +80,9 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             color: text.primary,
-            background: dark ? 'rgba(16,21,33,0.85)' : 'rgba(255,255,255,0.85)',
-            border: `1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(56,72,108,0.12)'}`,
-            boxShadow: dark
-              ? '0 16px 36px -20px rgba(0,0,0,0.8)'
-              : '0 16px 36px -20px rgba(55,72,110,0.4)',
+            background: 'var(--tono-surface-toast)',
+            border: '1px solid var(--tono-surface-card-border)',
+            boxShadow: 'var(--tono-shadow-toast)',
             backdropFilter: 'var(--tono-glass-blur)',
             WebkitBackdropFilter: 'var(--tono-glass-blur)',
           }}
@@ -114,7 +95,7 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
               display: 'flex',
             }}
           >
-            <CheckIcon />
+            <TonoIcon name="checkCircle" size={12} title="Done" />
           </span>
           {toast.message}
         </div>

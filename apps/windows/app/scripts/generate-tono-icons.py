@@ -19,6 +19,9 @@ ASSETS_DIR = APP_DIR / "src/assets/image"
 OUT_DIR = REPO_ROOT / "design-assets/tono-icon/export"
 
 MAIN_ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+# 16/20/24 should come from the optical SVG (tono-mark-16-color.svg) once
+# design signs that reconstruction off. Until then keep the raster master —
+# the concentric counter collapses on the pixel grid below ~28px.
 TRAY_ICO_SIZES = (16, 20, 24, 32, 40, 48, 64)
 
 

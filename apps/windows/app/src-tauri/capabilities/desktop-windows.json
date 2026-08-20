@@ -1,7 +1,7 @@
 {
   "identifier": "desktop-windows-capability",
   "description": "permissions for desktop windows applications",
-  "windows": ["main"],
+  "windows": ["main", "tray-flyout"],
   "permissions": [
     "core:webview:allow-create-webview",
     "core:webview:allow-create-webview-window"

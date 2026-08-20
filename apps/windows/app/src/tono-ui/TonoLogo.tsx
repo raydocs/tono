@@ -1,9 +1,13 @@
-import brandIcon from '@/assets/image/logo-mask.png'
+import markOptical from '@/assets/image/tono-mark-16-color.svg?url'
+import markFull from '@/assets/image/tono-mark.svg?url'
 
 /**
- * The shared Tono product mark used by the Windows shell and primary action.
- * The asset supplies its own transparent safety margin; do not add a tile,
- * rounded frame, border, or drop shadow around it.
+ * The shared Tono product mark. Full mark at ≥28px; below that the concentric
+ * counter collapses on the pixel grid, so the optical variant is used.
+ *
+ * These SVGs are a faithful reconstruction from the bitmap master, not a
+ * brand-signed vector. Tray/taskbar `.ico` files stay on the raster pipeline
+ * until design signs the traces off.
  */
 
 interface TonoLogoProps {
@@ -15,9 +19,10 @@ interface TonoLogoProps {
 }
 
 export const TonoLogo = ({ size = 52 }: TonoLogoProps) => {
+  const src = size < 28 ? markOptical : markFull
   return (
     <img
-      src={brandIcon}
+      src={src}
       alt=""
       aria-hidden
       draggable={false}

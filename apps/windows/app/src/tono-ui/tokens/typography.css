@@ -1,0 +1,39 @@
+/* Tono type — platform-native stacks (theme.ts TONO_FONT_STACK / TONO_MONO_STACK).
+   Tono ships no custom webfont: the shell inherits SF Pro on macOS and Segoe UI
+   Variable on Windows, with Microsoft YaHei covering the Simplified Chinese UI. */
+:root{
+  --tono-font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  --tono-font-mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"Microsoft YaHei UI","Microsoft YaHei",monospace;
+
+  /* Sizes, as used in the shell */
+  --tono-size-page-title:24px;      /* .tono-page-title */
+  --tono-size-pill-title:21px;      /* ConnectPill headline */
+  --tono-size-login-title:22px;
+  --tono-size-card-title:15px;      /* card headers, sidebar brand */
+  --tono-size-body:14px;            /* inputs, node names */
+  --tono-size-nav:13px;             /* nav items, page subtitle, rows */
+  --tono-size-meta:12px;            /* secondary meta, small buttons */
+  --tono-size-caption:11px;         /* badges, latency capsules */
+  --tono-size-micro:10px;           /* column heads, node meta */
+  --tono-size-nano:9px;             /* codename chips, version */
+
+  /* Weights — Tono uses 650 for titles, not 700 */
+  --tono-weight-regular:400; /* @kind font */
+  --tono-weight-medium:500; /* @kind font */
+  --tono-weight-semibold:600; /* @kind font */
+  --tono-weight-title:650; /* @kind font */
+  --tono-weight-strong:700; /* @kind font */
+  --tono-weight-chip:750; /* @kind font */
+
+  /* Tracking */
+  --tono-tracking-page-title:-0.45px;
+  --tono-tracking-pill-title:-0.35px;
+  --tono-tracking-brand:-0.2px;
+  --tono-tracking-section:0.35px;   /* uppercase group heads */
+  --tono-tracking-chip:0.6px;
+
+  /* Line heights */
+  --tono-leading-title:1.15; /* @kind font */
+  --tono-leading-body:1.45; /* @kind font */
+  --tono-leading-tight:1.25; /* @kind font */
+}

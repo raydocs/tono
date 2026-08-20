@@ -1,0 +1,64 @@
+/* ---------------------------------------------------------------------------
+   Tono motion — the named animations, so no component invents its own.
+
+   One rule governs all of them, and it comes from a shipped bug rather than
+   taste: a continuously animating element over a frosted surface makes WebView2
+   recomposite the whole blurred region every frame, which on a GPU-less VM or
+   over RDP is a full-window software Gaussian blur at 60 Hz. Two real machines
+   were found frozen in exactly the two states that render a perpetual spinner.
+
+   So: **continuous animation is only allowed while the blur is off** — which is
+   precisely the transacting states (connecting / disconnecting), where
+   .tono-root--transacting already sets --tono-glass-blur: none. Everything else
+   is a one-shot: it plays once on mount or on a state change and stops.
+   --------------------------------------------------------------------------- */
+
+/* One-shots ---------------------------------------------------------------- */
+
+/* A surface arriving: 0.5s, spring curve. Cards, the active-node panel. */
+@keyframes tono-rise-in{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:none}}
+
+/* A flyout or popover arriving from its anchor edge. */
+@keyframes tono-flyout-in{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
+
+/* The brand-gradient hairline drawing across a card that just became active. */
+@keyframes tono-sweep-in{from{transform:scaleX(0);opacity:0}60%{opacity:1}to{transform:scaleX(1);opacity:1}}
+
+/* Live text replacing live text — connect stages, latency values. */
+@keyframes tono-text-in{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+
+/* A value that just changed, acknowledged without moving the layout. */
+@keyframes tono-value-pop{0%{transform:scale(1)}35%{transform:scale(1.06)}100%{transform:scale(1)}}
+
+/* The whole shell on launch. */
+@keyframes tono-layout-fade-in{from{opacity:0}to{opacity:1}}
+
+/* Toast, top-centre. The translate is inside the frames so the leaving
+   transition and the entrance agree on it. */
+@keyframes tono-toast-in{from{opacity:0;transform:translate(-50%,-6px)}to{opacity:1;transform:translate(-50%,0)}}
+
+/* Continuous — permitted only while the blur is off -------------------------- */
+
+@keyframes tono-rotate{to{transform:rotate(360deg)}}
+
+/* The connect glow, breathing while a connection is being established. Scale
+   stays under 1.05 so it never reads as a pulse-to-get-attention. */
+@keyframes tono-glow-breathe{0%{opacity:.2;transform:scale(1)}50%{opacity:.34;transform:scale(1.045)}100%{opacity:.2;transform:scale(1)}}
+
+/* A progress hairline with no known duration: travels, never completes. */
+@keyframes tono-indeterminate{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
+
+/* Utility classes ---------------------------------------------------------- */
+.tono-rise-in{animation:tono-rise-in var(--tono-duration-page-in) var(--tono-spring) both}
+.tono-flyout-in{animation:tono-flyout-in .26s var(--tono-spring) both}
+.tono-text-in{animation:tono-text-in .22s var(--tono-ease) both}
+.tono-value-pop{animation:tono-value-pop .3s var(--tono-ease)}
+.tono-spin{display:inline-block;animation:tono-rotate .8s linear infinite}
+
+@media (prefers-reduced-motion:reduce){
+  /* Scales pin to 1 and everything degrades to opacity — the same contract the
+     macOS side gets from TonoMotion + accessibilityReduceMotion. */
+  .tono-rise-in,.tono-flyout-in,.tono-text-in{animation:tono-text-in .001ms both}
+  .tono-value-pop{animation:none}
+  .tono-spin{animation-duration:2.4s}
+}

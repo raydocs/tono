@@ -29,6 +29,9 @@ pub struct TonoPreferences {
     /// `light` or `dark` or `system`
     pub theme_mode: Option<String>,
 
+    /// Windows refined glass layer. None means on.
+    pub enable_refined_ui: Option<bool>,
+
     /// tray click event
     pub tray_event: Option<String>,
 

@@ -1,0 +1,83 @@
+/* ---------------------------------------------------------------------------
+   Refined layer — opt in with data-tono-refined on any ancestor.
+
+   Same product, pushed toward the macOS conventions Tono's own tokens were
+   extracted from, one step further than the shipped Windows client goes:
+
+   · concentric radii, larger throughout, and capsule controls
+   · thinner materials with a heavier blur (vibrancy, not tint)
+   · hairlines instead of 1px borders; inner rows lose their border entirely
+   · softer, lower-contrast shadows
+   · more air: bigger page padding and card gutters
+   · one weight step down on titles (600, not 650) with tighter tracking
+
+   Nothing here changes a status colour, a latency threshold, a motion curve or
+   any piece of copy — those are product contracts, not styling.
+   --------------------------------------------------------------------------- */
+
+[data-tono-refined]{
+  /* Radii — concentric: an inner radius is the outer minus its padding */
+  --tono-radius-card-lg:26px;
+  --tono-radius-card:22px;
+  --tono-radius-card-sm:18px;
+  --tono-radius-node-inner:16px;
+  --tono-radius-pill:34px;
+  --tono-radius-button:999px;   /* controls become capsules */
+  --tono-radius-lg:14px;        /* fields, nav items */
+  --tono-radius-md:12px;
+  --tono-radius-sm:10px;
+
+  /* Material — thinner tint, heavier blur */
+  --tono-glass-blur:blur(20px) saturate(1.6); /* @kind other */
+  --tono-surface-card:rgba(18,23,36,0.55);
+  --tono-surface-card-border:rgba(255,255,255,0.08);
+  --tono-surface-raised:rgba(255,255,255,0.04);
+  --tono-surface-raised-border:transparent;
+  --tono-surface-input:rgba(255,255,255,0.06);
+  --tono-surface-input-border:rgba(255,255,255,0.10);
+  --tono-surface-sidebar:rgba(10,13,21,0.42);
+  --tono-surface-sidebar-border:rgba(255,255,255,0.06);
+  --tono-surface-nav-active:rgba(255,255,255,0.10);
+  --tono-surface-pill:rgba(15,20,32,0.62);
+  --tono-hairline:rgba(255,255,255,0.08);
+  --tono-divider:rgba(255,255,255,0.06);
+  --tono-row-divider:rgba(255,255,255,0.07);
+
+  /* Elevation — soft and low contrast, no hard halo */
+  --tono-shadow-card:0 10px 30px -14px rgba(0,0,0,0.5),inset 0 0.5px 0 rgba(255,255,255,0.08);
+  --tono-shadow-pill:0 14px 34px -16px rgba(0,0,0,0.55),inset 0 0.5px 0 rgba(255,255,255,0.09);
+  --tono-shadow-node-card:0 8px 22px -14px rgba(0,0,0,0.5);
+  --tono-shadow-nav-active:inset 0 0 0 0.5px rgba(255,255,255,0.10);
+
+  /* Air */
+  --tono-page-padding:34px 40px 34px; /* @kind spacing */
+  --tono-card-gap:20px;
+  --tono-grid-gap:14px;
+
+  /* Type — one step lighter on titles, tighter tracking */
+  --tono-weight-title:600; /* @kind font */
+  --tono-tracking-page-title:-0.5px;
+  --tono-tracking-pill-title:-0.45px;
+}
+
+[data-tono-refined][data-tono-theme="light"],
+[data-tono-refined] [data-tono-theme="light"],
+[data-tono-theme="light"][data-tono-refined]{
+  --tono-surface-card:rgba(255,255,255,0.62);
+  --tono-surface-card-border:rgba(255,255,255,0.85);
+  --tono-surface-raised:rgba(240,244,252,0.6);
+  --tono-surface-raised-border:transparent;
+  --tono-surface-input:rgba(255,255,255,0.62);
+  --tono-surface-input-border:rgba(20,22,30,0.10);
+  --tono-surface-sidebar:rgba(250,251,255,0.44);
+  --tono-surface-sidebar-border:rgba(35,48,78,0.06);
+  --tono-surface-nav-active:rgba(255,255,255,0.86);
+  --tono-surface-pill:rgba(255,255,255,0.7);
+  --tono-hairline:rgba(56,72,108,0.08);
+  --tono-divider:rgba(56,72,108,0.07);
+  --tono-row-divider:rgba(56,72,108,0.09);
+  --tono-shadow-card:0 10px 30px -14px rgba(55,72,110,0.22),inset 0 0.5px 0 rgba(255,255,255,0.7);
+  --tono-shadow-pill:0 14px 34px -16px rgba(55,72,110,0.26),inset 0 0.5px 0 rgba(255,255,255,0.75);
+  --tono-shadow-node-card:0 8px 22px -14px rgba(16,24,48,0.18);
+  --tono-shadow-nav-active:inset 0 0 0 0.5px rgba(255,255,255,0.9);
+}

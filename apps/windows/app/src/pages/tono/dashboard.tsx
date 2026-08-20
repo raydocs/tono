@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router'
 
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
+import { showNotice } from '@/services/notice-service'
 import { useThemeMode } from '@/services/states'
 import {
   connectErrorSuggestsServerSwitch,
@@ -17,9 +18,9 @@ import {
   tonoRetryNow,
   tonoUploadDiagnostics,
 } from '@/services/tono'
-import { showNotice } from '@/services/notice-service'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { PageHeader } from '@/tono-ui/PageHeader'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
@@ -33,8 +34,6 @@ import parseTraffic from '@/utils/parse-traffic'
 
 import { ConnectProgressCard } from './connect-progress'
 import { latencyColor, readNodeLatency } from './node-latency'
-import { PageHeader } from '@/tono-ui/PageHeader'
-
 import { nodeCityParts, nodeCityTitleKey, nodeCode, nodeDisplayName } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
@@ -72,7 +71,7 @@ const ActiveNodeCard = ({
 
   return (
     <GlassCard
-      radius={18}
+      radius="var(--tono-radius-card)"
       padding={0}
       style={{
         width: 520,
@@ -715,38 +714,63 @@ const DashboardPage = () => {
         )}
       </div>
 
-      <div className="tono-stat-grid">
-        <GlassCard radius={16} padding={14}>
-          <InfoItem
-            label={t('tono.dashboard.overview.protection')}
-            value={protectionValue}
-            valueColor={statusBadge.color}
-          />
-          <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: text.tertiary }}>
-            {protectionDetail}
-          </span>
-        </GlassCard>
-        <GlassCard radius={16} padding={14}>
-          <InfoItem
-            label={t('tono.dashboard.overview.serverPool')}
-            value={selectedCity}
-          />
-          <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: text.tertiary }}>
-            {status?.catalogRevision != null
-              ? t('tono.dashboard.overview.verifiedCatalog')
-              : t('tono.dashboard.overview.refreshingCatalog')}
-          </span>
-        </GlassCard>
-        <GlassCard radius={16} padding={14}>
-          <InfoItem
-            label={t('tono.dashboard.overview.liveTraffic')}
-            value={trafficValue}
-          />
-          <span style={{ display: 'block', marginTop: 4, fontSize: 11, color: text.tertiary }}>
-            {trafficDetail}
-          </span>
-        </GlassCard>
-      </div>
+      {uiState !== 'connecting' &&
+        uiState !== 'disconnecting' &&
+        uiState !== 'protectedOffline' && (
+          <div className="tono-stat-grid">
+            <GlassCard radius="var(--tono-radius-card-sm)" padding={14}>
+              <InfoItem
+                label={t('tono.dashboard.overview.protection')}
+                value={protectionValue}
+                valueColor={statusBadge.color}
+              />
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: text.tertiary,
+                }}
+              >
+                {protectionDetail}
+              </span>
+            </GlassCard>
+            <GlassCard radius="var(--tono-radius-card-sm)" padding={14}>
+              <InfoItem
+                label={t('tono.dashboard.overview.serverPool')}
+                value={selectedCity}
+              />
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: text.tertiary,
+                }}
+              >
+                {status?.catalogRevision != null
+                  ? t('tono.dashboard.overview.verifiedCatalog')
+                  : t('tono.dashboard.overview.refreshingCatalog')}
+              </span>
+            </GlassCard>
+            <GlassCard radius="var(--tono-radius-card-sm)" padding={14}>
+              <InfoItem
+                label={t('tono.dashboard.overview.liveTraffic')}
+                value={trafficValue}
+              />
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: text.tertiary,
+                }}
+              >
+                {trafficDetail}
+              </span>
+            </GlassCard>
+          </div>
+        )}
       {confirmingDiagnostics && (
         <TonoConfirmDialog
           dark={dark}

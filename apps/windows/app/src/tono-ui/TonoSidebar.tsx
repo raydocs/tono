@@ -58,21 +58,15 @@ export const TonoSidebar = () => {
           minHeight: 42,
           padding: '10px 12px',
           border: 'none',
-          borderRadius: 12,
+          borderRadius: 'var(--tono-radius-lg)',
           textAlign: 'left',
           cursor: 'pointer',
           fontFamily: 'inherit',
           fontSize: 13,
-          background: active
-            ? dark
-              ? 'rgba(255,255,255,0.13)'
-              : 'rgba(255,255,255,0.78)'
-            : 'transparent',
+          background: active ? 'var(--tono-surface-nav-active)' : 'transparent',
           color: text.primary,
           fontWeight: active ? 600 : 400,
-          boxShadow: active
-            ? `inset 0 0 0 0.5px ${dark ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.9)'}, 0 8px 16px -10px rgba(0,0,0,${dark ? 0.45 : 0.18})`
-            : 'none',
+          boxShadow: active ? 'var(--tono-shadow-nav-active)' : 'none',
         }}
       >
         <span
@@ -81,7 +75,7 @@ export const TonoSidebar = () => {
             color: active ? TONO_COLORS.accent : text.primary,
           }}
         >
-          {item.icon[0]}
+          {item.icon}
         </span>
         <span>{t(item.label)}</span>
       </button>
@@ -100,8 +94,8 @@ export const TonoSidebar = () => {
         flexDirection: 'column',
         padding: '12px 6px 12px',
         boxSizing: 'border-box',
-        background: dark ? 'rgba(8,11,19,0.58)' : 'rgba(248,250,255,0.56)',
-        borderRight: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(35,48,78,0.08)'}`,
+        background: 'var(--tono-surface-sidebar)',
+        borderRight: '1px solid var(--tono-surface-sidebar-border)',
       }}
     >
       <div className="tono-brand">

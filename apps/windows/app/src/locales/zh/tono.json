@@ -7,6 +7,16 @@
     "support": "支持",
     "settings": "设置"
   },
+  "tray": {
+    "open": "打开 Tono",
+    "quit": "退出 Tono",
+    "noServer": "未选择节点",
+    "connect": "连接",
+    "disconnect": "断开并恢复网络",
+    "retry": "立即重试",
+    "connecting": "正在连接…",
+    "disconnecting": "正在断开…"
+  },
   "activity": {
     "title": "活动",
     "subtitle": "当前 Tono 会话的实时连接",
@@ -265,6 +275,7 @@
     "unavailableHint": "该节点当前不可用（线路被干扰），请选择其他节点。",
     "catalogRevision": "目录版本 v{{revision}}",
     "catalogNodes": "{{count}} 个云端节点",
+    "catalogVerified": "目录已验证",
     "lastSynced": "上次验证同步：{{time}}",
     "waitingForSync": "正在等待首次验证同步",
     "verifiedSyncHint": "每 5 分钟自动同步；无效更新不会替换上次验证副本。断开连接时可测试全部节点。",
@@ -366,7 +377,9 @@
         "system": "跟随系统"
       },
       "glass": "玻璃透明度",
-      "glassSubtitle": "背景环境图透出的程度"
+      "glassSubtitle": "背景环境图透出的程度",
+      "refined": "精致材质",
+      "refinedSubtitle": "更大圆角、细线和更重的毛玻璃。关闭后回到当前发货外观。"
     },
     "about": {
       "title": "关于",

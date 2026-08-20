@@ -1,5 +1,3 @@
-import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
-import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import { useLockFn } from 'ahooks'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -19,6 +17,7 @@ import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import { nodeCityTitleKey, nodeDisplayName } from './node-meta'
 
@@ -216,14 +215,14 @@ const SupportPage = () => {
             disabled={isLoading}
             style={buttonStyle}
           >
-            <RefreshRoundedIcon style={{ fontSize: 15 }} />
+            <TonoIcon name="refresh" size={15} />
             {t('tono.support.refresh')}
           </button>
         }
       />
 
       <div style={{ display: 'grid', gap: 14, maxWidth: 680 }}>
-        <GlassCard radius={18} padding={18}>
+        <GlassCard radius="var(--tono-radius-card)" padding={18}>
           <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
             {t('tono.support.summary.title')}
           </h2>
@@ -286,7 +285,7 @@ const SupportPage = () => {
           )}
         </GlassCard>
 
-        <GlassCard radius={18} padding={18}>
+        <GlassCard radius="var(--tono-radius-card)" padding={18}>
           <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
             {t('tono.support.audit.title')}
           </h2>
@@ -325,13 +324,13 @@ const SupportPage = () => {
               onClick={handleCopyAuditPath}
               style={buttonStyle}
             >
-              <ContentCopyRoundedIcon style={{ fontSize: 15 }} />
+              <TonoIcon name="copy" size={15} />
               {t('tono.support.audit.copyPath')}
             </button>
           </div>
         </GlassCard>
 
-        <GlassCard radius={18} padding={18}>
+        <GlassCard radius="var(--tono-radius-card)" padding={18}>
           <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
             {t('tono.support.diagnostics.title')}
           </h2>

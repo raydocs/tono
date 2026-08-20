@@ -30,7 +30,7 @@ export const TonoToggle = ({
       height: 20,
       flexShrink: 0,
       border: 'none',
-      borderRadius: 10,
+      borderRadius: 'var(--tono-radius-md)',
       padding: 0,
       cursor: disabled ? 'default' : 'pointer',
       opacity: disabled ? 0.45 : 1,

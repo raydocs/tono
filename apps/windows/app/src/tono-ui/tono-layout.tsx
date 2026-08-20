@@ -11,9 +11,9 @@ import {
   WindowResizeHandles,
 } from '@/components/layout/window-controller'
 import { useI18n } from '@/hooks/use-i18n'
-import { useUpdate } from '@/hooks/use-update'
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
+import { useUpdate } from '@/hooks/use-update'
 import { useWindowDecorations } from '@/hooks/use-window'
 import {
   useCustomTheme,
@@ -30,6 +30,7 @@ import { TONO_FONT_STACK, tonoText } from './theme'
 import { TonoSidebar } from './TonoSidebar'
 import { TonoToastProvider } from './TonoToast'
 
+import './design-tokens.css'
 import './tono.css'
 import 'dayjs/locale/ru'
 import 'dayjs/locale/zh-cn'
@@ -59,6 +60,7 @@ const TonoLayout = () => {
   const { decorated } = useWindowDecorations()
 
   const isLoginRoute = location.pathname === '/login'
+  const isTrayRoute = location.pathname === '/tray'
 
   useLoadingOverlay(themeReady)
 
@@ -110,11 +112,21 @@ const TonoLayout = () => {
             ? ' tono-root--transacting'
             : ''
         }`}
-        style={{ fontFamily: TONO_FONT_STACK, color: text.primary }}
+        data-tono-theme={isDark ? 'dark' : 'light'}
+        {...(preferences?.enable_refined_ui === false
+          ? {}
+          : { 'data-tono-refined': '' })}
+        style={{
+          fontFamily: TONO_FONT_STACK,
+          color: text.primary,
+          ...(isTrayRoute
+            ? { background: 'transparent', overflow: 'hidden' }
+            : {}),
+        }}
       >
-        <MeshBackground dark={isDark} />
+        {!isTrayRoute && <MeshBackground dark={isDark} />}
 
-        {decorated === false && (
+        {!isTrayRoute && decorated === false && (
           <>
             <WindowResizeHandles />
             <div className="tono-titlebar" data-tauri-drag-region="true">
@@ -137,13 +149,13 @@ const TonoLayout = () => {
                 height: '100%',
               }}
             >
-              {!isLoginRoute && <TonoSidebar />}
+              {!isLoginRoute && !isTrayRoute && <TonoSidebar />}
               <main
                 className="tono-main"
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  overflowY: 'auto',
+                  overflowY: isTrayRoute ? 'hidden' : 'auto',
                   position: 'relative',
                 }}
               >

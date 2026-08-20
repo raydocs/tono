@@ -263,6 +263,8 @@ describe('ConnectProgressCard', () => {
     expect(screen.getByText('Starting the protected tunnel…')).toBeDefined()
     expect(screen.getByText('3.4s')).toBeDefined()
     expect(screen.getByText('1 completed')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Copy details' })).toBeNull()
+    expect(screen.queryByTestId('tono-upload-diagnostics')).toBeNull()
   })
 
   it('shows the failure block for an uncleared failure even when idle', async () => {
@@ -414,7 +416,7 @@ describe('ConnectProgressCard', () => {
     tonoDiagnosticsReportMock.mockRejectedValue(new Error('state locked'))
     tonoConnectProgressMock.mockResolvedValue(makeProgress())
 
-    renderCard()
+    renderCard({ uiState: 'protectedOffline' })
     fireEvent.click(await screen.findByRole('button', { name: 'Copy details' }))
 
     await waitFor(() =>
@@ -426,7 +428,7 @@ describe('ConnectProgressCard', () => {
   describe('diagnostics upload', () => {
     it('discloses what is sent and only uploads after the user confirms', async () => {
       tonoConnectProgressMock.mockResolvedValue(makeProgress())
-      renderCard()
+      renderCard({ uiState: 'protectedOffline' })
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
 
@@ -451,7 +453,7 @@ describe('ConnectProgressCard', () => {
 
     it('cancelling sends nothing', async () => {
       tonoConnectProgressMock.mockResolvedValue(makeProgress())
-      renderCard()
+      renderCard({ uiState: 'protectedOffline' })
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
       const dialog = await screen.findByRole('dialog', {
@@ -467,7 +469,7 @@ describe('ConnectProgressCard', () => {
     it('shows the reference code prominently and offers to copy it', async () => {
       const writeText = stubClipboard()
       tonoConnectProgressMock.mockResolvedValue(makeProgress())
-      renderCard()
+      renderCard({ uiState: 'protectedOffline' })
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
       fireEvent.click(
@@ -491,7 +493,7 @@ describe('ConnectProgressCard', () => {
 
     it('replaces the button with the code so a success cannot be repeated', async () => {
       tonoConnectProgressMock.mockResolvedValue(makeProgress())
-      renderCard()
+      renderCard({ uiState: 'protectedOffline' })
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
       fireEvent.click(
@@ -515,7 +517,7 @@ describe('ConnectProgressCard', () => {
           }),
       )
       tonoConnectProgressMock.mockResolvedValue(makeProgress())
-      renderCard()
+      renderCard({ uiState: 'protectedOffline' })
 
       fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
       const send = await screen.findByRole('button', { name: 'Send report' })
@@ -560,7 +562,7 @@ describe('ConnectProgressCard', () => {
       async (raw, expected) => {
         tonoUploadDiagnosticsMock.mockRejectedValue(new Error(raw))
         tonoConnectProgressMock.mockResolvedValue(makeProgress())
-        renderCard()
+        renderCard({ uiState: 'protectedOffline' })
 
         fireEvent.click(await screen.findByTestId('tono-upload-diagnostics'))
         fireEvent.click(

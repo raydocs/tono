@@ -1,5 +1,3 @@
-import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
-import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -17,6 +15,7 @@ import {
   TONO_PAGE_LAYOUT,
   tonoText,
 } from '@/tono-ui/theme'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import {
   aggregateActivityApps,
@@ -223,7 +222,7 @@ const ActivityPage = () => {
             onClick={() => void handleClose(row.id)}
             style={{ width: 30, height: 30, color: text.secondary }}
           >
-            <CloseRoundedIcon fontSize="small" />
+            <TonoIcon name="close" size={16} />
           </button>
         </div>
       )
@@ -274,7 +273,7 @@ const ActivityPage = () => {
       />
 
       <GlassCard
-        radius={18}
+        radius="var(--tono-radius-card)"
         padding={0}
         style={{
           flex: 1,
@@ -294,13 +293,13 @@ const ActivityPage = () => {
           }}
         >
           <label style={{ position: 'relative', flex: 1, minWidth: 180 }}>
-            <SearchRoundedIcon
-              aria-hidden
-              fontSize="small"
+            <TonoIcon
+              name="search"
+              size={18}
               style={{
-                // Do not rely solely on Emotion's MuiSvgIcon rule for structural dimensions.
-                // A CSP regression once blocked that runtime stylesheet and expanded this SVG
-                // across the Activity card, obscuring the disconnected-state message.
+                // Keep the search glyph absolutely sized even if a stylesheet
+                // fails to load — a CSP regression once expanded this SVG
+                // across the Activity card.
                 width: 18,
                 height: 18,
                 position: 'absolute',
@@ -433,7 +432,58 @@ const ActivityPage = () => {
                 >
                   <span>{t('tono.activity.columns.process')}</span>
                   <span>{t('tono.activity.columns.count')}</span>
-                  <span>{t('tono.activity.columns.split')}</span>
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span>{t('tono.activity.columns.split')}</span>
+                    <span
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        textTransform: 'none',
+                        letterSpacing: 0,
+                        fontWeight: 600,
+                        fontSize: 10,
+                      }}
+                    >
+                      {(
+                        [
+                          ['direct', TONO_COLORS.connected],
+                          ['home', TONO_COLORS.accentWarm],
+                          ['proxied', TONO_COLORS.accent],
+                          ['rejected', TONO_COLORS.error],
+                        ] as const
+                      ).map(([key, color]) => (
+                        <span
+                          key={key}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            color: text.secondary,
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            style={{
+                              width: 7,
+                              height: 4,
+                              borderRadius: 2,
+                              background: color,
+                            }}
+                          />
+                          {t(`tono.activity.filters.${key}`)}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
                 </div>
                 <VirtualList
                   count={visibleApps.length}

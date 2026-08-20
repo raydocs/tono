@@ -270,10 +270,10 @@ export const TonoConfirmDialog = ({
       <div
         style={{
           width: 340,
-          borderRadius: 16,
+          borderRadius: 'var(--tono-radius-card-sm)',
           padding: 20,
-          background: dark ? '#23242c' : '#ffffff',
-          boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+          background: 'var(--tono-surface-dialog)',
+          boxShadow: 'var(--tono-shadow-dialog)',
         }}
         onClick={(event) => event.stopPropagation()}
       >

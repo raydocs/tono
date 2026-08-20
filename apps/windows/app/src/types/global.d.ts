@@ -877,6 +877,7 @@ interface TonoPreferences {
   start_page?: string
   clash_core?: string
   theme_mode?: 'light' | 'dark' | 'system'
+  enable_refined_ui?: boolean
   traffic_graph?: boolean
   enable_memory_usage?: boolean
   enable_group_icon?: boolean

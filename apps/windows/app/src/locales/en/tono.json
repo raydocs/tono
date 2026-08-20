@@ -7,6 +7,16 @@
     "support": "Support",
     "settings": "Settings"
   },
+  "tray": {
+    "open": "Open Tono",
+    "quit": "Quit Tono",
+    "noServer": "No server selected",
+    "connect": "Connect",
+    "disconnect": "Disconnect and restore internet",
+    "retry": "Retry now",
+    "connecting": "Connecting…",
+    "disconnecting": "Disconnecting…"
+  },
   "activity": {
     "title": "Activity",
     "subtitle": "Live connections through the current Tono session",
@@ -265,6 +275,7 @@
     "unavailableHint": "This server is currently unavailable (network blocked). Pick another exit.",
     "catalogRevision": "Catalog v{{revision}}",
     "catalogNodes": "{{count}} cloud servers",
+    "catalogVerified": "catalog verified",
     "lastSynced": "Last verified sync: {{time}}",
     "waitingForSync": "Waiting for first verified sync",
     "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. Test All is available while disconnected.",
@@ -366,7 +377,9 @@
         "system": "System"
       },
       "glass": "Glass Transparency",
-      "glassSubtitle": "How much of the ambient background shows through"
+      "glassSubtitle": "How much of the ambient background shows through",
+      "refined": "Refined materials",
+      "refinedSubtitle": "Larger radii, hairlines, and heavier glass. Turn off to match the current shipped look."
     },
     "about": {
       "title": "About",

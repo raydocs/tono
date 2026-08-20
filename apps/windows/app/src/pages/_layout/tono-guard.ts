@@ -22,7 +22,12 @@ export const resolveTonoGuard = (
   const accountState = status?.accountState
 
   if (!status || accountState === 'restoring') {
-    return 'loading'
+    return pathname === '/tray' ? null : 'loading'
+  }
+
+  // The tray flyout is its own window; it must not be hijacked onto /login.
+  if (pathname === '/tray') {
+    return null
   }
 
   const loginOwned =

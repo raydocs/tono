@@ -1,13 +1,12 @@
-import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import { useLockFn } from 'ahooks'
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
 import { useI18n } from '@/hooks/use-i18n'
-import { useUpdate } from '@/hooks/use-update'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
+import { useUpdate } from '@/hooks/use-update'
 import { resolveLanguage, supportedLanguages } from '@/services/i18n'
 import { showNotice } from '@/services/notice-service'
 import { setCacheData, useQuery } from '@/services/query-client'
@@ -31,6 +30,7 @@ import {
   useGlassTransparency,
 } from '@/tono-ui/theme'
 import { TonoAccountCard } from '@/tono-ui/TonoAccountCard'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { TonoToggle } from '@/tono-ui/TonoToggle'
 import { version } from '@root/package.json'
@@ -54,7 +54,7 @@ const CardHeader = ({
   title,
   tint,
 }: {
-  icon: string
+  icon: ReactNode
   title: string
   tint: string
 }) => {
@@ -78,7 +78,7 @@ const CardHeader = ({
           width: 36,
           height: 36,
           borderRadius: 10,
-          fontSize: 18,
+          color: 'inherit',
           background: tint,
           flexShrink: 0,
         }}
@@ -173,6 +173,14 @@ const GeneralCard = () => {
     },
   )
 
+  const handleRefined = useLockFn(async (value: boolean) => {
+    try {
+      await patchPreferences({ enable_refined_ui: value })
+    } catch (error) {
+      showNotice.error(error instanceof Error ? error.message : String(error))
+    }
+  })
+
   const commitSlider = () => {
     if (slider !== null) {
       setGlassTransparency(slider)
@@ -183,7 +191,7 @@ const GeneralCard = () => {
   return (
     <GlassCard>
       <CardHeader
-        icon="⚙️"
+        icon={<TonoIcon name="settings" size={18} />}
         title={t('tono.settings.preferences.title')}
         tint={`${TONO_COLORS.accent}26`}
       />
@@ -284,6 +292,16 @@ const GeneralCard = () => {
           </span>
         </span>
       </Row>
+      <Row
+        label={t('tono.settings.appearance.refined')}
+        subtitle={t('tono.settings.appearance.refinedSubtitle')}
+      >
+        <TonoToggle
+          checked={preferences?.enable_refined_ui !== false}
+          onChange={(value) => void handleRefined(value)}
+          label={t('tono.settings.appearance.refined')}
+        />
+      </Row>
     </GlassCard>
   )
 }
@@ -357,7 +375,7 @@ const PrivacyCard = () => {
   return (
     <GlassCard>
       <CardHeader
-        icon="🔒"
+        icon={<TonoIcon name="lock" size={18} />}
         title={t('tono.settings.privacy.title')}
         tint={`${TONO_COLORS.protectedOffline}26`}
       />
@@ -423,7 +441,7 @@ const PrivacyCard = () => {
             style={{ color: TONO_COLORS.accent, display: 'flex' }}
             onClick={handleCopyPath}
           >
-            <ContentCopyRoundedIcon style={{ fontSize: 14 }} />
+            <TonoIcon name="copy" size={14} />
           </button>
         </span>
       </Row>
