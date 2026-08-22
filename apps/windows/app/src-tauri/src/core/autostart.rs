@@ -64,7 +64,7 @@ pub async fn enable_on_first_connect() {
         );
         return;
     }
-    handle::Handle::refresh_verge();
+    Handle::refresh_verge();
     logging!(
         info,
         Type::System,
