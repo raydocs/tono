@@ -1,6 +1,10 @@
 use crate::core::handle;
 use crate::process::AsyncHandler;
-use crate::utils::{connections_stream, tray_speed};
+use crate::utils::connections_stream;
+#[cfg(target_os = "windows")]
+use crate::utils::speed::format_bytes_per_second;
+#[cfg(target_os = "macos")]
+use crate::utils::tray_speed;
 use crate::{Type, logging};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -146,13 +150,20 @@ impl TraySpeedController {
 
         let app_handle = handle::Handle::app_handle();
         if let Some(tray) = app_handle.tray_by_id(super::TRAY_ID) {
-            let result = tray.with_inner_tray_icon(|inner| {
-                if let Some(status_item) = inner.ns_status_item() {
-                    tray_speed::clear_speed_attributed_title(&status_item);
+            #[cfg(target_os = "macos")]
+            {
+                let result = tray.with_inner_tray_icon(|inner| {
+                    if let Some(status_item) = inner.ns_status_item() {
+                        tray_speed::clear_speed_attributed_title(&status_item);
+                    }
+                });
+                if let Err(err) = result {
+                    logging!(warn, Type::Tray, "清除富文本速率失败: {err}");
                 }
-            });
-            if let Err(err) = result {
-                logging!(warn, Type::Tray, "清除富文本速率失败: {err}");
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let _ = tray.set_tooltip(Some("Tono"));
             }
         }
     }
@@ -181,13 +192,27 @@ impl TraySpeedController {
     fn apply_tray_speed(up: u64, down: u64) {
         let app_handle = handle::Handle::app_handle();
         if let Some(tray) = app_handle.tray_by_id(super::TRAY_ID) {
-            let result = tray.with_inner_tray_icon(move |inner| {
-                if let Some(status_item) = inner.ns_status_item() {
-                    tray_speed::set_speed_attributed_title(&status_item, up, down);
+            #[cfg(target_os = "macos")]
+            {
+                let result = tray.with_inner_tray_icon(move |inner| {
+                    if let Some(status_item) = inner.ns_status_item() {
+                        tray_speed::set_speed_attributed_title(&status_item, up, down);
+                    }
+                });
+                if let Err(err) = result {
+                    logging!(warn, Type::Tray, "设置富文本速率失败: {err}");
                 }
-            });
-            if let Err(err) = result {
-                logging!(warn, Type::Tray, "设置富文本速率失败: {err}");
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let tooltip = format!(
+                    "↑ {}\n↓ {}",
+                    format_bytes_per_second(up),
+                    format_bytes_per_second(down)
+                );
+                if let Err(err) = tray.set_tooltip(Some(&tooltip)) {
+                    logging!(warn, Type::Tray, "设置托盘速率提示失败: {err}");
+                }
             }
         }
     }

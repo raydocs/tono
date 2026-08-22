@@ -28,6 +28,7 @@ import getSystem from '@/utils/get-system'
 import { MeshBackground } from './MeshBackground'
 import { TONO_FONT_STACK, tonoText } from './theme'
 import { TonoSidebar } from './TonoSidebar'
+import { ProtectedOfflineBanner } from './ProtectedOfflineBanner'
 import { TonoToastProvider } from './TonoToast'
 
 import './design-tokens.css'
@@ -113,9 +114,7 @@ const TonoLayout = () => {
             : ''
         }`}
         data-tono-theme={isDark ? 'dark' : 'light'}
-        {...(preferences?.enable_refined_ui === false
-          ? {}
-          : { 'data-tono-refined': '' })}
+        data-tono-refined=""
         style={{
           fontFamily: TONO_FONT_STACK,
           color: text.primary,
@@ -157,11 +156,16 @@ const TonoLayout = () => {
                   minWidth: 0,
                   overflowY: isTrayRoute ? 'hidden' : 'auto',
                   position: 'relative',
+                  display: isTrayRoute ? undefined : 'flex',
+                  flexDirection: isTrayRoute ? undefined : 'column',
                 }}
               >
-                <BaseErrorBoundary>
-                  <Outlet />
-                </BaseErrorBoundary>
+                {!isLoginRoute && !isTrayRoute && <ProtectedOfflineBanner />}
+                <div style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}>
+                  <BaseErrorBoundary>
+                    <Outlet />
+                  </BaseErrorBoundary>
+                </div>
               </main>
             </div>
           </TonoAuthGuard>

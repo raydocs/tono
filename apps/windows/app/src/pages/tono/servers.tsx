@@ -1,4 +1,5 @@
 import { useLockFn } from 'ahooks'
+import dayjs from 'dayjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -6,6 +7,7 @@ import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  formatTonoActionError,
   tonoCancelServerTests,
   tonoCatalogStatus,
   tonoRefreshCatalog,
@@ -48,7 +50,7 @@ const hex = (color: string, alpha: number) =>
     .padStart(2, '0')
     .toUpperCase()}`
 
-const TonoTestIcon = () => <TonoIcon name="bolt" size={13} title="Test latency" />
+const TonoTestIcon = () => <TonoIcon name="bolt" size={13} />
 
 const ServersPage = () => {
   const { t } = useTranslation()
@@ -321,7 +323,7 @@ const ServersPage = () => {
                   count: catalog?.nodeCount ?? (servers ?? []).length,
                 })}
                 {' · '}
-                {t('tono.nodes.catalogVerified')}
+                {t('tono.nodes.catalogSynced')}
               </div>
               <div
                 style={{
@@ -333,7 +335,9 @@ const ServersPage = () => {
               >
                 {catalog?.lastSyncedAtMs
                   ? t('tono.nodes.lastSynced', {
-                      time: new Date(catalog.lastSyncedAtMs).toLocaleString(),
+                      time: dayjs(catalog.lastSyncedAtMs).format(
+                        'YYYY-MM-DD HH:mm',
+                      ),
                     })
                   : t('tono.nodes.waitingForSync')}
                 {' · '}
@@ -371,7 +375,9 @@ const ServersPage = () => {
             }}
           >
             {catalog?.error
-              ? t('tono.nodes.catalogError', { error: catalog.error })
+              ? t('tono.nodes.catalogError', {
+                  error: formatTonoActionError(catalog.error, t),
+                })
               : refreshFeedback}
           </div>
         )}
@@ -526,7 +532,7 @@ const ServersPage = () => {
                           ? t('tono.nodes.cachedLatency', {
                               latency: cachedLatency,
                             })
-                          : '—'
+                          : t('tono.nodes.untested')
                   const available = server.available !== false
                   const latencyTone =
                     !available || endpointFailure
@@ -546,7 +552,7 @@ const ServersPage = () => {
                         ? t('tono.nodes.testFailed')
                         : server.selected
                           ? t('tono.node.activeServer')
-                          : t('tono.nodes.readyToConnect')
+                          : t('tono.nodes.untested')
                   return (
                     <button
                       key={server.name}
@@ -562,7 +568,7 @@ const ServersPage = () => {
                       }
                       style={{
                         position: 'relative',
-                        overflow: 'hidden',
+                        overflow: 'visible',
                         flexDirection: 'column',
                         alignItems: 'stretch',
                         justifyContent: 'space-between',
@@ -673,7 +679,7 @@ const ServersPage = () => {
                                 letterSpacing: 0.6,
                               }}
                             >
-                              ACTIVE
+                              {t('tono.servers.selected')}
                             </span>
                           )}
                           <span
@@ -738,7 +744,7 @@ const ServersPage = () => {
                               letterSpacing: 0.4,
                             }}
                           >
-                            <TonoIcon name="globe" size={10} title="Region" />
+                            <TonoIcon name="globe" size={10} />
                             {nodeCode(server.name)}
                           </span>
                           <span

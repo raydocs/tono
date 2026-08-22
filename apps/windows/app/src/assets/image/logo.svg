@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="tono-gradient" x1="12" y1="18" x2="116" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1433D5"/>
+      <stop offset="0.38" stop-color="#583EDE"/>
+      <stop offset="0.68" stop-color="#D553CA"/>
+      <stop offset="1" stop-color="#FFB26F"/>
+    </linearGradient>
+    <mask id="tono-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="128" height="128">
+      <rect width="128" height="128" fill="white"/>
+      <ellipse cx="86" cy="67" rx="10" ry="21" fill="black"/>
+    </mask>
+  </defs>
+  <g mask="url(#tono-cutout)">
+    <path d="M18 16h66v24H67v65c0 8-5 12-12 12h-2c-7 0-12-4-12-12V40H18C11 40 6 35 6 28s5-12 12-12z" fill="url(#tono-gradient)"/>
+    <ellipse cx="86" cy="67" rx="36" ry="51" fill="url(#tono-gradient)"/>
+    <ellipse cx="86" cy="67" rx="29" ry="43" stroke="#3447DE" stroke-opacity="0.52" stroke-width="5"/>
+    <ellipse cx="86" cy="67" rx="22" ry="34" stroke="#F47DAF" stroke-opacity="0.48" stroke-width="5"/>
+    <ellipse cx="86" cy="67" rx="15" ry="26" stroke="#7049D9" stroke-opacity="0.48" stroke-width="4"/>
+  </g>
+</svg>

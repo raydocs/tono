@@ -51,9 +51,9 @@ export const TONO_PAGE_LAYOUT = {
 
 /** Text/foreground ramps. macOS resolves these from semantic colors. */
 export const tonoText = (dark: boolean) => ({
-  primary: dark ? 'rgba(255,255,255,0.96)' : 'rgba(20,22,30,0.94)',
-  secondary: dark ? 'rgba(255,255,255,0.72)' : 'rgba(20,22,30,0.68)',
-  tertiary: dark ? 'rgba(255,255,255,0.5)' : 'rgba(20,22,30,0.52)',
+  primary: dark ? 'rgba(255,255,255,0.96)' : 'rgba(20,22,30,0.96)',
+  secondary: dark ? 'rgba(255,255,255,0.72)' : 'rgba(20,22,30,0.78)',
+  tertiary: dark ? 'rgba(255,255,255,0.5)' : 'rgba(20,22,30,0.64)',
 })
 
 // ---------------------------------------------------------------------------

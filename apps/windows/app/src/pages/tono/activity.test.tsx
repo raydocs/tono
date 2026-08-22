@@ -64,6 +64,7 @@ vi.mock('@/components/base/virtual-list', () => ({
 
 import ActivityPage from './activity'
 import {
+  activityProcessFamily,
   classifyActivityRoute,
   isWeChatActivityProcess,
   sanitizeActivityValue,
@@ -216,6 +217,23 @@ describe('Activity connection presentation', () => {
     expect(JSON.stringify(row)).not.toContain('private-user')
   })
 
+  it('maps Cursor, VS Code, and Claude Code process names to product families', () => {
+    expect(activityProcessFamily('Cursor.exe')).toBe('Cursor')
+    expect(activityProcessFamily('Code.exe')).toBe('Code')
+    expect(activityProcessFamily('claude.exe')).toBe('ClaudeCode')
+    expect(
+      toActivityRow(
+        connection('cursor', {
+          metadata: {
+            ...connection('cursor').metadata,
+            process: 'Cursor.exe',
+            processPath: 'C:\\Users\\private-user\\AppData\\Local\\Programs\\cursor\\Cursor.exe',
+          },
+        }),
+      ).process,
+    ).toBe('Cursor')
+  })
+
   it('groups WeChat helpers as one WeChat app and rejects WeCom', () => {
     expect(isWeChatActivityProcess('WeChatAppEx.exe')).toBe(true)
     expect(isWeChatActivityProcess('xwechat.exe')).toBe(true)
@@ -271,14 +289,12 @@ describe('ActivityPage', () => {
       screen.getByText('Connect Tono to view live activity.'),
     ).toBeDefined()
     expect(screen.queryByText('proxy.example.com:443')).toBeNull()
-
-    const search = screen.getByRole('textbox', {
-      name: 'Filter by app, domain, target, protocol, or rule',
-    })
-    const searchIcon = search.closest('label')?.querySelector('svg')
-    expect(searchIcon).not.toBeNull()
-    expect(searchIcon?.style.width).toBe('18px')
-    expect(searchIcon?.style.height).toBe('18px')
+    expect(
+      screen.queryByRole('textbox', {
+        name: 'Filter by app, domain, target, protocol, or rule',
+      }),
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Connections' })).toBeNull()
   })
 
   it('filters route results and closes one or all live connections', async () => {
@@ -299,7 +315,9 @@ describe('ActivityPage', () => {
       expect(closeConnectionMock).toHaveBeenCalledWith('direct', 7),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close All' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Close all connections' }),
+    )
     await waitFor(() => expect(closeAllConnectionsMock).toHaveBeenCalledWith(7))
   })
 })

@@ -1,9 +1,10 @@
 import { useLockFn } from 'ahooks'
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
+import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { useI18n } from '@/hooks/use-i18n'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
@@ -19,17 +20,15 @@ import {
   tonoSetPeriodicTelemetryEnabled,
   tonoNetworkLogUploadEnabled,
   tonoSetNetworkLogUploadEnabled,
+  formatTonoActionError,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
-  setGlassTransparency,
   tonoText,
-  useGlassTransparency,
 } from '@/tono-ui/theme'
-import { TonoAccountCard } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { TonoToggle } from '@/tono-ui/TonoToggle'
@@ -134,10 +133,7 @@ const GeneralCard = () => {
   const { preferences, mutatePreferences, patchPreferences } =
     useTonoPreferences()
   const { switchLanguage } = useI18n()
-  const transparency = useGlassTransparency()
-  const [slider, setSlider] = useState<number | null>(null)
   const themeMode = preferences?.theme_mode ?? 'system'
-  const sliderValue = slider ?? transparency
 
   const handleAutostart = useLockFn(async (value: boolean) => {
     const previous = preferences?.enable_auto_launch ?? false
@@ -150,7 +146,7 @@ const GeneralCard = () => {
       mutatePreferences((prev) =>
         prev ? { ...prev, enable_auto_launch: previous } : prev,
       )
-      showNotice.error(error instanceof Error ? error.message : String(error))
+      showNotice.error(formatTonoActionError(error, t))
     }
   })
 
@@ -159,7 +155,7 @@ const GeneralCard = () => {
       await switchLanguage(language)
       await patchPreferences({ language })
     } catch (error) {
-      showNotice.error(error instanceof Error ? error.message : String(error))
+      showNotice.error(formatTonoActionError(error, t))
     }
   })
 
@@ -168,25 +164,10 @@ const GeneralCard = () => {
       try {
         await patchPreferences({ theme_mode: value })
       } catch (error) {
-        showNotice.error(error instanceof Error ? error.message : String(error))
+        showNotice.error(formatTonoActionError(error, t))
       }
     },
   )
-
-  const handleRefined = useLockFn(async (value: boolean) => {
-    try {
-      await patchPreferences({ enable_refined_ui: value })
-    } catch (error) {
-      showNotice.error(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  const commitSlider = () => {
-    if (slider !== null) {
-      setGlassTransparency(slider)
-      setSlider(null)
-    }
-  }
 
   return (
     <GlassCard>
@@ -195,7 +176,10 @@ const GeneralCard = () => {
         title={t('tono.settings.preferences.title')}
         tint={`${TONO_COLORS.accent}26`}
       />
-      <Row label={t('tono.settings.general.launchAtStartup')}>
+      <Row
+        label={t('tono.settings.general.launchAtStartup')}
+        subtitle={t('tono.settings.general.launchAtStartupHint')}
+      >
         <TonoToggle
           checked={preferences?.enable_auto_launch ?? false}
           onChange={(value) => void handleAutostart(value)}
@@ -203,42 +187,31 @@ const GeneralCard = () => {
         />
       </Row>
       <Row label={t('tono.settings.general.language')}>
-        <select
-          // The resolved language, not the stored one. `supportedLanguages` is ['en','zh'],
-          // so a stored value the app merely *falls back* from — 'jp', 'ko', 'de', and
-          // 'zhtw', which resolveLanguage maps to 'zh' — matched no option and left the
-          // control blank, showing nothing while the app was plainly running in some
-          // language. This shows whichever one is actually running.
-          value={resolveLanguage(preferences?.language)}
-          onChange={(event) => void handleLanguage(event.target.value)}
-          style={{
-            fontFamily: 'inherit',
-            fontSize: 12,
-            padding: '6px 8px',
-            borderRadius: 8,
-            color: text.primary,
-            background: dark
-              ? 'rgba(255,255,255,0.08)'
-              : 'rgba(255,255,255,0.7)',
-            border: `1px solid ${dark ? 'rgba(255,255,255,0.16)' : 'rgba(20,22,30,0.12)'}`,
-          }}
-        >
-          {supportedLanguages.map((code) => (
-            <option key={code} value={code}>
-              {LANGUAGE_LABELS[code] ?? code}
-            </option>
-          ))}
-        </select>
+        <span className="tono-segmented">
+          {supportedLanguages.map((code) => {
+            const active = resolveLanguage(preferences?.language) === code
+            return (
+              <button
+                key={code}
+                type="button"
+                className="tono-link"
+                onClick={() => void handleLanguage(code)}
+                style={{
+                  padding: '6px 10px',
+                  fontSize: 11,
+                  fontWeight: active ? 600 : 400,
+                  color: active ? '#fff' : text.secondary,
+                  background: active ? TONO_COLORS.accent : 'transparent',
+                }}
+              >
+                {LANGUAGE_LABELS[code] ?? code}
+              </button>
+            )
+          })}
+        </span>
       </Row>
       <Row label={t('tono.settings.appearance.themeMode')}>
-        <span
-          style={{
-            display: 'flex',
-            borderRadius: 8,
-            overflow: 'hidden',
-            border: `1px solid ${dark ? 'rgba(255,255,255,0.16)' : 'rgba(20,22,30,0.12)'}`,
-          }}
-        >
+        <span className="tono-segmented">
           {(['light', 'dark', 'system'] as const).map((value) => (
             <button
               key={value}
@@ -258,49 +231,6 @@ const GeneralCard = () => {
             </button>
           ))}
         </span>
-      </Row>
-      <Row
-        label={t('tono.settings.appearance.glass')}
-        subtitle={t('tono.settings.appearance.glassSubtitle')}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input
-            type="range"
-            className="tono-range"
-            min={0}
-            max={100}
-            value={sliderValue}
-            aria-label={t('tono.settings.appearance.glass')}
-            onChange={(event) => setSlider(Number(event.target.value))}
-            onPointerUp={commitSlider}
-            onKeyUp={commitSlider}
-            onBlur={commitSlider}
-            style={{
-              background: `linear-gradient(to right, ${TONO_COLORS.accent} 0%, ${TONO_COLORS.accent} ${sliderValue}%, rgba(142,142,147,0.35) ${sliderValue}%, rgba(142,142,147,0.35) 100%)`,
-            }}
-          />
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: TONO_MONO_STACK,
-              color: text.secondary,
-              width: 24,
-              textAlign: 'right',
-            }}
-          >
-            {sliderValue}
-          </span>
-        </span>
-      </Row>
-      <Row
-        label={t('tono.settings.appearance.refined')}
-        subtitle={t('tono.settings.appearance.refinedSubtitle')}
-      >
-        <TonoToggle
-          checked={preferences?.enable_refined_ui !== false}
-          onChange={(value) => void handleRefined(value)}
-          label={t('tono.settings.appearance.refined')}
-        />
       </Row>
     </GlassCard>
   )
@@ -335,7 +265,7 @@ const PrivacyCard = () => {
       await tonoSetAuditEnabled(value)
     } catch (error) {
       setCacheData(tonoAuditEnabledQueryKey, previous)
-      showNotice.error(error instanceof Error ? error.message : String(error))
+      showNotice.error(formatTonoActionError(error, t))
     }
   })
 
@@ -346,7 +276,7 @@ const PrivacyCard = () => {
       await tonoSetPeriodicTelemetryEnabled(value)
     } catch (error) {
       setCacheData(tonoPeriodicTelemetryEnabledQueryKey, previous)
-      showNotice.error(error instanceof Error ? error.message : String(error))
+      showNotice.error(formatTonoActionError(error, t))
     }
   })
 
@@ -357,7 +287,7 @@ const PrivacyCard = () => {
       await tonoSetNetworkLogUploadEnabled(value)
     } catch (error) {
       setCacheData(tonoNetworkLogUploadEnabledQueryKey, previous)
-      showNotice.error(error instanceof Error ? error.message : String(error))
+      showNotice.error(formatTonoActionError(error, t))
     }
   })
 
@@ -457,6 +387,10 @@ const AboutCard = () => {
   const { checkUpdate, loading } = useUpdate()
 
   const onCheckUpdate = useLockFn(async () => {
+    if (!TONO_UPDATES_CONFIGURED) {
+      showNotice.info('tono.settings.about.updatesUnavailable')
+      return
+    }
     try {
       const result = await checkUpdate()
       if (result.data?.available) {
@@ -495,6 +429,9 @@ const AboutCard = () => {
         <span style={{ fontSize: 11, color: text.tertiary, maxWidth: 260 }}>
           {t('tono.settings.about.description')}
         </span>
+        <span style={{ fontSize: 11, color: text.tertiary, maxWidth: 280 }}>
+          {t('tono.settings.about.unsigned')}
+        </span>
         <button
           type="button"
           className="tono-link"
@@ -514,10 +451,6 @@ const SettingPage = () => {
   return (
     <div className="tono-page">
       <PageHeader title={t('tono.settings.title')} />
-
-      <div style={{ marginBottom: 20 }}>
-        <TonoAccountCard />
-      </div>
 
       <div
         style={{

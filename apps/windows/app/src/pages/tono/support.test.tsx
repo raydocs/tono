@@ -39,6 +39,11 @@ vi.mock('@/services/tono', async (importOriginal) => ({
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
+vi.mock('@/hooks/use-tono', () => ({
+  useTonoStatus: () => ({
+    status: { uiState: 'connected', selectedServer: 'US West 1' },
+  }),
+}))
 
 vi.mock('@/services/notice-service', () => ({
   showNotice: { success: noticeSuccess, error: noticeError, info: vi.fn() },

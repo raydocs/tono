@@ -1,26 +1,32 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useLockFn } from 'ahooks'
-import type { CSSProperties } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useTonoStatus } from '@/hooks/use-tono'
+import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
+import { useTrafficData } from '@/hooks/use-traffic-data'
 import { readNodeLatency } from '@/pages/tono/node-latency'
-import { nodeCityTitleKey, nodeDisplayName } from '@/pages/tono/node-meta'
+import {
+  nodeCityParts,
+  nodeCityTitleKey,
+  nodeCode,
+  nodeDisplayName,
+} from '@/pages/tono/node-meta'
+import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
   tonoConnect,
   tonoDisconnect,
   tonoRetryNow,
+  tonoSelectServer,
+  tonoServers,
   type TonoUiState,
 } from '@/services/tono'
-import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
-
-/**
- * The tray flyout: state, node, one safe action, then Open Tono / Quit Tono.
- * Native right-click menu stays for keyboard/menu semantics.
- */
+import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
+import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
+import parseTraffic from '@/utils/parse-traffic'
 
 const STATUS_LABEL: Record<TonoUiState, string> = {
   notConnected: 'tono.dashboard.status.standby',
@@ -59,6 +65,12 @@ const ACTION_LABEL: Record<Exclude<Action, null>, string> = {
   retry: 'tono.tray.retry',
 }
 
+const hex = (color: string, alpha: number) =>
+  `${color}${Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, '0')
+    .toUpperCase()}`
+
 export const TrayPanel = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -75,110 +87,97 @@ export const TrayPanel = () => {
       ? t(cityKey)
       : nodeDisplayName(serverName)
     : t('tono.tray.noServer')
+  const cityParts = serverName ? nodeCityParts(serverName) : null
+  const region = serverName ? nodeCode(serverName) : null
   const latency = serverName ? readNodeLatency(serverName) : null
+  const connected = uiState === 'connected'
+  const {
+    response: { data: traffic },
+  } = useTrafficData({
+    enabled: connected,
+    generation: status?.controllerGeneration,
+  })
+  const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
+  const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
+
+  const { data: servers } = useQuery({
+    queryKey: tonoServersQueryKey,
+    queryFn: tonoServers,
+    enabled: picking,
+  })
 
   const runAction = useLockFn(async () => {
     if (!action) return
+    setPicking(false)
+    setActionError(null)
     try {
       if (action === 'connect') await tonoConnect()
       else if (action === 'disconnect') await tonoDisconnect()
       else await tonoRetryNow()
       await mutateTonoStatus()
     } catch (error) {
-      console.warn('[TrayPanel]', formatTonoActionError(error, t))
+      setActionError(formatTonoActionError(error, t))
     }
   })
 
-  const secondary: CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-    minHeight: 32,
-    padding: '0 10px',
-    border: 'none',
-    borderRadius: 'var(--tono-radius-sm)',
-    background: 'transparent',
-    fontFamily: 'inherit',
-    fontSize: 13,
-    textAlign: 'left',
-    cursor: 'pointer',
-    color: text.secondary,
-  }
+  const pickServer = useLockFn(async (name: string) => {
+    setActionError(null)
+    try {
+      await tonoSelectServer(name)
+      await mutateTonoStatus()
+      setPicking(false)
+    } catch (error) {
+      setActionError(formatTonoActionError(error, t))
+    }
+  })
 
   return (
-    <div
-      role="dialog"
-      aria-label="Tono"
-      style={{
-        width: 296,
-        height: '100%',
-        padding: 8,
-        boxSizing: 'border-box',
-        borderRadius: 'var(--tono-radius-card-sm)',
-        background: 'var(--tono-surface-flyout)',
-        border: '1px solid var(--tono-surface-flyout-border)',
-        boxShadow: 'var(--tono-shadow-flyout)',
-        backdropFilter: 'var(--tono-glass-blur-strong)',
-        WebkitBackdropFilter: 'var(--tono-glass-blur-strong)',
-        color: text.primary,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '8px 10px 10px',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 34,
-            height: 34,
-            flexShrink: 0,
-            borderRadius: 11,
-            color,
-            background: `${color}24`,
-            border: `1px solid ${color}38`,
-          }}
+    <div className="tono-tray-panel" role="dialog" aria-label="Tono">
+      <div className="tono-tray-head">
+        <TonoNodeBadge size={32} city={cityParts?.city} />
+        <button
+          type="button"
+          className="tono-tray-node"
+          onClick={() => setPicking((open) => !open)}
+          aria-expanded={picking}
+          title={t('tono.tray.pickNode')}
         >
-          <TonoIcon
-            name={uiState === 'connected' ? 'shieldCheck' : 'shield'}
-            size={17}
-          />
-        </span>
-        <span
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            minWidth: 0,
-            flex: 1,
-          }}
-        >
-          <span
-            style={{
-              fontSize: 14,
-              fontWeight: 650,
-              letterSpacing: -0.2,
-              color,
-              lineHeight: 1.2,
-            }}
-          >
-            {t(STATUS_LABEL[uiState])}
-          </span>
-          <span
+          <div
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              fontSize: 11,
-              color: text.tertiary,
+              marginBottom: 2,
+            }}
+          >
+            <span
+              aria-hidden
+              className="tono-tray-dot"
+              style={{
+                background: color,
+                boxShadow: `0 0 6px ${hex(color, 0.65)}`,
+              }}
+            />
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 650,
+                letterSpacing: -0.2,
+                color: text.primary,
+              }}
+            >
+              {t(STATUS_LABEL[uiState])}
+            </span>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 12,
+              color: text.secondary,
               minWidth: 0,
             }}
           >
@@ -191,45 +190,112 @@ export const TrayPanel = () => {
             >
               {city}
             </span>
-            {latency != null && (
-              <span style={{ fontFamily: TONO_MONO_STACK, flexShrink: 0 }}>
-                · {latency}ms
+            {region && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  fontSize: 10,
+                  fontWeight: 650,
+                  letterSpacing: 0.3,
+                  color: text.tertiary,
+                }}
+              >
+                {region}
               </span>
             )}
-          </span>
-        </span>
+            {latency != null && (
+              <span
+                style={{
+                  fontFamily: TONO_MONO_STACK,
+                  flexShrink: 0,
+                  fontSize: 11,
+                  color: text.tertiary,
+                }}
+              >
+                {latency}ms
+              </span>
+            )}
+            <TonoIcon name="chevronDown" size={11} />
+          </div>
+        </button>
       </div>
+
+      {picking && (
+        <div className="tono-tray-picker">
+          {(servers ?? []).slice(0, 8).map((server) => {
+            const key = nodeCityTitleKey(server.name)
+            const label = key ? t(key) : nodeDisplayName(server.name)
+            const active = server.selected || server.name === serverName
+            return (
+              <button
+                key={server.name}
+                type="button"
+                className="tono-tray-pick"
+                disabled={!server.available && !active}
+                onClick={() => {
+                  if (active) {
+                    setPicking(false)
+                    return
+                  }
+                  void pickServer(server.name)
+                }}
+                style={{
+                  color: active ? text.primary : text.secondary,
+                  fontWeight: active ? 650 : 500,
+                  opacity: server.available || active ? 1 : 0.45,
+                }}
+              >
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {label}
+                </span>
+                <span style={{ flexShrink: 0, fontSize: 10, color: text.tertiary }}>
+                  {nodeCode(server.name) ?? ''}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {connected && (
+        <div className="tono-tray-traffic" style={{ color: text.secondary }}>
+          <span style={{ color: '#64D2FF' }}>
+            ↑ {up} {upUnit}/s
+          </span>
+          <span style={{ color: TONO_COLORS.connected }}>
+            ↓ {down} {downUnit}/s
+          </span>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="tono-tray-error" role="alert">
+          {actionError}
+        </div>
+      )}
 
       <button
         type="button"
         disabled={busy}
         onClick={() => void runAction()}
+        className="tono-tray-action"
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 7,
-          width: '100%',
-          minHeight: 38,
-          padding: '9px 14px',
-          border: 'none',
-          borderRadius: 'var(--tono-radius-button)',
-          fontFamily: 'inherit',
-          fontSize: 13,
-          fontWeight: 600,
           cursor: busy ? 'default' : 'pointer',
-          opacity: busy ? 0.55 : 1,
-          color: action === 'disconnect' ? text.primary : '#fff',
+          opacity: busy ? 0.5 : 1,
           background:
-            action === 'connect'
-              ? 'var(--tono-accent)'
-              : action === 'retry'
-                ? 'var(--tono-protected-offline)'
-                : 'var(--tono-surface-input)',
-          boxShadow:
             action === 'disconnect'
-              ? 'inset 0 0 0 1px var(--tono-surface-flyout-border)'
-              : 'none',
+              ? dark
+                ? 'rgba(255,255,255,0.12)'
+                : 'rgba(20,22,30,0.82)'
+              : action === 'retry'
+                ? TONO_COLORS.protectedOffline
+                : TONO_COLORS.accent,
         }}
       >
         {!busy && (
@@ -247,31 +313,25 @@ export const TrayPanel = () => {
             )}
       </button>
 
-      <div
-        aria-hidden
-        style={{
-          height: 1,
-          margin: '8px 6px',
-          background: 'var(--tono-divider)',
-        }}
-      />
-
-      <button
-        type="button"
-        onClick={() => void invoke('tray_flyout_open_dashboard')}
-        style={secondary}
-      >
-        <TonoIcon name="dashboard" size={14} />
-        {t('tono.tray.open')}
-      </button>
-      <button
-        type="button"
-        onClick={() => void invoke('tray_flyout_quit')}
-        style={secondary}
-      >
-        <TonoIcon name="close" size={14} />
-        {t('tono.tray.quit')}
-      </button>
+      <div className="tono-tray-foot">
+        <button
+          type="button"
+          className="tono-tray-quiet"
+          style={{ color: text.secondary }}
+          onClick={() => void invoke('tray_flyout_open_dashboard')}
+        >
+          {t('tono.tray.open')}
+        </button>
+        <span className="tono-tray-rule" />
+        <button
+          type="button"
+          className="tono-tray-quiet"
+          style={{ color: text.secondary }}
+          onClick={() => void invoke('tray_flyout_quit')}
+        >
+          {t('tono.tray.quit')}
+        </button>
+      </div>
     </div>
   )
 }

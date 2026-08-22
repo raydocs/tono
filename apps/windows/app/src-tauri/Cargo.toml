@@ -1,6 +1,6 @@
 [package]
 name = "tono-windows"
-version = "0.0.36"
+version = "0.0.41"
 description = "Tono Windows app"
 authors = ["Tono"]
 license = "GPL-3.0-only"
@@ -160,7 +160,9 @@ runas = "=1.2.0"
 winreg = "0.56.0"
 windows-service = "0.8.1"
 windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
   "Win32_Globalization",
+  "Win32_Graphics_Dwm",
   "Win32_UI_WindowsAndMessaging",
 ] }
 windows-sys.workspace = true

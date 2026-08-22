@@ -97,7 +97,7 @@ export const TonoIcon = ({
       className={className}
       style={{ display: 'block', flexShrink: 0, ...style }}
     >
-      <title>{title ?? name}</title>
+      {title ? <title>{title}</title> : null}
       {paths.map((d) => (
         <path key={d} d={d} />
       ))}

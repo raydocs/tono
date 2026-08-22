@@ -24,8 +24,8 @@ notifications:
     title: 即将退出
     body: Tono 即将退出。
   appHidden:
-    title: 应用已隐藏
-    body: Tono 正在后台运行。
+    title: Tono
+    body: 关窗口不会断开，可从托盘继续使用。
   updateReady:
     title: Tono 更新
     body: 新版本 (v{version}) 已下载完成，是否立即安装？

@@ -11,6 +11,7 @@ import {
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   formatTonoActionError,
+  isEncryptedDnsFailure,
   formatTonoDiagnostics,
   tonoConnect,
   tonoDiagnosticsReport,
@@ -29,6 +30,7 @@ import {
   tonoText,
 } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import parseTraffic from '@/utils/parse-traffic'
 
@@ -41,6 +43,81 @@ const hex = (color: string, alpha: number) =>
     .toString(16)
     .padStart(2, '0')
     .toUpperCase()}`
+
+const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
+
+const ConnectChecklist = ({ dark }: { dark: boolean }) => {
+  const { t } = useTranslation()
+  const text = tonoText(dark)
+  const [dismissed, setDismissed] = useState(() => {
+    try {
+      return window.localStorage.getItem(CHECKLIST_STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  if (dismissed) return null
+  const items = [
+    t('tono.dashboard.checklist.admin'),
+    t('tono.dashboard.checklist.encryptedDns'),
+    t('tono.dashboard.checklist.browserDns'),
+    t('tono.dashboard.checklist.leakTest'),
+  ]
+  return (
+    <GlassCard
+      radius="var(--tono-radius-card)"
+      padding={16}
+      style={{ width: 520, maxWidth: '100%' }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 650, color: text.primary }}>
+          {t('tono.dashboard.checklist.title')}
+        </span>
+        <button
+          type="button"
+          className="tono-link"
+          style={{ fontSize: 12, color: TONO_COLORS.accent, flexShrink: 0 }}
+          onClick={() => {
+            try {
+              window.localStorage.setItem(CHECKLIST_STORAGE_KEY, '1')
+            } catch {
+              /* ignore quota */
+            }
+            setDismissed(true)
+          }}
+        >
+          {t('tono.dashboard.checklist.dismiss')}
+        </button>
+      </div>
+      <ol
+        style={{
+          margin: 0,
+          paddingLeft: 18,
+          fontSize: 12,
+          lineHeight: 1.55,
+          color: text.secondary,
+        }}
+      >
+        {items.map((item) => (
+          <li key={item} style={{ marginBottom: 4 }}>
+            {item}
+          </li>
+        ))}
+      </ol>
+      <div style={{ marginTop: 10 }}>
+        <OpenDnsSettingsButton />
+      </div>
+    </GlassCard>
+  )
+}
 
 const ActiveNodeCard = ({
   serverName,
@@ -244,6 +321,7 @@ interface DashboardActionError {
   message: string
   retry: 'connect' | 'disconnect' | 'retryNow'
   suggestsSwitch: boolean
+  encryptedDns: boolean
 }
 
 const DashboardPage = () => {
@@ -333,7 +411,10 @@ const DashboardPage = () => {
 
   const {
     response: { data: traffic },
-  } = useTrafficData({ enabled: connected })
+  } = useTrafficData({
+    enabled: connected,
+    generation: status?.controllerGeneration,
+  })
 
   const handleConnect = useLockFn(async () => {
     setActionError(null)
@@ -367,6 +448,7 @@ const DashboardPage = () => {
         message: formatTonoActionError(error, t),
         retry,
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
+        encryptedDns: isEncryptedDnsFailure(error),
       })
     }
   })
@@ -381,6 +463,7 @@ const DashboardPage = () => {
         message: formatTonoActionError(error, t),
         retry: 'disconnect',
         suggestsSwitch: false,
+        encryptedDns: false,
       })
     }
   })
@@ -397,6 +480,7 @@ const DashboardPage = () => {
         message: formatTonoActionError(error, t),
         retry: 'retryNow',
         suggestsSwitch: connectErrorSuggestsServerSwitch(error),
+        encryptedDns: isEncryptedDnsFailure(error),
       })
     }
   })
@@ -414,31 +498,18 @@ const DashboardPage = () => {
 
   const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
-  const statusBadge =
-    uiState === 'connecting'
-      ? { label: t('tono.dashboard.status.connecting'), color: TONO_COLORS.connecting }
-      : uiState === 'disconnecting'
-        ? { label: t('tono.dashboard.status.disconnecting'), color: TONO_COLORS.connecting }
-        : uiState === 'protectedOffline'
-          ? {
-              label: t('tono.dashboard.status.offline'),
-              color: TONO_COLORS.protectedOffline,
-            }
-          : connected
-            ? { label: t('tono.dashboard.status.protected'), color: TONO_COLORS.connected }
-            : { label: t('tono.dashboard.status.standby'), color: TONO_COLORS.gray }
-  const protectionValue = statusBadge.label
-  const protectionDetail =
-    uiState === 'protectedOffline'
-      ? t('tono.dashboard.overview.directBlocked')
-      : connected
-        ? t('tono.dashboard.overview.trafficRouted')
-        : t('tono.dashboard.overview.ready')
+  const connectHint = connected
+    ? status?.directOverlay === 'skipped'
+      ? t('tono.dashboard.directSkipped')
+      : t('tono.dashboard.directOn')
+    : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
     ? nodeCityTitleKey(status.selectedServer)
       ? t(nodeCityTitleKey(status.selectedServer)!)
       : nodeDisplayName(status.selectedServer)
     : t('tono.dashboard.noServer')
+  const protectionValue = selectedCity
+  const protectionDetail = connectHint
   const trafficValue = connected
     ? `${down} ${downUnit}/s`
     : t('tono.dashboard.overview.idle')
@@ -452,30 +523,11 @@ const DashboardPage = () => {
     // card jammed into the window's left edge.
     <div
       className="tono-page tono-dashboard"
-      style={{ ...TONO_PAGE_LAYOUT, height: '100vh', paddingTop: 18 }}
+      style={{ ...TONO_PAGE_LAYOUT, height: '100%', minHeight: 0, paddingTop: 18 }}
     >
       <PageHeader
         title={t('tono.dashboard.title')}
         subtitle={t('tono.dashboard.subtitle')}
-        trailing={
-          <span
-            className="tono-status-badge"
-            style={{
-              color: statusBadge.color,
-              background: hex(statusBadge.color, dark ? 0.14 : 0.1),
-              border: `1px solid ${hex(statusBadge.color, 0.18)}`,
-            }}
-          >
-            <span
-              className="tono-status-badge__dot"
-              style={{
-                background: statusBadge.color,
-                boxShadow: `0 0 6px ${hex(statusBadge.color, 0.45)}`,
-              }}
-            />
-            {statusBadge.label}
-          </span>
-        }
       />
       {status?.catalogRequiresChoice && (
         <div
@@ -512,7 +564,7 @@ const DashboardPage = () => {
             }}
           >
             {t('tono.dashboard.killSwitchError', {
-              message: status.killSwitch.last_error,
+              message: formatTonoActionError(status.killSwitch.last_error, t),
             })}{' '}
             <span style={{ opacity: 0.7 }}>
               {t('tono.dashboard.killSwitchErrorNote')}
@@ -543,7 +595,23 @@ const DashboardPage = () => {
             onConnect={handleConnect}
             onDisconnect={handleDisconnect}
           />
+          <p
+            style={{
+              margin: '10px 0 0',
+              maxWidth: 360,
+              fontSize: 12,
+              lineHeight: 1.5,
+              textAlign: 'center',
+              color: text.secondary,
+            }}
+          >
+            {connectHint}
+          </p>
+
         </div>
+        {!connected && uiState === 'notConnected' && (
+          <ConnectChecklist dark={dark} />
+        )}
         {/* Actionable error under the primary control — includes a switch-server
             path when the exit itself is the likely problem. */}
         {showActionError && (
@@ -597,6 +665,7 @@ const DashboardPage = () => {
                 maxWidth: '100%',
               }}
             >
+              {actionError.encryptedDns && <OpenDnsSettingsButton accent />}
               <button
                 type="button"
                 className="tono-button"
@@ -720,9 +789,8 @@ const DashboardPage = () => {
           <div className="tono-stat-grid">
             <GlassCard radius="var(--tono-radius-card-sm)" padding={14}>
               <InfoItem
-                label={t('tono.dashboard.overview.protection')}
+                label={t('tono.dashboard.server')}
                 value={protectionValue}
-                valueColor={statusBadge.color}
               />
               <span
                 style={{
@@ -749,7 +817,7 @@ const DashboardPage = () => {
                 }}
               >
                 {status?.catalogRevision != null
-                  ? t('tono.dashboard.overview.verifiedCatalog')
+                  ? t('tono.nodes.catalogSynced')
                   : t('tono.dashboard.overview.refreshingCatalog')}
               </span>
             </GlassCard>

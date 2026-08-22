@@ -899,6 +899,7 @@ interface TonoPreferences {
   enable_auto_light_weight_mode?: boolean
   auto_light_weight_minutes?: number
   enable_auto_launch?: boolean
+  auto_launch_seeded?: boolean
   enable_silent_start?: boolean
   enable_system_proxy?: boolean
   enable_global_hotkey?: boolean

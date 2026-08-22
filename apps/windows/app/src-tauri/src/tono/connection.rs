@@ -33,7 +33,7 @@ use tono_core::{
 #[cfg(not(windows))]
 use crate::core::{CoreManager, manager::RunningMode};
 use crate::{
-    core::service,
+    core::{autostart, service},
     process::AsyncHandler,
     tono::{
         audit::{self, AuditEvent},
@@ -590,6 +590,12 @@ impl ConnectTransaction {
     }
 }
 
+fn seed_autostart_after_connect() {
+    AsyncHandler::spawn(|| async {
+        autostart::enable_on_first_connect().await;
+    });
+}
+
 /// `tono_connect`: guard, then the full §6 transaction; any failure after
 /// arm keeps blocking and schedules the protected reconnect.
 pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String> {
@@ -615,7 +621,10 @@ pub async fn connect(state: Arc<TonoState>, app: AppHandle) -> Result<(), String
         }
     }
     match attempt(&state, &app).await {
-        Attempt::Connected => Ok(()),
+        Attempt::Connected => {
+            seed_autostart_after_connect();
+            Ok(())
+        }
         Attempt::GuardRejected(err) => Err(err),
         Attempt::Stale => Err("connection superseded by a newer transition".to_string()),
         Attempt::Failed(err) => {
@@ -2472,7 +2481,11 @@ async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Dura
             }
         }
         match attempt(&state, &app).await {
-            Attempt::Connected | Attempt::Stale => return,
+            Attempt::Connected => {
+                seed_autostart_after_connect();
+                return;
+            }
+            Attempt::Stale => return,
             Attempt::GuardRejected(reason) => {
                 if !guard_rejection_is_transient(&reason) {
                     return;
@@ -2788,7 +2801,8 @@ async fn cold_switch_selected_node(state: Arc<TonoState>, app: AppHandle, genera
             logging!(info, Type::Service, "Tono: 节点切换被暂态守卫拒绝，稍后重试: {reason}");
             schedule_reconnect(&state, &app).await;
         }
-        Attempt::Connected | Attempt::GuardRejected(_) | Attempt::Stale => {}
+        Attempt::Connected => seed_autostart_after_connect(),
+        Attempt::GuardRejected(_) | Attempt::Stale => {}
     }
 }
 
@@ -3146,7 +3160,8 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
             logging!(info, Type::Service, "Tono: 重连被暂态守卫拒绝，稍后重试: {reason}");
             schedule_reconnect(state, app).await;
         }
-        Attempt::Connected | Attempt::GuardRejected(_) | Attempt::Stale => {}
+        Attempt::Connected => seed_autostart_after_connect(),
+        Attempt::GuardRejected(_) | Attempt::Stale => {}
     }
 }
 

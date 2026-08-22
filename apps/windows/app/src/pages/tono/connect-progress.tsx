@@ -8,6 +8,7 @@ import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   formatTonoActionError,
+  isEncryptedDnsFailure,
   formatTonoDiagnostics,
   formatTonoElapsed,
   subscribeTonoStatus,
@@ -23,6 +24,7 @@ import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 /**
@@ -124,12 +126,11 @@ interface ConnectProgressCardProps {
 }
 
 /**
- * The diagnostics upload is strictly user-initiated: idle → the user reads
- * what will be sent → confirms → one in-flight request → a reference code
- * that replaces the button. There is no path back to `idle` from `sent`
- * without remounting the card, which is the client half of the abuse
- * defence: the button cannot be pressed twice in a row, and cannot be held
- * down while a request is in flight.
+ * Manual resend on this card: idle → the user reads what will be sent →
+ * confirms → one in-flight request → a reference code that replaces the
+ * button. Connect failures also upload automatically; this button is a
+ * resend. There is no path back to `idle` from `sent` without remounting
+ * the card, so the button cannot be mashed while a request is in flight.
  */
 type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
 
@@ -434,6 +435,11 @@ export const ConnectProgressCard = ({
           >
             {formatTonoActionError(progress.error, t)}
           </pre>
+          {isEncryptedDnsFailure(progress.error) && (
+            <div style={{ marginTop: 10 }}>
+              <OpenDnsSettingsButton accent />
+            </div>
+          )}
         </details>
       )}
 

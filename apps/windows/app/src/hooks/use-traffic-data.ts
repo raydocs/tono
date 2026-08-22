@@ -25,15 +25,26 @@ const shouldSkipDuplicateTraffic = (traffic: Traffic) => {
   return false
 }
 
-export const useTrafficData = (options?: { enabled?: boolean }) => {
+export const useTrafficData = (options?: {
+  enabled?: boolean
+  generation?: number
+}) => {
   const enabled = options?.enabled ?? true
+  const generation = options?.generation
 
   const {
     graphData: { appendData },
   } = useTrafficMonitorEnhanced({ subscribe: false, enabled })
   const { response, refresh } = useMihomoWsSubscription<ITrafficItem>({
     storageKey: 'mihomo_traffic_date',
-    buildSubscriptKey: (date) => (enabled ? `getClashTraffic-${date}` : null),
+    // The traffic socket captures host/port/secret at open time. Tono mints a
+    // new loopback controller on every connect, so the key must include that
+    // generation — the same rule as the Activity connections socket. A sticky
+    // localStorage date left the dashboard subscribed to a dead 9090 socket.
+    buildSubscriptKey: (date) =>
+      enabled && generation != null && generation > 0
+        ? `getClashTraffic-${generation}-${date}`
+        : null,
     fallbackData: FALLBACK_TRAFFIC,
     connect: () => MihomoWebSocket.connect_traffic(),
     throttleMs: 200,

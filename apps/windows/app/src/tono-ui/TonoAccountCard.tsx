@@ -1,6 +1,6 @@
 import { useLockFn } from 'ahooks'
 import dayjs from 'dayjs'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -13,6 +13,7 @@ import {
 import { removeCacheData, useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  formatTonoActionError,
   tonoAccount,
   tonoDevices,
   tonoRevokeDevice,
@@ -23,10 +24,16 @@ import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
 
 import { GlassCard } from './GlassCard'
 
+const blurDeviceName = (name: string) => {
+  const stem = (name.split('.')[0] || name).trim()
+  if (stem.length <= 3) return '····'
+  const keep = Math.min(4, Math.max(2, Math.floor(stem.length / 3)))
+  return `${stem.slice(0, keep)}····`
+}
+
 /**
  * The Tono Account card: account email, the device list with revoke, and
- * sign-out. Embedded both by the Account page and at the top of Settings,
- * matching the macOS SettingsView account card.
+ * sign-out. Lives on the Account page only.
  */
 export const TonoAccountCard = () => {
   const { t } = useTranslation()
@@ -55,7 +62,7 @@ export const TonoAccountCard = () => {
     try {
       await tonoRevokeDevice(revokeTarget.id)
     } catch (error) {
-      setRevokeError(error instanceof Error ? error.message : String(error))
+      setRevokeError(formatTonoActionError(error, t))
       return
     }
     setRevokeTarget(null)
@@ -69,7 +76,7 @@ export const TonoAccountCard = () => {
     } catch (error) {
       // Sign-out is designed to be able to fail (the kill switch stays armed
       // when its release cannot be proven): keep the dialog open and show why.
-      setSignOutError(error instanceof Error ? error.message : String(error))
+      setSignOutError(formatTonoActionError(error, t))
       return
     }
     setSignOutOpen(false)
@@ -83,6 +90,67 @@ export const TonoAccountCard = () => {
   })
 
   const deviceList = devices ?? []
+  const currentDevices = deviceList.filter((device) => device.current)
+  const otherDevices = deviceList.filter((device) => !device.current)
+
+  const renderDeviceRow = (device: TonoDevice) => (
+    <div className="tono-row" key={device.id}>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: text.primary,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {device.current
+            ? t('tono.account.thisComputer')
+            : device.name.split('.')[0] || device.name}
+          {device.current && (
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                fontWeight: 600,
+                color: TONO_COLORS.accent,
+              }}
+            >
+              {t('tono.account.currentDevice')}
+            </span>
+          )}
+        </span>
+        {(device.current || device.createdAt != null) && (
+          <span style={{ fontSize: 11, color: text.secondary }}>
+            {device.current ? blurDeviceName(device.name) : null}
+            {device.current && device.createdAt != null ? ' · ' : null}
+            {device.createdAt != null
+              ? t('tono.account.addedAt', {
+                  time: dayjs(device.createdAt * 1000).format(
+                    'YYYY-MM-DD HH:mm',
+                  ),
+                })
+              : null}
+          </span>
+        )}
+      </span>
+      {!device.current && (
+        <button
+          type="button"
+          className="tono-link"
+          style={{ fontSize: 12, color: TONO_COLORS.error, flexShrink: 0 }}
+          onClick={() => {
+            setRevokeError(null)
+            setRevokeTarget(device)
+          }}
+        >
+          {t('tono.account.revoke')}
+        </button>
+      )}
+    </div>
+  )
 
   return (
     <GlassCard padding={20}>
@@ -129,54 +197,22 @@ export const TonoAccountCard = () => {
         </span>
       </div>
 
-      {deviceList.map((device) => (
-        <div className="tono-row" key={device.id}>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 500,
-                color: text.primary,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {device.name}
-              {device.current && (
-                <span
-                  style={{
-                    marginLeft: 6,
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: TONO_COLORS.accent,
-                  }}
-                >
-                  {t('tono.account.currentDevice')}
-                </span>
-              )}
-            </span>
-            {device.createdAt != null && (
-              <span style={{ fontSize: 11, color: text.secondary }}>
-                {dayjs(device.createdAt * 1000).format('YYYY-MM-DD HH:mm')}
-              </span>
-            )}
-          </span>
-          {!device.current && (
-            <button
-              type="button"
-              className="tono-link"
-              style={{ fontSize: 12, color: TONO_COLORS.error, flexShrink: 0 }}
-              onClick={() => {
-                setRevokeError(null)
-                setRevokeTarget(device)
-              }}
-            >
-              {t('tono.account.revoke')}
-            </button>
-          )}
+      {currentDevices.map(renderDeviceRow)}
+      {otherDevices.length > 0 && (
+        <div
+          style={{
+            marginTop: 10,
+            marginBottom: 2,
+            fontSize: 11,
+            fontWeight: 650,
+            color: text.tertiary,
+            letterSpacing: 0.3,
+          }}
+        >
+          {t('tono.account.otherDevices')}
         </div>
-      ))}
+      )}
+      {otherDevices.map(renderDeviceRow)}
 
       <div style={{ marginTop: 14 }}>
         <button
@@ -252,10 +288,25 @@ export const TonoConfirmDialog = ({
   onCancel,
 }: ConfirmDialogProps) => {
   const text = tonoText(dark)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null
+    const buttons = panelRef.current?.querySelectorAll<HTMLButtonElement>('button')
+    buttons?.[buttons.length - 1]?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      previous?.focus()
+    }
+  }, [onCancel])
   return (
     <div
       role="dialog"
-      aria-label={title}
+      aria-modal="true"
+      aria-labelledby="tono-confirm-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -268,6 +319,7 @@ export const TonoConfirmDialog = ({
       onClick={onCancel}
     >
       <div
+        ref={panelRef}
         style={{
           width: 340,
           borderRadius: 'var(--tono-radius-card-sm)',
@@ -277,7 +329,10 @@ export const TonoConfirmDialog = ({
         }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div style={{ fontSize: 15, fontWeight: 600, color: text.primary, marginBottom: 8 }}>
+        <div
+          id="tono-confirm-title"
+          style={{ fontSize: 15, fontWeight: 600, color: text.primary, marginBottom: 8 }}
+        >
           {title}
         </div>
         <div style={{ fontSize: 13, color: text.secondary, marginBottom: 12 }}>

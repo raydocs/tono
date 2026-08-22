@@ -9,13 +9,15 @@
   },
   "tray": {
     "open": "Open Tono",
-    "quit": "Quit Tono",
+    "quit": "Quit",
+    "closeKeepsConnected": "Closing the window does not disconnect. Use the tray.",
     "noServer": "No server selected",
     "connect": "Connect",
-    "disconnect": "Disconnect and restore internet",
-    "retry": "Retry now",
+    "disconnect": "Disconnect",
+    "retry": "Retry",
     "connecting": "Connecting…",
-    "disconnecting": "Disconnecting…"
+    "disconnecting": "Disconnecting…",
+    "pickNode": "Switch node"
   },
   "activity": {
     "title": "Activity",
@@ -36,25 +38,39 @@
       "apps": "Apps",
       "connections": "Connections"
     },
-    "splitHint": "{{direct}} direct · {{home}} home · {{proxied}} exit · {{rejected}} rejected",
+    "splitHint": "{{direct}} direct · {{home}} home · {{proxied}} cloud · {{rejected}} rejected",
+    "closeAll": "Close all connections",
+    "closeAllHint": "Closes these connections only. Tono stays connected.",
     "limitNotice": "display limited to {{count}} connections",
     "filters": {
       "all": "All",
-      "proxied": "Exit",
+      "proxied": "Cloud",
       "home": "Home",
       "direct": "Direct",
       "rejected": "Rejected",
       "local": "Local"
     },
     "routes": {
-      "proxied": "Exit",
+      "proxied": "Cloud",
       "home": "Home",
       "direct": "Direct",
       "rejected": "Rejected",
       "local": "Local"
     },
     "apps": {
-      "wechat": "WeChat"
+      "wechat": "WeChat",
+      "wecom": "WeCom",
+      "qq": "QQ",
+      "tim": "TIM",
+      "feishu": "Feishu",
+      "meeting": "Tencent Meeting",
+      "claude": "Claude",
+      "claudeCode": "Claude Code",
+      "chatgpt": "ChatGPT",
+      "grok": "Grok",
+      "cursor": "Cursor",
+      "vscode": "VS Code",
+      "chrome": "Chrome"
     },
     "columns": {
       "process": "Process",
@@ -68,45 +84,46 @@
   },
   "login": {
     "title": "Sign in to Tono",
-    "subtitle": "Enter your email to receive a sign-in code.",
-    "welcome": "Welcome to Tono",
-    "intro": "Sign in with a verified email to continue. No password is required.",
-    "continueWithEmail": "Continue with email",
-    "emailLabel": "Email address",
+    "subtitle": "Enter your email for a sign-in code.",
+    "welcome": "Sign in to Tono",
+    "intro": "Email sign-in. No password.",
+    "emailLabel": "Email",
     "emailPlaceholder": "you@example.com",
-    "sendCode": "Send sign-in code",
-    "sendNewCode": "Send a new code",
+    "sendCode": "Send code",
+    "sendNewCode": "Send again",
     "sending": "Sending…",
     "resendIn": "Resend in {{seconds}}s",
-    "codeSent": "Code sent. Check your inbox.",
+    "codeSent": "Code sent.",
+    "codeSentTo": "Sent to the address above. Check the full address, and spam.",
+    "codeFrom": "From Tono <login@lecvia.com>",
     "codeLabel": "6-digit code",
     "codePlaceholder": "123456",
-    "verify": "Verify email code",
+    "verify": "Sign in",
     "verifying": "Verifying…",
-    "validity": "If this address is eligible, the code is valid for 10 minutes.",
-    "changeEmail": "Use a different email",
-    "invalidEmail": "Please enter a valid email address",
-    "invalidCode": "Please enter the 6-digit code",
+    "validity": "Valid for 10 minutes",
+    "changeEmail": "Use another email",
+    "invalidEmail": "Enter a valid email",
+    "invalidCode": "Enter the 6-digit code",
     "suspended": {
-      "title": "Tono account suspended",
-      "description": "Your account has been suspended. Please contact support for assistance."
+      "title": "Account paused",
+      "description": "Contact support."
     },
     "restoreFailed": {
-      "title": "Couldn't restore your session",
-      "description": "Restoring your previous session failed. Retry, or sign in again below.",
+      "title": "Session expired",
+      "description": "Retry, or sign in again.",
       "retry": "Retry"
     },
     "networkBlocked": {
-      "title": "Internet access is currently blocked",
-      "description": "Tono restored its leak protection from an earlier connection. Restore normal internet access before signing in.",
-      "restore": "Restore normal internet",
-      "restoring": "Restoring internet…"
+      "title": "Internet is blocked",
+      "description": "Leak protection from the last session is still on. Restore the network, then sign in.",
+      "restore": "Restore network",
+      "restoring": "Restoring…"
     },
     "errors": {
-      "unreachable": "Tono's server could not be reached. Your network closed the connection — this is the network in the way, not a problem with your account or the code. Signing in only has to succeed once: do it on a network that works (a phone hotspot, or with another VPN running in TUN or global mode), and it stays signed in afterwards.",
-      "rateLimited": "Too many sign-in attempts. Wait a few minutes and try again.",
-      "deviceLimit": "This account is already on the maximum number of devices. Remove one from a signed-in device, then try again.",
-      "sessionExpired": "That sign-in expired. Request a new code."
+      "unreachable": "Can't reach the sign-in server. Use a working network (hotspot, or another VPN) once.",
+      "rateLimited": "Too many tries. Wait a few minutes.",
+      "deviceLimit": "Device limit reached. Remove one from a signed-in device.",
+      "sessionExpired": "That code expired. Request a new one."
     }
   },
   "pill": {
@@ -130,13 +147,13 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "subtitle": "Reality cloud protection",
+    "subtitle": "Cloud protection",
     "connect": "Connect",
     "connecting": "Connecting…",
     "connected": "Connected",
     "disconnecting": "Disconnecting…",
     "protectedOffline": "Protected, not connected",
-    "protectedOfflineDescription": "Tono is blocking a direct leak. It will switch to a working route and retry.",
+    "protectedOfflineDescription": "Direct traffic is blocked. Switching routes and retrying.",
     "server": "Server",
     "noServer": "No server selected",
     "killSwitchMode": "Leak protection: {{mode}}",
@@ -145,28 +162,40 @@
       "locked": "Locked",
       "blocked": "Blocked"
     },
-    "taglineIdle": "One click routes every app through your selected Tono cloud.",
-    "taglineConnected": "All traffic is protected. Tono will block leaks if the route drops.",
-    "directOn": "WeChat and reviewed China sites can go direct. Everything else stays in the tunnel.",
-    "directSkipped": "China-direct is off this session. WeChat and the rest stay in the tunnel.",
+    "taglineIdle": "Pick a node, then connect.",
+    "taglineConnected": "Traffic is protected. A drop will not leak your IP.",
+    "directOn": "WeChat and other China apps go direct. Claude, ChatGPT, and Cursor use home broadband. Everything else uses the tunnel.",
+    "directSkipped": "China-direct is off. WeChat uses the tunnel. Claude, ChatGPT, and Cursor still use home broadband.",
+    "secureDnsHint": "Pages failing? Turn off Secure DNS in the browser.",
+    "encryptedDnsHint": "Pages failing? Settings → Network & internet → DNS: turn Encrypted DNS off, then reconnect.",
+    "checklist": {
+      "title": "First connect",
+      "dismiss": "Got it",
+      "admin": "Allow the admin prompt on install.",
+      "encryptedDns": "Turn off Windows Encrypted DNS (Settings → Network & internet → DNS).",
+      "browserDns": "Turn off Secure DNS in Chrome and Edge.",
+      "leakTest": "After connecting, run the WebRTC check on Support. You should not see your home IP."
+    },
     "pickServer": "Choose a server to get started",
+    "openDnsSettings": "Open Windows DNS settings",
     "errorRetry": "Try again",
     "errorSwitchServer": "Switch server",
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
-    "catalogRequiresChoice": "Your server is no longer available — please reselect",
+    "catalogRequiresChoice": "That node is gone — pick another",
     "killSwitchError": "Leak protection: {{message}}",
-    "killSwitchErrorNote": "Most recent error — it may already be resolved.",
+    "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {
-      "serviceBusy": "Tono Service is installing or repairing. Approve any pending admin prompt, or restart Tono.",
-      "releaseReconciling": "Network protection is still releasing. Wait a moment, then connect again.",
-      "serviceTooOld": "This Tono Service is too old for this app. Reinstall Tono from the latest installer so the Service is replaced.",
-      "nodeUnreachable": "This server could not be reached. Try again, or switch to another server.",
+      "serviceBusy": "The service is installing or repairing. Approve the admin prompt, or restart Tono.",
+      "releaseReconciling": "Protection is still releasing. Wait, then connect.",
+      "serviceTooOld": "Service is too old. Reinstall from the latest package.",
+      "nodeUnreachable": "This node is unreachable. Retry or switch.",
       "protectedHttpsFailed": "Protected HTTPS did not complete (TLS handshake closed). If every server fails the same way, switching cities will not help — send diagnostics to support.",
       "coreUnpinned": "This Tono install is missing its kernel check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "The Tono kernel does not match this install. Install the latest Tono.",
       "dnsPortBusy": "Another app is using local DNS port 53. Close that app and try again.",
       "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
+      "encryptedDns": "Windows Encrypted DNS is still on. Open Settings below, turn it off, then reconnect.",
       "sendDiagnostics": "Send to support"
     },
     "status": {
@@ -256,7 +285,9 @@
     "subtitle": "Choose a secure exit for your protected traffic.",
     "search": "Search servers",
     "noMatches": "No servers match this search.",
-    "readyToConnect": "Ready to connect",
+    "readyToConnect": "Available",
+    "untested": "Not tested",
+    "catalogSynced": "Node list synced",
     "testCurrent": "Test Current",
     "testAll": "Test All",
     "cancelTest": "Cancel Test",
@@ -276,8 +307,8 @@
     "catalogRevision": "Catalog v{{revision}}",
     "catalogNodes": "{{count}} cloud servers",
     "catalogVerified": "catalog verified",
-    "lastSynced": "Last verified sync: {{time}}",
-    "waitingForSync": "Waiting for first verified sync",
+    "lastSynced": "Last synced: {{time}}",
+    "waitingForSync": "Waiting for first sync",
     "verifiedSyncHint": "Automatic sync runs every 5 minutes. Invalid updates never replace the last verified copy. Test All is available while disconnected.",
     "catalogError": "Latest refresh failed: {{error}}",
     "regions": {
@@ -301,6 +332,9 @@
     "devices": "Devices",
     "deviceLimit": "{{count}} / {{limit}} devices",
     "currentDevice": "This device",
+    "thisComputer": "This PC",
+    "otherDevices": "Other devices",
+    "addedAt": "Added {{time}}",
     "revoke": "Revoke",
     "revokeConfirmTitle": "Revoke device",
     "revokeConfirmMessage": "Revoke \"{{name}}\"? It will be signed out immediately.",
@@ -310,7 +344,12 @@
   },
   "support": {
     "title": "Support & Diagnostics",
-    "subtitle": "Review safe local status details and contact Tono support.",
+    "subtitle": "Local status. Copy a note for support.",
+    "contact": {
+      "description": "Copy this note for support. It includes version, status, and node — not passwords.",
+      "copyMessage": "Copy for support",
+      "copied": "Copied"
+    },
     "refresh": "Refresh",
     "loadFailed": "Couldn't load the diagnostics summary. Refresh to try again.",
     "enabled": "Enabled",
@@ -343,6 +382,12 @@
     "diagnostics": {
       "title": "Diagnostics report",
       "description": "Copy the current redacted report, or explicitly confirm an upload to receive a support reference code. Preview and upload use the same backend report builder."
+    },
+    "webrtc": {
+      "title": "WebRTC leak check",
+      "description": "Open this page after Tono is connected. STUN should time out, and your home public IP should not appear.",
+      "open": "Open ip.cx/webrtc",
+      "copyVersion": "Copy version"
     }
   },
   "settings": {
@@ -357,16 +402,8 @@
     "general": {
       "title": "General",
       "launchAtStartup": "Launch at Startup",
+      "launchAtStartupHint": "Turned on after the first successful connect. You can turn it off.",
       "language": "Interface Language"
-    },
-    "proxyEngine": {
-      "title": "Proxy Engine",
-      "tun": "TUN Mode",
-      "tunSubtitle": "Required by Tono to prevent application bypass",
-      "allowLan": "Allow LAN",
-      "allowLanSubtitle": "Managed by Tono",
-      "mixedPort": "Mixed Port",
-      "disabled": "Disabled (TUN only)"
     },
     "appearance": {
       "title": "Appearance",
@@ -383,10 +420,12 @@
     },
     "about": {
       "title": "About",
-      "tagline": "Protected cloud connection",
-      "description": "Authenticated VLESS Reality routing with fail-closed leak protection",
+      "tagline": "Cloud protection",
+      "description": "Signed cloud route. A drop will not leak.",
       "checkUpdates": "Check for updates",
-      "latestVersion": "You're already on the latest version"
+      "latestVersion": "You're on the latest version",
+      "updatesUnavailable": "This test build does not auto-update. Install the new package manually.",
+      "unsigned": "This installer is unsigned. Windows SmartScreen may warn; continue to install."
     }
   },
   "cities": {

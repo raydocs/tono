@@ -101,12 +101,36 @@ export const isWeChatActivityProcess = (process?: string, processPath?: string) 
   )
 }
 
-const processName = (metadata: IConnectionsItem['metadata']) => {
-  const value = metadata.process || metadata.processPath || ''
-  const file = value.split(/[\\/]/).pop() || ''
-  if (isWeChatActivityProcess(metadata.process, metadata.processPath)) {
+const ACTIVITY_FAMILY_STEMS: Record<string, string> = {
+  cursor: 'Cursor',
+  code: 'Code',
+  claude: 'ClaudeCode',
+  chatgpt: 'ChatGPT',
+  grok: 'Grok',
+  chrome: 'Chrome',
+}
+
+export const activityProcessFamily = (
+  process?: string,
+  processPath?: string,
+) => {
+  if (isWeChatActivityProcess(process, processPath)) {
     return WECHAT_ACTIVITY_PROCESS
   }
+  const stem = fileStem(process || processPath || '')
+  if (!stem) return ''
+  if (ACTIVITY_FAMILY_STEMS[stem]) return ACTIVITY_FAMILY_STEMS[stem]
+  if (stem.startsWith('cursor')) return 'Cursor'
+  if (stem.startsWith('code -')) return 'Code'
+  const file = (process || processPath || '').split(/[\\/]/).pop() || ''
+  return limitText(file, 100)
+}
+
+const processName = (metadata: IConnectionsItem['metadata']) => {
+  const family = activityProcessFamily(metadata.process, metadata.processPath)
+  if (family) return family
+  const value = metadata.process || metadata.processPath || ''
+  const file = value.split(/[\\/]/).pop() || ''
   // A full executable path can expose the Windows account name and private directory names.
   return limitText(file, 100)
 }

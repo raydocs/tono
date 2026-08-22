@@ -46,11 +46,11 @@
   --tono-hairline:rgba(56,72,108,0.10);
   --tono-surface-pill:rgba(255,255,255,0.82);
   --tono-surface-toast:rgba(255,255,255,0.85);
-  --tono-surface-flyout:rgba(252,253,255,0.66);
-  --tono-surface-flyout-border:rgba(255,255,255,0.9);
-  --tono-surface-flyout-highlight:rgba(255,255,255,0.7);
+  --tono-surface-flyout:rgba(246,247,251,0.94);
+  --tono-surface-flyout-border:rgba(20,22,30,0.10);
+  --tono-surface-flyout-highlight:rgba(20,22,30,0.04);
   --tono-surface-dialog:#ffffff;
   --tono-divider:rgba(56,72,108,0.08);
   --tono-mesh:radial-gradient(52% 64% at 16% 10%,rgba(176,196,255,0.78) 0%,rgba(176,196,255,0) 100%),radial-gradient(46% 56% at 84% 12%,rgba(198,184,255,0.55) 0%,rgba(198,184,255,0) 100%),radial-gradient(58% 64% at 78% 90%,rgba(255,196,168,0.42) 0%,rgba(255,196,168,0) 100%),radial-gradient(54% 58% at 12% 88%,rgba(188,210,235,0.55) 0%,rgba(188,210,235,0) 100%),linear-gradient(160deg,#f3f5fb 0%,#eceff7 100%); /* @kind color */
-  --tono-mesh-wash:rgba(243,245,250,0.83);
+  --tono-mesh-wash:rgba(243,245,250,0.58);
 }

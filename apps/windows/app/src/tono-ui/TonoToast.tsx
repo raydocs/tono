@@ -95,7 +95,7 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
               display: 'flex',
             }}
           >
-            <TonoIcon name="checkCircle" size={12} title="Done" />
+            <TonoIcon name="checkCircle" size={12} />
           </span>
           {toast.message}
         </div>

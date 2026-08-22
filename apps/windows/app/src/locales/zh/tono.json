@@ -9,17 +9,19 @@
   },
   "tray": {
     "open": "打开 Tono",
-    "quit": "退出 Tono",
+    "quit": "退出",
+    "closeKeepsConnected": "关窗口不会断开，托盘里还能用。",
     "noServer": "未选择节点",
     "connect": "连接",
-    "disconnect": "断开并恢复网络",
-    "retry": "立即重试",
+    "disconnect": "断开",
+    "retry": "重试",
     "connecting": "正在连接…",
-    "disconnecting": "正在断开…"
+    "disconnecting": "正在断开…",
+    "pickNode": "切换节点"
   },
   "activity": {
     "title": "活动",
-    "subtitle": "当前 Tono 会话的实时连接",
+    "subtitle": "当前会话的实时连接",
     "search": "按应用、域名、目标、协议或规则筛选",
     "routeFilter": "路由筛选",
     "disconnected": "连接 Tono 后即可查看实时活动。",
@@ -36,25 +38,39 @@
       "apps": "应用",
       "connections": "连接"
     },
-    "splitHint": "{{direct}} 直连 · {{home}} 住宅 · {{proxied}} 出口 · {{rejected}} 拒绝",
+    "splitHint": "{{direct}} 直连 · {{home}} 家宽 · {{proxied}} 云端 · {{rejected}} 拒绝",
+    "closeAll": "断开全部连接",
+    "closeAllHint": "只关掉这些连接，不会断开 Tono。",
     "limitNotice": "最多显示 {{count}} 条连接",
     "filters": {
       "all": "全部",
-      "proxied": "出口",
-      "home": "住宅",
+      "proxied": "云端",
+      "home": "家宽",
       "direct": "直连",
       "rejected": "已拒绝",
       "local": "本地"
     },
     "routes": {
-      "proxied": "出口",
-      "home": "住宅",
+      "proxied": "云端",
+      "home": "家宽",
       "direct": "直连",
       "rejected": "已拒绝",
       "local": "本地"
     },
     "apps": {
-      "wechat": "微信"
+      "wechat": "微信",
+      "wecom": "企业微信",
+      "qq": "QQ",
+      "tim": "TIM",
+      "feishu": "飞书",
+      "meeting": "腾讯会议",
+      "claude": "Claude",
+      "claudeCode": "Claude Code",
+      "chatgpt": "ChatGPT",
+      "grok": "Grok",
+      "cursor": "Cursor",
+      "vscode": "VS Code",
+      "chrome": "Chrome"
     },
     "columns": {
       "process": "进程",
@@ -68,45 +84,46 @@
   },
   "login": {
     "title": "登录 Tono",
-    "subtitle": "输入邮箱以接收登录验证码。",
-    "welcome": "欢迎使用 Tono",
-    "intro": "用已验证的邮箱登录即可，不用设密码。",
-    "continueWithEmail": "用邮箱继续",
-    "emailLabel": "邮箱地址",
+    "subtitle": "输入邮箱，收取验证码。",
+    "welcome": "登录 Tono",
+    "intro": "邮箱登录，无需密码。",
+    "emailLabel": "邮箱",
     "emailPlaceholder": "you@example.com",
-    "sendCode": "发送登录码",
-    "sendNewCode": "发送新验证码",
+    "sendCode": "发送验证码",
+    "sendNewCode": "重新发送",
     "sending": "发送中…",
     "resendIn": "{{seconds}} 秒后可重发",
-    "codeSent": "验证码已发送，请查收邮箱。",
+    "codeSent": "验证码已发送。",
+    "codeSentTo": "已发到上面这封邮箱。核对完整地址，也可看垃圾箱。",
+    "codeFrom": "发件人：Tono <login@lecvia.com>",
     "codeLabel": "6 位验证码",
     "codePlaceholder": "123456",
-    "verify": "验证邮箱验证码",
+    "verify": "登录",
     "verifying": "验证中…",
-    "validity": "如果该邮箱符合条件，验证码 10 分钟内有效。",
-    "changeEmail": "使用其他邮箱",
-    "invalidEmail": "请输入有效的邮箱地址",
+    "validity": "10 分钟内有效",
+    "changeEmail": "换邮箱",
+    "invalidEmail": "请输入有效邮箱",
     "invalidCode": "请输入 6 位验证码",
     "suspended": {
-      "title": "Tono 账号已被暂停",
-      "description": "你的账号已被暂停使用，请联系客服获取帮助。"
+      "title": "账号已暂停",
+      "description": "请联系客服。"
     },
     "restoreFailed": {
-      "title": "会话恢复失败",
-      "description": "恢复此前的登录会话失败。请重试，或在下方重新登录。",
+      "title": "登录状态已失效",
+      "description": "请重试，或重新登录。",
       "retry": "重试"
     },
     "networkBlocked": {
-      "title": "当前网络访问已被阻断",
-      "description": "Tono 恢复了上次连接遗留的防泄漏保护。请先恢复正常网络，再进行登录。",
-      "restore": "恢复正常网络",
-      "restoring": "正在恢复网络…"
+      "title": "网络已被保护拦住",
+      "description": "上次连接的防泄漏还在。先恢复网络，再登录。",
+      "restore": "恢复网络",
+      "restoring": "正在恢复…"
     },
     "errors": {
-      "unreachable": "连不上 Tono 服务器。是你的网络切断了连接——不是账号或验证码的问题。登录只需要成功一次：换一个能用的网络登录（手机热点，或先开着别的翻墙工具的 TUN/全局模式），之后就会一直保持登录状态。",
-      "rateLimited": "登录尝试次数过多，请等几分钟再试。",
-      "deviceLimit": "这个账号的设备数已经满了。请先在另一台已登录的设备上移除一台，再回来登录。",
-      "sessionExpired": "登录已失效，请重新获取验证码。"
+      "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",
+      "rateLimited": "尝试过多，请稍后再试。",
+      "deviceLimit": "设备数已满。请先在已登录设备上移除一台。",
+      "sessionExpired": "验证码已过期，请重新获取。"
     }
   },
   "pill": {
@@ -114,7 +131,7 @@
       "notConnected": "待机",
       "connecting": "连接中…",
       "connected": "已连接",
-      "protectedOffline": "保护已开启，当前未连接",
+      "protectedOffline": "保护中，未连上",
       "disconnecting": "断开中…"
     },
     "subtitle": {
@@ -124,19 +141,19 @@
       "restoringAccess": "正在恢复网络访问",
       "starting": "正在启动…"
     },
-    "statusProtected": "保护已开启",
-    "statusProtectedOffline": "保护已开启，当前未连接",
+    "statusProtected": "已连接",
+    "statusProtectedOffline": "保护中，未连上",
     "statusReality": "云端线路"
   },
   "dashboard": {
     "title": "总览",
-    "subtitle": "云端 Reality 保护",
+    "subtitle": "云端保护",
     "connect": "连接",
     "connecting": "连接中…",
     "connected": "已连接",
     "disconnecting": "断开中…",
-    "protectedOffline": "保护已开启，当前未连接",
-    "protectedOfflineDescription": "Tono 已阻止流量直连，避免真实 IP 泄漏。系统会自动换一条可用线路并重试。",
+    "protectedOffline": "保护中，未连上",
+    "protectedOfflineDescription": "已拦住直连，正在换线重试。",
     "server": "节点",
     "noServer": "未选择节点",
     "killSwitchMode": "断网保护：{{mode}}",
@@ -145,35 +162,47 @@
       "locked": "锁定",
       "blocked": "阻断"
     },
-    "taglineIdle": "一键让所有应用通过你选择的 Tono 云节点。",
-    "taglineConnected": "所有流量均受保护；线路中断时 Tono 会阻止泄漏。",
-    "directOn": "微信和已审核的国内站点可以直连，其余仍走隧道。",
-    "directSkipped": "本次未启用国内直连，微信和其他应用都走隧道。",
+    "taglineIdle": "选好节点，点连接。",
+    "taglineConnected": "流量已保护；断线不会漏 IP。",
+    "directOn": "微信等国内软件直连；Claude / ChatGPT / Cursor 走家里宽带；其余走隧道。",
+    "directSkipped": "国内直连未开，微信也走隧道。Claude / ChatGPT / Cursor 仍走家里宽带。",
+    "secureDnsHint": "网页打不开：关掉浏览器「使用安全 DNS」。",
+    "encryptedDnsHint": "网页打不开：设置 → 网络和 Internet → DNS，关掉「加密 DNS」，再连接。",
+    "checklist": {
+      "title": "第一次连接",
+      "dismiss": "知道了",
+      "admin": "安装时允许管理员权限。",
+      "encryptedDns": "关掉 Windows「加密 DNS」（设置 → 网络和 Internet → DNS）。",
+      "browserDns": "关掉 Chrome / Edge「使用安全 DNS」。",
+      "leakTest": "连上后到支持页测 WebRTC，不应看到家里公网 IP。"
+    },
     "pickServer": "选择节点以开始使用",
+    "openDnsSettings": "打开 Windows DNS 设置",
     "errorRetry": "重试",
     "errorSwitchServer": "切换节点",
     "whatFailed": "失败原因",
     "copyDetails": "复制诊断信息",
-    "catalogRequiresChoice": "你选择的节点已下线 — 请重新选择",
+    "catalogRequiresChoice": "当前节点已下线，请另选一个",
     "killSwitchError": "断网保护：{{message}}",
-    "killSwitchErrorNote": "最近一次错误，可能已恢复。",
+    "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {
-      "serviceBusy": "Tono 服务正在安装或修复。请批准待处理的管理员提示，或重启 Tono。",
-      "releaseReconciling": "网络保护仍在释放中。请稍候再连接，避免拆掉新连接。",
-      "serviceTooOld": "当前 Tono 服务版本过旧。请用最新安装包重装，以替换 Service。",
-      "nodeUnreachable": "无法连接此节点。请重试，或切换到其他节点。",
-      "protectedHttpsFailed": "受保护的 HTTPS 未能完成（TLS 握手被断开）。多个节点出现同一结果时，换节点通常没用，请把诊断发给支持。",
-      "coreUnpinned": "此安装缺少内核校验。请安装最新版 Tono，重装同一份安装包无效。",
-      "coreMismatch": "内核与此安装不匹配。请安装最新版 Tono。",
-      "dnsPortBusy": "本机 53 端口已被其他程序占用。请关闭该程序后重试。",
-      "protectionReleaseFailed": "断网保护还没解除，网络仍被拦住。请再试一次「恢复正常网络」。",
+      "serviceBusy": "服务正在安装或修复。请批准管理员提示，或重启 Tono。",
+      "releaseReconciling": "保护还在解除，请稍后再连。",
+      "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
+      "nodeUnreachable": "连不上这个节点。请重试或换节点。",
+      "protectedHttpsFailed": "受保护的 HTTPS 失败。多个节点都这样时，换节点没用，请发诊断。",
+      "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
+      "coreMismatch": "内核与安装不匹配，请安装最新版。",
+      "dnsPortBusy": "本机 53 端口被占用。关掉占用程序后再试。",
+      "protectionReleaseFailed": "保护还没解除。请再点一次「恢复网络」。",
+      "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
       "sendDiagnostics": "发给支持"
     },
     "status": {
       "connecting": "正在连接",
       "disconnecting": "正在断开",
-      "offline": "保护已开启，当前未连接",
-      "protected": "保护中",
+      "offline": "保护中，未连上",
+      "protected": "已连接",
       "standby": "待机"
     },
     "overview": {
@@ -208,8 +237,8 @@
     "tryBadge": "第 {{count}} 次",
     "failedAt": "失败于 {{stage}}",
     "unknownStage": "未知阶段",
-    "statusTitle": "当前线路未通过连接检查",
-    "statusBody": "Tono 已阻止流量直连，避免真实 IP 泄漏。系统会自动换一条可用线路并重试。",
+    "statusTitle": "当前线路未通过检查",
+    "statusBody": "已拦住直连，正在换线重试。",
     "completedCount": "已完成 {{count}} 项",
     "technicalDetails": "技术详情",
     "switchRoute": "选择其他线路",
@@ -240,23 +269,25 @@
       }
     },
     "steps": {
-      "preparing": "正在准备保护…",
-      "preparingService": "正在准备 Windows 服务…",
-      "startingKillSwitch": "正在启用保护并安装隧道网卡…",
-      "startingTunnel": "正在启动受保护隧道…",
-      "lockingTraffic": "正在将流量锁定到受保护接口…",
-      "applyingCloudPolicy": "应用云端路由策略…",
-      "securingDNS": "正在保护并验证 DNS…",
-      "checkingExit": "正在检查最终出口…",
-      "verifyingTraffic": "正在验证真实 TUN 数据面…"
+      "preparing": "正在准备…",
+      "preparingService": "正在准备服务…",
+      "startingKillSwitch": "正在启用保护…",
+      "startingTunnel": "正在启动隧道…",
+      "lockingTraffic": "正在锁定流量…",
+      "applyingCloudPolicy": "正在应用路由…",
+      "securingDNS": "正在保护 DNS…",
+      "checkingExit": "正在检查出口…",
+      "verifyingTraffic": "正在验证连接…"
     }
   },
   "nodes": {
     "title": "节点",
-    "subtitle": "为受保护的流量选一个出口。",
+    "subtitle": "选一个出口。",
     "search": "搜索节点",
     "noMatches": "没有符合条件的节点。",
-    "readyToConnect": "可以连接",
+    "readyToConnect": "可选",
+    "untested": "未测速",
+    "catalogSynced": "节点列表已同步",
     "testCurrent": "测试当前节点",
     "testAll": "测试全部",
     "cancelTest": "取消测试",
@@ -276,9 +307,9 @@
     "catalogRevision": "目录版本 v{{revision}}",
     "catalogNodes": "{{count}} 个云端节点",
     "catalogVerified": "目录已验证",
-    "lastSynced": "上次验证同步：{{time}}",
-    "waitingForSync": "正在等待首次验证同步",
-    "verifiedSyncHint": "每 5 分钟自动同步；无效更新不会替换上次验证副本。断开连接时可测试全部节点。",
+    "lastSynced": "上次同步：{{time}}",
+    "waitingForSync": "等待首次同步",
+    "verifiedSyncHint": "每 5 分钟自动同步。断开时可测全部节点。",
     "catalogError": "最近一次刷新失败：{{error}}",
     "regions": {
       "all": "全部",
@@ -296,11 +327,14 @@
   },
   "account": {
     "title": "账号",
-    "subtitle": "当前登录的邮箱，以及这个账号下的设备。",
+    "subtitle": "登录邮箱和设备。",
     "email": "邮箱",
     "devices": "设备",
     "deviceLimit": "设备 {{count}} / {{limit}}",
     "currentDevice": "当前设备",
+    "thisComputer": "这台电脑",
+    "otherDevices": "其他设备",
+    "addedAt": "添加于 {{time}}",
     "revoke": "移除",
     "revokeConfirmTitle": "移除设备",
     "revokeConfirmMessage": "确定移除「{{name}}」吗？该设备将立即退出登录。",
@@ -309,8 +343,13 @@
     "signOutConfirmMessage": "退出登录将断开 VPN 连接，并从账号中移除此设备。是否继续？"
   },
   "support": {
-    "title": "支持与诊断",
-    "subtitle": "查看安全的本地状态摘要并联系 Tono 客服。",
+    "title": "支持",
+    "subtitle": "本地状态摘要。可复制一段给客服。",
+    "contact": {
+      "description": "复制这段发给客服。含版本、状态和节点，不含密码。",
+      "copyMessage": "复制给客服",
+      "copied": "已复制"
+    },
     "refresh": "刷新",
     "loadFailed": "无法加载诊断摘要，请刷新重试。",
     "enabled": "已启用",
@@ -343,6 +382,12 @@
     "diagnostics": {
       "title": "诊断报告",
       "description": "复制当前脱敏报告，或明确确认上传后获取客服 reference code。预览和上传使用同一个后端报告生成器。"
+    },
+    "webrtc": {
+      "title": "WebRTC 泄漏检测",
+      "description": "连上后打开。正常应看不到家里公网 IP。",
+      "open": "打开 ip.cx/webrtc",
+      "copyVersion": "复制版本号"
     }
   },
   "settings": {
@@ -357,16 +402,8 @@
     "general": {
       "title": "通用",
       "launchAtStartup": "开机自启",
+      "launchAtStartupHint": "第一次连上后会打开，可随时关掉。",
       "language": "界面语言"
-    },
-    "proxyEngine": {
-      "title": "代理引擎",
-      "tun": "TUN 模式",
-      "tunSubtitle": "Tono 需要它来防止应用绕过代理",
-      "allowLan": "允许局域网连接",
-      "allowLanSubtitle": "由 Tono 托管",
-      "mixedPort": "混合端口",
-      "disabled": "已关闭（仅 TUN）"
     },
     "appearance": {
       "title": "外观",
@@ -383,10 +420,12 @@
     },
     "about": {
       "title": "关于",
-      "tagline": "受保护的云端连接",
-      "description": "经过认证的云端 Reality 线路，断线时会拦住直连，避免泄漏",
+      "tagline": "云端保护",
+      "description": "认证云线路；断线拦住直连。",
       "checkUpdates": "检查更新",
-      "latestVersion": "已经是最新版本"
+      "latestVersion": "已是最新版",
+      "updatesUnavailable": "测试版需手动安装，应用内更新尚未开放。",
+      "unsigned": "安装包未签名，Windows 可能拦截。过 SmartScreen 后即可安装。"
     }
   },
   "cities": {
@@ -403,7 +442,7 @@
     "osaka": "大阪"
   },
   "startup": {
-    "stateInitRetrying": "Tono 暂时无法打开自己的数据文件夹，正在重试。通常是磁盘已满，或者用户配置文件还没挂载好。原因消失后会自动恢复。",
-    "stateInitFailed": "Tono 无法打开自己的数据文件夹，因此无法启动（{{error}}）。请清出磁盘空间，或确认用户配置文件可用，然后重新启动 Tono。如果这台电脑已经没有网络，说明网络保护可能仍处于开启状态：以管理员身份打开命令提示符，运行 tono-service.exe --emergency-disarm 即可解除。"
+    "stateInitRetrying": "打不开数据文件夹，正在重试。多半是磁盘满了，或用户配置还没就绪。",
+    "stateInitFailed": "打不开数据文件夹，无法启动（{{error}}）。请腾出磁盘空间后重启。若已没网，管理员运行 tono-service.exe --emergency-disarm 解除保护。"
   }
 }

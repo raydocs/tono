@@ -271,7 +271,7 @@ export const ConnectPill = ({
           border: `1px solid ${hex(spec.color, 0.18)}`,
         }}
       >
-        <TonoIcon name="power" size={17} title="Connection power" />
+        <TonoIcon name="power" size={17} />
       </span>
     </button>
   )

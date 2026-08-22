@@ -19,16 +19,16 @@ use super::handle;
 use anyhow::Result;
 use std::borrow::Cow;
 use std::time::Duration;
-use tauri::{
-    AppHandle, Manager as _, Wry,
-    menu::{MenuEvent, MenuItem},
-};
+use tauri::{AppHandle, Manager as _, Wry, menu::MenuEvent};
+#[cfg(not(target_os = "windows"))]
+use tauri::menu::MenuItem;
 
 pub mod flyout;
 mod menu_def;
-#[cfg(target_os = "macos")]
 mod speed_task;
-use menu_def::{MenuCommand, MenuIds, MenuTexts};
+use menu_def::MenuCommand;
+#[cfg(not(target_os = "windows"))]
+use menu_def::{MenuIds, MenuTexts};
 
 // TODO: 是否需要将可变菜单抽离存储起来，后续直接更新对应菜单实例，无需重新创建菜单(待考虑)
 
@@ -90,7 +90,6 @@ pub struct Tray {
     /// Serializes native menu/tooltip snapshots. The guard is acquired before reading TonoState,
     /// so an older status refresh can never overwrite a newer projection after being suspended.
     projection_lock: tokio::sync::Mutex<()>,
-    #[cfg(target_os = "macos")]
     speed_controller: speed_task::TraySpeedController,
 }
 
@@ -155,7 +154,6 @@ impl Default for Tray {
         Self {
             limiter: Limiter::new(Duration::from_millis(TRAY_CLICK_DEBOUNCE_MS), SystemClock),
             projection_lock: tokio::sync::Mutex::new(()),
-            #[cfg(target_os = "macos")]
             speed_controller: speed_task::TraySpeedController::new(),
         }
     }
@@ -229,9 +227,19 @@ impl Tray {
             return Ok(());
         };
 
-        logging_error!(Type::Tray, tray.set_menu(Some(create_tray_menu(app_handle).await?)));
-
-        logging!(debug, Type::Tray, "托盘菜单更新成功");
+        #[cfg(target_os = "windows")]
+        {
+            // Native Win32 tray menus cannot carry Tono chrome. The flyout is
+            // the product surface; skip the system context menu entirely.
+            let _ = tray.set_menu(None::<tauri::menu::Menu<Wry>>);
+            let _ = app_handle;
+            let _ = _include_proxy_groups;
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            logging_error!(Type::Tray, tray.set_menu(Some(create_tray_menu(app_handle).await?)));
+            logging!(debug, Type::Tray, "托盘菜单更新成功");
+        }
         Ok(())
     }
 
@@ -316,8 +324,7 @@ impl Tray {
             logging_error!(Type::Tray, Self::global().update_menu().await);
         });
         self.update_icon(&verge).await?;
-        #[cfg(target_os = "macos")]
-        self.update_speed_task(verge.enable_tray_speed.unwrap_or(false));
+        self.update_speed_task(verge.enable_tray_speed.unwrap_or(true));
         self.update_tooltip().await?;
         Ok(())
     }
@@ -352,6 +359,12 @@ impl Tray {
 
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         {
+            #[cfg(target_os = "windows")]
+            {
+                let _ = show_menu_on_left_click;
+                builder = builder.show_menu_on_left_click(false);
+            }
+            #[cfg(not(target_os = "windows"))]
             if !show_menu_on_left_click {
                 builder = builder.show_menu_on_left_click(false);
             }
@@ -371,8 +384,7 @@ impl Tray {
         allow
     }
 
-    /// 根据配置统一更新托盘速率采集任务状态（macOS）
-    #[cfg(target_os = "macos")]
+    /// Start or stop live up/down collection for the tray icon.
     pub fn update_speed_task(&self, enable_tray_speed: bool) {
         self.speed_controller.update_task(enable_tray_speed);
     }
@@ -481,6 +493,7 @@ async fn tono_menu_state(app_handle: &AppHandle) -> TonoMenuState {
 
 /// Product tray only: live status, the one safe connection action, dashboard, quit.
 /// Directory, log and Clash leftovers stay out of the menu a customer sees.
+#[cfg(not(target_os = "windows"))]
 async fn create_tray_menu(app_handle: &AppHandle) -> Result<tauri::menu::Menu<Wry>> {
     let texts = MenuTexts::new();
     let state = tono_menu_state(app_handle).await;
@@ -557,7 +570,7 @@ fn on_tray_icon_event(_tray_icon: &TrayIcon, tray_event: TrayIconEvent) {
     }
 
     if let TrayIconEvent::Click {
-        button: MouseButton::Left,
+        button: MouseButton::Left | MouseButton::Right,
         button_state: MouseButtonState::Down,
         rect,
         position,

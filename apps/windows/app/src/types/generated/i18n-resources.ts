@@ -923,10 +923,12 @@ export interface TranslationResources {
     }
     tono: {
       account: {
+        addedAt: string
         currentDevice: string
         deviceLimit: string
         devices: string
         email: string
+        otherDevices: string
         revoke: string
         revokeConfirmMessage: string
         revokeConfirmTitle: string
@@ -934,14 +936,29 @@ export interface TranslationResources {
         signOutConfirmMessage: string
         signOutConfirmTitle: string
         subtitle: string
+        thisComputer: string
         title: string
       }
       activity: {
         appCount: string
         apps: {
+          chatgpt: string
+          chrome: string
+          claude: string
+          claudeCode: string
+          cursor: string
+          feishu: string
+          grok: string
+          meeting: string
+          qq: string
+          tim: string
+          vscode: string
           wechat: string
+          wecom: string
         }
+        closeAll: string
         closeAllFailed: string
+        closeAllHint: string
         closeConnection: string
         closeFailed: string
         closingAll: string
@@ -1000,6 +1017,14 @@ export interface TranslationResources {
       }
       dashboard: {
         catalogRequiresChoice: string
+        checklist: {
+          admin: string
+          browserDns: string
+          dismiss: string
+          encryptedDns: string
+          leakTest: string
+          title: string
+        }
         connect: string
         connected: string
         connecting: string
@@ -1007,11 +1032,13 @@ export interface TranslationResources {
         directOn: string
         directSkipped: string
         disconnecting: string
+        encryptedDnsHint: string
         errorRetry: string
         errors: {
           coreMismatch: string
           coreUnpinned: string
           dnsPortBusy: string
+          encryptedDns: string
           nodeUnreachable: string
           protectedHttpsFailed: string
           protectionReleaseFailed: string
@@ -1038,6 +1065,7 @@ export interface TranslationResources {
           locked: string
         }
         noServer: string
+        openDnsSettings: string
         overview: {
           directBlocked: string
           idle: string
@@ -1053,6 +1081,7 @@ export interface TranslationResources {
         pickServer: string
         protectedOffline: string
         protectedOfflineDescription: string
+        secureDnsHint: string
         server: string
         status: {
           connecting: string
@@ -1069,10 +1098,11 @@ export interface TranslationResources {
       }
       login: {
         changeEmail: string
+        codeFrom: string
         codeLabel: string
         codePlaceholder: string
         codeSent: string
-        continueWithEmail: string
+        codeSentTo: string
         emailLabel: string
         emailPlaceholder: string
         errors: {
@@ -1130,6 +1160,7 @@ export interface TranslationResources {
         catalogError: string
         catalogNodes: string
         catalogRevision: string
+        catalogSynced: string
         catalogVerified: string
         cloudServers: string
         empty: string
@@ -1158,6 +1189,7 @@ export interface TranslationResources {
         title: string
         unavailable: string
         unavailableHint: string
+        untested: string
         verifiedSyncHint: string
         waitingForSync: string
       }
@@ -1241,6 +1273,8 @@ export interface TranslationResources {
           latestVersion: string
           tagline: string
           title: string
+          unsigned: string
+          updatesUnavailable: string
         }
         account: string
         appearance: {
@@ -1259,6 +1293,7 @@ export interface TranslationResources {
         general: {
           language: string
           launchAtStartup: string
+          launchAtStartupHint: string
           title: string
         }
         preferences: {
@@ -1266,15 +1301,6 @@ export interface TranslationResources {
         }
         privacy: {
           title: string
-        }
-        proxyEngine: {
-          allowLan: string
-          allowLanSubtitle: string
-          disabled: string
-          mixedPort: string
-          title: string
-          tun: string
-          tunSubtitle: string
         }
         title: string
       }
@@ -1290,6 +1316,11 @@ export interface TranslationResources {
           title: string
         }
         auditPathCopied: string
+        contact: {
+          copied: string
+          copyMessage: string
+          description: string
+        }
         copyFailed: string
         detailsCopied: string
         diagnostics: {
@@ -1318,14 +1349,22 @@ export interface TranslationResources {
           title: string
         }
         title: string
+        webrtc: {
+          copyVersion: string
+          description: string
+          open: string
+          title: string
+        }
       }
       tray: {
+        closeKeepsConnected: string
         connect: string
         connecting: string
         disconnect: string
         disconnecting: string
         noServer: string
         open: string
+        pickNode: string
         quit: string
         retry: string
       }

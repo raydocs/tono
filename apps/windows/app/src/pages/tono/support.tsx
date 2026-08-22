@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
+import { open as openUrl } from '@tauri-apps/plugin-shell'
+
 import {
   formatTonoActionError,
   formatTonoDiagnostics,
@@ -17,6 +19,7 @@ import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
+import { SupportContact } from '@/tono-ui/SupportContact'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import { nodeCityTitleKey, nodeDisplayName } from './node-meta'
@@ -182,11 +185,15 @@ const SupportPage = () => {
     dnsWarningMarkers.some((marker) => report.dnsLastError!.includes(marker))
       ? report.dnsLastError
       : null
-  const lastError = report
+  const rawLastError = report
     ? (report.error ??
       report.killSwitchLastError ??
-      (dnsWarning ? null : report.dnsLastError) ??
-      t('tono.support.none'))
+      (dnsWarning ? null : report.dnsLastError))
+    : null
+  const lastError = report
+    ? rawLastError
+      ? formatTonoActionError(rawLastError, t)
+      : t('tono.support.none')
     : '—'
   const secondaryBackground = dark
     ? 'rgba(255,255,255,0.07)'
@@ -222,6 +229,12 @@ const SupportPage = () => {
       />
 
       <div style={{ display: 'grid', gap: 14, maxWidth: 680 }}>
+        <GlassCard radius="var(--tono-radius-card)" padding={18}>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: text.primary }}>
+            {t('tono.support.contact.copyMessage')}
+          </h2>
+          <SupportContact extra={rawLastError ? lastError : undefined} />
+        </GlassCard>
         <GlassCard radius="var(--tono-radius-card)" padding={18}>
           <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
             {t('tono.support.summary.title')}
@@ -276,6 +289,23 @@ const SupportPage = () => {
             value={lastError}
             monospace
           />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+            <button
+              type="button"
+              className="tono-button"
+              disabled={!report}
+              onClick={() => {
+                if (!report) return
+                void navigator.clipboard
+                  .writeText(`Tono ${report.appVersion} · ${report.osVersion}`)
+                  .then(() => showNotice.success('tono.support.detailsCopied'))
+                  .catch(() => showNotice.error('tono.support.copyFailed'))
+              }}
+              style={buttonStyle}
+            >
+              {t('tono.support.webrtc.copyVersion')}
+            </button>
+          </div>
           {dnsWarning && (
             <SummaryRow
               label={t('tono.support.summary.lastWarning')}
@@ -328,6 +358,30 @@ const SupportPage = () => {
               {t('tono.support.audit.copyPath')}
             </button>
           </div>
+        </GlassCard>
+
+        <GlassCard radius="var(--tono-radius-card)" padding={18}>
+          <h2 style={{ margin: '0 0 6px', fontSize: 14, color: text.primary }}>
+            {t('tono.support.webrtc.title')}
+          </h2>
+          <p
+            style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}
+          >
+            {t('tono.support.webrtc.description')}
+          </p>
+          <button
+            type="button"
+            className="tono-button"
+            onClick={() => {
+              void openUrl('https://ip.cx/webrtc').catch((error) => {
+                console.warn('[Support] open WebRTC check failed:', error)
+                showNotice.error('tono.support.copyFailed')
+              })
+            }}
+            style={buttonStyle}
+          >
+            {t('tono.support.webrtc.open')}
+          </button>
         </GlassCard>
 
         <GlassCard radius="var(--tono-radius-card)" padding={18}>

@@ -35,6 +35,43 @@ pub async fn update_launch() -> Result<()> {
     Ok(())
 }
 
+/// First successful connect turns launch-at-startup on unless the user already
+/// chose in Settings. Later connects do nothing.
+pub async fn enable_on_first_connect() {
+    let verge = Config::verge().await;
+    if verge.latest_arc().auto_launch_seeded.unwrap_or(false) {
+        return;
+    }
+    verge.edit_draft(|draft| {
+        draft.enable_auto_launch = Some(true);
+        draft.auto_launch_seeded = Some(true);
+    });
+    if let Err(error) = update_launch().await {
+        verge.discard();
+        logging!(
+            warn,
+            Type::System,
+            "first-connect autostart task skipped: {error}"
+        );
+        return;
+    }
+    verge.apply();
+    if let Err(error) = verge.data_arc().save_file().await {
+        logging!(
+            warn,
+            Type::System,
+            "first-connect autostart persist skipped: {error}"
+        );
+        return;
+    }
+    handle::Handle::refresh_verge();
+    logging!(
+        info,
+        Type::System,
+        "enabled launch-at-startup after first connect"
+    );
+}
+
 pub fn get_launch_status() -> Result<bool> {
     #[cfg(target_os = "windows")]
     {

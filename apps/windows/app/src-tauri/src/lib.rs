@@ -137,6 +137,7 @@ mod app_init {
             cmd::open_app_dir,
             cmd::open_logs_dir,
             cmd::open_core_dir,
+            cmd::open_windows_dns_settings,
             cmd::restart_app,
             cmd::restart_for_update,
             tono::commands::tono_prepare_update,
@@ -514,12 +515,43 @@ pub fn run() {
     let builder = builder.on_web_content_process_terminate(resolve::window::on_web_content_process_terminated);
 
     mod event_handlers {
+        use crate::process::AsyncHandler;
         use crate::utils::window_manager::WindowManager;
         use crate::core::{self, handle};
+        use crate::utils::dirs;
         use tono_logging::{Type, logging};
         use tauri::AppHandle;
+        use tauri_plugin_notification::NotificationExt;
         #[cfg(target_os = "macos")]
         use tauri::Manager as _;
+
+        fn notify_closed_to_tray() {
+            let Ok(home) = dirs::app_home_dir() else {
+                return;
+            };
+            let marker = home.join("tray-close-hint-seen");
+            if marker.exists() {
+                return;
+            }
+            if let Some(parent) = marker.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::write(&marker, b"1").is_err() {
+                return;
+            }
+            let app = handle::Handle::app_handle();
+            let title = tono_i18n::t!("notifications.appHidden.title");
+            let body = tono_i18n::t!("notifications.appHidden.body");
+            if let Err(error) = app
+                .notification()
+                .builder()
+                .title(title.as_ref())
+                .body(body.as_ref())
+                .show()
+            {
+                logging!(warn, Type::Tray, "tray close hint skipped: {error}");
+            }
+        }
 
         pub fn handle_ready_resumed(_app_handle: &AppHandle) {
             if handle::Handle::global().is_exiting() {
@@ -557,6 +589,9 @@ pub fn run() {
                 if let Some(window) = WindowManager::get_main_window() {
                     let _ = window.hide();
                 }
+                AsyncHandler::spawn(|| async {
+                    notify_closed_to_tray();
+                });
             }
         }
     }

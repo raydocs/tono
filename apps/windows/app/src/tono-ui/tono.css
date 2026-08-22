@@ -117,8 +117,16 @@
 .tono-nav__item:focus-visible,
 .tono-button:focus-visible,
 .tono-link:focus-visible,
+.tono-chip:focus-visible,
 .tono-pill:focus-visible,
-.tono-server-card:focus-visible {
+.tono-server-card:focus-visible,
+.tono-input:focus-visible,
+.tono-range:focus-visible,
+.tono-search:focus-visible,
+.tono-tray-action:focus-visible,
+.tono-tray-quiet:focus-visible,
+.tono-tray-node:focus-visible,
+.tono-tray-pick:focus-visible {
   outline: 2px solid rgba(75, 110, 255, 0.9);
   outline-offset: 2px;
 }
@@ -223,6 +231,7 @@
   gap: 10px;
   width: min(720px, 100%);
   margin: 0 auto;
+  flex-shrink: 0;
 }
 .tono-search {
   display: flex;
@@ -304,7 +313,8 @@
 
 /* Dashboard */
 .tono-dashboard {
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   padding-top: 42px;
 }
 .tono-dashboard__content {
@@ -434,6 +444,153 @@
 
 /* RDP, VM and accessibility mode: remove expensive compositing and non-essential motion.
    Refined raises blur 12→20px, so this guard must beat [data-tono-refined]. */
+.tono-tray-panel {
+  width: 280px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 12px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  position: relative;
+  border-radius: 10px;
+  color: inherit;
+  font-family: inherit;
+  background: var(--tono-surface-flyout);
+  border: 1px solid var(--tono-surface-flyout-border);
+  backdrop-filter: var(--tono-glass-blur-strong);
+  -webkit-backdrop-filter: var(--tono-glass-blur-strong);
+}
+.tono-tray-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.tono-tray-node {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+.tono-tray-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tono-tray-traffic {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.1px;
+}
+.tono-tray-picker {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 56px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 104px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--tono-surface-flyout);
+  border: 1px solid var(--tono-surface-flyout-border);
+}
+.tono-tray-pick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.tono-tray-pick:hover {
+  background: var(--tono-hover-tint);
+}
+.tono-tray-error {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--tono-color-error, #ff453a);
+  background: rgba(255, 69, 58, 0.12);
+  border-radius: 8px;
+  padding: 6px 8px;
+  flex-shrink: 0;
+}
+.tono-tray-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  flex-shrink: 0;
+  color: #fff;
+}
+.tono-tray-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.tono-tray-quiet {
+  flex: 1;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.tono-tray-rule {
+  width: 1px;
+  height: 12px;
+  background: var(--tono-hairline);
+}
+@media (max-width: 900px) {
+  .tono-activity-row {
+    grid-template-columns: minmax(90px, 1.1fr) minmax(110px, 1.4fr) 72px 72px 34px !important;
+  }
+  .tono-activity-rule {
+    display: none;
+  }
+}
+.tono-segmented {
+  display: flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--tono-surface-input-border);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tono-root,
   .tono-root[data-tono-refined],

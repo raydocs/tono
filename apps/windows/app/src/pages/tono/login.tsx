@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -13,7 +13,13 @@ import {
   tonoSignInVerify,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
-import { TONO_COLORS, TONO_PAGE_LAYOUT, tonoText } from '@/tono-ui/theme'
+import {
+  TONO_COLORS,
+  TONO_MONO_STACK,
+  TONO_PAGE_LAYOUT,
+  tonoText,
+} from '@/tono-ui/theme'
+import { SupportContact } from '@/tono-ui/SupportContact'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 
 const RESEND_COUNTDOWN = 60
@@ -41,10 +47,11 @@ const LoginPage = () => {
     string | null
   >(null)
   const [countdown, setCountdown] = useState(0)
-  const [showEmailForm, setShowEmailForm] = useState(false)
   const [autoSubmittedCode, setAutoSubmittedCode] = useState<string | null>(
     null,
   )
+  const codeInputRef = useRef<HTMLInputElement>(null)
+  const emailInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (countdown <= 0) return
@@ -66,16 +73,16 @@ const LoginPage = () => {
     setCodeSent(false)
     setCode('')
     setError(null)
-    setShowEmailForm(false)
     setAutoSubmittedCode(null)
   }
 
   const handleSendCode = useLockFn(async () => {
-    const trimmed = email.trim()
+    const trimmed = email.trim().toLowerCase()
     if (!EMAIL_PATTERN.test(trimmed)) {
       setError(t('tono.login.invalidEmail'))
       return
     }
+    setEmail(trimmed)
     setSending(true)
     setError(null)
     try {
@@ -113,6 +120,16 @@ const LoginPage = () => {
       setVerifying(false)
     }
   })
+
+  useEffect(() => {
+    if (!codeSent) return
+    codeInputRef.current?.focus()
+  }, [codeSent])
+
+  useEffect(() => {
+    if (codeSent) return
+    emailInputRef.current?.focus()
+  }, [codeSent])
 
   useEffect(() => {
     if (!codeSent || verifying || internetBlocked) return
@@ -207,9 +224,12 @@ const LoginPage = () => {
           : t('tono.login.networkBlocked.restore')}
       </button>
       {restoreInternetError && (
-        <span style={{ fontSize: 12, color: TONO_COLORS.error }}>
-          {restoreInternetError}
-        </span>
+        <>
+          <span style={{ fontSize: 12, color: TONO_COLORS.error }}>
+            {restoreInternetError}
+          </span>
+          <SupportContact extra={restoreInternetError} />
+        </>
       )}
     </div>
   ) : null
@@ -244,6 +264,10 @@ const LoginPage = () => {
           <p style={{ margin: 0, fontSize: 13, color: text.secondary }}>
             {t('tono.login.suspended.description')}
           </p>
+          <SupportContact
+            email={email}
+            extra={t('tono.login.suspended.title')}
+          />
           <button
             type="button"
             className="tono-link"
@@ -317,6 +341,9 @@ const LoginPage = () => {
             </button>
           </div>
         )}
+        {restoreFailed && (
+          <SupportContact extra={t('tono.login.restoreFailed.title')} />
+        )}
 
         <div
           style={{
@@ -352,27 +379,26 @@ const LoginPage = () => {
           </p>
         </div>
 
-        {!showEmailForm && !codeSent ? (
-          <button
-            type="button"
-            className="tono-button"
-            style={primaryButtonStyle}
-            onClick={() => {
-              setShowEmailForm(true)
-              setError(null)
+        <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (!codeSent) void handleSendCode()
+              else void handleVerify()
             }}
-            disabled={restoringInternet || internetBlocked}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              width: '100%',
+            }}
           >
-            {t('tono.login.continueWithEmail')}
-          </button>
-        ) : (
-          <>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: text.secondary }}>
                 {t('tono.login.emailLabel')}
               </span>
               <input
                 className="tono-input"
+                ref={emailInputRef}
                 style={inputStyle}
                 type="email"
                 autoComplete="email"
@@ -392,26 +418,12 @@ const LoginPage = () => {
             {!codeSent ? (
               <>
                 <button
-                  type="button"
+                  type="submit"
                   className="tono-button"
                   style={primaryButtonStyle}
-                  onClick={handleSendCode}
                   disabled={sending || restoringInternet || internetBlocked}
                 >
                   {sending ? t('tono.login.sending') : t('tono.login.sendCode')}
-                </button>
-                <button
-                  type="button"
-                  className="tono-link"
-                  style={{
-                    fontSize: 12,
-                    color: text.secondary,
-                    alignSelf: 'center',
-                  }}
-                  onClick={resetToStart}
-                  disabled={sending || restoringInternet || internetBlocked}
-                >
-                  {t('shared.actions.cancel')}
                 </button>
               </>
             ) : (
@@ -429,6 +441,7 @@ const LoginPage = () => {
                       fontSize: 22,
                       fontWeight: 650,
                     }}
+                    ref={codeInputRef}
                     placeholder={t('tono.login.codePlaceholder')}
                     value={code}
                     maxLength={6}
@@ -443,10 +456,9 @@ const LoginPage = () => {
                   />
                 </label>
                 <button
-                  type="button"
+                  type="submit"
                   className="tono-button"
                   style={primaryButtonStyle}
-                  onClick={handleVerify}
                   disabled={
                     sending ||
                     verifying ||
@@ -508,8 +520,7 @@ const LoginPage = () => {
                 </button>
               </>
             )}
-          </>
-        )}
+          </form>
 
         {error && (
           <p
@@ -524,17 +535,51 @@ const LoginPage = () => {
             {error}
           </p>
         )}
+        {error &&
+          error !== t('tono.login.invalidEmail') &&
+          error !== t('tono.login.invalidCode') && (
+            <SupportContact email={email} extra={error} />
+          )}
         {codeSent && !error && (
-          <p
+          <div
             style={{
-              margin: 0,
-              fontSize: 12,
-              textAlign: 'center',
-              color: TONO_COLORS.latencyGood,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              alignItems: 'center',
             }}
           >
-            {t('tono.login.codeSent')}
-          </p>
+            <code
+              style={{
+                fontFamily: TONO_MONO_STACK,
+                fontSize: 13,
+                color: text.primary,
+                userSelect: 'text',
+              }}
+            >
+              {email.trim()}
+            </code>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12,
+                textAlign: 'center',
+                color: TONO_COLORS.latencyGood,
+              }}
+            >
+              {t('tono.login.codeSentTo')}
+            </p>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 11,
+                textAlign: 'center',
+                color: text.tertiary,
+              }}
+            >
+              {t('tono.login.codeFrom')}
+            </p>
+          </div>
         )}
       </GlassCard>
     </div>

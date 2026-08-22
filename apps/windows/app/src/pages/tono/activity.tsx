@@ -33,13 +33,37 @@ const FILTERS: ActivityFilter[] = ['all', 'proxied', 'home', 'direct', 'rejected
 const ACTIVITY_GRID_COLUMNS =
   'minmax(120px, 1.1fr) minmax(150px, 1.4fr) 90px 88px minmax(110px, 1fr) 34px'
 
+const ACTIVITY_APP_KEYS: Record<string, string> = {
+  [WECHAT_ACTIVITY_PROCESS]: 'tono.activity.apps.wechat',
+  WXWork: 'tono.activity.apps.wecom',
+  WeCom: 'tono.activity.apps.wecom',
+  QQ: 'tono.activity.apps.qq',
+  TIM: 'tono.activity.apps.tim',
+  Feishu: 'tono.activity.apps.feishu',
+  Lark: 'tono.activity.apps.feishu',
+  WeMeetApp: 'tono.activity.apps.meeting',
+  TencentMeeting: 'tono.activity.apps.meeting',
+  Claude: 'tono.activity.apps.claude',
+  claude: 'tono.activity.apps.claude',
+  ClaudeCode: 'tono.activity.apps.claudeCode',
+  ChatGPT: 'tono.activity.apps.chatgpt',
+  chatgpt: 'tono.activity.apps.chatgpt',
+  Grok: 'tono.activity.apps.grok',
+  grok: 'tono.activity.apps.grok',
+  Cursor: 'tono.activity.apps.cursor',
+  cursor: 'tono.activity.apps.cursor',
+  Code: 'tono.activity.apps.vscode',
+  chrome: 'tono.activity.apps.chrome',
+  Chrome: 'tono.activity.apps.chrome',
+}
+
 const activityProcessLabel = (
   process: string,
   translate: (key: string) => string,
-) =>
-  process === WECHAT_ACTIVITY_PROCESS
-    ? translate('tono.activity.apps.wechat')
-    : process
+) => {
+  const key = ACTIVITY_APP_KEYS[process]
+  return key ? translate(key) : process
+}
 
 const RouteBadge = ({ route }: { route: ActivityRoute }) => {
   const { t } = useTranslation()
@@ -149,6 +173,7 @@ const ActivityPage = () => {
       return (
         <div
           role="listitem"
+          className="tono-activity-row"
           data-testid={`activity-row-${row.id}`}
           style={{
             minHeight: 74,
@@ -200,6 +225,7 @@ const ActivityPage = () => {
           </span>
           <RouteBadge route={row.route} />
           <span
+            className="tono-activity-rule"
             title={row.rule}
             style={{
               minWidth: 0,
@@ -258,6 +284,7 @@ const ActivityPage = () => {
             type="button"
             className="tono-button"
             disabled={!connected || activeConnections.length === 0 || closingAll}
+            title={t('tono.activity.closeAllHint')}
             onClick={() => void handleCloseAll()}
             style={{
               padding: '8px 13px',
@@ -267,7 +294,7 @@ const ActivityPage = () => {
           >
             {closingAll
               ? t('tono.activity.closingAll')
-              : t('shared.actions.closeAll')}
+              : t('tono.activity.closeAll')}
           </button>
         }
       />
@@ -283,6 +310,7 @@ const ActivityPage = () => {
           overflow: 'hidden',
         }}
       >
+        {connected && (
         <div
           style={{
             display: 'flex',
@@ -384,6 +412,7 @@ const ActivityPage = () => {
             ))}
           </div>
         </div>
+        )}
 
         {!connected ? (
           <div
@@ -544,6 +573,7 @@ const ActivityPage = () => {
             ) : (
               <>
                 <div
+                  className="tono-activity-row"
                   style={{
                     display: 'grid',
                     gridTemplateColumns: ACTIVITY_GRID_COLUMNS,
@@ -560,7 +590,9 @@ const ActivityPage = () => {
                   <span>{t('tono.activity.columns.target')}</span>
                   <span>{t('tono.activity.columns.protocol')}</span>
                   <span>{t('tono.activity.columns.route')}</span>
-                  <span>{t('tono.activity.columns.rule')}</span>
+                  <span className="tono-activity-rule">
+                    {t('tono.activity.columns.rule')}
+                  </span>
                   <span />
                 </div>
                 <VirtualList

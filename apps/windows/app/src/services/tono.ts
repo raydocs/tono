@@ -174,6 +174,10 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
     key: 'tono.dashboard.errors.protectionReleaseFailed',
   },
   {
+    match: /Encrypted DNS|EnableAutoDoh/i,
+    key: 'tono.dashboard.errors.encryptedDns',
+  },
+  {
     match: /device allowance|DEVICE_LIMIT|device limit/i,
     key: 'tono.login.errors.deviceLimit',
   },
@@ -187,6 +191,16 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
  * Map backend error strings (including stable `TONO_*` prefixes) to a UI message.
  * Pass `t` from `useTranslation` when available; falls back to the raw string.
  */
+export const isEncryptedDnsFailure = (error: unknown): boolean => {
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : String(error ?? '')
+  return /Encrypted DNS|EnableAutoDoh/i.test(raw)
+}
+
 export const formatTonoActionError = (
   error: unknown,
   t?: (key: string) => string,
@@ -362,7 +376,7 @@ export const tonoRetryNow = () => call<void>('tono_retry_now')
 export const formatTonoElapsed = (ms: number) =>
   ms >= 10000 ? `${Math.round(ms / 1000)}s` : `${(ms / 1000).toFixed(1)}s`
 
-// ---- Diagnostics (user-initiated upload) ----
+// ---- Diagnostics (manual resend; connect failures also upload automatically) ----
 //
 // `TonoDiagnosticsReport` mirrors `tono_core::auth::DiagnosticsReport`, which
 // is the single definition of the upload payload — see the wire-shape comment

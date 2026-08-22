@@ -63,6 +63,8 @@ vi.mock('@/services/tono', () => ({
   tonoSignInVerify: tonoSignInVerifyMock,
   tonoRetryRestore: tonoRetryRestoreMock,
   tonoDisconnect: tonoDisconnectMock,
+  formatTonoActionError: (error: unknown) =>
+    error instanceof Error ? error.message : String(error),
   TONO_STATUS_EVENT: 'tono://status',
 }))
 
@@ -319,7 +321,7 @@ describe('login flow under status pushes', () => {
       </MemoryRouter>,
     )
 
-    // t() returns the key with no resources loaded.
+    // t() returns the key with no resources loaded. Email is on the first screen.
     const emailInput = (await screen.findByPlaceholderText(
       'tono.login.emailPlaceholder',
     )) as HTMLInputElement

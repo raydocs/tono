@@ -14,8 +14,8 @@ use crate::feat;
 use crate::utils::window_manager::WindowManager;
 
 pub const FLYOUT_LABEL: &str = "tray-flyout";
-const FLYOUT_WIDTH: f64 = 296.0;
-const FLYOUT_HEIGHT: f64 = 208.0;
+const FLYOUT_WIDTH: f64 = 280.0;
+const FLYOUT_HEIGHT: f64 = 176.0;
 const FLYOUT_GAP: f64 = 8.0;
 const BLUR_GRACE: Duration = Duration::from_millis(400);
 
@@ -79,12 +79,42 @@ fn build_flyout(app: &AppHandle) -> Result<WebviewWindow> {
         .visible(false)
         .focused(true)
         .skip_taskbar(true)
-        .shadow(false)
+        .shadow(true)
         .background_color(Color(0, 0, 0, 0));
     // macOS needs macos-private-api for transparent(); Windows/Linux expose it.
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
-    Ok(builder.build()?)
+    let window = builder.build()?;
+    #[cfg(windows)]
+    round_flyout_corners(&window);
+    Ok(window)
+}
+
+#[cfg(windows)]
+fn round_flyout_corners(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+
+    let Ok(raw) = window.hwnd() else {
+        return;
+    };
+    let hwnd = HWND(raw.0 as *mut core::ffi::c_void);
+    let preference = DWMWCP_ROUND;
+    // SAFETY: hwnd is the live flyout window; the preference pointer is a
+    // local that outlives the call.
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::from_ref(&preference).cast(),
+            std::mem::size_of_val(&preference) as u32,
+        )
+    };
+    if let Err(error) = result {
+        logging!(warn, Type::Tray, "flyout round corners skipped: {error}");
+    }
 }
 
 fn show_flyout(window: &WebviewWindow) {

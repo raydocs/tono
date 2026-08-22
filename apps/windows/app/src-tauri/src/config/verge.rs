@@ -97,6 +97,10 @@ pub struct TonoPreferences {
     /// can the app auto startup
     pub enable_auto_launch: Option<bool>,
 
+    /// Set once launch-at-startup has been decided (settings toggle or first
+    /// successful connect). Until then, first connect turns autostart on.
+    pub auto_launch_seeded: Option<bool>,
+
     /// not show the window on launch
     pub enable_silent_start: Option<bool>,
 
@@ -242,7 +246,6 @@ pub struct TonoPreferences {
     )]
     pub webdav_password: Option<String>,
 
-    #[cfg(target_os = "macos")]
     pub enable_tray_speed: Option<bool>,
 
     // pub enable_tray_icon: Option<bool>,
@@ -431,6 +434,7 @@ impl TonoPreferences {
             #[cfg(target_os = "macos")]
             macos_kill_switch_mode: Some(tono_service_protocol::MacosKillSwitchMode::Disabled),
             enable_auto_launch: Some(false),
+            auto_launch_seeded: Some(false),
             enable_silent_start: Some(false),
             enable_hover_jump_navigator: Some(true),
             hover_jump_navigator_delay: Some(280),
@@ -465,8 +469,7 @@ impl TonoPreferences {
             webdav_url: None,
             webdav_username: None,
             webdav_password: None,
-            #[cfg(target_os = "macos")]
-            enable_tray_speed: Some(false),
+            enable_tray_speed: Some(true),
             // enable_tray_icon: Some(true),
             tray_proxy_groups_display_mode: Some("default".into()),
             tray_inline_outbound_modes: Some(false),
@@ -525,6 +528,10 @@ impl TonoPreferences {
         #[cfg(target_os = "macos")]
         patch!(macos_kill_switch_mode);
         patch!(enable_auto_launch);
+        if patch.enable_auto_launch.is_some() {
+            self.auto_launch_seeded = Some(true);
+        }
+        patch!(auto_launch_seeded);
         patch!(enable_silent_start);
         patch!(enable_hover_jump_navigator);
         patch!(hover_jump_navigator_delay);
@@ -573,7 +580,6 @@ impl TonoPreferences {
         patch!(webdav_url);
         patch!(webdav_username);
         patch!(webdav_password);
-        #[cfg(target_os = "macos")]
         patch!(enable_tray_speed);
         // patch!(enable_tray_icon);
         patch!(tray_proxy_groups_display_mode);
@@ -605,3 +611,19 @@ impl TonoPreferences {
 
 /// Temporary name while remaining call sites move to [`TonoPreferences`].
 pub type IVerge = TonoPreferences;
+
+#[cfg(test)]
+mod auto_launch_seed {
+    use super::TonoPreferences;
+
+    #[test]
+    fn toggling_auto_launch_marks_it_decided() {
+        let mut prefs = TonoPreferences::default();
+        prefs.patch_config(&TonoPreferences {
+            enable_auto_launch: Some(false),
+            ..TonoPreferences::default()
+        });
+        assert_eq!(prefs.enable_auto_launch, Some(false));
+        assert_eq!(prefs.auto_launch_seeded, Some(true));
+    }
+}

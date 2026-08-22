@@ -12,6 +12,7 @@ import {
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
   formatTonoActionError,
+  isEncryptedDnsFailure,
   subscribeTonoStatus,
   tonoAuditEnabled,
   tonoAuditLogPath,
@@ -235,5 +236,21 @@ describe('connectErrorSuggestsServerSwitch', () => {
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.protectionReleaseFailed')
+    expect(
+      formatTonoActionError(
+        new Error(
+          'fake-ip verification failed: Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1. Turn Encrypted DNS off',
+        ),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.dashboard.errors.encryptedDns')
+    expect(
+      isEncryptedDnsFailure(
+        new Error(
+          'fake-ip verification failed: Windows Encrypted DNS (DNS over HTTPS) may still be overriding 127.0.0.1',
+        ),
+      ),
+    ).toBe(true)
+    expect(isEncryptedDnsFailure(new Error('node unreachable'))).toBe(false)
   })
 })

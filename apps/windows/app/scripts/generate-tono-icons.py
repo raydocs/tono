@@ -85,6 +85,27 @@ def monochrome_icon(master: Image.Image, size: int) -> Image.Image:
     return output
 
 
+def with_status_dot(image: Image.Image, rgb: tuple[int, int, int]) -> Image.Image:
+    """Corner status pip so 16px tray states stay distinct on light and dark taskbars."""
+
+    from PIL import ImageDraw
+
+    output = image.copy()
+    draw = ImageDraw.Draw(output)
+    size = output.size[0]
+    radius = max(3, round(size * 0.15))
+    margin = max(1, round(size * 0.07))
+    x2 = size - margin
+    y2 = size - margin
+    x1 = x2 - radius * 2
+    y1 = y2 - radius * 2
+    draw.ellipse((x1 - 1, y1 - 1, x2 + 1, y2 + 1), fill=(20, 22, 30, 220))
+    draw.ellipse((x1, y1, x2, y2), fill=(255, 255, 255, 235))
+    inset = max(1, round(radius * 0.28))
+    draw.ellipse((x1 + inset, y1 + inset, x2 - inset, y2 - inset), fill=(*rgb, 255))
+    return output
+
+
 def save_png(image: Image.Image, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path, format="PNG", optimize=True)
@@ -177,7 +198,11 @@ def main() -> None:
     save_png(resize_rgba(master, 256), ASSETS_DIR / "logo.png")
     save_png(resize_rgba(master, 256), ASSETS_DIR / "logo-mask.png")
 
-    color_tray_names = ("tray-icon.ico", "tray-icon-sys.ico", "tray-icon-tun.ico")
+    color_tray_dots = {
+        "tray-icon.ico": (142, 142, 147),
+        "tray-icon-sys.ico": (255, 159, 10),
+        "tray-icon-tun.ico": (46, 213, 115),
+    }
     mono_tray_names = (
         "tray-icon-mono.ico",
         "tray-icon-sys-mono.ico",
@@ -185,10 +210,12 @@ def main() -> None:
         "tray-icon-tun-mono.ico",
         "tray-icon-tun-mono-new.ico",
     )
-    color_tray_images = [resize_rgba(master, size) for size in TRAY_ICO_SIZES]
     mono_tray_images = [monochrome_icon(master, size) for size in TRAY_ICO_SIZES]
-    for name in color_tray_names:
-        save_ico(color_tray_images, ICONS_DIR / name)
+    for name, rgb in color_tray_dots.items():
+        save_ico(
+            [with_status_dot(resize_rgba(master, size), rgb) for size in TRAY_ICO_SIZES],
+            ICONS_DIR / name,
+        )
     for name in mono_tray_names:
         save_ico(mono_tray_images, ICONS_DIR / name)
 
