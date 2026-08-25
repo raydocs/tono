@@ -84,9 +84,11 @@ struct LoginView: View {
     @State private var appeared = false
     @State private var showEmailForm = false
 
-    /// A live challenge pins the form open regardless of navigation state.
+    /// Email is the first screen. A live challenge keeps the code field open.
     private var showsEmailForm: Bool {
-        showEmailForm || session.emailChallenge != nil
+        (methods?.email.enabled == true)
+            || showEmailForm
+            || session.emailChallenge != nil
     }
 
     private var stepSpring: Animation? {
@@ -279,46 +281,31 @@ struct LoginView: View {
                             ))
                             .disabled(busy || resendCountdown > 0)
                             if session.emailChallenge != nil {
-                                Text("If this address is eligible, the code is valid for 10 minutes.")
+                                Text("Code sent to \(email). Sender is Tono <login@lecvia.com>. If this address is eligible, the code is valid for 10 minutes.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
                             }
 
-                            if session.emailChallenge == nil {
-                                Button("Back") {
-                                    withAnimation(stepSpring) { showEmailForm = false }
+                            #if DEBUG
+                            if nativeAppleSignInEnabled {
+                                TonoAppleSignInButton {
+                                    Task {
+                                        await session.signInWithApple(
+                                            deviceName: deviceName
+                                        )
+                                    }
                                 }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 2)
+                                .frame(height: 44)
+                                .frame(maxWidth: .infinity)
+                                .disabled(busy)
                             }
+                            #endif
                         }
                         .transition(stepTransition)
                     } else {
                         VStack(spacing: 10) {
-                            // The two ways in share one row — peers, not a
-                            // stack of competing full-width bars.
                             HStack(spacing: 10) {
-                                if methods.email.enabled {
-                                    Button {
-                                        withAnimation(stepSpring) { showEmailForm = true }
-                                    } label: {
-                                        // Mirrors the Apple button's glyph+label
-                                        // anatomy so the pair reads symmetric.
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "envelope.fill")
-                                                .font(.system(size: 13, weight: .semibold))
-                                            Text("Continue with email")
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                    }
-                                    // While Retry owns the filled treatment the
-                                    // sign-in path steps back to the quiet style.
-                                    .buttonStyle(GateAdaptiveButtonStyle(prominent: error == nil))
-                                    .disabled(busy)
-                                }
-
                                 #if DEBUG
                                 if nativeAppleSignInEnabled {
                                     TonoAppleSignInButton {

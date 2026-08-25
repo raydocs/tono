@@ -5392,14 +5392,21 @@ pub fn build_direct_plan(
     // [80, 443] subset, so this only normalizes order and duplicates.
     let mut web_suffix_rules: Vec<(String, u16)> = Vec::new();
     for entry in suffixes {
-        // Windows has an address-free WFP permit only for the currently
-        // reviewed Bilibili family. Keep other accepted policy suffixes on
-        // the tunnel until their own process/permit contract exists.
+        // Address-free WFP path: Bilibili family plus product China suffixes.
         if !tono_core::config::is_address_free_web_suffix(&entry.host) {
             continue;
         }
         for port in &entry.ports {
             web_suffix_rules.push((entry.host.clone(), *port));
+        }
+    }
+    // Product China suffixes whenever native-app DIRECT pins exist. Without
+    // those pins the WFP port permit is not installed and a suffix rule hangs.
+    if !wechat_tcp.is_empty() {
+        for suffix in tono_core::config::ALWAYS_ADDRESS_FREE_WEB_SUFFIXES {
+            for port in [80_u16, 443] {
+                web_suffix_rules.push((suffix.to_string(), port));
+            }
         }
     }
     web_suffix_rules.sort_unstable();
@@ -7577,13 +7584,22 @@ mod tests {
         );
         // UDP: only (9.0.0.20, 443|8000).
         assert_eq!(plan.udp_wechat_rules.len(), 2);
-        // Only the reviewed Bilibili family is retained for the Windows
-        // address-free path; other accepted suffixes stay tunnelled.
+        // Bilibili from policy plus always-on China suffixes; zoom stays off.
         assert_eq!(
             plan.web_suffix_rules,
             vec![
+                ("aliyuncs.com".to_string(), 80),
+                ("aliyuncs.com".to_string(), 443),
+                ("baidu.com".to_string(), 80),
+                ("baidu.com".to_string(), 443),
                 ("bilibili.com".to_string(), 80),
                 ("bilibili.com".to_string(), 443),
+                ("edu.cn".to_string(), 80),
+                ("edu.cn".to_string(), 443),
+                ("qq.com".to_string(), 80),
+                ("qq.com".to_string(), 443),
+                ("weixinbridge.com".to_string(), 80),
+                ("weixinbridge.com".to_string(), 443),
             ]
         );
         // hosts carry both WeChat domains and the exact web domain.
@@ -7680,6 +7696,22 @@ mod tests {
                 && rule.payload
                     == "((Network,tcp) && (DstPort,443) && (DomainSuffix,bilibili.com))"
         }));
+        assert!(rules.iter().any(|rule| {
+            rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
+                && rule.payload == "((Network,tcp) && (DstPort,443) && (DomainSuffix,qq.com))"
+        }));
+        for suffix in ["baidu.com", "aliyuncs.com", "edu.cn", "weixinbridge.com"] {
+            assert!(
+                rules.iter().any(|rule| {
+                    rule.proxy == tono_core::config::WEB_DIRECT_GROUP_NAME
+                        && rule.payload
+                            == format!(
+                                "((Network,tcp) && (DstPort,443) && (DomainSuffix,{suffix}))"
+                            )
+                }),
+                "{suffix} must be in the controller proof"
+            );
+        }
     }
 
     #[test]

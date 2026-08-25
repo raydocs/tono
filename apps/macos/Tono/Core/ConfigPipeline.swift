@@ -106,8 +106,28 @@ nonisolated struct ConfigPipeline {
         /// bounded root-originated port permit even when this policy contains
         /// no native-app surface. Exact web pins use session endpoints and do
         /// not need this wider permit.
+        /// Product web-direct suffixes, always on when a managed-direct plan
+        /// exists: unidentified helpers and browsers hit these trees.
+        static let productWebDirectSuffixes: [DirectDomainSuffix] = [
+            DirectDomainSuffix(host: "qq.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "baidu.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "aliyuncs.com", ports: [80, 443]),
+            DirectDomainSuffix(host: "edu.cn", ports: [80, 443]),
+            DirectDomainSuffix(host: "weixinbridge.com", ports: [80, 443]),
+        ]
+
+        var effectiveWebDomainSuffixes: [DirectDomainSuffix] {
+            var suffixes = webDomainSuffixes
+            for extra in Self.productWebDirectSuffixes {
+                if !suffixes.contains(where: { $0.host == extra.host }) {
+                    suffixes.append(extra)
+                }
+            }
+            return suffixes.sorted { $0.host < $1.host }
+        }
+
         var requiresAddressFreeDirectPermit: Bool {
-            nativeAppDirect || !webDomainSuffixes.isEmpty
+            nativeAppDirect || !effectiveWebDomainSuffixes.isEmpty
         }
 
         var sessionEndpoints: [DirectEndpoint] {
@@ -431,8 +451,10 @@ nonisolated struct ConfigPipeline {
     /// ordinary sites (`chase.com`, `google.com`, `tesla.com` all appear in the
     /// same audit), and those must keep resolving the way every other app's
     /// hostnames do. Kept to families that are unambiguously WeChat rather than
-    /// Tencent-wide — no bare `qq.com`, which would swallow `v.qq.com` video
-    /// and everything else the managed policy governs separately.
+    /// Tencent-wide DNS — no bare `qq.com` here. Product web-direct now
+    /// carries `qq.com` as a suffix route (browser + unidentified WeChat
+    /// helpers); that list lives on `effectiveWebDomainSuffixes`, not this
+    /// WeChat-resolver family list.
     ///
     /// Accepted limitation, the same one the managed suffixes already carry: a
     /// `nameserver-policy` entry has no fallback to the global nameserver, so
@@ -1275,7 +1297,7 @@ nonisolated struct ConfigPipeline {
             // Suffix routes resolve through this outbound too, so a
             // suffix-only policy must still define it or `nameserver-policy`
             // would reference a proxy that does not exist.
-            || !directPolicy.webDomainSuffixes.isEmpty {
+            || !directPolicy.effectiveWebDomainSuffixes.isEmpty {
             proxyBlock += """
               - name: "\(directProxyName)"
                 type: direct
@@ -1289,7 +1311,7 @@ nonisolated struct ConfigPipeline {
         // without an exact-address PF entry.
         if let directPolicy,
            !directPolicy.webDomainPins.isEmpty
-            || !directPolicy.webDomainSuffixes.isEmpty {
+            || !directPolicy.effectiveWebDomainSuffixes.isEmpty {
             proxyBlock += """
               - name: "\(webDirectProxyName)"
                 type: direct
@@ -1357,7 +1379,7 @@ nonisolated struct ConfigPipeline {
                 : []
         if let directPolicy,
            !directPolicy.directResolverHosts.isEmpty
-            || !directPolicy.webDomainSuffixes.isEmpty
+            || !directPolicy.effectiveWebDomainSuffixes.isEmpty
             || !wechatResolverKeys.isEmpty {
             // Managed-direct hostnames resolve via China DoH through the
             // interface-bound direct outbound so /dns/query returns
@@ -1376,7 +1398,7 @@ nonisolated struct ConfigPipeline {
             // China DoH over the interface-bound direct outbound, which is the
             // same mechanism that kept pinned answers region-correct — and it
             // never needed the pin to work.
-            for suffix in directPolicy.webDomainSuffixes {
+            for suffix in directPolicy.effectiveWebDomainSuffixes {
                 policyKeys.append(suffix.host)
                 policyKeys.append("+.\(suffix.host)")
             }
@@ -1464,7 +1486,7 @@ nonisolated struct ConfigPipeline {
         }
         if let directPolicy,
            !directPolicy.webDomainPins.isEmpty
-            || !directPolicy.webDomainSuffixes.isEmpty {
+            || !directPolicy.effectiveWebDomainSuffixes.isEmpty {
             yaml += """
               - name: "\(webDirectGroupName)"
                 type: fallback
@@ -1630,7 +1652,7 @@ nonisolated struct ConfigPipeline {
             // hosts is what forced the pin refresh whose config reload severed
             // every long-lived connection — but it widens the direct surface,
             // and `MATCH,Tono-Exit` remains the only thing behind it.
-            for suffix in directPolicy.webDomainSuffixes {
+            for suffix in directPolicy.effectiveWebDomainSuffixes {
                 for port in suffix.ports {
                     yaml += "  - AND,((NETWORK,TCP),(DST-PORT,\(port)),(DOMAIN-SUFFIX,\(suffix.host))),\(webDirectGroupName)\n"
                     // Without this the browser's QUIC attempt reaches the

@@ -166,6 +166,21 @@ final class CoreRouteClassificationTests: XCTestCase {
         XCTAssertTrue(runtime.contains(
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,feishu.cn)),Tono-China-Web"
         ))
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,qq.com)),Tono-China-Web"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,baidu.com)),Tono-China-Web"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,aliyuncs.com)),Tono-China-Web"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,edu.cn)),Tono-China-Web"
+        ))
+        XCTAssertTrue(runtime.contains(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,weixinbridge.com)),Tono-China-Web"
+        ))
         XCTAssertTrue(runtimePolicy.requiresAddressFreeDirectPermit)
     }
 

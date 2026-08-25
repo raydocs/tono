@@ -25,15 +25,29 @@ pub const WEB_DIRECT_GROUP_NAME: &str = "Tono-China-Web-Direct";
 /// Web suffixes that may use an address-free DIRECT rule on Windows.
 ///
 /// Windows can only make this safe when the WFP reviewed-port permit is live
-/// for the staged core. Keep this deliberately smaller than the policy
-/// allowlist: a suffix such as `edu.cn` or `aliyuncs.com` is a namespace, not
-/// an identity, and routing every tenant on it to the physical interface
-/// would widen the user's DIRECT surface unexpectedly.
-pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 4] = [
+/// for the staged core. Keep this smaller than the full policy allowlist
+/// (`zoom.us` and similar stay tunnelled). The China-site suffixes below are
+/// product-direct: any process, TCP 80/443, same staged-core port permit as
+/// Bilibili.
+pub const ADDRESS_FREE_WEB_SUFFIXES: [&str; 9] = [
     "bilibili.com",
     "biliapi.net",
     "bilivideo.com",
     "hdslb.com",
+    "qq.com",
+    "baidu.com",
+    "aliyuncs.com",
+    "edu.cn",
+    "weixinbridge.com",
+];
+/// Always attached to a native-app DIRECT plan, even if the published policy
+/// omitted them. Unidentified helpers and browsers hit these trees.
+pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 5] = [
+    "qq.com",
+    "baidu.com",
+    "aliyuncs.com",
+    "edu.cn",
+    "weixinbridge.com",
 ];
 
 pub fn is_address_free_web_suffix(host: &str) -> bool {
@@ -954,10 +968,8 @@ fn runtime_value(
                 "AND,((NETWORK,TCP),(DST-PORT,{port}),(DOMAIN,{host}),(IP-CIDR,{address}/32,no-resolve)),{WEB_DIRECT_GROUP_NAME}"
             ));
         }
-        // Only the Bilibili family is currently admitted to the Windows
-        // address-free path. The signed native-app path permit above is the
-        // WFP boundary; arbitrary policy suffixes stay tunnelled until they
-        // receive an equivalent reviewed route.
+        // Address-free path: Bilibili family plus product China suffixes.
+        // The signed native-app path permit above is the WFP boundary.
         if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
             for (suffix, port) in &plan.web_suffix_rules {
                 if !is_address_free_web_suffix(suffix) {
@@ -1652,7 +1664,25 @@ reality-opts:
         assert!(yaml.contains(
             "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,bilibili.com)),Tono-China-Web-Direct"
         ));
-        assert!(!yaml.contains("DOMAIN-SUFFIX,baidu.com"));
+        assert!(!yaml.contains("DOMAIN-SUFFIX,zoom.us"));
+        for suffix in ALWAYS_ADDRESS_FREE_WEB_SUFFIXES {
+            plan.web_suffix_rules.push((suffix.to_string(), 443));
+        }
+        let extra_runtime = build_owned_runtime(
+            &three_nodes(),
+            "JP Reality 02",
+            "test-secret",
+            Some(&plan),
+        )
+        .expect("runtime");
+        for suffix in ALWAYS_ADDRESS_FREE_WEB_SUFFIXES {
+            assert!(
+                extra_runtime.yaml().contains(&format!(
+                    "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,{suffix})),Tono-China-Web-Direct"
+                )),
+                "{suffix} must emit as address-free web-direct"
+            );
+        }
 
         let suffix_index = yaml
             .find("DOMAIN-SUFFIX,bilibili.com")

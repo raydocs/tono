@@ -22,6 +22,7 @@ struct SupportView: View {
         case report
         case recoveryCommand
         case timing
+        case appVersion
     }
 
     private struct RuntimeProbe {
@@ -47,6 +48,7 @@ struct SupportView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     summaryCard(snapshot)
+                    webrtcCard
                     if !appState.lastConnectionStageDurations.isEmpty {
                         connectTimingCard
                     }
@@ -117,6 +119,11 @@ struct SupportView: View {
                 label: String(localized: "App"),
                 value: "\(AppProfile.displayName) \(snapshot.appVersion) (\(snapshot.build))"
             )
+            copyButton(
+                title: String(localized: "Copy version for support"),
+                target: .appVersion,
+                value: "Tono \(snapshot.appVersion) (\(snapshot.build)) · macOS \(osVersionText)"
+            )
             supportDivider
             SupportRow(label: String(localized: "macOS"), value: osVersionText)
             supportDivider
@@ -152,6 +159,28 @@ struct SupportView: View {
                 value: lastErrorText,
                 monospaced: true
             )
+        }
+    }
+
+    private var webrtcCard: some View {
+        SupportCard(
+            icon: "dot.radiowaves.left.and.right",
+            title: String(localized: "WebRTC leak check")
+        ) {
+            Text(String(localized: "Opens a page that shows whether your browser is leaking a local or tunnel address. Compare it with the protected IP on the dashboard."))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                if let url = URL(string: "https://ip.cx/webrtc") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Text(String(localized: "Open WebRTC check"))
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 

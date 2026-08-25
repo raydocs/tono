@@ -93,16 +93,27 @@ final class WeChatResolverPolicyTests: XCTestCase {
     }
 
     func testNoTencentWideWildcardSlipsIn() throws {
-        // A bare `qq.com` would swallow `v.qq.com` video and everything else
-        // the managed policy governs separately.
+        // WeChat-resolver families stay narrower than Tencent-wide. Product
+        // web-direct now carries `qq.com` itself (browser + unidentified
+        // helpers); that is `effectiveWebDomainSuffixes`, not this list.
         for suffix in ConfigPipeline.wechatDirectDNSSuffixes {
             XCTAssertNotEqual(suffix, "qq.com")
             XCTAssertNotEqual(suffix, "tencent.com")
         }
-        let keys = Set(nameserverPolicy(try runtime(
-            directPolicy: Fixture.directPolicy()
-        )))
-        XCTAssertFalse(keys.contains("+.qq.com"))
+        let yaml = try runtime(directPolicy: Fixture.directPolicy())
+        let keys = Set(nameserverPolicy(yaml))
+        XCTAssertFalse(keys.contains("+.tencent.com"))
+        XCTAssertFalse(keys.contains("+.zoom.us"))
+        for host in ["qq.com", "baidu.com", "aliyuncs.com", "edu.cn", "weixinbridge.com"] {
+            XCTAssertTrue(keys.contains(host), "missing \(host)")
+            XCTAssertTrue(keys.contains("+.\(host)"), "missing +.\(host)")
+            XCTAssertTrue(
+                yaml.contains(
+                    "AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN-SUFFIX,\(host))),\(ConfigPipeline.webDirectGroupName)"
+                ),
+                "\(host) must be web-direct"
+            )
+        }
     }
 
     func testPublishedPolicyHostsSurviveAlongsideThem() throws {

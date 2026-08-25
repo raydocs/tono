@@ -14,45 +14,97 @@ struct ContentView: View {
                 SidebarView(selectedPage: $appState.selectedPage)
                     .navigationSplitViewColumnWidth(200)
             } detail: {
-                ZStack(alignment: .topTrailing) {
-                    Group {
-                        switch appState.selectedPage {
-                        case .dashboard:
-                            DashboardView()
-                        case .proxies:
-                            ProxiesView()
-                        case .rules:
-                            RulesView()
-                        case .activity:
-                            ActivityView()
-                        case .logs:
-                            LogsView()
-                        case .support:
-                            SupportView()
-                        case .settings:
-                            SettingsView()
-                        }
+                VStack(spacing: 0) {
+                    if appState.isProtectionBlocked {
+                        ProtectedOfflineBanner()
                     }
+                    ZStack(alignment: .topTrailing) {
+                        Group {
+                            switch appState.selectedPage {
+                            case .dashboard:
+                                DashboardView()
+                            case .proxies:
+                                ProxiesView()
+                            case .rules:
+                                RulesView()
+                            case .activity:
+                                ActivityView()
+                            case .logs:
+                                LogsView()
+                            case .support:
+                                SupportView()
+                            case .settings:
+                                SettingsView()
+                            }
+                        }
 
-                    if let error = appState.errorMessage {
-                        ErrorBanner(message: error) {
-                            appState.errorMessage = nil
+                        if let error = appState.errorMessage {
+                            ErrorBanner(message: error) {
+                                appState.errorMessage = nil
+                            }
+                            .padding(16)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        .padding(16)
-                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
+                    .frame(minWidth: 660, minHeight: 540)
+                    .animation(
+                        .easeOut(duration: 0.18),
+                        value: appState.errorMessage != nil
+                    )
                 }
-                .frame(minWidth: 660, minHeight: 540)
-                .animation(
-                    .easeOut(duration: 0.18),
-                    value: appState.errorMessage != nil
-                )
             }
             .navigationSplitViewStyle(.balanced)
             .onChange(of: columnVisibility) {
                 columnVisibility = .doubleColumn
             }
         }
+    }
+}
+
+private struct ProtectedOfflineBanner: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Circle()
+                .fill(TonoStatus.blocked)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Protected Offline")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Direct traffic is blocked. Restore internet from here if you need the network.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Retry now") {
+                appState.retryProtectedConnectionNow()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(TonoStatus.blocked)
+            .controlSize(.small)
+            .disabled(!appState.isTonoReady || appState.isDisconnecting)
+            Button("Restore internet") {
+                appState.disconnect(releaseKillSwitch: true)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button("Choose another route") {
+                appState.selectedPage = .proxies
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(TonoStatus.blocked.opacity(0.12))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(TonoStatus.blocked.opacity(0.28))
+                .frame(height: 1)
+        }
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

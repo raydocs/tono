@@ -69,11 +69,12 @@ struct DashboardView: View {
 
                 Spacer(minLength: 12)
 
-                dashboardOverview
+                if !showsConnectionDetails {
+                    dashboardOverview
 
-                // Network info bar (when connected)
-                if appState.isConnected {
-                    networkInfoBar
+                    if appState.isConnected {
+                        networkInfoBar
+                    }
                 }
             }
             .padding(.horizontal, 32)
@@ -345,21 +346,16 @@ struct DashboardView: View {
 private struct ConnectionProgressCard: View {
     @Bindable var appState: AppState
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 12, alignment: .leading),
-        GridItem(.flexible(), spacing: 12, alignment: .leading),
-    ]
-
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 12) {
                 header(now: context.date)
 
-                if appState.isConnecting || appState.lastConnectionFailure != nil {
+                if !highlightedStages.isEmpty {
                     Divider().opacity(0.45)
 
-                    LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                        ForEach(ConnectionStage.allCases, id: \.self) { stage in
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(highlightedStages, id: \.self) { stage in
                             stageRow(stage)
                         }
                     }
@@ -380,6 +376,15 @@ private struct ConnectionProgressCard: View {
                 .regular.tint(cardTint),
                 in: RoundedRectangle(cornerRadius: 18)
             )
+        }
+    }
+
+    /// Current and failed steps only — listing every pending stage pushes
+    /// Restore internet below the fold on the one screen that needs it.
+    private var highlightedStages: [ConnectionStage] {
+        ConnectionStage.allCases.filter { stage in
+            (appState.isConnecting && stage == appState.connectionStage)
+                || appState.lastConnectionFailure?.stage == stage
         }
     }
 
