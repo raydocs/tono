@@ -2378,17 +2378,14 @@ async function sharedAdministrativeResource(
     rejectUnexpectedKeys(b, ['yaml', 'expectedRevision']);
     const yaml = managedCatalogYAML(b.yaml);
     const expectedRevision = b.expectedRevision;
-    if (
-      expectedRevision !== undefined &&
-      (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
-    ) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'expectedRevision is required and must be a non-negative integer');
     }
     const current = await e.DB.prepare(
       'SELECT revision FROM managed_exit_catalog WHERE singleton_id = 1',
     ).first<Row>();
     const currentRevision = Number(current?.revision ?? 0);
-    if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+    if (expectedRevision !== currentRevision) {
       throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; reload before replacing it');
     }
     const revision = currentRevision + 1;
@@ -2409,6 +2406,14 @@ async function sharedAdministrativeResource(
     if (!changed.meta.changes) {
       throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; reload before replacing it');
     }
+    await writeOpsAudit(
+      e,
+      actorEmail,
+      'catalog.publish',
+      'managed_exit_catalog',
+      String(revision),
+      `published r${currentRevision} → r${revision} (${digest.slice(0, 16)})`,
+    );
     return Response.json({ revision, sha256: digest, updatedAt: t });
   }
   if (resource === 'traffic-policy' && m === 'GET') {
@@ -2452,14 +2457,14 @@ async function sharedAdministrativeResource(
       });
     }
     const expectedRevision = b.expectedRevision;
-    if (expectedRevision !== undefined && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'expectedRevision is required and must be a non-negative integer');
     }
     const current = await e.DB.prepare(
       'SELECT revision FROM managed_traffic_policy WHERE singleton_id = 1',
     ).first<Row>();
     const currentRevision = Number(current?.revision ?? 0);
-    if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+    if (expectedRevision !== currentRevision) {
       throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
     }
     const revision = currentRevision + 1;
@@ -2481,6 +2486,14 @@ async function sharedAdministrativeResource(
     if (!changed.meta.changes) {
       throw new ApiError(409, 'TRAFFIC_POLICY_CONFLICT', 'Managed traffic policy changed; reload before replacing it');
     }
+    await writeOpsAudit(
+      e,
+      actorEmail,
+      'traffic-policy.publish',
+      'managed_traffic_policy',
+      String(revision),
+      `published r${currentRevision} → r${revision} (${digest.slice(0, 16)})`,
+    );
     return Response.json({
       revision, json, sha256: digest, updatedAt: t,
       ...(signature ? { signature } : {}),
@@ -2890,7 +2903,15 @@ async function operationsFleetNodes(e: Env) {
     const observedAt = agent && typeof agent.observedAt === 'number' ? agent.observedAt : null;
     const agentStatus = observedAt === null ? 'missing' : nowSec - observedAt > 15 * 60 ? 'stale' : 'online';
     const q = fleetQualityStatus(qualityNode ?? undefined);
-    const affectedUsers = activity.users.filter((user) => user.selectedServer === name);
+    const affectedRows = activity.users.filter((user) => user.selectedServer === name);
+    const affectedByUser = new Map<string, Row>();
+    for (const user of affectedRows) {
+      const current = affectedByUser.get(String(user.userId));
+      if (!current || Number(user.lastSeenAt) > Number(current.lastSeenAt)) {
+        affectedByUser.set(String(user.userId), user);
+      }
+    }
+    const affectedUsers = [...affectedByUser.values()];
     const reasons: string[] = [];
     const listed = catalogNames?.has(name) ?? null;
     if (listed === true && q.status === 'DOWN') reasons.push('catalog_health_down');
@@ -2909,7 +2930,7 @@ async function operationsFleetNodes(e: Env) {
       profile: profileRow ? publicNodeProfile(profileRow) : null,
       agent,
       quality: qualityNode,
-      occupancy: affectedUsers.filter((user) => user.online).length,
+      occupancy: new Set(affectedRows.filter((user) => user.online).map((user) => String(user.userId))).size,
       affectedUsers,
       needsAttention: reasons.length > 0,
       reasons,
@@ -3499,15 +3520,34 @@ function liveExposure(value: unknown): Row | null {
   };
 }
 
-function liveQualityReport(value: unknown): { updatedAt: number | null; updatedAtIso: string | null; cnAgentsConfigured: number | null; nodes: Row[] } | null {
+function liveObservedAt(value: unknown, receivedAt?: number): number | null {
+  const observedAt = optionalNumber(value);
+  if (observedAt === null || !Number.isFinite(observedAt)) return null;
+  if (observedAt <= 0) return receivedAt ?? null;
+  if (receivedAt !== undefined && observedAt > receivedAt + 5 * 60) {
+    return receivedAt;
+  }
+  return observedAt;
+}
+
+function liveQualityReport(
+  value: unknown,
+  receivedAt?: number,
+): { updatedAt: number | null; updatedAtIso: string | null; cnAgentsConfigured: number | null; nodes: Row[] } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Row;
   const sourceNodes = Array.isArray(raw.nodes) ? raw.nodes : null;
   if (!sourceNodes) return null;
   const nodes = sourceNodes.slice(0, OPS_LIVE_MAX_NODES).map(liveQualityNode).filter((node): node is Row => node !== null);
+  const updatedAt = liveObservedAt(raw.updatedAt ?? raw.updated_at, receivedAt);
   return {
-    updatedAt: optionalNumber(raw.updatedAt ?? raw.updated_at),
-    updatedAtIso: optionalText(raw.updatedAtIso ?? raw.updated_at_iso),
+    updatedAt,
+    // Keep the two representations consistent when a broken collector clock is
+    // pinned to receipt time. The console uses the integer for incident age, but
+    // a contradictory ISO string is still misleading to API consumers.
+    updatedAtIso: updatedAt === null
+      ? optionalText(raw.updatedAtIso ?? raw.updated_at_iso)
+      : new Date(updatedAt * 1_000).toISOString(),
     cnAgentsConfigured: optionalNumber(raw.cnAgentsConfigured ?? raw.cn_agents_configured),
     nodes,
   };
@@ -3567,7 +3607,7 @@ function liveCarriers(value: unknown): Row | null {
   return Object.keys(out).length ? out : null;
 }
 
-function liveAgents(value: unknown): Row[] | null {
+function liveAgents(value: unknown, receivedAt?: number): Row[] | null {
   if (value === null || value === undefined) return null;
   const rows = Array.isArray(value)
     ? value
@@ -3605,7 +3645,7 @@ function liveAgents(value: unknown): Row[] | null {
       swapUsed: optionalNumber(node.swapUsed ?? node.swap_used),
       tcpConnections: optionalNumber(node.tcpConnections ?? node.tcp_connections),
       processes: optionalNumber(node.processes ?? node.process),
-      observedAt: optionalNumber(node.observedAt ?? node.observed_at),
+      observedAt: liveObservedAt(node.observedAt ?? node.observed_at, receivedAt),
       // Komari /api/nodes inventory. Manual nodeProfiles still win when filled;
       // these fill the holes so "which box renews / is about to blow quota"
       // is not a second spreadsheet.
@@ -3671,11 +3711,19 @@ async function storeLiveSnapshot(e: Env, input: { quality?: ReturnType<typeof li
 
 async function operationsLive(e: Env) {
   const stored = await storedLiveSnapshot(e);
+  const qualityReceivedAt = optionalNumber(stored?.quality_updated_at);
+  const agentsReceivedAt = optionalNumber(stored?.agents_updated_at);
   const quality = stored?.quality_json
-    ? liveQualityReport(JSON.parse(String(stored.quality_json)))
+    ? liveQualityReport(
+      JSON.parse(String(stored.quality_json)),
+      qualityReceivedAt !== null && Number.isFinite(qualityReceivedAt) ? qualityReceivedAt : undefined,
+    )
     : null;
   const agents = stored?.agents_json
-    ? liveAgents(JSON.parse(String(stored.agents_json)))
+    ? liveAgents(
+      JSON.parse(String(stored.agents_json)),
+      agentsReceivedAt !== null && Number.isFinite(agentsReceivedAt) ? agentsReceivedAt : undefined,
+    )
     : null;
   const qualityError = quality ? null : 'no quality snapshot';
   const agentsError = agents ? null : 'no agent snapshot';
@@ -3753,14 +3801,20 @@ async function operationsActivity(e: Env) {
   const live = await operationsLive(e);
   const quality = live.quality;
   const rows = await e.DB.prepare(
-    `SELECT t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
-            t.payload_json, u.email
-     FROM telemetry_windows t
-     JOIN users u ON u.id = t.user_id
-     JOIN (
-       SELECT user_id, MAX(received_at) mr FROM telemetry_windows GROUP BY user_id
-     ) latest ON latest.user_id = t.user_id AND latest.mr = t.received_at
-     ORDER BY t.received_at DESC`,
+    `WITH ranked AS (
+       SELECT t.id, t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
+              t.payload_json, u.email,
+              ROW_NUMBER() OVER (
+                PARTITION BY t.user_id, COALESCE(t.device_id, '')
+                ORDER BY t.received_at DESC, t.id DESC
+              ) AS rank
+       FROM telemetry_windows t
+       JOIN users u ON u.id = t.user_id
+     )
+     SELECT id, user_id, device_id, received_at, client_version, os_version, payload_json, email
+     FROM ranked
+     WHERE rank = 1
+     ORDER BY received_at DESC, id DESC`,
   ).all<Row>();
   const nowSec = now();
   const users = rows.results.map((row) => {
@@ -3788,12 +3842,14 @@ async function operationsActivity(e: Env) {
       ...health,
     };
   });
-  const onlineUsers = users.filter((user) => user.online);
+  const onlineRows = users.filter((user) => user.online);
   // Pre-0019 windows carry no device id; fall back to per-user counting there.
-  const onlineDevices = new Set(onlineUsers.map((user) => user.deviceId ?? user.userId)).size;
+  const onlineDevices = new Set(onlineRows.map(
+    (user) => `${user.userId}:${user.deviceId ?? 'legacy'}`,
+  )).size;
   return {
     onlineWindowSeconds: ACTIVITY_ONLINE_SECONDS,
-    onlineUsers: onlineUsers.length,
+    onlineUsers: new Set(onlineRows.map((user) => user.userId)).size,
     onlineDevices,
     users,
   };
@@ -5530,6 +5586,22 @@ async function enforceAll(e: Env) {
       console.error('expirePending failed', row.user_id, x instanceof Error ? x.message : String(x));
     }
   }
+  // Revocation is enforcement, not housekeeping. Run it before retention so a
+  // transient failure deleting old diagnostics or telemetry cannot leave an
+  // ineligible user's tailnet identity live until the next cron tick.
+  if (tailscaleEnrollmentEnabled(e)) {
+    try {
+      await cleanupOrphanPendingNodes(e);
+    } catch (x) {
+      console.error('cleanupOrphanPendingNodes failed', x instanceof Error ? x.message : String(x));
+    }
+    try {
+      await processRevocations(e);
+    } catch (x) {
+      // The durable outbox remains pending and the next scheduled run retries it.
+      console.error('processRevocations failed', x instanceof Error ? x.message : String(x));
+    }
+  }
   const rateWindow = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
   // Diagnostics counters run on a day-long window, so pruning at twice the auth
   // window would silently reset the per-day cap every five minutes.
@@ -5583,14 +5655,6 @@ async function enforceAll(e: Env) {
   );
   await e.DB.prepare('DELETE FROM routing_research_snapshots WHERE received_at <= ?')
     .bind(t - routingResearchRetention).run();
-  if (tailscaleEnrollmentEnabled(e)) {
-    try {
-      await cleanupOrphanPendingNodes(e);
-    } catch (x) {
-      console.error('cleanupOrphanPendingNodes failed', x instanceof Error ? x.message : String(x));
-    }
-    await processRevocations(e);
-  }
 }
 
 async function issueEnrollment(e: Env, d: Row) {
@@ -6632,11 +6696,14 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     if (payload.report === undefined && payload.agents === undefined && payload.homeProbes === undefined) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'report, agents or homeProbes is required');
     }
-    const quality = payload.report === undefined ? undefined : liveQualityReport(payload.report);
+    const receivedAt = now();
+    const quality = payload.report === undefined
+      ? undefined
+      : liveQualityReport(payload.report, receivedAt);
     if (payload.report !== undefined && !quality) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid quality report');
     }
-    const agents = payload.agents === undefined ? undefined : liveAgents(payload.agents);
+    const agents = payload.agents === undefined ? undefined : liveAgents(payload.agents, receivedAt);
     if (payload.agents !== undefined && !agents) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid agent inventory');
     }

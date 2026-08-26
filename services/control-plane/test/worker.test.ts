@@ -850,6 +850,57 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('pins future collector clocks to receipt time in live state and metrics', async () => {
+    const collectorToken = 'collector-test-token-with-at-least-32-chars';
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = collectorToken;
+    const before = Math.floor(Date.now() / 1_000);
+    const futureMilliseconds = (before + 86_400) * 1_000;
+    try {
+      const ingested = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${collectorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          report: {
+            updated_at: futureMilliseconds,
+            updated_at_iso: '2126-01-01T00:00:00Z',
+            nodes: [{ name: 'Future clock', ok: true }],
+          },
+          agents: {
+            data: [{ name: 'Future clock', cpu: 15, observed_at: futureMilliseconds }],
+          },
+        }),
+      });
+      expect(ingested.status).toBe(200);
+      const after = Math.floor(Date.now() / 1_000);
+
+      const response = await operations('live');
+      const { live } = await response.json() as any;
+      const agent = live.agents.find((row: any) => row.name === 'Future clock');
+      expect(agent.observedAt).toBeGreaterThanOrEqual(before);
+      expect(agent.observedAt).toBeLessThanOrEqual(after);
+      expect(live.quality.updatedAt).toBeGreaterThanOrEqual(before);
+      expect(live.quality.updatedAt).toBeLessThanOrEqual(after);
+      expect(live.quality.updatedAtIso)
+        .toBe(new Date(live.quality.updatedAt * 1_000).toISOString());
+
+      const sampleRow = await env.DB.prepare(
+        `SELECT observed_at FROM operations_agent_samples
+         WHERE node_name = 'Future clock'`,
+      ).first<any>();
+      expect(Number(sampleRow.observed_at)).toBe(Math.floor(agent.observedAt / 60) * 60);
+
+      const metrics = await operations('metrics?range=24h&node=Future%20clock');
+      const points = ((await metrics.json() as any).metrics.series['Future clock']) as any[];
+      expect(points).toHaveLength(1);
+      expect(points[0].t).toBe(Number(sampleRow.observed_at));
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
+  });
+
   it('does not let a collector that predates exposure look like a clean node', async () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
     const ingested = await api('ops-ingest/snapshot', {
@@ -1578,6 +1629,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 `;
     expect((await api('exit-catalog')).status).toBe(401);
 
+    const blindWrite = await admin('exit-catalog', { yaml }, 'PUT');
+    expect(blindWrite.status).toBe(400);
+    expect((await blindWrite.json() as any).error.code).toBe('VALIDATION_ERROR');
+
     const literalIdentity = await admin(
       'exit-catalog',
       { yaml: yaml.replace('{{TONO_CLIENT_UUID}}', '11111111-1111-4111-8111-111111111111'), expectedRevision: 0 },
@@ -1590,6 +1645,18 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(created.status).toBe(200);
     const createdBody = await created.json() as any;
     expect(createdBody.revision).toBe(1);
+
+    const publishAudit = await env.DB.prepare(
+      `SELECT actor_email, action, target_type, target_id, summary
+       FROM ops_audit WHERE action = 'catalog.publish'`,
+    ).first<any>();
+    expect(publishAudit).toMatchObject({
+      actor_email: 'token-admin',
+      action: 'catalog.publish',
+      target_type: 'managed_exit_catalog',
+      target_id: '1',
+    });
+    expect(String(publishAudit.summary)).toMatch(/^published r0 → r1 \([A-Za-z0-9_-]{16}\)$/);
 
     const stored = await env.DB.prepare(
       'SELECT revision, ciphertext, nonce, content_sha256 FROM managed_exit_catalog WHERE singleton_id = 1',
@@ -2432,6 +2499,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
       version: 1,
     };
+    const blindWrite = await admin('traffic-policy', { policy }, 'PUT');
+    expect(blindWrite.status).toBe(400);
+    expect((await blindWrite.json() as any).error.code).toBe('VALIDATION_ERROR');
+
     const created = await admin('traffic-policy', { policy, expectedRevision: 0 }, 'PUT');
     expect(created.status).toBe(200);
     const createdBody = await created.json() as any;
@@ -2443,6 +2514,17 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
       mediaEndpoints: [{ address: '43.146.27.17', ports: [443, 8000] }],
     });
+    const publishAudit = await env.DB.prepare(
+      `SELECT actor_email, action, target_type, target_id, summary
+       FROM ops_audit WHERE action = 'traffic-policy.publish'`,
+    ).first<any>();
+    expect(publishAudit).toMatchObject({
+      actor_email: 'token-admin',
+      action: 'traffic-policy.publish',
+      target_type: 'managed_traffic_policy',
+      target_id: '1',
+    });
+    expect(String(publishAudit.summary)).toMatch(/^published r0 → r1 \([A-Za-z0-9_-]{16}\)$/);
     const stored = await env.DB.prepare(
       'SELECT ciphertext, nonce, content_sha256 FROM managed_traffic_policy WHERE singleton_id = 1',
     ).first<any>();
@@ -3452,6 +3534,49 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       installationId: 'expire-rev-installation-one',
     });
     expect(retry.status).toBe(200);
+  });
+
+  it('processes durable revocations before retention housekeeping can fail', async () => {
+    const account = await createAccount('revocation-before-retention');
+    resetMockInventory(account.device.id, account.enrollment.hostname);
+    expect((await confirm(account)).status).toBe(200);
+
+    // Leave the outbox pending after the request path's immediate attempt.
+    failNextDelete = true;
+    const disabled = await admin(`users/${account.user.id}`, { status: 'disabled' }, 'PATCH');
+    expect(disabled.status).toBe(200);
+    const pending = await env.DB.prepare(
+      'SELECT id, completed_at FROM revocation_jobs WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(pending).toBeTruthy();
+    expect(pending.completed_at).toBeNull();
+
+    // Force the first retention statement to abort. Security enforcement must
+    // already have retried the durable deletion when this failure surfaces.
+    await env.DB.prepare(
+      "INSERT INTO rate_limits(key, count, window_start) VALUES('force-retention-failure', 1, 0)",
+    ).run();
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_retention
+       BEFORE DELETE ON rate_limits
+       BEGIN
+         SELECT RAISE(ABORT, 'TEST_RETENTION_FAILURE');
+       END`,
+    ).run();
+    try {
+      const context = createExecutionContext();
+      await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+      await expect(waitOnExecutionContext(context)).rejects.toThrow(/TEST_RETENTION_FAILURE/);
+
+      const completed = await env.DB.prepare(
+        'SELECT completed_at, last_error FROM revocation_jobs WHERE id = ?',
+      ).bind(pending.id).first<any>();
+      expect(completed.completed_at).toBeTypeOf('number');
+      expect(completed.last_error).toBeNull();
+      expect(mockInventory.some((device) => device.id === MGMT_ID)).toBe(false);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_retention').run();
+    }
   });
 
   it('scheduled cleanup revokes superseded pending enrollment hostnames', async () => {
@@ -5093,6 +5218,71 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(me.exitDelayMs).toBeNull();
     expect(me.tcpDelayMs).toBeNull();
     expect(me.nodeHealth).toBe('unknown');
+  });
+
+  it('returns one deterministic latest heartbeat per device without inflating user occupancy', async () => {
+    const account = await createAccount('activity-multi-device');
+    const secondLogin = await emailSignIn({
+      email: account.email,
+      deviceName: 'Second Mac',
+      installationId: 'activity-multi-device-installation-two',
+    });
+    expect(secondLogin.status).toBe(200);
+    const second = await secondLogin.json() as any;
+    const receivedAt = Math.floor(Date.now() / 1_000);
+    const windowStartMs = (receivedAt - 1_200) * 1_000;
+    const windowEndMs = receivedAt * 1_000;
+    const heartbeat = (
+      rowId: string,
+      deviceId: string,
+      at: number,
+      selectedServer: string,
+    ) => env.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+         client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, '0.0.90', 'macOS 26', ?)`,
+    ).bind(
+      rowId,
+      account.user.id,
+      deviceId,
+      at,
+      windowStartMs,
+      windowEndMs,
+      JSON.stringify(telemetryWindowPayload({ selectedServer }).window),
+    );
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+         VALUES('profile-shared-node', 'Shared Node', 'active', ?, ?)`,
+      ).bind(receivedAt, receivedAt),
+      heartbeat('activity-primary-old', account.device.id, receivedAt - 10, 'Old Node'),
+      // Same second, same device: highest id must win rather than returning both
+      // rows or whichever SQLite happened to encounter first.
+      heartbeat('activity-primary-a', account.device.id, receivedAt, 'Wrong Node'),
+      heartbeat('activity-primary-z', account.device.id, receivedAt, 'Shared Node'),
+      heartbeat('activity-secondary', second.device.id, receivedAt, 'Shared Node'),
+    ]);
+
+    const response = await operations('activity');
+    expect(response.status).toBe(200);
+    const { activity } = await response.json() as any;
+    const mine = activity.users.filter((row: any) => row.userId === account.user.id);
+    expect(mine).toHaveLength(2);
+    expect(activity.onlineUsers).toBe(1);
+    expect(activity.onlineDevices).toBe(2);
+    expect(mine.find((row: any) => row.deviceId === account.device.id)?.selectedServer)
+      .toBe('Shared Node');
+    expect(mine.find((row: any) => row.deviceId === second.device.id)?.selectedServer)
+      .toBe('Shared Node');
+
+    const fleet = await operations('fleet-nodes');
+    const shared = ((await fleet.json() as any).nodes as any[])
+      .find((node) => node.name === 'Shared Node');
+    expect(shared.occupancy).toBe(1);
+    expect(shared.affectedUsers).toHaveLength(1);
+    expect(shared.affectedUsers[0].userId).toBe(account.user.id);
   });
 
   it('accepts split path delays on a telemetry window and joins node health for every customer', async () => {

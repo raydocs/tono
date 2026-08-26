@@ -10,6 +10,7 @@ const HOME_PROBE_RETENTION_SECONDS = 90 * 86400;
 const QUALITY_SAMPLE_RETENTION_SECONDS = 90 * 86400;
 const NAME_LIMIT = 120;
 const MAX_SERIES_POINTS = 2_000;
+const MAX_FUTURE_SKEW_SECONDS = 5 * 60;
 
 export type AgentSample = {
   name: string;
@@ -68,6 +69,14 @@ function floorMinute(unix: number): number {
   return Math.floor(unix / 60) * 60;
 }
 
+function sampleObservedAt(value: unknown, nowUnix: number): number {
+  const observed = finite(value);
+  if (observed === null || observed <= 0 || observed > nowUnix + MAX_FUTURE_SKEW_SECONDS) {
+    return nowUnix;
+  }
+  return observed;
+}
+
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
 }
@@ -83,7 +92,12 @@ export async function recordAgentSamples(
   for (const agent of agents) {
     const name = nodeName(agent.name);
     if (!name) continue;
-    const observed = floorMinute(finite(agent.observedAt) || nowUnix);
+    // The collector is trusted to authenticate, not to have a perfect clock.
+    // A millisecond timestamp or a host clock in the future otherwise creates a
+    // row outside every normal query/retention window and can keep the live node
+    // looking fresh indefinitely. Preserve genuinely old samples (they describe
+    // a stalled probe), but pin invalid/future values to receipt time.
+    const observed = floorMinute(sampleObservedAt(agent.observedAt, nowUnix));
     const key = `${name}:${observed}`;
     if (seen.has(key)) continue;
     seen.add(key);

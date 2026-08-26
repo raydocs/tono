@@ -70,7 +70,7 @@ describe('operations timeseries retention', () => {
     const bucket = 1_800_000_000;
     const minutes = Array.from({ length: 60 }, (_, i) => bucket + i * 60);
     await recordAgentSamples(
-      db(), minutes.map((t, i) => sample('Bulk', t, i)), bucket,
+      db(), minutes.map((t, i) => sample('Bulk', t, i)), bucket + 3_600,
     );
     await retainOperationsTimeseries(db(), bucket + 3_600 + 48 * 3600);
 
@@ -80,6 +80,31 @@ describe('operations timeseries retention', () => {
     ).first<Record<string, any>>();
     // Sixty minutes at five-minute resolution is twelve buckets, not sixty.
     expect(Number(rollups!.c)).toBe(12);
+  });
+
+  it('pins invalid or far-future clocks to receipt time without rewriting old samples', async () => {
+    const receivedAt = 1_800_100_123;
+    await recordAgentSamples(db(), [
+      // A millisecond timestamp is the collector failure this guard primarily
+      // addresses: without pinning, it lands centuries outside query/retention.
+      sample('Future clock', receivedAt * 1_000, 10),
+      sample('Invalid clock', 0, 20),
+      sample('Old probe', receivedAt - 7_200, 30),
+    ], receivedAt);
+
+    const rows = await db().prepare(
+      `SELECT node_name, observed_at FROM operations_agent_samples
+       ORDER BY node_name`,
+    ).all<Record<string, any>>();
+    const observed = Object.fromEntries(rows.results.map((row) => [
+      String(row.node_name),
+      Number(row.observed_at),
+    ]));
+    expect(observed).toEqual({
+      'Future clock': Math.floor(receivedAt / 60) * 60,
+      'Invalid clock': Math.floor(receivedAt / 60) * 60,
+      'Old probe': Math.floor((receivedAt - 7_200) / 60) * 60,
+    });
   });
 
   it('serves the most recent week in a 90-day view', async () => {
