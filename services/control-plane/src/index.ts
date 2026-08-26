@@ -6861,9 +6861,13 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       if (p === '/api/v1/ops/metrics') {
         const url = new URL(req.url);
+        const range = url.searchParams.get('range');
+        if (range !== null && !['24h', '7d', '90d'].includes(range)) {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Unsupported metrics range');
+        }
         return Response.json({
           metrics: await queryAgentMetrics(e.DB, {
-            range: url.searchParams.get('range'),
+            range,
             node: url.searchParams.get('node'),
             nowUnix: now(),
           }),

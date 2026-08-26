@@ -854,6 +854,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('rejects an unknown metrics range instead of silently serving 24 hours', async () => {
+    const response = await operations('metrics?range=24hours');
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR', message: 'Unsupported metrics range' },
+    });
+  });
+
   it('pins future collector clocks to receipt time in live state and metrics', async () => {
     const collectorToken = 'collector-test-token-with-at-least-32-chars';
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = collectorToken;

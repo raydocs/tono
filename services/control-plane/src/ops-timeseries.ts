@@ -242,6 +242,8 @@ async function rollupResolution(
        )
        INSERT INTO operations_agent_rollups(
          node_name, resolution_seconds, bucket_at, samples,
+         cpu_samples, mem_used_samples, disk_used_samples,
+         load1_samples, swap_used_samples, tcp_samples,
          cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
          load1_avg, net_in_last, net_out_last, swap_used_avg, tcp_avg
        )
@@ -250,11 +252,17 @@ async function rollupResolution(
          ?,
          target_bucket,
          COUNT(*),
+         COUNT(cpu),
+         COUNT(mem_used),
+         COUNT(disk_used),
+         COUNT(load1),
+         COUNT(swap_used),
+         COUNT(tcp_connections),
          AVG(cpu),
          AVG(mem_used),
-         MAX(mem_total),
+         MAX(CASE WHEN bucket_rank = 1 THEN mem_total END),
          AVG(disk_used),
-         MAX(disk_total),
+         MAX(CASE WHEN bucket_rank = 1 THEN disk_total END),
          AVG(load1),
          MAX(CASE WHEN bucket_rank = 1 THEN net_in END),
          MAX(CASE WHEN bucket_rank = 1 THEN net_out END),
@@ -264,6 +272,12 @@ async function rollupResolution(
        GROUP BY node_name, target_bucket
        ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
          samples = excluded.samples,
+         cpu_samples = excluded.cpu_samples,
+         mem_used_samples = excluded.mem_used_samples,
+         disk_used_samples = excluded.disk_used_samples,
+         load1_samples = excluded.load1_samples,
+         swap_used_samples = excluded.swap_used_samples,
+         tcp_samples = excluded.tcp_samples,
          cpu_avg = excluded.cpu_avg,
          mem_used_avg = excluded.mem_used_avg,
          mem_total = excluded.mem_total,
@@ -299,6 +313,8 @@ async function rollupResolution(
      )
      INSERT INTO operations_agent_rollups(
        node_name, resolution_seconds, bucket_at, samples,
+       cpu_samples, mem_used_samples, disk_used_samples,
+       load1_samples, swap_used_samples, tcp_samples,
        cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
        load1_avg, net_in_last, net_out_last, swap_used_avg, tcp_avg
      )
@@ -307,20 +323,38 @@ async function rollupResolution(
        ?,
        target_bucket,
        SUM(samples),
-       AVG(cpu_avg),
-       AVG(mem_used_avg),
-       MAX(mem_total),
-       AVG(disk_used_avg),
-       MAX(disk_total),
-       AVG(load1_avg),
+       SUM(cpu_samples),
+       SUM(mem_used_samples),
+       SUM(disk_used_samples),
+       SUM(load1_samples),
+       SUM(swap_used_samples),
+       SUM(tcp_samples),
+       CASE WHEN SUM(cpu_samples) = 0 THEN NULL
+            ELSE SUM(cpu_avg * cpu_samples) / SUM(cpu_samples) END,
+       CASE WHEN SUM(mem_used_samples) = 0 THEN NULL
+            ELSE SUM(mem_used_avg * mem_used_samples) / SUM(mem_used_samples) END,
+       MAX(CASE WHEN bucket_rank = 1 THEN mem_total END),
+       CASE WHEN SUM(disk_used_samples) = 0 THEN NULL
+            ELSE SUM(disk_used_avg * disk_used_samples) / SUM(disk_used_samples) END,
+       MAX(CASE WHEN bucket_rank = 1 THEN disk_total END),
+       CASE WHEN SUM(load1_samples) = 0 THEN NULL
+            ELSE SUM(load1_avg * load1_samples) / SUM(load1_samples) END,
        MAX(CASE WHEN bucket_rank = 1 THEN net_in_last END),
        MAX(CASE WHEN bucket_rank = 1 THEN net_out_last END),
-       AVG(swap_used_avg),
-       AVG(tcp_avg)
+       CASE WHEN SUM(swap_used_samples) = 0 THEN NULL
+            ELSE SUM(swap_used_avg * swap_used_samples) / SUM(swap_used_samples) END,
+       CASE WHEN SUM(tcp_samples) = 0 THEN NULL
+            ELSE SUM(tcp_avg * tcp_samples) / SUM(tcp_samples) END
      FROM ranked
      GROUP BY node_name, target_bucket
      ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
        samples = excluded.samples,
+       cpu_samples = excluded.cpu_samples,
+       mem_used_samples = excluded.mem_used_samples,
+       disk_used_samples = excluded.disk_used_samples,
+       load1_samples = excluded.load1_samples,
+       swap_used_samples = excluded.swap_used_samples,
+       tcp_samples = excluded.tcp_samples,
        cpu_avg = excluded.cpu_avg,
        mem_used_avg = excluded.mem_used_avg,
        mem_total = excluded.mem_total,

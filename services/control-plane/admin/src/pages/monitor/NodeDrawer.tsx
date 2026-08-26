@@ -66,6 +66,7 @@ function NodeTrends({ metrics, name }: { metrics: MetricsDto | null; name: strin
 }
 
 function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void }) {
+  const privacy = usePrivacy();
   const profile = node.profile;
   const agent = node.agent;
   const [url, setUrl] = useState(profile?.billingUrl ?? '');
@@ -149,17 +150,17 @@ function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void
     <div className="stack">
       {billing.source !== 'none' && (
         <p className="field-hint">
-          当前：{billing.price != null ? `${billing.currency || ''}${billing.price}` : '没有价格'}
+          当前：{billing.price != null ? privacy.money(`${billing.currency || ''}${billing.price}`) : '没有价格'}
           {billing.billingCycle ? ` · ${billing.billingCycle} 天一期` : ''}
           {billing.source === 'komari' ? ' · 来自 Komari' : billing.source === 'mixed' ? ' · 自己填的优先，缺的用 Komari 补' : ' · 自己填的'}
         </p>
       )}
       <FieldGrid>
         <Field label="账单页">
-          <input className="input compact" placeholder="https://…" value={url} onChange={(event) => setUrl(event.target.value)} />
+          <input className="input compact sensitive-value" placeholder="https://…" value={url} onChange={(event) => setUrl(event.target.value)} />
         </Field>
         <Field label="价格">
-          <input className="input compact" placeholder="5.5" value={price} onChange={(event) => setPrice(event.target.value)} />
+          <input className="input compact sensitive-value" placeholder="5.5" value={price} onChange={(event) => setPrice(event.target.value)} />
         </Field>
         <Field label="货币">
           <input className="input compact" placeholder="USD" value={currency} onChange={(event) => setCurrency(event.target.value)} />
@@ -190,7 +191,9 @@ function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void
           >新账期（移动基线）</button>
         )}
         {profile?.billingUrl && (
-          <a className="btn btn-outline btn-sm" href={profile.billingUrl} target="_blank" rel="noreferrer">打开账单</a>
+          privacy.privacy
+            ? <span className="field-hint">隐私模式下隐藏账单链接。</span>
+            : <a className="btn btn-outline btn-sm" href={profile.billingUrl} target="_blank" rel="noreferrer">打开账单</a>
         )}
       </div>
       <Banner message={error} tone="error" />

@@ -858,9 +858,13 @@ describe('sparkline gaps', () => {
 });
 
 describe('screenshot privacy masks', () => {
-  it('hides local-part and IPv4 host', () => {
+  it('hides local-part and network addresses without leaking host:port values', () => {
     expect(maskEmail('tester@example.com')).toBe('te***@example.com');
     expect(maskIp('203.0.113.9')).toBe('203.0.***.***');
+    expect(maskIp('203.0.113.9:443')).toBe('203.0.***.***');
+    expect(maskIp('proxy.customer.example:443')).toBe('***');
+    expect(maskIp('2001:db8::1')).toBe('2001:***');
+    expect(maskIp('[2001:db8::1]:443')).toBe('2001:***');
   });
 });
 

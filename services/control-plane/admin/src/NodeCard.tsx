@@ -96,7 +96,7 @@ export function NodeCard({
       <div className="nc-top">
         <div className="nc-title">
           <strong title={node.name}>{node.name}</strong>
-          <small title={ip ?? undefined}>{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</small>
+          <small title={ip ? privacy.ip(ip) : undefined}>{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</small>
         </div>
         <span className="nc-state">
           <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />

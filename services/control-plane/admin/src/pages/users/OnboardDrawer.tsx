@@ -124,7 +124,7 @@ export function OnboardDrawer({
       <Banner message={error || mutate.error} tone="error" />
       <form className="onboard-steps" onSubmit={(event) => void submit(event, Boolean(result?.registered))}>
         <Field label="客户邮箱" hint="用来收验证码的邮箱">
-          <input className="input" type="email" required value={email} onChange={(event) => changeEmail(event.target.value)} disabled={mutate.busy} />
+          <input className="input sensitive-value" type="email" required value={email} onChange={(event) => changeEmail(event.target.value)} disabled={mutate.busy} />
         </Field>
         {!result && (
           <button className="btn" type="submit" disabled={mutate.busy || !email.trim()}>{mutate.busy ? '保存中…' : '保存登录资格'}</button>
@@ -150,7 +150,7 @@ export function OnboardDrawer({
             <FieldGrid>
               <Field label="家宽" hint="直接贴一行 host:port:user:pass">
                 <input
-                  className="input"
+                  className="input sensitive-value"
                   value={extras.line}
                   onChange={(event) => setExtras({ ...extras, line: event.target.value, homeExitId: event.target.value ? '' : extras.homeExitId })}
                   placeholder="host:port:user:pass"
@@ -173,7 +173,7 @@ export function OnboardDrawer({
               </Field>
               <Field label="Claude 账号">
                 <input
-                  className="input"
+                  className="input sensitive-value"
                   value={extras.accountRef}
                   onChange={(event) => setExtras({ ...extras, accountRef: event.target.value, productAccountId: event.target.value ? '' : extras.productAccountId })}
                   disabled={mutate.busy}
@@ -193,7 +193,7 @@ export function OnboardDrawer({
                 </select>
               </Field>
               <Field label="微信或备注">
-                <input className="input" value={extras.contact} onChange={(event) => setExtras({ ...extras, contact: event.target.value })} disabled={mutate.busy} />
+                <input className="input sensitive-value" value={extras.contact} onChange={(event) => setExtras({ ...extras, contact: event.target.value })} disabled={mutate.busy} />
               </Field>
             </FieldGrid>
             <div className="row-actions">

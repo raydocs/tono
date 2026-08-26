@@ -61,7 +61,8 @@ export function ControlPage() {
   const [policyBaseText, setPolicyBaseText] = useState('');
   const [policyBase, setPolicyBase] = useState<number | null>(null);
   const [policyPhase, setPolicyPhase] = useState<Phase>('viewing');
-  const [reveal, setReveal] = useState(!privacy.privacy);
+  const [revealYaml, setRevealYaml] = useState(false);
+  const [revealPolicy, setRevealPolicy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{
@@ -74,7 +75,10 @@ export function ControlPage() {
   const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
-    if (privacy.privacy) setReveal(false);
+    if (privacy.privacy) {
+      setRevealYaml(false);
+      setRevealPolicy(false);
+    }
   }, [privacy.privacy]);
 
   const catalogRevision = catalog.state === 'ready' ? catalog.data.revision : null;
@@ -315,7 +319,7 @@ export function ControlPage() {
                 <span>线上 r{catalogRevision ?? '—'}</span>
                 {yamlDiff ? <span>+{yamlDiff.added} / −{yamlDiff.removed}</span> : null}
               </p>
-              {privacy.privacy && !reveal ? (
+              {privacy.privacy && !revealYaml ? (
                 <p className="muted">隐私模式隐藏目录原文。</p>
               ) : (
                 <textarea
@@ -328,11 +332,11 @@ export function ControlPage() {
                 />
               )}
               {privacy.privacy && (
-                <button className="btn btn-outline btn-sm" type="button" onClick={() => setReveal((value) => !value)}>
-                  {reveal ? '重新隐藏原文' : '临时显示原文'}
+                <button className="btn btn-outline btn-sm" type="button" onClick={() => setRevealYaml((value) => !value)}>
+                  {revealYaml ? '重新隐藏目录原文' : '临时显示目录原文'}
                 </button>
               )}
-              {yamlDiff && <DiffView diff={yamlDiff} revealed={!privacy.privacy || reveal} />}
+              {yamlDiff && <DiffView diff={yamlDiff} revealed={!privacy.privacy || revealYaml} />}
               <div className="form-actions">
                 <button
                   className="btn"
@@ -345,8 +349,16 @@ export function ControlPage() {
                     publishYaml,
                   )}
                 >对照 diff 发布</button>
-                <button className="btn btn-outline" type="button" onClick={() => void navigator.clipboard.writeText(yamlDraft)}>复制草稿</button>
-                <a className="btn btn-outline" href={`data:text/yaml;charset=utf-8,${encodeURIComponent(yamlDraft)}`} download="tono-catalog.yaml">下载草稿</a>
+                <button
+                  className="btn btn-outline"
+                  type="button"
+                  disabled={privacy.privacy && !revealYaml}
+                  title={privacy.privacy && !revealYaml ? '先临时显示目录原文' : undefined}
+                  onClick={() => void navigator.clipboard.writeText(yamlDraft)}
+                >复制草稿</button>
+                {privacy.privacy && !revealYaml
+                  ? <button className="btn btn-outline" type="button" disabled title="先临时显示目录原文">下载草稿</button>
+                  : <a className="btn btn-outline" href={`data:text/yaml;charset=utf-8,${encodeURIComponent(yamlDraft)}`} download="tono-catalog.yaml">下载草稿</a>}
                 <button className="btn btn-outline" type="button" onClick={() => void reloadYaml()}>重新加载线上版</button>
               </div>
             </div>
@@ -381,7 +393,7 @@ export function ControlPage() {
                 <span>线上 r{policyRevision ?? '—'}</span>
                 {policyDiff ? <span>+{policyDiff.added} / −{policyDiff.removed}</span> : null}
               </p>
-              {privacy.privacy && !reveal ? (
+              {privacy.privacy && !revealPolicy ? (
                 <p className="muted">隐私模式隐藏规则原文。</p>
               ) : (
                 <textarea
@@ -393,7 +405,12 @@ export function ControlPage() {
                   onChange={(event) => changePolicy(event.target.value)}
                 />
               )}
-              {policyDiff && <DiffView diff={policyDiff} revealed={!privacy.privacy || reveal} />}
+              {privacy.privacy && (
+                <button className="btn btn-outline btn-sm" type="button" onClick={() => setRevealPolicy((value) => !value)}>
+                  {revealPolicy ? '重新隐藏规则原文' : '临时显示规则原文'}
+                </button>
+              )}
+              {policyDiff && <DiffView diff={policyDiff} revealed={!privacy.privacy || revealPolicy} />}
               <div className="form-actions">
                 <button
                   className="btn"

@@ -139,6 +139,8 @@ function App() {
                   key={entry.id}
                   className={`nav-item${page === entry.id ? ' active' : ''}${PRIMARY.includes(entry.id as typeof PRIMARY[number]) ? '' : ' nav-overflow'}`}
                   href={`#/${entry.id}`}
+                  aria-label={entry.label}
+                  aria-current={page === entry.id ? 'page' : undefined}
                   onClick={() => setShowMore(false)}
                 >
                   <Icon d={icons[entry.id]} />
@@ -171,7 +173,7 @@ function App() {
             <div className="search-wrap">
               <input
                 ref={searchRef}
-                className="input compact search-input"
+                className="input compact search-input sensitive-value"
                 type="search"
                 aria-label="搜索节点或客户"
                 placeholder="搜索节点或客户  /"

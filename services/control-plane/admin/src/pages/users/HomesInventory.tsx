@@ -46,7 +46,7 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
     await mutate.run(async () => {
       const result = await operationsApi.importHomeLines(lines);
       const failed = [
-        ...result.skipped.map((row) => `跳过 ${row.host ?? ''}:${row.port ?? ''} ${row.message}`),
+        ...result.skipped.map((row) => `跳过 ${privacy.ip(row.host)}:${row.port ?? ''} ${row.message}`),
         ...result.failed.map((row) => row.message),
       ];
       mutate.setOk([
@@ -74,7 +74,7 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
         </div>
         <div className="card-body">
           <form className="stack" onSubmit={(event) => void importLines(event)}>
-            <textarea className="input control-textarea" aria-label="家宽线路，每行一条" rows={4} spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} disabled={mutate.busy} />
+            <textarea className="input control-textarea sensitive-value" aria-label="家宽线路，每行一条" rows={4} spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} disabled={mutate.busy} />
             <button className="btn" type="submit" disabled={mutate.busy || !importText.trim()}>加入库存</button>
           </form>
         </div>
@@ -125,7 +125,7 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
               </select>
             </Field>
             <Field label="出口 IPv4" hint="可选">
-              <input className="input" value={egressIpv4} onChange={(event) => setEgressIpv4(event.target.value)} />
+              <input className="input sensitive-value" value={egressIpv4} onChange={(event) => setEgressIpv4(event.target.value)} />
             </Field>
             <Field label="备注" hint="可选">
               <input className="input" value={notes} onChange={(event) => setNotes(event.target.value)} />
@@ -133,13 +133,13 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
             {kind === 'socks5' && (
               <>
                 <Field label="主机">
-                  <input className="input" required value={socks5Host} onChange={(event) => setSocks5Host(event.target.value)} />
+                  <input className="input sensitive-value" required value={socks5Host} onChange={(event) => setSocks5Host(event.target.value)} />
                 </Field>
                 <Field label="端口" hint="1–65535">
                   <input className="input" required type="number" min={1} max={65535} value={socks5Port} onChange={(event) => setSocks5Port(event.target.value)} />
                 </Field>
                 <Field label="用户名">
-                  <input className="input" required value={socks5Username} onChange={(event) => setSocks5Username(event.target.value)} />
+                  <input className="input sensitive-value" required value={socks5Username} onChange={(event) => setSocks5Username(event.target.value)} />
                 </Field>
                 <Field label="密码">
                   <input className="input" required type="password" value={socks5Password} onChange={(event) => setSocks5Password(event.target.value)} />

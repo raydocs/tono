@@ -114,6 +114,71 @@ describe('operations timeseries retention', () => {
     expect(Number(hourly!.net_out_last)).toBe(200);
   });
 
+  it('weights hourly gauges by their real non-null sample counts', async () => {
+    const hour = Math.floor(1_800_200_000 / 3_600) * 3_600;
+    const points = [
+      { ...sample('Irregular', hour, 10), memTotal: 1_000, memUsed: 100, diskUsed: null, load1: 1, swapUsed: null, tcpConnections: 1 },
+      { ...sample('Irregular', hour + 60, 20), memTotal: 1_000, memUsed: null, diskUsed: 200, load1: 2, swapUsed: null, tcpConnections: 2 },
+      { ...sample('Irregular', hour + 120, 0), cpu: null, memTotal: 1_000, memUsed: null, diskUsed: 300, load1: 3, swapUsed: null, tcpConnections: 3 },
+      { ...sample('Irregular', hour + 180, 0), cpu: null, memTotal: 1_000, memUsed: null, diskUsed: null, load1: null, swapUsed: 4, tcpConnections: 4 },
+      { ...sample('Irregular', hour + 240, 0), cpu: null, memTotal: 1_000, memUsed: null, diskUsed: null, load1: null, swapUsed: null, tcpConnections: 5 },
+      // The later bucket has only one sample and the machine reports a smaller
+      // memory total after reconfiguration.
+      {
+        ...sample('Irregular', hour + 360, 100),
+        memTotal: 800,
+        memUsed: 700,
+        diskTotal: 750,
+        diskUsed: 900,
+        load1: 10,
+        swapUsed: 8,
+        tcpConnections: null,
+      },
+    ];
+    await recordAgentSamples(db(), points, hour + 360);
+
+    await retainOperationsTimeseries(db(), hour + 3_600 + 48 * 3_600);
+    const firstBucket = await db().prepare(
+      `SELECT samples, cpu_samples, mem_used_samples, disk_used_samples,
+              load1_samples, swap_used_samples, tcp_samples, cpu_avg
+       FROM operations_agent_rollups
+       WHERE node_name = 'Irregular' AND resolution_seconds = 300 AND bucket_at = ?`,
+    ).bind(hour).first<Record<string, any>>();
+    expect(Number(firstBucket!.samples)).toBe(5);
+    expect(Number(firstBucket!.cpu_samples)).toBe(2);
+    expect(Number(firstBucket!.mem_used_samples)).toBe(1);
+    expect(Number(firstBucket!.disk_used_samples)).toBe(2);
+    expect(Number(firstBucket!.load1_samples)).toBe(3);
+    expect(Number(firstBucket!.swap_used_samples)).toBe(1);
+    expect(Number(firstBucket!.tcp_samples)).toBe(5);
+    expect(Number(firstBucket!.cpu_avg)).toBeCloseTo(15, 5);
+
+    await retainOperationsTimeseries(db(), hour + 3_600 + 8 * 86_400);
+    const hourly = await db().prepare(
+      `SELECT samples, cpu_samples, mem_used_samples, disk_used_samples,
+              load1_samples, swap_used_samples, tcp_samples,
+              cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
+              load1_avg, swap_used_avg, tcp_avg
+       FROM operations_agent_rollups
+       WHERE node_name = 'Irregular' AND resolution_seconds = 3600 AND bucket_at = ?`,
+    ).bind(hour).first<Record<string, any>>();
+    expect(Number(hourly!.samples)).toBe(6);
+    expect(Number(hourly!.cpu_samples)).toBe(3);
+    expect(Number(hourly!.mem_used_samples)).toBe(2);
+    expect(Number(hourly!.disk_used_samples)).toBe(3);
+    expect(Number(hourly!.load1_samples)).toBe(4);
+    expect(Number(hourly!.swap_used_samples)).toBe(2);
+    expect(Number(hourly!.tcp_samples)).toBe(5);
+    expect(Number(hourly!.cpu_avg)).toBeCloseTo((10 + 20 + 100) / 3, 5);
+    expect(Number(hourly!.mem_used_avg)).toBeCloseTo((100 + 700) / 2, 5);
+    expect(Number(hourly!.disk_used_avg)).toBeCloseTo((200 + 300 + 900) / 3, 5);
+    expect(Number(hourly!.load1_avg)).toBeCloseTo((1 + 2 + 3 + 10) / 4, 5);
+    expect(Number(hourly!.swap_used_avg)).toBeCloseTo((4 + 8) / 2, 5);
+    expect(Number(hourly!.tcp_avg)).toBeCloseTo((1 + 2 + 3 + 4 + 5) / 5, 5);
+    expect(Number(hourly!.mem_total)).toBe(800);
+    expect(Number(hourly!.disk_total)).toBe(750);
+  });
+
   it('pins invalid or far-future clocks to receipt time without rewriting old samples', async () => {
     const receivedAt = 1_800_100_123;
     await recordAgentSamples(db(), [

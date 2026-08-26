@@ -420,6 +420,21 @@ p { text-wrap: pretty; }
 }
 .control-select:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -2px; }
 
+/* Privacy mode is also a screenshot mode. Loaded values are masked in React;
+   these are operator drafts/search terms that otherwise remain visible while
+   typing. Text security hides glyphs without changing the submitted value or
+   replacing semantic input types such as email and search. */
+:root[data-privacy='on'] .sensitive-value {
+  -webkit-text-security: disc;
+}
+@supports not (-webkit-text-security: disc) {
+  :root[data-privacy='on'] .sensitive-value {
+    color: transparent;
+    caret-color: hsl(var(--foreground));
+    text-shadow: 0 0 0.42rem hsl(var(--foreground));
+  }
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;

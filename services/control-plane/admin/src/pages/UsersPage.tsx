@@ -62,7 +62,7 @@ export function UsersPage() {
       ) : (
         <>
           <div className="customer-toolbar">
-            <input className="input compact search-input" type="search" aria-label="搜索客户" placeholder="搜索邮箱" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input className="input compact search-input sensitive-value" type="search" aria-label="搜索客户" placeholder="搜索邮箱" value={query} onChange={(event) => setQuery(event.target.value)} />
             <button type="button" className="btn" onClick={() => setOnboard(true)}>开通客户</button>
             <button type="button" className="btn btn-outline" onClick={() => setRoute((current) => ({ ...current, page: 'users', focus: 'homes', user: null }))}>家宽库存</button>
           </div>

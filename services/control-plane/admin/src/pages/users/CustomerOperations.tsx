@@ -135,7 +135,7 @@ export function CustomerOperations({
         {catalog.state === 'error' && <Unavailable title="目录不可用" detail={catalog.message} />}
         <div className="stack home-form">
           <Field label="新线路" hint="host:port:user:pass">
-            <input className="input compact" value={assignLine} onChange={(event) => setAssignLine(event.target.value)} spellCheck={false} />
+            <input className="input compact sensitive-value" value={assignLine} onChange={(event) => setAssignLine(event.target.value)} spellCheck={false} />
           </Field>
           <button
             type="button"
@@ -268,7 +268,7 @@ function ClaudeBlock({
       </StatGrid>
       <div className="assign-line">
         <Field label={current ? '新账号' : '账号'}>
-          <input className="input compact" value={accountRef} onChange={(event) => setAccountRef(event.target.value)} />
+          <input className="input compact sensitive-value" value={accountRef} onChange={(event) => setAccountRef(event.target.value)} />
         </Field>
         {current ? (
           <button
