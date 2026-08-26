@@ -27,6 +27,8 @@ function App() {
   const world = useOpsWorld();
   const searchRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState(route.q ?? '');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(0);
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
     const saved = localStorage.getItem('tono-ops-theme');
     return saved === 'light' || saved === 'dark' ? saved : 'system';
@@ -73,22 +75,32 @@ function App() {
     { label: '谁在线', state: world.activity.state, stale: world.activity.stale, refreshedAt: world.activity.refreshedAt },
   ], Date.now());
 
-  function submitSearch() {
-    const needle = search.trim().toLowerCase();
-    if (!needle) return;
-    const node = world.nodes.find((item) => item.name.toLowerCase().includes(needle)
-      || (item.quality?.publicIp ?? '').includes(needle));
-    if (node) {
-      openNode(node.name);
-      return;
-    }
-    const person = world.people.find((item) => item.email.toLowerCase().includes(needle)
-      || item.userId.toLowerCase().includes(needle));
-    if (person) openUser(person.userId);
+  const needle = search.trim().toLowerCase();
+  const nodeHits = needle
+    ? world.nodes.filter((item) => item.name.toLowerCase().includes(needle)
+      || (item.quality?.publicIp ?? '').toLowerCase().includes(needle)
+      || (item.profile?.provider ?? '').toLowerCase().includes(needle)).slice(0, 6)
+    : [];
+  const personHits = needle
+    ? world.people.filter((item) => item.email.toLowerCase().includes(needle)
+      || item.userId.toLowerCase().includes(needle)).slice(0, 6)
+    : [];
+  const hits = [
+    ...nodeHits.map((node) => ({ kind: 'node' as const, id: node.name, label: node.name })),
+    ...personHits.map((person) => ({ kind: 'user' as const, id: person.userId, label: privacy.email(person.email) })),
+  ];
+  const refreshing = [world.live, world.users, world.activity].some((resource) => resource.refreshing);
+
+  function goHit(hit: (typeof hits)[number]) {
+    setSearchOpen(false);
+    setSearch('');
+    if (hit.kind === 'node') openNode(hit.id, { page: 'monitor', focus: null });
+    else openUser(hit.id, { page: 'users', focus: null });
   }
 
   return (
     <>
+    <a className="skip-link" href="#ops-main">跳到正文</a>
     <OpsBackground />
     <div className={`shell${showMore ? ' show-more' : ''}`}>
       <aside className="sidebar">
@@ -137,17 +149,66 @@ function App() {
             </div>
           </div>
           <div className="topbar-right">
-            <input
-              ref={searchRef}
-              className="input compact search-input"
-              type="search"
-              placeholder="搜索节点或客户  /"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') submitSearch();
-              }}
-            />
+            <div className="search-wrap">
+              <input
+                ref={searchRef}
+                className="input compact search-input"
+                type="search"
+                placeholder="搜索节点或客户  /"
+                value={search}
+                role="combobox"
+                aria-expanded={searchOpen}
+                aria-controls="ops-search-results"
+                onChange={(event) => { setSearch(event.target.value); setSearchOpen(true); setSearchIndex(0); }}
+                onFocus={() => setSearchOpen(true)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setSearchOpen(false);
+                    searchRef.current?.blur();
+                    return;
+                  }
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setSearchIndex((value) => Math.min(hits.length - 1, value + 1));
+                    return;
+                  }
+                  if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    setSearchIndex((value) => Math.max(0, value - 1));
+                    return;
+                  }
+                  if (event.key === 'Enter' && hits[searchIndex]) {
+                    event.preventDefault();
+                    goHit(hits[searchIndex]);
+                  }
+                }}
+                onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
+              />
+              {searchOpen && needle && (
+                <div className="search-pop" id="ops-search-results" role="listbox">
+                  {hits.length === 0 && <p className="muted">没有匹配的节点或客户</p>}
+                  {nodeHits.length > 0 && <p className="muted">节点</p>}
+                  {nodeHits.map((node, index) => (
+                    <button
+                      type="button"
+                      className={`search-hit${hits[searchIndex]?.id === node.name && hits[searchIndex]?.kind === 'node' ? ' active' : ''}`}
+                      key={`n-${node.name}`}
+                      onMouseDown={(event) => { event.preventDefault(); goHit({ kind: 'node', id: node.name, label: node.name }); }}
+                    >{node.name}</button>
+                  ))}
+                  {personHits.length > 0 && <p className="muted">客户</p>}
+                  {personHits.map((person) => (
+                    <button
+                      type="button"
+                      className={`search-hit${hits[searchIndex]?.id === person.userId && hits[searchIndex]?.kind === 'user' ? ' active' : ''}`}
+                      key={`u-${person.userId}`}
+                      onMouseDown={(event) => { event.preventDefault(); goHit({ kind: 'user', id: person.userId, label: person.email }); }}
+                    >{privacy.email(person.email)}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {refreshing && <span className="refreshing-dot">刷新中</span>}
             {health.length > 0 && (
               <span className={`health-compact${health.some((line) => line.includes('没加载')) ? ' bad' : ''}`} title={health.join(' ')}>
                 {health[0]}
@@ -181,7 +242,7 @@ function App() {
           </div>
         </header>
 
-        <div className="content">
+        <main className="content" id="ops-main">
           <div className="page-head">
             <div>
               <h1>{selected.label}</h1>
@@ -202,7 +263,7 @@ function App() {
           {page === 'users' && <UsersPage />}
           {page === 'traffic' && <TrafficPage />}
           {page === 'control' && <ControlPage />}
-        </div>
+        </main>
       </div>
     </div>
     </>

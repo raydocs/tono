@@ -354,7 +354,7 @@ describe('client path status on the customer list', () => {
   });
 });
 
-import { formatOpsHash, parseOpsHash } from '../admin/src/lib/hash';
+import { formatOpsHash, parseOpsHash, parseTrafficRange } from '../admin/src/lib/hash';
 import {
   accidentsOnly,
   customerPathVerdict,
@@ -419,6 +419,7 @@ describe('ops hash routing', () => {
       node: 'Tokyo · Fuji',
       user: null,
       q: null,
+      range: null,
     });
     expect(hash).toContain('#/monitor?');
     expect(parseOpsHash(hash)).toEqual({
@@ -427,6 +428,7 @@ describe('ops hash routing', () => {
       node: 'Tokyo · Fuji',
       user: null,
       q: null,
+      range: null,
     });
   });
 
@@ -827,7 +829,7 @@ describe('customer telemetry and path activity', () => {
   it('does not carry a monitor focus into a user drawer', () => {
     const fromMonitor = { ...emptyHash('monitor'), focus: 'blocked', node: 'Tokyo · Fuji' };
     expect(nextRouteForOpenUser(fromMonitor, 'u1')).toEqual({
-      page: 'users', focus: null, node: null, user: 'u1', q: null,
+      page: 'users', focus: null, node: null, user: 'u1', q: null, range: null,
     });
     const fromUsers = { ...emptyHash('users'), focus: 'quota' };
     expect(nextRouteForOpenNode(fromUsers, 'Tokyo · Fuji').focus).toBeNull();
@@ -838,7 +840,12 @@ describe('customer telemetry and path activity', () => {
     expect(parseOpsHash('#/monitor?focus=unknown&node=Catalog%20Only')).toMatchObject({
       page: 'monitor', focus: 'unknown', node: 'Catalog Only',
     });
-    expect(formatOpsHash({ page: 'users', focus: 'path', node: null, user: 'u1', q: null })).toBe('#/users?focus=path&user=u1');
+    expect(formatOpsHash({ page: 'users', focus: 'path', node: null, user: 'u1', q: null, range: null })).toBe('#/users?focus=path&user=u1');
+    expect(parseTrafficRange('90d')).toBe('90d');
+    expect(parseTrafficRange('nope')).toBe('24h');
+    expect(parseOpsHash(formatOpsHash({
+      page: 'traffic', focus: null, node: 'Tokyo · Fuji', user: null, q: null, range: 'weird',
+    }))).toMatchObject({ page: 'traffic', node: 'Tokyo · Fuji', range: '24h' });
     expect(parseOpsHash('#/users?focus=path&user=u1').user).toBe('u1');
   });
 });
@@ -871,5 +878,72 @@ describe('confirm exclusive gate', () => {
     expect(started).toBe(1);
     expect(finished).toBe(1);
     expect(second).toBe(false);
+  });
+});
+
+import { dashboardKpis, KPI_HREFS } from '../admin/src/lib/incidents';
+import { lineDiff } from '../admin/src/lib/textdiff';
+import { aggregateFleetRates, coverageByBucket, latestValidRate, nodeRateSeries, rangeTransfer } from '../admin/src/lib/traffic';
+
+describe('dashboard KPI routes stay pinned', () => {
+  it('does not drift off the hash contract', () => {
+    expect(KPI_HREFS).toEqual({
+      blocked: '#/monitor?focus=blocked',
+      offline: '#/monitor?focus=offline',
+      path: '#/failures?focus=customer-path',
+      online: '#/users?focus=online',
+      quota: '#/users?focus=quota',
+      expiring: '#/monitor?focus=expiring',
+    });
+  });
+
+  it('shows em dash values when a source is unavailable, not zero', () => {
+    const kpis = dashboardKpis({
+      nodes: [],
+      people: [],
+      incidents: [],
+      qualityAvailable: false,
+      activityAvailable: false,
+      usersAvailable: false,
+      nowSec: 1,
+    });
+    expect(kpis.find((item) => item.id === 'blocked')?.value).toBeNull();
+    expect(kpis.find((item) => item.id === 'online')?.value).toBeNull();
+    expect(kpis.find((item) => item.id === 'quota')?.value).toBeNull();
+    expect(kpis.find((item) => item.id === 'expiring')?.value).toBe(0);
+  });
+});
+
+describe('honest traffic aggregation', () => {
+  it('does not treat missing nodes as zero and keeps reset gaps', () => {
+    const a = nodeRateSeries([
+      { t: 0, netIn: 100, netOut: 10 },
+      { t: 60, netIn: 160, netOut: 40 },
+      { t: 120, netIn: 10, netOut: 50 },
+    ], 60);
+    const b = nodeRateSeries([
+      { t: 0, netIn: 200, netOut: 20 },
+      { t: 60, netIn: 260, netOut: 50 },
+    ], 60);
+    expect(a[1].inBps).toBeNull();
+    const fleet = aggregateFleetRates({ a, b }, 3);
+    const at60 = fleet.find((point) => point.t === 60)!;
+    expect(at60.contributing).toBe(2);
+    expect(at60.expected).toBe(3);
+    expect(at60.inBps).toBeCloseTo(2);
+    expect(coverageByBucket(fleet).present).toBe(2);
+    expect(rangeTransfer(b).inBytes).toBe(60 * 1);
+    expect(latestValidRate(a)?.t).toBe(120);
+  });
+});
+
+describe('raw text diff', () => {
+  it('counts add/remove without rewriting placeholders', () => {
+    const before = 'uuid: {{TONO_CLIENT_UUID}}\nkeep\n';
+    const after = 'uuid: {{TONO_CLIENT_UUID}}\nkeep\nextra\n';
+    const diff = lineDiff(before, after);
+    expect(after).toContain('{{TONO_CLIENT_UUID}}');
+    expect(diff.added).toBe(1);
+    expect(diff.removed).toBe(0);
   });
 });

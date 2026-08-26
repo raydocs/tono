@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type SVGProps } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type SVGProps } from 'react';
 import { createPortal } from 'react-dom';
 import type { Live, Resource } from './hooks';
 import { dataHealthLines } from './lib/health';
@@ -127,7 +127,7 @@ export function DataHealth({ sources }: {
 
 export function Banner({ message, tone = 'info' }: { message: string | null; tone?: 'info' | 'error' | 'ok' }) {
   if (!message) return null;
-  return <div className={`banner banner-${tone}`}>{message}</div>;
+  return <div className={`banner banner-${tone}`} role="status" aria-live={tone === 'error' ? 'assertive' : 'polite'}>{message}</div>;
 }
 
 export function Drawer({
@@ -143,6 +143,7 @@ export function Drawer({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const titleId = useId();
   const panel = useRef<HTMLElement>(null);
   const closeBtn = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -184,10 +185,10 @@ export function Drawer({
   return createPortal(
     <div className="drawer-root">
       <button type="button" className="drawer-scrim" aria-label="关闭" onClick={onClose} />
-      <aside ref={panel} className="drawer" data-modal="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <aside ref={panel} className="drawer" data-modal="drawer" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="drawer-head">
           <div>
-            <h2 id="drawer-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             {subtitle ? <p>{subtitle}</p> : null}
           </div>
           <button ref={closeBtn} type="button" className="btn btn-outline btn-sm" onClick={onClose}>关闭</button>
@@ -218,6 +219,7 @@ export function Confirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const titleId = useId();
   const panel = useRef<HTMLElement>(null);
   const confirmBtn = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -263,8 +265,8 @@ export function Confirm({
   return createPortal(
     <div className="drawer-root" data-modal="confirm">
       <button type="button" className="drawer-scrim" aria-label="取消" onClick={() => { if (!busy) onCancel(); }} />
-      <aside ref={panel} className="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
-        <h2 id="confirm-title">{title}</h2>
+      <aside ref={panel} className="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby={titleId}>
+        <h2 id={titleId}>{title}</h2>
         {detail ? <p>{detail}</p> : null}
         {error ? <p className="confirm-error">{error}</p> : null}
         <div className="form-row">

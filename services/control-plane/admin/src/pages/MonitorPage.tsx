@@ -298,7 +298,7 @@ export function MonitorPage() {
       {loading ? (
         <Skeleton label="正在加载服务器" />
       ) : world.live.state === 'error' && world.nodes.length === 0 ? (
-        <Unavailable title="服务器数据没加载上来" detail={world.live.message} />
+        <Unavailable title="服务器数据没加载上来" detail={world.live.state === 'error' ? world.live.message : undefined} />
       ) : visible.length === 0 ? (
         <div className="state"><strong>没有符合条件的节点</strong></div>
       ) : (
