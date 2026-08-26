@@ -27,7 +27,12 @@ import { useTonoToast } from '@/tono-ui/tono-toast-context'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 
-import { latencyColor, latencyLabelKey, readNodeLatency } from './node-latency'
+import {
+  latencyColor,
+  latencyLabelKey,
+  latencyLabelVars,
+  readNodeLatency,
+} from './node-latency'
 import {
   nodeCityParts,
   nodeCityTitleKey,
@@ -525,24 +530,34 @@ const ServersPage = () => {
                     endpointLatency ?? exitLatency ?? cachedLatency
                   const latencyLabel =
                     endpointLatency !== undefined
-                      ? t(latencyLabelKey('tcp', endpointLatency), {
-                          latency: endpointLatency,
-                        })
+                      ? t(
+                          latencyLabelKey('tcp', endpointLatency),
+                          latencyLabelVars(endpointLatency),
+                        )
                       : exitLatency !== undefined
-                        ? t(latencyLabelKey('exit', exitLatency), {
-                            latency: exitLatency,
-                          })
+                        ? t(
+                            latencyLabelKey('exit', exitLatency),
+                            latencyLabelVars(exitLatency),
+                          )
                         : cachedLatency !== null
-                          ? t(latencyLabelKey('cached', cachedLatency), {
-                              latency: cachedLatency,
-                            })
+                          ? t(
+                              latencyLabelKey('cached', cachedLatency),
+                              latencyLabelVars(cachedLatency),
+                            )
                           : t('tono.nodes.untested')
                   const available = server.available !== false
                   const latencyTone =
                     !available || endpointFailure
                       ? TONO_COLORS.error
                       : latency !== null
-                        ? latencyColor(latency)
+                        ? latencyColor(
+                            latency,
+                            endpointLatency !== undefined
+                              ? 'tcp'
+                              : exitLatency !== undefined
+                                ? 'exit'
+                                : 'cached',
+                          )
                         : text.tertiary
                   const latencyHasTone =
                     !available ||
@@ -556,7 +571,7 @@ const ServersPage = () => {
                         ? t('tono.nodes.testFailed')
                         : server.selected
                           ? t('tono.node.activeServer')
-                          : t('tono.nodes.untested')
+                          : t('tono.nodes.readyToConnect')
                   return (
                     <button
                       key={server.name}

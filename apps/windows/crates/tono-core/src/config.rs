@@ -92,7 +92,7 @@ pub const REVIEWED_DIRECT_PROCESS_NAMES: [&str; 17] = [
 /// Desktop assistants that should share Claude's residential (or exit) path.
 /// Command-line `node.exe` is deliberately absent: it would capture every
 /// Node process on the machine.
-pub const HOME_PROCESS_NAMES: [&str; 7] = [
+pub const HOME_PROCESS_NAMES: [&str; 19] = [
     "Claude.exe",
     "claude.exe",
     "Claude Helper.exe",
@@ -100,20 +100,39 @@ pub const HOME_PROCESS_NAMES: [&str; 7] = [
     "chatgpt.exe",
     "Codex.exe",
     "codex.exe",
+    "Cursor.exe",
+    "Code.exe",
+    "Code Helper.exe",
+    "Windsurf.exe",
+    "Trae.exe",
+    "Zed.exe",
+    "VSCodium.exe",
+    "Cursor Helper.exe",
+    "Windsurf Helper.exe",
+    "Grok.exe",
+    "grok.exe",
+    "Grok Helper.exe",
 ];
 /// Windows install-tree fragments whose helpers should share the home (or
 /// exit) hop. These are contains-matches, not identity: a mistaken hit still
 /// leaves through the tunnel. The AND payload cannot contain `,` or `()`.
 /// `claude\versions` covers Claude Code's versioned launcher (`2.1.223`),
 /// whose process name is not `claude.exe`.
-const HOME_PROCESS_PATH_FRAGMENTS: [&str; 7] = [
+const HOME_PROCESS_PATH_FRAGMENTS: [&str; 14] = [
     "AnthropicClaude",
     r"claude\versions",
     r".local\share\claude",
     "claude-code",
     r"@anthropic-ai\claude-code",
+    r"@anthropic-ai+claude-code",
     "ChatGPT",
     r"openai\codex",
+    r"Programs\cursor",
+    r"Microsoft VS Code",
+    "Windsurf",
+    r"Programs\Trae",
+    "VSCodium",
+    r"Programs\Grok",
 ];
 /// Signed WeChat/DingTalk/Feishu install prefixes that may join a DirectPlan.
 /// Discovery is bounded so a poisoned registry cannot grow the rule table
@@ -1938,7 +1957,16 @@ reality-opts:
 
     #[test]
     fn claude_home_covers_desktop_helpers_and_versioned_code_launcher() {
-        for process in ["Claude.exe", "claude.exe", "Claude Helper.exe"] {
+        for process in [
+            "Claude.exe",
+            "claude.exe",
+            "Claude Helper.exe",
+            "Cursor.exe",
+            "Code.exe",
+            "Windsurf.exe",
+            "Trae.exe",
+            "Grok.exe",
+        ] {
             assert!(
                 HOME_PROCESS_NAMES.contains(&process),
                 "{process} must share the home hop"
@@ -1950,6 +1978,9 @@ reality-opts:
             r".local\share\claude",
             "claude-code",
             r"@anthropic-ai\claude-code",
+            r"@anthropic-ai+claude-code",
+            r"Programs\cursor",
+            r"Microsoft VS Code",
         ] {
             assert!(
                 HOME_PROCESS_PATH_FRAGMENTS.contains(&fragment),
@@ -1962,6 +1993,10 @@ reality-opts:
             r"C:\Users\me\AppData\Local\AnthropicClaude\app-1.0.0\Claude Helper (Renderer).exe",
             r"C:\Users\me\.local\share\claude\versions\2.1.223",
             r"C:\Users\me\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js",
+            r"C:\Users\me\AppData\Local\pnpm\store\v3\@anthropic-ai+claude-code@1.2.3\node_modules\@anthropic-ai\claude-code\cli.js",
+            r"C:\Users\me\AppData\Local\Programs\cursor\Cursor.exe",
+            r"C:\Users\me\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+            r"C:\Users\me\AppData\Local\Programs\Grok\Grok.exe",
         ] {
             let encoded = windows_path_regex(sample, WindowsPathRegexKind::ContainsFragment)
                 .expect(sample);

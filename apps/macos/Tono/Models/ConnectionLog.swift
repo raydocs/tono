@@ -4,8 +4,39 @@ import Foundation
 
 nonisolated enum ConnectionType: String, Codable {
     case proxied  = "Proxied"
+    case home     = "Home"
     case direct   = "Direct"
     case rejected = "Rejected"
+}
+
+/// How Activity presents `/connections`. Clash.md's Connections view keeps
+/// every live tunnel flow and virtualizes the list; a 50-row `VStack` is
+/// why Tono used to look empty on a busy Mac.
+enum ConnectionActivityPresentation {
+    static let maxDisplayed = 2_000
+
+    static func isLoopback(_ connection: APIConnection) -> Bool {
+        loopbackAddress(connection.metadata.host)
+            || loopbackAddress(connection.metadata.destinationIP ?? "")
+    }
+
+    static func type(for connection: APIConnection) -> ConnectionType {
+        switch AppTrafficLedger.routeClass(for: connection) {
+        case .blocked: return .rejected
+        case .direct: return .direct
+        case .residential: return .home
+        case .tunnel: return .proxied
+        }
+    }
+
+    private static func loopbackAddress(_ value: String) -> Bool {
+        let host = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if host.isEmpty { return false }
+        if host == "localhost" || host == "::1" || host.hasPrefix("[::1]") {
+            return true
+        }
+        return host.hasPrefix("127.")
+    }
 }
 
 // MARK: - Connection Entry

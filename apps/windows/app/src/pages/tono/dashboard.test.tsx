@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   tonoConnect: vi.fn(),
   tonoDisconnect: vi.fn(),
   tonoRetryNow: vi.fn(),
+  trafficLive: false,
+  traffic: undefined as { up: number; down: number } | undefined,
+  refreshGetClashTraffic: vi.fn(),
 }))
 
 vi.mock('@/hooks/use-tono', () => ({
@@ -30,7 +33,11 @@ vi.mock('@/hooks/use-tono', () => ({
 }))
 
 vi.mock('@/hooks/use-traffic-data', () => ({
-  useTrafficData: () => ({ response: { data: undefined } }),
+  useTrafficData: () => ({
+    response: { data: mocks.traffic },
+    live: mocks.trafficLive,
+    refreshGetClashTraffic: mocks.refreshGetClashTraffic,
+  }),
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'light' }))
@@ -78,6 +85,9 @@ beforeEach(() => {
   mocks.tonoConnect.mockReset().mockResolvedValue(undefined)
   mocks.tonoDisconnect.mockReset().mockResolvedValue(undefined)
   mocks.tonoRetryNow.mockReset().mockResolvedValue(undefined)
+  mocks.trafficLive = false
+  mocks.traffic = undefined
+  mocks.refreshGetClashTraffic.mockReset()
 })
 
 afterEach(() => cleanup())
@@ -225,5 +235,32 @@ describe('dashboard action-error ownership', () => {
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(2))
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+  })
+})
+
+describe('dashboard live traffic copy', () => {
+  it('does not present 0 B/s as live throughput before the core feed arrives', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+    })
+    mocks.trafficLive = false
+    renderDashboard()
+
+    expect(screen.getByText('Reading traffic…')).toBeDefined()
+    expect(screen.queryByText(/0 B\/s/)).toBeNull()
+  })
+
+  it('shows the live rate once the traffic socket has delivered a frame', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+    })
+    mocks.trafficLive = true
+    mocks.traffic = { up: 2048, down: 4096 }
+    renderDashboard()
+
+    expect(screen.queryByText('Reading traffic…')).toBeNull()
+    expect(screen.getByText('4.00 KB/s')).toBeDefined()
   })
 })

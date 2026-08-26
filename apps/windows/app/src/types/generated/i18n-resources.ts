@@ -974,6 +974,7 @@ export interface TranslationResources {
         connectionCount: string
         disconnected: string
         empty: string
+        emptyHiddenDns: string
         filters: {
           all: string
           direct: string
@@ -984,6 +985,7 @@ export interface TranslationResources {
         }
         limitNotice: string
         noMatches: string
+        reading: string
         routeFilter: string
         routes: {
           direct: string
@@ -995,6 +997,7 @@ export interface TranslationResources {
         search: string
         splitHint: string
         subtitle: string
+        telemetryFailed: string
         title: string
         view: string
         views: {
@@ -1072,9 +1075,11 @@ export interface TranslationResources {
           liveTraffic: string
           noActiveRoute: string
           protection: string
+          reading: string
           ready: string
           refreshingCatalog: string
           serverPool: string
+          telemetryFailed: string
           trafficRouted: string
           verifiedCatalog: string
         }

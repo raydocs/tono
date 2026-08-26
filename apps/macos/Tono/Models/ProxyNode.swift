@@ -26,16 +26,43 @@ nonisolated enum ProxyType: String, Codable, CaseIterable, Hashable, Sendable {
 
 // MARK: - Latency Level
 
+nonisolated enum LatencyKind {
+    /// TCP connect to :443, no TLS.
+    case tcp
+    /// HTTPS generate_204 through Reality. A healthy Japan exit is often 400–900ms.
+    case exit
+}
+
 nonisolated enum LatencyLevel {
     case low, mid, high
 
-    /// Canonical latency banding for the whole app (macOS and Windows agree):
-    /// <200 good, <400 slow, ≥400 poor. Keep aligned with `latencyColor` in
-    /// the Windows `pages/tono/node-latency.ts`.
-    static func level(for ms: Int) -> LatencyLevel {
-        if ms < 200 { return .low }
-        if ms < 400 { return .mid }
-        return .high
+    /// Canonical banding. Keep aligned with Windows `pages/tono/node-latency.ts`.
+    /// Exit uses wider bands so a normal Reality handshake is not painted as a
+    /// dead node.
+    static func level(for ms: Int, kind: LatencyKind = .exit) -> LatencyLevel {
+        switch kind {
+        case .tcp:
+            if ms < 200 { return .low }
+            if ms < 400 { return .mid }
+            return .high
+        case .exit:
+            if ms < 1000 { return .low }
+            if ms < 1500 { return .mid }
+            return .high
+        }
+    }
+
+    static func spokenSeconds(for ms: Int) -> String {
+        String(format: "%.1f", Double(ms) / 1000.0)
+    }
+
+    static func spokenTitle(for ms: Int, kind: LatencyKind = .exit) -> String {
+        switch kind {
+        case .tcp:
+            return String(localized: "\(ms)ms")
+        case .exit:
+            return String(localized: "\(spokenSeconds(for: ms))s")
+        }
     }
 
     var color: String {
@@ -104,7 +131,7 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     var protocolType: String { type.displayName }
     var ping: Int { latency }
 
-    var latencyColor: LatencyLevel { LatencyLevel.level(for: latency) }
+    var latencyColor: LatencyLevel { LatencyLevel.level(for: latency, kind: .exit) }
 
     enum CodingKeys: String, CodingKey {
         case id, flag, name, type, server, port, relay, latency, isActive, subscriptionId

@@ -658,6 +658,10 @@ final class AppState {
     var activeNode: ProxyNode? = nil
     var networkInfo: NetworkInfo = NetworkInfo()
     var trafficStats: TrafficStats = TrafficStats()
+    /// True after `/traffic` has delivered at least one frame for this session.
+    var trafficFeedLive = false
+    /// True after `/connections` has delivered at least one frame for this session.
+    var connectionsFeedLive = false
     var errorMessage: String? = nil {
         didSet {
             guard let errorMessage, errorMessage != oldValue else { return }
@@ -714,6 +718,8 @@ final class AppState {
 
     // Activity
     var connections: [ConnectionEntry] = []
+    /// True when live flows (after hiding loopback DNS) exceed the displayed cap.
+    var connectionsDisplayLimited = false
     /// Per-app totals with a route split. Fed from every connections
     /// snapshot, not only while the Activity page is visible.
     let appTrafficLedger = AppTrafficLedger()
@@ -2062,7 +2068,10 @@ final class AppState {
         isProxyDegraded = false
         networkInfo = NetworkInfo()
         trafficStats = TrafficStats()
+        trafficFeedLive = false
+        connectionsFeedLive = false
         connections = []
+        connectionsDisplayLimited = false
         appTrafficLedger.reset()
         logEntries = []
         activeRules = []
@@ -2272,6 +2281,8 @@ final class AppState {
         let port = config.externalController.split(separator: ":").last.flatMap { Int($0) } ?? 9090
 
         // Start WebSocket streams
+        trafficFeedLive = false
+        connectionsFeedLive = false
         let ws = ClashWebSocket(port: port, secret: config.secret)
         webSocket = ws
 
@@ -2281,10 +2292,12 @@ final class AppState {
             stats.uploadSpeed = traffic.up
             stats.downloadSpeed = traffic.down
             self.trafficStats = stats
+            self.trafficFeedLive = true
         }
 
         ws.onConnections = { [weak self] response in
             guard let self else { return }
+            self.connectionsFeedLive = true
             if let apiConnections = response.connections {
                 LocalTrafficAudit.shared.recordConnections(
                     apiConnections,
@@ -2305,8 +2318,10 @@ final class AppState {
             stats.totalDownload = response.downloadTotal
             stats.activeConnections = response.connections?.count ?? 0
             self.trafficStats = stats
-            guard self.isMainWindowVisible,
-                  self.selectedPage == .activity else { return }
+            // Keep the Activity snapshot even when that page is not visible.
+            // Gating it made the first paint a lie ("no connections") until the
+            // next 2.5s websocket frame. Mapping 2k rows is cheaper than the
+            // old 50-card VStack that this used to protect.
             self.updateConnections(from: response)
         }
 
@@ -2326,7 +2341,7 @@ final class AppState {
             }
         }
 
-        ws.onStreamStalled = { stream in
+        ws.onStreamStalled = { [weak self] stream in
             LocalTrafficAudit.shared.recordEvent(
                 "audit_observer_stream_stalled",
                 details: [
@@ -2334,8 +2349,11 @@ final class AppState {
                     "protection_impact": "none",
                 ]
             )
+            guard let self else { return }
+            if stream == "traffic" { self.trafficFeedLive = false }
+            if stream == "connections" { self.connectionsFeedLive = false }
         }
-        ws.onStreamRecovered = { stream in
+        ws.onStreamRecovered = { [weak self] stream in
             LocalTrafficAudit.shared.recordEvent(
                 "audit_observer_stream_recovered",
                 details: [
@@ -2343,6 +2361,9 @@ final class AppState {
                     "protection_impact": "none",
                 ]
             )
+            guard let self else { return }
+            if stream == "traffic" { self.trafficFeedLive = true }
+            if stream == "connections" { self.connectionsFeedLive = true }
         }
 
         updateLiveStreamSubscriptions()
@@ -2397,12 +2418,16 @@ final class AppState {
     private func updateLiveStreamSubscriptions() {
         guard isConnected, let webSocket else { return }
 
-        if isMainWindowVisible, selectedPage == .dashboard {
+        if isMainWindowVisible,
+           selectedPage == .dashboard || selectedPage == .activity {
             webSocket.startTrafficStream()
         } else {
             webSocket.stopTrafficStream()
             trafficStats.uploadSpeed = 0
             trafficStats.downloadSpeed = 0
+            // Leaving the dashboard used to keep `trafficFeedLive` true with
+            // zeroed rates, so coming back showed "Connected" next to 0 B/s.
+            trafficFeedLive = false
         }
 
         let localAuditEnabled = LocalTrafficAudit.isEnabled
@@ -5933,57 +5958,66 @@ final class AppState {
     // MARK: - Update Connections from WebSocket
 
     private func updateConnections(from response: APIConnectionsResponse) {
-        guard let apiConnections = response.connections else { return }
+        guard let apiConnections = response.connections else {
+            connections = []
+            connectionsDisplayLimited = false
+            return
+        }
         let timestamp = Date.now.formatted(
             .dateTime.hour(.twoDigits(amPM: .omitted))
                 .minute(.twoDigits)
                 .second(.twoDigits)
         )
-
-        connections = apiConnections.prefix(50).map { conn in
-            let type: ConnectionType
-            switch AppTrafficLedger.routeClass(for: conn) {
-            case .blocked:
-                type = .rejected
-            case .direct:
-                type = .direct
-            case .residential, .tunnel:
-                type = .proxied
-            }
-
-            let chainNode = conn.chains.first ?? "Direct"
-            let flag = ConfigParser.guessFlag(from: chainNode)
-            let destinationHost = conn.metadata.destinationIP ?? "unknown"
-            let destination = conn.metadata.destinationPort.map {
-                "\(destinationHost):\($0)"
-            } ?? destinationHost
-
-            return ConnectionEntry(
-                id: conn.id,
-                domain: conn.metadata.host.isEmpty ? (conn.metadata.destinationIP ?? "unknown") : conn.metadata.host,
-                protocolName: conn.metadata.type,
-                rule: "\(conn.rule)\(conn.rulePayload.map { " (\($0))" } ?? "")",
-                nodeFlag: flag,
-                nodeName: chainNode,
-                latency: nil,
-                dataSize: formatBytes(conn.download + conn.upload),
-                dataLabel: "Traffic",
-                timestamp: timestamp,
-                type: type,
-                network: conn.metadata.network.uppercased(),
-                destination: destination,
-                processName: {
-                    let name = appTrafficLedger.resolvedProcessName(for: conn)
-                    if name == AppTrafficLedger.unattributed { return nil }
-                    return name
-                }(),
-                route: conn.chains.isEmpty
-                    ? "Direct"
-                    : conn.chains.joined(separator: " → "),
-                uploadText: formatBytes(conn.upload),
-                downloadText: formatBytes(conn.download)
-            )
+        let cap = ConnectionActivityPresentation.maxDisplayed
+        var mapped: [ConnectionEntry] = []
+        mapped.reserveCapacity(min(apiConnections.count, cap))
+        var visibleCount = 0
+        for conn in apiConnections {
+            if ConnectionActivityPresentation.isLoopback(conn) { continue }
+            visibleCount += 1
+            if mapped.count >= cap { continue }
+            mapped.append(connectionEntry(from: conn, timestamp: timestamp))
         }
+        connections = mapped
+        connectionsDisplayLimited = visibleCount > cap
+    }
+
+    private func connectionEntry(
+        from conn: APIConnection,
+        timestamp: String
+    ) -> ConnectionEntry {
+        let type = ConnectionActivityPresentation.type(for: conn)
+        let chainNode = conn.chains.first ?? "Direct"
+        let flag = ConfigParser.guessFlag(from: chainNode)
+        let destinationHost = conn.metadata.destinationIP ?? "unknown"
+        let destination = conn.metadata.destinationPort.map {
+            "\(destinationHost):\($0)"
+        } ?? destinationHost
+        let host = conn.metadata.host.isEmpty
+            ? (conn.metadata.destinationIP ?? "unknown")
+            : conn.metadata.host
+        let process = appTrafficLedger.resolvedProcessName(for: conn)
+        return ConnectionEntry(
+            id: conn.id,
+            domain: host,
+            protocolName: conn.metadata.type,
+            rule: "\(conn.rule)\(conn.rulePayload.map { " (\($0))" } ?? "")",
+            nodeFlag: flag,
+            nodeName: chainNode,
+            latency: nil,
+            dataSize: formatBytes(conn.download + conn.upload),
+            dataLabel: "Traffic",
+            timestamp: timestamp,
+            type: type,
+            network: conn.metadata.network.uppercased(),
+            destination: destination,
+            processName: process == AppTrafficLedger.unattributed ? nil : process,
+            route: conn.chains.isEmpty
+                ? "Direct"
+                : conn.chains.joined(separator: " → "),
+            uploadText: formatBytes(conn.upload),
+            downloadText: formatBytes(conn.download)
+        )
     }
 
     /// Resolves the control-plane host through the protected resolver and stores
@@ -6178,6 +6212,8 @@ final class AppState {
         proxyRegions = mockProxyRegions
         rules = mockRules
         connections = mockConnections
+        trafficFeedLive = true
+        connectionsFeedLive = true
         selectedNodeId = proxyRegions.first?.nodes.first?.id
         activeNode = proxyRegions.first?.nodes.first
     }

@@ -3682,6 +3682,11 @@ fn fake_ip_attempt_timeout(attempt: u32) -> Duration {
 /// [`EXIT_PROBE_CORE_TIMEOUT_MS`] core-side budget; a positive delay proves egress. The client
 /// budget ([`EXIT_PROBE_CLIENT_TIMEOUT`]) is strictly larger, so the verdict — including a
 /// mihomo-reported failure — always comes from the core (C2).
+///
+/// Mihomo `unified-delay` already discards the cold handshake inside this one
+/// call. A second `/delay` here would add another cross-border round to connect
+/// without changing the number the UI shows. Japan→gstatic through Reality
+/// commonly lands 400–900ms; that is not a dead node.
 async fn probe_exit_once(secret: &str, controller_port: u16) -> Result<u64, String> {
     let client = controller_client(EXIT_PROBE_CLIENT_TIMEOUT)?;
     let mut url = reqwest::Url::parse(&controller_url(

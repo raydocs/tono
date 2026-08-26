@@ -445,26 +445,18 @@ struct NodeLatencyBadge: View {
     private var tint: Color {
         if didFail { return TonoStatus.error }
         if latency <= 0 { return TonoStatus.neutral }
-        return Color(hex: LatencyLevel.level(for: latency).color)
+        return Color(hex: LatencyLevel.level(for: latency, kind: .exit).color)
     }
 
     private var title: String {
         if didFail { return String(localized: "Timeout") }
-        guard latency > 0 else { return String(localized: "Not tested") }
-        if latency >= 400 {
-            return String(localized: "Slow exit \(latency)ms")
-        }
-        return String(localized: "Exit \(latency)ms")
+        guard latency > 0 else { return "—" }
+        return LatencyLevel.spokenTitle(for: latency, kind: .exit)
     }
 
     private var detail: String? {
         if didFail { return String(localized: "Unavailable") }
-        guard latency > 0 else { return nil }
-        switch LatencyLevel.level(for: latency) {
-        case .low: return String(localized: "Good")
-        case .mid: return String(localized: "Slow")
-        case .high: return nil
-        }
+        return nil
     }
 
     var body: some View {

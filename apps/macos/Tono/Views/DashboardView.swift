@@ -212,12 +212,18 @@ struct DashboardView: View {
 
     private var trafficSummaryValue: String {
         guard appState.isConnected else { return String(localized: "Idle") }
+        if !appState.trafficFeedLive {
+            return String(localized: "Reading traffic…")
+        }
         let speed = max(appState.trafficStats.uploadSpeed, appState.trafficStats.downloadSpeed)
         return speed > 0 ? formatSpeed(speed) : String(localized: "Connected")
     }
 
     private var trafficSummaryDetail: String {
         guard appState.isConnected else { return String(localized: "No active route") }
+        if !appState.trafficFeedLive {
+            return String(localized: "Dashboard has not reached the core yet — retrying")
+        }
         return String(localized: "\(appState.trafficStats.activeConnections) active")
     }
 
@@ -263,7 +269,7 @@ struct DashboardView: View {
             HStack(spacing: 10) {
                 TrafficSparkline(
                     history: trafficHistory,
-                    isLive: appState.isConnected
+                    isLive: appState.isConnected && appState.trafficFeedLive
                 )
 
                 VStack(alignment: .trailing, spacing: 2) {

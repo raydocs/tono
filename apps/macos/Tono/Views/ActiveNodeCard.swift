@@ -74,10 +74,9 @@ struct ActiveNodeCard: View {
                 }
                 Spacer()
                 if latency > 0 {
-                    let tint = Color(hex: LatencyLevel.level(for: latency).color)
-                    Text(latency >= 400
-                         ? String(localized: "Slow exit \(latency)ms")
-                         : String(localized: "Exit \(latency)ms"))
+                    let level = LatencyLevel.level(for: latency, kind: .exit)
+                    let tint = Color(hex: level.color)
+                    Text(LatencyLevel.spokenTitle(for: latency, kind: .exit))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(tint)
                         .padding(.horizontal, 8)

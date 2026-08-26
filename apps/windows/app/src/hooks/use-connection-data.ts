@@ -37,6 +37,8 @@ let connectionData: ConnectionMonitorData = initConnData
 let connectionSummary: ConnectionSummaryData = initConnSummaryData
 let connectionSocket: MihomoWebSocket | null = null
 let connectionConnecting = false
+/** True after the live core has delivered at least one connections frame. */
+let connectionFeedLive = false
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let pendingMessageData: string | null = null
@@ -233,6 +235,7 @@ const flushPendingMessage = () => {
   }
 
   lastFlushAt = Date.now()
+  connectionFeedLive = true
   connectionSummary = mergeConnectionSummary(payload)
   notifySummaryListeners()
 
@@ -358,6 +361,7 @@ const selectConnectionGeneration = (generation?: number) => {
   connectionGeneration = generation
   connectionData = initConnData
   connectionSummary = initConnSummaryData
+  connectionFeedLive = false
   pendingMessageData = null
   lastFlushAt = 0
   if (flushTimer) {
@@ -436,7 +440,15 @@ export const useConnectionData = (options?: {
     getVersionedSnapshot,
     getVersionedSnapshot,
   )
-  const response = useMemo(() => ({ data }), [data])
+  const live = useSyncExternalStore(
+    subscribe,
+    () =>
+      generation == null || generation === connectionGeneration
+        ? connectionFeedLive
+        : false,
+    () => false,
+  )
+  const response = useMemo(() => ({ data, live }), [data, live])
   const refreshGetClashConnection = useCallback(() => {
     refreshConnectionData()
   }, [])

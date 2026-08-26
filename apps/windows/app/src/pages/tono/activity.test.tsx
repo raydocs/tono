@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -110,7 +111,10 @@ beforeEach(() => {
   tonoStatusMock.uiState = 'connected'
   useConnectionDataMock
     .mockReset()
-    .mockReturnValue({ response: { data: connectionDataMock } })
+    .mockReturnValue({
+      response: { data: connectionDataMock, live: true },
+      refreshGetClashConnection: vi.fn(),
+    })
   connectionDataMock.activeConnections = [
     connection('proxy'),
     connection('direct', { chains: ['DIRECT'] }),
@@ -319,5 +323,62 @@ describe('ActivityPage', () => {
       screen.getByRole('button', { name: 'Close all connections' }),
     )
     await waitFor(() => expect(closeAllConnectionsMock).toHaveBeenCalledWith(7))
+  })
+
+  it('says it is reading connections before the first live frame', () => {
+    useConnectionDataMock.mockReturnValue({
+      response: { data: { activeConnections: [] }, live: false },
+      refreshGetClashConnection: vi.fn(),
+    })
+    render(<ActivityPage />)
+    expect(screen.getByText('Reading connections…')).toBeDefined()
+  })
+
+  it('retries and names a telemetry miss after the first feed timeout', () => {
+    vi.useFakeTimers()
+    try {
+      const refreshGetClashConnection = vi.fn()
+      useConnectionDataMock.mockReturnValue({
+        response: { data: { activeConnections: [] }, live: false },
+        refreshGetClashConnection,
+      })
+      render(<ActivityPage />)
+      act(() => {
+        vi.advanceTimersByTime(4_000)
+      })
+      expect(
+        screen.getByText(
+          'The dashboard has not reached the core yet and is retrying. Pages loading still means the tunnel is up.',
+        ),
+      ).toBeDefined()
+      expect(refreshGetClashConnection).toHaveBeenCalledTimes(1)
+      act(() => {
+        vi.advanceTimersByTime(4_000)
+      })
+      expect(refreshGetClashConnection).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('explains an empty list when only hidden local DNS is open', () => {
+    connectionDataMock.activeConnections = [
+      connection('dns', {
+        metadata: {
+          ...connection('dns').metadata,
+          host: '',
+          destinationIP: '127.0.0.1',
+          destinationPort: '53',
+        },
+        chains: ['DIRECT'],
+        rule: 'IPCIDR',
+        rulePayload: '127.0.0.0/8',
+      }),
+    ]
+    render(<ActivityPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
+    expect(
+      screen.getByText('Only local DNS lookups are open; those stay hidden.'),
+    ).toBeDefined()
   })
 })

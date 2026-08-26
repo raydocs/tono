@@ -191,6 +191,7 @@ struct ActivityView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedFilter: String = "All"
     @State private var section: Section = .apps
+    @State private var connectionQuery = ""
     @State private var isTestingLatency = false
     @State private var trafficHistory = TrafficHistory()
 
@@ -199,11 +200,25 @@ struct ActivityView: View {
         case connections = "Connections"
     }
 
-    private let filters = ["All", "Proxied", "Direct", "Rejected"]
+    private let filters = ["All", "Proxied", "Home", "Direct", "Rejected"]
 
     private var filteredConnections: [ConnectionEntry] {
-        if selectedFilter == "All" { return appState.connections }
-        return appState.connections.filter { $0.type.rawValue == selectedFilter }
+        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return appState.connections.filter { entry in
+            if selectedFilter != "All", entry.type.rawValue != selectedFilter {
+                return false
+            }
+            if query.isEmpty { return true }
+            return [
+                entry.domain,
+                entry.processName ?? "",
+                entry.destination,
+                entry.nodeName,
+                entry.route,
+                entry.network,
+                entry.protocolName,
+            ].contains { $0.lowercased().contains(query) }
+        }
     }
 
     private var selectedExitLatency: Int? {
@@ -252,15 +267,18 @@ struct ActivityView: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 ActivityCard(
-                    title: "Selected exit latency",
+                    title: "Current exit",
                     accessory: AnyView(latencyRefreshButton)
                 ) {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(selectedExitLatency.map(String.init) ?? "—")
+                    if let ms = selectedExitLatency {
+                        Text(LatencyLevel.spokenTitle(for: ms, kind: .exit))
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
-                        if selectedExitLatency != nil {
-                            Text("ms").font(.system(size: 12)).foregroundStyle(.secondary)
-                        }
+                            .foregroundStyle(
+                                Color(hex: LatencyLevel.level(for: ms, kind: .exit).color)
+                            )
+                    } else {
+                        Text("—")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
                     }
                     Text(appState.proxyService.activeNodeName ?? "No exit selected")
                         .font(.system(size: 10))
@@ -269,13 +287,23 @@ struct ActivityView: View {
                 }
 
                 ActivityCard(title: "Upload") {
-                    rateValue(appState.trafficStats.uploadSpeed, tint: TonoTraffic.upload)
+                    if appState.trafficFeedLive {
+                        rateValue(appState.trafficStats.uploadSpeed, tint: TonoTraffic.upload)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    }
                     Text("\(activityBytes(appState.trafficStats.totalUpload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
 
                 ActivityCard(title: "Download") {
-                    rateValue(appState.trafficStats.downloadSpeed, tint: TonoTraffic.download)
+                    if appState.trafficFeedLive {
+                        rateValue(appState.trafficStats.downloadSpeed, tint: TonoTraffic.download)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    }
                     Text("\(activityBytes(appState.trafficStats.totalDownload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
@@ -283,8 +311,12 @@ struct ActivityView: View {
 
             HStack(spacing: 10) {
                 ActivityCard(title: "Active connections") {
-                    Text("\(appState.trafficStats.activeConnections)")
-                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    Text(
+                        appState.connectionsFeedLive
+                            ? "\(appState.connections.count)"
+                            : "—"
+                    )
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     Text("\(appState.appTrafficLedger.apps.count) apps seen this session")
                         .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
                 }
@@ -395,6 +427,24 @@ struct ActivityView: View {
             if section == .connections {
                 Divider().frame(height: 16).padding(.horizontal, 4)
                 filterPills
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "Filter by app, domain, or destination",
+                        text: $connectionQuery
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .frame(width: 200)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    .white.opacity(colorScheme == .dark ? 0.08 : 0.4),
+                    in: Capsule()
+                )
             }
 
             Spacer(minLength: 0)
@@ -410,9 +460,7 @@ struct ActivityView: View {
                     AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
                 }
                 if appState.appTrafficLedger.apps.isEmpty {
-                    Text(appState.isConnected
-                        ? "Waiting for the first traffic sample…"
-                        : "Connect to see which apps use which route.")
+                    Text(appsEmptyCopy)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -425,21 +473,66 @@ struct ActivityView: View {
 
     // MARK: - Connections
 
+    @ViewBuilder
     private var connectionsList: some View {
-        ScrollView {
-            ZStack(alignment: .leading) {
-                timelineLine
-                VStack(spacing: 14) {
-                    ForEach(filteredConnections) { entry in
-                        LogEntryRow(entry: entry) {
-                            Task { await appState.closeConnection(entry.id) }
+        if filteredConnections.isEmpty {
+            Text(connectionsEmptyCopy)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 40)
+        } else {
+            ScrollView {
+                ZStack(alignment: .leading) {
+                    timelineLine
+                    LazyVStack(spacing: 14) {
+                        ForEach(filteredConnections) { entry in
+                            LogEntryRow(entry: entry) {
+                                Task { await appState.closeConnection(entry.id) }
+                            }
+                        }
+                        if appState.connectionsDisplayLimited,
+                           selectedFilter == "All",
+                           connectionQuery.isEmpty {
+                            Text("Showing the newest \(ConnectionActivityPresentation.maxDisplayed) connections.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 4)
                         }
                     }
+                    .padding(.leading, 32)
+                    .padding(.bottom, 8)
                 }
-                .padding(.leading, 32)
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
+    }
+
+    private var appsEmptyCopy: String {
+        if !appState.isConnected {
+            return String(localized: "Connect to see which apps use which route.")
+        }
+        if !appState.connectionsFeedLive {
+            return String(localized: "Reading connections…")
+        }
+        return String(localized: "Waiting for the first traffic sample…")
+    }
+
+    private var connectionsEmptyCopy: String {
+        if !appState.isConnected {
+            return String(localized: "Connect Tono to view live activity.")
+        }
+        if !appState.connectionsFeedLive {
+            return String(localized: "Reading connections…")
+        }
+        if selectedFilter != "All" || !connectionQuery.isEmpty {
+            return String(localized: "No connections match these filters.")
+        }
+        if appState.trafficStats.activeConnections > 0 {
+            return String(localized: "Only local DNS lookups are open; those stay hidden.")
+        }
+        return String(localized: "No active connections.")
     }
 
     // MARK: - Timeline Line
@@ -599,6 +692,7 @@ private struct LogEntryRow: View {
     private var dotColor: Color {
         switch entry.type {
         case .proxied:  return RouteTint.tunnel
+        case .home:     return RouteTint.residential
         case .direct:   return RouteTint.direct
         case .rejected: return RouteTint.blocked
         }
@@ -624,7 +718,7 @@ private struct LogEntryRow: View {
         // Same latency banding as the node cards (LatencyLevel.level(for:)),
         // so a given millisecond count is the same colour app-wide.
         guard let ms = entry.latency else { return ("98989D", "000000") }
-        let color = LatencyLevel.level(for: ms).color
+        let color = LatencyLevel.level(for: ms, kind: .exit).color
         return (color, color)
     }
 
@@ -698,7 +792,8 @@ private struct LogEntryRow: View {
                 .frame(width: 160, alignment: .leading)
                 .help(entry.route.isEmpty ? entry.nodeName : entry.route)
 
-                // Latency
+                // Per-flow latency is not in the `/connections` snapshot.
+                // A permanent "--" looked like every row had timed out.
                 if let ms = entry.latency {
                     Text("\(ms)ms")
                         .font(.system(size: 12, weight: .semibold))
@@ -706,14 +801,6 @@ private struct LogEntryRow: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color(hex: latencyStyle.bg).opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-                        .frame(width: 80)
-                } else {
-                    Text("- -")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
                         .frame(width: 80)
                 }
 

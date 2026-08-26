@@ -493,7 +493,7 @@ struct ProxiesView: View {
                 if node.latency > 0 {
                     Text("\(node.latency)ms")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency).color))
+                        .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency, kind: .exit).color))
                 } else if node.lastTestFailed {
                     Text("Timeout")
                         .font(.system(size: 10, design: .monospaced))

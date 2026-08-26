@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { VirtualList } from '@/components/base/virtual-list'
@@ -105,8 +105,24 @@ const ActivityPage = () => {
   const [closingId, setClosingId] = useState<string | null>(null)
   const [closingAll, setClosingAll] = useState(false)
   const {
-    response: { data },
+    response: { data, live },
+    refreshGetClashConnection,
   } = useConnectionData({ enabled: connected, generation })
+  const [waitedForFeed, setWaitedForFeed] = useState(false)
+  useEffect(() => {
+    if (!connected || live) {
+      setWaitedForFeed(false)
+      return
+    }
+    const timer = window.setTimeout(() => setWaitedForFeed(true), 4_000)
+    return () => window.clearTimeout(timer)
+  }, [connected, live, generation])
+  useEffect(() => {
+    if (!waitedForFeed || live) return
+    refreshGetClashConnection()
+    const timer = window.setInterval(() => refreshGetClashConnection(), 4_000)
+    return () => window.clearInterval(timer)
+  }, [waitedForFeed, live, refreshGetClashConnection])
 
   const activeConnections = data?.activeConnections ?? EMPTY_CONNECTIONS
   const capped = useMemo(
@@ -438,7 +454,13 @@ const ActivityPage = () => {
             {t(
               normalizedQuery || filter !== 'all'
                 ? 'tono.activity.noMatches'
-                : 'tono.activity.empty',
+                : !live && !waitedForFeed
+                  ? 'tono.activity.reading'
+                  : !live && waitedForFeed
+                    ? 'tono.activity.telemetryFailed'
+                    : activeConnections.length > 0
+                      ? 'tono.activity.emptyHiddenDns'
+                      : 'tono.activity.empty',
             )}
           </div>
         ) : (
