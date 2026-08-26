@@ -2515,6 +2515,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       directSuffixes: [{ host: 'edu.cn', ports: [80, 443] }],
       tcpEndpoints: [{ address: '49.51.67.253', ports: [80, 443] }],
     });
+    const fetchedV4 = await admin('traffic-policy', undefined, 'GET');
+    expect(fetchedV4.status).toBe(200);
+    expect(JSON.parse((await fetchedV4.json() as { json: string }).json)).toEqual({
+      version: 4,
+      domains: [
+        { host: 'res.wx.qq.com', ports: [443] },
+        { host: 'wx.qlogo.cn', ports: [80, 443] },
+      ],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443, 8000] }],
+      webDomains: [
+        { host: 'www.bilibili.com', ports: [443] },
+        { host: 'ykimg.alicdn.com', ports: [443] },
+      ],
+      directSuffixes: [{ host: 'edu.cn', ports: [80, 443] }],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [80, 443] }],
+    });
 
     const invalidPolicies = [
       { ...policy, version: 3 },

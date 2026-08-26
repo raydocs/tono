@@ -56,29 +56,36 @@ function greedyOps(a: string[], b: string[]): Array<'eq' | 'add' | 'del'> {
     list.push(index);
     bIndex.set(line, list);
   });
-  const used = new Set<number>();
+  const cursor = new Map<string, number>();
   let ai = 0;
   let bj = 0;
   while (ai < a.length || bj < b.length) {
     if (ai < a.length && bj < b.length && a[ai] === b[bj]) {
       ops.push('eq');
-      used.add(bj);
+      cursor.set(a[ai], (cursor.get(a[ai]) ?? 0) + 1);
       ai += 1;
       bj += 1;
       continue;
     }
-    const candidates = ai < a.length ? bIndex.get(a[ai]) : undefined;
-    const next = candidates?.find((index) => index >= bj && !used.has(index));
-    if (next != null) {
-      while (bj < next) {
-        ops.push('add');
+    const list = ai < a.length ? bIndex.get(a[ai]) : undefined;
+    if (list) {
+      let at = cursor.get(a[ai]) ?? 0;
+      while (at < list.length && list[at] < bj) at += 1;
+      cursor.set(a[ai], at);
+      if (at < list.length) {
+        const next = list[at];
+        while (bj < next) {
+          ops.push('add');
+          bj += 1;
+        }
+        ops.push('eq');
+        cursor.set(a[ai], at + 1);
+        ai += 1;
         bj += 1;
+        continue;
       }
-      ops.push('eq');
-      used.add(bj);
-      ai += 1;
-      bj += 1;
-    } else if (ai < a.length) {
+    }
+    if (ai < a.length) {
       ops.push('del');
       ai += 1;
     } else {

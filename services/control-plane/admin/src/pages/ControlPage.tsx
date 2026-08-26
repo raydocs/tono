@@ -1,17 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { operationsApi } from '../api';
 import { useResource } from '../hooks';
 import { createExclusiveGate } from '../lib/exclusive';
 import { timestamp } from '../lib/format';
 import { publishGate } from '../lib/revision';
-import { lineDiff, type LineDiff } from '../lib/textdiff';
+import { lineDiff } from '../lib/textdiff';
+import {
+  clearWebDomains,
+  emptyDirectPolicy,
+  hasWebDomains,
+  parseTrafficPolicyText,
+} from '../lib/traffic-policy';
 import { useOpsWorld } from '../ops-context';
 import { usePrivacy } from '../privacy';
 import { Banner, Confirm, DataHealth, GlassCard } from '../ui';
 
 type Phase = 'viewing' | 'editing-clean' | 'editing-dirty' | 'confirming' | 'publishing' | 'success' | 'conflict' | 'error';
 
-function DiffView({ diff, revealed }: { diff: LineDiff; revealed: boolean }) {
+function DiffView({ diff, revealed }: { diff: ReturnType<typeof lineDiff>; revealed: boolean }) {
   if (!revealed) return <p className="muted">隐私模式已隐藏 diff 原文。提交仍使用原始草稿。</p>;
   return (
     <div className="text-diff">
@@ -44,7 +50,14 @@ export function ControlPage() {
   const [reveal, setReveal] = useState(!privacy.privacy);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{ title: string; detail: string; run: () => Promise<void> } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    title: string;
+    detail: string;
+    target: 'yaml' | 'policy';
+    run: () => Promise<void>;
+  } | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   useEffect(() => {
     if (privacy.privacy) setReveal(false);
@@ -57,8 +70,16 @@ export function ControlPage() {
   const behind = world.people.filter((person) => person.catalogLag.state === 'behind').length;
   const latest = world.people.filter((person) => person.catalogLag.state === 'current').length;
   const unreported = world.people.filter((person) => person.catalogLag.state === 'unreported').length;
-  const yamlDiff = yamlPhase === 'viewing' ? null : lineDiff(yamlBaseText, yamlDraft);
-  const policyDiff = policyPhase === 'viewing' ? null : lineDiff(policyBaseText, policyDraft);
+  const yamlDiff = useMemo(
+    () => (yamlPhase === 'viewing' ? null : lineDiff(yamlBaseText, yamlDraft)),
+    [yamlPhase, yamlBaseText, yamlDraft],
+  );
+  const policyDiff = useMemo(
+    () => (policyPhase === 'viewing' ? null : lineDiff(policyBaseText, policyDraft)),
+    [policyPhase, policyBaseText, policyDraft],
+  );
+  const parsedDraft = useMemo(() => parseTrafficPolicyText(policyDraft), [policyDraft]);
+  const webDirectDisabled = !parsedDraft.ok || parsedDraft.policy.version === 1 || !hasWebDomains(parsedDraft.policy);
 
   function startYaml() {
     if (catalog.state !== 'ready') return;
@@ -67,6 +88,7 @@ export function ControlPage() {
     setYamlBase(catalog.data.revision);
     setYamlPhase('editing-clean');
     setError(null);
+    setMessage(null);
   }
 
   function startPolicy() {
@@ -76,6 +98,7 @@ export function ControlPage() {
     setPolicyBase(policy.data.revision);
     setPolicyPhase('editing-clean');
     setError(null);
+    setMessage(null);
   }
 
   function changeYaml(text: string) {
@@ -88,94 +111,107 @@ export function ControlPage() {
     setPolicyPhase(text === policyBaseText ? 'editing-clean' : 'editing-dirty');
   }
 
-  async function reloadYaml(force = false) {
-    if (!force && yamlPhase === 'editing-dirty') {
+  async function reloadYaml() {
+    const fetchOnline = async () => {
+      const data = await catalog.reloadNow();
+      setYamlBaseText(data.yaml);
+      setYamlDraft(data.yaml);
+      setYamlBase(data.revision);
+      setYamlPhase('editing-clean');
+      setError(null);
+      setMessage(`已加载线上目录 r${data.revision}`);
+    };
+    if (yamlPhase === 'editing-dirty') {
       setConfirm({
         title: '重新加载会丢掉当前草稿',
-        detail: '线上目录会覆盖你正在改的 YAML。',
-        run: async () => { catalog.reload(); startYaml(); },
+        detail: '成功拿到线上版后才会替换编辑框。失败则草稿还在。',
+        target: 'yaml',
+        run: fetchOnline,
       });
       return;
     }
-    catalog.reload();
-    if (catalog.state === 'ready') startYaml();
+    try {
+      await fetchOnline();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '没加载上来，草稿没动');
+      setYamlPhase((phase) => (phase === 'viewing' ? phase : 'error'));
+    }
   }
 
-  function askPublish(
-    title: string,
-    detail: string,
-    run: () => Promise<void>,
-  ) {
-    setConfirm({ title, detail, run });
+  async function reloadPolicy() {
+    const fetchOnline = async () => {
+      const data = await policy.reloadNow();
+      setPolicyBaseText(data.json);
+      setPolicyDraft(data.json);
+      setPolicyBase(data.revision);
+      setPolicyPhase('editing-clean');
+      setError(null);
+      setMessage(`已加载线上规则 r${data.revision}`);
+    };
+    if (policyPhase === 'editing-dirty') {
+      setConfirm({
+        title: '重新加载会丢掉当前草稿',
+        detail: '成功拿到线上版后才会替换编辑框。失败则草稿还在。',
+        target: 'policy',
+        run: fetchOnline,
+      });
+      return;
+    }
+    try {
+      await fetchOnline();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '没加载上来，草稿没动');
+      setPolicyPhase((phase) => (phase === 'viewing' ? phase : 'error'));
+    }
+  }
+
+  function askAction(title: string, detail: string, target: 'yaml' | 'policy', run: () => Promise<void>) {
+    setMessage(null);
+    setError(null);
+    setConfirmError(null);
+    setConfirm({ title, detail, target, run });
   }
 
   async function publishYaml() {
     if (!catalogGate.allow) {
-      setError(catalogGate.reason);
-      setYamlPhase('error');
-      return;
+      setConfirmError(catalogGate.reason);
+      throw new Error(catalogGate.reason);
     }
-    const ran = await gate.current.run(async () => {
-      setYamlPhase('publishing');
-      try {
-        const result = await operationsApi.replaceCatalog(yamlDraft, catalogGate.expectedRevision);
-        setMessage(`节点目录 r${catalogGate.expectedRevision} → r${result.revision}`);
-        setYamlPhase('success');
-        setYamlBase(result.revision);
-        setYamlBaseText(yamlDraft);
-        catalog.reload();
-      } catch (err) {
-        const text = err instanceof Error ? err.message : '目录没更新成';
-        if (/\(409\)|revision|冲突/.test(text)) {
-          setError(`${text}。草稿还在，请对照线上版后再发布。`);
-          setYamlPhase('conflict');
-        } else {
-          setError(text);
-          setYamlPhase('error');
-        }
-      }
-    });
-    if (!ran) return;
+    const expected = catalogGate.expectedRevision;
+    const result = await operationsApi.replaceCatalog(yamlDraft, expected);
+    setYamlBase(result.revision);
+    setYamlBaseText(yamlDraft);
+    setYamlPhase('success');
+    setMessage(`节点目录 r${expected} → r${result.revision}`);
+    catalog.reload();
   }
 
-  async function publishPolicyJson(next: unknown, draftText: string) {
-    if (!policyGate.allow) throw new Error(policyGate.reason);
-    const result = await operationsApi.replaceTrafficPolicy(next, policyGate.expectedRevision);
-    setMessage(`国内直连规则 r${policyGate.expectedRevision} → r${result.revision}`);
-    setPolicyPhase('success');
-    setPolicyBase(result.revision);
-    setPolicyBaseText(draftText);
+  async function publishPolicyObject(next: unknown, draftText: string) {
+    if (!policyGate.allow) {
+      setConfirmError(policyGate.reason);
+      throw new Error(policyGate.reason);
+    }
+    const expected = policyGate.expectedRevision;
+    const result = await operationsApi.replaceTrafficPolicy(next, expected);
     setPolicyDraft(draftText);
+    setPolicyBaseText(draftText);
+    setPolicyBase(result.revision);
+    setPolicyPhase('success');
+    setMessage(`国内直连规则 r${expected} → r${result.revision}`);
     policy.reload();
   }
 
   async function savePolicyFromDraft() {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(policyDraft);
-    } catch {
-      setError('JSON 无效，没有提交。');
-      setPolicyPhase('error');
-      return;
+    const parsed = parseTrafficPolicyText(policyDraft);
+    if (!parsed.ok) {
+      setConfirmError(parsed.reason);
+      throw new Error(parsed.reason);
     }
-    setPolicyPhase('publishing');
-    try {
-      await gate.current.run(async () => {
-        await publishPolicyJson(parsed, policyDraft);
-      });
-    } catch (err) {
-      const text = err instanceof Error ? err.message : '规则没保存成';
-      if (/\(409\)/.test(text)) {
-        setError(`${text}。草稿还在。`);
-        setPolicyPhase('conflict');
-      } else {
-        setError(text);
-        setPolicyPhase('error');
-      }
-    }
+    await publishPolicyObject(parsed.policy, policyDraft);
   }
 
   const lagReady = world.activity.state === 'ready';
+  const publishing = yamlPhase === 'publishing' || policyPhase === 'publishing' || confirmBusy;
 
   return (
     <div className="stack">
@@ -184,8 +220,8 @@ export function ControlPage() {
         { label: '直连规则', resource: policy },
         { label: '客户心跳', resource: world.activity },
       ]} />
-      <Banner message={error} tone="error" />
-      <Banner message={message} tone="ok" />
+      {error && !message ? <Banner message={error} tone="error" /> : null}
+      {message && !error ? <Banner message={message} tone="ok" /> : null}
 
       <GlassCard>
         <div className="card-header">
@@ -243,10 +279,11 @@ export function ControlPage() {
                 <button
                   className="btn"
                   type="button"
-                  disabled={yamlPhase === 'publishing' || yamlDraft === yamlBaseText || !catalogGate.allow}
-                  onClick={() => askPublish(
+                  disabled={publishing || yamlDraft === yamlBaseText || !catalogGate.allow}
+                  onClick={() => askAction(
                     '发布节点目录',
                     `基线 r${yamlBase}，线上 r${catalogRevision}，+${yamlDiff?.added ?? 0}/−${yamlDiff?.removed ?? 0}${catalogGate.allow && catalogGate.drifted ? '，已发生 drift' : ''}。发布后客户会拉新目录。`,
+                    'yaml',
                     publishYaml,
                   )}
                 >对照 diff 发布</button>
@@ -288,52 +325,62 @@ export function ControlPage() {
                 <button
                   className="btn"
                   type="button"
-                  disabled={policyPhase === 'publishing' || policyDraft === policyBaseText}
-                  onClick={() => askPublish(
+                  disabled={publishing || policyDraft === policyBaseText}
+                  onClick={() => askAction(
                     '发布直连规则',
                     `基线 r${policyBase}，线上 r${policyRevision}，+${policyDiff?.added ?? 0}/−${policyDiff?.removed ?? 0}。保存后客户端安全重连。`,
+                    'policy',
                     savePolicyFromDraft,
                   )}
                 >对照 diff 保存</button>
                 <button
                   className="btn btn-outline"
                   type="button"
+                  disabled={publishing || webDirectDisabled}
+                  title={!parsedDraft.ok ? parsedDraft.reason : parsedDraft.policy.version === 1 ? '当前没有网页直连规则' : undefined}
                   onClick={() => {
-                    let current: { domains?: unknown; mediaEndpoints?: unknown };
-                    try { current = JSON.parse(policyDraft) as { domains?: unknown; mediaEndpoints?: unknown }; }
-                    catch { setError('当前草稿不是合法 JSON'); return; }
-                    const next = { version: 2, domains: current.domains || [], mediaEndpoints: current.mediaEndpoints || [], webDomains: [] };
-                    const text = JSON.stringify(next);
+                    if (!parsedDraft.ok) {
+                      setError(parsedDraft.reason);
+                      return;
+                    }
+                    const cleared = clearWebDomains(parsedDraft.policy);
+                    if (!cleared.ok) {
+                      setError(cleared.reason);
+                      return;
+                    }
+                    const text = JSON.stringify(cleared.policy);
                     const diff = lineDiff(policyDraft, text);
-                    askPublish(
-                      '只停视频网页直连',
-                      `将生成新 JSON（+${diff.added}/−${diff.removed}）。微信原生先留着。`,
+                    askAction(
+                      '关闭网页直连',
+                      `保留原生应用直连和 TCP 端点。基线 r${policyBase}。+${diff.added}/−${diff.removed}。不清空 webDomains 以外的字段，也不改 version。`,
+                      'policy',
                       async () => {
                         setPolicyDraft(text);
-                        setPolicyPhase('editing-dirty');
-                        await publishPolicyJson(next, text);
+                        await publishPolicyObject(cleared.policy, text);
                       },
                     );
                   }}
-                >只停视频网页直连</button>
+                >关闭网页直连</button>
                 <button
                   className="btn btn-outline"
                   type="button"
+                  disabled={publishing}
                   onClick={() => {
-                    const next = { version: 1, domains: [], mediaEndpoints: [] };
+                    const next = emptyDirectPolicy();
                     const text = JSON.stringify(next);
                     const diff = lineDiff(policyDraft, text);
-                    askPublish(
+                    askAction(
                       '关闭全部直连',
-                      `将生成空规则（+${diff.added}/−${diff.removed}）。客户端会安全重连。`,
+                      `将发布空的 v1 规则（+${diff.added}/−${diff.removed}）。客户端会安全重连。`,
+                      'policy',
                       async () => {
                         setPolicyDraft(text);
-                        await publishPolicyJson(next, text);
+                        await publishPolicyObject(next, text);
                       },
                     );
                   }}
                 >关掉全部直连</button>
-                <button className="btn btn-outline" type="button" onClick={() => { setPolicyBase(null); setPolicyPhase('viewing'); policy.reload(); }}>重新加载</button>
+                <button className="btn btn-outline" type="button" onClick={() => void reloadPolicy()}>重新加载</button>
               </div>
             </>
           )}
@@ -344,16 +391,36 @@ export function ControlPage() {
         open={Boolean(confirm)}
         title={confirm?.title ?? ''}
         detail={confirm?.detail}
-        busy={yamlPhase === 'publishing' || policyPhase === 'publishing'}
-        onCancel={() => setConfirm(null)}
+        busy={publishing}
+        error={confirmError}
+        onCancel={() => { if (!publishing) { setConfirm(null); setConfirmError(null); } }}
         onConfirm={async () => {
-          if (!confirm) return;
+          if (!confirm || gate.current.busy || confirmBusy) return;
+          setConfirmBusy(true);
+          setConfirmError(null);
           setError(null);
+          setMessage(null);
+          if (confirm.target === 'policy') setPolicyPhase('publishing');
+          else setYamlPhase('publishing');
           try {
-            await confirm.run();
-            setConfirm(null);
+            const ran = await gate.current.run(confirm.run);
+            if (ran) {
+              setConfirm(null);
+              setConfirmError(null);
+            }
           } catch (err) {
-            setError(err instanceof Error ? err.message : '没做成');
+            const text = err instanceof Error ? err.message : '没做成';
+            if (/\(409\)|revision|冲突/.test(text)) {
+              setConfirmError(`${text}。草稿和冻结的基线还在，请重新对照后再发。`);
+              setPolicyPhase((phase) => (phase === 'viewing' ? phase : 'conflict'));
+              setYamlPhase((phase) => (phase === 'viewing' ? phase : 'conflict'));
+            } else {
+              setConfirmError(text);
+              setPolicyPhase((phase) => (phase === 'viewing' ? phase : 'error'));
+              setYamlPhase((phase) => (phase === 'viewing' ? phase : 'error'));
+            }
+          } finally {
+            setConfirmBusy(false);
           }
         }}
       />
