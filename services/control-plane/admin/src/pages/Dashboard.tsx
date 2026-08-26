@@ -86,7 +86,7 @@ export function Dashboard() {
         </div>
         {accidents.length > 0 ? (
           <>
-            {staleNote && <p className="muted dash-pad">正在看旧快照，自动刷新失败。</p>}
+            {staleNote && <p className="muted dash-pad">正在看旧快照；采集或页面刷新已经落后。</p>}
             {!healthy && <p className="muted dash-pad">还有来源不可判断，已知事故仍列在下面。</p>}
             <ul className="attention-list">
               {accidents.map((item) => (

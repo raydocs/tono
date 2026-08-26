@@ -247,6 +247,7 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
         fetchedAt: clock,
         agents: liveNames.map((name, i) => agent(name, i, clock)),
         agentsError: null,
+        agentsReceivedAt: clock,
         quality: {
           updatedAt: clock,
           updatedAtIso: new Date(clock * 1000).toISOString(),
@@ -254,6 +255,7 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
           nodes: liveNames.map((name, i) => quality(name, i)),
         },
         qualityError: null,
+        qualityReceivedAt: clock,
       },
     };
   }

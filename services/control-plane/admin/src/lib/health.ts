@@ -1,3 +1,5 @@
+import type { OpsSourceTruth } from './source-truth';
+
 /**
  * What a page has to admit about the data it is drawing.
  *
@@ -21,7 +23,7 @@ export type HealthSource = {
   refreshedAt: number;
 };
 
-function sinceLabel(ms: number, nowMs: number) {
+export function sinceLabel(ms: number, nowMs: number) {
   if (!ms) return '更早';
   const seconds = Math.max(0, Math.round((nowMs - ms) / 1_000));
   if (seconds < 90) return '刚刚';
@@ -42,6 +44,29 @@ export function dataHealthLines(sources: HealthSource[], nowMs: number): string[
   if (stale.length) {
     const oldest = Math.min(...stale.map((source) => source.refreshedAt || 0));
     lines.push(`${stale.map((source) => source.label).join('、')}自动刷新失败（${stale[0].stale}），现在看到的是${sinceLabel(oldest, nowMs)}的数据。`);
+  }
+  return lines;
+}
+
+/** Inner collector sources can be old even when the Worker request succeeds. */
+export function sourceTruthHealthLines(
+  sources: Array<{ label: string; source: OpsSourceTruth }>,
+  nowMs: number,
+): string[] {
+  const unavailable = sources.filter(({ source }) => source.status === 'unavailable');
+  const stale = sources.filter(({ source }) => source.status === 'stale');
+  const lines: string[] = [];
+  if (unavailable.length) {
+    lines.push(`${unavailable.map(({ label }) => label).join('、')}采集快照不可用，靠它们得出的结论都不作数。`);
+  }
+  if (stale.length) {
+    const dated = stale
+      .map(({ source }) => source.asOf)
+      .filter((asOf): asOf is number => asOf !== null && asOf > 0);
+    const age = dated.length
+      ? `现在看到的是${sinceLabel(Math.min(...dated), nowMs)}的数据`
+      : '采集时间未知';
+    lines.push(`${stale.map(({ label }) => label).join('、')}采集已落后，${age}，不能据此声明正常。`);
   }
   return lines;
 }

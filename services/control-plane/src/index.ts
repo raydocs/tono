@@ -3711,18 +3711,26 @@ async function storeLiveSnapshot(e: Env, input: { quality?: ReturnType<typeof li
 
 async function operationsLive(e: Env) {
   const stored = await storedLiveSnapshot(e);
-  const qualityReceivedAt = optionalNumber(stored?.quality_updated_at);
-  const agentsReceivedAt = optionalNumber(stored?.agents_updated_at);
+  const rawQualityReceivedAt = optionalNumber(stored?.quality_updated_at);
+  const rawAgentsReceivedAt = optionalNumber(stored?.agents_updated_at);
+  const qualityReceivedAt = rawQualityReceivedAt !== null &&
+    Number.isFinite(rawQualityReceivedAt) && rawQualityReceivedAt > 0
+    ? Math.floor(rawQualityReceivedAt)
+    : null;
+  const agentsReceivedAt = rawAgentsReceivedAt !== null &&
+    Number.isFinite(rawAgentsReceivedAt) && rawAgentsReceivedAt > 0
+    ? Math.floor(rawAgentsReceivedAt)
+    : null;
   const quality = stored?.quality_json
     ? liveQualityReport(
       JSON.parse(String(stored.quality_json)),
-      qualityReceivedAt !== null && Number.isFinite(qualityReceivedAt) ? qualityReceivedAt : undefined,
+      qualityReceivedAt ?? undefined,
     )
     : null;
   const agents = stored?.agents_json
     ? liveAgents(
       JSON.parse(String(stored.agents_json)),
-      agentsReceivedAt !== null && Number.isFinite(agentsReceivedAt) ? agentsReceivedAt : undefined,
+      agentsReceivedAt ?? undefined,
     )
     : null;
   const qualityError = quality ? null : 'no quality snapshot';
@@ -3732,8 +3740,10 @@ async function operationsLive(e: Env) {
     fetchedAt: now(),
     agents,
     agentsError,
+    agentsReceivedAt,
     quality,
     qualityError,
+    qualityReceivedAt,
   };
 }
 

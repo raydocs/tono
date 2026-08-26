@@ -336,6 +336,9 @@ export interface LiveDto {
   fetchedAt: number;
   agents: LiveAgentDto[] | null;
   agentsError: string | null;
+  /** When the Worker last accepted an agent snapshot from the collector. This
+   * differs from fetchedAt, which only says when the browser read the Worker. */
+  agentsReceivedAt: number | null;
   quality: {
     updatedAt: number | null;
     updatedAtIso: string | null;
@@ -343,6 +346,8 @@ export interface LiveDto {
     nodes: LiveQualityNodeDto[] | null;
   } | null;
   qualityError: string | null;
+  /** When the Worker last accepted a quality snapshot from the collector. */
+  qualityReceivedAt: number | null;
 }
 
 export type FleetReason =

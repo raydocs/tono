@@ -4,7 +4,13 @@ import { useKeyedResource, useRefresh, useResource, type KeyedLive, type Live } 
 import { parseOpsHash, parseTrafficRange, type TrafficRange } from './lib/hash';
 import { accidentsOnly, choresOnly, incidentsFromWorld, type OpsIncident } from './lib/incidents';
 import { assembleOpsNodes, assembleOpsPeople, type OpsNodeView, type OpsPersonView } from './lib/ops-views';
-import { innerTruth, resourceTruth, type OpsSourceTruth } from './lib/source-truth';
+import {
+  AGENT_SNAPSHOT_STALE_SECONDS,
+  innerTruth,
+  QUALITY_SNAPSHOT_STALE_SECONDS,
+  resourceTruth,
+  type OpsSourceTruth,
+} from './lib/source-truth';
 
 export type OpsWorld = {
   dashboard: Live<DashboardDto>;
@@ -87,8 +93,16 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
     const qualityPresent = Boolean(liveReady && live.data.quality);
     const agentsPresent = Boolean(liveReady && live.data.agents);
     const sources = {
-      quality: innerTruth(live, qualityPresent, liveReady ? live.data.qualityError : null),
-      agents: innerTruth(live, agentsPresent, liveReady ? live.data.agentsError : null),
+      quality: innerTruth(live, qualityPresent, liveReady ? live.data.qualityError : null, {
+        asOfSec: liveReady ? live.data.qualityReceivedAt : null,
+        staleAfterSeconds: QUALITY_SNAPSHOT_STALE_SECONDS,
+        nowSec,
+      }),
+      agents: innerTruth(live, agentsPresent, liveReady ? live.data.agentsError : null, {
+        asOfSec: liveReady ? live.data.agentsReceivedAt : null,
+        staleAfterSeconds: AGENT_SNAPSHOT_STALE_SECONDS,
+        nowSec,
+      }),
       profiles: resourceTruth(profiles),
       activity: resourceTruth(activity),
       users: resourceTruth(users),

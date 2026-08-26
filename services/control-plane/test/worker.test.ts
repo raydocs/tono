@@ -636,6 +636,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(live.agents).toBeNull();
     expect(live.qualityError).toBe('no quality snapshot');
     expect(live.agentsError).toBe('no agent snapshot');
+    expect(live.qualityReceivedAt).toBeNull();
+    expect(live.agentsReceivedAt).toBeNull();
     // The console showing "no snapshot" is the point: the previous code showed
     // a JSON parse error here, having fetched its own redirect.
     expect(absorbedHostFetches).toEqual([]);
@@ -788,6 +790,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(JSON.stringify(live.agents)).not.toContain('203.0.113.20');
     expect(live.agentsError).toBeNull();
     expect(live.qualityError).toBeNull();
+    expect(live.agentsReceivedAt).toEqual(expect.any(Number));
+    expect(live.qualityReceivedAt).toEqual(expect.any(Number));
     expect(absorbedHostFetches).toEqual([]);
 
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
@@ -881,8 +885,12 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       const agent = live.agents.find((row: any) => row.name === 'Future clock');
       expect(agent.observedAt).toBeGreaterThanOrEqual(before);
       expect(agent.observedAt).toBeLessThanOrEqual(after);
+      expect(live.agentsReceivedAt).toBeGreaterThanOrEqual(before);
+      expect(live.agentsReceivedAt).toBeLessThanOrEqual(after);
       expect(live.quality.updatedAt).toBeGreaterThanOrEqual(before);
       expect(live.quality.updatedAt).toBeLessThanOrEqual(after);
+      expect(live.qualityReceivedAt).toBeGreaterThanOrEqual(before);
+      expect(live.qualityReceivedAt).toBeLessThanOrEqual(after);
       expect(live.quality.updatedAtIso)
         .toBe(new Date(live.quality.updatedAt * 1_000).toISOString());
 

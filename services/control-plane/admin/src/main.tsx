@@ -12,7 +12,7 @@ import { OpsBackground } from './Background';
 import { OpsDataProvider, useOpsWorld } from './ops-context';
 import { PrivacyProvider, usePrivacy } from './privacy';
 import { useOpsRoute } from './lib/route';
-import { dataHealthLines } from './lib/health';
+import { dataHealthLines, sourceTruthHealthLines } from './lib/health';
 import './styles.css';
 
 const PRIMARY: Array<'dashboard' | 'failures' | 'monitor' | 'users'> = [
@@ -69,11 +69,15 @@ function App() {
     return [...map.entries()];
   }, []);
 
+  const healthAt = Date.now();
   const health = dataHealthLines([
     { label: '节点', state: world.live.state, stale: world.live.stale, refreshedAt: world.live.refreshedAt },
     { label: '客户', state: world.users.state, stale: world.users.stale, refreshedAt: world.users.refreshedAt },
     { label: '谁在线', state: world.activity.state, stale: world.activity.stale, refreshedAt: world.activity.refreshedAt },
-  ], Date.now());
+  ], healthAt).concat(world.live.state === 'ready' ? sourceTruthHealthLines([
+    { label: '节点质量', source: world.sources.quality },
+    { label: '机器探针', source: world.sources.agents },
+  ], healthAt) : []);
 
   const needle = search.trim().toLowerCase();
   const nodeHits = needle
@@ -231,7 +235,7 @@ function App() {
             </div>
             {refreshing && <span className="status-pill refreshing-dot">刷新中</span>}
             {health.length > 0 && (
-              <span className={`health-compact${health.some((line) => line.includes('没加载')) ? ' bad' : ''}`} title={health.join(' ')}>
+              <span className={`health-compact${health.some((line) => line.includes('没加载') || line.includes('不可用')) ? ' bad' : ''}`} title={health.join(' ')}>
                 {health[0]}
               </span>
             )}

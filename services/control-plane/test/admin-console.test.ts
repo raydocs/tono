@@ -4,10 +4,11 @@ import { formatBytes } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
 import { gibibytes, tcpPort, unixDate, unixDateTimeLocal } from '../admin/src/lib/fields';
 import { acceptIfCurrent, bindDetail } from '../admin/src/lib/bound-detail';
-import { dataHealthLines } from '../admin/src/lib/health';
+import { dataHealthLines, sourceTruthHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
 import { carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
 import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../admin/src/lib/path-status';
+import { innerTruth } from '../admin/src/lib/source-truth';
 import type { CarrierPingMapDto } from '../admin/src/api';
 import type { LiveAgentDto, NodeProfileDto } from '../admin/src/api';
 
@@ -207,6 +208,57 @@ describe('what a page admits about its own data', () => {
       source({ label: '家宽库存', stale: 'x', refreshedAt: now - 90 * 60 * 1_000 }),
     ], now);
     expect(lines[0]).toContain('2 小时前');
+  });
+});
+
+describe('collector snapshot truth', () => {
+  const envelope = (over: Record<string, unknown> = {}) => ({
+    state: 'ready' as const,
+    data: {},
+    reload: () => undefined,
+    reloadNow: async () => ({}),
+    refreshedAt: 2_000_000,
+    stale: null,
+    refreshing: false,
+    ...over,
+  }) as Parameters<typeof innerTruth>[0];
+
+  it('keeps the exact freshness boundary current and turns the next second stale', () => {
+    const options = { asOfSec: 1_000, staleAfterSeconds: 900 };
+    expect(innerTruth(envelope(), true, null, { ...options, nowSec: 1_900 }).status)
+      .toBe('current');
+    const stale = innerTruth(envelope(), true, null, { ...options, nowSec: 1_901 });
+    expect(stale).toMatchObject({
+      status: 'stale',
+      hasSnapshot: true,
+      error: '采集快照已过期',
+      asOf: 1_000_000,
+    });
+  });
+
+  it('does not call a present snapshot current when its receipt time is unknown', () => {
+    expect(innerTruth(envelope(), true, null, {
+      asOfSec: null,
+      staleAfterSeconds: 900,
+      nowSec: 2_000,
+    })).toMatchObject({
+      status: 'stale',
+      hasSnapshot: true,
+      error: '采集快照时间未知',
+      asOf: null,
+    });
+  });
+
+  it('puts collector age in the compact health sentence', () => {
+    const stale = innerTruth(envelope(), true, null, {
+      asOfSec: 1_000,
+      staleAfterSeconds: 900,
+      nowSec: 8_200,
+    });
+    const lines = sourceTruthHealthLines([{ label: '机器探针', source: stale }], 8_200_000);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('2 小时前');
+    expect(lines[0]).toContain('不能据此声明正常');
   });
 });
 
