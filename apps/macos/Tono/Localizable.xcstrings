@@ -273,17 +273,6 @@
         }
       }
     },
-    "About %@s": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "约 %@ 秒"
-          }
-        }
-      }
-    },
     "Active": {
       "extractionState": "manual",
       "localizations": {
@@ -1125,7 +1114,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "无法解析订阅内容，请检查订阅格式"
+            "value": "无法解析订阅内容，请检查订阅格式。"
           }
         }
       }
@@ -1509,17 +1498,6 @@
         }
       }
     },
-    "Exit %lldms": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "出口 %lldms"
-          }
-        }
-      }
-    },
     "Exit not responding — checking": {
       "localizations": {
         "zh-Hans": {
@@ -1605,7 +1583,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "过滤日志..."
+            "value": "过滤日志…"
           }
         }
       }
@@ -1681,16 +1659,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "全局"
-          }
-        }
-      }
-    },
-    "Good": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "良好"
           }
         }
       }
@@ -1854,7 +1822,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请将 Tono 安装到“应用程序”"
+            "value": "请将 Tono 安装到「应用程序」"
           }
         }
       }
@@ -2072,27 +2040,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "浅色、深色或跟随系统"
-          }
-        }
-      }
-    },
-    "Line %lldms": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "线路 %lldms"
-          }
-        }
-      }
-    },
-    "LiquidClash": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "LiquidClash"
           }
         }
       }
@@ -2446,7 +2393,6 @@
       }
     },
     "No exit selected": {
-      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -2704,7 +2650,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "打开“应用程序”"
+            "value": "打开「应用程序」"
           }
         }
       }
@@ -2768,16 +2714,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "套餐"
-          }
-        }
-      }
-    },
-    "Poor": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "极慢"
           }
         }
       }
@@ -3126,16 +3062,6 @@
         }
       }
     },
-    "Ready to test": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "待测速"
-          }
-        }
-      }
-    },
     "Reality cloud protection": {
       "localizations": {
         "zh-Hans": {
@@ -3316,7 +3242,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要先开启远程诊断。共享 Claude 保护与微信原生试用路由的聚合计数（含被拒或未知应用归因）以及固定的出口与绕行判定。可能包含官方 claude.ai/anthropic.com 主机名、端口与字节总量；其他所有目标只归入“其他”桶，仅携带路由类别、端口与字节总量——绝不包含主机名。原始 IP、进程名、路径、内容与原始日志均保留在本地。"
+            "value": "需要先开启远程诊断。共享 Claude 保护与微信原生试用路由的聚合计数（含被拒或未知应用归因）以及固定的出口与绕行判定。可能包含官方 claude.ai/anthropic.com 主机名、端口与字节总量；其他所有目标只归入「其他」桶，仅携带路由类别、端口与字节总量——绝不包含主机名。原始 IP、进程名、路径、内容与原始日志均保留在本地。"
           }
         }
       }
@@ -3701,17 +3627,6 @@
         }
       }
     },
-    "Selected exit latency": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当前出口延迟"
-          }
-        }
-      }
-    },
     "Selector": {
       "localizations": {
         "zh-Hans": {
@@ -3968,48 +3883,6 @@
         }
       }
     },
-    "Slow": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "较慢"
-          }
-        }
-      }
-    },
-    "Slow exit %lldms": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "出口较慢 %lldms"
-          }
-        }
-      }
-    },
-    "Slow line %lldms": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "线路较慢 %lldms"
-          }
-        }
-      }
-    },
-    "Slow · about %@s": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "偏慢 · 约 %@ 秒"
-          }
-        }
-      }
-    },
     "Something went wrong. Please try again.": {
       "localizations": {
         "zh-Hans": {
@@ -4151,7 +4024,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "订阅服务器返回了 HTML 页面而非配置文件，请检查链接"
+            "value": "订阅服务器返回了 HTML 页面而非配置文件，请检查链接。"
           }
         }
       }
@@ -4494,17 +4367,6 @@
         }
       }
     },
-    "Test All": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "全部测速"
-          }
-        }
-      }
-    },
     "Test Latency": {
       "localizations": {
         "zh-Hans": {
@@ -4591,7 +4453,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已安装的网络组件不再接受这份 Tono。点按\"重试\"并在管理员弹窗中确认以修复，或运行文档中的 sudo 紧急解除命令后重新打开 Tono。%@"
+            "value": "已安装的网络组件不再接受这份 Tono。点按「重试」并在管理员弹窗中确认以修复，或运行文档中的 sudo 紧急解除命令后重新打开 Tono。%@"
           }
         }
       }
@@ -4784,7 +4646,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为确保 Tono 稳定运行，必须从“应用程序”文件夹启动。请退出 Tono，在安装窗口中将它拖到“应用程序”，然后打开已安装的副本。"
+            "value": "为确保 Tono 稳定运行，必须从「应用程序」文件夹启动。请退出 Tono，在安装窗口中将它拖到「应用程序」，然后打开已安装的副本。"
           }
         }
       }
@@ -5255,17 +5117,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "版本 %1$@（%2$@）"
-          }
-        }
-      }
-    },
-    "Version 0.0.1": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "版本 0.0.1"
           }
         }
       }

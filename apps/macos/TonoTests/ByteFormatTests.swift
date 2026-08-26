@@ -32,3 +32,33 @@ final class ByteFormatTests: XCTestCase {
         XCTAssertEqual(TonoByteFormat.bytes(-1), "0 B")
     }
 }
+
+final class RouteNamingTests: XCTestCase {
+    func testMihomoVocabularyNeverReachesTheRulesTable() {
+        for raw in ["DIRECT", "REJECT", "REJECT-DROP"] {
+            XCTAssertFalse(
+                ruleTargetTitle(raw).contains(raw),
+                "\(raw) reached the UI verbatim"
+            )
+        }
+    }
+
+    func testInternalGroupNamesReadAsTheRoutesUsersAlreadyKnow() {
+        XCTAssertEqual(
+            ruleTargetTitle(ConfigPipeline.exitGroupName),
+            String(localized: "Proxied")
+        )
+        XCTAssertEqual(
+            ruleTargetTitle(ConfigPipeline.homeResidentialProxyName),
+            String(localized: "Home")
+        )
+        XCTAssertEqual(
+            ruleTargetTitle(ConfigPipeline.directProxyName),
+            String(localized: "Direct")
+        )
+    }
+
+    func testACatalogNodeKeepsItsCityTitle() {
+        XCTAssertEqual(ruleTargetTitle("JP-VLESS-Reality"), nodeCityTitle("Tokyo · Dawn"))
+    }
+}

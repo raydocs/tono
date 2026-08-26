@@ -260,8 +260,9 @@ struct ActivityView: View {
                                 Color(hex: LatencyLevel.level(for: ms, kind: .exit).color)
                             )
                     } else {
-                        Text("—")
+                        Text("Not tested")
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
                     }
                     // Every other surface localizes the city; this one printed
                     // the raw catalog name, so Activity said "Tokyo · Fuji"
