@@ -1,6 +1,7 @@
 import type { ActivityUserDto } from '../api';
 import type { OpsNodeView, OpsPersonView } from './ops-views';
 import { isLikelyBlocked } from './quality';
+import { msEpochToSec } from './time';
 
 export const HEARTBEAT_FRESH_SECONDS = 40 * 60;
 export const PATH_WARN_MS = 400;
@@ -53,21 +54,22 @@ export function customerPathVerdict(input: {
     };
   }
 
-  const delays: Array<{ ms: number; label: string; at: number | null }> = [];
+  const delays: Array<{ ms: number; label: string; atSec: number | null }> = [];
   if (input.exitDelayMs != null) {
-    delays.push({ ms: input.exitDelayMs, label: '出口', at: input.exitDelayAtMs ?? lastSeen });
+    delays.push({ ms: input.exitDelayMs, label: '出口', atSec: msEpochToSec(input.exitDelayAtMs) });
   }
   if (input.tcpDelayMs != null) {
-    delays.push({ ms: input.tcpDelayMs, label: 'TCP', at: input.tcpDelayAtMs ?? lastSeen });
+    delays.push({ ms: input.tcpDelayMs, label: 'TCP', atSec: msEpochToSec(input.tcpDelayAtMs) });
   }
   if (delays.length === 0) return { kind: 'unmeasured' };
 
   const worst = delays.reduce((a, b) => (b.ms > a.ms ? b : a));
+  const measuredAt = worst.atSec ?? lastSeen;
   if (worst.ms >= PATH_SEVERE_MS) {
-    return { kind: 'incident', severity: 'severe', reason: `${worst.label} ${worst.ms}ms`, measuredAt: worst.at };
+    return { kind: 'incident', severity: 'severe', reason: `${worst.label} ${worst.ms}ms`, measuredAt };
   }
   if (worst.ms >= PATH_WARN_MS) {
-    return { kind: 'incident', severity: 'warn', reason: `${worst.label} ${worst.ms}ms`, measuredAt: worst.at };
+    return { kind: 'incident', severity: 'warn', reason: `${worst.label} ${worst.ms}ms`, measuredAt };
   }
   return { kind: 'ok' };
 }
@@ -93,14 +95,35 @@ function verdictForRow(row: ActivityUserDto, nowSec: number): CustomerPathVerdic
   });
 }
 
+function nodeHealthRank(value: string | null | undefined): number {
+  if (value === 'down' || value === 'blocked') return 0;
+  if (value === 'ok') return 3;
+  return 2;
+}
+
+function worstDelayMs(row: ActivityUserDto): number {
+  return Math.max(row.exitDelayMs ?? -1, row.tcpDelayMs ?? -1);
+}
+
+/** Negative if `a` is the worse (preferred) path sample. */
+export function comparePathActivity(a: ActivityUserDto, b: ActivityUserDto, nowSec: number): number {
+  const rankDelta = pathRank(verdictForRow(a, nowSec)) - pathRank(verdictForRow(b, nowSec));
+  if (rankDelta !== 0) return rankDelta;
+  const healthDelta = nodeHealthRank(a.nodeHealth) - nodeHealthRank(b.nodeHealth);
+  if (healthDelta !== 0) return healthDelta;
+  const delayDelta = worstDelayMs(b) - worstDelayMs(a);
+  if (delayDelta !== 0) return delayDelta;
+  return b.lastSeenAt - a.lastSeenAt;
+}
+
 /** Among online devices, the worst path; if nobody is online, the newest row. */
 export function pickWorstActivity(rows: ActivityUserDto[], nowSec: number): ActivityUserDto | null {
   if (rows.length === 0) return null;
   const online = rows.filter((row) => row.online);
-  const pool = online.length ? online : rows;
-  return pool.reduce((best, row) => (
-    pathRank(verdictForRow(row, nowSec)) < pathRank(verdictForRow(best, nowSec)) ? row : best
-  ));
+  if (online.length === 0) {
+    return rows.reduce((best, row) => (row.lastSeenAt > best.lastSeenAt ? row : best));
+  }
+  return online.reduce((best, row) => (comparePathActivity(row, best, nowSec) < 0 ? row : best));
 }
 
 function nodeOffline(node: OpsNodeView): boolean {
@@ -249,13 +272,12 @@ export function incidentsFromWorld(input: {
         });
       }
     }
-    if (person.activity?.catalogRevision != null && input.catalogRevision != null
-      && person.activity.catalogRevision < input.catalogRevision) {
+    if (person.catalogLag.state === 'behind') {
       incidents.push({
         id: `catalog-lag:${person.userId}`,
         severity: 'notice',
         title: person.email,
-        detail: `目录落后 ${input.catalogRevision - person.activity.catalogRevision} 版`,
+        detail: `目录落后 ${person.catalogLag.by} 版`,
         href: `#/users?user=${encodeURIComponent(person.userId)}`,
         userId: person.userId,
       });

@@ -184,7 +184,7 @@ export function Drawer({
   return createPortal(
     <div className="drawer-root">
       <button type="button" className="drawer-scrim" aria-label="关闭" onClick={onClose} />
-      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <aside ref={panel} className="drawer" data-modal="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
         <header className="drawer-head">
           <div>
             <h2 id="drawer-title">{title}</h2>
@@ -204,6 +204,8 @@ export function Confirm({
   detail,
   confirmLabel = '确认',
   open,
+  busy = false,
+  error = null,
   onCancel,
   onConfirm,
 }: {
@@ -211,19 +213,65 @@ export function Confirm({
   detail?: string;
   confirmLabel?: string;
   open: boolean;
+  busy?: boolean;
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const panel = useRef<HTMLElement>(null);
+  const confirmBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const previously = document.activeElement as HTMLElement | null;
+    const behind = document.querySelector<HTMLElement>('[data-modal="drawer"]')
+      ?? document.querySelector<HTMLElement>('.shell');
+    behind?.setAttribute('inert', '');
+    document.body.style.overflow = 'hidden';
+    confirmBtn.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!busy) onCancel();
+        return;
+      }
+      if (event.key !== 'Tab' || !panel.current) return;
+      const focusable = [...panel.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((node) => !node.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      const drawer = document.querySelector<HTMLElement>('[data-modal="drawer"]');
+      if (drawer) drawer.removeAttribute('inert');
+      else behind?.removeAttribute('inert');
+      previously?.focus?.();
+    };
+  }, [open, onCancel, busy]);
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
-    <div className="drawer-root">
-      <button type="button" className="drawer-scrim" aria-label="取消" onClick={onCancel} />
-      <aside className="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div className="drawer-root" data-modal="confirm">
+      <button type="button" className="drawer-scrim" aria-label="取消" onClick={() => { if (!busy) onCancel(); }} />
+      <aside ref={panel} className="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
         <h2 id="confirm-title">{title}</h2>
         {detail ? <p>{detail}</p> : null}
+        {error ? <p className="confirm-error">{error}</p> : null}
         <div className="form-row">
-          <button type="button" className="btn btn-outline" onClick={onCancel}>取消</button>
-          <button type="button" className="btn" onClick={onConfirm}>{confirmLabel}</button>
+          <button type="button" className="btn btn-outline" onClick={onCancel} disabled={busy}>取消</button>
+          <button ref={confirmBtn} type="button" className="btn" onClick={() => { if (!busy) onConfirm(); }} disabled={busy}>
+            {busy ? '处理中…' : confirmLabel}
+          </button>
         </div>
       </aside>
     </div>,

@@ -9,12 +9,14 @@ const PrivacyContext = createContext<{
   email: (value: string) => string;
   ip: (value: string | null | undefined) => string;
   money: (value: string) => string;
+  secret: (value: string | null | undefined) => string;
 }>({
   privacy: false,
   setPrivacy: () => undefined,
   email: (value) => value,
   ip: (value) => value || '—',
   money: (value) => value,
+  secret: (value) => value || '—',
 });
 
 export function PrivacyProvider({ children }: { children: ReactNode }) {
@@ -35,6 +37,11 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
         return privacy ? maskIp(value) : value;
       },
       money: (value) => (privacy ? maskMoney(value) : value),
+      secret: (value) => {
+        if (!value) return '—';
+        if (!privacy) return value;
+        return `${value.slice(0, Math.min(2, value.length))}***`;
+      },
     }}
     >
       {children}

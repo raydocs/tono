@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { emptyHash, formatOpsHash, parseOpsHash, type OpsHash, type Page } from './hash';
+import { emptyHash, formatOpsHash, nextRouteForOpenNode, nextRouteForOpenUser, parseOpsHash, type OpsHash, type Page } from './hash';
 
 function readHash(): OpsHash {
   if (typeof window === 'undefined') return emptyHash();
@@ -33,12 +33,8 @@ export function useOpsRoute(): {
     route,
     page: route.page,
     setRoute,
-    openNode: (name, extra = {}) => setRoute((current) => ({
-      ...current, ...extra, page: extra.page ?? 'monitor', node: name, user: null,
-    })),
-    openUser: (userId, extra = {}) => setRoute((current) => ({
-      ...current, ...extra, page: extra.page ?? 'users', user: userId, node: null,
-    })),
+    openNode: (name, extra = {}) => setRoute((current) => nextRouteForOpenNode(current, name, extra)),
+    openUser: (userId, extra = {}) => setRoute((current) => nextRouteForOpenUser(current, userId, extra)),
     closeDrawer: () => setRoute((current) => ({ ...current, node: null, user: null })),
   };
 }

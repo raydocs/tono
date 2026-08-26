@@ -72,3 +72,27 @@ export function formatOpsHash(state: OpsHash): string {
 export function hashWithoutDrawer(state: OpsHash): OpsHash {
   return { ...state, node: null, user: null };
 }
+
+export function nextRouteForOpenUser(current: OpsHash, userId: string, extra: Partial<OpsHash> = {}): OpsHash {
+  const page = extra.page ?? 'users';
+  const keepFocus = current.page === 'users' && page === 'users';
+  return {
+    page,
+    focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),
+    node: null,
+    user: userId,
+    q: extra.q !== undefined ? extra.q : null,
+  };
+}
+
+export function nextRouteForOpenNode(current: OpsHash, name: string, extra: Partial<OpsHash> = {}): OpsHash {
+  const page = extra.page ?? 'monitor';
+  const keepFocus = current.page === 'monitor' && page === 'monitor';
+  return {
+    page,
+    focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),
+    node: name,
+    user: null,
+    q: extra.q !== undefined ? extra.q : null,
+  };
+}

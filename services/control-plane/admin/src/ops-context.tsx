@@ -67,6 +67,8 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
     const people = assembleOpsPeople({
       users: users.state === 'ready' ? users.data : null,
       activity: activity.state === 'ready' ? activity.data.users : null,
+      telemetrySource: activity.state === 'ready' ? 'ready' : activity.state === 'error' ? 'unavailable' : 'loading',
+      catalogRevision: catalog.state === 'ready' ? catalog.data.revision : null,
       nowSec: clock,
     });
     const catalogRevision = catalog.state === 'ready' ? catalog.data.revision : null;

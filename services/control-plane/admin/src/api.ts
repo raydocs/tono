@@ -436,11 +436,10 @@ interface ErrorEnvelope {
   error?: { code?: string; message?: string };
 }
 
-async function devFallback<T>(path: string, method: string): Promise<T | undefined> {
-  const dev = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
-  if (!dev) return undefined;
+async function devFallback<T>(path: string, method: string, body?: string): Promise<T | undefined> {
+  if (!import.meta.env.DEV) return undefined;
   const { matchDevOps } = await import('./dev/ops-fixture');
-  return matchDevOps(path, method) as T | undefined;
+  return matchDevOps(path, method, body) as T | undefined;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -457,7 +456,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
     if (response.status === 204) return undefined as T;
     if (!response.ok) {
-      const fake = await devFallback<T>(path, method);
+      const fake = await devFallback<T>(path, method, typeof init.body === 'string' ? init.body : undefined);
       if (fake !== undefined) return fake;
       let message = `Request failed (${response.status})`;
       try {
@@ -473,7 +472,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     return response.json() as Promise<T>;
   } catch (error) {
-    const fake = await devFallback<T>(path, method);
+    const fake = await devFallback<T>(path, method, typeof init.body === 'string' ? init.body : undefined);
     if (fake !== undefined) return fake;
     throw error;
   }

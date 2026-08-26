@@ -38,6 +38,7 @@ const FLEET_REASON_LABELS: Record<string, string> = {
 };
 
 function FleetQueue({ nodes, catalogSource, reload }: { nodes: FleetNodeDto[]; catalogSource?: FleetSourceDto; reload: () => void }) {
+  const privacy = usePrivacy();
   const [preview, setPreview] = useState<FleetRetirePreviewDto | null>(null);
   const [loadingName, setLoadingName] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState('');

@@ -509,9 +509,10 @@ describe('customer path incidents', () => {
   it('picks the worst online device even when the slow one is listed second', () => {
     const people = assembleOpsPeople({
       nowSec: now,
+      telemetrySource: 'ready',
       activity: [
-        activity({ deviceId: 'fast', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10 }),
-        activity({ deviceId: 'slow', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10 }),
+        activity({ deviceId: 'fast', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10, exitDelayAtMs: now * 1000 }),
+        activity({ deviceId: 'slow', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10, exitDelayAtMs: now * 1000 }),
       ],
     });
     expect(people[0].path).toMatchObject({ kind: 'incident', severity: 'severe' });
@@ -520,13 +521,14 @@ describe('customer path incidents', () => {
   it('dedupes two devices of the same customer into one person incident', () => {
     const people = assembleOpsPeople({
       nowSec: now,
+      telemetrySource: 'ready',
       activity: [
         activity({ deviceId: 'a', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10 }),
         activity({ deviceId: 'b', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10 }),
       ],
     });
     expect(people).toHaveLength(1);
-    expect(people[0].deviceCount).toBe(2);
+    expect(people[0].reportedDeviceCount).toBe(2);
     const incidents = incidentsFromWorld({ nodes: [], people, catalogRevision: 40, nowSec: now });
     expect(incidents.filter((item) => item.id.startsWith('path:'))).toHaveLength(1);
   });
@@ -573,6 +575,7 @@ describe('ops node union and incident ranking', () => {
     });
     const people = assembleOpsPeople({
       nowSec,
+      telemetrySource: 'ready',
       users: [{
         id: 'u-claude',
         email: 'c@example.com',
@@ -609,6 +612,7 @@ describe('ops node union and incident ranking', () => {
     });
     const people = assembleOpsPeople({
       nowSec,
+      telemetrySource: 'ready',
       activity: [
         activity({ userId: 'a', email: 'a@x', selectedServer: 'Sakura', nodeHealth: 'blocked', lastSeenAt: nowSec, exitDelayMs: 80 }),
         activity({ userId: 'b', email: 'b@x', selectedServer: 'Sakura', nodeHealth: 'blocked', lastSeenAt: nowSec, exitDelayMs: 90 }),
@@ -634,5 +638,127 @@ describe('screenshot privacy masks', () => {
   it('hides local-part and IPv4 host', () => {
     expect(maskEmail('tester@example.com')).toBe('te***@example.com');
     expect(maskIp('203.0.113.9')).toBe('203.0.***.***');
+  });
+});
+
+import { createExclusiveGate } from '../admin/src/lib/exclusive';
+import { personMatchesFocus } from '../admin/src/lib/ops-views';
+import { nextRouteForOpenUser, nextRouteForOpenNode } from '../admin/src/lib/hash';
+import { msEpochToSec } from '../admin/src/lib/time';
+import { emptyHash } from '../admin/src/lib/hash';
+import { pickWorstActivity } from '../admin/src/lib/incidents';
+
+describe('customer telemetry and path activity', () => {
+  const now = 2_000_000;
+
+  it('does not treat a missing activity source as offline', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'unavailable',
+      users: [{
+        id: 'u1', email: 'a@example.com', deviceLimit: 1, quotaBytes: null, usageBytes: 0,
+        suspended: false, status: 'active', createdAt: now, homeBinding: null,
+      } as UserDto],
+    });
+    expect(people[0].telemetryState).toBe('unavailable');
+    expect(people[0].online).toBe(false);
+    expect(people[0].path.kind).toBe('offline');
+  });
+
+  it('keeps latest heartbeat and worst-path device separate', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      activity: [
+        activity({ deviceId: 'new', lastSeenAt: now, selectedServer: 'Tokyo · Fuji', exitDelayMs: 40, tcpDelayMs: 20, exitDelayAtMs: now * 1000 }),
+        activity({ deviceId: 'bad', lastSeenAt: now - 10, selectedServer: 'Tokyo · Neon', exitDelayMs: 900, tcpDelayMs: 20, exitDelayAtMs: (now - 10) * 1000 }),
+      ],
+    });
+    expect(people[0].latestActivity?.deviceId).toBe('new');
+    expect(people[0].pathActivity?.deviceId).toBe('bad');
+    expect(people[0].selectedServer).toBe('Tokyo · Neon');
+    expect(people[0].exitDelayMs).toBe(900);
+    expect(people[0].exitDelayAtSec).toBe(now - 10);
+  });
+
+  it('breaks a same-severity tie using the larger delay, then recency if everyone is offline', () => {
+    const a = activity({ deviceId: 'a', online: true, lastSeenAt: now - 5, exitDelayMs: 410, tcpDelayMs: 10 });
+    const b = activity({ deviceId: 'b', online: true, lastSeenAt: now, exitDelayMs: 790, tcpDelayMs: 10 });
+    expect(pickWorstActivity([a, b], now)?.deviceId).toBe('b');
+    const old = activity({ deviceId: 'old', online: false, lastSeenAt: now - 20 });
+    const newer = activity({ deviceId: 'new', online: false, lastSeenAt: now - 1 });
+    expect(pickWorstActivity([old, newer], now)?.deviceId).toBe('new');
+  });
+
+  it('converts delay sample timestamps from milliseconds to seconds', () => {
+    expect(msEpochToSec(1_700_000_000_000)).toBe(1_700_000_000);
+    expect(customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 400, tcpDelayMs: 10, exitDelayAtMs: now * 1000, nowSec: now,
+    })).toMatchObject({ kind: 'incident', severity: 'warn', measuredAt: now });
+    expect(customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 800, tcpDelayMs: 10, exitDelayAtMs: now * 1000, nowSec: now,
+    }).kind).toBe('incident');
+  });
+
+  it('filters people by quota, path, and catalog chores', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      catalogRevision: 40,
+      users: [{
+        id: 'u1', email: 'q@example.com', deviceLimit: 1, quotaBytes: 100, usageBytes: 90,
+        suspended: false, status: 'active', createdAt: now, homeBinding: null,
+        product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true },
+      } as UserDto],
+      activity: [activity({ userId: 'u1', catalogRevision: 38, exitDelayMs: 900, lastSeenAt: now, exitDelayAtMs: now * 1000 })],
+    });
+    expect(personMatchesFocus(people[0], 'quota')).toBe(true);
+    expect(personMatchesFocus(people[0], 'path')).toBe(true);
+    expect(personMatchesFocus(people[0], 'claude')).toBe(true);
+    expect(people[0].catalogLag.state).toBe('behind');
+  });
+
+  it('does not carry a monitor focus into a user drawer', () => {
+    const fromMonitor = { ...emptyHash('monitor'), focus: 'blocked', node: 'Tokyo · Fuji' };
+    expect(nextRouteForOpenUser(fromMonitor, 'u1')).toEqual({
+      page: 'users', focus: null, node: null, user: 'u1', q: null,
+    });
+    const fromUsers = { ...emptyHash('users'), focus: 'quota' };
+    expect(nextRouteForOpenNode(fromUsers, 'Tokyo · Fuji').focus).toBeNull();
+    expect(formatOpsHash({ page: 'users', focus: 'path', node: null, user: 'u1', q: null })).toBe('#/users?focus=path&user=u1');
+    expect(parseOpsHash('#/users?focus=path&user=u1').user).toBe('u1');
+  });
+});
+
+describe('dev onboard fixture shapes', () => {
+  it('returns unregistered vs registered onboard payloads', async () => {
+    const { matchDevOps } = await import('../admin/src/dev/ops-fixture');
+    expect(matchDevOps('users/onboard', 'POST', JSON.stringify({ email: 'new@example.com' }))).toMatchObject({
+      userId: null, allowlisted: true, exitIdentityIssued: false,
+    });
+    expect(matchDevOps('users/onboard', 'POST', JSON.stringify({ email: 'fast@example.com' }))).toMatchObject({
+      userId: 'u-fast', exitIdentityIssued: true,
+    });
+    expect(matchDevOps('users/u-fast/detail', 'GET')).toMatchObject({ devices: expect.any(Array), diagnostics: expect.any(Array) });
+  });
+});
+
+describe('confirm exclusive gate', () => {
+  it('does not start a second run while the first is in flight, and cancel never calls the action', async () => {
+    const gate = createExclusiveGate();
+    let started = 0;
+    let finished = 0;
+    const first = gate.run(async () => {
+      started += 1;
+      await Promise.resolve();
+      finished += 1;
+    });
+    const second = await gate.run(async () => { started += 1; });
+    await first;
+    expect(started).toBe(1);
+    expect(finished).toBe(1);
+    expect(second).toBe(false);
   });
 });

@@ -76,14 +76,38 @@ function quality(name: string, i: number) {
   };
 }
 
-export function matchDevOps(path: string, method = 'GET'): unknown {
+const registered = new Set(['fast@example.com', 'slow@example.com', 'blocked@example.com', 'quiet@example.com', 'old@example.com']);
+const closed = new Set<string>();
+
+export function matchDevOps(path: string, method = 'GET', body?: string): unknown {
   const clock = now();
   const base = path.split('?')[0];
   const listed = names.filter((name) => name !== 'Catalog Only' || true);
   const yaml = `proxies:\n${listed.filter((n) => n !== 'Catalog Only' || n === 'Catalog Only').filter((n) => n !== 'Buffalo · Erie').map((n) => `  - name: "${n}"\n    type: vless\n`).join('')}`;
 
   if (method !== 'GET') {
-    return { ok: true, revision: 41 };
+    if (base === 'users/onboard') {
+      const email = (() => {
+        try { return String(JSON.parse(body || '{}').email || '').trim(); } catch { return ''; }
+      })();
+      if (registered.has(email.toLowerCase())) {
+        return {
+          email,
+          userId: `u-${email.split('@')[0]}`,
+          allowlisted: true,
+          exitIdentityIssued: true,
+          binding: null,
+          account: null,
+          incomplete: [],
+        };
+      }
+      return { email, userId: null, allowlisted: true, exitIdentityIssued: false, binding: null, account: null, incomplete: [] };
+    }
+    if (base.endsWith('/close')) return { ok: true, email: 'dev@example.com', status: 'disabled' };
+    if (base.includes('home-exits')) return { created: [], skipped: [], failed: [], homeExit: { id: 'h-new', proxyName: 'new', displayName: '新线路', kind: 'socks5', status: 'active', createdAt: clock, updatedAt: clock }, binding: null, replaced: false };
+    if (base.includes('product-accounts')) return { account: { id: 'pa1', userId: 'u-slow', product: 'claude', accountRef: 'new-ref', status: 'assigned', openedAt: clock, closedAt: null, closeReason: null, createdAt: clock, updatedAt: clock } };
+    if (base.includes('device-actions')) return { action: { id: 'a1', userId: 'u-fast', deviceId: 'd1', action: 'diagnostic_snapshot', status: 'queued', createdAt: clock, expiresAt: clock + 60, deliveredAt: null, completedAt: null, result: null } };
+    return { ok: true };
   }
 
   if (base === 'dashboard') {
@@ -155,25 +179,31 @@ export function matchDevOps(path: string, method = 'GET'): unknown {
             userId: 'u-fast', deviceId: 'd1', email: 'fast@example.com', lastSeenAt: clock - 30,
             online: true, clientVersion: '0.0.34', osVersion: 'macOS', selectedServer: 'Tokyo · Fuji',
             uiState: 'connected', catalogRevision: 40, exitDelayMs: 90, tcpDelayMs: 40,
-            exitDelayAtMs: clock - 30, tcpDelayAtMs: clock - 30, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
+            exitDelayAtMs: (clock - 30) * 1000, tcpDelayAtMs: (clock - 30) * 1000, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
           },
           {
             userId: 'u-slow', deviceId: 'd-slow-good', email: 'slow@example.com', lastSeenAt: clock - 20,
             online: true, clientVersion: '0.0.34', osVersion: 'Windows', selectedServer: 'Tokyo · Neon',
             uiState: 'connected', catalogRevision: 39, exitDelayMs: 80, tcpDelayMs: 30,
-            exitDelayAtMs: clock - 20, tcpDelayAtMs: clock - 20, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
+            exitDelayAtMs: (clock - 20) * 1000, tcpDelayAtMs: (clock - 20) * 1000, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
           },
           {
             userId: 'u-slow', deviceId: 'd-slow-bad', email: 'slow@example.com', lastSeenAt: clock - 15,
             online: true, clientVersion: '0.0.34', osVersion: 'Windows', selectedServer: 'Tokyo · Neon',
             uiState: 'connected', catalogRevision: 39, exitDelayMs: 920, tcpDelayMs: 40,
-            exitDelayAtMs: clock - 15, tcpDelayAtMs: clock - 15, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
+            exitDelayAtMs: (clock - 15) * 1000, tcpDelayAtMs: (clock - 15) * 1000, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
           },
           {
             userId: 'u-blocked', deviceId: 'd3', email: 'blocked@example.com', lastSeenAt: clock - 40,
             online: true, clientVersion: '0.0.34', osVersion: 'macOS', selectedServer: 'Tokyo · Sakura',
             uiState: 'connected', catalogRevision: 40, exitDelayMs: 110, tcpDelayMs: 50,
-            exitDelayAtMs: clock - 40, tcpDelayAtMs: clock - 40, nodeHealth: 'blocked', nodeHealthLabel: '疑似被墙',
+            exitDelayAtMs: (clock - 40) * 1000, tcpDelayAtMs: (clock - 40) * 1000, nodeHealth: 'blocked', nodeHealthLabel: '疑似被墙',
+          },
+          {
+            userId: 'u-ghost', deviceId: 'd-ghost', email: 'ghost@example.com', lastSeenAt: clock - 12,
+            online: true, clientVersion: '0.0.34', osVersion: 'macOS', selectedServer: 'Tokyo · Fuji',
+            uiState: 'connected', catalogRevision: 40, exitDelayMs: 70, tcpDelayMs: 28,
+            exitDelayAtMs: (clock - 12) * 1000, tcpDelayAtMs: (clock - 12) * 1000, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
           },
         ],
       },
@@ -188,10 +218,21 @@ export function matchDevOps(path: string, method = 'GET'): unknown {
   if (base === 'users') {
     return {
       users: [
-        { id: 'u-fast', email: 'fast@example.com', deviceLimit: 3, quotaBytes: 200 * 1024 ** 3, usageBytes: 20 * 1024 ** 3, suspended: false, status: 'active', createdAt: clock, product: { accountRef: 'c1', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h1', proxyName: 'home-1', displayName: '家宽 1', status: 'assigned' } },
-        { id: 'u-slow', email: 'slow@example.com', deviceLimit: 3, quotaBytes: 200 * 1024 ** 3, usageBytes: 180 * 1024 ** 3, suspended: false, status: 'active', createdAt: clock, product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true }, homeBinding: null },
-        { id: 'u-blocked', email: 'blocked@example.com', deviceLimit: 3, quotaBytes: null, usageBytes: 0, suspended: false, status: 'active', createdAt: clock, product: { accountRef: 'c2', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h2', proxyName: 'home-2', displayName: '家宽 2', status: 'assigned' } },
+        { id: 'u-fast', email: 'fast@example.com', deviceLimit: 3, quotaBytes: 200 * 1024 ** 3, usageBytes: 20 * 1024 ** 3, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: 'c1', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h1', proxyName: 'home-1', displayName: '家宽 1', status: 'assigned' } },
+        { id: 'u-slow', email: 'slow@example.com', deviceLimit: 3, quotaBytes: 200 * 1024 ** 3, usageBytes: 180 * 1024 ** 3, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true }, homeBinding: null },
+        { id: 'u-blocked', email: 'blocked@example.com', deviceLimit: 3, quotaBytes: null, usageBytes: 0, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: 'c2', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h2', proxyName: 'home-2', displayName: '家宽 2', status: 'assigned' } },
+        { id: 'u-quiet', email: 'quiet@example.com', deviceLimit: 3, quotaBytes: 100 * 1024 ** 3, usageBytes: 1, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true }, homeBinding: null },
+        { id: 'u-old', email: 'old@example.com', deviceLimit: 3, quotaBytes: 50 * 1024 ** 3, usageBytes: 10, suspended: false, status: 'active', createdAt: clock - 90 * 86400, expiresAt: clock - 86400, hasExitIdentity: true, product: { accountRef: 'c3', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: null },
       ],
+    };
+  }
+  if (base.startsWith('users/') && base.endsWith('/detail')) {
+    const id = base.split('/')[1];
+    return {
+      devices: [{ id: `dev-${id}`, name: 'Mac', status: 'active', createdAt: clock, updatedAt: clock }],
+      diagnostics: [{ referenceCode: 'ABC123', receivedAt: clock - 100, clientVersion: '0.0.34', osVersion: 'macOS', reportJson: '{"ok":true,"email":"hidden"}' }],
+      product: { accounts: [], events: [], replaceCount: 0 },
+      heartbeat: null,
     };
   }
   if (base === 'metrics') {
@@ -214,8 +255,8 @@ export function matchDevOps(path: string, method = 'GET'): unknown {
   if (base === 'home-exits') {
     return {
       homeExits: [
-        { id: 'h1', proxyName: 'home-1', displayName: '家宽 1', egressIpv4: '198.51.100.10', kind: 'socks5', status: 'assigned', createdAt: clock, updatedAt: clock },
-        { id: 'h-pool', proxyName: 'home-pool', displayName: '闲置家宽', egressIpv4: '198.51.100.11', kind: 'socks5', status: 'pooled', createdAt: clock, updatedAt: clock },
+        { id: 'h1', proxyName: 'home-1', displayName: '家宽 1', egressIpv4: '198.51.100.10', socks5Host: '198.51.100.10', socks5Port: 1080, kind: 'socks5', status: 'assigned', bindCount: 1, createdAt: clock, updatedAt: clock },
+        { id: 'h-pool', proxyName: 'home-pool', displayName: '闲置家宽', egressIpv4: '198.51.100.11', socks5Host: '198.51.100.11', socks5Port: 11080, kind: 'socks5', status: 'active', bindCount: 0, createdAt: clock, updatedAt: clock },
       ],
     };
   }

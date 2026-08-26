@@ -8,7 +8,9 @@ import type {
 import { catalogProxyNames } from './catalog';
 import { customerPathVerdict, pickWorstActivity, type CustomerPathVerdict } from './incidents';
 import { machineSignals, mergedBilling, trafficRemaining, type BillingView } from './machine';
+import { catalogLag, type CatalogLag } from './revision';
 import { blockLabel, blockStatus } from './quality';
+import { msEpochToSec } from './time';
 import { parseTrafficLimitType, type TrafficAccounting } from './traffic';
 
 export type NodeDot = 'ok' | 'warn' | 'bad' | 'unknown';
@@ -33,15 +35,44 @@ export type OpsNodeView = {
   dot: NodeDot;
 };
 
+export type TelemetrySource = 'loading' | 'unavailable' | 'ready';
+export type TelemetryState = 'loading' | 'unavailable' | 'unreported' | 'reported';
+
 export type OpsPersonView = {
   userId: string;
   email: string;
   user: UserDto | null;
-  activity: ActivityUserDto | null;
+  activityOnly: boolean;
+  latestActivity: ActivityUserDto | null;
+  pathActivity: ActivityUserDto | null;
+  telemetryState: TelemetryState;
   online: boolean;
-  deviceCount: number;
+  onlineDeviceCount: number;
+  reportedDeviceCount: number;
   path: CustomerPathVerdict;
   selectedServer: string | null;
+  nodeHealth: string | null;
+  nodeHealthLabel: string | null;
+  exitDelayMs: number | null;
+  tcpDelayMs: number | null;
+  exitDelayAtSec: number | null;
+  tcpDelayAtSec: number | null;
+  lastSeenAt: number | null;
+  quotaBytes: number | null;
+  usageBytes: number;
+  quotaRatio: number | null;
+  quotaWarn: boolean;
+  quotaOver: boolean;
+  expiresAt: number | null;
+  expired: boolean;
+  expiring: boolean;
+  catalogLag: CatalogLag;
+  hasExitIdentity: boolean;
+  hasHome: boolean;
+  hasClaude: boolean;
+  chores: string[];
+  /** @deprecated use latestActivity */
+  activity: ActivityUserDto | null;
 };
 
 export function nodeDot(
@@ -131,46 +162,121 @@ export function assembleOpsNodes(input: {
 export function assembleOpsPeople(input: {
   users?: UserDto[] | null;
   activity?: ActivityUserDto[] | null;
+  telemetrySource: TelemetrySource;
+  catalogRevision?: number | null;
   nowSec: number;
 }): OpsPersonView[] {
   const activityByUser = new Map<string, ActivityUserDto[]>();
-  for (const row of input.activity ?? []) {
-    const list = activityByUser.get(row.userId) ?? [];
-    list.push(row);
-    activityByUser.set(row.userId, list);
+  if (input.telemetrySource === 'ready') {
+    for (const row of input.activity ?? []) {
+      const list = activityByUser.get(row.userId) ?? [];
+      list.push(row);
+      activityByUser.set(row.userId, list);
+    }
   }
 
   const ids = new Set<string>();
   for (const user of input.users ?? []) ids.add(user.id);
-  for (const userId of activityByUser.keys()) ids.add(userId);
+  if (input.telemetrySource === 'ready') {
+    for (const userId of activityByUser.keys()) ids.add(userId);
+  }
 
   const userBy = new Map((input.users ?? []).map((user) => [user.id, user]));
 
   return [...ids].map((userId) => {
     const user = userBy.get(userId) ?? null;
     const rows = activityByUser.get(userId) ?? [];
-    const latest = [...rows].sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0] ?? null;
-    const online = rows.some((row) => row.online);
-    const pathSource = pickWorstActivity(rows, input.nowSec) ?? latest;
-    const path = customerPathVerdict({
-      lastSeenAt: pathSource?.lastSeenAt,
-      online: pathSource?.online,
-      nodeHealth: pathSource?.nodeHealth,
-      exitDelayMs: pathSource?.exitDelayMs,
-      tcpDelayMs: pathSource?.tcpDelayMs,
-      exitDelayAtMs: pathSource?.exitDelayAtMs,
-      tcpDelayAtMs: pathSource?.tcpDelayAtMs,
-      nowSec: input.nowSec,
-    });
+    const latest = rows.length ? rows.reduce((best, row) => (row.lastSeenAt > best.lastSeenAt ? row : best)) : null;
+    const pathSource = pickWorstActivity(rows, input.nowSec);
+    const telemetryState: TelemetryState = input.telemetrySource === 'loading'
+      ? 'loading'
+      : input.telemetrySource === 'unavailable'
+        ? 'unavailable'
+        : latest ? 'reported' : 'unreported';
+    const onlineRows = rows.filter((row) => row.online);
+    const path = telemetryState === 'reported'
+      ? customerPathVerdict({
+        lastSeenAt: pathSource?.lastSeenAt,
+        online: pathSource?.online,
+        nodeHealth: pathSource?.nodeHealth,
+        exitDelayMs: pathSource?.exitDelayMs,
+        tcpDelayMs: pathSource?.tcpDelayMs,
+        exitDelayAtMs: pathSource?.exitDelayAtMs,
+        tcpDelayAtMs: pathSource?.tcpDelayAtMs,
+        nowSec: input.nowSec,
+      })
+      : { kind: 'offline' as const };
+    const quotaBytes = user?.quotaBytes ?? null;
+    const usageBytes = user?.usageBytes ?? 0;
+    const quotaRatio = quotaBytes != null && quotaBytes > 0 ? usageBytes / quotaBytes : null;
+    const expiresAt = user?.expiresAt ?? null;
+    const days = expiresAt == null ? null : (expiresAt - input.nowSec) / 86_400;
+    const lag = catalogLag(latest?.catalogRevision, input.catalogRevision ?? null);
+    const hasExitIdentity = Boolean(user?.hasExitIdentity);
+    const hasHome = Boolean(user?.homeBinding);
+    const hasClaude = Boolean(user && !user.product?.incomplete && user.product?.accountRef);
+    const chores: string[] = [];
+    if (user && !hasExitIdentity) chores.push('没凭证');
+    if (user?.product?.incomplete) chores.push('Claude');
+    if (user && !hasHome) chores.push('家宽');
+    if (lag.state === 'behind') chores.push(`目录落后 ${lag.by}`);
     return {
       userId,
       email: user?.email ?? latest?.email ?? userId,
       user,
-      activity: latest,
-      online,
-      deviceCount: new Set(rows.map((row) => row.deviceId).filter(Boolean)).size || rows.length,
+      activityOnly: user == null,
+      latestActivity: latest,
+      pathActivity: pathSource,
+      telemetryState,
+      online: telemetryState === 'reported' && onlineRows.length > 0,
+      onlineDeviceCount: new Set(onlineRows.map((row) => row.deviceId).filter(Boolean)).size || onlineRows.length,
+      reportedDeviceCount: new Set(rows.map((row) => row.deviceId).filter(Boolean)).size || rows.length,
       path,
       selectedServer: pathSource?.selectedServer ?? null,
+      nodeHealth: pathSource?.nodeHealth ?? null,
+      nodeHealthLabel: pathSource?.nodeHealthLabel ?? null,
+      exitDelayMs: pathSource?.exitDelayMs ?? null,
+      tcpDelayMs: pathSource?.tcpDelayMs ?? null,
+      exitDelayAtSec: msEpochToSec(pathSource?.exitDelayAtMs),
+      tcpDelayAtSec: msEpochToSec(pathSource?.tcpDelayAtMs),
+      lastSeenAt: latest?.lastSeenAt ?? null,
+      quotaBytes,
+      usageBytes,
+      quotaRatio,
+      quotaWarn: quotaRatio != null && quotaRatio >= 0.8 && quotaRatio < 1,
+      quotaOver: quotaRatio != null && quotaRatio >= 1,
+      expiresAt,
+      expired: days != null && days < 0,
+      expiring: days != null && days >= 0 && days <= 7,
+      catalogLag: lag,
+      hasExitIdentity,
+      hasHome,
+      hasClaude,
+      chores,
+      activity: latest,
     };
   }).sort((a, b) => Number(b.online) - Number(a.online) || a.email.localeCompare(b.email, 'zh'));
+}
+
+export const PERSON_FOCUS = [
+  'quota', 'expiring', 'expired', 'claude', 'home', 'online', 'path', 'credential',
+] as const;
+
+export type PersonFocus = typeof PERSON_FOCUS[number];
+
+export function isPersonFocus(value: string | null | undefined): value is PersonFocus {
+  return PERSON_FOCUS.includes(value as PersonFocus);
+}
+
+export function personMatchesFocus(person: OpsPersonView, focus: string | null): boolean {
+  if (!focus || focus === 'homes') return true;
+  if (focus === 'quota') return person.quotaWarn || person.quotaOver;
+  if (focus === 'expiring') return person.expiring;
+  if (focus === 'expired') return person.expired;
+  if (focus === 'claude') return Boolean(person.user?.product?.incomplete);
+  if (focus === 'home') return Boolean(person.user && !person.hasHome);
+  if (focus === 'online') return person.online;
+  if (focus === 'path') return person.path.kind === 'incident';
+  if (focus === 'credential') return Boolean(person.user && !person.hasExitIdentity);
+  return true;
 }
