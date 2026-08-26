@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { shouldUseDevFixtureResponse } from '../admin/src/api';
+import { matchDevOps } from '../admin/src/dev/ops-fixture';
 import { catalogProxyNames } from '../admin/src/lib/catalog';
 import { formatBytes } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
 import { gibibytes, tcpPort, unixDate, unixDateTimeLocal } from '../admin/src/lib/fields';
 import { acceptIfCurrent, bindDetail } from '../admin/src/lib/bound-detail';
-import { dataHealthLines, sourceTruthHealthLines } from '../admin/src/lib/health';
+import { compactHealthLine, dataHealthLines, sourceTruthHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
 import { carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
 import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../admin/src/lib/path-status';
@@ -259,6 +261,50 @@ describe('collector snapshot truth', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('2 小时前');
     expect(lines[0]).toContain('不能据此声明正常');
+  });
+});
+
+describe('development fixture failure scenarios', () => {
+  it('keeps top-bar source health concise while the full sentence remains available', () => {
+    expect(compactHealthLine('节点质量、机器探针采集快照不可用，靠它们得出的结论都不作数。'))
+      .toBe('节点质量、机器探针不可用');
+    expect(compactHealthLine('节点质量、机器探针采集已落后，现在看到的是48 小时前的数据，不能据此声明正常。'))
+      .toBe('节点质量、机器探针采集落后');
+    expect(compactHealthLine('一条未知格式的健康信息')).toBe('一条未知格式的健康信息');
+  });
+
+  it('falls back only for a missing Vite route, not a real JSON API error', () => {
+    expect(shouldUseDevFixtureResponse(404, 'text/html; charset=utf-8')).toBe(true);
+    expect(shouldUseDevFixtureResponse(404, 'application/json')).toBe(false);
+    expect(shouldUseDevFixtureResponse(409, 'text/html')).toBe(false);
+    expect(shouldUseDevFixtureResponse(503, 'application/json')).toBe(false);
+  });
+
+  it('provides browser-reachable unavailable and stale source snapshots', () => {
+    const unavailable = (matchDevOps('live', 'GET', undefined, 'source-unavailable') as any).live;
+    expect(unavailable).toMatchObject({
+      agents: null,
+      agentsReceivedAt: null,
+      quality: null,
+      qualityReceivedAt: null,
+    });
+    expect(unavailable.agentsError).toContain('不可用');
+    expect(unavailable.qualityError).toContain('不可用');
+
+    const stale = (matchDevOps('live', 'GET', undefined, 'source-stale') as any).live;
+    expect(stale.fetchedAt - stale.agentsReceivedAt).toBe(2 * 86_400);
+    expect(stale.fetchedAt - stale.qualityReceivedAt).toBe(2 * 86_400);
+  });
+
+  it('exercises dense carrier history, unknown buckets, and a loss transition', () => {
+    const live = (matchDevOps('live') as any).live;
+    const history = live.agents[0].carriers.unicom.history as Array<{
+      latencyMs: number | null;
+      lossPct: number | null;
+    }>;
+    expect(history).toHaveLength(12);
+    expect(history.some((point) => point.latencyMs === null)).toBe(true);
+    expect(history.some((point) => (point.lossPct ?? 0) >= 12)).toBe(true);
   });
 });
 

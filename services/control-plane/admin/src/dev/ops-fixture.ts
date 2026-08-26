@@ -5,6 +5,18 @@
 
 const now = () => Math.floor(Date.now() / 1000);
 
+function carrierHistory(latencyMs: number, lossPct: number) {
+  return Array.from({ length: 12 }, (_, index) => {
+    // Exercise the visual rail's unknown hatch and a real colour transition;
+    // one perfect bucket repeated twelve times would prove neither state.
+    if (index === 4) return { latencyMs: null, lossPct: null };
+    return {
+      latencyMs: latencyMs + ((index % 5) - 2) * 4,
+      lossPct: index === 8 ? Math.max(lossPct, 12) : index === 11 ? lossPct : 0,
+    };
+  });
+}
+
 const names = [
   'Tokyo · Fuji', 'Tokyo · Neon', 'Tokyo · Sakura',
   'Los Angeles · Mesa', 'Los Angeles · Pacific', 'Singapore · Harbour',
@@ -43,9 +55,9 @@ function agent(name: string, i: number, observedAt: number) {
     trafficLimit: 1024 ** 4,
     trafficLimitType: i % 4 === 0 ? 'min' : 'sum',
     carriers: name === 'Catalog Only' ? null : {
-      unicom: { latencyMs: 40 + i * 8, lossPct: i === 2 ? 12 : 0, samples: 6, targets: ['三网-联通-北京'], history: [{ latencyMs: 42, lossPct: 0 }] },
-      telecom: { latencyMs: 48 + i * 6, lossPct: 0, samples: 6, targets: ['三网-电信-上海'], history: [{ latencyMs: 50, lossPct: 0 }] },
-      mobile: { latencyMs: 55 + i * 5, lossPct: 0, samples: 6, targets: ['三网-移动-广州'], history: [{ latencyMs: 52, lossPct: 0 }] },
+      unicom: { latencyMs: 40 + i * 8, lossPct: i === 2 ? 12 : 0, samples: 6, targets: ['三网-联通-北京'], history: carrierHistory(42 + i * 8, i === 2 ? 12 : 0) },
+      telecom: { latencyMs: 48 + i * 6, lossPct: 0, samples: 6, targets: ['三网-电信-上海'], history: carrierHistory(50 + i * 6, 0) },
+      mobile: { latencyMs: 55 + i * 5, lossPct: 0, samples: 6, targets: ['三网-移动-广州'], history: carrierHistory(52 + i * 5, 0) },
     },
   };
 }
@@ -84,7 +96,12 @@ const extraActions: Array<{ id: string; userId: string; deviceId: string; action
 const extraHomes: Array<Record<string, unknown>> = [];
 
 
-export function matchDevOps(path: string, method = 'GET', body?: string): unknown {
+export function matchDevOps(
+  path: string,
+  method = 'GET',
+  body?: string,
+  scenario: string | null = null,
+): unknown {
   const clock = now();
   const base = path.split('?')[0];
   const listed = names.filter((name) => name !== 'Catalog Only' || true);
@@ -241,21 +258,35 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
     };
   }
   if (base === 'live') {
+    if (scenario === 'source-unavailable') {
+      return {
+        live: {
+          fetchedAt: clock,
+          agents: null,
+          agentsError: 'DEV：机器探针源不可用',
+          agentsReceivedAt: null,
+          quality: null,
+          qualityError: 'DEV：节点质量源不可用',
+          qualityReceivedAt: null,
+        },
+      };
+    }
+    const snapshotClock = scenario === 'source-stale' ? clock - 2 * 86_400 : clock;
     const liveNames = names.filter((n) => n !== 'Catalog Only');
     return {
       live: {
         fetchedAt: clock,
-        agents: liveNames.map((name, i) => agent(name, i, clock)),
+        agents: liveNames.map((name, i) => agent(name, i, snapshotClock)),
         agentsError: null,
-        agentsReceivedAt: clock,
+        agentsReceivedAt: snapshotClock,
         quality: {
-          updatedAt: clock,
-          updatedAtIso: new Date(clock * 1000).toISOString(),
+          updatedAt: snapshotClock,
+          updatedAtIso: new Date(snapshotClock * 1000).toISOString(),
           cnAgentsConfigured: 3,
           nodes: liveNames.map((name, i) => quality(name, i)),
         },
         qualityError: null,
-        qualityReceivedAt: clock,
+        qualityReceivedAt: snapshotClock,
       },
     };
   }

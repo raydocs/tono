@@ -12,7 +12,7 @@ import { OpsBackground } from './Background';
 import { OpsDataProvider, useOpsWorld } from './ops-context';
 import { PrivacyProvider, usePrivacy } from './privacy';
 import { useOpsRoute } from './lib/route';
-import { dataHealthLines, sourceTruthHealthLines } from './lib/health';
+import { compactHealthLine, dataHealthLines, sourceTruthHealthLines } from './lib/health';
 import './styles.css';
 
 const PRIMARY: Array<'dashboard' | 'failures' | 'monitor' | 'users'> = [
@@ -236,7 +236,7 @@ function App() {
             {refreshing && <span className="status-pill refreshing-dot">刷新中</span>}
             {health.length > 0 && (
               <span className={`health-compact${health.some((line) => line.includes('没加载') || line.includes('不可用')) ? ' bad' : ''}`} title={health.join(' ')}>
-                {health[0]}
+                {compactHealthLine(health[0])}
               </span>
             )}
             <div className="topbar-extras">

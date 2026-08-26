@@ -444,13 +444,21 @@ interface ErrorEnvelope {
 async function devFallback<T>(path: string, method: string, body?: string): Promise<T | undefined> {
   if (!import.meta.env.DEV) return undefined;
   const { matchDevOps } = await import('./dev/ops-fixture');
-  return matchDevOps(path, method, body) as T | undefined;
+  const href = (globalThis as unknown as { location?: { href?: string } }).location?.href;
+  const scenario = href ? new URL(href).searchParams.get('opsFixture') : null;
+  return matchDevOps(path, method, body, scenario) as T | undefined;
+}
+
+export function shouldUseDevFixtureResponse(status: number, contentType: string | null): boolean {
+  return status === 404 && !contentType?.toLowerCase().includes('application/json');
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET';
+  const requestBody = typeof init.body === 'string' ? init.body : undefined;
+  let response: Response;
   try {
-    const response = await fetch(`/api/v1/ops/${path}`, {
+    response = await fetch(`/api/v1/ops/${path}`, {
       credentials: 'same-origin',
       ...init,
       headers: {
@@ -459,28 +467,37 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         ...(init.headers || {}),
       },
     });
-    if (response.status === 204) return undefined as T;
-    if (!response.ok) {
-      const fake = await devFallback<T>(path, method, typeof init.body === 'string' ? init.body : undefined);
-      if (fake !== undefined) return fake;
-      let message = `Request failed (${response.status})`;
-      try {
-        const envelope = await response.json() as ErrorEnvelope;
-        message = envelope.error?.message || message;
-      } catch {
-        // Keep status-only message for non-JSON Access or network responses.
-      }
-      throw new Error(message);
-    }
-    if (response.headers.get('content-length') === '0') {
-      return undefined as T;
-    }
-    return response.json() as Promise<T>;
   } catch (error) {
-    const fake = await devFallback<T>(path, method, typeof init.body === 'string' ? init.body : undefined);
+    // A network-less `vite admin` can use the fixture. HTTP errors are handled
+    // below so a real API's 409/503 is never replaced with synthetic success.
+    const fake = await devFallback<T>(path, method, requestBody);
     if (fake !== undefined) return fake;
     throw error;
   }
+  if (response.status === 204) return undefined as T;
+  const contentType = response.headers.get('content-type');
+  if (!response.ok) {
+    if (import.meta.env.DEV && shouldUseDevFixtureResponse(response.status, contentType)) {
+      const fake = await devFallback<T>(path, method, requestBody);
+      if (fake !== undefined) return fake;
+    }
+    let message = `Request failed (${response.status})`;
+    try {
+      const envelope = await response.json() as ErrorEnvelope;
+      message = envelope.error?.message || message;
+    } catch {
+      // Keep status-only message for non-JSON Access or proxy responses.
+    }
+    throw new Error(message);
+  }
+  if (response.headers.get('content-length') === '0') return undefined as T;
+  if (import.meta.env.DEV && !contentType?.toLowerCase().includes('application/json')) {
+    // Some Vite history-fallback setups answer an unknown API path with the SPA
+    // HTML and status 200. Treat only that non-JSON success as a missing dev API.
+    const fake = await devFallback<T>(path, method, requestBody);
+    if (fake !== undefined) return fake;
+  }
+  return response.json() as Promise<T>;
 }
 
 const get = <T>(path: string) => request<T>(path, { method: 'GET' });

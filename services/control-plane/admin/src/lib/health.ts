@@ -23,6 +23,25 @@ export type HealthSource = {
   refreshedAt: number;
 };
 
+/**
+ * The top bar has room for a diagnosis, not the full operator guidance used in
+ * a tooltip or page banner. Keep both: this shortens only sentences generated
+ * in this module and leaves an unfamiliar sentence untouched.
+ */
+export function compactHealthLine(line: string): string {
+  const endings: Array<[marker: string, ending: string]> = [
+    ['没加载上来', '不可用'],
+    ['自动刷新失败', '刷新失败'],
+    ['采集快照不可用', '不可用'],
+    ['采集已落后', '采集落后'],
+  ];
+  for (const [marker, ending] of endings) {
+    const index = line.indexOf(marker);
+    if (index >= 0) return `${line.slice(0, index)}${ending}`;
+  }
+  return line;
+}
+
 export function sinceLabel(ms: number, nowMs: number) {
   if (!ms) return '更早';
   const seconds = Math.max(0, Math.round((nowMs - ms) / 1_000));
