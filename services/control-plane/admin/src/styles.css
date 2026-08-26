@@ -1,5 +1,6 @@
-/* shadcn/ui zinc dark tokens — close to satnaing/shadcn-admin */
-:root {
+/* Explicit themes keep native controls and application surfaces in sync. */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
   --background: 230 28% 96%;
   --foreground: 228 22% 14%;
   --card: 0 0% 100%;
@@ -11,24 +12,24 @@
   --secondary: 228 20% 92%;
   --secondary-foreground: 228 22% 18%;
   --muted: 228 16% 92%;
-  --muted-foreground: 228 10% 40%;
+  --muted-foreground: 228 10% 38%;
   --accent: 228 20% 92%;
   --accent-foreground: 228 22% 14%;
-  --destructive: 0 62.8% 50%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 228 16% 84%;
-  --input: 228 16% 84%;
-  --ring: 228 60% 48%;
-  --success: 142 71% 38%;
-  --warning: 38 92% 46%;
+  --destructive: 0 68% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 228 16% 82%;
+  --input: 228 16% 76%;
+  --ring: 228 60% 42%;
+  --success: 142 68% 30%;
+  --warning: 32 92% 34%;
+  --glass: rgb(255 255 255 / 0.82);
   --radius: 1rem;
   --sidebar-width: 16rem;
   --header-height: 3.5rem;
-  --glass: rgb(255 255 255 / 0.62);
 }
 
-@media (prefers-color-scheme: dark) {
-:root {
+:root[data-theme="dark"] {
+  color-scheme: dark;
   --background: 240 10% 3.9%;
   --foreground: 0 0% 98%;
   --card: 240 10% 8%;
@@ -51,7 +52,9 @@
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
   --glass: rgb(18 18 28 / 0.55);
-}
+  --radius: 1rem;
+  --sidebar-width: 16rem;
+  --header-height: 3.5rem;
 }
 
 :root {
@@ -436,6 +439,10 @@ code, .mono {
   transition: opacity 120ms ease, background 120ms ease;
 }
 .btn:hover { opacity: 0.92; }
+.btn:focus-visible, .input:focus-visible, a:focus-visible, summary:focus-visible, .click-row:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-secondary {
@@ -443,7 +450,7 @@ code, .mono {
   color: hsl(var(--secondary-foreground));
   border-color: transparent;
 }
-.btn-secondary:hover { background: hsl(240 3.7% 20%); opacity: 1; }
+.btn-secondary:hover { background: hsl(var(--accent)); opacity: 1; }
 
 .btn-outline {
   background: transparent;
@@ -527,7 +534,7 @@ th {
   font-size: 0.72rem;
   font-weight: 500;
   height: 2.25rem;
-  background: hsl(240 8% 8%);
+  background: hsl(var(--card));
 }
 td strong { font-weight: 500; }
 td small {
@@ -782,7 +789,7 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   .sidebar-brand { display: none; }
   .sidebar-nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0.15rem;
     padding: 0.4rem 0.4rem calc(0.4rem + env(safe-area-inset-bottom));
   }
@@ -803,7 +810,7 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   .page-head h1 { font-size: 1.25rem; }
 }
 @media (max-width: 560px) {
-  .sidebar-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sidebar-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .metrics { grid-template-columns: 1fr; }
   .revision { grid-template-columns: 1fr; }
 }
@@ -1209,3 +1216,80 @@ dd { margin: 0; text-align: right; font-weight: 500; }
 .carrier-unknown-text { color: hsl(var(--muted-foreground)); }
 .carrier-note { font-size: 0.6875rem; margin: 0; }
 @media (max-width: 760px) { .carrier-panels { grid-template-columns: 1fr; } }
+
+/* —— Incident, fleet and customer diagnosis workbenches —— */
+.table-link { text-decoration: underline; text-decoration-color: hsl(var(--border)); text-underline-offset: 0.2rem; }
+.table-link:hover { text-decoration-color: currentColor; }
+.incident-list, .fleet-list { display: grid; gap: 0.65rem; }
+.incident, .fleet-row {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1.2fr) minmax(12rem, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--card));
+}
+.incident-main { display: flex; align-items: baseline; gap: 0.65rem; }
+.incident h2, .unavailable-card h2 { margin: 0; font-size: 0.95rem; }
+.incident p { margin: 0.15rem 0; font-size: 0.85rem; }
+.incident small { color: hsl(var(--muted-foreground)); }
+.incident-error, .fleet-row-alert { border-color: hsl(var(--destructive) / 0.55); }
+.incident-warn { border-color: hsl(var(--warning) / 0.55); }
+.unavailable-card .card-body { display: grid; justify-items: start; gap: 0.65rem; }
+.unavailable-card p { margin: 0; max-width: 76ch; }
+.fleet-queue.has-alerts { border-color: hsl(var(--warning) / 0.55); }
+.fleet-row { grid-template-columns: minmax(11rem, 1.1fr) minmax(13rem, 1fr) minmax(8rem, .7fr) minmax(14rem, 1.2fr) auto; }
+.fleet-identity, .fleet-impact { display: grid; }
+.fleet-identity small, .fleet-impact small { color: hsl(var(--muted-foreground)); font-size: 0.72rem; }
+.fleet-state, .fleet-reasons { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.retire-panel { margin-top: 1rem; padding: 1rem; border: 1px solid hsl(var(--destructive) / 0.55); border-radius: var(--radius); background: hsl(var(--destructive) / 0.06); display: grid; gap: 0.85rem; }
+.retire-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.retire-head h3 { margin: 0; }
+.retire-head p { margin: 0.2rem 0 0; color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+.retire-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; }
+.retire-summary div { padding: 0.75rem; border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 3px); background: hsl(var(--card)); }
+.retire-summary strong { font-size: 1.2rem; }
+.retire-summary span { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+.retire-field { display: grid; gap: 0.35rem; font-size: 0.82rem; }
+.retire-field textarea.input { height: auto; padding-block: 0.6rem; resize: vertical; }
+.affected-users { padding: 0.65rem; border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 3px); }
+.diagnostic-summary { display: grid; gap: 0.65rem; margin-bottom: 1rem; }
+.diagnostic-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; }
+.diagnostic-card { min-width: 0; padding: 0.75rem; border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) - 3px); background: hsl(var(--card)); display: grid; gap: 0.18rem; }
+.diagnostic-card > span, .diagnostic-card small { color: hsl(var(--muted-foreground)); font-size: 0.72rem; }
+.diagnostic-card strong { overflow-wrap: anywhere; font-size: 0.88rem; }
+.diagnostic-warn { border-color: hsl(var(--warning) / .55); }
+.diagnostic-unknown { border-style: dashed; }
+.diagnostic-empty { display: grid; gap: 0.2rem; margin-bottom: 1rem; padding: 0.85rem; border: 1px dashed hsl(var(--border)); border-radius: var(--radius); }
+.diagnostic-empty span { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+
+@media (max-width: 1100px) {
+  .fleet-row { grid-template-columns: 1fr 1fr; }
+  .fleet-row .row-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .incident, .fleet-row, .diagnostic-grid, .retire-summary { grid-template-columns: 1fr; }
+}
+
+/* Light-theme status colours use dark foregrounds; the old values were only
+   legible against a near-black canvas. */
+:root[data-theme="light"] .status-active,
+:root[data-theme="light"] .attention-ok { color: hsl(142 68% 26%); }
+:root[data-theme="light"] .status-disabled,
+:root[data-theme="light"] .status-degraded,
+:root[data-theme="light"] .status-failed,
+:root[data-theme="light"] .status-retired,
+:root[data-theme="light"] .attention-error,
+:root[data-theme="light"] .metric-alert .metric-value,
+:root[data-theme="light"] .expired-flag { color: hsl(0 68% 38%); }
+:root[data-theme="light"] .status-planned,
+:root[data-theme="light"] .status-deploying,
+:root[data-theme="light"] .attention-warn,
+:root[data-theme="light"] .metric-warn .metric-value,
+:root[data-theme="light"] .inv-chip.inv-warn { color: hsl(32 88% 30%); }
+:root[data-theme="light"] .banner-error { color: hsl(0 68% 32%); background: hsl(0 78% 95%); border-color: hsl(0 55% 72%); }
+:root[data-theme="light"] .banner-ok { color: hsl(142 68% 25%); background: hsl(142 48% 94%); border-color: hsl(142 38% 68%); }
+:root[data-theme="light"] .chip-risk,
+:root[data-theme="light"] .chip-bad { color: hsl(0 68% 34%); }

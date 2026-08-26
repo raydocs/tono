@@ -6,18 +6,20 @@ import {
   type ReactNode,
 } from 'react';
 
-export type Page = 'dashboard' | 'users' | 'monitor' | 'control';
+export type Page = 'dashboard' | 'failures' | 'users' | 'monitor' | 'traffic' | 'control';
 export type Resource<T> = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; data: T };
 
 export const pages: Array<{ id: Page; label: string; group: string }> = [
   { id: 'dashboard', label: '总览', group: '日常' },
+  { id: 'failures', label: '故障', group: '日常' },
   { id: 'users', label: '客户', group: '日常' },
   { id: 'monitor', label: '服务器', group: '日常' },
+  { id: 'traffic', label: '流量', group: '日常' },
   { id: 'control', label: '目录和规则', group: '配置' },
 ];
 
 function currentPage(): Page {
-  const value = window.location.hash.replace(/^#\/?/, '');
+  const value = window.location.hash.replace(/^#\/?/, '').split('?')[0];
   if (value === 'homes') return 'users';
   if (value === 'servers' || value === 'nodes' || value === 'catalog') return 'control';
   return pages.some((page) => page.id === value) ? value as Page : 'dashboard';

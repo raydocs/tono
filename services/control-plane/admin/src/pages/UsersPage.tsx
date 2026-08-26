@@ -1,6 +1,7 @@
-import { useMemo, useState, Fragment, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, Fragment, type FormEvent } from 'react';
 import {
   operationsApi,
+  type ActivityUserDto,
   type ActivityDto,
   type HomeExitDto,
   type ProductAccountDto,
@@ -10,6 +11,7 @@ import {
 import { catalogProxyNames } from '../lib/catalog';
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../lib/path-status';
+import { catalogLag } from '../lib/revision';
 import { useRefresh, useResource } from '../hooks';
 import { Banner, DataHealth, StateBoundary, Status } from '../ui';
 
@@ -211,12 +213,36 @@ export function UsersPage() {
   const [bindPick, setBindPick] = useState<Record<string, string>>({});
   const [defaultPick, setDefaultPick] = useState<Record<string, string>>({});
   const [assignLine, setAssignLine] = useState<Record<string, string>>({});
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(() => {
+    const queryText = window.location.hash.split('?')[1] ?? '';
+    return new URLSearchParams(queryText).get('user');
+  });
   const [expiryPick, setExpiryPick] = useState<Record<string, string>>({});
   const [query, setQuery] = useState('');
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
   const [onlyMissingExit, setOnlyMissingExit] = useState(false);
   const [showAllowlist, setShowAllowlist] = useState(false);
+
+  const toggleExpanded = (userId: string) => {
+    const next = expanded === userId ? null : userId;
+    setExpanded(next);
+    window.location.hash = next ? `#/users?user=${encodeURIComponent(next)}` : '#/users';
+  };
+
+  useEffect(() => {
+    const syncUser = () => {
+      const next = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('user');
+      setExpanded(next);
+    };
+    window.addEventListener('hashchange', syncUser);
+    return () => window.removeEventListener('hashchange', syncUser);
+  }, []);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const element = document.querySelector(`[data-user-id="${CSS.escape(expanded)}"]`);
+    element?.scrollIntoView({ block: 'center' });
+  }, [expanded, users.state]);
 
   const reloadAll = () => {
     users.reload();
@@ -512,7 +538,6 @@ export function UsersPage() {
                 <th>用量</th>
                 <th>家宽</th>
                 <th>Claude</th>
-                <th>线路</th>
               </tr>
             </thead>
             <tbody>
@@ -520,10 +545,19 @@ export function UsersPage() {
                 const nowSec = Math.floor(Date.now() / 1_000);
                 const expired = user.expiresAt != null && user.expiresAt <= nowSec;
                 const opened = expanded === user.id;
+                const heartbeat = heartbeats.get(user.id);
                 return <Fragment key={user.id}>
                 <tr
+                  data-user-id={user.id}
                   className={`${expired ? 'row-expired ' : ''}${opened ? 'open' : ''} click-row`}
-                  onClick={() => setExpanded(opened ? null : user.id)}
+                  tabIndex={0}
+                  aria-expanded={opened}
+                  onClick={() => toggleExpanded(user.id)}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    toggleExpanded(user.id);
+                  }}
                 >
                 <td>
                   <span className="expand-caret" aria-hidden>{opened ? '▾' : '▸'}</span>
@@ -536,7 +570,7 @@ export function UsersPage() {
                 </td>
                 <td>
                   {(() => {
-                    const beat = heartbeats.get(user.id);
+                    const beat = heartbeat;
                     if (!beat) return <span className="muted">无心跳</span>;
                     return (
                       <div>
@@ -577,26 +611,6 @@ export function UsersPage() {
                     </>
                     : <span className="muted">未开通</span>}
                 </td>
-                <td onClick={(event) => event.stopPropagation()}>
-                  <div className="assign-line">
-                    <input
-                      className="input compact"
-                      type="text"
-                      spellCheck={false}
-                      autoComplete="off"
-                      placeholder="host:port:user:pass"
-                      value={assignLine[user.id] ?? ''}
-                      onChange={(e) => setAssignLine((prev) => ({ ...prev, [user.id]: e.target.value }))}
-                      disabled={busy}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={busy || !(assignLine[user.id] ?? '').trim()}
-                      onClick={() => assignPasted(user)}
-                    >{user.homeBinding ? '换线路' : '绑定'}</button>
-                  </div>
-                </td>
                 </tr>
                 {opened && (
                   <tr className="detail-row">
@@ -620,6 +634,11 @@ export function UsersPage() {
                         onApplyExpiry={() => applyExpiryPick(user)}
                         onClearExpiry={() => setExpiry(user, null)}
                         onResetUsage={() => resetUsage(user)}
+                        heartbeat={heartbeat}
+                        publishedRevision={catalog.state === 'ready' ? catalog.data.revision : null}
+                        assignLine={assignLine[user.id] ?? ''}
+                        onAssignLine={(value) => setAssignLine((prev) => ({ ...prev, [user.id]: value }))}
+                        onAssignPasted={() => assignPasted(user)}
                       />
                     </td>
                   </tr>
@@ -642,6 +661,8 @@ function UserWorkbench({
   bindPick, defaultPick, expiryPick,
   onBindPick, onDefaultPick, onExpiryPick,
   onBind, onUnbind, onToggle, onExpiry30, onApplyExpiry, onClearExpiry, onResetUsage,
+  heartbeat, publishedRevision,
+  assignLine, onAssignLine, onAssignPasted,
 }: {
   user: UserDto;
   busy: boolean;
@@ -661,6 +682,11 @@ function UserWorkbench({
   onApplyExpiry: () => void;
   onClearExpiry: () => void;
   onResetUsage: () => void;
+  heartbeat?: ActivityUserDto;
+  publishedRevision: number | null;
+  assignLine: string;
+  onAssignLine: (value: string) => void;
+  onAssignPasted: () => void;
 }) {
   const nowSec = Math.floor(Date.now() / 1_000);
   const aliveDays = Math.max(0, Math.floor((nowSec - user.createdAt) / 86_400));
@@ -675,6 +701,19 @@ function UserWorkbench({
         <span>用量 {formatBytes(user.usageBytes)}</span>
       </div>
       <div className="workbench-ops">
+        <input
+          className="input compact"
+          type="text"
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="绑定/换线路：host:port:user:pass"
+          value={assignLine}
+          onChange={(event) => onAssignLine(event.target.value)}
+          disabled={busy}
+        />
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !assignLine.trim()} onClick={onAssignPasted}>
+          {user.homeBinding ? '换线路' : '绑定线路'}
+        </button>
         <select className="input compact" value={bindPick} onChange={(e) => onBindPick(e.target.value)} disabled={busy || homes.length === 0}>
           <option value="">{homes.length ? '从库存选一条家宽' : '没有可绑的线路'}</option>
           {homes.map((home) => (
@@ -712,7 +751,7 @@ function UserWorkbench({
           >这期清零</button>
         )}
       </div>
-      <UserDetailPanel user={user} />
+      <UserDetailPanel user={user} heartbeat={heartbeat} publishedRevision={publishedRevision} />
     </div>
   );
 }
@@ -869,7 +908,67 @@ function ProductLedger({ user, detail, onChanged }: {
   );
 }
 
-function UserDetailPanel({ user }: { user: UserDto }) {
+function DiagnosticSummary({ heartbeat, publishedRevision }: {
+  heartbeat?: ActivityUserDto;
+  publishedRevision: number | null;
+}) {
+  if (!heartbeat) {
+    return <div className="diagnostic-empty"><strong>没有收到过客户心跳</strong><span>无法判断客户屏幕和当前线路。请先确认客户端已登录并联网。</span></div>;
+  }
+  const stale = Date.now() - heartbeat.lastSeenAt * 1_000 > 40 * 60 * 1_000;
+  const lag = catalogLag(heartbeat.catalogRevision, publishedRevision);
+  const lagText = lag.state === 'behind' ? `落后 ${lag.by} 版`
+    : lag.state === 'ahead' ? '比线上版本更新'
+      : lag.state === 'current' ? '已是最新版'
+        : lag.state === 'unreported' ? '客户端未上报版本'
+          : '线上版本未知';
+  const measurement = (kind: 'exit' | 'tcp') => {
+    const value = kind === 'exit' ? heartbeat.exitDelayMs : heartbeat.tcpDelayMs;
+    const at = kind === 'exit' ? heartbeat.exitDelayAtMs : heartbeat.tcpDelayAtMs;
+    if (value == null) return { value: '未上报', note: '旧客户端或尚未完成测量', tone: 'unknown' };
+    return {
+      value: kind === 'exit' ? formatExitDelay(value) : formatTcpDelay(value),
+      note: at ? `采样于 ${timestamp(Math.floor(at / 1_000))}` : '采样时间未上报',
+      tone: value >= 400 ? 'warn' : 'ok',
+    };
+  };
+  const exit = measurement('exit');
+  const tcp = measurement('tcp');
+  return (
+    <section className="diagnostic-summary" aria-label="客户诊断摘要">
+      {stale && <Banner tone="error" message={`心跳已过期：最后一次是 ${timeAgo(heartbeat.lastSeenAt)}。下面是旧快照，不能代表客户现在的屏幕。`} />}
+      <div className="diagnostic-grid">
+        <div className="diagnostic-card">
+          <span>客户屏幕</span><strong>{heartbeat.uiState || '未上报'}</strong>
+          <small>{heartbeat.online ? '按约 20 分钟心跳窗口判定在线' : '当前判定离线'}</small>
+        </div>
+        <div className="diagnostic-card">
+          <span>所选节点</span><strong>{heartbeat.selectedServer || '未选择'}</strong>
+          <small>{heartbeat.selectedServer ? (heartbeat.nodeHealthLabel || nodeHealthLabel(heartbeat.nodeHealth)) : '没有节点可关联检查'}</small>
+        </div>
+        <div className={`diagnostic-card diagnostic-${exit.tone}`}>
+          <span>隧道出口</span><strong>{exit.value}</strong><small>{exit.note}</small>
+        </div>
+        <div className={`diagnostic-card diagnostic-${tcp.tone}`}>
+          <span>节点 TCP</span><strong>{tcp.value}</strong><small>{tcp.note}</small>
+        </div>
+        <div className="diagnostic-card">
+          <span>节点目录</span><strong>{lagText}</strong>
+          <small>{heartbeat.catalogRevision == null ? '不能判断是否拿到刚发布的目录' : `客户端 r${heartbeat.catalogRevision}${publishedRevision == null ? '' : ` · 线上 r${publishedRevision}`}`}</small>
+        </div>
+        <div className="diagnostic-card">
+          <span>客户端</span><strong>{heartbeat.clientVersion || '版本未知'}</strong><small>{heartbeat.osVersion || '系统未知'} · 心跳 {timeAgo(heartbeat.lastSeenAt)}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function UserDetailPanel({ user, heartbeat, publishedRevision }: {
+  user: UserDto;
+  heartbeat?: ActivityUserDto;
+  publishedRevision: number | null;
+}) {
   const detail = useResource<UserDetailDto>(() => operationsApi.userDetail(user.id), [user.id]);
   const quotaPct = user.quotaBytes
     ? Math.min(100, (user.usageBytes / user.quotaBytes) * 100)
@@ -885,6 +984,7 @@ function UserDetailPanel({ user }: { user: UserDto }) {
 
   return (
     <div className="user-detail">
+      <DiagnosticSummary heartbeat={heartbeat} publishedRevision={publishedRevision} />
       <div className="detail-grid">
         <div className="detail-block">
           <h3>用量</h3>

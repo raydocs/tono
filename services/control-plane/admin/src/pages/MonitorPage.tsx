@@ -1,6 +1,9 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
   operationsApi,
+  type FleetNodeDto,
+  type FleetRetirePreviewDto,
+  type FleetSourceDto,
   type LiveAgentDto,
   type LiveDto,
   type LiveQualityNodeDto,
@@ -21,6 +24,169 @@ const RISK_SIGNAL_LABELS: Record<string, string> = {
   malicious: '恶意', spam: '垃圾邮件', spamhaus: 'SPAMHAUS 名单',
 };
 
+const FLEET_REASON_LABELS: Record<string, string> = {
+  catalog_health_down: '在售但整机失联',
+  catalog_likely_blocked: '在售但疑似被墙',
+  agent_missing: '未安装探针',
+  agent_stale: '探针数据过期',
+  profile_retired_but_listed: '已退役但仍在目录',
+};
+
+function FleetQueue({ nodes, catalogSource, reload }: { nodes: FleetNodeDto[]; catalogSource?: FleetSourceDto; reload: () => void }) {
+  const [preview, setPreview] = useState<FleetRetirePreviewDto | null>(null);
+  const [loadingName, setLoadingName] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState('');
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ordered = [...nodes].sort((a, b) => Number(b.needsAttention) - Number(a.needsAttention)
+    || Number(b.catalogListed === true) - Number(a.catalogListed === true)
+    || b.affectedUsers.length - a.affectedUsers.length
+    || a.name.localeCompare(b.name, 'zh'));
+  const needs = ordered.filter((node) => node.needsAttention);
+  const agentPresentation = (status: string) => {
+    if (status === 'online') return { label: '正常', tone: 'ok' };
+    if (status === 'stale') return { label: '数据过期', tone: 'warn' };
+    if (status === 'missing') return { label: '未安装', tone: 'warn' };
+    return { label: '状态未知', tone: 'unknown' };
+  };
+
+  async function loadPreview(node: FleetNodeDto) {
+    setLoadingName(node.name);
+    setError(null);
+    setMessage(null);
+    try {
+      setPreview(await operationsApi.fleetRetirePreview(node.name));
+      setConfirmation('');
+      setReason('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法生成下架预览');
+    } finally {
+      setLoadingName(null);
+    }
+  }
+
+  async function retire() {
+    if (!preview || confirmation !== preview.node.name || !reason.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await operationsApi.retireFleetNode(
+        preview.node.name,
+        preview.expectedRevision,
+        confirmation,
+        reason.trim(),
+      );
+      setMessage(`${result.node.name} 已从目录下架：r${result.previousRevision} → r${result.revision}`);
+      setPreview(null);
+      reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '下架失败；目录可能已经变化，请重新预览');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className={`card fleet-queue${needs.length ? ' has-alerts' : ''}`}>
+      <div className="card-header">
+        <div>
+          <h2>待处理机队</h2>
+          <p>销售状态、节点健康、探针和受影响客户来自同一份机队视图。</p>
+        </div>
+        <span className={`status ${needs.length ? 'status-degraded' : 'status-active'}`}>
+          {needs.length ? `${needs.length} 台待处理` : '没有待处理'}
+        </span>
+      </div>
+      <div className="card-body">
+        {catalogSource && catalogSource.state !== 'ready' && (
+          <Banner tone="error" message={`目录状态未知：${catalogSource.message || '目录源当前不可读'}。节点仍会显示，但不能据此判断是否在售。`} />
+        )}
+        <Banner message={error} tone="error" />
+        <Banner message={message} tone="ok" />
+        <div className="fleet-list">
+          {(needs.length ? needs : ordered).map((node) => (
+            (() => {
+              const agentView = agentPresentation(node.agentStatus);
+              return (
+            <article className={`fleet-row${node.needsAttention ? ' fleet-row-alert' : ''}`} key={node.name} id={`node-${encodeURIComponent(node.name)}`}>
+              <div className="fleet-identity">
+                <strong>{node.name}</strong>
+                <small>{node.catalogListed === true ? '客户目录：在售' : node.catalogListed === false ? '客户目录：已下架' : '客户目录：状态未知'}</small>
+              </div>
+              <div className="fleet-state">
+                <span className={`chip ${node.qualityStatus === 'OK' || node.qualityStatus === 'EDGE_OK' ? 'chip-ok' : node.qualityStatus ? 'chip-risk' : 'chip-unknown'}`}>
+                  {node.qualityLabel || '健康未测'}
+                </span>
+                <span className={`chip chip-${agentView.tone}`}>
+                  探针 {agentView.label}
+                </span>
+              </div>
+              <div className="fleet-impact">
+                <strong>{node.occupancy}</strong><span> 人在线使用</span>
+                <small>{node.agentObservedAt ? `探针 ${timestamp(node.agentObservedAt)}` : '探针从未上报'}</small>
+              </div>
+              <div className="fleet-reasons">
+                {node.reasons.length
+                  ? node.reasons.map((code) => <span className="chip chip-warn" key={code}>{FLEET_REASON_LABELS[code] ?? code}</span>)
+                  : <span className="muted">没有已知问题</span>}
+              </div>
+              <div className="row-actions">
+                <a className="btn btn-outline btn-sm" href={`#/monitor?node=${encodeURIComponent(node.name)}`}>查看</a>
+                {node.catalogListed === true && (
+                  <button className="btn btn-destructive btn-sm" type="button" disabled={loadingName === node.name} onClick={() => void loadPreview(node)}>
+                    {loadingName === node.name ? '生成预览…' : '预览下架'}
+                  </button>
+                )}
+              </div>
+            </article>
+              );
+            })()
+          ))}
+        </div>
+
+        {preview && (
+          <div className="retire-panel" role="dialog" aria-labelledby="retire-title">
+            <div className="retire-head">
+              <div>
+                <h3 id="retire-title">下架 {preview.node.name}</h3>
+                <p>基于目录 r{preview.currentRevision} 的只读预览。确认后会再次用 r{preview.expectedRevision} 做并发检查。</p>
+              </div>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setPreview(null)}>关闭</button>
+            </div>
+            <div className="retire-summary">
+              <div><strong>{preview.affectedUsers.length}</strong><span> 位受影响客户</span></div>
+              <div><strong>{preview.changes.proxyGroupReferencesRemoved.length}</strong><span> 个代理组引用将移除</span></div>
+              <div><strong>{preview.changes.profileMarkedRetired ? '会' : '不会'}</strong><span> 标记账单档案退役</span></div>
+            </div>
+            {preview.affectedUsers.length > 0 && (
+              <ul className="detail-list affected-users">
+                {preview.affectedUsers.map((user) => <li key={`${user.userId}-${user.deviceId}`}><strong>{user.email}</strong><span className="muted">{user.online ? '在线' : '离线'}</span></li>)}
+              </ul>
+            )}
+            {preview.warnings.map((warning) => <div className="banner banner-info" key={warning}>{warning}</div>)}
+            {!preview.canRetire && <Banner tone="error" message="后端判定当前不能安全下架；请处理上面的阻断项后重新预览。" />}
+            <label className="retire-field">
+              <span>下架原因（会写入操作记录）</span>
+              <textarea className="input" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="例如：整机失联，已确认从客户目录停售" />
+            </label>
+            <label className="retire-field">
+              <span>输入节点全名 <code>{preview.node.name}</code> 确认</span>
+              <input className="input" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" />
+            </label>
+            <div className="form-actions">
+              <button className="btn btn-destructive" type="button" disabled={busy || !preview.canRetire || confirmation !== preview.node.name || !reason.trim()} onClick={() => void retire()}>
+                {busy ? '正在下架…' : '确认从目录下架'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function NodeExpand({ node, agent, profile, onProfile }: {
   node: LiveQualityNodeDto;
   agent?: LiveAgentDto;
@@ -32,6 +198,9 @@ function NodeExpand({ node, agent, profile, onProfile }: {
   const [quota, setQuota] = useState(profile?.trafficQuotaBytes != null ? String(Math.round(profile.trafficQuotaBytes / (1024 ** 3))) : '');
   const [used, setUsed] = useState(profile?.trafficUsedBytes != null ? String(Math.round(profile.trafficUsedBytes / (1024 ** 3))) : '');
   const [renew, setRenew] = useState(profile?.renewsAt ? new Date(profile.renewsAt * 1000).toISOString().slice(0, 10) : '');
+  const [price, setPrice] = useState(profile?.price != null ? String(profile.price) : '');
+  const [currency, setCurrency] = useState(profile?.currency ?? '');
+  const [billingCycle, setBillingCycle] = useState(profile?.billingCycle != null ? String(profile.billingCycle) : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,10 +208,14 @@ function NodeExpand({ node, agent, profile, onProfile }: {
     const trafficQuotaBytes = gibibytes(quota);
     const trafficUsedBytes = gibibytes(used);
     const renewsAt = unixDate(renew);
+    const parsedPrice = price.trim() === '' ? null : Number(price);
+    const parsedCycle = billingCycle.trim() === '' ? null : Number(billingCycle);
     const bad = [
       trafficQuotaBytes === 'invalid' ? '套餐 GB' : null,
       trafficUsedBytes === 'invalid' ? '已用 GB' : null,
       renewsAt === 'invalid' ? '续费日期' : null,
+      parsedPrice !== null && !(Number.isFinite(parsedPrice) && parsedPrice >= 0) ? '价格' : null,
+      parsedCycle !== null && !(Number.isSafeInteger(parsedCycle) && parsedCycle > 0) ? '账期天数' : null,
     ].filter((label): label is string => label !== null);
     // Nothing partial: one unreadable box holds back the whole save. Sending
     // the fields that did parse would leave the operator looking at a form that
@@ -51,6 +224,7 @@ function NodeExpand({ node, agent, profile, onProfile }: {
       trafficQuotaBytes === 'invalid'
       || trafficUsedBytes === 'invalid'
       || renewsAt === 'invalid'
+      || bad.length > 0
     ) {
       setError(`${bad.join('、')}格式不对，这次什么都没保存。`);
       return;
@@ -61,6 +235,9 @@ function NodeExpand({ node, agent, profile, onProfile }: {
       const payload = {
         catalogName: node.name,
         billingUrl: url.trim() || null,
+        price: parsedPrice,
+        currency: currency.trim() || null,
+        billingCycle: parsedCycle,
         trafficQuotaBytes,
         trafficUsedBytes,
         renewsAt,
@@ -185,6 +362,9 @@ function NodeExpand({ node, agent, profile, onProfile }: {
         })()}
         <div className="stack">
           <input className="input compact" placeholder="https://账单页" value={url} onChange={(e) => setUrl(e.target.value)} />
+          <input className="input compact" placeholder="价格" value={price} onChange={(e) => setPrice(e.target.value)} />
+          <input className="input compact" placeholder="货币，如 USD" value={currency} onChange={(e) => setCurrency(e.target.value)} />
+          <input className="input compact" type="number" min={1} placeholder="账期天数" value={billingCycle} onChange={(e) => setBillingCycle(e.target.value)} />
           <input className="input compact" type="number" min={0} placeholder="套餐 GB" value={quota} onChange={(e) => setQuota(e.target.value)} />
           <input className="input compact" type="number" min={0} placeholder="已用 GB（手填）" value={used} onChange={(e) => setUsed(e.target.value)} />
           <input className="input compact" type="date" value={renew} onChange={(e) => setRenew(e.target.value)} />
@@ -295,17 +475,31 @@ export function MonitorPage() {
   const profilesRes = useResource(operationsApi.nodeProfiles, [], refreshMs);
   const activityRes = useResource(operationsApi.activity, [], refreshMs);
   const metrics = useResource(() => operationsApi.metrics('24h'), [], refreshMs);
-  const [query, setQuery] = useState('');
+  const fleet = useResource(operationsApi.fleetNodes, [], refreshMs);
+  const initialNode = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('node') ?? '';
+  const [query, setQuery] = useState(initialNode);
   const [filter, setFilter] = useState('all');
   const [focus, setFocus] = useState<'all' | 'needs' | 'expiring' | 'noprobe'>('all');
   const [view, setView] = useState<'cards' | 'table'>('cards');
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(initialNode || null);
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [newQuota, setNewQuota] = useState('');
   const [newRenew, setNewRenew] = useState('');
   const [newError, setNewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const syncNode = () => {
+      const next = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('node') ?? '';
+      if (!next) return;
+      setQuery(next);
+      setOpen(next);
+      requestAnimationFrame(() => document.getElementById(`node-${encodeURIComponent(next)}`)?.scrollIntoView({ block: 'center' }));
+    };
+    window.addEventListener('hashchange', syncNode);
+    syncNode();
+    return () => window.removeEventListener('hashchange', syncNode);
+  }, []);
   return <StateBoundary resource={resource}>{(live: LiveDto) => {
     const qualityNodes = [...(live.quality?.nodes ?? [])].sort((a, b) => {
       const rank = (node: LiveQualityNodeDto) => {
@@ -355,7 +549,7 @@ export function MonitorPage() {
       return `${node.name} ${node.host ?? ''} ${node.publicIp ?? ''}`.toLowerCase().includes(needle);
     });
     const agentsConfigured = live.quality?.cnAgentsConfigured;
-    const keyOf = (node: LiveQualityNodeDto) => node.publicIp || node.host || node.name;
+    const keyOf = (node: LiveQualityNodeDto) => node.name;
     const routeChips = (node: LiveQualityNodeDto) =>
       node.routeKeywords.filter((keyword) => !['联通', '电信', '移动'].includes(keyword)).slice(0, 4);
     // A listed exit is the failure customers report as "everything asks me for
@@ -405,11 +599,13 @@ export function MonitorPage() {
     };
     return <div className="stack">
       <DataHealth sources={[
+        { label: '机队', resource: fleet },
         { label: '账单资料', resource: profilesRes },
         { label: '谁在线', resource: activityRes },
         { label: '趋势', resource: metrics },
         { label: '节点质量', resource },
       ]} />
+      {fleet.state === 'ready' && <FleetQueue nodes={fleet.data.nodes} catalogSource={fleet.data.sources.catalog} reload={() => { fleet.reload(); resource.reload(); profilesRes.reload(); activityRes.reload(); }} />}
       {(live.agentsError || live.qualityError) && (
         <Banner
           tone="error"

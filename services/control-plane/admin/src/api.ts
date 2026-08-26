@@ -128,6 +128,9 @@ export interface NodeProfileDto {
   publicIp?: string;
   provider?: string;
   billingUrl?: string;
+  price: number | null;
+  currency: string | null;
+  billingCycle: number | null;
   trafficQuotaBytes: number | null;
   trafficUsedBytes: number | null;
   trafficCycleStart: number | null;
@@ -342,6 +345,67 @@ export interface LiveDto {
   qualityError: string | null;
 }
 
+export type FleetReason =
+  | 'catalog_health_down'
+  | 'catalog_likely_blocked'
+  | 'agent_missing'
+  | 'agent_stale'
+  | 'profile_retired_but_listed'
+  | string;
+
+export interface FleetNodeDto {
+  name: string;
+  catalogListed: boolean | null;
+  qualityStatus: string;
+  qualityLabel: string;
+  agentStatus: string;
+  agentObservedAt: number | null;
+  profile: NodeProfileDto | null;
+  agent: LiveAgentDto | null;
+  quality: LiveQualityNodeDto | null;
+  occupancy: number;
+  affectedUsers: ActivityUserDto[];
+  needsAttention: boolean;
+  reasons: FleetReason[];
+}
+
+export interface FleetRetireChangesDto {
+  catalogEntryRemoved: boolean;
+  proxyGroupReferencesRemoved: string[];
+  profileMarkedRetired: boolean;
+}
+
+export interface FleetRetirePreviewDto {
+  node: FleetNodeDto;
+  expectedRevision: number;
+  currentRevision: number;
+  affectedUsers: ActivityUserDto[];
+  changes: FleetRetireChangesDto;
+  warnings: string[];
+  canRetire: boolean;
+}
+
+export interface FleetRetireResultDto {
+  node: FleetNodeDto;
+  previousRevision: number;
+  revision: number;
+  sha256: string;
+  affectedUsers: ActivityUserDto[];
+  changes: FleetRetireChangesDto;
+  warnings: string[];
+}
+
+export interface FleetSourceDto {
+  state: string;
+  message?: string | null;
+  updatedAt?: number | null;
+}
+
+export interface FleetDto {
+  nodes: FleetNodeDto[];
+  sources: Record<string, FleetSourceDto> & { catalog?: FleetSourceDto };
+}
+
 export interface ActivityUserDto {
   userId: string;
   deviceId: string | null;
@@ -483,6 +547,17 @@ export interface MetricsDto {
 export const operationsApi = {
   dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
   live: async () => (await get<{ live: LiveDto }>('live')).live,
+  fleetNodes: async () => get<FleetDto>('fleet-nodes'),
+  fleetRetirePreview: async (name: string) => get<FleetRetirePreviewDto>(
+    `fleet-nodes/${encodeURIComponent(name)}/retire-preview`,
+  ),
+  retireFleetNode: async (name: string, expectedRevision: number, confirmation: string, reason: string) => (
+    post<FleetRetireResultDto>(`fleet-nodes/${encodeURIComponent(name)}/retire`, {
+      expectedRevision,
+      confirmation,
+      reason,
+    })
+  ),
   metrics: async (range = '24h', node?: string) => {
     const query = new URLSearchParams({ range });
     if (node) query.set('node', node);

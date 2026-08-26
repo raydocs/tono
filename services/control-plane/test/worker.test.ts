@@ -6,7 +6,7 @@ import {
 } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
-import worker, { parseBytesRange, type Env } from '../src/index';
+import worker, { parseBytesRange, retirementCatalogPlan, type Env } from '../src/index';
 import adminWorker from '../src/admin-worker';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
@@ -1380,7 +1380,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const dashboard = await operations('dashboard');
     expect(dashboard.status).toBe(200);
-    expect((await dashboard.json() as any).dashboard.servers).toEqual({ total: 1, active: 1 });
+    // Dashboard occupancy is the live fleet (catalog + quality + agents), not
+    // the unused operations_servers inventory this test still exercises below.
+    expect((await dashboard.json() as any).dashboard.servers).toEqual({ total: 0, active: 0 });
 
     const servers = await operations('servers');
     expect(servers.status).toBe(200);
@@ -5144,5 +5146,52 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(onSakura.nodeHealthLabel).toBe('整机失联');
     expect(onSakura.exitDelayMs).toBe(775);
     expect(onSakura.tcpDelayMs).toBeNull();
+  });
+
+  it('retires a catalog node as text and keeps remaining UUID placeholders', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Fuji',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.catalogEntryRemoved).toBe(true);
+    expect(plan.changes.proxyGroupReferencesRemoved).toEqual(['Tono-Exit']);
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).toContain('{{TONO_CLIENT_UUID}}');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+    expect(plan.yaml).not.toContain('\n  uuid:\n');
+  });
+
+  it('refuses to dump a catalog whose retirement would empty Tono-Exit', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(false);
+    expect(plan.yaml).toContain('Tokyo · Sakura');
+    expect(plan.warnings.some((warning) => warning.includes('清空代理组'))).toBe(true);
   });
 });

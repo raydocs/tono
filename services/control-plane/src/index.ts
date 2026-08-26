@@ -25,7 +25,6 @@ import {
   recordQualitySamples,
   retainOperationsTimeseries,
 } from './ops-timeseries';
-
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
@@ -90,6 +89,7 @@ export interface Env {
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY?: string;
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY?: string;
   ROUTING_RESEARCH_RETENTION_SECONDS?: string;
+  BUILD_SHA?: string;
 }
 
 type Row = Record<string, any>;
@@ -1144,6 +1144,31 @@ function optionalByteCount(value: unknown, name: string): number | null {
   return value as number;
 }
 
+function optionalMoney(value: unknown, name: string): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1_000_000) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+  }
+  return value;
+}
+
+function optionalCurrency(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const currency = str(value, 'currency', 1, 8).trim();
+  if (!/^[A-Za-z$€£¥￥]{1,8}$/.test(currency)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid currency');
+  }
+  return currency;
+}
+
+function optionalBillingCycle(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (!Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > 3_650) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid billingCycle');
+  }
+  return value as number;
+}
+
 function publicProductAccount(row: Row) {
   return {
     id: String(row.id),
@@ -1180,6 +1205,9 @@ function publicNodeProfile(row: Row) {
     publicIp: row.public_ip == null ? undefined : String(row.public_ip),
     provider: row.provider == null ? undefined : String(row.provider),
     billingUrl: row.billing_url == null ? undefined : String(row.billing_url),
+    price: row.price == null ? null : Number(row.price),
+    currency: row.currency == null ? null : String(row.currency),
+    billingCycle: row.billing_cycle == null ? null : Number(row.billing_cycle),
     trafficQuotaBytes: row.traffic_quota_bytes == null ? null : Number(row.traffic_quota_bytes),
     trafficUsedBytes: row.traffic_used_bytes == null ? null : Number(row.traffic_used_bytes),
     trafficCycleStart: row.traffic_cycle_start == null ? null : Number(row.traffic_cycle_start),
@@ -2597,6 +2625,7 @@ async function sharedAdministrativeResource(
     const b = await body(req, 16 * 1024);
     rejectUnexpectedKeys(b, [
       'catalogName', 'publicIp', 'provider', 'billingUrl',
+      'price', 'currency', 'billingCycle',
       'trafficQuotaBytes', 'trafficUsedBytes', 'trafficCycleStart', 'trafficCycleEnd',
       'cycleNetIn', 'cycleNetOut', 'renewsAt', 'notes', 'status',
     ]);
@@ -2616,11 +2645,13 @@ async function sharedAdministrativeResource(
       await e.DB.prepare(
         `INSERT INTO ops_node_profiles(
            id, catalog_name, public_ip, provider, billing_url,
+           price, currency, billing_cycle,
            traffic_quota_bytes, traffic_used_bytes, traffic_cycle_start, traffic_cycle_end,
            cycle_net_in, cycle_net_out, renews_at, notes, status, created_at, updated_at
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         profileId, catalogName, publicIp, provider, billingUrl,
+        optionalMoney(b.price, 'price'), optionalCurrency(b.currency), optionalBillingCycle(b.billingCycle),
         optionalByteCount(b.trafficQuotaBytes, 'trafficQuotaBytes'),
         optionalByteCount(b.trafficUsedBytes, 'trafficUsedBytes'),
         optionalUnix(b.trafficCycleStart, 'trafficCycleStart'),
@@ -2643,6 +2674,7 @@ async function sharedAdministrativeResource(
     const b = await body(req, 16 * 1024);
     rejectUnexpectedKeys(b, [
       'catalogName', 'publicIp', 'provider', 'billingUrl',
+      'price', 'currency', 'billingCycle',
       'trafficQuotaBytes', 'trafficUsedBytes', 'trafficCycleStart', 'trafficCycleEnd',
       'cycleNetIn', 'cycleNetOut', 'renewsAt', 'notes', 'status',
     ]);
@@ -2659,6 +2691,7 @@ async function sharedAdministrativeResource(
       await e.DB.prepare(
         `UPDATE ops_node_profiles SET
            catalog_name = ?, public_ip = ?, provider = ?, billing_url = ?,
+           price = ?, currency = ?, billing_cycle = ?,
            traffic_quota_bytes = ?, traffic_used_bytes = ?,
            traffic_cycle_start = ?, traffic_cycle_end = ?,
            cycle_net_in = ?, cycle_net_out = ?, renews_at = ?,
@@ -2675,6 +2708,15 @@ async function sharedAdministrativeResource(
         b.billingUrl === undefined
           ? (existing.billing_url == null ? null : String(existing.billing_url))
           : httpsUrlField(b.billingUrl, 'billingUrl'),
+        b.price === undefined
+          ? (existing.price == null ? null : Number(existing.price))
+          : optionalMoney(b.price, 'price'),
+        b.currency === undefined
+          ? (existing.currency == null ? null : String(existing.currency))
+          : optionalCurrency(b.currency),
+        b.billingCycle === undefined
+          ? (existing.billing_cycle == null ? null : Number(existing.billing_cycle))
+          : optionalBillingCycle(b.billingCycle),
         b.trafficQuotaBytes === undefined
           ? (existing.traffic_quota_bytes == null ? null : Number(existing.traffic_quota_bytes))
           : optionalByteCount(b.trafficQuotaBytes, 'trafficQuotaBytes'),
@@ -2755,17 +2797,458 @@ async function operationsAdmin(req: Request, e: Env) {
   }
 }
 
+function buildSha(e: Env): string {
+  const value = e.BUILD_SHA?.trim() ?? '';
+  return /^[0-9a-f]{40}$/.test(value) ? value : 'development';
+}
+
 const optionalText = (value: unknown) => value === null || value === undefined ? null : String(value);
 const optionalNumber = (value: unknown) => value === null || value === undefined ? null : Number(value);
 
+async function managedCatalogTemplate(e: Env) {
+  const row = await e.DB.prepare(
+    'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
+  ).first<Row>();
+  if (!row) {
+    const yaml = 'proxies: []\n';
+    return { revision: 0, yaml, sha256: await sha256(yaml), updatedAt: null };
+  }
+  let yaml: string;
+  try {
+    yaml = await decryptCatalog(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
+  } catch {
+    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog is unavailable');
+  }
+  const digest = await sha256(yaml);
+  if (digest !== String(row.content_sha256)) {
+    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Managed server catalog failed integrity validation');
+  }
+  return {
+    revision: Number(row.revision),
+    yaml,
+    sha256: digest,
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function fleetQualityStatus(node: Row | undefined): { status: string; label: string } {
+  if (!node) return { status: 'UNKNOWN', label: '未测' };
+  const block = node.block && typeof node.block === 'object' && !Array.isArray(node.block)
+    ? node.block as Row
+    : null;
+  const reported = typeof block?.status === 'string' ? block.status : null;
+  if (reported === 'LIKELY_BLOCKED') return { status: reported, label: '疑似被墙' };
+  if (node.ok !== true) return { status: 'DOWN', label: '整机失联' };
+  if (reported) return { status: reported, label: optionalText(block?.label) ?? reported };
+  return { status: 'OK', label: '大陆正常' };
+}
+
+async function operationsFleetNodes(e: Env) {
+  const [catalogResult, live, activity, profilesResult] = await Promise.all([
+    managedCatalogTemplate(e).then(
+      (catalog) => ({ state: 'ready' as const, catalog }),
+      (error) => ({
+        state: 'error' as const,
+        message: error instanceof Error ? error.message : 'Managed catalog is unavailable',
+      }),
+    ),
+    operationsLive(e),
+    operationsActivity(e),
+    e.DB.prepare('SELECT * FROM ops_node_profiles ORDER BY catalog_name').all<Row>(),
+  ]);
+  let catalogNames: Set<string> | null = null;
+  let catalogRevision: number | null = null;
+  let catalogSource: Row;
+  if (catalogResult.state === 'ready') {
+    try {
+      catalogNames = new Set(splitManagedCatalogProxies(catalogResult.catalog.yaml).items.map((item) => item.name));
+      catalogRevision = catalogResult.catalog.revision;
+      catalogSource = { state: 'ready', revision: catalogRevision };
+    } catch (error) {
+      catalogSource = {
+        state: 'error',
+        message: error instanceof Error ? error.message : 'Managed catalog is unavailable',
+      };
+    }
+  } else {
+    catalogSource = { state: 'error', message: catalogResult.message };
+  }
+  const profiles = new Map(profilesResult.results.map((row) => [String(row.catalog_name), row]));
+  const agents = new Map((live.agents ?? []).map((row) => [String(row.name), row]));
+  const quality = new Map((live.quality?.nodes ?? []).map((row) => [String(row.name), row]));
+  const names = new Set<string>([
+    ...(catalogNames ?? []),
+    ...profiles.keys(),
+    ...agents.keys(),
+    ...quality.keys(),
+  ]);
+  const nowSec = now();
+  const nodes = [...names].sort((a, b) => a.localeCompare(b, 'zh')).map((name) => {
+    const profileRow = profiles.get(name);
+    const agent = agents.get(name) ?? null;
+    const qualityNode = quality.get(name) ?? null;
+    const observedAt = agent && typeof agent.observedAt === 'number' ? agent.observedAt : null;
+    const agentStatus = observedAt === null ? 'missing' : nowSec - observedAt > 15 * 60 ? 'stale' : 'online';
+    const q = fleetQualityStatus(qualityNode ?? undefined);
+    const affectedUsers = activity.users.filter((user) => user.selectedServer === name);
+    const reasons: string[] = [];
+    const listed = catalogNames?.has(name) ?? null;
+    if (listed === true && q.status === 'DOWN') reasons.push('catalog_health_down');
+    if (listed === true && q.status === 'LIKELY_BLOCKED') reasons.push('catalog_likely_blocked');
+    if (listed === true && agentStatus === 'missing') reasons.push('agent_missing');
+    if (listed === true && agentStatus === 'stale') reasons.push('agent_stale');
+    if (listed === true && profileRow?.status === 'retired') reasons.push('profile_retired_but_listed');
+    if (catalogNames === null) reasons.push('catalog_unavailable');
+    return {
+      name,
+      catalogListed: listed,
+      qualityStatus: q.status,
+      qualityLabel: q.label,
+      agentStatus,
+      agentObservedAt: observedAt,
+      profile: profileRow ? publicNodeProfile(profileRow) : null,
+      agent,
+      quality: qualityNode,
+      occupancy: affectedUsers.filter((user) => user.online).length,
+      affectedUsers,
+      needsAttention: reasons.length > 0,
+      reasons,
+    };
+  });
+  return {
+    nodes,
+    catalogRevision,
+    sources: {
+      catalog: catalogSource,
+      quality: { state: live.quality ? 'ready' : 'error', message: live.qualityError },
+      agents: { state: live.agents ? 'ready' : 'error', message: live.agentsError },
+      profiles: { state: 'ready' },
+    },
+  };
+}
+
+type RetireChanges = {
+  catalogEntryRemoved: boolean;
+  proxyGroupReferencesRemoved: string[];
+  profileMarkedRetired: boolean;
+};
+
+function placeholderCount(yaml: string): number {
+  return yaml.split(CLIENT_UUID_PLACEHOLDER).length - 1;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function catalogGroupName(line: string): string | null {
+  const match = line.match(
+    /^\s*(?:-\s+)?name:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^\s#"'][^#]*?))\s*(?:#.*)?$/,
+  );
+  if (!match) return null;
+  return (match[1] ?? match[2] ?? match[3] ?? '').trim() || null;
+}
+
+function emptyProxyGroupNames(yaml: string): string[] {
+  const empty: string[] = [];
+  let inGroups = false;
+  let group: string | null = null;
+  let awaitingMembers = false;
+  let members = 0;
+  const finish = () => {
+    if (awaitingMembers && members === 0 && group) empty.push(group);
+    awaitingMembers = false;
+    members = 0;
+  };
+  for (const line of yaml.split('\n')) {
+    if (/^proxy-groups\s*:/.test(line)) {
+      finish();
+      inGroups = true;
+      continue;
+    }
+    if (inGroups && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
+      finish();
+      inGroups = false;
+    }
+    if (!inGroups) continue;
+    const named = catalogGroupName(line);
+    if (named && /^\s*-\s+/.test(line)) {
+      finish();
+      group = named;
+      continue;
+    }
+    if (/^\s+proxies\s*:/.test(line)) {
+      awaitingMembers = true;
+      members = 0;
+      continue;
+    }
+    if (awaitingMembers) {
+      if (line.trim() === '' || /^\s*#/.test(line)) continue;
+      if (/^\s+-\s+/.test(line)) {
+        members += 1;
+        continue;
+      }
+      finish();
+    }
+  }
+  finish();
+  return empty;
+}
+
+/**
+ * Remove one catalog proxy by rewriting text, never by YAML parse/dump.
+ * `{{TONO_CLIENT_UUID}}` is legal YAML flow-mapping syntax; round-tripping
+ * would rewrite every remaining identity into a nested map and brick the fleet.
+ */
+export function retirementCatalogPlan(yaml: string, name: string): {
+  yaml: string;
+  changes: RetireChanges;
+  warnings: string[];
+  safe: boolean;
+} {
+  const warnings: string[] = [];
+  const placeholdersBefore = placeholderCount(yaml);
+  let prefix = '';
+  let items: Array<{ name: string; block: string }> = [];
+  let suffix = '';
+  try {
+    ({ prefix, items, suffix } = splitManagedCatalogProxies(yaml));
+  } catch {
+    return {
+      yaml,
+      changes: { catalogEntryRemoved: false, proxyGroupReferencesRemoved: [], profileMarkedRetired: false },
+      warnings: ['目录没有可安全编辑的 proxies 列表。'],
+      safe: false,
+    };
+  }
+  const matches = items.filter((item) => item.name === name);
+  if (matches.length > 1) {
+    return {
+      yaml,
+      changes: { catalogEntryRemoved: false, proxyGroupReferencesRemoved: [], profileMarkedRetired: false },
+      warnings: ['目录中存在多个同名节点，拒绝自动退役。'],
+      safe: false,
+    };
+  }
+  if (matches.length === 1 && items.length <= 1) {
+    return {
+      yaml,
+      changes: { catalogEntryRemoved: true, proxyGroupReferencesRemoved: [], profileMarkedRetired: false },
+      warnings: ['不能退役目录中的最后一个节点。'],
+      safe: false,
+    };
+  }
+
+  const placeholdersRemoved = matches.length === 1 ? placeholderCount(matches[0].block) : 0;
+  let next = yaml;
+  if (matches.length === 1) {
+    const kept = items.filter((item) => item.name !== name);
+    const body = kept.map((item) => item.block.replace(/\s+$/, '')).join('\n') + '\n';
+    next = `${prefix}${body}${suffix}`;
+    if (!next.endsWith('\n')) next += '\n';
+  }
+
+  const memberLine = new RegExp(`^([ \\t]+)-[ \\t]+${escapeRegExp(name)}[ \\t]*(?:#.*)?$`);
+  const groupsChanged: string[] = [];
+  let inGroups = false;
+  let currentGroup: string | null = null;
+  const keptLines: string[] = [];
+  for (const line of next.split('\n')) {
+    if (/^proxy-groups\s*:/.test(line)) {
+      inGroups = true;
+      keptLines.push(line);
+      continue;
+    }
+    if (inGroups && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) {
+      inGroups = false;
+    }
+    if (inGroups) {
+      const named = catalogGroupName(line);
+      if (named && /^\s*-\s+/.test(line)) currentGroup = named;
+      if (memberLine.test(line)) {
+        const groupName = currentGroup ?? '未命名';
+        if (!groupsChanged.includes(groupName)) groupsChanged.push(groupName);
+        continue;
+      }
+    }
+    keptLines.push(line);
+  }
+  next = keptLines.join('\n');
+  if (yaml.endsWith('\n') && !next.endsWith('\n')) next += '\n';
+
+  const ruleTarget = new RegExp(`,\\s*${escapeRegExp(name)}\\s*(?:,\\s*no-resolve)?\\s*$`, 'i');
+  let inRules = false;
+  for (const line of next.split('\n')) {
+    if (/^rules\s*:/.test(line)) {
+      inRules = true;
+      continue;
+    }
+    if (inRules && line.trim() && !/^\s/.test(line) && !line.trimStart().startsWith('#')) break;
+    if (!inRules) continue;
+    const value = line.trim().replace(/^-\s+/, '');
+    if (ruleTarget.test(value)) {
+      warnings.push('规则列表直接引用了该节点，需先改为代理组。');
+      break;
+    }
+  }
+
+  for (const groupName of emptyProxyGroupNames(next)) {
+    warnings.push(`退役会清空代理组 ${groupName}。`);
+  }
+
+  const placeholdersAfter = placeholderCount(next);
+  if (placeholdersAfter !== placeholdersBefore - placeholdersRemoved) {
+    warnings.push('退役后目录占位符数量与预期不符，拒绝自动改写。');
+  }
+  if (next.includes('TONO_CLIENT_UUID') && !next.includes(CLIENT_UUID_PLACEHOLDER)) {
+    warnings.push('退役改写破坏了客户端占位符。');
+  }
+
+  const blocked = warnings.some((warning) => (
+    warning.startsWith('规则列表')
+    || warning.includes('占位符')
+    || warning.startsWith('退役会清空')
+  ));
+  const safe = matches.length === 1 && !blocked;
+  if (safe) {
+    try {
+      next = managedCatalogYAML(next);
+    } catch {
+      warnings.push('改写后的目录未通过发布校验。');
+      return {
+        yaml,
+        changes: { catalogEntryRemoved: true, proxyGroupReferencesRemoved: groupsChanged, profileMarkedRetired: false },
+        warnings,
+        safe: false,
+      };
+    }
+  }
+
+  return {
+    yaml: safe ? next : yaml,
+    changes: {
+      catalogEntryRemoved: matches.length === 1,
+      proxyGroupReferencesRemoved: groupsChanged,
+      profileMarkedRetired: false,
+    },
+    warnings,
+    safe,
+  };
+}
+
+async function operationsRetirePreview(e: Env, name: string) {
+  const [fleet, catalog] = await Promise.all([operationsFleetNodes(e), managedCatalogTemplate(e)]);
+  const node = fleet.nodes.find((candidate) => candidate.name === name);
+  if (!node) throw new ApiError(404, 'NOT_FOUND', 'Fleet node not found');
+  const catalogPlan = retirementCatalogPlan(catalog.yaml, name);
+  const listedCount = splitManagedCatalogProxies(catalog.yaml).items.length;
+  if (catalogPlan.changes.catalogEntryRemoved && listedCount <= 1) {
+    catalogPlan.warnings.push('不能退役目录中的最后一个节点。');
+    catalogPlan.safe = false;
+  }
+  const profileMarkedRetired = node.profile === null || node.profile.status !== 'retired';
+  const changes = { ...catalogPlan.changes, profileMarkedRetired };
+  return {
+    node,
+    expectedRevision: catalog.revision,
+    currentRevision: catalog.revision,
+    affectedUsers: node.affectedUsers,
+    changes,
+    warnings: catalogPlan.warnings,
+    canRetire: catalogPlan.safe && changes.catalogEntryRemoved,
+    nextYaml: catalogPlan.yaml,
+  };
+}
+
+function fleetNodeName(raw: string): string {
+  let name: string;
+  try {
+    name = decodeURIComponent(raw);
+  } catch {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid node name');
+  }
+  if (!name || name.length > 200 || /[\r\n\0]/.test(name)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid node name');
+  }
+  return name;
+}
+
+async function retireFleetNode(e: Env, actorEmail: string, name: string, requestBody: Row) {
+  rejectUnexpectedKeys(requestBody, ['expectedRevision', 'confirmation', 'reason']);
+  if (!Number.isSafeInteger(requestBody.expectedRevision) || requestBody.expectedRevision < 0) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
+  }
+  if (requestBody.confirmation !== name) {
+    throw new ApiError(400, 'RETIRE_CONFIRMATION_REQUIRED', 'Type the exact node name to confirm retirement');
+  }
+  const reason = str(requestBody.reason, 'reason', 1, 500).trim();
+  if (!reason) throw new ApiError(400, 'VALIDATION_ERROR', 'Retirement reason is required');
+  const preview = await operationsRetirePreview(e, name);
+  if (preview.currentRevision !== requestBody.expectedRevision) {
+    throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
+  }
+  if (!preview.canRetire) {
+    throw new ApiError(422, 'RETIRE_UNSAFE', preview.warnings[0] ?? 'Node cannot be retired safely');
+  }
+  const revision = preview.currentRevision + 1;
+  const encrypted = await encryptCatalog(preview.nextYaml, requiredCatalogKey(e));
+  const digest = await sha256(preview.nextYaml);
+  const changedAt = now();
+  const auditId = id();
+  const profileId = id();
+  const results = await e.DB.batch([
+    e.DB.prepare(
+      `UPDATE managed_exit_catalog
+       SET revision = ?, ciphertext = ?, nonce = ?, content_sha256 = ?, updated_at = ?
+       WHERE singleton_id = 1 AND revision = ?`,
+    ).bind(revision, encrypted.ciphertext, encrypted.nonce, digest, changedAt, preview.currentRevision),
+    e.DB.prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       SELECT ?, ?, 'retired', ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM managed_exit_catalog
+         WHERE singleton_id = 1 AND revision = ? AND content_sha256 = ?
+       )
+       ON CONFLICT(catalog_name) DO UPDATE SET status = 'retired', updated_at = excluded.updated_at`,
+    ).bind(profileId, name, changedAt, changedAt, revision, digest),
+    e.DB.prepare(
+      `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
+       SELECT ?, ?, ?, 'node.retire', 'fleet_node', ?, ?
+       WHERE EXISTS (
+         SELECT 1 FROM managed_exit_catalog
+         WHERE singleton_id = 1 AND revision = ? AND content_sha256 = ?
+       )`,
+    ).bind(
+      auditId,
+      changedAt,
+      actorEmail.slice(0, 254),
+      name,
+      `retired ${name}: ${reason}`.slice(0, 500),
+      revision,
+      digest,
+    ),
+  ]);
+  if (!results[0].meta.changes) {
+    throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
+  }
+  const refreshed = await operationsFleetNodes(e);
+  return {
+    node: refreshed.nodes.find((candidate) => candidate.name === name) ?? { ...preview.node, catalogListed: false },
+    previousRevision: preview.currentRevision,
+    revision,
+    sha256: digest,
+    affectedUsers: preview.affectedUsers,
+    changes: preview.changes,
+    warnings: preview.warnings,
+  };
+}
+
 async function operationsDashboard(e: Env) {
   const week = now() + 7 * 86_400;
-  const [users, devices, servers, nodes, deployments, catalog, unusedHomes, unusedAccounts, bannedOpen, incomplete, renewing, usersWithoutHome] = await Promise.all([
+  const [users, devices, fleet, catalog, unusedHomes, unusedAccounts, bannedOpen, incomplete, renewing, usersWithoutHome] = await Promise.all([
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM users").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM devices").first<Row>(),
-    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_servers").first<Row>(),
-    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_logical_nodes").first<Row>(),
-    e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM operations_deployments").first<Row>(),
+    operationsFleetNodes(e),
     e.DB.prepare('SELECT revision, updated_at FROM managed_exit_catalog WHERE singleton_id = 1').first<Row>(),
     e.DB.prepare(
       `SELECT COUNT(*) total FROM home_exits
@@ -2803,12 +3286,19 @@ async function operationsDashboard(e: Env) {
     ).first<Row>(),
   ]);
   const counts = (row: Row | null) => ({ total: Number(row?.total ?? 0), active: Number(row?.active ?? 0) });
+  const fleetCounts = {
+    total: fleet.nodes.length,
+    active: fleet.nodes.filter((node) => node.catalogListed === true).length,
+  };
   return {
     users: counts(users),
     devices: counts(devices),
-    servers: counts(servers),
-    logicalNodes: counts(nodes),
-    deployments: counts(deployments),
+    // Compatibility keys now describe the authoritative fleet aggregate. The
+    // phase-1 operations_* tables remain queryable through their legacy GETs,
+    // but no longer drive dashboard truth.
+    servers: fleetCounts,
+    logicalNodes: fleetCounts,
+    deployments: { total: 0, active: 0 },
     catalog: catalog
       ? { revision: Number(catalog.revision), updatedAt: Number(catalog.updated_at) }
       : { revision: 0, updatedAt: null },
@@ -5457,7 +5947,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   const m = req.method;
 
   if (p === '/api/v1/health' && m === 'GET') {
-    return Response.json({ ok: true, version: '0.0.1' });
+    return Response.json({ ok: true, version: '0.0.1', buildSha: buildSha(e), service: 'api' });
+  }
+
+  if (p === '/api/v1/system/version' && m === 'GET') {
+    return Response.json({ service: 'api', version: '0.0.1', buildSha: buildSha(e) });
   }
 
   if (p === '/api/v1/auth/methods' && m === 'GET') {
@@ -6239,6 +6733,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (p === '/api/v1/ops/dashboard') {
         return Response.json({ dashboard: await operationsDashboard(e) });
       }
+      if (p === '/api/v1/ops/system/version') {
+        return Response.json({ system: { service: 'api', version: '0.0.1', buildSha: buildSha(e) } });
+      }
+      if (p === '/api/v1/ops/fleet-nodes') {
+        return Response.json(await operationsFleetNodes(e));
+      }
+      mt = p.match(/^\/api\/v1\/ops\/fleet-nodes\/([^/]+)\/retire-preview$/);
+      if (mt) {
+        const { nextYaml: _nextYaml, ...preview } = await operationsRetirePreview(e, fleetNodeName(mt[1]));
+        return Response.json(preview);
+      }
       if (p === '/api/v1/ops/servers') {
         return Response.json({ servers: await operationsServers(e) });
       }
@@ -6384,6 +6889,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         });
       }
       throw new ApiError(404, 'NOT_FOUND', 'Route not found');
+    }
+
+    mt = p.match(/^\/api\/v1\/ops\/fleet-nodes\/([^/]+)\/retire$/);
+    if (mt && m === 'POST') {
+      const b = await body(req, 8 * 1024);
+      return Response.json(await retireFleetNode(e, actor.email, fleetNodeName(mt[1]), b));
     }
 
     // --- Product ops writes (same Access boundary; no ADMIN_API_TOKEN in browser) ---

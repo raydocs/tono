@@ -61,10 +61,12 @@ export function mergedBilling(
   const renewsAt = profile?.renewsAt ?? unset(agent?.expiredAt) ?? null;
   const trafficQuotaBytes = profile?.trafficQuotaBytes ?? unset(agent?.trafficLimit) ?? null;
   const trafficUsedBytes = profile?.trafficUsedBytes ?? null;
-  const price = unset(agent?.price);
-  const currency = agent?.currency ?? null;
-  const billingCycle = unset(agent?.billingCycle);
-  const fromProfile = Boolean(profile?.renewsAt || profile?.trafficQuotaBytes);
+  const price = unset(profile?.price) ?? unset(agent?.price);
+  const currency = profile?.currency || agent?.currency || null;
+  const billingCycle = unset(profile?.billingCycle) ?? unset(agent?.billingCycle);
+  const fromProfile = Boolean(
+    profile?.renewsAt || profile?.trafficQuotaBytes || unset(profile?.price) || unset(profile?.billingCycle),
+  );
   // Billing cycle counts as Komari data like the rest of it. Leaving it out
   // meant a server whose only filled-in Komari field was the cycle reported its
   // source as 'none' while the cycle itself was on screen.

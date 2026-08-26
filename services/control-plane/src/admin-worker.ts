@@ -2,8 +2,8 @@ import controlPlane, { type Env } from './index';
 
 type AdminEnv = Pick<
   Env,
-  'DB' | 'ASSETS' | 'ALLOWED_ORIGIN' | 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'ACCESS_ADMIN_EMAILS'
->;
+  'DB' | 'ASSETS' | 'ALLOWED_ORIGIN' | 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'ACCESS_ADMIN_EMAILS' | 'BUILD_SHA'
+> & { API: Fetcher };
 
 const ADMIN_MONITOR = 'https://admin.afk.ccwu.cc/ops/#/monitor';
 const ABSORBED_HOSTS = new Set(['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']);
@@ -26,6 +26,11 @@ function absorbed() {
     status: 302,
     headers: { ...closedHeaders, location: ADMIN_MONITOR },
   });
+}
+
+function adminBuildSha(env: AdminEnv) {
+  const value = env.BUILD_SHA?.trim() ?? '';
+  return /^[0-9a-f]{40}$/.test(value) ? value : 'development';
 }
 
 export default {
@@ -58,6 +63,30 @@ export default {
       });
     }
 
-    return controlPlane.fetch(request, env as Env, context);
+    if (url.pathname.startsWith('/api/v1/ops/')) {
+      // This is no longer a browser cross-origin request after it enters the
+      // service binding. Forwarding the public admin Origin would make the API
+      // worker compare it with api.afk.ccwu.cc and reject every state-changing
+      // operation before Access authentication runs.
+      const headers = new Headers(request.headers);
+      headers.delete('origin');
+      const internalRequest = new Request(request, { headers });
+      const response = await env.API.fetch(internalRequest);
+      if (url.pathname === '/api/v1/ops/system/version' && response.ok) {
+        const payload = await response.json() as { system?: Record<string, unknown> };
+        const api = payload.system ?? {};
+        const admin = { service: 'admin', version: '0.0.1', buildSha: adminBuildSha(env) };
+        return Response.json({
+          system: {
+            api,
+            admin,
+            aligned: api.buildSha === admin.buildSha,
+          },
+        }, { headers: { 'cache-control': 'no-store' } });
+      }
+      return response;
+    }
+
+    return controlPlane.fetch(request, env as unknown as Env, context);
   },
 } satisfies ExportedHandler<AdminEnv>;

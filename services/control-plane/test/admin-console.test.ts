@@ -86,6 +86,18 @@ describe('admin console helpers', () => {
     expect(mergedBilling(profile, agent()).trafficQuotaBytes).toBe(500);
     expect(trafficRemaining(profile, agent())).toBe(400);
   });
+
+  it('lets a hand-filled profile price win over Komari zeros and values', () => {
+    const profile = {
+      price: 12,
+      currency: 'USD',
+      billingCycle: 30,
+    } as NodeProfileDto;
+    const billing = mergedBilling(profile, agent());
+    expect(billing.price).toBe(12);
+    expect(billing.currency).toBe('USD');
+    expect(billing.billingCycle).toBe(30);
+  });
 });
 
 describe('billing fields Komari leaves unset', () => {

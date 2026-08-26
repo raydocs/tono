@@ -39,6 +39,7 @@ export function Dashboard() {
   const usersRes = useResource(operationsApi.users, [], refreshMs);
   const activityRes = useResource<ActivityDto>(operationsApi.activity, [], refreshMs);
   const auditRes = useResource(operationsApi.audit, [], refreshMs);
+  const fleetRes = useResource(operationsApi.fleetNodes, [], refreshMs);
   return <StateBoundary resource={resource}>{(data: DashboardDto) => {
     const liveData = live.state === 'ready' ? live.data : null;
     const qualityNodes = liveData?.quality?.nodes ?? [];
@@ -61,13 +62,32 @@ export function Dashboard() {
     const occupancyRows = [...occupancy.entries()].sort((a, b) => b[1] - a[1]);
     const occupancyMax = Math.max(1, ...occupancyRows.map(([, count]) => count));
 
-    const alerts: Array<{ tone: 'error' | 'warn'; text: string }> = [];
-    if (liveData) {
-      for (const node of offline) alerts.push({ tone: 'error', text: `${node.name} 大陆测不通` });
-      for (const node of blocked) {
-        alerts.push({ tone: 'error', text: `${node.name} 疑似被墙（${node.block?.label ?? '异常'}）` });
+    const alerts: Array<{ tone: 'error' | 'warn'; text: string; href?: string; key?: string }> = [];
+    if (fleetRes.state === 'ready') {
+      const reasonLabel: Record<string, string> = {
+        catalog_health_down: '整机失联且仍在售',
+        catalog_likely_blocked: '疑似被墙且仍在售',
+        agent_missing: '没有安装探针',
+        agent_stale: '探针数据过期',
+        profile_retired_but_listed: '已退役但仍在目录',
+      };
+      for (const node of fleetRes.data.nodes.filter((entry) => entry.needsAttention)) {
+        const severe = node.reasons.some((reason) => ['catalog_health_down', 'catalog_likely_blocked', 'profile_retired_but_listed'].includes(reason));
+        alerts.push({
+          key: `node:${node.name}`,
+          tone: severe ? 'error' : 'warn',
+          text: `${node.name}：${node.reasons.map((reason) => reasonLabel[reason] ?? reason).join('、')}${node.affectedUsers.length ? `；影响 ${node.affectedUsers.length} 位客户` : ''}`,
+          href: `#/monitor?node=${encodeURIComponent(node.name)}`,
+        });
       }
-      for (const node of degraded) alerts.push({ tone: 'warn', text: `${node.name} 出口质量有问题（${node.quality}）` });
+    } else if (liveData) {
+      for (const node of qualityNodes) {
+        const parts: string[] = [];
+        if (!node.ok) parts.push('大陆测不通');
+        if (isLikelyBlocked(node)) parts.push(`疑似被墙（${node.block?.label ?? '异常'}）`);
+        if (node.quality && node.quality !== 'ok') parts.push(`出口质量 ${node.quality}`);
+        if (parts.length) alerts.push({ tone: 'error', text: `${node.name}：${parts.join('、')}`, href: `#/monitor?node=${encodeURIComponent(node.name)}`, key: `node:${node.name}` });
+      }
       const probeless = qualityNodes.filter((node) => !agentNames.has(node.name));
       if (probeless.length > 0) {
         alerts.push({ tone: 'warn', text: `${probeless.length} 台还没装探针：${probeless.map((node) => node.name).join('、')}` });
@@ -135,10 +155,13 @@ export function Dashboard() {
       if (node.quality && node.quality !== 'ok') return { key: 'warn', label: `质量 ${node.quality}` };
       return { key: 'ok', label: blockLabel(node) };
     };
+    const orderedAlerts = [...new Map(alerts.map((alert, index) => [alert.key ?? `alert:${index}:${alert.text}`, alert])).values()]
+      .sort((a, b) => Number(b.tone === 'error') - Number(a.tone === 'error'));
 
     return <>
       <DataHealth sources={[
         { label: '节点质量', resource: live },
+        { label: '机队', resource: fleetRes },
         { label: '客户', resource: usersRes },
         { label: '谁在线', resource: activityRes },
         { label: '操作记录', resource: auditRes },
@@ -187,23 +210,23 @@ export function Dashboard() {
       )}
 
       {(liveData || usersRes.state === 'ready') && (
-        <section className={`card attention-card${alerts.length > 0 ? ' has-alerts' : ''}`}>
+        <section className={`card attention-card${orderedAlerts.length > 0 ? ' has-alerts' : ''}`}>
           <div className="card-header">
             <div>
               <h2>需要关注</h2>
               <p>被墙、测不通、质量、流量、到期</p>
             </div>
           </div>
-          {alerts.length === 0 ? (
+          {orderedAlerts.length === 0 ? (
             unchecked.length === 0
               ? <div className="attention-ok">✓ 节点和客户都正常</div>
               : <div className="attention-ok">{unchecked.join('和')}还在加载，还没查完</div>
           ) : (
             <ul className="attention-list">
-              {alerts.map((alert, index) => (
-                <li key={index} className={`attention-${alert.tone}`}>
+              {orderedAlerts.map((alert, index) => (
+                <li key={alert.key ?? index} className={`attention-${alert.tone}`}>
                   <span className="attention-dot" aria-hidden />
-                  <span>{alert.text}</span>
+                  {alert.href ? <a className="table-link" href={alert.href}>{alert.text}</a> : <span>{alert.text}</span>}
                 </li>
               ))}
             </ul>
@@ -224,7 +247,7 @@ export function Dashboard() {
             {qualityNodes.map((node) => {
               const state = nodeState(node);
               return (
-                <a className={`node-tile node-${state.key}`} key={node.name} href="#/monitor">
+                <a className={`node-tile node-${state.key}`} key={node.name} href={`#/monitor?node=${encodeURIComponent(node.name)}`}>
                   <span className="node-dot" aria-hidden />
                   <span className="node-tile-main">
                     <strong>{node.name}</strong>
@@ -252,7 +275,7 @@ export function Dashboard() {
               </thead>
               <tbody>{activityRes.data.users.map((user) => (
                 <tr key={user.userId}>
-                  <td><strong>{user.email}</strong></td>
+                  <td><a className="table-link" href={`#/users?user=${encodeURIComponent(user.userId)}`}><strong>{user.email}</strong></a></td>
                   <td>
                     {user.online
                       ? <Status value="active" />
