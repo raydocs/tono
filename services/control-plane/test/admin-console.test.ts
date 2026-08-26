@@ -368,6 +368,7 @@ import {
   assembleOpsNodes,
   assembleOpsPeople,
   nodeMatchesFocus,
+  nodeRootCause,
   nodeSearchHaystack,
   sortOpsNodes,
 } from '../admin/src/lib/ops-views';
@@ -533,8 +534,8 @@ describe('customer path incidents', () => {
       nowSec: now,
       telemetrySource: 'ready',
       activity: [
-        activity({ deviceId: 'a', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10 }),
-        activity({ deviceId: 'b', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10 }),
+        activity({ deviceId: 'a', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10, exitDelayAtMs: now * 1000, tcpDelayAtMs: now * 1000 }),
+        activity({ deviceId: 'b', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10, exitDelayAtMs: now * 1000, tcpDelayAtMs: now * 1000 }),
       ],
     });
     expect(people).toHaveLength(1);
@@ -931,7 +932,8 @@ describe('confirm exclusive gate', () => {
 
 import { dashboardKpis, KPI_HREFS } from '../admin/src/lib/incidents';
 import { lineDiff } from '../admin/src/lib/textdiff';
-import { aggregateFleetRates, coverageByBucket, latestValidRate, nodeRateSeries, rangeTransfer } from '../admin/src/lib/traffic';
+import { metricsForRange } from '../admin/src/lib/metrics-bind';
+import { aggregateFleetRates, coverageByBucket, fleetByteTransfer, latestValidRate, nodeRateSeries, rangeTransfer } from '../admin/src/lib/traffic';
 
 describe('dashboard KPI routes stay pinned', () => {
   it('does not drift off the hash contract', () => {
@@ -953,12 +955,13 @@ describe('dashboard KPI routes stay pinned', () => {
       qualityAvailable: false,
       activityAvailable: false,
       usersAvailable: false,
+      profilesAvailable: false,
       nowSec: 1,
     });
     expect(kpis.find((item) => item.id === 'blocked')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'online')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'quota')?.value).toBeNull();
-    expect(kpis.find((item) => item.id === 'expiring')?.value).toBe(0);
+    expect(kpis.find((item) => item.id === 'expiring')?.value).toBeNull();
   });
 });
 
@@ -976,12 +979,103 @@ describe('honest traffic aggregation', () => {
     expect(a[1].inBps).toBeNull();
     const fleet = aggregateFleetRates({ a, b }, 3);
     const at60 = fleet.find((point) => point.t === 60)!;
-    expect(at60.contributing).toBe(2);
+    expect(at60.contributingIn).toBe(2);
     expect(at60.expected).toBe(3);
     expect(at60.inBps).toBeCloseTo(2);
-    expect(coverageByBucket(fleet).present).toBe(2);
+    expect(coverageByBucket(fleet).inPresent).toBe(2);
     expect(rangeTransfer(b).inBytes).toBe(60 * 1);
     expect(latestValidRate(a)?.t).toBe(120);
+  });
+
+  it('sums each node byte delta and does not depend on object order', () => {
+    const resolution = 60;
+    const a = [
+      { t: 0, netIn: 0, netOut: 0 },
+      { t: 60, netIn: 60, netOut: 0 },
+    ];
+    const b = [
+      { t: 0, netIn: 0, netOut: 0 },
+      { t: 120, netIn: 240, netOut: 0 },
+    ];
+    expect(fleetByteTransfer({ a, b }, resolution).inBytes).toBe(300);
+    expect(fleetByteTransfer({ b, a }, resolution).inBytes).toBe(300);
+  });
+
+  it('uses eligible node count as coverage denominator', () => {
+    const series = {
+      only: nodeRateSeries([
+        { t: 0, netIn: 0, netOut: null },
+        { t: 60, netIn: 60, netOut: null },
+      ], 60),
+    };
+    const fleet = aggregateFleetRates(series, 11);
+    const cover = coverageByBucket(fleet);
+    expect(cover.expected).toBe(11);
+    expect(cover.inPresent).toBe(1);
+    expect(cover.outPresent).toBe(0);
+    const empty = aggregateFleetRates({
+      only: [{ t: 1, dt: 60, inBps: null, outBps: null }],
+    }, 11);
+    expect(coverageByBucket(empty).inPresent).toBe(0);
+  });
+});
+
+import { clearWebDomains, parseTrafficPolicy } from '../admin/src/lib/traffic-policy';
+
+describe('traffic policy web-direct shortcut', () => {
+  const v2 = {
+    version: 2 as const,
+    domains: [{ host: 'wx.qq.com', ports: [443] }],
+    mediaEndpoints: [{ address: '1.1.1.1', ports: [443] }],
+    webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+  };
+  const v3 = { ...v2, version: 3 as const, directSuffixes: [{ host: 'edu.cn', ports: [80, 443] }] };
+  const v4 = {
+    ...v3,
+    version: 4 as const,
+    tcpEndpoints: [{ address: '8.8.8.8', ports: [443] }],
+  };
+
+  it('empties only webDomains on v2 and does not mutate the input', () => {
+    const frozen = JSON.parse(JSON.stringify(v2));
+    const result = clearWebDomains(v2);
+    expect(result).toEqual({ ok: true, policy: { ...v2, webDomains: [] } });
+    expect(v2).toEqual(frozen);
+  });
+
+  it('keeps v3 directSuffixes structure when clearing webDomains', () => {
+    const result = clearWebDomains(v3);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.policy.version).toBe(3);
+      expect(result.policy).toMatchObject({
+        domains: v3.domains,
+        mediaEndpoints: v3.mediaEndpoints,
+        directSuffixes: v3.directSuffixes,
+        webDomains: [],
+      });
+    }
+  });
+
+  it('keeps v4 domains/media/directSuffixes/tcpEndpoints and only clears webDomains', () => {
+    const result = clearWebDomains(v4);
+    expect(result).toEqual({
+      ok: true,
+      policy: {
+        version: 4,
+        domains: v4.domains,
+        mediaEndpoints: v4.mediaEndpoints,
+        webDomains: [],
+        directSuffixes: v4.directSuffixes,
+        tcpEndpoints: v4.tcpEndpoints,
+      },
+    });
+  });
+
+  it('does not invent a publishable document from v1 or a broken shape', () => {
+    expect(clearWebDomains({ version: 1, domains: [], mediaEndpoints: [] }).ok).toBe(false);
+    expect(parseTrafficPolicy({ version: 2, domains: [] }).ok).toBe(false);
+    expect(parseTrafficPolicy({ version: 4, domains: [], mediaEndpoints: [], webDomains: [] }).ok).toBe(false);
   });
 });
 
@@ -993,5 +1087,80 @@ describe('raw text diff', () => {
     expect(after).toContain('{{TONO_CLIENT_UUID}}');
     expect(diff.added).toBe(1);
     expect(diff.removed).toBe(0);
+  });
+
+  it('handles many duplicate lines without hanging', () => {
+    const before = Array.from({ length: 400 }, () => 'same').join('\n');
+    const after = `${before}\nextra`;
+    const diff = lineDiff(before, after);
+    expect(diff.added).toBe(1);
+  });
+});
+
+describe('path measurement freshness', () => {
+  const now = 10_000;
+  const freshMs = now * 1000;
+  const staleMs = (now - HEARTBEAT_FRESH_SECONDS - 1) * 1000;
+
+  it('treats 40:00 as fresh and 40:01 as stale', () => {
+    expect(customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 900, tcpDelayMs: 10,
+      exitDelayAtMs: (now - HEARTBEAT_FRESH_SECONDS) * 1000,
+      tcpDelayAtMs: freshMs,
+      nowSec: now,
+    }).kind).toBe('incident');
+    expect(customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 900, tcpDelayMs: 10,
+      exitDelayAtMs: (now - HEARTBEAT_FRESH_SECONDS - 1) * 1000,
+      tcpDelayAtMs: 10 * 1000,
+      nowSec: now,
+    }).kind).not.toBe('incident');
+  });
+
+  it('does not let a stale 900ms raise a fresh 500ms warn into severe', () => {
+    const verdict = customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 900, tcpDelayMs: 500,
+      exitDelayAtMs: staleMs, tcpDelayAtMs: freshMs,
+      nowSec: now,
+    });
+    expect(verdict).toMatchObject({ kind: 'incident', severity: 'warn', metric: 'tcp' });
+  });
+
+  it('reports unmeasured when both delay samples are stale', () => {
+    expect(customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 900, tcpDelayMs: 900,
+      exitDelayAtMs: staleMs, tcpDelayAtMs: staleMs,
+      nowSec: now,
+    }).kind).toBe('unmeasured');
+  });
+});
+
+describe('node root cause uniqueness', () => {
+  it('classifies blocked-and-down Sakura only as blocked', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1_800_000_000_000,
+      catalogYaml: 'proxies:\n  - name: "Sakura"\n    type: vless\n',
+      qualityNodes: [qualityNode('Sakura', {
+        ok: false,
+        block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+      })],
+      agents: [agent({ name: 'Sakura', observedAt: 1_800_000_000 - 700 })],
+    });
+    expect(nodeRootCause(nodes[0])).toBe('blocked');
+    expect(nodeMatchesFocus(nodes[0], 'offline', 1_800_000_000)).toBe(false);
+    const incidents = incidentsFromWorld({ nodes, people: [], catalogRevision: 1, nowSec: 1_800_000_000, qualityUpdatedAtSec: 1_800_000_000 });
+    expect(incidents.filter((item) => item.node === 'Sakura' && (item.severity === 'severe' || item.severity === 'warn'))).toHaveLength(1);
+    expect(incidents[0].measuredAtSec).toBe(1_800_000_000);
+  });
+});
+
+describe('metrics range binding', () => {
+  it('does not present a 24h snapshot as 90d', () => {
+    expect(metricsForRange('90d', '24h', { from: 1 })).toBeNull();
+    expect(metricsForRange('24h', '24h', { from: 1 })).toEqual({ from: 1 });
   });
 });
