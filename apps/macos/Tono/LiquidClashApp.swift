@@ -729,6 +729,14 @@ struct LiquidClashApp: App {
                     appState.compactRemoteDiagnosticSnapshot()
                 )
             },
+            claudeTrafficResearchConsumer: {
+                await appState.claudeTrafficResearchSnapshot()
+            },
+            protectionBlockedConsumer: { appState.isProtectionBlocked },
+            protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
+            appRoutingResearchActivationConsumer: {
+                appState.appRoutingResearchActivationChanged()
+            },
             pathLatencyConsumer: {
                 let selected = appState.proxyService.activeNodeName
                     ?? appState.activeNode?.name
@@ -741,14 +749,6 @@ struct LiquidClashApp: App {
                     exitDelayMs: Int64(sample.ms),
                     exitDelayAtMs: Int64(sample.at.timeIntervalSince1970 * 1_000)
                 )
-            },
-            claudeTrafficResearchConsumer: {
-                await appState.claudeTrafficResearchSnapshot()
-            },
-            protectionBlockedConsumer: { appState.isProtectionBlocked },
-            protectedRetryConsumer: { appState.retryProtectedConnectionNow() },
-            appRoutingResearchActivationConsumer: {
-                appState.appRoutingResearchActivationChanged()
             }
         ))
         // CRITICAL: Purge saved window frames BEFORE SwiftUI's scene management

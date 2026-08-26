@@ -12,7 +12,11 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertTrue(ConnectionActivityPresentation.isLoopback(dns))
         XCTAssertFalse(
             ConnectionActivityPresentation.isLoopback(
-                fixture(host: "claude.ai", destinationIP: "160.79.104.10")
+                fixture(
+                    host: "claude.ai",
+                    destinationIP: "160.79.104.10",
+                    chains: ["Tono-Exit"]
+                )
             )
         )
     }
