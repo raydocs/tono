@@ -787,9 +787,12 @@ dd { margin: 0; text-align: right; font-weight: 500; }
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar {
-    position: sticky;
+    position: fixed;
+    left: 0;
+    right: 0;
     bottom: 0;
     top: auto;
+    width: 100%;
     height: auto;
     order: 2;
     border-right: 0;
@@ -816,7 +819,7 @@ dd { margin: 0; text-align: right; font-weight: 500; }
     text-align: center;
   }
   .nav-group, .sidebar-footer { display: none; }
-  .main { order: 1; padding-bottom: 4.5rem; }
+  .main { order: 1; padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
   .content { padding: 1rem 0.85rem 1.5rem; }
   .topbar {
     padding: 0.35rem 0.85rem;
@@ -831,7 +834,13 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   .page-head { margin-bottom: 1rem; }
   .page-head h1 { font-size: 1.25rem; }
 }
-.nav-more { display: none; }
+.nav-more {
+  display: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
 @media (max-width: 560px) {
   .sidebar-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .nav-item.nav-overflow { display: none; }
@@ -1659,9 +1668,15 @@ dd { margin: 0; text-align: right; font-weight: 500; }
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .dash-command { grid-template-columns: 1fr; }
 }
+@media (max-width: 900px) {
+  /* These overrides must follow the desktop declarations above. */
+  .topbar-extras { display: none; }
+  .topbar-compact-more { display: block; }
+}
 @media (max-width: 430px) {
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-chips { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
+  .filter-chips > .chip { flex: 0 0 auto; white-space: nowrap; }
   .content, .shell, .main, .topbar { overflow-x: hidden; max-width: 100%; }
   .person-row { grid-template-columns: minmax(0, 1fr); }
   .customer-toolbar { max-width: 100%; }

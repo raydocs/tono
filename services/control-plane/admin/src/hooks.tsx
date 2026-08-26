@@ -16,8 +16,8 @@ export type Resource<T> =
 export const pages: Array<{ id: Page; label: string; group: string }> = [
   { id: 'dashboard', label: '总览', group: '日常' },
   { id: 'failures', label: '故障', group: '日常' },
-  { id: 'users', label: '客户', group: '日常' },
   { id: 'monitor', label: '服务器', group: '日常' },
+  { id: 'users', label: '客户', group: '日常' },
   { id: 'traffic', label: '流量', group: '日常' },
   { id: 'control', label: '目录和规则', group: '配置' },
 ];

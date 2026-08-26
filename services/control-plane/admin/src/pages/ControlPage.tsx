@@ -396,11 +396,12 @@ export function ControlPage() {
         onCancel={() => { if (!publishing) { setConfirm(null); setConfirmError(null); } }}
         onConfirm={async () => {
           if (!confirm || gate.current.busy || confirmBusy) return;
+          const target = confirm.target;
           setConfirmBusy(true);
           setConfirmError(null);
           setError(null);
           setMessage(null);
-          if (confirm.target === 'policy') setPolicyPhase('publishing');
+          if (target === 'policy') setPolicyPhase('publishing');
           else setYamlPhase('publishing');
           try {
             const ran = await gate.current.run(confirm.run);
@@ -412,12 +413,12 @@ export function ControlPage() {
             const text = err instanceof Error ? err.message : '没做成';
             if (/\(409\)|revision|冲突/.test(text)) {
               setConfirmError(`${text}。草稿和冻结的基线还在，请重新对照后再发。`);
-              setPolicyPhase((phase) => (phase === 'viewing' ? phase : 'conflict'));
-              setYamlPhase((phase) => (phase === 'viewing' ? phase : 'conflict'));
+              if (target === 'policy') setPolicyPhase('conflict');
+              else setYamlPhase('conflict');
             } else {
               setConfirmError(text);
-              setPolicyPhase((phase) => (phase === 'viewing' ? phase : 'error'));
-              setYamlPhase((phase) => (phase === 'viewing' ? phase : 'error'));
+              if (target === 'policy') setPolicyPhase('error');
+              else setYamlPhase('error');
             }
           } finally {
             setConfirmBusy(false);
