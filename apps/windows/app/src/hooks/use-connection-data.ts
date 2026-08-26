@@ -349,6 +349,14 @@ const stopConnectionMonitorIfIdle = () => {
     window.clearTimeout(flushTimer)
     flushTimer = null
   }
+  // Drop the snapshot too. Closing the socket but keeping up to 2000 active
+  // and 500 closed connections meant leaving Activity retained the whole
+  // window for the life of the process, and re-entering flashed stale rows
+  // before the first frame.
+  connectionData = initConnData
+  connectionSummary = initConnSummaryData
+  connectionFeedLive = false
+  lastFlushAt = 0
   void closeConnectionSocket()
 }
 

@@ -317,12 +317,18 @@ describe('ActivityPage', () => {
       screen.getByText('Connect Tono to view live activity.'),
     ).toBeDefined()
     expect(screen.queryByText('proxy.example.com:443')).toBeNull()
+    // The controls stay mounted but inert, so a drop mid-session does not wipe
+    // the tab and search text the user had chosen.
+    const search = screen.getByRole('textbox', {
+      name: 'Filter by app, domain, target, protocol, or rule',
+    })
+    expect(search).toBeDefined()
+    expect(search.closest('[aria-disabled="true"]')).not.toBeNull()
     expect(
-      screen.queryByRole('textbox', {
-        name: 'Filter by app, domain, target, protocol, or rule',
-      }),
-    ).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Connections' })).toBeNull()
+      screen
+        .getByRole('button', { name: 'Connections' })
+        .closest('[aria-disabled="true"]'),
+    ).not.toBeNull()
   })
 
   it('filters route results and closes one or all live connections', async () => {

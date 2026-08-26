@@ -5,7 +5,12 @@ import { useTranslation } from 'react-i18next'
 
 import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
-import { readNodeLatency } from '@/pages/tono/node-latency'
+import {
+  latencyColor,
+  latencyLabelKey,
+  latencyLabelVars,
+  readNodeLatency,
+} from '@/pages/tono/node-latency'
 import {
   nodeCityParts,
   nodeCityTitleKey,
@@ -209,10 +214,14 @@ export const TrayPanel = () => {
                   fontFamily: TONO_MONO_STACK,
                   flexShrink: 0,
                   fontSize: 11,
-                  color: text.tertiary,
+                  // readNodeLatency returns the exit's generate_204 delay, the
+                  // same measurement the dashboard speaks in seconds. Printing
+                  // it raw made the tray say "816ms" for a node the dashboard
+                  // called "0.8 秒", and it carried no band colour at all.
+                  color: latencyColor(latency, 'cached'),
                 }}
               >
-                {latency}ms
+                {t(latencyLabelKey('cached', latency), latencyLabelVars(latency))}
               </span>
             )}
             <TonoIcon name="chevronDown" size={11} />

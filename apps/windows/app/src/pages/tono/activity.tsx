@@ -119,10 +119,26 @@ const ActivityPage = () => {
   }, [connected, live, generation])
   useEffect(() => {
     if (!waitedForFeed || live) return
-    refreshGetClashConnection()
-    const timer = window.setInterval(() => refreshGetClashConnection(), 4_000)
-    return () => window.clearInterval(timer)
-  }, [waitedForFeed, live, refreshGetClashConnection])
+    // Back off instead of tearing the socket down and rebuilding it every four
+    // seconds forever. Also keyed on generation, so a controller restart
+    // retries against the new one rather than leaving the old loop running.
+    let cancelled = false
+    let attempt = 0
+    let timer = 0
+    const tick = () => {
+      if (cancelled) return
+      refreshGetClashConnection()
+      attempt += 1
+      // First retry still lands at 4s; only a feed that stays down backs off.
+      const delay = Math.min(4_000 * 2 ** (attempt - 1), 30_000)
+      timer = window.setTimeout(tick, delay)
+    }
+    tick()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [waitedForFeed, live, generation, refreshGetClashConnection])
 
   const activeConnections = data?.activeConnections ?? EMPTY_CONNECTIONS
   const capped = useMemo(
@@ -299,7 +315,10 @@ const ActivityPage = () => {
           <button
             type="button"
             className="tono-button"
-            disabled={!connected || activeConnections.length === 0 || closingAll}
+            // Gate on what the list shows. The raw array still holds the
+            // loopback DNS rows the list hides, so this button was live
+            // over an empty list whenever only DNS was open.
+            disabled={!connected || visibleRows.length === 0 || closingAll}
             title={t('tono.activity.closeAllHint')}
             onClick={() => void handleCloseAll()}
             style={{
@@ -326,7 +345,9 @@ const ActivityPage = () => {
           overflow: 'hidden',
         }}
       >
-        {connected && (
+        {/* Dim the controls when disconnected instead of unmounting them.
+            Unmounting silently reset the user's tab and search text every time
+            the tunnel dropped mid-session. */}
         <div
           style={{
             display: 'flex',
@@ -334,7 +355,10 @@ const ActivityPage = () => {
             gap: 10,
             padding: 14,
             borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(30,42,70,0.08)'}`,
+            opacity: connected ? 1 : 0.45,
+            pointerEvents: connected ? 'auto' : 'none',
           }}
+          aria-disabled={!connected}
         >
           <label style={{ position: 'relative', flex: 1, minWidth: 180 }}>
             <TonoIcon
@@ -428,7 +452,6 @@ const ActivityPage = () => {
             ))}
           </div>
         </div>
-        )}
 
         {!connected ? (
           <div
@@ -640,7 +663,7 @@ const ActivityPage = () => {
           {view === 'apps'
             ? t('tono.activity.appCount', { count: visibleApps.length })
             : t('tono.activity.connectionCount', { count: visibleRows.length })}
-          {activeConnections.length > MAX_ACTIVITY_CONNECTIONS &&
+          {visibleRows.length >= MAX_ACTIVITY_CONNECTIONS &&
             ` · ${t('tono.activity.limitNotice', { count: MAX_ACTIVITY_CONNECTIONS })}`}
         </div>
       </GlassCard>
