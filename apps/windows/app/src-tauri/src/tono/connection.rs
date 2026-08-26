@@ -2667,6 +2667,36 @@ pub async fn selected_node_vanished(state: Arc<TonoState>, app: AppHandle) {
 ///
 /// `generation` is the connect generation the switch was spawned under; a
 /// newer bump (another switch, disconnect, sign-out) retires it silently.
+/// Put the selection back and tell the UI about it.
+///
+/// `tono_select_server` writes `selected_node` and emits before this task even
+/// starts, so every branch below that gives up on the switch has to undo that
+/// claim. Without it the node card, the tray, and the dashboard all showed the
+/// exit the user picked while every byte still left through the old one — and
+/// nothing ever corrected it, because the stored selection was the new name.
+async fn restore_selected_node(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    generation: u64,
+    previous_name: &str,
+) {
+    if previous_name.is_empty() {
+        return;
+    }
+    let mut inner = state.lock().await;
+    // A newer operation owns the state; it will publish its own selection.
+    if inner.connect_generation != generation {
+        return;
+    }
+    if inner.selected_node.as_deref() == Some(previous_name) {
+        return;
+    }
+    inner.selected_node = Some(previous_name.to_string());
+    let status = commands::status_of(&inner);
+    drop(inner);
+    commands::emit_status(app, &status);
+}
+
 pub async fn switch_selected_node(
     state: Arc<TonoState>,
     app: AppHandle,
@@ -2680,6 +2710,15 @@ pub async fn switch_selected_node(
             return;
         }
         if !inner.fsm.status().is_connected {
+            // A connect already in flight is dialling the previous exit, but
+            // the caller has published the new name — the UI would show a node
+            // the attempt is not using. When fully disconnected the new name is
+            // simply the choice for the next connect, so leave it alone.
+            let connecting = inner.fsm.status().is_connecting;
+            drop(inner);
+            if connecting {
+                restore_selected_node(&state, &app, generation, &previous_name).await;
+            }
             return;
         }
         let previous = inner
@@ -2696,6 +2735,7 @@ pub async fn switch_selected_node(
     };
     let (previous, next, routing, nodes, secret, port) = snapshot;
     let Some(next) = next else {
+        restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     };
     let old_endpoints = previous
@@ -2705,6 +2745,7 @@ pub async fn switch_selected_node(
     let new_endpoints = proxy_endpoints_for(&next, &nodes, routing.as_ref());
     let union = unique_proxy_endpoints([&old_endpoints[..], &new_endpoints[..]].concat());
     if union.is_empty() {
+        restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     }
 
@@ -2742,6 +2783,7 @@ pub async fn switch_selected_node(
     if let Err(error) = select_exit_group(&secret, port, &next_name).await {
         logging!(warn, Type::Service, "Tono: selector switch failed: {error}");
         let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints).await;
+        restore_selected_node(&state, &app, generation, &previous_name).await;
         return;
     }
     if state.lock().await.connect_generation != generation {
@@ -2761,6 +2803,7 @@ pub async fn switch_selected_node(
         }
         let rollback_ok = verify_tun_data_plane().await.is_ok();
         let _ = service::tono_replace_proxy_endpoints(&session, old_endpoints.clone()).await;
+        restore_selected_node(&state, &app, generation, &previous_name).await;
         if !rollback_ok {
             let mut inner = state.lock().await;
             if inner.connect_generation != generation {
