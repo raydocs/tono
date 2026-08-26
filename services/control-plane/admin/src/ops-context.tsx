@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { operationsApi, type DashboardDto, type MetricsDto } from './api';
 import { useRefresh, useResource, type Live } from './hooks';
-import { parseOpsHash } from './lib/hash';
+import { parseOpsHash, parseTrafficRange } from './lib/hash';
 import { accidentsOnly, choresOnly, incidentsFromWorld, type OpsIncident } from './lib/incidents';
 import { assembleOpsNodes, assembleOpsPeople, type OpsNodeView, type OpsPersonView } from './lib/ops-views';
 
@@ -34,8 +34,13 @@ function cadence(pulse: number, floor: number) {
 export function OpsDataProvider({ children }: { children: ReactNode }) {
   const { refreshMs } = useRefresh();
   const [page, setPage] = useState(() => parseOpsHash(window.location.hash).page);
+  const [metricsRange, setMetricsRange] = useState(() => parseTrafficRange(parseOpsHash(window.location.hash).range));
   useEffect(() => {
-    const sync = () => setPage(parseOpsHash(window.location.hash).page);
+    const sync = () => {
+      const hash = parseOpsHash(window.location.hash);
+      setPage(hash.page);
+      setMetricsRange(parseTrafficRange(hash.range));
+    };
     window.addEventListener('hashchange', sync);
     return () => window.removeEventListener('hashchange', sync);
   }, []);
@@ -43,6 +48,7 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
   const minute = cadence(refreshMs, 60_000);
   const slow = cadence(refreshMs, 120_000);
   const wantMetrics = page === 'traffic' || page === 'monitor';
+  const range = page === 'traffic' ? metricsRange : '24h';
 
   const dashboard = useResource(operationsApi.dashboard, [], minute);
   const live = useResource(operationsApi.live, [], fast);
@@ -52,7 +58,7 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
   const fleet = useResource(operationsApi.fleetNodes, [], fast);
   const users = useResource(operationsApi.users, [], minute);
   const audit = useResource(operationsApi.audit, [], slow);
-  const metrics = useResource(() => operationsApi.metrics('24h'), [], wantMetrics ? minute : 0, wantMetrics);
+  const metrics = useResource(() => operationsApi.metrics(range), [range], wantMetrics ? minute : 0, wantMetrics);
 
   const world = useMemo(() => {
     const clock = Math.floor(Date.now() / 1000);

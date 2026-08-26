@@ -1,6 +1,10 @@
 import type { MetricsDto } from './api';
 import { sparkPath } from './lib/spark';
 
+import { useState } from 'react';
+import { formatBytes, timestamp } from './lib/format';
+import type { RatePoint } from './lib/traffic';
+
 export function Sparkline({ values, label }: { values: Array<number | null>; label: string }) {
   const d = sparkPath(values, 160, 36);
   if (!d) return <span className="muted">还没有{label}记录</span>;
@@ -8,6 +12,61 @@ export function Sparkline({ values, label }: { values: Array<number | null>; lab
     <svg className="sparkline" viewBox="0 0 160 36" width="160" height="36" aria-label={label} role="img">
       <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" />
     </svg>
+  );
+}
+
+export function RateChart({
+  points,
+  summary,
+  coverage,
+}: {
+  points: Array<RatePoint & { contributing?: number; expected?: number }>;
+  summary: string;
+  coverage?: string;
+}) {
+  const width = 640;
+  const height = 160;
+  const pad = 8;
+  const inPath = sparkPath(points.map((point) => point.inBps), width, height);
+  const outPath = sparkPath(points.map((point) => point.outBps), width, height);
+  const [hover, setHover] = useState<number | null>(null);
+  const hovered = hover != null ? points[hover] : null;
+  return (
+    <figure className="rate-chart">
+      <svg
+        viewBox={`0 0 ${width} ${height + pad * 2}`}
+        className="rate-svg"
+        role="img"
+        aria-label={summary}
+        onMouseLeave={() => setHover(null)}
+        onMouseMove={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX - box.left;
+          const index = Math.round((x / box.width) * Math.max(0, points.length - 1));
+          setHover(Math.max(0, Math.min(points.length - 1, index)));
+        }}
+      >
+        {inPath && <path d={inPath} transform={`translate(0 ${pad})`} fill="none" stroke="var(--rate-down)" strokeWidth="1.8" />}
+        {outPath && <path d={outPath} transform={`translate(0 ${pad})`} fill="none" stroke="var(--rate-up)" strokeWidth="1.8" />}
+        {!inPath && !outPath && (
+          <text x={width / 2} y={height / 2} textAnchor="middle" fill="currentColor" fontSize="12">还没有可连起来的采样</text>
+        )}
+      </svg>
+      <figcaption>
+        <span className="rate-key"><i className="rate-swatch down" /> 下行</span>
+        <span className="rate-key"><i className="rate-swatch up" /> 上行</span>
+        {coverage && <span className="muted">{coverage}</span>}
+        <p>{summary}</p>
+        {hovered && (
+          <p className="muted">
+            {timestamp(hovered.t)}
+            {hovered.inBps != null ? ` · 下行 ${formatBytes(hovered.inBps)}/s` : ' · 下行缺口'}
+            {hovered.outBps != null ? ` · 上行 ${formatBytes(hovered.outBps)}/s` : ' · 上行缺口'}
+            {hovered.contributing != null && hovered.expected != null ? ` · 覆盖 ${hovered.contributing}/${hovered.expected}` : ''}
+          </p>
+        )}
+      </figcaption>
+    </figure>
   );
 }
 
