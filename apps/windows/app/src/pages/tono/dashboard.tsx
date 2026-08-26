@@ -450,10 +450,29 @@ const DashboardPage = () => {
   }, [connected, trafficLive, status?.controllerGeneration])
   useEffect(() => {
     if (!trafficWaited || trafficLive) return
-    refreshGetClashTraffic()
-    const timer = window.setInterval(() => refreshGetClashTraffic(), 4_000)
-    return () => window.clearInterval(timer)
-  }, [trafficWaited, trafficLive, refreshGetClashTraffic])
+    // Back off rather than polling at 4s forever, and rebuild on a controller
+    // restart: without the generation here, a poll could keep running against
+    // the generation that just went away.
+    let cancelled = false
+    let attempt = 0
+    let timer = 0
+    const tick = () => {
+      if (cancelled) return
+      refreshGetClashTraffic()
+      attempt += 1
+      timer = window.setTimeout(tick, Math.min(4_000 * 2 ** (attempt - 1), 30_000))
+    }
+    tick()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [
+    trafficWaited,
+    trafficLive,
+    status?.controllerGeneration,
+    refreshGetClashTraffic,
+  ])
 
   const handleConnect = useLockFn(async () => {
     setActionError(null)

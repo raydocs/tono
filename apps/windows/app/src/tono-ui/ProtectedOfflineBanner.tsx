@@ -1,4 +1,5 @@
 import { useLockFn } from 'ahooks'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -23,20 +24,26 @@ export const ProtectedOfflineBanner = () => {
   const text = tonoText(dark)
   const navigate = useNavigate()
   const { status, mutateTonoStatus } = useTonoStatus()
+  // Both actions used to fail into console.warn only, so pressing 重试 or
+  // 恢复正常网络 while the Service was unavailable looked like a dead button.
+  // TrayPanel already surfaces the same formatted error; this matches it.
+  const [actionError, setActionError] = useState<string | null>(null)
   const retry = useLockFn(async () => {
+    setActionError(null)
     try {
       await tonoRetryNow()
       await mutateTonoStatus()
     } catch (error) {
-      console.warn('[ProtectedOfflineBanner]', formatTonoActionError(error, t))
+      setActionError(formatTonoActionError(error, t))
     }
   })
   const restore = useLockFn(async () => {
+    setActionError(null)
     try {
       await tonoDisconnect()
       await mutateTonoStatus()
     } catch (error) {
-      console.warn('[ProtectedOfflineBanner]', formatTonoActionError(error, t))
+      setActionError(formatTonoActionError(error, t))
     }
   })
 
@@ -92,6 +99,19 @@ export const ProtectedOfflineBanner = () => {
         >
           {t('tono.dashboard.protectedOfflineDescription')}
         </span>
+        {actionError && (
+          <span
+            style={{
+              display: 'block',
+              marginTop: 4,
+              fontSize: 12,
+              fontWeight: 500,
+              color: TONO_COLORS.error,
+            }}
+          >
+            {actionError}
+          </span>
+        )}
       </span>
       <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         <button

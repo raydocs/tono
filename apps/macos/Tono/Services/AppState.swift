@@ -2676,6 +2676,11 @@ final class AppState {
                     }
                     self.isProxyDegraded = advisory != nil
                     self.isRecoveringProtectedConnection = false
+                    // The connection healed on its own. Leaving the retry-loop
+                    // message in place kept "last error" showing a failure that
+                    // had already resolved, which sends support down the wrong
+                    // path.
+                    if advisory == nil { self.errorMessage = nil }
                     continue
                 case .retry(let failure):
                     self.lastClassifiedFailure = failure
