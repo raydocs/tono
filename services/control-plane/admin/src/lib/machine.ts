@@ -1,4 +1,5 @@
 import type { LiveAgentDto, NodeProfileDto } from '../api';
+import { accountedBytes, parseTrafficLimitType } from './traffic';
 
 export function machineSignals(agent: LiveAgentDto, nowMs: number) {
   const signals: { label: string; severity: number }[] = [];
@@ -87,13 +88,17 @@ export function trafficRemaining(
   const quota = profile?.trafficQuotaBytes ?? unset(agent?.trafficLimit) ?? null;
   if (quota == null) return null;
   if (profile?.trafficUsedBytes != null) return quota - profile.trafficUsedBytes;
-  if (
-    agent
-    && profile?.cycleNetIn != null
-    && profile?.cycleNetOut != null
-  ) {
-    const used = Math.max(0, (agent.netIn ?? 0) + (agent.netOut ?? 0) - profile.cycleNetIn - profile.cycleNetOut);
-    return quota - used;
+  if (!agent) return null;
+  const { accounting } = parseTrafficLimitType(agent.trafficLimitType);
+  const now = accountedBytes(agent.netIn, agent.netOut, accounting);
+  if (now == null) return null;
+  if (profile?.cycleNetIn != null || profile?.cycleNetOut != null) {
+    const baseline = accountedBytes(
+      profile?.cycleNetIn ?? 0,
+      profile?.cycleNetOut ?? 0,
+      accounting,
+    ) ?? 0;
+    return quota - Math.max(0, now - baseline);
   }
   return null;
 }

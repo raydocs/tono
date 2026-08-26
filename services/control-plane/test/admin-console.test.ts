@@ -353,3 +353,286 @@ describe('client path status on the customer list', () => {
     expect(nodeHealthTone('ok')).toBe('ok');
   });
 });
+
+import { formatOpsHash, parseOpsHash } from '../admin/src/lib/hash';
+import {
+  accidentsOnly,
+  customerPathVerdict,
+  HEARTBEAT_FRESH_SECONDS,
+  incidentsFromWorld,
+  PATH_SEVERE_MS,
+  PATH_WARN_MS,
+} from '../admin/src/lib/incidents';
+import { assembleOpsNodes, assembleOpsPeople } from '../admin/src/lib/ops-views';
+import { maskEmail, maskIp } from '../admin/src/lib/privacy';
+import { counterDeltaBps, parseTrafficLimitType, seriesRates } from '../admin/src/lib/traffic';
+import type { ActivityUserDto, LiveQualityNodeDto, UserDto } from '../admin/src/api';
+
+const qualityNode = (name: string, over: Partial<LiveQualityNodeDto> = {}): LiveQualityNodeDto => ({
+  name,
+  host: null,
+  publicIp: null,
+  ok: true,
+  quality: 'ok',
+  riskKeywords: [],
+  riskSignals: [],
+  exposure: null,
+  routeKeywords: [],
+  block: { status: 'OK', label: '大陆正常', rule: null, mainland: null, asiaEdge: null, overseas: null },
+  securityCheck: null,
+  backtrace: null,
+  ...over,
+});
+
+const activity = (over: Partial<ActivityUserDto> = {}): ActivityUserDto => ({
+  userId: 'u1',
+  deviceId: 'd1',
+  email: 'a@example.com',
+  lastSeenAt: 1_700_000_000,
+  online: true,
+  clientVersion: '1',
+  osVersion: 'mac',
+  selectedServer: 'Tokyo · Fuji',
+  uiState: 'connected',
+  catalogRevision: 40,
+  exitDelayMs: 80,
+  tcpDelayMs: 40,
+  exitDelayAtMs: 1_700_000_000,
+  tcpDelayAtMs: 1_700_000_000,
+  nodeHealth: 'ok',
+  nodeHealthLabel: '大陆正常',
+  ...over,
+});
+
+describe('ops hash routing', () => {
+  it('round-trips page, focus, and node with spaces', () => {
+    const hash = formatOpsHash({
+      page: 'monitor',
+      focus: 'blocked',
+      node: 'Tokyo · Fuji',
+      user: null,
+      q: null,
+    });
+    expect(hash).toContain('#/monitor?');
+    expect(parseOpsHash(hash)).toEqual({
+      page: 'monitor',
+      focus: 'blocked',
+      node: 'Tokyo · Fuji',
+      user: null,
+      q: null,
+    });
+  });
+
+  it('maps old aliases and missing page to known pages', () => {
+    expect(parseOpsHash('#/homes').page).toBe('users');
+    expect(parseOpsHash('#/catalog').page).toBe('control');
+    expect(parseOpsHash('#/nope').page).toBe('dashboard');
+  });
+});
+
+describe('cumulative traffic is not a live rate', () => {
+  it('parses Komari limit types and assumes sum only when the string is unknown', () => {
+    expect(parseTrafficLimitType('sum')).toEqual({ accounting: 'sum', assumed: false });
+    expect(parseTrafficLimitType('max')).toEqual({ accounting: 'max', assumed: false });
+    expect(parseTrafficLimitType('min')).toEqual({ accounting: 'min', assumed: false });
+    expect(parseTrafficLimitType('up')).toEqual({ accounting: 'up', assumed: false });
+    expect(parseTrafficLimitType('down')).toEqual({ accounting: 'down', assumed: false });
+    expect(parseTrafficLimitType('weird')).toEqual({ accounting: 'sum', assumed: true });
+  });
+
+  it('turns adjacent counters into bytes/sec and drops resets and gaps', () => {
+    expect(counterDeltaBps({ t: 0, value: 1000 }, { t: 10, value: 3000 }, 30)).toBe(200);
+    expect(counterDeltaBps({ t: 0, value: 3000 }, { t: 10, value: 1000 }, 30)).toBeNull();
+    expect(counterDeltaBps({ t: 0, value: 1000 }, { t: 80, value: 9000 }, 30)).toBeNull();
+  });
+
+  it('breaks the rate series where a counter restarts', () => {
+    const rates = seriesRates([
+      { t: 0, netIn: 100, netOut: 50 },
+      { t: 60, netIn: 160, netOut: 80 },
+      { t: 120, netIn: 10, netOut: 90 },
+    ], 60);
+    expect(rates[0].inBps).toBe(1);
+    expect(rates[1].inBps).toBeNull();
+    expect(rates[1].outBps).toBeCloseTo(10 / 60);
+  });
+
+  it('accounts remaining against up-only quota instead of silently summing', () => {
+    const profile = {
+      trafficQuotaBytes: 1000,
+      cycleNetIn: 100,
+      cycleNetOut: 200,
+    } as NodeProfileDto;
+    expect(trafficRemaining(profile, agent({ netIn: 500, netOut: 400, trafficLimitType: 'up' }))).toBe(800);
+    expect(trafficRemaining(profile, agent({ netIn: 500, netOut: 400, trafficLimitType: 'sum' }))).toBe(400);
+  });
+});
+
+describe('customer path incidents', () => {
+  const now = 2_000_000;
+
+  it('does not treat a stale heartbeat as an incident', () => {
+    expect(customerPathVerdict({
+      lastSeenAt: now - HEARTBEAT_FRESH_SECONDS - 1,
+      online: true,
+      nodeHealth: 'down',
+      exitDelayMs: 900,
+      tcpDelayMs: 900,
+      nowSec: now,
+    }).kind).toBe('stale');
+  });
+
+  it('does not treat missing delay as a failure', () => {
+    expect(customerPathVerdict({
+      lastSeenAt: now,
+      online: true,
+      nodeHealth: 'ok',
+      exitDelayMs: null,
+      tcpDelayMs: null,
+      nowSec: now,
+    }).kind).toBe('unmeasured');
+  });
+
+  it('splits 400ms warn from 800ms severe', () => {
+    const warn = customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: PATH_WARN_MS, tcpDelayMs: 10, nowSec: now,
+    });
+    const severe = customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: PATH_SEVERE_MS, tcpDelayMs: 10, nowSec: now,
+    });
+    expect(warn).toMatchObject({ kind: 'incident', severity: 'warn' });
+    expect(severe).toMatchObject({ kind: 'incident', severity: 'severe' });
+  });
+
+  it('picks the worst online device even when the slow one is listed second', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      activity: [
+        activity({ deviceId: 'fast', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10 }),
+        activity({ deviceId: 'slow', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10 }),
+      ],
+    });
+    expect(people[0].path).toMatchObject({ kind: 'incident', severity: 'severe' });
+  });
+
+  it('dedupes two devices of the same customer into one person incident', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      activity: [
+        activity({ deviceId: 'a', lastSeenAt: now, exitDelayMs: 900, tcpDelayMs: 10 }),
+        activity({ deviceId: 'b', lastSeenAt: now, exitDelayMs: 50, tcpDelayMs: 10 }),
+      ],
+    });
+    expect(people).toHaveLength(1);
+    expect(people[0].deviceCount).toBe(2);
+    const incidents = incidentsFromWorld({ nodes: [], people, catalogRevision: 40, nowSec: now });
+    expect(incidents.filter((item) => item.id.startsWith('path:'))).toHaveLength(1);
+  });
+});
+
+describe('ops node union and incident ranking', () => {
+  it('keeps catalog-only and agent-only machines in the grid', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1_700_000_000_000,
+      catalogYaml: 'proxies:\n  - name: "Catalog Only"\n    type: vless\n',
+      qualityNodes: [qualityNode('Quality Only')],
+      agents: [agent({ name: 'Agent Only' })],
+      activity: [activity({ selectedServer: 'Occupied Only', lastSeenAt: 1_700_000_000, online: true })],
+    });
+    expect(nodes.map((node) => node.name).sort()).toEqual([
+      'Agent Only', 'Catalog Only', 'Occupied Only', 'Quality Only',
+    ]);
+    expect(nodes.find((node) => node.name === 'Catalog Only')?.catalogListed).toBe(true);
+    expect(nodes.find((node) => node.name === 'Agent Only')?.agent).toBeTruthy();
+    expect(nodes.find((node) => node.name === 'Occupied Only')?.occupancy).toBe(1);
+  });
+
+  it('counts unique users on a node, not devices', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 0,
+      activity: [
+        activity({ userId: 'u1', deviceId: 'd1', email: 'a@x' }),
+        activity({ userId: 'u1', deviceId: 'd2', email: 'a@x' }),
+        activity({ userId: 'u2', deviceId: 'd3', email: 'b@x' }),
+      ],
+    });
+    expect(nodes.find((node) => node.name === 'Tokyo · Fuji')?.occupancy).toBe(2);
+  });
+
+  it('ranks a blocked listed node above unopened Claude', () => {
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Sakura"\n    type: vless\n',
+      qualityNodes: [qualityNode('Sakura', {
+        ok: false,
+        block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+      })],
+    });
+    const people = assembleOpsPeople({
+      nowSec,
+      users: [{
+        id: 'u-claude',
+        email: 'c@example.com',
+        deviceLimit: 2,
+        quotaBytes: null,
+        usageBytes: 0,
+        suspended: false,
+        status: 'active',
+        createdAt: nowSec,
+        product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true },
+        homeBinding: null,
+      } as UserDto],
+    });
+    const incidents = incidentsFromWorld({ nodes, people, catalogRevision: 40, nowSec });
+    expect(incidents[0].severity).toBe('severe');
+    expect(incidents[0].node).toBe('Sakura');
+    expect(accidentsOnly(incidents).some((item) => item.detail.includes('Claude'))).toBe(false);
+    expect(incidents.some((item) => item.severity === 'info' && item.detail.includes('Claude'))).toBe(true);
+  });
+
+  it('does not emit per-customer path accidents when the node is already severe', () => {
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Sakura"\n    type: vless\n',
+      qualityNodes: [qualityNode('Sakura', {
+        ok: false,
+        block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+      })],
+      activity: [
+        activity({ userId: 'a', email: 'a@x', selectedServer: 'Sakura', nodeHealth: 'blocked', lastSeenAt: nowSec, exitDelayMs: 80 }),
+        activity({ userId: 'b', email: 'b@x', selectedServer: 'Sakura', nodeHealth: 'blocked', lastSeenAt: nowSec, exitDelayMs: 90 }),
+      ],
+    });
+    const people = assembleOpsPeople({
+      nowSec,
+      activity: [
+        activity({ userId: 'a', email: 'a@x', selectedServer: 'Sakura', nodeHealth: 'blocked', lastSeenAt: nowSec, exitDelayMs: 80 }),
+        activity({ userId: 'b', email: 'b@x', selectedServer: 'Sakura', nodeHealth: 'blocked', lastSeenAt: nowSec, exitDelayMs: 90 }),
+      ],
+    });
+    const incidents = incidentsFromWorld({ nodes, people, catalogRevision: 40, nowSec });
+    expect(incidents.filter((item) => item.id.startsWith('path:'))).toHaveLength(0);
+    expect(incidents.some((item) => item.node === 'Sakura' && item.severity === 'severe')).toBe(true);
+  });
+
+  it('does not paint an unprobed-fresh node green when the agent is stale', () => {
+    const nowMs = 1_700_000_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs,
+      qualityNodes: [qualityNode('Quiet')],
+      agents: [agent({ name: 'Quiet', observedAt: Math.floor(nowMs / 1000) - 700 })],
+    });
+    expect(nodes[0].dot).toBe('warn');
+  });
+});
+
+describe('screenshot privacy masks', () => {
+  it('hides local-part and IPv4 host', () => {
+    expect(maskEmail('tester@example.com')).toBe('te***@example.com');
+    expect(maskIp('203.0.113.9')).toBe('203.0.***.***');
+  });
+});

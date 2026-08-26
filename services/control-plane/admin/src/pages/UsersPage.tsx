@@ -14,6 +14,8 @@ import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from
 import { catalogLag } from '../lib/revision';
 import { useRefresh, useResource } from '../hooks';
 import { Banner, DataHealth, StateBoundary, Status } from '../ui';
+import { useOpsWorld } from '../ops-context';
+import { usePrivacy } from '../privacy';
 
 type OnboardResult = {
   email: string;
@@ -201,12 +203,14 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
 
 export function UsersPage() {
   const { refreshMs } = useRefresh();
-  const users = useResource(operationsApi.users, [], refreshMs);
-  const activity = useResource<ActivityDto>(operationsApi.activity, [], refreshMs);
-  const allowlist = useResource(operationsApi.signupAllowlist, [], refreshMs);
-  const homes = useResource(operationsApi.homeExits, [], refreshMs);
-  const catalog = useResource(operationsApi.exitCatalog, [], refreshMs);
-  const pooled = useResource(() => operationsApi.productAccounts('pooled'), [], refreshMs);
+  const world = useOpsWorld();
+  const privacy = usePrivacy();
+  const users = world.users;
+  const activity = world.activity;
+  const catalog = world.catalog;
+  const allowlist = useResource(operationsApi.signupAllowlist, [], 120_000);
+  const homes = useResource(operationsApi.homeExits, [], 120_000);
+  const pooled = useResource(() => operationsApi.productAccounts('pooled'), [], 120_000);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -561,7 +565,7 @@ export function UsersPage() {
                 >
                 <td>
                   <span className="expand-caret" aria-hidden>{opened ? '▾' : '▸'}</span>
-                  <strong>{user.email}</strong>
+                  <strong>{privacy.email(user.email)}</strong>
                   {user.product?.incomplete && <span className="expired-flag">没开 Claude</span>}
                 </td>
                 <td>
@@ -1069,6 +1073,7 @@ function UserDetailPanel({ user, heartbeat, publishedRevision }: {
 
 function HomesPage() {
   const { refreshMs } = useRefresh();
+  const privacy = usePrivacy();
   const homes = useResource(operationsApi.homeExits, [], refreshMs);
   const [proxyName, setProxyName] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -1291,7 +1296,7 @@ function HomesPage() {
                 <td><strong>{home.displayName}</strong>{home.notes ? <small>{home.notes}</small> : null}</td>
                 <td className="mono">{home.proxyName}</td>
                 <td className="mono">{home.kind}</td>
-                <td className="mono">{home.kind === 'socks5' ? `${home.socks5Host}:${home.socks5Port}` : (home.egressIpv4 || '—')}</td>
+                <td className="mono">{home.kind === 'socks5' ? `${privacy.ip(home.socks5Host)}:${home.socks5Port}` : privacy.ip(home.egressIpv4)}</td>
                 <td><Status value={home.status} /></td>
                 <td className="muted">
                   {home.probeStatus ? `${home.probeStatus}${home.lastProbedAt ? ` · ${timeAgo(home.lastProbedAt)}` : ''}` : '—'}

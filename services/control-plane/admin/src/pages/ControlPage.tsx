@@ -2,13 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { operationsApi } from '../api';
 import { timestamp } from '../lib/format';
 import { publishGate } from '../lib/revision';
-import { useRefresh, useResource } from '../hooks';
+import { useResource } from '../hooks';
 import { Banner, DataHealth, StateBoundary } from '../ui';
+import { useOpsWorld } from '../ops-context';
 
 export function ControlPage() {
-  const { refreshMs } = useRefresh();
-  const catalog = useResource(operationsApi.exitCatalog, [], refreshMs);
-  const policy = useResource(operationsApi.trafficPolicy, [], refreshMs);
+  const world = useOpsWorld();
+  const catalog = world.catalog;
+  const policy = useResource(operationsApi.trafficPolicy, [], 120_000);
   const [yaml, setYaml] = useState('');
   // The revision this draft was written against, frozen when the draft appears.
   //

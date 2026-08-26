@@ -436,31 +436,47 @@ interface ErrorEnvelope {
   error?: { code?: string; message?: string };
 }
 
+async function devFallback<T>(path: string, method: string): Promise<T | undefined> {
+  const dev = Boolean((import.meta as { env?: { DEV?: boolean } }).env?.DEV);
+  if (!dev) return undefined;
+  const { matchDevOps } = await import('./dev/ops-fixture');
+  return matchDevOps(path, method) as T | undefined;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api/v1/ops/${path}`, {
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      accept: 'application/json',
-      ...(init.body ? { 'content-type': 'application/json' } : {}),
-      ...(init.headers || {}),
-    },
-  });
-  if (response.status === 204) return undefined as T;
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    try {
-      const envelope = await response.json() as ErrorEnvelope;
-      message = envelope.error?.message || message;
-    } catch {
-      // Keep status-only message for non-JSON Access or network responses.
+  const method = init.method ?? 'GET';
+  try {
+    const response = await fetch(`/api/v1/ops/${path}`, {
+      credentials: 'same-origin',
+      ...init,
+      headers: {
+        accept: 'application/json',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+        ...(init.headers || {}),
+      },
+    });
+    if (response.status === 204) return undefined as T;
+    if (!response.ok) {
+      const fake = await devFallback<T>(path, method);
+      if (fake !== undefined) return fake;
+      let message = `Request failed (${response.status})`;
+      try {
+        const envelope = await response.json() as ErrorEnvelope;
+        message = envelope.error?.message || message;
+      } catch {
+        // Keep status-only message for non-JSON Access or network responses.
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    if (response.headers.get('content-length') === '0') {
+      return undefined as T;
+    }
+    return response.json() as Promise<T>;
+  } catch (error) {
+    const fake = await devFallback<T>(path, method);
+    if (fake !== undefined) return fake;
+    throw error;
   }
-  if (response.status === 204 || response.headers.get('content-length') === '0') {
-    return undefined as T;
-  }
-  return response.json() as Promise<T>;
 }
 
 const get = <T>(path: string) => request<T>(path, { method: 'GET' });

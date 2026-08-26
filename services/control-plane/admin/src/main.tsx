@@ -1,6 +1,6 @@
-import { StrictMode, useEffect, useMemo, useState } from 'react';
+import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { REFRESH_CHOICES, RefreshProvider, pages, usePage, useRefresh } from './hooks';
+import { REFRESH_CHOICES, RefreshProvider, pages, useRefresh } from './hooks';
 import { ControlPage } from './pages/ControlPage';
 import { Dashboard } from './pages/Dashboard';
 import { MonitorPage } from './pages/MonitorPage';
@@ -8,16 +8,30 @@ import { UsersPage } from './pages/UsersPage';
 import { FailuresPage } from './pages/FailuresPage';
 import { TrafficPage } from './pages/TrafficPage';
 import { Icon, icons } from './ui';
+import { OpsBackground } from './Background';
+import { OpsDataProvider, useOpsWorld } from './ops-context';
+import { PrivacyProvider, usePrivacy } from './privacy';
+import { useOpsRoute } from './lib/route';
+import { dataHealthLines } from './lib/health';
 import './styles.css';
 
+const PRIMARY: Array<'dashboard' | 'failures' | 'monitor' | 'users'> = [
+  'dashboard', 'failures', 'monitor', 'users',
+];
+
 function App() {
-  const page = usePage();
-  const selected = pages.find((entry) => entry.id === page)!;
+  const { route, page, setRoute, openNode, openUser } = useOpsRoute();
+  const selected = pages.find((entry) => entry.id === page) ?? pages[0];
   const { refreshMs, setRefreshMs } = useRefresh();
+  const privacy = usePrivacy();
+  const world = useOpsWorld();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [search, setSearch] = useState(route.q ?? '');
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
     const saved = localStorage.getItem('tono-ops-theme');
     return saved === 'light' || saved === 'dark' ? saved : 'system';
   });
+  const [showMore, setShowMore] = useState(false);
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
@@ -30,6 +44,19 @@ function App() {
     media.addEventListener('change', apply);
     return () => media.removeEventListener('change', apply);
   }, [theme]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if ((event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) && !typing) {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const groups = useMemo(() => {
     const map = new Map<string, typeof pages>();
     for (const entry of pages) {
@@ -40,8 +67,30 @@ function App() {
     return [...map.entries()];
   }, []);
 
+  const health = dataHealthLines([
+    { label: '节点', state: world.live.state, stale: world.live.stale, refreshedAt: world.live.refreshedAt },
+    { label: '客户', state: world.users.state, stale: world.users.stale, refreshedAt: world.users.refreshedAt },
+    { label: '谁在线', state: world.activity.state, stale: world.activity.stale, refreshedAt: world.activity.refreshedAt },
+  ], Date.now());
+
+  function submitSearch() {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return;
+    const node = world.nodes.find((item) => item.name.toLowerCase().includes(needle)
+      || (item.quality?.publicIp ?? '').includes(needle));
+    if (node) {
+      openNode(node.name);
+      return;
+    }
+    const person = world.people.find((item) => item.email.toLowerCase().includes(needle)
+      || item.userId.toLowerCase().includes(needle));
+    if (person) openUser(person.userId);
+  }
+
   return (
-    <div className="shell">
+    <>
+    <OpsBackground />
+    <div className={`shell${showMore ? ' show-more' : ''}`}>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>
@@ -58,7 +107,7 @@ function App() {
               {items.map((entry) => (
                 <a
                   key={entry.id}
-                  className={`nav-item${page === entry.id ? ' active' : ''}`}
+                  className={`nav-item${page === entry.id ? ' active' : ''}${PRIMARY.includes(entry.id as typeof PRIMARY[number]) ? '' : ' nav-overflow'}`}
                   href={`#/${entry.id}`}
                 >
                   <Icon d={icons[entry.id]} />
@@ -67,6 +116,10 @@ function App() {
               ))}
             </div>
           ))}
+          <button type="button" className="nav-item nav-more" onClick={() => setShowMore((value) => !value)}>
+            <span>⋯</span>
+            <span>更多</span>
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -84,6 +137,26 @@ function App() {
             </div>
           </div>
           <div className="topbar-right">
+            <input
+              ref={searchRef}
+              className="input compact search-input"
+              type="search"
+              placeholder="搜索节点或客户  /"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') submitSearch();
+              }}
+            />
+            {health.length > 0 && (
+              <span className={`health-compact${health.some((line) => line.includes('没加载')) ? ' bad' : ''}`} title={health.join(' ')}>
+                {health[0]}
+              </span>
+            )}
+            <label className="muted">
+              <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+              隐私
+            </label>
             <label className="muted">
               主题
               <select className="control-select" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
@@ -113,12 +186,12 @@ function App() {
             <div>
               <h1>{selected.label}</h1>
               <p>
-                {page === 'dashboard' && '看告警、库存和谁在线'}
-                {page === 'failures' && '集中处理客户和节点故障'}
-                {page === 'monitor' && '看节点状态、余量和续费'}
-                {page === 'users' && '开通客户、绑家宽、管 Claude'}
-                {page === 'traffic' && '核对客户本期用量'}
-                {page === 'control' && '更新节点目录和国内直连规则'}
+                {page === 'dashboard' && '事故、在线客户、该处理的节点'}
+                {page === 'failures' && '机房事故和客户路径'}
+                {page === 'monitor' && '机器全集、三网、下架'}
+                {page === 'users' && '开通、家宽、路径'}
+                {page === 'traffic' && '机器累计与客户本期用量'}
+                {page === 'control' && '节点目录和国内直连规则'}
               </p>
             </div>
           </div>
@@ -132,13 +205,18 @@ function App() {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <RefreshProvider>
-      <App />
+      <OpsDataProvider>
+        <PrivacyProvider>
+          <App />
+        </PrivacyProvider>
+      </OpsDataProvider>
     </RefreshProvider>
   </StrictMode>,
 );

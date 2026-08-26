@@ -1,11 +1,13 @@
-import { operationsApi, type UserDto } from '../api';
-import { useRefresh, useResource } from '../hooks';
+import type { UserDto } from '../api';
 import { formatBytes } from '../lib/format';
 import { DataHealth, StateBoundary, Status } from '../ui';
+import { useOpsWorld } from '../ops-context';
+import { usePrivacy } from '../privacy';
 
 export function TrafficPage() {
-  const { refreshMs } = useRefresh();
-  const users = useResource(operationsApi.users, [], refreshMs);
+  const world = useOpsWorld();
+  const privacy = usePrivacy();
+  const users = world.users;
   return (
     <div className="stack">
       <DataHealth sources={[{ label: '客户用量', resource: users }]} />
@@ -13,7 +15,7 @@ export function TrafficPage() {
         <div className="card-header">
           <div>
             <h2>客户本期流量</h2>
-            <p>这里展示控制面现有的本期累计值，不推算实时速度或历史趋势。</p>
+            <p>本期累计用量。机器网卡数字是累计字节，不是当前速度。</p>
           </div>
         </div>
         <div className="table-wrap">
@@ -23,7 +25,7 @@ export function TrafficPage() {
               <tbody>{[...rows].sort((a, b) => b.usageBytes - a.usageBytes).map((user) => {
                 const ratio = user.quotaBytes ? user.usageBytes / user.quotaBytes : null;
                 return <tr key={user.id}>
-                  <td><a className="table-link" href={`#/users?user=${encodeURIComponent(user.id)}`}><strong>{user.email}</strong></a></td>
+                  <td><a className="table-link" href={`#/users?user=${encodeURIComponent(user.id)}`}><strong>{privacy.email(user.email)}</strong></a></td>
                   <td><Status value={user.status} /></td>
                   <td className="mono">{formatBytes(user.usageBytes)}</td>
                   <td className="mono">{user.quotaBytes == null ? '不限' : formatBytes(user.quotaBytes)}</td>
@@ -40,8 +42,8 @@ export function TrafficPage() {
       </section>
       <section className="card unavailable-card">
         <div className="card-body">
-          <h2>流量趋势尚不可用</h2>
-          <p className="muted">当前前端 API 没有按客户的时间序列与账期来源。此处不会用累计值伪造日速率；待后端提供聚合接口后再恢复趋势图。</p>
+          <h2>客户小时趋势尚不可用</h2>
+          <p className="muted">没有按客户的时间序列接口。机器累计可在服务器抽屉的 24 小时趋势里看。这里不会把累计计数器画成当前速度。</p>
         </div>
       </section>
     </div>

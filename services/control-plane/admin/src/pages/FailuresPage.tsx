@@ -1,7 +1,8 @@
-import { operationsApi, type FleetNodeDto } from '../api';
-import { useRefresh, useResource } from '../hooks';
+import type { FleetNodeDto } from '../api';
 import { timeAgo } from '../lib/format';
 import { DataHealth, StateBoundary } from '../ui';
+import { useOpsWorld } from '../ops-context';
+import { usePrivacy } from '../privacy';
 
 const reasonLabels: Record<string, string> = {
   catalog_health_down: '在售节点整机失联',
@@ -37,11 +38,15 @@ function FleetFailure({ node }: { node: FleetNodeDto }) {
 }
 
 export function FailuresPage() {
-  const { refreshMs } = useRefresh();
-  const fleet = useResource(operationsApi.fleetNodes, [], refreshMs);
+  const world = useOpsWorld();
+  const privacy = usePrivacy();
+  const fleet = world.fleet;
   return (
     <div className="stack">
-      <DataHealth sources={[{ label: '机队', resource: fleet }]} />
+      <DataHealth sources={[
+        { label: '机队', resource: fleet },
+        { label: '客户心跳', resource: world.activity },
+      ]} />
       <section className="card">
         <div className="card-header">
           <div>
@@ -61,11 +66,30 @@ export function FailuresPage() {
           }}</StateBoundary>
         </div>
       </section>
-      <section className="card unavailable-card">
-        <div className="card-body">
-          <h2>客户故障流尚未接入</h2>
-          <p className="muted">现有合同只能逐个客户读取诊断报告，不能可靠生成全局失败队列。请从客户详情查看诊断摘要；这里不会用推测数据冒充故障。</p>
-          <a className="btn btn-outline btn-sm" href="#/users">去客户页</a>
+      <section className="card">
+        <div className="card-header">
+          <div>
+            <h2>客户路径</h2>
+            <p>只看 40 分钟内的心跳。缺测不是故障。400ms 警告，800ms 严重。</p>
+          </div>
+        </div>
+        <div className="card-body incident-list">
+          {world.activity.state !== 'ready' && !world.activity.refreshedAt
+            ? <div className="state state-error"><strong>客户心跳没加载上来</strong><span>不能判断路径是不是事故，空着不是安全。</span></div>
+            : world.accidents.filter((item) => item.userId).length
+              ? world.accidents.filter((item) => item.userId).map((item) => (
+                <article className={`incident incident-${item.severity === 'severe' ? 'error' : 'warn'}`} key={item.id}>
+                  <div className="incident-main">
+                    <span className="attention-dot" aria-hidden />
+                    <div>
+                      <h2>{privacy.email(item.title)}</h2>
+                      <p>{item.detail}</p>
+                    </div>
+                  </div>
+                  <a className="btn btn-outline btn-sm" href={item.href}>打开客户</a>
+                </article>
+              ))
+              : <div className="attention-ok">✓ 没有新鲜的客户路径事故</div>}
         </div>
       </section>
     </div>

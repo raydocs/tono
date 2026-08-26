@@ -14,10 +14,15 @@ import { formatBytes, formatDuration, timestamp } from '../lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../lib/machine';
 import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
 import { useRefresh, useResource } from '../hooks';
-import { Banner, DataHealth, StateBoundary, Status } from '../ui';
+import { Banner, DataHealth, Drawer, StateBoundary, Status } from '../ui';
 import { AgentTrends } from '../charts';
 import { CarrierPing } from '../carriers';
 import { worstCarrier } from '../lib/carrier';
+import { NodeCard } from '../NodeCard';
+import { useOpsWorld } from '../ops-context';
+import { useOpsRoute } from '../lib/route';
+import type { OpsNodeView } from '../lib/ops-views';
+import { usePrivacy } from '../privacy';
 
 const RISK_SIGNAL_LABELS: Record<string, string> = {
   attacker: '攻击者', abuser: '滥用者', threat: '威胁',
@@ -162,7 +167,7 @@ function FleetQueue({ nodes, catalogSource, reload }: { nodes: FleetNodeDto[]; c
             </div>
             {preview.affectedUsers.length > 0 && (
               <ul className="detail-list affected-users">
-                {preview.affectedUsers.map((user) => <li key={`${user.userId}-${user.deviceId}`}><strong>{user.email}</strong><span className="muted">{user.online ? '在线' : '离线'}</span></li>)}
+                {preview.affectedUsers.map((user) => <li key={`${user.userId}-${user.deviceId}`}><strong>{privacy.email(user.email)}</strong><span className="muted">{user.online ? '在线' : '离线'}</span></li>)}
               </ul>
             )}
             {preview.warnings.map((warning) => <div className="banner banner-info" key={warning}>{warning}</div>)}
@@ -471,36 +476,31 @@ function MachinePressure({ agents }: { agents: LiveAgentDto[] }) {
 
 export function MonitorPage() {
   const { refreshMs } = useRefresh();
-  const resource = useResource(operationsApi.live, [], refreshMs);
-  const profilesRes = useResource(operationsApi.nodeProfiles, [], refreshMs);
-  const activityRes = useResource(operationsApi.activity, [], refreshMs);
-  const metrics = useResource(() => operationsApi.metrics('24h'), [], refreshMs);
-  const fleet = useResource(operationsApi.fleetNodes, [], refreshMs);
-  const initialNode = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('node') ?? '';
-  const [query, setQuery] = useState(initialNode);
-  const [filter, setFilter] = useState('all');
-  const [focus, setFocus] = useState<'all' | 'needs' | 'expiring' | 'noprobe'>('all');
+  const world = useOpsWorld();
+  const { route, setRoute, openNode, closeDrawer } = useOpsRoute();
+  const privacy = usePrivacy();
+  const resource = world.live;
+  const profilesRes = world.profiles;
+  const activityRes = world.activity;
+  const metrics = world.metrics;
+  const fleet = world.fleet;
+  const [query, setQuery] = useState(route.q ?? route.node ?? '');
+  const [filter, setFilter] = useState(route.focus && ['LIKELY_BLOCKED', 'OK', 'EDGE_OK', 'EDGE_FAIL', 'DOWN'].includes(route.focus) ? route.focus : 'all');
+  const [focus, setFocus] = useState<'all' | 'needs' | 'expiring' | 'noprobe' | 'blocked'>(
+    route.focus === 'blocked' || route.focus === 'needs' || route.focus === 'expiring' || route.focus === 'noprobe'
+      ? route.focus
+      : 'all',
+  );
   const [view, setView] = useState<'cards' | 'table'>('cards');
-  const [open, setOpen] = useState<string | null>(initialNode || null);
+  const open = route.node;
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [newQuota, setNewQuota] = useState('');
   const [newRenew, setNewRenew] = useState('');
   const [newError, setNewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    const syncNode = () => {
-      const next = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('node') ?? '';
-      if (!next) return;
-      setQuery(next);
-      setOpen(next);
-      requestAnimationFrame(() => document.getElementById(`node-${encodeURIComponent(next)}`)?.scrollIntoView({ block: 'center' }));
-    };
-    window.addEventListener('hashchange', syncNode);
-    syncNode();
-    return () => window.removeEventListener('hashchange', syncNode);
-  }, []);
   return <StateBoundary resource={resource}>{(live: LiveDto) => {
+    const union = world.nodes;
     const qualityNodes = [...(live.quality?.nodes ?? [])].sort((a, b) => {
       const rank = (node: LiveQualityNodeDto) => {
         const status = blockStatus(node);
@@ -540,13 +540,30 @@ export function MonitorPage() {
       if (focus === 'expiring') {
         if (!billing.renewsAt || billing.renewsAt - nowSec > 7 * 86_400) return false;
       }
-      if (focus === 'needs') {
+      if (focus === 'needs' || focus === 'blocked') {
         const troubled = status === 'LIKELY_BLOCKED' || status === 'DOWN' || status === 'EDGE_FAIL'
           || node.quality === 'poor' || !agent;
-        if (!troubled) return false;
+        if (focus === 'blocked' && status !== 'LIKELY_BLOCKED') return false;
+        if (focus === 'needs' && !troubled) return false;
       }
       if (!needle) return true;
       return `${node.name} ${node.host ?? ''} ${node.publicIp ?? ''}`.toLowerCase().includes(needle);
+    });
+    const visibleViews: OpsNodeView[] = union.filter((view) => {
+      const status = view.blockStatus;
+      if (filter !== 'all' && status !== filter) return false;
+      if (focus === 'noprobe' && view.agent) return false;
+      if (focus === 'expiring') {
+        if (!view.billing.renewsAt || view.billing.renewsAt - nowSec > 7 * 86_400) return false;
+      }
+      if (focus === 'needs' || focus === 'blocked') {
+        const troubled = status === 'LIKELY_BLOCKED' || status === 'DOWN' || status === 'EDGE_FAIL'
+          || view.quality?.quality === 'poor' || !view.agent;
+        if (focus === 'blocked' && status !== 'LIKELY_BLOCKED') return false;
+        if (focus === 'needs' && !troubled) return false;
+      }
+      if (!needle) return true;
+      return `${view.name} ${view.quality?.host ?? ''} ${view.quality?.publicIp ?? ''}`.toLowerCase().includes(needle);
     });
     const agentsConfigured = live.quality?.cnAgentsConfigured;
     const keyOf = (node: LiveQualityNodeDto) => node.name;
@@ -704,9 +721,14 @@ export function MonitorPage() {
           </div>
           <div className="form-row">
             <input className="input compact" type="search" placeholder="搜索名称 / IP" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <select className="input compact" value={focus} onChange={(event) => setFocus(event.target.value as typeof focus)}>
+            <select className="input compact" value={focus} onChange={(event) => {
+              const next = event.target.value as typeof focus;
+              setFocus(next);
+              setRoute((current) => ({ ...current, page: 'monitor', focus: next === 'all' ? null : next }));
+            }}>
               <option value="all">全部</option>
               <option value="needs">需要处理</option>
+              <option value="blocked">疑似被墙</option>
               <option value="expiring">即将到期</option>
               <option value="noprobe">未安装探针</option>
             </select>
@@ -723,59 +745,39 @@ export function MonitorPage() {
             <button type="button" className="btn btn-outline btn-sm" onClick={() => resource.reload()}>刷新</button>
           </div>
         </div>
-        {visible.length === 0 ? (
+        {visibleViews.length === 0 ? (
           <div className="state"><strong>没有符合条件的节点</strong></div>
         ) : view === 'cards' ? (
           <>
-          <div className="server-grid">
-            {visible.map((node) => {
-              const agent = agentByName.get(node.name);
-              const profile = profileByName.get(node.name);
-              const remain = trafficRemaining(profile, agent);
-              const billing = mergedBilling(profile, agent);
-              const opened = open === keyOf(node);
-              const worst = worstCarrier(agent?.carriers ?? null);
-              return (
-                <button
-                  type="button"
-                  key={keyOf(node)}
-                  className={`server-card${opened ? ' open' : ''}`}
-                  onClick={() => setOpen(opened ? null : keyOf(node))}
-                >
-                  <div className="server-card-top">
-                    <div>
-                      <strong>{node.name}</strong>
-                      <div className="muted">{node.publicIp || node.host || '—'}</div>
-                    </div>
-                    <span className={`status status-${blockStatus(node) === 'OK' || blockStatus(node) === 'EDGE_OK' ? 'active' : blockStatus(node) === 'LIKELY_BLOCKED' ? 'degraded' : 'planned'}`}>
-                      {blockLabel(node)}
-                    </span>
-                  </div>
-                  <div className="server-card-meta">
-                    <span>探针 {agent ? `CPU ${agent.cpu != null ? `${Math.round(agent.cpu)}%` : '—'}` : '没装'}</span>
-                    <span>在用 {activityRes.state === 'ready' ? (occupancy.get(node.name) ?? 0) : '—'}</span>
-                    <span>余量 {remain == null ? '—' : formatBytes(remain)}</span>
-                    <span>续费 {billing.renewsAt ? timestamp(billing.renewsAt) : '—'}</span>
-                    <span>{worst ? `${worst.label} ${worst.latencyText}` : '延迟未测'}</span>
-                    <span>内存 {agent?.memUsed != null && agent.memTotal ? `${Math.round((agent.memUsed / agent.memTotal) * 100)}%` : '—'}</span>
-                  </div>
-                </button>
-              );
-            })}
+          <div className="node-grid">
+            {visibleViews.map((viewNode) => (
+              <NodeCard
+                key={viewNode.name}
+                node={viewNode}
+                density="full"
+                selected={open === viewNode.name}
+                onOpen={() => (open === viewNode.name ? closeDrawer() : openNode(viewNode.name, { focus: focus === 'all' ? null : focus }))}
+              />
+            ))}
           </div>
-          {open && visible.some((node) => keyOf(node) === open) && (
-            <div className="card-body">
-              {visible.filter((node) => keyOf(node) === open).map((node) => (
-                <NodeExpand
-                  key={keyOf(node)}
-                  node={node}
-                  agent={agentByName.get(node.name)}
-                  profile={profileByName.get(node.name)}
-                  onProfile={profilesRes.reload}
-                />
-              ))}
-            </div>
-          )}
+          <Drawer
+            open={Boolean(open)}
+            title={open ?? ''}
+            subtitle={union.find((item) => item.name === open)?.blockLabel}
+            onClose={closeDrawer}
+          >
+            {open && visible.some((node) => keyOf(node) === open) ? visible.filter((node) => keyOf(node) === open).map((node) => (
+              <NodeExpand
+                key={keyOf(node)}
+                node={node}
+                agent={agentByName.get(node.name)}
+                profile={profileByName.get(node.name)}
+                onProfile={profilesRes.reload}
+              />
+            )) : open ? (
+              <p className="muted">这台在目录或探针里，还没有大陆探测记录。不是好，只是没测。</p>
+            ) : null}
+          </Drawer>
           </>
         ) : (
           <div className="table-wrap">
@@ -791,10 +793,10 @@ export function MonitorPage() {
                 const status = blockStatus(node);
                 const opened = open === keyOf(node);
                 return <Fragment key={keyOf(node)}>
-                  <tr className={opened ? 'open' : undefined} onClick={() => setOpen(opened ? null : keyOf(node))}>
+                  <tr className={opened ? 'open' : undefined} onClick={() => (opened ? closeDrawer() : openNode(keyOf(node)))}>
                     <td>
                       <strong>{node.name}</strong>
-                      <small className="mono">{node.publicIp || node.host || '—'}</small>
+                      <small className="mono">{privacy.ip(node.publicIp || node.host)}</small>
                     </td>
                     <td><span className={`status status-${status === 'OK' || status === 'EDGE_OK' ? 'active' : status === 'LIKELY_BLOCKED' ? 'degraded' : 'planned'}`}>{blockLabel(node)}</span></td>
                     <td>

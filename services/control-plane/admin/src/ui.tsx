@@ -1,4 +1,5 @@
-import type { ReactNode, SVGProps } from 'react';
+import { useEffect, useRef, type ReactNode, type SVGProps } from 'react';
+import { createPortal } from 'react-dom';
 import type { Live, Resource } from './hooks';
 import { dataHealthLines } from './lib/health';
 
@@ -46,15 +47,62 @@ export function StateBoundary<T>({ resource, empty, children }: {
   children: (data: T) => ReactNode;
 }) {
   if (resource.state === 'loading') {
-    return <div className="state"><span className="spinner" /><strong>加载中</strong><span>正在加载…</span></div>;
+    return <Skeleton label="正在加载" />;
   }
   if (resource.state === 'error') {
-    return <div className="state state-error"><strong>无法加载</strong><span>{resource.message}</span></div>;
+    return <Unavailable title="无法加载" detail={resource.message} />;
   }
   if (empty?.(resource.data)) {
-    return <div className="state"><strong>还没有内容</strong><span>这里暂时是空的。</span></div>;
+    return <Empty title="还没有内容" detail="这里暂时是空的。" />;
   }
   return children(resource.data);
+}
+
+export function Skeleton({ label = '正在加载' }: { label?: string }) {
+  return (
+    <div className="state skeleton-state" aria-busy="true">
+      <div className="skeleton-block" />
+      <div className="skeleton-block short" />
+      <span className="muted">{label}</span>
+    </div>
+  );
+}
+
+export function Empty({ title, detail }: { title: string; detail?: string }) {
+  return <div className="state"><strong>{title}</strong>{detail ? <span>{detail}</span> : null}</div>;
+}
+
+export function Unavailable({ title, detail }: { title: string; detail?: string }) {
+  return <div className="state state-error"><strong>{title}</strong>{detail ? <span>{detail}</span> : null}</div>;
+}
+
+export function GlassCard({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <section className={`card ${className}`.trim()}>{children}</section>;
+}
+
+export function FilterChips({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: Array<{ id: string; label: string }>;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="filter-chips">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={`chip${value === option.id ? ' chip-ok' : ''}`}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -80,4 +128,105 @@ export function DataHealth({ sources }: {
 export function Banner({ message, tone = 'info' }: { message: string | null; tone?: 'info' | 'error' | 'ok' }) {
   if (!message) return null;
   return <div className={`banner banner-${tone}`}>{message}</div>;
+}
+
+export function Drawer({
+  title,
+  subtitle,
+  open,
+  onClose,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panel = useRef<HTMLElement>(null);
+  const closeBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const previously = document.activeElement as HTMLElement | null;
+    const shell = document.querySelector('.shell');
+    shell?.setAttribute('inert', '');
+    document.body.style.overflow = 'hidden';
+    closeBtn.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !panel.current) return;
+      const focusable = [...panel.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((node) => !node.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      shell?.removeAttribute('inert');
+      document.body.style.overflow = '';
+      previously?.focus?.();
+    };
+  }, [open, onClose]);
+  if (!open || typeof document === 'undefined') return null;
+  return createPortal(
+    <div className="drawer-root">
+      <button type="button" className="drawer-scrim" aria-label="关闭" onClick={onClose} />
+      <aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+        <header className="drawer-head">
+          <div>
+            <h2 id="drawer-title">{title}</h2>
+            {subtitle ? <p>{subtitle}</p> : null}
+          </div>
+          <button ref={closeBtn} type="button" className="btn btn-outline btn-sm" onClick={onClose}>关闭</button>
+        </header>
+        <div className="drawer-body">{children}</div>
+      </aside>
+    </div>,
+    document.body,
+  );
+}
+
+export function Confirm({
+  title,
+  detail,
+  confirmLabel = '确认',
+  open,
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  detail?: string;
+  confirmLabel?: string;
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open || typeof document === 'undefined') return null;
+  return createPortal(
+    <div className="drawer-root">
+      <button type="button" className="drawer-scrim" aria-label="取消" onClick={onCancel} />
+      <aside className="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 id="confirm-title">{title}</h2>
+        {detail ? <p>{detail}</p> : null}
+        <div className="form-row">
+          <button type="button" className="btn btn-outline" onClick={onCancel}>取消</button>
+          <button type="button" className="btn" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </aside>
+    </div>,
+    document.body,
+  );
 }

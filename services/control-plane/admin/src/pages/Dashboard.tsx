@@ -1,13 +1,18 @@
 import { useMemo } from 'react';
-import { operationsApi, type ActivityDto, type DashboardDto, type LiveQualityNodeDto, type UserDto } from '../api';
-import { useRefresh, useResource } from '../hooks';
+import { type ActivityDto, type DashboardDto, type LiveQualityNodeDto, type UserDto } from '../api';
+
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
 import { DataHealth, StateBoundary, Status } from '../ui';
 import { catalogLag } from '../lib/revision';
 import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../lib/path-status';
+import { useOpsWorld } from '../ops-context';
+import { NodeCard } from '../NodeCard';
+import { useOpsRoute } from '../lib/route';
+import { usePrivacy } from '../privacy';
 
 function UsageLeaderboard({ users }: { users: UserDto[] }) {
+  const privacy = usePrivacy();
   const top = useMemo(
     () => [...users].sort((a, b) => b.usageBytes - a.usageBytes).slice(0, 5),
     [users],
@@ -21,7 +26,7 @@ function UsageLeaderboard({ users }: { users: UserDto[] }) {
       {top.map((user, index) => (
         <div className="lb-row" key={user.id}>
           <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
-          <span className="lb-email">{user.email}</span>
+          <span className="lb-email">{privacy.email(user.email)}</span>
           <div className="lb-track">
             <div className="lb-fill" style={{ width: `${Math.max(2, (user.usageBytes / max) * 100)}%` }} />
           </div>
@@ -33,13 +38,15 @@ function UsageLeaderboard({ users }: { users: UserDto[] }) {
 }
 
 export function Dashboard() {
-  const { refreshMs } = useRefresh();
-  const resource = useResource(operationsApi.dashboard, [], refreshMs);
-  const live = useResource(operationsApi.live, [], refreshMs);
-  const usersRes = useResource(operationsApi.users, [], refreshMs);
-  const activityRes = useResource<ActivityDto>(operationsApi.activity, [], refreshMs);
-  const auditRes = useResource(operationsApi.audit, [], refreshMs);
-  const fleetRes = useResource(operationsApi.fleetNodes, [], refreshMs);
+  const world = useOpsWorld();
+  const { openNode, openUser } = useOpsRoute();
+  const privacy = usePrivacy();
+  const resource = world.dashboard;
+  const live = world.live;
+  const usersRes = world.users;
+  const activityRes = world.activity;
+  const fleetRes = world.fleet;
+  const auditRes = world.audit;
   return <StateBoundary resource={resource}>{(data: DashboardDto) => {
     const liveData = live.state === 'ready' ? live.data : null;
     const qualityNodes = liveData?.quality?.nodes ?? [];
@@ -210,27 +217,45 @@ export function Dashboard() {
       )}
 
       {(liveData || usersRes.state === 'ready') && (
-        <section className={`card attention-card${orderedAlerts.length > 0 ? ' has-alerts' : ''}`}>
+        <section className={`card attention-card${world.accidents.length > 0 ? ' has-alerts' : ''}`}>
           <div className="card-header">
             <div>
-              <h2>需要关注</h2>
-              <p>被墙、测不通、质量、流量、到期</p>
+              <h2>事故</h2>
+              <p>被墙、失联、路径差。Claude 和家宽在下面待办里。</p>
             </div>
           </div>
-          {orderedAlerts.length === 0 ? (
+          {world.accidents.length === 0 ? (
             unchecked.length === 0
-              ? <div className="attention-ok">✓ 节点和客户都正常</div>
+              ? <div className="attention-ok">✓ 没有机房或路径事故</div>
               : <div className="attention-ok">{unchecked.join('和')}还在加载，还没查完</div>
           ) : (
             <ul className="attention-list">
-              {orderedAlerts.map((alert, index) => (
-                <li key={alert.key ?? index} className={`attention-${alert.tone}`}>
+              {world.accidents.map((item) => (
+                <li key={item.id} className={`attention-${item.severity === 'severe' ? 'error' : 'warn'}`}>
                   <span className="attention-dot" aria-hidden />
-                  {alert.href ? <a className="table-link" href={alert.href}>{alert.text}</a> : <span>{alert.text}</span>}
+                  <a className="table-link" href={item.href}>{privacy.email(item.title)} · {item.detail}</a>
                 </li>
               ))}
             </ul>
           )}
+        </section>
+      )}
+      {world.chores.length > 0 && (
+        <section className="card">
+          <div className="card-header">
+            <div>
+              <h2>待办</h2>
+              <p>额度、续费、目录落后、未开可选服务</p>
+            </div>
+          </div>
+          <ul className="attention-list">
+            {world.chores.slice(0, 12).map((item) => (
+              <li key={item.id} className="attention-warn">
+                <span className="attention-dot" aria-hidden />
+                <a className="table-link" href={item.href}>{privacy.email(item.title)} · {item.detail}</a>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -243,19 +268,15 @@ export function Dashboard() {
             </div>
             <a className="btn btn-outline btn-sm" href="#/monitor">去服务器页</a>
           </div>
-          <div className="card-body node-grid">
-            {qualityNodes.map((node) => {
-              const state = nodeState(node);
-              return (
-                <a className={`node-tile node-${state.key}`} key={node.name} href={`#/monitor?node=${encodeURIComponent(node.name)}`}>
-                  <span className="node-dot" aria-hidden />
-                  <span className="node-tile-main">
-                    <strong>{node.name}</strong>
-                    <small>{state.label}{agentNames.has(node.name) ? '' : ' · 没装探针'}</small>
-                  </span>
-                </a>
-              );
-            })}
+          <div className="node-grid">
+            {world.nodes.slice(0, 12).map((node) => (
+              <NodeCard
+                key={node.name}
+                node={node}
+                density="compact"
+                onOpen={() => openNode(node.name)}
+              />
+            ))}
           </div>
         </section>
       )}
@@ -275,7 +296,7 @@ export function Dashboard() {
               </thead>
               <tbody>{activityRes.data.users.map((user) => (
                 <tr key={user.userId}>
-                  <td><a className="table-link" href={`#/users?user=${encodeURIComponent(user.userId)}`}><strong>{user.email}</strong></a></td>
+                  <td><a className="table-link" href={`#/users?user=${encodeURIComponent(user.userId)}`} onClick={(event) => { event.preventDefault(); openUser(user.userId); }}><strong>{privacy.email(user.email)}</strong></a></td>
                   <td>
                     {user.online
                       ? <Status value="active" />

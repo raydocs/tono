@@ -1,0 +1,3 @@
+# Keep directory; screenshots are local verification artifacts.
+*
+!.gitignore
