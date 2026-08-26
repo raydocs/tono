@@ -117,6 +117,7 @@ function CustomerAccountBody({
   onChanged: () => void;
 }) {
   const user = person.user!;
+  const privacy = usePrivacy();
   const ask = useAsk();
   const danger = useMutation();
   const detail = useResource(
@@ -183,7 +184,7 @@ function CustomerAccountBody({
           className="btn"
           disabled={danger.busy}
           onClick={() => ask.prompt(
-            user.status === 'active' ? `注销 ${user.email}？` : `恢复 ${user.email}？`,
+            user.status === 'active' ? `注销 ${privacy.email(user.email)}？` : `恢复 ${privacy.email(user.email)}？`,
             user.status === 'active'
               ? '马上不能登录，设备会撤销，家宽会退回库存。确认后才会执行。'
               : '恢复后可以再登录。确认后才会改状态。',

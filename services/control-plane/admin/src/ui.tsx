@@ -90,12 +90,13 @@ export function FilterChips({
   onChange: (id: string) => void;
 }) {
   return (
-    <div className="filter-chips">
+    <div className="filter-chips" role="group" aria-label="筛选">
       {options.map((option) => (
         <button
           key={option.id}
           type="button"
           className={`chip${value === option.id ? ' chip-ok' : ''}`}
+          aria-pressed={value === option.id}
           onClick={() => onChange(option.id)}
         >
           {option.label}

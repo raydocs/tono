@@ -121,6 +121,7 @@ function App() {
                   key={entry.id}
                   className={`nav-item${page === entry.id ? ' active' : ''}${PRIMARY.includes(entry.id as typeof PRIMARY[number]) ? '' : ' nav-overflow'}`}
                   href={`#/${entry.id}`}
+                  onClick={() => setShowMore(false)}
                 >
                   <Icon d={icons[entry.id]} />
                   <span>{entry.label}</span>
@@ -128,7 +129,7 @@ function App() {
               ))}
             </div>
           ))}
-          <button type="button" className="nav-item nav-more" onClick={() => setShowMore((value) => !value)}>
+          <button type="button" className="nav-item nav-more" aria-expanded={showMore} onClick={() => setShowMore((value) => !value)}>
             <span>⋯</span>
             <span>更多</span>
           </button>
@@ -157,8 +158,10 @@ function App() {
                 placeholder="搜索节点或客户  /"
                 value={search}
                 role="combobox"
-                aria-expanded={searchOpen}
+                aria-autocomplete="list"
+                aria-expanded={Boolean(searchOpen && needle)}
                 aria-controls="ops-search-results"
+                aria-activedescendant={searchOpen && needle && hits[searchIndex] ? `ops-search-${hits[searchIndex].kind}-${hits[searchIndex].id}` : undefined}
                 onChange={(event) => { setSearch(event.target.value); setSearchOpen(true); setSearchIndex(0); }}
                 onFocus={() => setSearchOpen(true)}
                 onKeyDown={(event) => {
@@ -169,11 +172,13 @@ function App() {
                   }
                   if (event.key === 'ArrowDown') {
                     event.preventDefault();
+                    if (hits.length === 0) return;
                     setSearchIndex((value) => Math.min(hits.length - 1, value + 1));
                     return;
                   }
                   if (event.key === 'ArrowUp') {
                     event.preventDefault();
+                    if (hits.length === 0) return;
                     setSearchIndex((value) => Math.max(0, value - 1));
                     return;
                   }
@@ -185,26 +190,42 @@ function App() {
                 onBlur={() => window.setTimeout(() => setSearchOpen(false), 120)}
               />
               {searchOpen && needle && (
-                <div className="search-pop" id="ops-search-results" role="listbox">
-                  {hits.length === 0 && <p className="muted">没有匹配的节点或客户</p>}
-                  {nodeHits.length > 0 && <p className="muted">节点</p>}
-                  {nodeHits.map((node, index) => (
-                    <button
-                      type="button"
-                      className={`search-hit${hits[searchIndex]?.id === node.name && hits[searchIndex]?.kind === 'node' ? ' active' : ''}`}
-                      key={`n-${node.name}`}
-                      onMouseDown={(event) => { event.preventDefault(); goHit({ kind: 'node', id: node.name, label: node.name }); }}
-                    >{node.name}</button>
-                  ))}
-                  {personHits.length > 0 && <p className="muted">客户</p>}
-                  {personHits.map((person) => (
-                    <button
-                      type="button"
-                      className={`search-hit${hits[searchIndex]?.id === person.userId && hits[searchIndex]?.kind === 'user' ? ' active' : ''}`}
-                      key={`u-${person.userId}`}
-                      onMouseDown={(event) => { event.preventDefault(); goHit({ kind: 'user', id: person.userId, label: person.email }); }}
-                    >{privacy.email(person.email)}</button>
-                  ))}
+                <div className="search-pop" id="ops-search-results">
+                  {hits.length === 0 && <p className="muted" role="status">没有匹配的节点或客户</p>}
+                  {hits.length > 0 && (
+                    <div role="listbox" aria-label="搜索结果">
+                      {nodeHits.length > 0 && (
+                        <div role="group" aria-label="节点">
+                          {nodeHits.map((node) => (
+                            <button
+                              type="button"
+                              role="option"
+                              id={`ops-search-node-${node.name}`}
+                              aria-selected={hits[searchIndex]?.kind === 'node' && hits[searchIndex]?.id === node.name}
+                              className={`search-hit${hits[searchIndex]?.id === node.name && hits[searchIndex]?.kind === 'node' ? ' active' : ''}`}
+                              key={`n-${node.name}`}
+                              onMouseDown={(event) => { event.preventDefault(); goHit({ kind: 'node', id: node.name, label: node.name }); }}
+                            >{node.name}</button>
+                          ))}
+                        </div>
+                      )}
+                      {personHits.length > 0 && (
+                        <div role="group" aria-label="客户">
+                          {personHits.map((person) => (
+                            <button
+                              type="button"
+                              role="option"
+                              id={`ops-search-user-${person.userId}`}
+                              aria-selected={hits[searchIndex]?.kind === 'user' && hits[searchIndex]?.id === person.userId}
+                              className={`search-hit${hits[searchIndex]?.id === person.userId && hits[searchIndex]?.kind === 'user' ? ' active' : ''}`}
+                              key={`u-${person.userId}`}
+                              onMouseDown={(event) => { event.preventDefault(); goHit({ kind: 'user', id: person.userId, label: person.email }); }}
+                            >{privacy.email(person.email)}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -269,7 +290,7 @@ function App() {
           </div>
         </header>
 
-        <main className="content" id="ops-main">
+        <main className="content" id="ops-main" tabIndex={-1}>
           <div className="page-head">
             <div>
               <h1>{selected.label}</h1>

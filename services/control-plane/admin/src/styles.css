@@ -1651,6 +1651,10 @@ dd { margin: 0; text-align: right; font-weight: 500; }
 .diff-del { color: hsl(var(--destructive)); }
 .control-textarea { overflow-x: auto; white-space: pre; max-width: 100%; }
 .refreshing-dot { font-size: 0.72rem; color: hsl(var(--muted-foreground)); }
+.quota-bar { height: 0.35rem; border-radius: 99px; background: hsl(var(--muted)); overflow: hidden; min-width: 4rem; }
+.quota-bar span { display: block; height: 100%; background: hsl(var(--success)); }
+.quota-warn span { background: hsl(var(--warning)); }
+.quota-bad span { background: hsl(var(--destructive)); }
 @media (max-width: 1100px) {
   .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .dash-command { grid-template-columns: 1fr; }

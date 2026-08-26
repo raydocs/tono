@@ -302,6 +302,12 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
             exitDelayAtMs: (clock - 20) * 1000, tcpDelayAtMs: (clock - 20) * 1000, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
           },
           {
+            userId: 'u-slow', deviceId: 'd-slow-old', email: 'slow@example.com', lastSeenAt: clock - 20,
+            online: true, clientVersion: '0.0.34', osVersion: 'Windows', selectedServer: 'Tokyo · Neon',
+            uiState: 'connected', catalogRevision: 39, exitDelayMs: 900, tcpDelayMs: 40,
+            exitDelayAtMs: (clock - 41 * 60) * 1000, tcpDelayAtMs: (clock - 20) * 1000, nodeHealth: 'ok', nodeHealthLabel: '大陆正常',
+          },
+          {
             userId: 'u-slow', deviceId: 'd-slow-bad', email: 'slow@example.com', lastSeenAt: clock - 15,
             online: true, clientVersion: '0.0.34', osVersion: 'Windows', selectedServer: 'Tokyo · Neon',
             uiState: 'connected', catalogRevision: 39, exitDelayMs: 920, tcpDelayMs: 40,
@@ -404,7 +410,19 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
     };
   }
   if (base === 'traffic-policy') {
-    return { revision: 3, json: '{"direct":[]}', sha256: 'dev', updatedAt: clock };
+    return {
+      revision: 4,
+      json: JSON.stringify({
+        version: 4,
+        domains: [],
+        mediaEndpoints: [],
+        webDomains: [{ host: 'www.bilibili.com', ports: [443] }],
+        directSuffixes: [{ host: 'edu.cn', ports: [443] }],
+        tcpEndpoints: [{ address: '8.8.8.8', ports: [443] }],
+      }),
+      sha256: 'dev',
+      updatedAt: clock,
+    };
   }
   if (base === 'audit') return { entries: [] };
   if (base.startsWith('product-accounts')) return { accounts: [] };
