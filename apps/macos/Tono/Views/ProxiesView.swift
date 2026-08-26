@@ -846,7 +846,7 @@ struct ProxiesView: View {
                         guard !isTesting else { return }
                         isTesting = true
                         Task {
-                            await appState.testAllLatency()
+                            await appState.testSelectedExitLatency()
                             isTesting = false
                         }
                     } label: {
@@ -858,7 +858,11 @@ struct ProxiesView: View {
                                 Image(systemName: "bolt.fill")
                                     .font(.system(size: 11))
                             }
-                            Text("Test Latency")
+                            // Says what it measures. "Test Latency" next to a
+                            // grid of untested cards read as a list-wide sweep,
+                            // and users concluded testing was broken when the
+                            // other cards stayed unmeasured.
+                            Text("Test current exit")
                             .font(.system(size: 12, weight: .semibold))
                         }
                         .foregroundStyle(.primary)

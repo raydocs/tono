@@ -3668,9 +3668,12 @@ final class AppState {
         _ = await proxyService.testLatency(name: proxyService.activeNodeName ?? name)
     }
 
-    func testAllLatency() async {
-        // Testing all imported endpoints would require opening all of them in
-        // PF. Protected mode probes only the current selection.
+    /// Probes the selected exit only.
+    ///
+    /// Not a catalog sweep: with the kill switch armed, PF permits just the
+    /// endpoints of the exit in use, so probing every node would mean opening
+    /// all of them — that is the fail-closed guarantee, not an oversight.
+    func testSelectedExitLatency() async {
         guard isOwnedTonoMode, coreController != nil else { return }
         guard let selected = proxyService.activeNodeName else { return }
         _ = await proxyService.testLatency(name: selected)

@@ -268,7 +268,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前服务器"
+            "value": "当前节点"
           }
         }
       }
@@ -310,7 +310,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前服务器"
+            "value": "当前节点"
           }
         }
       }
@@ -1299,7 +1299,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "直连流量已阻断"
+            "value": "已拦住直连流量"
           }
         }
       }
@@ -2318,7 +2318,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "网络助手"
+            "value": "网络组件"
           }
         }
       }
@@ -2390,7 +2390,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未选择服务器"
+            "value": "未选择节点"
           }
         }
       }
@@ -2883,7 +2883,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保护已开启，当前未连接"
+            "value": "保护中，未连上"
           }
         }
       }
@@ -2947,7 +2947,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已保护但离线"
+            "value": "保护中，未连上"
           }
         }
       }
@@ -3008,7 +3008,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "代理"
+            "value": "云端"
           }
         }
       }
@@ -3141,7 +3141,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reality 云保护"
+            "value": "云端保护"
           }
         }
       }
@@ -3243,7 +3243,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "拒绝"
+            "value": "已拒绝"
           }
         }
       }
@@ -3521,7 +3521,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已选服务器"
+            "value": "已选节点"
           }
         }
       }
@@ -3623,7 +3623,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索服务器"
+            "value": "搜索节点"
           }
         }
       }
@@ -3798,7 +3798,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "服务器池"
+            "value": "节点池"
           }
         }
       }
@@ -4437,7 +4437,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点击启动连接"
+            "value": "点按连接"
           }
         }
       }
@@ -4457,7 +4457,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点击断开连接"
+            "value": "点按断开"
           }
         }
       }
@@ -4467,7 +4467,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点击恢复正常网络"
+            "value": "点按恢复上网"
           }
         }
       }
@@ -4511,6 +4511,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "测试延迟"
+          }
+        }
+      }
+    },
+    "Test current exit": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "测试当前节点"
           }
         }
       }
@@ -4976,7 +4986,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "流量已经过隧道"
+            "value": "流量已走受保护线路"
           }
         }
       }

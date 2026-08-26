@@ -75,18 +75,8 @@ private struct ClientAppIcon: View {
     }
 }
 
-/// Byte formatting matching the connection rows, which come from AppState's own
-/// formatter. Duplicated rather than shared because the two live on opposite
-/// sides of the view boundary and a shared helper would be one file holding one
-/// function; if a third caller appears, promote it then.
 private func activityBytes(_ bytes: Int64) -> String {
-    ActivityByteFormat.string(bytes)
-}
-
-private enum ActivityByteFormat {
-    static func string(_ bytes: Int64) -> String {
-        TonoByteFormat.bytes(bytes)
-    }
+    TonoByteFormat.bytes(bytes)
 }
 
 /// One colour per path class, used by every split bar and legend on this page so
@@ -380,7 +370,7 @@ struct ActivityView: View {
             guard !isTestingLatency, appState.isConnected else { return }
             isTestingLatency = true
             Task {
-                await appState.testAllLatency()
+                await appState.testSelectedExitLatency()
                 isTestingLatency = false
             }
         } label: {
