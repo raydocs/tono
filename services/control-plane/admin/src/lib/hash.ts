@@ -93,6 +93,6 @@ export function nextRouteForOpenNode(current: OpsHash, name: string, extra: Part
     focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),
     node: name,
     user: null,
-    q: extra.q !== undefined ? extra.q : null,
+    q: extra.q !== undefined ? extra.q : (keepFocus ? current.q : null),
   };
 }

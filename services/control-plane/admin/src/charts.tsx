@@ -1,23 +1,7 @@
 import type { MetricsDto } from './api';
+import { sparkPath } from './lib/spark';
 
-function sparkPath(values: Array<number | null>, width: number, height: number) {
-  const nums = values.filter((value): value is number => value != null && Number.isFinite(value));
-  if (nums.length < 2) return null;
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
-  const span = max - min || 1;
-  const step = width / Math.max(1, values.length - 1);
-  const parts: string[] = [];
-  values.forEach((value, index) => {
-    if (value == null || !Number.isFinite(value)) return;
-    const x = index * step;
-    const y = height - ((value - min) / span) * height;
-    parts.push(`${parts.length ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`);
-  });
-  return parts.length < 2 ? null : parts.join(' ');
-}
-
-function Sparkline({ values, label }: { values: Array<number | null>; label: string }) {
+export function Sparkline({ values, label }: { values: Array<number | null>; label: string }) {
   const d = sparkPath(values, 160, 36);
   if (!d) return <span className="muted">还没有{label}记录</span>;
   return (

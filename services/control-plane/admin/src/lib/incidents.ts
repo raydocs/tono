@@ -142,7 +142,8 @@ export function incidentsFromWorld(input: {
   for (const node of input.nodes) {
     const href = `#/monitor?focus=blocked&node=${encodeURIComponent(node.name)}`;
     const listed = node.catalogListed === true;
-    const affecting = node.occupancy > 0 || listed;
+    const occupied = node.occupancyState === 'known' && (node.occupancy ?? 0) > 0;
+    const affecting = occupied || listed;
 
     if (node.quality && isLikelyBlocked(node.quality)) {
       incidents.push({
@@ -158,7 +159,7 @@ export function incidentsFromWorld(input: {
         id: `node-down:${node.name}`,
         severity: 'severe',
         title: node.name,
-        detail: node.occupancy > 0
+        detail: occupied
           ? `整机失联，${node.occupancy} 人在用`
           : '整机失联，仍在客户目录',
         href,
@@ -175,7 +176,7 @@ export function incidentsFromWorld(input: {
       });
     }
 
-    if (listed && !node.agent) {
+    if (listed && node.agentState === 'unreported') {
       incidents.push({
         id: `node-noprobe:${node.name}`,
         severity: 'warn',

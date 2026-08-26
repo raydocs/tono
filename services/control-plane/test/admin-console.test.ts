@@ -363,7 +363,14 @@ import {
   PATH_SEVERE_MS,
   PATH_WARN_MS,
 } from '../admin/src/lib/incidents';
-import { assembleOpsNodes, assembleOpsPeople } from '../admin/src/lib/ops-views';
+import {
+  assembleOpsNodes,
+  assembleOpsPeople,
+  nodeMatchesFocus,
+  nodeSearchHaystack,
+  sortOpsNodes,
+} from '../admin/src/lib/ops-views';
+import { sparkPath } from '../admin/src/lib/spark';
 import { maskEmail, maskIp } from '../admin/src/lib/privacy';
 import { counterDeltaBps, parseTrafficLimitType, seriesRates } from '../admin/src/lib/traffic';
 import type { ActivityUserDto, LiveQualityNodeDto, UserDto } from '../admin/src/api';
@@ -632,6 +639,103 @@ describe('ops node union and incident ranking', () => {
     });
     expect(nodes[0].dot).toBe('warn');
   });
+
+  it('does not treat a failed agent source as every machine missing a probe', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1,
+      catalogYaml: 'proxies:\n  - name: "Listed"\n    type: vless\n',
+      catalogSource: 'ready',
+      agentSource: 'unavailable',
+      qualitySource: 'ready',
+      qualityNodes: [qualityNode('Listed')],
+      activitySource: 'ready',
+      activity: [],
+    });
+    expect(nodes[0].agentState).toBe('unavailable');
+    expect(nodes[0].blockLabel).not.toBe('质量源不可用');
+    const incidents = incidentsFromWorld({ nodes, people: [], catalogRevision: 1, nowSec: 1 });
+    expect(incidents.some((item) => item.id.startsWith('node-noprobe:'))).toBe(false);
+  });
+
+  it('does not report occupancy 0 or 大陆未测 when those sources failed', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1,
+      catalogYaml: 'proxies:\n  - name: "OnlyCat"\n    type: vless\n',
+      catalogSource: 'ready',
+      qualitySource: 'unavailable',
+      agentSource: 'ready',
+      agents: [agent({ name: 'OnlyCat' })],
+      activitySource: 'unavailable',
+    });
+    expect(nodes[0].occupancy).toBeNull();
+    expect(nodes[0].occupancyState).toBe('unavailable');
+    expect(nodes[0].qualityState).toBe('unavailable');
+    expect(nodes[0].blockLabel).toBe('质量源不可用');
+    expect(nodes[0].catalogState).toBe('known-listed');
+  });
+
+  it('keeps occupancy-only machines and does not match noprobe when the agent source failed', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1,
+      catalogSource: 'ready',
+      catalogYaml: 'proxies:\n  - name: "Listed"\n    type: vless\n',
+      agentSource: 'unavailable',
+      qualitySource: 'ready',
+      qualityNodes: [],
+      activitySource: 'ready',
+      activity: [activity({ selectedServer: 'Occupied Only', lastSeenAt: 1, online: true })],
+    });
+    const listed = nodes.find((node) => node.name === 'Listed')!;
+    const occupied = nodes.find((node) => node.name === 'Occupied Only')!;
+    expect(occupied.occupancy).toBe(1);
+    expect(nodeMatchesFocus(listed, 'noprobe', 1)).toBe(false);
+    expect(nodeMatchesFocus(listed, 'unknown', 1)).toBe(true);
+    expect(nodeMatchesFocus(occupied, 'unknown', 1)).toBe(true);
+  });
+
+  it('sorts blocked listed nodes ahead of healthy occupied ones', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1_800_000_000_000,
+      catalogYaml: 'proxies:\n  - name: "Sakura"\n    type: vless\n  - name: "Tokyo · Fuji"\n    type: vless\n',
+      qualityNodes: [
+        qualityNode('Sakura', {
+          ok: false,
+          block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+        }),
+        qualityNode('Tokyo · Fuji'),
+      ],
+      activity: [activity({ selectedServer: 'Tokyo · Fuji', lastSeenAt: 1_800_000_000, online: true })],
+    });
+    expect(sortOpsNodes(nodes)[0].name).toBe('Sakura');
+    expect(nodeMatchesFocus(nodes.find((node) => node.name === 'Sakura')!, 'blocked', 1_800_000_000)).toBe(true);
+    expect(nodeMatchesFocus(nodes.find((node) => node.name === 'Tokyo · Fuji')!, 'blocked', 1_800_000_000)).toBe(false);
+  });
+
+  it('searches name, IP, provider, and route tags', () => {
+    const nodes = assembleOpsNodes({
+      nowMs: 1,
+      qualityNodes: [qualityNode('Tokyo · Fuji', { publicIp: '203.0.113.9', routeKeywords: ['9929'] })],
+      profiles: [{
+        id: 'p1', catalogName: 'Tokyo · Fuji', publicIp: '203.0.113.9', provider: 'Bandwagon',
+        price: null, currency: null, billingCycle: null, trafficQuotaBytes: null, trafficUsedBytes: null,
+        trafficCycleStart: null, trafficCycleEnd: null, cycleNetIn: null, cycleNetOut: null, renewsAt: null,
+        status: 'active', createdAt: 1, updatedAt: 1,
+      } as NodeProfileDto],
+    });
+    const hay = nodeSearchHaystack(nodes[0]);
+    expect(hay).toContain('tokyo');
+    expect(hay).toContain('203.0.113.9');
+    expect(hay).toContain('bandwagon');
+    expect(hay).toContain('9929');
+  });
+});
+
+describe('sparkline gaps', () => {
+  it('does not draw a line across a null sample', () => {
+    const path = sparkPath([1, 2, null, 4, 5], 100, 10);
+    expect(path).toContain('M');
+    expect(path?.match(/M/g)?.length).toBe(2);
+  });
 });
 
 describe('screenshot privacy masks', () => {
@@ -727,6 +831,13 @@ describe('customer telemetry and path activity', () => {
     });
     const fromUsers = { ...emptyHash('users'), focus: 'quota' };
     expect(nextRouteForOpenNode(fromUsers, 'Tokyo · Fuji').focus).toBeNull();
+    expect(nextRouteForOpenNode(
+      { ...emptyHash('monitor'), focus: 'blocked', q: 'fuji' },
+      'Tokyo · Fuji',
+    )).toMatchObject({ page: 'monitor', focus: 'blocked', node: 'Tokyo · Fuji', q: 'fuji' });
+    expect(parseOpsHash('#/monitor?focus=unknown&node=Catalog%20Only')).toMatchObject({
+      page: 'monitor', focus: 'unknown', node: 'Catalog Only',
+    });
     expect(formatOpsHash({ page: 'users', focus: 'path', node: null, user: 'u1', q: null })).toBe('#/users?focus=path&user=u1');
     expect(parseOpsHash('#/users?focus=path&user=u1').user).toBe('u1');
   });

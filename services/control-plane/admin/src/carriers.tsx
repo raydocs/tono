@@ -54,6 +54,26 @@ function Panel({ title, rows, metric }: {
   );
 }
 
+export function CarrierMini({ carriers }: { carriers: CarrierPingMapDto }) {
+  const rows = carrierRows(carriers);
+  const probed = rows.filter((row) => row.probed);
+  if (probed.length === 0) {
+    return <p className="muted nc-carrier-mini">三网没测</p>;
+  }
+  return (
+    <div className="nc-carrier-mini">
+      {rows.map((row) => (
+        <div className="nc-carrier-mini-row" key={row.key} title={row.detail}>
+          <span className={`carrier-dot carrier-dot-${row.key}`} />
+          <span>{row.label}</span>
+          <span className={`mono carrier-${row.latencyTone}-text`}>{row.probed ? row.latencyText : '没测'}</span>
+          {row.probed && row.history.length > 0 ? <Bars row={row} metric="latency" /> : <span className="carrier-bars carrier-bars-empty" />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CarrierPing({ carriers }: { carriers: CarrierPingMapDto }) {
   const rows = carrierRows(carriers);
   const probed = rows.filter((row) => row.probed);

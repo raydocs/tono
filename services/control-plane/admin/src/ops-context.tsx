@@ -56,12 +56,21 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
 
   const world = useMemo(() => {
     const clock = Math.floor(Date.now() / 1000);
+    const liveReady = live.state === 'ready';
     const nodes = assembleOpsNodes({
       catalogYaml: catalog.state === 'ready' ? catalog.data.yaml : null,
-      qualityNodes: live.state === 'ready' ? live.data.quality?.nodes : null,
-      agents: live.state === 'ready' ? live.data.agents : null,
+      catalogSource: catalog.state === 'ready' ? 'ready' : catalog.state === 'error' ? 'unavailable' : 'loading',
+      qualityNodes: liveReady ? live.data.quality?.nodes : null,
+      qualitySource: !liveReady
+        ? (live.state === 'error' ? 'unavailable' : 'loading')
+        : (live.data.qualityError && live.data.quality == null ? 'unavailable' : 'ready'),
+      agents: liveReady ? live.data.agents : null,
+      agentSource: !liveReady
+        ? (live.state === 'error' ? 'unavailable' : 'loading')
+        : (live.data.agentsError && live.data.agents == null ? 'unavailable' : 'ready'),
       profiles: profiles.state === 'ready' ? profiles.data : null,
       activity: activity.state === 'ready' ? activity.data.users : null,
+      activitySource: activity.state === 'ready' ? 'ready' : activity.state === 'error' ? 'unavailable' : 'loading',
       nowMs: Date.now(),
     });
     const people = assembleOpsPeople({
