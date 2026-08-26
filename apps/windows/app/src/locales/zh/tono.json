@@ -81,7 +81,7 @@
       "protocol": "协议",
       "route": "路由",
       "rule": "规则",
-      "count": "连接",
+      "count": "连接数",
       "split": "路径拆分"
     }
   },
