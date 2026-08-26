@@ -85,16 +85,8 @@ private func activityBytes(_ bytes: Int64) -> String {
 
 private enum ActivityByteFormat {
     static func string(_ bytes: Int64) -> String {
-        formatter.string(fromByteCount: bytes)
+        TonoByteFormat.bytes(bytes)
     }
-
-    private static let formatter: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
-        formatter.countStyle = .binary
-        formatter.allowsNonnumericFormatting = false
-        return formatter
-    }()
 }
 
 /// One colour per path class, used by every split bar and legend on this page so
@@ -254,6 +246,7 @@ struct ActivityView: View {
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
+            guard appState.trafficFeedLive else { return }
             trafficHistory.record(
                 up: appState.trafficStats.uploadSpeed,
                 down: appState.trafficStats.downloadSpeed
@@ -341,9 +334,11 @@ struct ActivityView: View {
 
     private func rateValue(_ bytesPerSecond: Int64, tint: Color) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(activityBytes(bytesPerSecond))
+            Text(TonoByteFormat.bytes(bytesPerSecond))
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
+                // An idle line is not a healthy line; only a moving rate earns
+                // the accent colour.
+                .foregroundStyle(bytesPerSecond > 0 ? tint : Color.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             Text("/s").font(.system(size: 12)).foregroundStyle(.secondary)
@@ -497,9 +492,10 @@ struct ActivityView: View {
                                 Task { await appState.closeConnection(entry.id) }
                             }
                         }
-                        if appState.connectionsDisplayLimited,
-                           selectedFilter == "All",
-                           connectionQuery.isEmpty {
+                        // Say it under a filter too. Suppressing it there hid
+                        // the truncation exactly when a search could be
+                        // silently missing matches beyond the cap.
+                        if appState.connectionsDisplayLimited {
                             Text("Showing the newest \(ConnectionActivityPresentation.maxDisplayed) connections.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.tertiary)

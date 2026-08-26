@@ -2398,9 +2398,7 @@ final class AppState {
             await self.fetchNetworkInfo()
         }
         Task { await fetchActiveRules() }
-        if !isOwnedTonoMode {
-            startLatencyTestTimer()
-        }
+        startLatencyTestTimer()
 
         // Legacy subscription networking is available only in the explicitly
         // isolated developer profile. Production server state comes solely
@@ -3194,7 +3192,13 @@ final class AppState {
                 )
                 networkInfoTask?.cancel()
                 networkInfoTask = Task { [weak self] in
-                    await self?.fetchNetworkInfo()
+                    guard let self else { return }
+                    // Re-probe the exit we just moved to. Without this the
+                    // badge keeps showing the previous node's number under the
+                    // new node's name until something else happens to measure.
+                    _ = await self.proxyService.testLatency(name: nodeName)
+                    guard !Task.isCancelled else { return }
+                    await self.fetchNetworkInfo()
                 }
             } catch is CancellationError {
                 return
@@ -5032,12 +5036,20 @@ final class AppState {
 
     private func startLatencyTestTimer() {
         stopLatencyTestTimer()
-        // Never run bulk subscription outbound latency tests in Tono mode.
-        if isOwnedTonoMode { return }
-        latencyTestTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        // Bulk subscription sweeps stay banned in Tono mode — they would probe
+        // the whole catalog. But the selected exit still needs re-measuring, or
+        // the badge shows the number from connect time for the whole session
+        // even after the line degrades.
+        let interval: TimeInterval = isOwnedTonoMode ? 120 : 300
+        latencyTestTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isConnected, !self.isOwnedTonoMode else { return }
-                await self.proxyService.testAllLatency()
+                guard let self, self.isConnected else { return }
+                if self.isOwnedTonoMode {
+                    guard let selected = self.proxyService.activeNodeName else { return }
+                    _ = await self.proxyService.testLatency(name: selected)
+                } else {
+                    await self.proxyService.testAllLatency()
+                }
             }
         }
     }
@@ -5977,16 +5989,18 @@ final class AppState {
                 .second(.twoDigits)
         )
         let cap = ConnectionActivityPresentation.maxDisplayed
-        var mapped: [ConnectionEntry] = []
-        mapped.reserveCapacity(min(apiConnections.count, cap))
-        var visibleCount = 0
-        for conn in apiConnections {
-            if ConnectionActivityPresentation.isLoopback(conn) { continue }
-            visibleCount += 1
-            if mapped.count >= cap { continue }
-            mapped.append(connectionEntry(from: conn, timestamp: timestamp))
+        // /connections comes back in no guaranteed order, so capping it raw
+        // could drop the newest flows while claiming to show them, and rows
+        // reshuffled on every frame. `start` is RFC3339, so descending string
+        // order is descending time order.
+        let visible = apiConnections
+            .filter { !ConnectionActivityPresentation.isLoopback($0) }
+            .sorted { $0.start > $1.start }
+        let visibleCount = visible.count
+        let mapped = visible.prefix(cap).map {
+            connectionEntry(from: $0, timestamp: timestamp)
         }
-        connections = mapped
+        connections = Array(mapped)
         connectionsDisplayLimited = visibleCount > cap
         return visibleCount
     }

@@ -306,10 +306,15 @@ struct DashboardView: View {
             // AppState publishes only the newest reading, so sample on a fixed
             // cadence: an idle stretch is as meaningful to the series as a spike.
             while !Task.isCancelled {
-                trafficHistory.record(
-                    up: appState.trafficStats.uploadSpeed,
-                    down: appState.trafficStats.downloadSpeed
-                )
+                // Only plot readings the feed actually delivered. Sampling
+                // while it is down drew a flat zero line that looks like a
+                // measured idle stretch.
+                if appState.trafficFeedLive {
+                    trafficHistory.record(
+                        up: appState.trafficStats.uploadSpeed,
+                        down: appState.trafficStats.downloadSpeed
+                    )
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -342,10 +347,7 @@ struct DashboardView: View {
     }
 
     private func formatSpeed(_ bytesPerSec: Int64) -> String {
-        let kb = Double(bytesPerSec) / 1024
-        if kb < 1024 { return String(format: "%.1f KB/s", kb) }
-        let mb = kb / 1024
-        return String(format: "%.1f MB/s", mb)
+        TonoByteFormat.rate(bytesPerSec)
     }
 }
 

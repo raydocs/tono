@@ -36,6 +36,25 @@ final class ConnectionActivityTests: XCTestCase {
         XCTAssertEqual(ConnectionActivityPresentation.maxDisplayed, 2_000)
     }
 
+    func testFlagsComeFromWholeWordsSoHomeAndChinaRoutesAreNotForeign() {
+        // "Tono-Home-Residential" contains "de" and "Tono-China-Direct"
+        // contains "in"; substring matching flew a German flag over home
+        // traffic and an Indian one over WeChat's Tencent hops.
+        XCTAssertEqual(ConfigParser.guessFlag(from: "Tono-Home-Residential"), "🌐")
+        XCTAssertEqual(ConfigParser.guessFlag(from: "Tono-China-Direct"), "🌐")
+        XCTAssertEqual(ConfigParser.guessFlag(from: "Tono-Claude-Home"), "🌐")
+        // Real exits still resolve.
+        XCTAssertEqual(ConfigParser.guessFlag(from: "Tokyo · Fuji"), "🇯🇵")
+        XCTAssertEqual(ConfigParser.guessFlag(from: "US-VLESS-Reality"), "🇺🇸")
+        XCTAssertEqual(ConfigParser.guessFlag(from: "Los Angeles · Sunset"), "🇺🇸")
+    }
+
+    func testTokyoWireNameResolvesToACityLikeItsWindowsCounterpart() {
+        XCTAssertEqual(ProxyNode.displayName(for: "JP-VLESS-Reality"), "Tokyo · Dawn")
+        XCTAssertEqual(ProxyNode.displayName(for: "US-VLESS-Reality"), "Los Angeles · Sunset")
+        XCTAssertEqual(ProxyNode.displayName(for: "Tokyo · Fuji"), "Tokyo · Fuji")
+    }
+
     private func fixture(
         host: String,
         destinationIP: String = "203.0.113.10",

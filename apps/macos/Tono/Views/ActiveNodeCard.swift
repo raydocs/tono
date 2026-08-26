@@ -73,16 +73,23 @@ struct ActiveNodeCard: View {
                     }
                 }
                 Spacer()
-                if latency > 0 {
-                    let level = LatencyLevel.level(for: latency, kind: .exit)
-                    let tint = Color(hex: level.color)
-                    Text(LatencyLevel.spokenTitle(for: latency, kind: .exit))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(tint)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-                }
+                // Always render the slot. Hiding it until the first probe made
+                // the card reflow when the number arrived, and left no word for
+                // "nobody has measured this yet".
+                let measured = latency > 0
+                let tint = measured
+                    ? Color(hex: LatencyLevel.level(for: latency, kind: .exit).color)
+                    : TonoStatus.neutral
+                Text(
+                    measured
+                        ? LatencyLevel.spokenTitle(for: latency, kind: .exit)
+                        : String(localized: "Not tested")
+                )
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
