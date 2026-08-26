@@ -1,14 +1,17 @@
 import { useState, type FormEvent } from 'react';
 import { operationsApi, type HomeExitDto } from '../../api';
+import { tcpPort } from '../../lib/fields';
 import { timeAgo, timestamp } from '../../lib/format';
 import type { Live } from '../../hooks';
 import { Banner, Empty, Skeleton, Status, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
 import { useAsk } from './ask';
+import { useMutation } from './mutate';
 
 export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
   const privacy = usePrivacy();
   const ask = useAsk();
+  const mutate = useMutation();
   const [importText, setImportText] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [proxyName, setProxyName] = useState('');
@@ -17,9 +20,20 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
   const [socks5Port, setSocks5Port] = useState('');
   const [socks5Username, setSocks5Username] = useState('');
   const [socks5Password, setSocks5Password] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [egressIpv4, setEgressIpv4] = useState('');
+  const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  function clearCreate() {
+    setDisplayName('');
+    setProxyName('');
+    setSocks5Host('');
+    setSocks5Port('');
+    setSocks5Username('');
+    setSocks5Password('');
+    setEgressIpv4('');
+    setNotes('');
+  }
 
   async function importLines(event: FormEvent) {
     event.preventDefault();
@@ -28,29 +42,29 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
       setError('先贴一行或多行 host:port:user:pass');
       return;
     }
-    setBusy(true);
     setError(null);
-    try {
+    await mutate.run(async () => {
       const result = await operationsApi.importHomeLines(lines);
-      setMessage([
+      const failed = [
+        ...result.skipped.map((row) => `跳过 ${row.host ?? ''}:${row.port ?? ''} ${row.message}`),
+        ...result.failed.map((row) => row.message),
+      ];
+      mutate.setOk([
         result.created.length ? `加了 ${result.created.length} 条` : null,
         result.skipped.length ? `跳过 ${result.skipped.length} 条` : null,
         result.failed.length ? `失败 ${result.failed.length} 条` : null,
       ].filter(Boolean).join(' · ') || '没有新的线路');
+      if (failed.length) setError(failed.join('；'));
       if (result.created.length) setImportText('');
       homes.reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加入库存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
     <div className="stack">
       {ask.dialog}
-      <Banner message={error} tone="error" />
-      <Banner message={message} tone="ok" />
+      <Banner message={error || mutate.error} tone="error" />
+      <Banner message={mutate.ok} tone="ok" />
       <section className="card">
         <div className="card-header">
           <div>
@@ -59,9 +73,9 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
           </div>
         </div>
         <div className="card-body">
-          <form className="stack" onSubmit={importLines}>
-            <textarea className="input control-textarea" rows={4} spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} disabled={busy} />
-            <button className="btn" type="submit" disabled={busy || !importText.trim()}>加入库存</button>
+          <form className="stack" onSubmit={(event) => void importLines(event)}>
+            <textarea className="input control-textarea" rows={4} spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} disabled={mutate.busy} />
+            <button className="btn" type="submit" disabled={mutate.busy || !importText.trim()}>加入库存</button>
           </form>
         </div>
       </section>
@@ -71,22 +85,30 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
           className="card-body form-grid"
           onSubmit={(event) => {
             event.preventDefault();
-            setBusy(true);
-            operationsApi.createHomeExit({
-              proxyName: proxyName.trim(),
-              displayName: displayName.trim(),
-              kind,
-              ...(kind === 'socks5' ? {
-                socks5Host: socks5Host.trim(),
-                socks5Port: Number(socks5Port),
-                socks5Username,
-                socks5Password,
-              } : {}),
-            }).then((created) => {
-              setMessage(`已加上 ${created.displayName}`);
+            const port = kind === 'socks5' ? tcpPort(socks5Port) : null;
+            if (kind === 'socks5' && (port === 'invalid' || port == null)) {
+              setError('端口必须是 1–65535。');
+              return;
+            }
+            setError(null);
+            void mutate.run(async () => {
+              const created = await operationsApi.createHomeExit({
+                proxyName: proxyName.trim(),
+                displayName: displayName.trim(),
+                kind,
+                notes: notes.trim() || undefined,
+                egressIpv4: egressIpv4.trim() || undefined,
+                ...(kind === 'socks5' ? {
+                  socks5Host: socks5Host.trim(),
+                  socks5Port: port as number,
+                  socks5Username,
+                  socks5Password,
+                } : {}),
+              });
+              mutate.setOk(`已加上 ${created.displayName}`);
+              clearCreate();
               homes.reload();
-            }).catch((err) => setError(err instanceof Error ? err.message : '创建失败'))
-              .finally(() => setBusy(false));
+            });
           }}
         >
           <input className="input" required placeholder="名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
@@ -95,15 +117,17 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
             <option value="catalog">目录里的节点</option>
             <option value="socks5">SOCKS5 家宽</option>
           </select>
+          <input className="input" placeholder="出口 IPv4（可选）" value={egressIpv4} onChange={(event) => setEgressIpv4(event.target.value)} />
+          <input className="input" placeholder="备注（可选）" value={notes} onChange={(event) => setNotes(event.target.value)} />
           {kind === 'socks5' && (
             <>
               <input className="input" required placeholder="主机" value={socks5Host} onChange={(event) => setSocks5Host(event.target.value)} />
-              <input className="input" required type="number" placeholder="端口" value={socks5Port} onChange={(event) => setSocks5Port(event.target.value)} />
+              <input className="input" required type="number" min={1} max={65535} placeholder="端口 1–65535" value={socks5Port} onChange={(event) => setSocks5Port(event.target.value)} />
               <input className="input" required placeholder="用户名" value={socks5Username} onChange={(event) => setSocks5Username(event.target.value)} />
               <input className="input" required type="password" placeholder="密码" value={socks5Password} onChange={(event) => setSocks5Password(event.target.value)} />
             </>
           )}
-          <button className="btn" type="submit" disabled={busy}>加上</button>
+          <button className="btn" type="submit" disabled={mutate.busy}>加上</button>
         </form>
       </details>
       <section className="card">
@@ -118,20 +142,41 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
           {homes.state === 'ready' && homes.data.map((home) => (
             <article key={home.id} className="card home-card">
               <strong>{home.displayName}</strong>
+              <small className="muted">{home.proxyName} · {home.kind} · 绑定 {home.bindCount ?? 0} 人</small>
               <span className="mono">{home.kind === 'socks5' ? `${privacy.ip(home.socks5Host)}:${home.socks5Port}` : privacy.ip(home.egressIpv4)}</span>
               <Status value={home.status} />
-              <small className="muted">{home.probeStatus ? `${home.probeStatus} · ${home.lastProbedAt ? timeAgo(home.lastProbedAt) : ''}` : '未检测'} · {timestamp(home.updatedAt)}</small>
+              <small className="muted">
+                {home.probeStatus ? `${home.probeStatus}` : '未检测'}
+                {home.probeUptimeRatio != null ? ` · 在线率 ${Math.round(home.probeUptimeRatio * 100)}%` : ''}
+                {home.lastProbedAt ? ` · ${timeAgo(home.lastProbedAt)}` : ''}
+                {home.notes ? ` · ${home.notes}` : ''}
+                {' · '}{timestamp(home.updatedAt)}
+              </small>
               <div className="row-actions">
                 {home.status !== 'active'
-                  ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => operationsApi.updateHomeExit(home.id, { status: 'active' }).then(() => homes.reload())}>启用</button>
-                  : <button type="button" className="btn btn-ghost btn-sm" onClick={() => operationsApi.updateHomeExit(home.id, { status: 'disabled' }).then(() => homes.reload())}>停用</button>}
+                  ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={mutate.busy}
+                      onClick={() => void mutate.run(async () => { await operationsApi.updateHomeExit(home.id, { status: 'active' }); homes.reload(); }, '已启用')}
+                    >启用</button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={mutate.busy}
+                      onClick={() => void mutate.run(async () => { await operationsApi.updateHomeExit(home.id, { status: 'disabled' }); homes.reload(); }, '已停用')}
+                    >停用</button>
+                  )}
                 <button
                   type="button"
                   className="btn btn-outline btn-sm"
+                  disabled={mutate.busy}
                   onClick={() => ask.prompt(
                     `删除家宽「${home.displayName}」？`,
                     '要先把绑着的客户都解开。确认后才会从库存去掉。',
-                    () => operationsApi.deleteHomeExit(home.id).then(() => homes.reload()),
+                    async () => { await operationsApi.deleteHomeExit(home.id); homes.reload(); },
                   )}
                 >删除</button>
               </div>

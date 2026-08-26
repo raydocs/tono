@@ -78,6 +78,11 @@ function quality(name: string, i: number) {
 
 const registered = new Set(['fast@example.com', 'slow@example.com', 'blocked@example.com', 'quiet@example.com', 'old@example.com']);
 const closed = new Set<string>();
+const extraBindings = new Map<string, { homeExitId: string; displayName: string; proxyName: string }>();
+const extraExpiry = new Map<string, number | null>();
+const extraActions: Array<{ id: string; userId: string; deviceId: string; action: string; status: string; createdAt: number }> = [];
+const extraHomes: Array<Record<string, unknown>> = [];
+
 
 export function matchDevOps(path: string, method = 'GET', body?: string): unknown {
   const clock = now();
@@ -86,28 +91,137 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
   const yaml = `proxies:\n${listed.filter((n) => n !== 'Catalog Only' || n === 'Catalog Only').filter((n) => n !== 'Buffalo · Erie').map((n) => `  - name: "${n}"\n    type: vless\n`).join('')}`;
 
   if (method !== 'GET') {
+    const payload = (() => {
+      try { return JSON.parse(body || '{}') as Record<string, unknown>; } catch { return {}; }
+    })();
     if (base === 'users/onboard') {
-      const email = (() => {
-        try { return String(JSON.parse(body || '{}').email || '').trim(); } catch { return ''; }
-      })();
+      const email = String(payload.email || '').trim();
       if (registered.has(email.toLowerCase())) {
         return {
           email,
           userId: `u-${email.split('@')[0]}`,
           allowlisted: true,
           exitIdentityIssued: true,
-          binding: null,
-          account: null,
+          binding: payload.homeExitId || payload.line ? {
+            userId: `u-${email.split('@')[0]}`,
+            homeExitId: String(payload.homeExitId || 'h-new'),
+            proxyName: 'home-bound',
+            displayName: '已绑家宽',
+            status: 'assigned',
+            createdAt: clock,
+            updatedAt: clock,
+          } : null,
+          account: payload.accountRef || payload.productAccountId ? {
+            id: 'pa-onboard', userId: `u-${email.split('@')[0]}`, product: 'claude',
+            accountRef: String(payload.accountRef || 'pooled'), status: 'assigned',
+            openedAt: clock, closedAt: null, closeReason: null, createdAt: clock, updatedAt: clock,
+          } : null,
           incomplete: [],
         };
       }
       return { email, userId: null, allowlisted: true, exitIdentityIssued: false, binding: null, account: null, incomplete: [] };
     }
-    if (base.endsWith('/close')) return { ok: true, email: 'dev@example.com', status: 'disabled' };
-    if (base.includes('home-exits')) return { created: [], skipped: [], failed: [], homeExit: { id: 'h-new', proxyName: 'new', displayName: '新线路', kind: 'socks5', status: 'active', createdAt: clock, updatedAt: clock }, binding: null, replaced: false };
-    if (base.includes('product-accounts')) return { account: { id: 'pa1', userId: 'u-slow', product: 'claude', accountRef: 'new-ref', status: 'assigned', openedAt: clock, closedAt: null, closeReason: null, createdAt: clock, updatedAt: clock } };
-    if (base.includes('device-actions')) return { action: { id: 'a1', userId: 'u-fast', deviceId: 'd1', action: 'diagnostic_snapshot', status: 'queued', createdAt: clock, expiresAt: clock + 60, deliveredAt: null, completedAt: null, result: null } };
-    return { ok: true };
+    if (base.endsWith('/close')) {
+      const userId = base.split('/')[1];
+      closed.add(userId);
+      return { ok: true, email: 'dev@example.com', status: 'disabled' };
+    }
+    if (base.endsWith('/home-binding') && (method === 'PUT' || method === 'POST')) {
+      const userId = base.split('/')[1];
+      const binding = {
+        userId,
+        homeExitId: String(payload.homeExitId || 'h-pool'),
+        proxyName: 'home-pool',
+        displayName: '闲置家宽',
+        kind: 'socks5',
+        socks5Host: '198.51.100.11',
+        socks5Port: 11080,
+        defaultProxyName: payload.defaultProxyName == null ? null : String(payload.defaultProxyName),
+        status: 'assigned',
+        homeStatus: 'assigned',
+        createdAt: clock,
+        updatedAt: clock,
+      };
+      extraBindings.set(userId, { homeExitId: binding.homeExitId, displayName: binding.displayName, proxyName: binding.proxyName });
+      return { binding };
+    }
+    if (base.endsWith('/home-binding') && method === 'DELETE') {
+      extraBindings.delete(base.split('/')[1]);
+      return { ok: true };
+    }
+    if (base.startsWith('users/') && method === 'PATCH') {
+      const userId = base.split('/')[1];
+      if ('expiresAt' in payload) extraExpiry.set(userId, payload.expiresAt == null ? null : Number(payload.expiresAt));
+      return { ok: true };
+    }
+    if (base === 'home-exits/import' || (base === 'home-exits' && method === 'POST' && Array.isArray((payload as { lines?: unknown }).lines))) {
+      const lines = (payload.lines as string[] | undefined) ?? [];
+      return {
+        created: lines.slice(0, 1).map((_, i) => ({
+          id: `h-imp-${clock}-${i}`, proxyName: `imp-${i}`, displayName: `导入 ${i + 1}`,
+          kind: 'socks5', status: 'active', createdAt: clock, updatedAt: clock, bindCount: 0,
+        })),
+        skipped: [],
+        failed: lines.length > 1 ? [{ message: '第二行格式不对' }] : [],
+      };
+    }
+    if (base === 'home-exits' && method === 'POST') {
+      const created = {
+        id: `h-new-${clock}`,
+        proxyName: String(payload.proxyName || 'new'),
+        displayName: String(payload.displayName || '新线路'),
+        kind: String(payload.kind || 'socks5'),
+        egressIpv4: payload.egressIpv4 ? String(payload.egressIpv4) : undefined,
+        notes: payload.notes ? String(payload.notes) : undefined,
+        socks5Host: payload.socks5Host ? String(payload.socks5Host) : undefined,
+        socks5Port: payload.socks5Port == null ? undefined : Number(payload.socks5Port),
+        status: 'active',
+        bindCount: 0,
+        createdAt: clock,
+        updatedAt: clock,
+      };
+      extraHomes.push(created);
+      return { homeExit: created };
+    }
+    if (base.startsWith('home-exits/') && method === 'PATCH') {
+      return { homeExit: { id: base.split('/')[1], proxyName: 'home-pool', displayName: '闲置家宽', kind: 'socks5', status: String(payload.status || 'active'), createdAt: clock, updatedAt: clock, bindCount: 0 } };
+    }
+    if (base.includes('product-accounts')) {
+      return {
+        account: {
+          id: 'pa1', userId: String(payload.userId || 'u-slow'), product: 'claude',
+          accountRef: String(payload.accountRef || 'new-ref'), status: 'assigned',
+          openedAt: clock - 10 * 86400, closedAt: null, closeReason: null, createdAt: clock, updatedAt: clock,
+        },
+        previous: undefined,
+      };
+    }
+    if (base === 'device-actions' && method === 'POST') {
+      const action = {
+        id: `a-${clock}`,
+        userId: 'u-fast',
+        deviceId: String(payload.deviceId || 'd1'),
+        action: String(payload.action || 'diagnostic_snapshot'),
+        status: 'queued',
+        createdAt: clock,
+        expiresAt: clock + 60,
+        deliveredAt: null,
+        completedAt: null,
+        result: null,
+      };
+      extraActions.unshift(action);
+      return { action };
+    }
+    if (base.startsWith('home-exits/assign') || base === 'home-exits/assign') {
+      return {
+        homeExit: { id: 'h-new', proxyName: 'new', displayName: '新线路', kind: 'socks5', status: 'active', createdAt: clock, updatedAt: clock, bindCount: 1 },
+        binding: { userId: String(payload.userId || 'u-slow'), homeExitId: 'h-new', proxyName: 'new', displayName: '新线路', status: 'assigned', createdAt: clock, updatedAt: clock },
+        created: true,
+        replaced: Boolean(payload.replace),
+        refreshQueued: 1,
+      };
+    }
+    return undefined;
   }
 
   if (base === 'dashboard') {
@@ -215,7 +329,23 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
   if (base === 'fleet-nodes') {
     return { nodes: [], sources: { catalog: { state: 'ready', updatedAt: clock } } };
   }
+  if (base === 'device-actions') {
+    return { actions: extraActions };
+  }
   if (base === 'users') {
+    const withExtras = (user: Record<string, unknown>) => {
+      const id = String(user.id);
+      const bound = extraBindings.get(id);
+      const expiry = extraExpiry.get(id);
+      return {
+        ...user,
+        status: closed.has(id) ? 'disabled' : user.status,
+        expiresAt: extraExpiry.has(id) ? expiry : user.expiresAt,
+        homeBinding: bound
+          ? { homeExitId: bound.homeExitId, proxyName: bound.proxyName, displayName: bound.displayName, status: 'assigned' }
+          : user.homeBinding,
+      };
+    };
     return {
       users: [
         { id: 'u-fast', email: 'fast@example.com', deviceLimit: 3, quotaBytes: 200 * 1024 ** 3, usageBytes: 20 * 1024 ** 3, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: 'c1', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h1', proxyName: 'home-1', displayName: '家宽 1', status: 'assigned' } },
@@ -223,7 +353,7 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
         { id: 'u-blocked', email: 'blocked@example.com', deviceLimit: 3, quotaBytes: null, usageBytes: 0, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: 'c2', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h2', proxyName: 'home-2', displayName: '家宽 2', status: 'assigned' } },
         { id: 'u-quiet', email: 'quiet@example.com', deviceLimit: 3, quotaBytes: 100 * 1024 ** 3, usageBytes: 1, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true }, homeBinding: null },
         { id: 'u-old', email: 'old@example.com', deviceLimit: 3, quotaBytes: 50 * 1024 ** 3, usageBytes: 10, suspended: false, status: 'active', createdAt: clock - 90 * 86400, expiresAt: clock - 86400, hasExitIdentity: true, product: { accountRef: 'c3', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: null },
-      ],
+      ].map(withExtras),
     };
   }
   if (base.startsWith('users/') && base.endsWith('/detail')) {
@@ -231,7 +361,14 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
     return {
       devices: [{ id: `dev-${id}`, name: 'Mac', status: 'active', createdAt: clock, updatedAt: clock }],
       diagnostics: [{ referenceCode: 'ABC123', receivedAt: clock - 100, clientVersion: '0.0.34', osVersion: 'macOS', reportJson: '{"ok":true,"email":"hidden"}' }],
-      product: { accounts: [], events: [], replaceCount: 0 },
+      product: {
+        accounts: id === 'u-fast' ? [{
+          id: 'pa-fast', userId: id, product: 'claude', accountRef: 'c1', status: 'assigned',
+          openedAt: clock - 12 * 86400, closedAt: null, closeReason: null, createdAt: clock, updatedAt: clock,
+        }] : [],
+        events: [{ id: 'ev1', accountId: 'pa-fast', userId: id, type: 'assigned', at: clock - 86400, detail: '从号池领出' }],
+        replaceCount: 0,
+      },
       heartbeat: null,
     };
   }
@@ -256,7 +393,13 @@ export function matchDevOps(path: string, method = 'GET', body?: string): unknow
     return {
       homeExits: [
         { id: 'h1', proxyName: 'home-1', displayName: '家宽 1', egressIpv4: '198.51.100.10', socks5Host: '198.51.100.10', socks5Port: 1080, kind: 'socks5', status: 'assigned', bindCount: 1, createdAt: clock, updatedAt: clock },
-        { id: 'h-pool', proxyName: 'home-pool', displayName: '闲置家宽', egressIpv4: '198.51.100.11', socks5Host: '198.51.100.11', socks5Port: 11080, kind: 'socks5', status: 'active', bindCount: 0, createdAt: clock, updatedAt: clock },
+        {
+          id: 'h-pool', proxyName: 'home-pool', displayName: '闲置家宽', egressIpv4: '198.51.100.11',
+          socks5Host: '198.51.100.11', socks5Port: 11080, kind: 'socks5', status: 'active', bindCount: 0,
+          notes: '备用', probeStatus: 'ok', probeUptimeRatio: 0.98, lastProbedAt: clock - 600,
+          createdAt: clock, updatedAt: clock,
+        },
+        ...extraHomes,
       ],
     };
   }

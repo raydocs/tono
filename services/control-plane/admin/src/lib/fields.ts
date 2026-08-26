@@ -30,6 +30,23 @@ export function gibibytes(text: string): Parsed {
 }
 
 /** A date box → unix seconds. Empty clears; anything unparseable refuses. */
+export function unixDateTimeLocal(text: string): Parsed {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const ms = new Date(trimmed).getTime();
+  if (!Number.isFinite(ms)) return 'invalid';
+  const seconds = Math.floor(ms / 1_000);
+  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 'invalid';
+}
+
+export function tcpPort(text: string): Parsed {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) return 'invalid';
+  return value;
+}
+
 export function unixDate(text: string): Parsed {
   const trimmed = text.trim();
   if (trimmed === '') return null;

@@ -136,8 +136,8 @@ export function FailuresPage() {
         open={Boolean(route.user)}
         focus={route.focus}
         publishedRevision={world.catalogRevision}
-        catalogYaml={world.catalog.state === 'ready' ? world.catalog.data.yaml : null}
-        homes={homes.state === 'ready' ? homes.data : []}
+        catalog={world.catalog}
+        homes={homes}
         onClose={closeDrawer}
         onChanged={() => { world.users.reload(); world.activity.reload(); }}
       />

@@ -146,16 +146,21 @@ export function Drawer({
   const titleId = useId();
   const panel = useRef<HTMLElement>(null);
   const closeBtn = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return undefined;
     const previously = document.activeElement as HTMLElement | null;
     const shell = document.querySelector('.shell');
+    const previousInert = shell?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
     shell?.setAttribute('inert', '');
     document.body.style.overflow = 'hidden';
     closeBtn.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose();
+        if (document.querySelector('[data-modal="confirm"]')) return;
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab' || !panel.current) return;
@@ -176,11 +181,12 @@ export function Drawer({
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
-      shell?.removeAttribute('inert');
-      document.body.style.overflow = '';
+      if (shell && !previousInert) shell.removeAttribute('inert');
+      else if (shell && previousInert) shell.setAttribute('inert', '');
+      document.body.style.overflow = previousOverflow;
       previously?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
     <div className="drawer-root">
@@ -222,11 +228,17 @@ export function Confirm({
   const titleId = useId();
   const panel = useRef<HTMLElement>(null);
   const confirmBtn = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  const busyRef = useRef(busy);
+  onCancelRef.current = onCancel;
+  busyRef.current = busy;
   useEffect(() => {
     if (!open) return undefined;
     const previously = document.activeElement as HTMLElement | null;
     const behind = document.querySelector<HTMLElement>('[data-modal="drawer"]')
       ?? document.querySelector<HTMLElement>('.shell');
+    const previousInert = behind?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
     behind?.setAttribute('inert', '');
     document.body.style.overflow = 'hidden';
     confirmBtn.current?.focus();
@@ -234,7 +246,7 @@ export function Confirm({
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (!busy) onCancel();
+        if (!busyRef.current) onCancelRef.current();
         return;
       }
       if (event.key !== 'Tab' || !panel.current) return;
@@ -255,12 +267,12 @@ export function Confirm({
     window.addEventListener('keydown', onKey, true);
     return () => {
       window.removeEventListener('keydown', onKey, true);
-      const drawer = document.querySelector<HTMLElement>('[data-modal="drawer"]');
-      if (drawer) drawer.removeAttribute('inert');
-      else behind?.removeAttribute('inert');
+      if (behind && !previousInert) behind.removeAttribute('inert');
+      else if (behind && previousInert) behind.setAttribute('inert', '');
+      document.body.style.overflow = previousOverflow;
       previously?.focus?.();
     };
-  }, [open, onCancel, busy]);
+  }, [open]);
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
     <div className="drawer-root" data-modal="confirm">

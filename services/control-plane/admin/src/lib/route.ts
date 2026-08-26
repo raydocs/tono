@@ -29,12 +29,22 @@ export function useOpsRoute(): {
     else setRouteState(resolved);
   }, []);
 
+  const openNode = useCallback((name: string, extra: Partial<OpsHash> = {}) => {
+    setRoute((current) => nextRouteForOpenNode(current, name, extra));
+  }, [setRoute]);
+  const openUser = useCallback((userId: string, extra: Partial<OpsHash> = {}) => {
+    setRoute((current) => nextRouteForOpenUser(current, userId, extra));
+  }, [setRoute]);
+  const closeDrawer = useCallback(() => {
+    setRoute((current) => ({ ...current, node: null, user: null }));
+  }, [setRoute]);
+
   return {
     route,
     page: route.page,
     setRoute,
-    openNode: (name, extra = {}) => setRoute((current) => nextRouteForOpenNode(current, name, extra)),
-    openUser: (userId, extra = {}) => setRoute((current) => nextRouteForOpenUser(current, userId, extra)),
-    closeDrawer: () => setRoute((current) => ({ ...current, node: null, user: null })),
+    openNode,
+    openUser,
+    closeDrawer,
   };
 }

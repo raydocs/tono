@@ -12,6 +12,13 @@ function telemetryLabel(person: OpsPersonView): string {
   return '离线';
 }
 
+function accountChip(person: OpsPersonView) {
+  if (person.accountState === 'present' && person.user) return null;
+  if (person.accountState === 'loading') return '客户资料加载中';
+  if (person.accountState === 'unavailable') return '客户资料不可用';
+  return '心跳身份未进入客户库';
+}
+
 export function PersonRow({ person, selected, onOpen }: {
   person: OpsPersonView;
   selected?: boolean;
@@ -24,7 +31,7 @@ export function PersonRow({ person, selected, onOpen }: {
       <div className="person-id">
         <strong>{privacy.email(person.email)}</strong>
         <div className="person-tags">
-          {person.user ? <Status value={person.user.status} /> : <span className="chip chip-muted">心跳身份未进入客户库</span>}
+          {person.accountState === 'present' && person.user ? <Status value={person.user.status} /> : <span className="chip chip-muted">{accountChip(person)}</span>}
           {person.expired && <span className="expired-flag">已过期</span>}
           {person.expiring && !person.expired && <span className="chip chip-warn">将到期</span>}
           {person.chores.map((chore) => <span className="chip chip-muted" key={chore}>{chore}</span>)}
@@ -40,7 +47,7 @@ export function PersonRow({ person, selected, onOpen }: {
           <>
             <strong>{person.selectedServer ?? '未选节点'}</strong>
             {person.selectedServer && (
-              <span className={`chip chip-${nodeHealthTone(person.nodeHealth)}`}>
+              <span className={`chip chip-wrap chip-${nodeHealthTone(person.nodeHealth)}`}>
                 {person.nodeHealthLabel || nodeHealthLabel(person.nodeHealth)}
               </span>
             )}
@@ -55,7 +62,7 @@ export function PersonRow({ person, selected, onOpen }: {
         )}
       </div>
       <div className="person-usage">
-        {person.user ? (
+        {person.accountState === 'present' && person.user ? (
           <>
             <span className="mono">
               {formatBytes(person.usageBytes)}
@@ -68,7 +75,11 @@ export function PersonRow({ person, selected, onOpen }: {
             )}
             {person.catalogLag.state === 'behind' && <small className="chip chip-risk">目录落后 {person.catalogLag.by}</small>}
           </>
-        ) : <span className="muted">无账户资料</span>}
+        ) : (
+          <span className="muted">
+            {person.accountState === 'loading' ? '客户资料加载中' : person.accountState === 'unavailable' ? '客户资料不可用' : '无账户资料'}
+          </span>
+        )}
       </div>
       <div className="muted">{path?.osVersion}</div>
     </button>

@@ -214,30 +214,57 @@ function App() {
                 {health[0]}
               </span>
             )}
-            <label className="muted">
-              <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
-              隐私
-            </label>
-            <label className="muted">
-              主题
-              <select className="control-select" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
-            </label>
-            <label className="muted">
-              自动刷新
-              <select
-                className="control-select"
-                value={refreshMs}
-                onChange={(event) => setRefreshMs(Number(event.target.value))}
-              >
-                {REFRESH_CHOICES.map((choice) => (
-                  <option key={choice.ms} value={choice.ms}>{choice.label}</option>
-                ))}
-              </select>
-            </label>
+            <div className="topbar-extras">
+              <label className="muted">
+                <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+                隐私
+              </label>
+              <label className="muted">
+                主题
+                <select className="control-select" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
+                  <option value="system">跟随系统</option>
+                  <option value="light">浅色</option>
+                  <option value="dark">深色</option>
+                </select>
+              </label>
+              <label className="muted">
+                自动刷新
+                <select
+                  className="control-select"
+                  value={refreshMs}
+                  onChange={(event) => setRefreshMs(Number(event.target.value))}
+                >
+                  {REFRESH_CHOICES.map((choice) => (
+                    <option key={choice.ms} value={choice.ms}>{choice.label}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <details className="topbar-compact-more">
+              <summary>更多</summary>
+              <div className="topbar-more-panel">
+                <label className="muted">
+                  <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+                  隐私
+                </label>
+                <label className="muted">
+                  主题
+                  <select className="control-select" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
+                    <option value="system">跟随系统</option>
+                    <option value="light">浅色</option>
+                    <option value="dark">深色</option>
+                  </select>
+                </label>
+                <label className="muted">
+                  自动刷新
+                  <select className="control-select" value={refreshMs} onChange={(event) => setRefreshMs(Number(event.target.value))}>
+                    {REFRESH_CHOICES.map((choice) => (
+                      <option key={choice.ms} value={choice.ms}>{choice.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </details>
             <span className="badge">已登录</span>
           </div>
         </header>

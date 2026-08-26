@@ -81,10 +81,13 @@ export type OpsPersonView = {
   hasExitIdentity: boolean;
   hasHome: boolean;
   hasClaude: boolean;
+  accountState: AccountState;
   chores: string[];
   /** @deprecated use latestActivity */
   activity: ActivityUserDto | null;
 };
+
+export type AccountState = 'loading' | 'unavailable' | 'present' | 'absent';
 
 export function nodeDot(node: {
   blockStatus: string;
@@ -296,6 +299,7 @@ export function sortOpsNodes(nodes: OpsNodeView[]): OpsNodeView[] {
 
 export function assembleOpsPeople(input: {
   users?: UserDto[] | null;
+  usersSource?: SourceKind;
   activity?: ActivityUserDto[] | null;
   telemetrySource: TelemetrySource;
   catalogRevision?: number | null;
@@ -310,13 +314,16 @@ export function assembleOpsPeople(input: {
     }
   }
 
+  const usersReady = ready(input.usersSource);
   const ids = new Set<string>();
-  for (const user of input.users ?? []) ids.add(user.id);
+  if (usersReady) {
+    for (const user of input.users ?? []) ids.add(user.id);
+  }
   if (input.telemetrySource === 'ready') {
     for (const userId of activityByUser.keys()) ids.add(userId);
   }
 
-  const userBy = new Map((input.users ?? []).map((user) => [user.id, user]));
+  const userBy = new Map((usersReady ? input.users ?? [] : []).map((user) => [user.id, user]));
 
   return [...ids].map((userId) => {
     const user = userBy.get(userId) ?? null;
@@ -350,11 +357,13 @@ export function assembleOpsPeople(input: {
     const hasExitIdentity = Boolean(user?.hasExitIdentity);
     const hasHome = Boolean(user?.homeBinding);
     const hasClaude = Boolean(user && !user.product?.incomplete && user.product?.accountRef);
+    const accountState: AccountState = !usersReady
+      ? (input.usersSource === 'unavailable' ? 'unavailable' : 'loading')
+      : user ? 'present' : 'absent';
     const chores: string[] = [];
-    if (user && !hasExitIdentity) chores.push('没凭证');
-    if (user?.product?.incomplete) chores.push('Claude');
-    if (user && !hasHome) chores.push('家宽');
-    if (lag.state === 'behind') chores.push(`目录落后 ${lag.by}`);
+    if (accountState === 'present' && user && !hasExitIdentity) chores.push('没凭证');
+    if (accountState === 'present' && user?.product?.incomplete) chores.push('没开 Claude');
+    if (accountState === 'present' && user && !hasHome) chores.push('家宽');
     return {
       userId,
       email: user?.email ?? latest?.email ?? userId,
@@ -387,6 +396,7 @@ export function assembleOpsPeople(input: {
       hasExitIdentity,
       hasHome,
       hasClaude,
+      accountState,
       chores,
       activity: latest,
     };

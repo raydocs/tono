@@ -1,7 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { operationsApi, type HomeExitDto, type ProductAccountDto } from '../../api';
-import { Drawer, Banner } from '../../ui';
+import type { Live } from '../../hooks';
+import { Drawer, Banner, Skeleton, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
+import { useMutation } from './mutate';
 
 type OnboardResult = {
   email: string;
@@ -44,6 +46,10 @@ export function OnboardChecklist({ result }: { result: OnboardResult }) {
   );
 }
 
+function emptyExtras() {
+  return { line: '', homeExitId: '', accountRef: '', productAccountId: '', contact: '' };
+}
+
 export function OnboardDrawer({
   open,
   homes,
@@ -52,37 +58,51 @@ export function OnboardDrawer({
   onDone,
 }: {
   open: boolean;
-  homes: HomeExitDto[];
-  pooled: ProductAccountDto[];
+  homes: Live<HomeExitDto[]>;
+  pooled: Live<ProductAccountDto[]>;
   onClose: () => void;
   onDone: () => void;
 }) {
   const privacy = usePrivacy();
+  const mutate = useMutation();
   const [email, setEmail] = useState('');
-  const [line, setLine] = useState('');
-  const [homeExitId, setHomeExitId] = useState('');
-  const [accountRef, setAccountRef] = useState('');
-  const [productAccountId, setProductAccountId] = useState('');
-  const [contact, setContact] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [extras, setExtras] = useState(emptyExtras);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OnboardResult | null>(null);
-  const unusedHomes = homes.filter((home) => home.status === 'active' && (home.bindCount ?? 0) === 0);
+  const unusedHomes = homes.state === 'ready'
+    ? homes.data.filter((home) => home.status === 'active' && (home.bindCount ?? 0) === 0)
+    : [];
+  const pooledRows = pooled.state === 'ready' ? pooled.data : [];
+
+  useEffect(() => {
+    if (open) return;
+    setEmail('');
+    setExtras(emptyExtras());
+    setResult(null);
+    setError(null);
+  }, [open]);
+
+  function changeEmail(value: string) {
+    setEmail(value);
+    setResult(null);
+    setExtras(emptyExtras());
+  }
 
   async function submit(event: FormEvent, withExtras: boolean) {
     event.preventDefault();
-    setBusy(true);
     setError(null);
-    try {
+    await mutate.run(async () => {
       const response = await operationsApi.onboardUser({
         email: email.trim(),
-        line: withExtras ? (line.trim() || undefined) : undefined,
-        homeExitId: withExtras ? (homeExitId || undefined) : undefined,
-        accountRef: withExtras ? (accountRef.trim() || undefined) : undefined,
-        productAccountId: withExtras ? (productAccountId || undefined) : undefined,
-        contact: withExtras ? (contact.trim() || undefined) : undefined,
+        line: withExtras && extras.line.trim() ? extras.line.trim() : undefined,
+        homeExitId: withExtras && extras.homeExitId ? extras.homeExitId : undefined,
+        accountRef: withExtras && extras.accountRef.trim() ? extras.accountRef.trim() : undefined,
+        productAccountId: withExtras && extras.productAccountId ? extras.productAccountId : undefined,
+        contact: withExtras && extras.contact.trim() ? extras.contact.trim() : undefined,
       });
-      const extrasOffered = withExtras && Boolean(line.trim() || homeExitId || accountRef.trim() || productAccountId || contact.trim());
+      const extrasOffered = withExtras && Boolean(
+        extras.line.trim() || extras.homeExitId || extras.accountRef.trim() || extras.productAccountId || extras.contact.trim(),
+      );
       setResult({
         email: response.email,
         allowlisted: response.allowlisted,
@@ -92,48 +112,61 @@ export function OnboardDrawer({
         hasClaude: response.account != null,
         extrasIgnored: extrasOffered && response.userId == null,
       });
+      if (withExtras && response.userId) setExtras(emptyExtras());
       onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const waiting = result && !result.registered;
 
   return (
     <Drawer open={open} title="开通客户" subtitle="先让客户能登录，再绑家宽和 Claude" onClose={onClose}>
-      <Banner message={error} tone="error" />
-      <form className="onboard-steps" onSubmit={(event) => submit(event, Boolean(result?.registered))}>
+      <Banner message={error || mutate.error} tone="error" />
+      <form className="onboard-steps" onSubmit={(event) => void submit(event, Boolean(result?.registered))}>
         <label>
           <span>客户邮箱</span>
-          <input className="input" type="email" required value={email} onChange={(event) => { setEmail(event.target.value); setResult(null); }} placeholder="用来收验证码的邮箱" disabled={busy} />
+          <input className="input" type="email" required value={email} onChange={(event) => changeEmail(event.target.value)} placeholder="用来收验证码的邮箱" disabled={mutate.busy} />
         </label>
         {!result && (
-          <button className="btn" type="submit" disabled={busy || !email.trim()}>{busy ? '保存中…' : '保存登录资格'}</button>
+          <button className="btn" type="submit" disabled={mutate.busy || !email.trim()}>{mutate.busy ? '保存中…' : '保存登录资格'}</button>
         )}
         {waiting && (
           <div className="onboard-result">
             <strong>{privacy.email(result.email)}</strong>
             <OnboardChecklist result={result} />
             <p>请客户先在 App 里用这个邮箱收验证码登录。登录完成后再点一次保存，才会收集家宽和 Claude。</p>
-            <button className="btn" type="submit" disabled={busy}>我已经登录，再检查一次</button>
+            <button className="btn" type="submit" disabled={mutate.busy}>我已经登录，再检查一次</button>
           </div>
         )}
         {result?.registered && (
           <div className="onboard-result">
             <strong>{privacy.email(result.email)}</strong>
             <OnboardChecklist result={result} />
+            {homes.state === 'loading' && <Skeleton label="家宽库存" />}
+            {homes.state === 'error' && <Unavailable title="家宽库存不可用" detail={homes.message} />}
+            {pooled.state === 'loading' && <Skeleton label="号池" />}
+            {pooled.state === 'error' && <Unavailable title="号池不可用" detail={pooled.message} />}
             <div className="form-grid">
               <label>
                 <span>家宽（直接贴过来）</span>
-                <input className="input" value={line} onChange={(event) => setLine(event.target.value)} placeholder="host:port:user:pass" disabled={busy} spellCheck={false} />
+                <input
+                  className="input"
+                  value={extras.line}
+                  onChange={(event) => setExtras({ ...extras, line: event.target.value, homeExitId: event.target.value ? '' : extras.homeExitId })}
+                  placeholder="host:port:user:pass"
+                  disabled={mutate.busy}
+                  spellCheck={false}
+                />
               </label>
               <label>
                 <span>或从库存里选</span>
-                <select className="input" value={homeExitId} onChange={(event) => setHomeExitId(event.target.value)} disabled={busy || unusedHomes.length === 0}>
-                  <option value="">{unusedHomes.length ? '先不选' : '库存是空的'}</option>
+                <select
+                  className="input"
+                  value={extras.homeExitId}
+                  onChange={(event) => setExtras({ ...extras, homeExitId: event.target.value, line: event.target.value ? '' : extras.line })}
+                  disabled={mutate.busy || homes.state !== 'ready'}
+                >
+                  <option value="">{homes.state !== 'ready' ? '库存未就绪' : unusedHomes.length ? '先不选' : '库存是空的'}</option>
                   {unusedHomes.map((home) => (
                     <option key={home.id} value={home.id}>{home.displayName} · {privacy.ip(home.socks5Host)}</option>
                   ))}
@@ -141,23 +174,33 @@ export function OnboardDrawer({
               </label>
               <label>
                 <span>Claude 账号</span>
-                <input className="input" value={accountRef} onChange={(event) => setAccountRef(event.target.value)} disabled={busy} />
+                <input
+                  className="input"
+                  value={extras.accountRef}
+                  onChange={(event) => setExtras({ ...extras, accountRef: event.target.value, productAccountId: event.target.value ? '' : extras.productAccountId })}
+                  disabled={mutate.busy}
+                />
               </label>
               <label>
                 <span>或从号池里选</span>
-                <select className="input" value={productAccountId} onChange={(event) => setProductAccountId(event.target.value)} disabled={busy || pooled.length === 0}>
-                  <option value="">{pooled.length ? '先不选' : '号池是空的'}</option>
-                  {pooled.map((account) => (
+                <select
+                  className="input"
+                  value={extras.productAccountId}
+                  onChange={(event) => setExtras({ ...extras, productAccountId: event.target.value, accountRef: event.target.value ? '' : extras.accountRef })}
+                  disabled={mutate.busy || pooled.state !== 'ready'}
+                >
+                  <option value="">{pooled.state !== 'ready' ? '号池未就绪' : pooledRows.length ? '先不选' : '号池是空的'}</option>
+                  {pooledRows.map((account) => (
                     <option key={account.id} value={account.id}>{privacy.secret(account.accountRef)}</option>
                   ))}
                 </select>
               </label>
               <label>
                 <span>微信或备注</span>
-                <input className="input" value={contact} onChange={(event) => setContact(event.target.value)} disabled={busy} />
+                <input className="input" value={extras.contact} onChange={(event) => setExtras({ ...extras, contact: event.target.value })} disabled={mutate.busy} />
               </label>
             </div>
-            <button className="btn" type="submit" disabled={busy}>保存家宽 / Claude</button>
+            <button className="btn" type="submit" disabled={mutate.busy}>保存家宽 / Claude</button>
           </div>
         )}
       </form>

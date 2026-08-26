@@ -32,7 +32,12 @@ export function CustomerDiagnostics({
         <div className="diagnostic-card">
           <span>最新心跳设备</span>
           <strong>{latest?.osVersion || '未知设备'}</strong>
-          <small>{latest ? timeAgo(latest.lastSeenAt) : '—'} · {latest?.uiState || '未上报屏幕'}</small>
+          <small>
+            {latest ? timeAgo(latest.lastSeenAt) : '—'}
+            {latest?.clientVersion ? ` · ${latest.clientVersion}` : ''}
+            {latest?.osVersion ? ` · ${latest.osVersion}` : ''}
+            {' · '}{latest?.uiState || '未上报屏幕'}
+          </small>
         </div>
         <div className="diagnostic-card">
           <span>路径所用设备</span>

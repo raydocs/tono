@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { catalogProxyNames } from '../admin/src/lib/catalog';
 import { formatBytes } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
-import { gibibytes, unixDate } from '../admin/src/lib/fields';
+import { gibibytes, tcpPort, unixDate, unixDateTimeLocal } from '../admin/src/lib/fields';
+import { acceptIfCurrent, bindDetail } from '../admin/src/lib/bound-detail';
 import { dataHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
 import { carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
@@ -824,6 +825,49 @@ describe('customer telemetry and path activity', () => {
     expect(personMatchesFocus(people[0], 'path')).toBe(true);
     expect(personMatchesFocus(people[0], 'claude')).toBe(true);
     expect(people[0].catalogLag.state).toBe('behind');
+    expect(people[0].chores).toContain('没开 Claude');
+    expect(people[0].chores.some((chore) => chore.includes('目录落后'))).toBe(false);
+    expect(people[0].accountState).toBe('present');
+  });
+
+  it('does not call heartbeat-only people ghosts while the users source is loading or down', () => {
+    const loading = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      usersSource: 'loading',
+      activity: [activity({ userId: 'ghost', email: 'g@x' })],
+    });
+    expect(loading[0].accountState).toBe('loading');
+    expect(loading[0].user).toBeNull();
+    const down = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      usersSource: 'unavailable',
+      activity: [activity({ userId: 'ghost', email: 'g@x' })],
+    });
+    expect(down[0].accountState).toBe('unavailable');
+    const ready = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      usersSource: 'ready',
+      users: [],
+      activity: [activity({ userId: 'ghost', email: 'g@x' })],
+    });
+    expect(ready[0].accountState).toBe('absent');
+  });
+
+  it('drops a late userDetail payload that belongs to another customer', () => {
+    const bound = bindDetail('user-a', { devices: [{ id: 'dev-a' }] });
+    expect(acceptIfCurrent('user-b', bound.userId, bound)).toBeNull();
+    expect(acceptIfCurrent('user-a', bound.userId, bound)?.devices[0].id).toBe('dev-a');
+  });
+
+  it('rejects invalid datetime-local and ports instead of sending NaN', () => {
+    expect(unixDateTimeLocal('not-a-date')).toBe('invalid');
+    expect(Number.isFinite(unixDateTimeLocal('2026-08-26T12:00') as number)).toBe(true);
+    expect(tcpPort('0')).toBe('invalid');
+    expect(tcpPort('65536')).toBe('invalid');
+    expect(tcpPort('443')).toBe(443);
   });
 
   it('does not carry a monitor focus into a user drawer', () => {
@@ -860,6 +904,10 @@ describe('dev onboard fixture shapes', () => {
       userId: 'u-fast', exitIdentityIssued: true,
     });
     expect(matchDevOps('users/u-fast/detail', 'GET')).toMatchObject({ devices: expect.any(Array), diagnostics: expect.any(Array) });
+    expect(matchDevOps('users/u-slow/home-binding', 'PUT', JSON.stringify({ homeExitId: 'h-pool' }))).toMatchObject({
+      binding: { displayName: expect.any(String), homeExitId: 'h-pool' },
+    });
+    expect(matchDevOps('mystery', 'POST', '{}')).toBeUndefined();
   });
 });
 
