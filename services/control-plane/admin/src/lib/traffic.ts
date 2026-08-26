@@ -89,17 +89,15 @@ export function nodeRateSeries(
 
 export function aggregateFleetRates(
   series: Record<string, RatePoint[]>,
-  expectedNodes: number,
-): Array<RatePoint & { contributing: number; expected: number }> {
-  const byTime = new Map<number, { inSum: number; outSum: number; inN: number; outN: number; contributing: number; dt: number }>();
+  expectedNodes: number | null,
+): Array<RatePoint & { contributingIn: number; contributingOut: number; expected: number | null }> {
+  const byTime = new Map<number, { inSum: number; outSum: number; inN: number; outN: number }>();
   for (const points of Object.values(series)) {
     const seen = new Set<number>();
     for (const point of points) {
       if (seen.has(point.t)) continue;
       seen.add(point.t);
-      const bucket = byTime.get(point.t) ?? { inSum: 0, outSum: 0, inN: 0, outN: 0, contributing: 0, dt: point.dt };
-      bucket.contributing += 1;
-      bucket.dt = point.dt;
+      const bucket = byTime.get(point.t) ?? { inSum: 0, outSum: 0, inN: 0, outN: 0 };
       if (point.inBps != null) {
         bucket.inSum += point.inBps;
         bucket.inN += 1;
@@ -115,12 +113,63 @@ export function aggregateFleetRates(
     .sort((a, b) => a[0] - b[0])
     .map(([t, bucket]) => ({
       t,
-      dt: bucket.dt,
+      dt: 0,
       inBps: bucket.inN ? bucket.inSum : null,
       outBps: bucket.outN ? bucket.outSum : null,
-      contributing: bucket.contributing,
+      contributingIn: bucket.inN,
+      contributingOut: bucket.outN,
       expected: expectedNodes,
     }));
+}
+
+/** Bytes from this node's own counter deltas. Never use a fleet-wide dt. */
+export function nodeByteTransfer(
+  points: Array<{ t: number; netIn: number | null; netOut: number | null }>,
+  resolutionSeconds: number,
+): { inBytes: number | null; outBytes: number | null } {
+  const maxGap = Math.max(resolutionSeconds * 3, resolutionSeconds + 1);
+  let inBytes = 0;
+  let outBytes = 0;
+  let inAny = false;
+  let outAny = false;
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = points[i - 1];
+    const next = points[i];
+    const inBps = counterDeltaBps({ t: prev.t, value: prev.netIn }, { t: next.t, value: next.netIn }, maxGap);
+    const outBps = counterDeltaBps({ t: prev.t, value: prev.netOut }, { t: next.t, value: next.netOut }, maxGap);
+    const dt = next.t - prev.t;
+    if (inBps != null && dt > 0) {
+      inBytes += inBps * dt;
+      inAny = true;
+    }
+    if (outBps != null && dt > 0) {
+      outBytes += outBps * dt;
+      outAny = true;
+    }
+  }
+  return { inBytes: inAny ? inBytes : null, outBytes: outAny ? outBytes : null };
+}
+
+export function fleetByteTransfer(
+  series: Record<string, Array<{ t: number; netIn: number | null; netOut: number | null }>>,
+  resolutionSeconds: number,
+): { inBytes: number | null; outBytes: number | null } {
+  let inBytes = 0;
+  let outBytes = 0;
+  let inAny = false;
+  let outAny = false;
+  for (const points of Object.values(series)) {
+    const moved = nodeByteTransfer(points, resolutionSeconds);
+    if (moved.inBytes != null) {
+      inBytes += moved.inBytes;
+      inAny = true;
+    }
+    if (moved.outBytes != null) {
+      outBytes += moved.outBytes;
+      outAny = true;
+    }
+  }
+  return { inBytes: inAny ? inBytes : null, outBytes: outAny ? outBytes : null };
 }
 
 export function rangeTransfer(points: RatePoint[]): { inBytes: number | null; outBytes: number | null } {
@@ -151,10 +200,12 @@ export function latestValidRate(points: RatePoint[]): RatePoint | null {
 }
 
 export function coverageByBucket(
-  points: Array<{ contributing: number; expected: number }>,
-): { present: number; expected: number; ratio: number | null } {
-  if (points.length === 0) return { present: 0, expected: 0, ratio: null };
-  const expected = points[0].expected;
-  const present = Math.max(0, ...points.map((point) => point.contributing));
-  return { present, expected, ratio: expected > 0 ? present / expected : null };
+  points: Array<{ contributingIn: number; contributingOut: number; expected: number | null }>,
+): { inPresent: number; outPresent: number; expected: number | null } {
+  if (points.length === 0) return { inPresent: 0, outPresent: 0, expected: null };
+  return {
+    inPresent: Math.max(0, ...points.map((point) => point.contributingIn)),
+    outPresent: Math.max(0, ...points.map((point) => point.contributingOut)),
+    expected: points[0].expected,
+  };
 }

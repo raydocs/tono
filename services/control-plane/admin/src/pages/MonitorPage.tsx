@@ -326,7 +326,7 @@ export function MonitorPage() {
         key={`${selected?.name ?? 'none'}:${selected?.profile?.id ?? 'new'}`}
         node={selected}
         open={Boolean(route.node)}
-        metrics={world.metrics.state === 'ready' ? world.metrics.data : null}
+        metrics={world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready' ? world.metrics.data : null}
         onClose={closeDrawer}
         onChanged={() => { world.live.reload(); world.profiles.reload(); world.fleet.reload(); world.catalog.reload(); world.activity.reload(); }}
       />
@@ -346,7 +346,9 @@ export function MonitorPage() {
         </details>
         <details>
           <summary>全机队 24h 趋势</summary>
-          {world.metrics.state === 'ready' ? <AgentTrends metrics={world.metrics.data} /> : <p className="muted">趋势还没回来。</p>}
+          {world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready'
+            ? <AgentTrends metrics={world.metrics.data} />
+            : <p className="muted">24h 趋势还没绑定到当前快照。</p>}
         </details>
         <details>
           <summary>补账单资料</summary>

@@ -20,7 +20,7 @@ export function RateChart({
   summary,
   coverage,
 }: {
-  points: Array<RatePoint & { contributing?: number; expected?: number }>;
+  points: Array<RatePoint & { contributingIn?: number; contributingOut?: number; expected?: number | null }>;
   summary: string;
   coverage?: string;
 }) {
@@ -62,7 +62,7 @@ export function RateChart({
             {timestamp(hovered.t)}
             {hovered.inBps != null ? ` · 下行 ${formatBytes(hovered.inBps)}/s` : ' · 下行缺口'}
             {hovered.outBps != null ? ` · 上行 ${formatBytes(hovered.outBps)}/s` : ' · 上行缺口'}
-            {hovered.contributing != null && hovered.expected != null ? ` · 覆盖 ${hovered.contributing}/${hovered.expected}` : ''}
+            {hovered.expected != null ? ` · 下行 ${hovered.contributingIn ?? 0}/${hovered.expected} · 上行 ${hovered.contributingOut ?? 0}/${hovered.expected}` : ''}
           </p>
         )}
       </figcaption>
