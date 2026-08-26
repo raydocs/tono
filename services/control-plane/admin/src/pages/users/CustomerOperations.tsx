@@ -66,7 +66,7 @@ export function CustomerOperations({
               `${privacy.email(user.email)} +30 天`,
             )}
           >+30 天</button>
-          <input className="input compact" type="datetime-local" value={expiryPick} onChange={(event) => setExpiryPick(event.target.value)} />
+          <input className="input compact" type="datetime-local" aria-label="指定到期时间" value={expiryPick} onChange={(event) => setExpiryPick(event.target.value)} />
           <button
             type="button"
             className="btn btn-outline btn-sm"

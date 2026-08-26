@@ -223,9 +223,24 @@ async function rollupResolution(
   // five minutes at a time, so without this the boundary lands inside a bucket
   // on essentially every pass.
   const cutoff = Math.floor(olderThan / toResolution) * toResolution;
+  // net_in/net_out are cumulative counters, not gauges. A node restart can make
+  // them smaller inside a bucket, so MAX(value) is not the bucket's closing
+  // counter. Rank by time and carry the final observation into the next tier.
   if (source === 'samples') {
     await db.prepare(
-      `INSERT INTO operations_agent_rollups(
+      `WITH ranked AS (
+         SELECT
+           *,
+           (observed_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER) AS target_bucket,
+           ROW_NUMBER() OVER (
+             PARTITION BY node_name,
+               (observed_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
+             ORDER BY observed_at DESC
+           ) AS bucket_rank
+         FROM operations_agent_samples
+         WHERE observed_at < ?
+       )
+       INSERT INTO operations_agent_rollups(
          node_name, resolution_seconds, bucket_at, samples,
          cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
          load1_avg, net_in_last, net_out_last, swap_used_avg, tcp_avg
@@ -233,7 +248,7 @@ async function rollupResolution(
        SELECT
          node_name,
          ?,
-         (observed_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER),
+         target_bucket,
          COUNT(*),
          AVG(cpu),
          AVG(mem_used),
@@ -241,13 +256,12 @@ async function rollupResolution(
          AVG(disk_used),
          MAX(disk_total),
          AVG(load1),
-         MAX(net_in),
-         MAX(net_out),
+         MAX(CASE WHEN bucket_rank = 1 THEN net_in END),
+         MAX(CASE WHEN bucket_rank = 1 THEN net_out END),
          AVG(swap_used),
          AVG(tcp_connections)
-       FROM operations_agent_samples
-       WHERE observed_at < ?
-       GROUP BY node_name, (observed_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
+       FROM ranked
+       GROUP BY node_name, target_bucket
        ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
          samples = excluded.samples,
          cpu_avg = excluded.cpu_avg,
@@ -261,13 +275,29 @@ async function rollupResolution(
          swap_used_avg = excluded.swap_used_avg,
          tcp_avg = excluded.tcp_avg
        WHERE excluded.samples >= operations_agent_rollups.samples`,
-    ).bind(toResolution, toResolution, toResolution, cutoff, toResolution, toResolution).run();
+    ).bind(
+      toResolution, toResolution,
+      toResolution, toResolution,
+      cutoff, toResolution,
+    ).run();
     await db.prepare('DELETE FROM operations_agent_samples WHERE observed_at < ?')
       .bind(cutoff).run();
     return;
   }
   await db.prepare(
-    `INSERT INTO operations_agent_rollups(
+    `WITH ranked AS (
+       SELECT
+         *,
+         (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER) AS target_bucket,
+         ROW_NUMBER() OVER (
+           PARTITION BY node_name,
+             (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
+           ORDER BY bucket_at DESC
+         ) AS bucket_rank
+       FROM operations_agent_rollups
+       WHERE resolution_seconds = ? AND bucket_at < ?
+     )
+     INSERT INTO operations_agent_rollups(
        node_name, resolution_seconds, bucket_at, samples,
        cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
        load1_avg, net_in_last, net_out_last, swap_used_avg, tcp_avg
@@ -275,7 +305,7 @@ async function rollupResolution(
      SELECT
        node_name,
        ?,
-       (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER),
+       target_bucket,
        SUM(samples),
        AVG(cpu_avg),
        AVG(mem_used_avg),
@@ -283,13 +313,12 @@ async function rollupResolution(
        AVG(disk_used_avg),
        MAX(disk_total),
        AVG(load1_avg),
-       MAX(net_in_last),
-       MAX(net_out_last),
+       MAX(CASE WHEN bucket_rank = 1 THEN net_in_last END),
+       MAX(CASE WHEN bucket_rank = 1 THEN net_out_last END),
        AVG(swap_used_avg),
        AVG(tcp_avg)
-     FROM operations_agent_rollups
-     WHERE resolution_seconds = ? AND bucket_at < ?
-     GROUP BY node_name, (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER)
+     FROM ranked
+     GROUP BY node_name, target_bucket
      ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
        samples = excluded.samples,
        cpu_avg = excluded.cpu_avg,
@@ -303,9 +332,9 @@ async function rollupResolution(
        swap_used_avg = excluded.swap_used_avg,
        tcp_avg = excluded.tcp_avg`,
   ).bind(
-    toResolution, toResolution, toResolution,
-    fromResolution, cutoff,
     toResolution, toResolution,
+    toResolution, toResolution,
+    fromResolution, cutoff, toResolution,
   ).run();
   await db.prepare(
     'DELETE FROM operations_agent_rollups WHERE resolution_seconds = ? AND bucket_at < ?',

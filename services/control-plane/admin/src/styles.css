@@ -450,6 +450,8 @@ p { text-wrap: pretty; }
   color: hsl(var(--muted-foreground));
 }
 .health-compact.bad { color: hsl(var(--sev-fg)); }
+.health-compact.warn { color: hsl(var(--warn-fg)); }
+.health-mobile { display: none; }
 
 .search-wrap { position: relative; flex: 0 1 15rem; min-width: 0; }
 .search-input { width: 100%; min-width: 0; height: 2rem; }
@@ -1329,14 +1331,14 @@ tbody tr:last-child td { border-bottom: 0; }
 .drawer-head p { margin: 0.15rem 0 0; color: hsl(var(--muted-foreground)); font-size: var(--t-base); }
 .drawer-body { flex: 1; overflow: auto; padding: var(--s5) var(--s5) var(--s8); }
 .drawer-section { margin-bottom: var(--s5); }
-.drawer-section h3 {
+.drawer-section h3, .drawer-fold-title {
   margin: 0 0 var(--s2);
   font-size: var(--t-xs);
   font-weight: 650;
   letter-spacing: 0.06em;
   color: hsl(var(--faint-foreground));
 }
-.drawer-section summary h3 { display: inline; }
+.drawer-fold-title { display: inline; }
 .drawer-section > p { margin: 0 0 var(--s1); font-size: var(--t-md); }
 .drawer-section > p:first-of-type { font-size: var(--t-lg); font-weight: 600; }
 .drawer-section > p.muted:first-of-type { font-size: var(--t-md); font-weight: 400; }
@@ -1409,18 +1411,18 @@ a.chip-link:hover { background: var(--hover-bg); color: hsl(var(--foreground)); 
   color: hsl(var(--muted-foreground));
   min-width: 0;
 }
-/* The head row is the whole affordance, so the marker sits inside it. */
+/* The head row is the whole affordance. The explicit aria-hidden marker keeps
+   VoiceOver from reading a decorative "triangle" after every section name. */
 .drawer-fold > summary { cursor: pointer; list-style: none; border-radius: var(--r-sm); }
 .drawer-fold > summary::-webkit-details-marker { display: none; }
-.drawer-fold > summary .drawer-head-row::after {
-  content: '▸';
+.drawer-fold-chevron {
   margin-left: var(--s2);
   color: hsl(var(--faint-foreground));
   font-size: var(--t-sm);
   transition: transform var(--dur) var(--ease);
 }
-.drawer-fold[open] > summary .drawer-head-row::after { transform: rotate(90deg); }
-.drawer-fold > summary:hover .drawer-head-row h3 { color: hsl(var(--foreground)); }
+.drawer-fold[open] .drawer-fold-chevron { transform: rotate(90deg); }
+.drawer-fold > summary:hover .drawer-fold-title { color: hsl(var(--foreground)); }
 .drawer-fold-body { display: grid; gap: var(--s3); }
 
 .stat-grid {
@@ -1549,6 +1551,7 @@ a.chip-link:hover { background: var(--hover-bg); color: hsl(var(--foreground)); 
   color: hsl(var(--faint-foreground));
 }
 .rate-sample.is-on { color: hsl(var(--foreground)); }
+.rate-sample-status { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
 .rate-sample-text { font-variant-numeric: tabular-nums; }
 .rate-grid { stroke: var(--grid-line); stroke-width: 1; }
 .rate-axis-text { fill: hsl(var(--faint-foreground)); font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -1830,7 +1833,22 @@ dd { margin: 0; text-align: right; font-weight: 550; }
   .topbar-left { flex: 1 1 auto; }
   .topbar-right { flex: 1 1 100%; gap: var(--s1); }
   .search-wrap { flex: 1 1 auto; }
-  .health-compact { display: none; }
+  /* Data freshness is safety information, not desktop decoration. Keep a short
+     status visible when the full diagnosis no longer fits beside mobile search. */
+  .health-compact {
+    display: inline-flex;
+    flex: 0 0 auto;
+    max-width: none;
+    align-items: center;
+    min-height: 1.5rem;
+    padding: 0 var(--s2);
+    border-radius: 999px;
+    background: hsl(var(--tone-bg));
+  }
+  .health-compact.bad { --tone-bg: var(--sev-bg); }
+  .health-compact.warn { --tone-bg: var(--warn-bg); }
+  .health-wide { display: none; }
+  .health-mobile { display: inline; }
   .page-head { margin-bottom: var(--s3); }
   .page-head h1 { font-size: var(--t-xl); }
   .carrier-panels { grid-template-columns: 1fr; }
@@ -1915,6 +1933,7 @@ dd { margin: 0; text-align: right; font-weight: 550; }
   .confirm-card { top: auto; bottom: var(--s3); left: var(--s3); right: var(--s3); width: auto; transform: none; }
   @keyframes pop { from { transform: translateY(1rem); opacity: 0; } }
   .drawer { width: 100%; }
+  .drawer-head .btn-sm { min-width: 3.5rem; min-height: 2.75rem; }
   .content, .shell, .main, .topbar { max-width: 100%; }
   .kpi { padding: var(--s2) var(--s2) var(--s2) var(--s3); }
   .kpi-value { font-size: 1.25rem; }

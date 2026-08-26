@@ -3766,12 +3766,21 @@ function optionalTelemetryInt(payload: Row, key: string, min: number, max: numbe
   return value;
 }
 
-function telemetryPathFields(payload: Row) {
+function telemetryPathFields(payload: Row, receivedAtSec: number) {
+  const receivedAtMs = receivedAtSec * 1_000;
+  // These timestamps come from the client clock. Keep the raw value in the
+  // forensic payload, but never expose a measurement as happening after the
+  // Worker received it: a laptop set to 2099 would otherwise keep one bad RTT
+  // "fresh" for decades in the incident board.
+  const sampleAt = (key: string) => {
+    const value = optionalTelemetryInt(payload, key, 1, TELEMETRY_MAX_REPORTED_AT_MS);
+    return value == null ? null : Math.min(value, receivedAtMs);
+  };
   return {
     exitDelayMs: optionalTelemetryInt(payload, 'exitDelayMs', 1, 120_000),
     tcpDelayMs: optionalTelemetryInt(payload, 'tcpDelayMs', 1, 120_000),
-    exitDelayAtMs: optionalTelemetryInt(payload, 'exitDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS),
-    tcpDelayAtMs: optionalTelemetryInt(payload, 'tcpDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS),
+    exitDelayAtMs: sampleAt('exitDelayAtMs'),
+    tcpDelayAtMs: sampleAt('tcpDelayAtMs'),
   };
 }
 
@@ -3848,7 +3857,7 @@ async function operationsActivity(e: Env) {
       selectedServer,
       uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
       catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
-      ...telemetryPathFields(payload),
+      ...telemetryPathFields(payload, lastSeenAt),
       ...health,
     };
   });
@@ -6926,7 +6935,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             osVersion: String(activity.os_version),
             selectedServer,
             uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
-            ...telemetryPathFields(payload),
+            ...telemetryPathFields(payload, Number(activity.received_at)),
             ...nodeHealthFromQuality(qualityNodeByName(live.quality, selectedServer)),
           };
         }

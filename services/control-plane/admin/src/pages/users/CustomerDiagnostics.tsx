@@ -53,15 +53,15 @@ export function CustomerDiagnostics({
         />
         <Stat
           label="隧道出口 gstatic"
-          value={person.exitDelayMs == null ? '未测' : `${person.exitDelayMs} ms`}
-          note={person.exitDelayAtSec ? `采样 ${timeAgo(person.exitDelayAtSec)}` : '采样时间未上报'}
-          tone={person.exitDelayMs == null ? 'unknown' : person.exitDelayMs >= 800 ? 'severe' : person.exitDelayMs >= 400 ? 'warn' : undefined}
+          value={person.exitDelayMs == null ? '未测' : `${person.exitDelayMs} ms${person.exitDelayFresh ? '' : '（过期）'}`}
+          note={person.exitDelayAtSec ? `${person.exitDelayFresh ? '采样' : '过期采样'} ${timeAgo(person.exitDelayAtSec)}` : '采样时间未上报'}
+          tone={person.exitDelayMs == null || !person.exitDelayFresh ? 'unknown' : person.exitDelayMs >= 800 ? 'severe' : person.exitDelayMs >= 400 ? 'warn' : undefined}
         />
         <Stat
           label="TCP :443"
-          value={person.tcpDelayMs == null ? '未测' : `${person.tcpDelayMs} ms`}
-          note={person.tcpDelayAtSec ? `采样 ${timeAgo(person.tcpDelayAtSec)}` : '采样时间未上报'}
-          tone={person.tcpDelayMs == null ? 'unknown' : person.tcpDelayMs >= 800 ? 'severe' : person.tcpDelayMs >= 400 ? 'warn' : undefined}
+          value={person.tcpDelayMs == null ? '未测' : `${person.tcpDelayMs} ms${person.tcpDelayFresh ? '' : '（过期）'}`}
+          note={person.tcpDelayAtSec ? `${person.tcpDelayFresh ? '采样' : '过期采样'} ${timeAgo(person.tcpDelayAtSec)}` : '采样时间未上报'}
+          tone={person.tcpDelayMs == null || !person.tcpDelayFresh ? 'unknown' : person.tcpDelayMs >= 800 ? 'severe' : person.tcpDelayMs >= 400 ? 'warn' : undefined}
         />
         <Stat
           label="目录版本"

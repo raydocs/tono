@@ -113,23 +113,26 @@ export function DrawerSection({
   danger?: boolean;
   children: ReactNode;
 }) {
-  const head = (
-    <div className="drawer-head-row">
-      <h3>{title}</h3>
-      {aside ? <div className="drawer-head-aside">{aside}</div> : null}
-    </div>
-  );
   if (fold) {
     return (
       <details className={`drawer-section drawer-fold${danger ? ' danger-zone' : ''}`} open={initiallyOpen}>
-        <summary>{head}</summary>
+        <summary>
+          <span className="drawer-head-row">
+            <span className="drawer-fold-title">{title}</span>
+            {aside ? <span className="drawer-head-aside">{aside}</span> : null}
+            <span className="drawer-fold-chevron" aria-hidden>▸</span>
+          </span>
+        </summary>
         <div className="drawer-fold-body">{children}</div>
       </details>
     );
   }
   return (
     <section className={`drawer-section${danger ? ' danger-zone' : ''}`}>
-      {head}
+      <div className="drawer-head-row">
+        <h3>{title}</h3>
+        {aside ? <div className="drawer-head-aside">{aside}</div> : null}
+      </div>
       {children}
     </section>
   );

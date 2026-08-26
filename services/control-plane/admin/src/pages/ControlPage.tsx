@@ -320,6 +320,7 @@ export function ControlPage() {
               ) : (
                 <textarea
                   className="input control-textarea"
+                  aria-label="节点目录 YAML 原文"
                   rows={14}
                   spellCheck={false}
                   value={yamlDraft}
@@ -385,6 +386,7 @@ export function ControlPage() {
               ) : (
                 <textarea
                   className="input control-textarea"
+                  aria-label="国内直连规则 JSON 原文"
                   rows={12}
                   spellCheck={false}
                   value={policyDraft}

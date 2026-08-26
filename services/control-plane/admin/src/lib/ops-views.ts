@@ -85,6 +85,8 @@ export type OpsPersonView = {
   tcpDelayMs: number | null;
   exitDelayAtSec: number | null;
   tcpDelayAtSec: number | null;
+  exitDelayFresh: boolean;
+  tcpDelayFresh: boolean;
   lastSeenAt: number | null;
   quotaBytes: number | null;
   usageBytes: number;
@@ -372,6 +374,14 @@ export function assembleOpsPeople(input: {
         nowSec: input.nowSec,
       })
       : { kind: 'offline' as const };
+    const exitDelayFresh = Boolean(
+      pathSource?.exitDelayMs != null
+      && measurementFresh(pathSource.exitDelayAtMs, pathSource.lastSeenAt, input.nowSec),
+    );
+    const tcpDelayFresh = Boolean(
+      pathSource?.tcpDelayMs != null
+      && measurementFresh(pathSource.tcpDelayAtMs, pathSource.lastSeenAt, input.nowSec),
+    );
     const quotaBytes = user?.quotaBytes ?? null;
     const usageBytes = user?.usageBytes ?? 0;
     const quotaRatio = quotaBytes != null && quotaBytes > 0 ? usageBytes / quotaBytes : null;
@@ -407,6 +417,8 @@ export function assembleOpsPeople(input: {
       tcpDelayMs: pathSource?.tcpDelayMs ?? null,
       exitDelayAtSec: msEpochToSec(pathSource?.exitDelayAtMs),
       tcpDelayAtSec: msEpochToSec(pathSource?.tcpDelayAtMs),
+      exitDelayFresh,
+      tcpDelayFresh,
       lastSeenAt: latest?.lastSeenAt ?? null,
       quotaBytes,
       usageBytes,

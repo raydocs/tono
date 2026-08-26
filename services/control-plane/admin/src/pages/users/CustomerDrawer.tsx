@@ -65,8 +65,8 @@ export function CustomerDrawer({
       {ask.dialog}
       <section className="drawer-section drawer-hero">
         <div className="drawer-hero-top">
-          <span className={`nc-state nc-tone-${person.online ? 'ok' : person.telemetryState === 'reported' ? 'warn' : 'unknown'}`}>
-            <span className={`nc-dot nc-dot-${person.online ? 'ok' : person.telemetryState === 'reported' ? 'warn' : 'unknown'}`} aria-hidden />
+          <span className={`nc-state nc-tone-${person.online ? 'ok' : 'unknown'}`}>
+            <span className={`nc-dot nc-dot-${person.online ? 'ok' : 'unknown'}`} aria-hidden />
             {accountLabel}
           </span>
           {person.accountState === 'present' && person.user && <Status value={person.user.status} />}

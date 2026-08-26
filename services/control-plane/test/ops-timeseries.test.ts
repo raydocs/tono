@@ -82,6 +82,38 @@ describe('operations timeseries retention', () => {
     expect(Number(rollups!.c)).toBe(12);
   });
 
+  it('keeps the last counter in each bucket across a node restart', async () => {
+    const hour = Math.floor(1_800_000_000 / 3_600) * 3_600;
+    const points = [
+      { ...sample('Restarted', hour + 60, 10), netIn: 900, netOut: 1_800 },
+      { ...sample('Restarted', hour + 120, 20), netIn: 1_000, netOut: 2_000 },
+      // Counter reset inside the first five-minute bucket.
+      { ...sample('Restarted', hour + 180, 30), netIn: 20, netOut: 40 },
+      { ...sample('Restarted', hour + 360, 40), netIn: 50, netOut: 100 },
+      { ...sample('Restarted', hour + 660, 50), netIn: 100, netOut: 200 },
+    ];
+    await recordAgentSamples(db(), points, hour + 660);
+
+    // First age raw minutes into five-minute buckets, but not into hours yet.
+    await retainOperationsTimeseries(db(), hour + 3_600 + 48 * 3_600);
+    const firstBucket = await db().prepare(
+      `SELECT net_in_last, net_out_last FROM operations_agent_rollups
+       WHERE node_name = 'Restarted' AND resolution_seconds = 300 AND bucket_at = ?`,
+    ).bind(hour).first<Record<string, any>>();
+    expect(Number(firstBucket!.net_in_last)).toBe(20);
+    expect(Number(firstBucket!.net_out_last)).toBe(40);
+
+    // Then age those five-minute buckets into the 90-day hourly tier. The hour
+    // must end at the latest bucket's counters, not the pre-restart maximum.
+    await retainOperationsTimeseries(db(), hour + 3_600 + 8 * 86_400);
+    const hourly = await db().prepare(
+      `SELECT net_in_last, net_out_last FROM operations_agent_rollups
+       WHERE node_name = 'Restarted' AND resolution_seconds = 3600 AND bucket_at = ?`,
+    ).bind(hour).first<Record<string, any>>();
+    expect(Number(hourly!.net_in_last)).toBe(100);
+    expect(Number(hourly!.net_out_last)).toBe(200);
+  });
+
   it('pins invalid or far-future clocks to receipt time without rewriting old samples', async () => {
     const receivedAt = 1_800_100_123;
     await recordAgentSamples(db(), [

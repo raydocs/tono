@@ -74,7 +74,7 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
         </div>
         <div className="card-body">
           <form className="stack" onSubmit={(event) => void importLines(event)}>
-            <textarea className="input control-textarea" rows={4} spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} disabled={mutate.busy} />
+            <textarea className="input control-textarea" aria-label="家宽线路，每行一条" rows={4} spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} disabled={mutate.busy} />
             <button className="btn" type="submit" disabled={mutate.busy || !importText.trim()}>加入库存</button>
           </form>
         </div>

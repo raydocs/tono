@@ -1,6 +1,8 @@
 export function timestamp(value: number | null | undefined) {
   if (value === null || value === undefined) return '—';
-  return new Date(value * 1_000).toLocaleString();
+  // The console copy is Chinese; leaving locale selection to the operator's OS
+  // made the same page mix `8/26/2026, 5:50 AM` with `2026/9/5` billing dates.
+  return new Date(value * 1_000).toLocaleString('zh-CN', { hour12: false });
 }
 
 // Scaled on magnitude, with the sign put back afterwards. A negative byte

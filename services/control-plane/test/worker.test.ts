@@ -5228,6 +5228,35 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(me.nodeHealth).toBe('unknown');
   });
 
+  it('caps future client path clocks at receipt time without rewriting forensic JSON', async () => {
+    const account = await createAccount('activity-future-clock');
+    const futureAtMs = Date.now() + 365 * 86_400_000;
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      exitDelayMs: 900,
+      tcpDelayMs: 500,
+      exitDelayAtMs: futureAtMs,
+      tcpDelayAtMs: futureAtMs,
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+    const created = await posted.json() as any;
+
+    const stored = await env.DB.prepare(
+      'SELECT payload_json FROM telemetry_windows WHERE id = ?',
+    ).bind(created.id).first<any>();
+    expect(JSON.parse(stored.payload_json).exitDelayAtMs).toBe(futureAtMs);
+
+    const activityResponse = await operations('activity');
+    const { activity } = await activityResponse.json() as any;
+    const me = activity.users.find((user: any) => user.userId === account.user.id);
+    expect(me.exitDelayAtMs).toBe(me.lastSeenAt * 1_000);
+    expect(me.tcpDelayAtMs).toBe(me.lastSeenAt * 1_000);
+
+    const detailResponse = await operations(`users/${account.user.id}/detail`);
+    const detail = await detailResponse.json() as any;
+    expect(detail.heartbeat.exitDelayAtMs).toBe(detail.heartbeat.lastSeenAt * 1_000);
+    expect(detail.heartbeat.tcpDelayAtMs).toBe(detail.heartbeat.lastSeenAt * 1_000);
+  });
+
   it('returns one deterministic latest heartbeat per device without inflating user occupancy', async () => {
     const account = await createAccount('activity-multi-device');
     const secondLogin = await emailSignIn({

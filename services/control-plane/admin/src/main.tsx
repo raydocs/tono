@@ -19,6 +19,12 @@ const PRIMARY: Array<'dashboard' | 'failures' | 'monitor' | 'users'> = [
   'dashboard', 'failures', 'monitor', 'users',
 ];
 
+function searchOptionId(kind: 'node' | 'user', value: string) {
+  // `aria-activedescendant` is an ID reference. Node names contain spaces and
+  // middle dots, so the human label cannot safely double as the DOM id.
+  return `ops-search-${kind}-${encodeURIComponent(value)}`;
+}
+
 function App() {
   const { route, page, setRoute, openNode, openUser } = useOpsRoute();
   const selected = pages.find((entry) => entry.id === page) ?? pages[0];
@@ -80,6 +86,9 @@ function App() {
     { label: '节点质量', source: world.sources.quality },
     { label: '机器探针', source: world.sources.agents },
   ], healthAt) : []);
+  const healthUnavailable = health.some((line) => (
+    line.includes('没加载') || line.includes('不可用')
+  ));
 
   const needle = search.trim().toLowerCase();
   const nodeHits = needle
@@ -164,13 +173,14 @@ function App() {
                 ref={searchRef}
                 className="input compact search-input"
                 type="search"
+                aria-label="搜索节点或客户"
                 placeholder="搜索节点或客户  /"
                 value={search}
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={Boolean(searchOpen && needle)}
                 aria-controls="ops-search-results"
-                aria-activedescendant={searchOpen && needle && hits[searchIndex] ? `ops-search-${hits[searchIndex].kind}-${hits[searchIndex].id}` : undefined}
+                aria-activedescendant={searchOpen && needle && hits[searchIndex] ? searchOptionId(hits[searchIndex].kind, hits[searchIndex].id) : undefined}
                 onChange={(event) => { setSearch(event.target.value); setSearchOpen(true); setSearchIndex(0); }}
                 onFocus={() => setSearchOpen(true)}
                 onKeyDown={(event) => {
@@ -209,7 +219,7 @@ function App() {
                             <button
                               type="button"
                               role="option"
-                              id={`ops-search-node-${node.name}`}
+                              id={searchOptionId('node', node.name)}
                               aria-selected={hits[searchIndex]?.kind === 'node' && hits[searchIndex]?.id === node.name}
                               className={`search-hit${hits[searchIndex]?.id === node.name && hits[searchIndex]?.kind === 'node' ? ' active' : ''}`}
                               key={`n-${node.name}`}
@@ -224,7 +234,7 @@ function App() {
                             <button
                               type="button"
                               role="option"
-                              id={`ops-search-user-${person.userId}`}
+                              id={searchOptionId('user', person.userId)}
                               aria-selected={hits[searchIndex]?.kind === 'user' && hits[searchIndex]?.id === person.userId}
                               className={`search-hit${hits[searchIndex]?.id === person.userId && hits[searchIndex]?.kind === 'user' ? ' active' : ''}`}
                               key={`u-${person.userId}`}
@@ -240,8 +250,13 @@ function App() {
             </div>
             {refreshing && <span className="status-pill refreshing-dot">刷新中</span>}
             {health.length > 0 && (
-              <span className={`health-compact${health.some((line) => line.includes('没加载') || line.includes('不可用')) ? ' bad' : ''}`} title={health.join(' ')}>
-                {compactHealthLine(health[0])}
+              <span
+                className={`health-compact ${healthUnavailable ? 'bad' : 'warn'}`}
+                title={health.join(' ')}
+                role="status"
+              >
+                <span className="health-wide">{compactHealthLine(health[0])}</span>
+                <span className="health-mobile">{healthUnavailable ? '数据不可用' : '数据已过期'}</span>
               </span>
             )}
             <div className="topbar-extras">

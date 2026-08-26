@@ -14,7 +14,9 @@ function telemetryLabel(person: OpsPersonView): string {
 
 function telemetryTone(person: OpsPersonView): 'ok' | 'warn' | 'unknown' {
   if (person.telemetryState !== 'reported') return 'unknown';
-  return person.online ? 'ok' : 'warn';
+  // A customer simply being offline is not an incident. Yellow is reserved for
+  // something that needs attention; an old heartbeat is context, not a warning.
+  return person.online ? 'ok' : 'unknown';
 }
 
 function accountChip(person: OpsPersonView) {
@@ -29,13 +31,18 @@ function accountChip(person: OpsPersonView) {
  * The previous layout ran both readings and both timestamps into one wrapping
  * paragraph, which produced an orphan "钟前" on almost every row.
  */
-function PathMetric({ label, value, at }: { label: string; value: string; at: number | null }) {
+function PathMetric({ label, value, at, fresh }: {
+  label: string;
+  value: string;
+  at: number | null;
+  fresh: boolean;
+}) {
   return (
     <div className="path-metric">
       <dt>{label}</dt>
       <dd>
-        <span className="path-value mono">{value}</span>
-        <span className="path-age">{at ? timeAgo(at) : '采样时间未知'}</span>
+        <span className="path-value mono">{value}{value !== '未测' && !fresh ? ' · 过期' : ''}</span>
+        <span className="path-age">{at ? `${fresh ? '' : '过期采样 · '}${timeAgo(at)}` : '采样时间未知'}</span>
       </dd>
     </div>
   );
@@ -95,11 +102,13 @@ export function PersonRow({ person, selected, onOpen }: {
               label="出口 gstatic"
               value={person.exitDelayMs == null ? '未测' : `${person.exitDelayMs} ms`}
               at={person.exitDelayAtSec}
+              fresh={person.exitDelayFresh}
             />
             <PathMetric
               label="TCP :443"
               value={person.tcpDelayMs == null ? '未测' : `${person.tcpDelayMs} ms`}
               at={person.tcpDelayAtSec}
+              fresh={person.tcpDelayFresh}
             />
           </dl>
         )}

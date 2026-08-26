@@ -566,6 +566,23 @@ describe('cumulative traffic is not a live rate', () => {
     expect(rates[1].outBps).toBeCloseTo(10 / 60);
   });
 
+  it('makes the dev fixture exercise both illegal gaps and legal irregular sampling', () => {
+    type CounterPoint = { t: number; netIn: number | null; netOut: number | null };
+    const metrics = (matchDevOps('metrics?range=24h') as {
+      metrics: { resolutionSeconds: number; series: Record<string, CounterPoint[]> };
+    }).metrics;
+    const rates = (name: string) => seriesRates(metrics.series[name], metrics.resolutionSeconds);
+
+    expect(rates('Tokyo · Fuji').some((point) => point.inBps == null && point.outBps == null)).toBe(true);
+    expect(rates('Tokyo · Neon').some((point) => point.dt > metrics.resolutionSeconds * 3
+      && point.inBps == null && point.outBps == null)).toBe(true);
+    expect(rates('Tokyo · Sakura').some((point) => point.dt === metrics.resolutionSeconds * 2
+      && point.inBps != null && point.outBps != null)).toBe(true);
+    expect(rates('Los Angeles · Mesa').every((point) => point.dt === metrics.resolutionSeconds * 2
+      && point.inBps != null && point.outBps != null)).toBe(true);
+    expect(rates('Singapore · Harbour').every((point) => point.inBps == null && point.outBps == null)).toBe(true);
+  });
+
   it('accounts remaining against up-only quota instead of silently summing', () => {
     const profile = {
       trafficQuotaBytes: 1000,
@@ -1234,6 +1251,36 @@ describe('path measurement freshness', () => {
       exitDelayAtMs: staleMs, tcpDelayAtMs: staleMs,
       nowSec: now,
     }).kind).toBe('unmeasured');
+  });
+
+  it('does not let a far-future client clock keep a path sample fresh', () => {
+    expect(customerPathVerdict({
+      lastSeenAt: now, online: true, nodeHealth: 'ok',
+      exitDelayMs: 900, tcpDelayMs: null,
+      exitDelayAtMs: (now + 24 * 3600) * 1000,
+      nowSec: now,
+    }).kind).toBe('unmeasured');
+  });
+
+  it('marks old values as displayable history, not current path readings', () => {
+    const staleAt = now - HEARTBEAT_FRESH_SECONDS - 1;
+    const [person] = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      activity: [activity({
+        lastSeenAt: staleAt,
+        online: false,
+        exitDelayMs: 900,
+        tcpDelayMs: 500,
+        exitDelayAtMs: staleAt * 1000,
+        tcpDelayAtMs: staleAt * 1000,
+      })],
+    });
+    expect(person.exitDelayMs).toBe(900);
+    expect(person.tcpDelayMs).toBe(500);
+    expect(person.exitDelayFresh).toBe(false);
+    expect(person.tcpDelayFresh).toBe(false);
+    expect(person.path.kind).toBe('stale');
   });
 });
 

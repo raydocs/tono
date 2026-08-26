@@ -162,8 +162,9 @@ const RANGE_SHAPES: Record<string, { windowSeconds: number; resolutionSeconds: n
  * A fleet time series with the failure shapes the traffic page has to survive:
  * a counter reset, a long collector outage, a single dropped bucket, a node
  * that samples at half the nominal rate, a node that only joined partway, and
- * a node whose counters are present but null. Every one of these must produce
- * a gap rather than a fabricated line.
+ * a node whose counters are present but null. Resets, long outages, and null
+ * counters must break the line; a one-bucket miss and a deliberate half-rate
+ * sampler remain legal because the delta uses their real elapsed time.
  */
 function metricsFixture(range: string, clock: number, onlyNode?: string | null, dense = false) {
   const shape = RANGE_SHAPES[range] ?? RANGE_SHAPES['24h'];

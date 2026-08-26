@@ -1,7 +1,7 @@
 import type { MetricsDto } from './api';
 import { sparkPath } from './lib/spark';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { formatBytes, formatDuration, timestamp } from './lib/format';
 import type { RatePoint } from './lib/traffic';
 
@@ -70,6 +70,7 @@ export function RateChart({
   // labels down with the container and they become unreadable on a phone.
   const box = useRef<HTMLDivElement>(null);
   const [RATE_W, setRateW] = useState(720);
+  const readoutId = useId();
   useEffect(() => {
     const el = box.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
@@ -124,6 +125,7 @@ export function RateChart({
   const xLabel = wide ? dayLabel : clockLabel;
   const ticks = [0, yMax / 2, yMax];
   const hovered = cursor != null ? points[cursor] : null;
+  const selectedIndex = cursor != null && points[cursor] ? cursor : points.length - 1;
 
   /** Nearest sample to an x position in SVG units. */
   function indexAt(px: number): number {
@@ -177,9 +179,15 @@ export function RateChart({
         width={RATE_W}
         height={RATE_H}
         className={`rate-svg${locked ? ' rate-svg-locked' : ''}`}
-        role="img"
+        role="slider"
         tabIndex={0}
-        aria-label={`${summary}。用左右方向键逐点查看。`}
+        aria-label="机器流量采样点"
+        aria-orientation="horizontal"
+        aria-valuemin={1}
+        aria-valuemax={points.length}
+        aria-valuenow={selectedIndex + 1}
+        aria-valuetext={readout(points[selectedIndex])}
+        aria-describedby={readoutId}
         onPointerDown={(event) => {
           event.currentTarget.setPointerCapture(event.pointerId);
           const next = indexAt(svgX(event));
@@ -193,6 +201,7 @@ export function RateChart({
           setCursor(indexAt(svgX(event)));
         }}
         onPointerLeave={() => { if (!locked) setCursor(null); }}
+        onFocus={() => { if (cursor == null) setCursor(points.length - 1); }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowRight') { event.preventDefault(); step(1); }
           else if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); }
@@ -246,15 +255,17 @@ export function RateChart({
         <p className="rate-read">{summary}</p>
         {/* The readout is a live region so the selected sample is announced,
             and it stays put so a locked point can be read without a pointer. */}
-        <p className={`rate-sample${hovered ? ' is-on' : ''}`} role="status" aria-live="polite">
-          {hovered
-            ? <>
-              <span className={`pill-count ${locked ? 't-info' : 't-unknown'}`}>{locked ? '已锁定' : '悬停'}</span>
-              <span className="rate-sample-text">{readout(hovered)}</span>
-              {locked && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setLocked(false); setCursor(null); }}>取消</button>}
-            </>
-            : <span className="rate-sample-text">点一下图上任意位置锁定一个采样点，拖动或用左右方向键换点。</span>}
-        </p>
+        <div className={`rate-sample${hovered ? ' is-on' : ''}`}>
+          <span id={readoutId} className="rate-sample-status" role="status" aria-live="polite" aria-atomic="true">
+            {hovered
+              ? <>
+                <span className={`pill-count ${locked ? 't-info' : 't-unknown'}`}>{locked ? '已锁定' : '悬停'}</span>
+                <span className="rate-sample-text">{readout(hovered)}</span>
+              </>
+              : <span className="rate-sample-text">点一下图上任意位置锁定一个采样点，拖动或用左右方向键换点。</span>}
+          </span>
+          {locked && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setLocked(false); setCursor(null); }}>取消</button>}
+        </div>
       </figcaption>
     </figure>
   );

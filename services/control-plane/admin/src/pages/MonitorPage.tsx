@@ -220,10 +220,10 @@ function BillingCreate({ onSaved }: { onSaved: () => void }) {
         }
       }}
     >
-      <input className="input compact" placeholder="节点名（要和探测里的名字一致）" value={newName} onChange={(event) => setNewName(event.target.value)} disabled={busy} />
-      <input className="input compact" placeholder="https://账单页" value={newUrl} onChange={(event) => setNewUrl(event.target.value)} disabled={busy} />
-      <input className="input compact" type="number" min={0} placeholder="套餐 GB" value={newQuota} onChange={(event) => setNewQuota(event.target.value)} disabled={busy} />
-      <input className="input compact" type="date" value={newRenew} onChange={(event) => setNewRenew(event.target.value)} disabled={busy} />
+      <input className="input compact" aria-label="节点名" placeholder="节点名（要和探测里的名字一致）" value={newName} onChange={(event) => setNewName(event.target.value)} disabled={busy} />
+      <input className="input compact" aria-label="账单页" placeholder="https://账单页" value={newUrl} onChange={(event) => setNewUrl(event.target.value)} disabled={busy} />
+      <input className="input compact" aria-label="套餐 GB" type="number" min={0} placeholder="套餐 GB" value={newQuota} onChange={(event) => setNewQuota(event.target.value)} disabled={busy} />
+      <input className="input compact" aria-label="续费日期" type="date" value={newRenew} onChange={(event) => setNewRenew(event.target.value)} disabled={busy} />
       <button className="btn btn-sm" type="submit" disabled={busy || !newName.trim()}>保存</button>
       <Banner message={newError} tone="error" />
     </form>
@@ -281,6 +281,7 @@ export function MonitorPage() {
         <input
           className="input compact search-input"
           type="search"
+          aria-label="搜索服务器"
           placeholder="搜索名称 / IP / 商家 / 路线"
           value={query}
           onChange={(event) => onSearch(event.target.value)}
