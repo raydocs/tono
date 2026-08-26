@@ -3,7 +3,7 @@ import { useResource, type Live } from '../../hooks';
 import { acceptIfCurrent, bindDetail } from '../../lib/bound-detail';
 import { formatBytes, timestamp } from '../../lib/format';
 import type { OpsPersonView } from '../../lib/ops-views';
-import { Banner, Status, Drawer, Skeleton, Unavailable } from '../../ui';
+import { Banner, Status, Drawer, DrawerSection, Note, Skeleton, Stat, StatGrid, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
 import { CustomerDiagnostics } from './CustomerDiagnostics';
 import { CustomerOperations } from './CustomerOperations';
@@ -63,19 +63,27 @@ export function CustomerDrawer({
       onClose={onClose}
     >
       {ask.dialog}
-      <section className="drawer-section">
-        <div className="person-tags">
+      <section className="drawer-section drawer-hero">
+        <div className="drawer-hero-top">
+          <span className={`nc-state nc-tone-${person.online ? 'ok' : person.telemetryState === 'reported' ? 'warn' : 'unknown'}`}>
+            <span className={`nc-dot nc-dot-${person.online ? 'ok' : person.telemetryState === 'reported' ? 'warn' : 'unknown'}`} aria-hidden />
+            {accountLabel}
+          </span>
           {person.accountState === 'present' && person.user && <Status value={person.user.status} />}
-          {person.accountState === 'loading' && <span className="chip chip-muted">客户资料加载中</span>}
-          {person.accountState === 'unavailable' && <span className="chip chip-muted">客户资料不可用</span>}
-          {person.accountState === 'absent' && <span className="chip chip-muted">心跳身份未进入客户库</span>}
           {person.expired && <span className="expired-flag">已过期</span>}
+          {person.accountState === 'loading' && <span className="chip chip-unknown">客户资料加载中</span>}
+          {person.accountState === 'unavailable' && <span className="chip chip-unknown">客户资料不可用</span>}
+          {person.accountState === 'absent' && <span className="chip chip-unknown">心跳身份未进入客户库</span>}
         </div>
-        <p>
-          {person.selectedServer ?? '未选节点'} · 用量 {formatBytes(person.usageBytes)}
-          {person.quotaBytes == null ? ' / 不限' : ` / ${formatBytes(person.quotaBytes)}`}
-        </p>
-        {person.user?.contact && <p className="muted">联系 {privacy.secret(person.user.contact)}</p>}
+        <StatGrid columns={2}>
+          <Stat label="当前节点" value={person.selectedServer ?? '未选节点'} />
+          <Stat
+            label="本期用量"
+            value={`${formatBytes(person.usageBytes)}${person.quotaBytes == null ? ' / 不限' : ` / ${formatBytes(person.quotaBytes)}`}`}
+            tone={person.quotaRatio == null ? undefined : person.quotaRatio >= 1 ? 'severe' : person.quotaRatio >= 0.8 ? 'warn' : undefined}
+          />
+        </StatGrid>
+        {person.user?.contact && <p className="field-hint">联系 {privacy.secret(person.user.contact)}</p>}
       </section>
 
       <CustomerDiagnostics person={person} publishedRevision={publishedRevision} />
@@ -142,17 +150,18 @@ function CustomerAccountBody({
         onChanged={() => { detail.reload(); onChanged(); }}
       />
 
-      <details className="drawer-section">
-        <summary><h3>设备</h3></summary>
+      <DrawerSection title="设备" fold aside={bound ? `${bound.devices.length} 台` : undefined}>
         {detail.state === 'loading' || (detail.state === 'ready' && !bound) ? <Skeleton label="加载设备" /> : null}
         {detail.state === 'error' && <Unavailable title="设备没加载上来" detail={detail.message} />}
-        {bound && (bound.devices.length === 0 ? <p className="muted">还没有设备</p> : (
-          <ul className="detail-list">
+        {bound && (bound.devices.length === 0 ? <Note>还没有设备。</Note> : (
+          <div className="device-list">
             {bound.devices.map((device) => (
-              <li key={device.id}>
-                <Status value={device.status} />
-                <strong>{device.name}</strong>
-                <span className="muted">{timestamp(device.updatedAt)}</span>
+              <article className="device-card" key={device.id}>
+                <div className="device-card-top">
+                  <strong>{device.name}</strong>
+                  <Status value={device.status} />
+                  <span className="field-hint">{timestamp(device.updatedAt)}</span>
+                </div>
                 {device.status !== 'revoked' && (
                   <DeviceButtons
                     deviceId={device.id}
@@ -160,28 +169,31 @@ function CustomerAccountBody({
                     onChanged={() => { detail.reload(); actions.reload(); onChanged(); }}
                   />
                 )}
-              </li>
+              </article>
             ))}
-          </ul>
+          </div>
         ))}
-      </details>
+      </DrawerSection>
 
-      <details className="drawer-section">
-        <summary><h3>诊断报告</h3></summary>
-        {bound && bound.diagnostics.length === 0 && <p className="muted">还没有诊断报告</p>}
+      <DrawerSection title="诊断报告" fold aside={bound ? `${bound.diagnostics.length} 份` : undefined}>
+        {bound && bound.diagnostics.length === 0 && <Note>还没有诊断报告。</Note>}
         {bound && bound.diagnostics.map((report) => (
           <DiagnosticReport key={report.referenceCode} report={report} />
         ))}
-      </details>
+      </DrawerSection>
 
-      <section className="danger-zone">
-        <h3>危险操作</h3>
+      <DrawerSection title="危险操作" danger>
+        <Note tone="severe">
+          {user.status === 'active'
+            ? '注销会立刻断登录、撤销设备、把家宽退回库存。'
+            : '恢复后这个账号可以再登录。'}
+        </Note>
         {ask.dialog}
         <Banner message={danger.ok} tone="ok" />
         <Banner message={danger.error} tone="error" />
         <button
           type="button"
-          className="btn"
+          className={user.status === 'active' ? 'btn btn-outline btn-danger' : 'btn btn-outline'}
           disabled={danger.busy}
           onClick={() => ask.prompt(
             user.status === 'active' ? `注销 ${privacy.email(user.email)}？` : `恢复 ${privacy.email(user.email)}？`,
@@ -195,7 +207,7 @@ function CustomerAccountBody({
             },
           )}
         >{user.status === 'active' ? '注销账号' : '恢复账号'}</button>
-      </section>
+      </DrawerSection>
     </>
   );
 }
@@ -203,7 +215,7 @@ function CustomerAccountBody({
 function DiagnosticReport({ report }: { report: UserDetailDto['diagnostics'][number] }) {
   const privacy = usePrivacy();
   return (
-    <details>
+    <details className="raw-fold">
       <summary>
         <code>{report.referenceCode}</code>
         {' · '}
@@ -212,7 +224,7 @@ function DiagnosticReport({ report }: { report: UserDetailDto['diagnostics'][num
         {report.clientVersion} / {report.osVersion}
       </summary>
       {privacy.privacy
-        ? <p className="muted">隐私模式已隐藏原始诊断 JSON。</p>
+        ? <Note>隐私模式已隐藏原始诊断 JSON。</Note>
         : <pre className="report-json">{prettyReport(report.reportJson)}</pre>}
     </details>
   );

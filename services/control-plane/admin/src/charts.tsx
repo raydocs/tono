@@ -26,7 +26,8 @@ function niceMax(max: number): number {
   if (!(max > 0)) return 1;
   const unit = 1024 ** Math.floor(Math.log2(max) / 10);
   const scaled = max / unit;
-  const step = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1024].find((value) => value >= scaled) ?? 1024;
+  const step = [1, 1.5, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500, 700, 1024]
+    .find((value) => value >= scaled) ?? 1024;
   return step * unit;
 }
 
@@ -63,7 +64,8 @@ export function RateChart({
   latestOut?: number | null;
   spanSeconds?: number;
 }) {
-  const [hover, setHover] = useState<number | null>(null);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [locked, setLocked] = useState(false);
   // One SVG unit = one CSS pixel. Without this the viewBox scales the axis
   // labels down with the container and they become unreadable on a phone.
   const box = useRef<HTMLDivElement>(null);
@@ -121,7 +123,36 @@ export function RateChart({
   const short = spanSeconds != null && span < spanSeconds * 0.5;
   const xLabel = wide ? dayLabel : clockLabel;
   const ticks = [0, yMax / 2, yMax];
-  const hovered = hover != null ? points[hover] : null;
+  const hovered = cursor != null ? points[cursor] : null;
+
+  /** Nearest sample to an x position in SVG units. */
+  function indexAt(px: number): number {
+    const t = t0 + ((px - PAD_L) / plotW) * span;
+    let best = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      if (Math.abs(points[i].t - t) < Math.abs(points[best].t - t)) best = i;
+    }
+    return best;
+  }
+  function svgX(event: { clientX: number; currentTarget: Element }): number {
+    const box = event.currentTarget.getBoundingClientRect();
+    return ((event.clientX - box.left) / box.width) * RATE_W;
+  }
+  function step(delta: number) {
+    setLocked(true);
+    setCursor((value) => {
+      const next = (value ?? points.length - 1) + delta;
+      return Math.max(0, Math.min(points.length - 1, next));
+    });
+  }
+  function readout(point: typeof points[number]): string {
+    return [
+      timestamp(point.t),
+      point.inBps != null ? `下行 ${formatBytes(point.inBps)}/s` : '下行缺口',
+      point.outBps != null ? `上行 ${formatBytes(point.outBps)}/s` : '上行缺口',
+      point.expected != null ? `下行 ${point.contributingIn ?? 0}/${point.expected} 台 · 上行 ${point.contributingOut ?? 0}/${point.expected} 台` : '',
+    ].filter(Boolean).join(' · ');
+  }
 
   // Buckets where neither direction produced a legal delta: shade them so the
   // hole is visible rather than being read as a quiet period.
@@ -138,24 +169,38 @@ export function RateChart({
   return (
     <figure className="rate-chart">
       <div className="rate-canvas" ref={box}>
+      {/* Pointer, not mouse: a tap locks a sample, a drag moves it, and the
+          arrow keys do the same thing without any pointer at all. Hover alone
+          would leave the chart unreadable on a phone. */}
       <svg
         viewBox={`0 0 ${RATE_W} ${RATE_H}`}
         width={RATE_W}
         height={RATE_H}
-        className="rate-svg"
+        className={`rate-svg${locked ? ' rate-svg-locked' : ''}`}
         role="img"
-        aria-label={summary}
-        onMouseLeave={() => setHover(null)}
-        onMouseMove={(event) => {
-          const box = event.currentTarget.getBoundingClientRect();
-          const px = ((event.clientX - box.left) / box.width) * RATE_W;
-          const t = t0 + ((px - PAD_L) / plotW) * span;
-          let best = 0;
-          for (let i = 1; i < points.length; i += 1) {
-            if (Math.abs(points[i].t - t) < Math.abs(points[best].t - t)) best = i;
-          }
-          setHover(best);
+        tabIndex={0}
+        aria-label={`${summary}。用左右方向键逐点查看。`}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          const next = indexAt(svgX(event));
+          // Tapping the locked sample again releases it; anything else locks.
+          if (locked && cursor === next) { setLocked(false); setCursor(null); }
+          else { setLocked(true); setCursor(next); }
         }}
+        onPointerMove={(event) => {
+          if (event.pointerType === 'mouse' && !locked) { setCursor(indexAt(svgX(event))); return; }
+          if (event.buttons === 0) return;
+          setCursor(indexAt(svgX(event)));
+        }}
+        onPointerLeave={() => { if (!locked) setCursor(null); }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowRight') { event.preventDefault(); step(1); }
+          else if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); }
+          else if (event.key === 'Home') { event.preventDefault(); setLocked(true); setCursor(0); }
+          else if (event.key === 'End') { event.preventDefault(); setLocked(true); setCursor(points.length - 1); }
+          else if (event.key === 'Escape') { setLocked(false); setCursor(null); }
+        }}
+        onBlur={() => { if (!locked) setCursor(null); }}
       >
         {gaps.map((gap, index) => (
           <rect
@@ -181,7 +226,11 @@ export function RateChart({
         {inPath && <path d={inPath} fill="none" stroke="var(--rate-down)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
         {outPath && <path d={outPath} fill="none" stroke="var(--rate-up)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 3" />}
         {hovered && (
-          <line className="rate-cursor" x1={x(hovered.t)} x2={x(hovered.t)} y1={PAD_T} y2={PAD_T + plotH} />
+          <>
+            <line className="rate-cursor" x1={x(hovered.t)} x2={x(hovered.t)} y1={PAD_T} y2={PAD_T + plotH} />
+            {hovered.inBps != null && <circle className="rate-knob rate-knob-down" cx={x(hovered.t)} cy={y(hovered.inBps)} r="4" />}
+            {hovered.outBps != null && <circle className="rate-knob rate-knob-up" cx={x(hovered.t)} cy={y(hovered.outBps)} r="4" />}
+          </>
         )}
       </svg>
       </div>
@@ -195,14 +244,17 @@ export function RateChart({
         </div>
         {coverage && <p className="muted">{coverage}</p>}
         <p className="rate-read">{summary}</p>
-        {hovered && (
-          <p className="muted">
-            {timestamp(hovered.t)}
-            {hovered.inBps != null ? ` · 下行 ${formatBytes(hovered.inBps)}/s` : ' · 下行缺口'}
-            {hovered.outBps != null ? ` · 上行 ${formatBytes(hovered.outBps)}/s` : ' · 上行缺口'}
-            {hovered.expected != null ? ` · 下行 ${hovered.contributingIn ?? 0}/${hovered.expected} · 上行 ${hovered.contributingOut ?? 0}/${hovered.expected}` : ''}
-          </p>
-        )}
+        {/* The readout is a live region so the selected sample is announced,
+            and it stays put so a locked point can be read without a pointer. */}
+        <p className={`rate-sample${hovered ? ' is-on' : ''}`} role="status" aria-live="polite">
+          {hovered
+            ? <>
+              <span className={`pill-count ${locked ? 't-info' : 't-unknown'}`}>{locked ? '已锁定' : '悬停'}</span>
+              <span className="rate-sample-text">{readout(hovered)}</span>
+              {locked && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setLocked(false); setCursor(null); }}>取消</button>}
+            </>
+            : <span className="rate-sample-text">点一下图上任意位置锁定一个采样点，拖动或用左右方向键换点。</span>}
+        </p>
       </figcaption>
     </figure>
   );

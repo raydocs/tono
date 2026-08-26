@@ -89,6 +89,99 @@ export function Unavailable({ title, detail }: { title: string; detail?: string 
   );
 }
 
+/* —— Drawer primitives ——————————————————————————————————————————————————
+ * The drawers held the console's densest content in the loosest markup: bare
+ * paragraphs for readings, placeholders standing in for form labels, and
+ * `<details>` whose summary carried an `<h3>`. These four give every drawer the
+ * same skeleton — a titled block, a reading grid, a stated gap, a labelled
+ * field — so the shell and its contents finally agree.
+ */
+
+export function DrawerSection({
+  title,
+  aside,
+  fold = false,
+  open: initiallyOpen = false,
+  danger = false,
+  children,
+}: {
+  title: string;
+  aside?: ReactNode;
+  /** Render as a disclosure. Long or rarely-read blocks only. */
+  fold?: boolean;
+  open?: boolean;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  const head = (
+    <div className="drawer-head-row">
+      <h3>{title}</h3>
+      {aside ? <div className="drawer-head-aside">{aside}</div> : null}
+    </div>
+  );
+  if (fold) {
+    return (
+      <details className={`drawer-section drawer-fold${danger ? ' danger-zone' : ''}`} open={initiallyOpen}>
+        <summary>{head}</summary>
+        <div className="drawer-fold-body">{children}</div>
+      </details>
+    );
+  }
+  return (
+    <section className={`drawer-section${danger ? ' danger-zone' : ''}`}>
+      {head}
+      {children}
+    </section>
+  );
+}
+
+/** A reading: what it is, what it says, and where the number came from. */
+export function Stat({ label, value, note, tone }: {
+  label: string;
+  value: ReactNode;
+  note?: ReactNode;
+  tone?: 'severe' | 'warn' | 'ok' | 'info' | 'unknown';
+}) {
+  return (
+    <div className={`stat${tone ? ` t-${tone}` : ''}${tone ? ' stat-toned' : ''}`}>
+      <span className="stat-label">{label}</span>
+      <strong className="stat-value">{value}</strong>
+      {note ? <small className="stat-note">{note}</small> : null}
+    </div>
+  );
+}
+
+export function StatGrid({ children, columns }: { children: ReactNode; columns?: 2 | 3 }) {
+  return <div className={`stat-grid${columns ? ` stat-grid-${columns}` : ''}`}>{children}</div>;
+}
+
+/**
+ * Why a reading is missing, or what an action will actually do. Never an alarm:
+ * the tone rail defaults to unknown so an absent measurement does not borrow
+ * the colour of a real failure.
+ */
+export function Note({ tone = 'unknown', children }: {
+  tone?: 'severe' | 'warn' | 'ok' | 'info' | 'unknown';
+  children: ReactNode;
+}) {
+  return <p className={`note t-${tone}`}>{children}</p>;
+}
+
+/** A labelled control. A placeholder is a hint, not a label. */
+export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <label className="field">
+      <span className="field-label">{label}</span>
+      {children}
+      {hint ? <small className="field-hint">{hint}</small> : null}
+    </label>
+  );
+}
+
+export function FieldGrid({ children }: { children: ReactNode }) {
+  return <div className="field-grid">{children}</div>;
+}
+
 export function GlassCard({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <section className={`card ${className}`.trim()}>{children}</section>;
 }

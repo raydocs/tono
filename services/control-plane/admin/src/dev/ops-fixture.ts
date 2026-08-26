@@ -24,6 +24,52 @@ const names = [
   'Frankfurt · Main', 'Buffalo · Erie', 'Catalog Only',
 ];
 
+/**
+ * `?opsFixture=dense` — the shapes a five-row fixture never produces: node and
+ * customer names long enough to break a layout, and enough customers that the
+ * list has to scroll rather than fit. Nothing here changes any rule; it only
+ * feeds the same view models harder input.
+ */
+/* Only nodes the activity fixture does not reference by name, so renaming
+   them does not accidentally invent a thirteenth machine. */
+const DENSE_RENAME: Record<string, string> = {
+  'Los Angeles · Pacific': 'Los Angeles · Pacific-Coast-Highway-Backhaul-01',
+  'Frankfurt · Main': 'Frankfurt · Main · eu-central-1a-secondary · 法兰克福备用出口',
+  'Singapore · Harbour': 'Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）',
+};
+
+/** The node roster, optionally with names long enough to break a layout. */
+function roster(dense: boolean): string[] {
+  return dense ? names.map((name) => DENSE_RENAME[name] ?? name) : names;
+}
+
+function denseUser(index: number, clock: number): Record<string, unknown> {
+  const long = index % 7 === 0;
+  const email = long
+    ? `customer.with.a.very.long.mailbox.name.${index}@a-rather-long-corporate-domain.example.com`
+    : `dense-${index}@example.com`;
+  const quota = index % 5 === 0 ? null : (25 + (index % 8) * 25) * 1024 ** 3;
+  const ratio = [0.02, 0.35, 0.82, 0.97, 1.04][index % 5];
+  return {
+    id: `u-dense-${index}`,
+    email,
+    deviceLimit: 3,
+    quotaBytes: quota,
+    usageBytes: quota == null ? Math.round(3 * 1024 ** 3) : Math.round(quota * ratio),
+    suspended: false,
+    status: index % 11 === 0 ? 'disabled' : 'active',
+    createdAt: clock - index * 86_400,
+    expiresAt: index % 9 === 0 ? clock - 86_400 : undefined,
+    hasExitIdentity: index % 13 !== 0,
+    product: index % 3 === 0
+      ? { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true }
+      : { accountRef: `claude-${index}`, status: 'assigned', openedAt: clock - index * 3600, replaceCount: index % 4, incomplete: false },
+    homeBinding: index % 4 === 0
+      ? { homeExitId: `h-dense-${index}`, proxyName: `home-dense-${index}`, displayName: `家宽 ${index}`, status: 'assigned' }
+      : null,
+  };
+}
+
 function agent(name: string, i: number, observedAt: number) {
   const stale = name.includes('Sakura');
   return {
@@ -96,6 +142,111 @@ const extraActions: Array<{ id: string; userId: string; deviceId: string; action
 const extraHomes: Array<Record<string, unknown>> = [];
 
 
+/**
+ * Deterministic noise. `Math.random` would make every screenshot and every
+ * regression diff different; this is stable across reloads while still looking
+ * like traffic rather than a ruler.
+ */
+function wobble(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const RANGE_SHAPES: Record<string, { windowSeconds: number; resolutionSeconds: number }> = {
+  '24h': { windowSeconds: 24 * 3600, resolutionSeconds: 300 },
+  '7d': { windowSeconds: 7 * 86_400, resolutionSeconds: 1800 },
+  '90d': { windowSeconds: 90 * 86_400, resolutionSeconds: 6 * 3600 },
+};
+
+/**
+ * A fleet time series with the failure shapes the traffic page has to survive:
+ * a counter reset, a long collector outage, a single dropped bucket, a node
+ * that samples at half the nominal rate, a node that only joined partway, and
+ * a node whose counters are present but null. Every one of these must produce
+ * a gap rather than a fabricated line.
+ */
+function metricsFixture(range: string, clock: number, onlyNode?: string | null, dense = false) {
+  const shape = RANGE_SHAPES[range] ?? RANGE_SHAPES['24h'];
+  const { windowSeconds, resolutionSeconds } = shape;
+  const buckets = Math.floor(windowSeconds / resolutionSeconds);
+  const from = clock - windowSeconds;
+  const liveNames = roster(dense).filter((name) => name !== 'Catalog Only');
+  const series: Record<string, Array<Record<string, number | null>>> = {};
+
+  liveNames.forEach((name, nodeIndex) => {
+    if (onlyNode && name !== onlyNode) return;
+    // Every node gets its own quirk, so one range shows all of them at once.
+    const quirk = nodeIndex % 6;
+    const stride = quirk === 3 ? 2 : 1;           // half-rate sampler
+    const joinsAt = quirk === 4 ? Math.floor(buckets * 0.55) : 0;
+    const outage: [number, number] = quirk === 1
+      ? [Math.floor(buckets * 0.30), Math.floor(buckets * 0.46)]  // long collector outage
+      : [-1, -1];
+    const dropOne = quirk === 2 ? Math.floor(buckets * 0.7) : -1;  // single missing bucket
+    const resetAt = quirk === 0 ? Math.floor(buckets * 0.62) : -1; // counter reset
+    const nullCounters = quirk === 5;
+
+    const points: Array<Record<string, number | null>> = [];
+    let netIn = 40_000_000_000 + nodeIndex * 3_000_000_000;
+    let netOut = 6_000_000_000 + nodeIndex * 400_000_000;
+
+    for (let i = 0; i < buckets; i += 1) {
+      const t = from + (i + 1) * resolutionSeconds;
+      // Diurnal shape plus stable jitter, in bytes per second.
+      const baseBps = 18_000 + nodeIndex * 2_500;
+      // A counter accumulates the integral over the bucket, not the rate at
+      // its edge. Sub-sampling matters at 6-hour buckets, where edge sampling
+      // would alias the daily cycle into a comb that no real fleet produces.
+      const SUB = 12;
+      let inSum = 0;
+      for (let k = 0; k < SUB; k += 1) {
+        const at = t - resolutionSeconds + ((k + 0.5) / SUB) * resolutionSeconds;
+        const subPhase = ((at % 86_400) / 86_400) * Math.PI * 2;
+        const slow = wobble(nodeIndex * 97 + Math.floor((i * SUB + k) / 24));
+        const fast = wobble(nodeIndex * 41 + i * SUB + k);
+        inSum += Math.max(400, baseBps * (1.15 + Math.sin(subPhase - 1.1)) * (0.82 + slow * 0.3 + fast * 0.06));
+      }
+      const inBps = inSum / SUB;
+      const outBps = inBps * (0.08 + wobble(nodeIndex * 31 + Math.floor(i / 4)) * 0.05);
+      netIn += inBps * resolutionSeconds;
+      netOut += outBps * resolutionSeconds;
+      if (i === resetAt) {
+        // Agent reinstalled: the counter starts over. Differencing must refuse
+        // to turn the negative step into a number.
+        netIn = inBps * resolutionSeconds;
+        netOut = outBps * resolutionSeconds;
+      }
+      if (i < joinsAt) continue;
+      if (i >= outage[0] && i < outage[1]) continue;
+      if (i === dropOne) continue;
+      if (i % stride !== 0) continue;
+      points.push({
+        t,
+        cpu: Math.round(8 + nodeIndex * 2 + wobble(nodeIndex + i) * 26),
+        memUsed: Math.round((0.35 + wobble(nodeIndex * 7 + i) * 0.4) * 2 * 1024 ** 3),
+        memTotal: 2 * 1024 ** 3,
+        diskUsed: 8 * 1024 ** 3,
+        diskTotal: 40 * 1024 ** 3,
+        load1: Math.round((0.2 + wobble(nodeIndex * 13 + i) * 1.6) * 100) / 100,
+        netIn: nullCounters ? null : Math.round(netIn),
+        netOut: nullCounters ? null : Math.round(netOut),
+        swapUsed: 0,
+        tcpConnections: Math.round(20 + wobble(nodeIndex * 5 + i) * 180),
+      });
+    }
+    series[name] = points;
+  });
+
+  return { from, to: clock, resolutionSeconds, series };
+}
+
+/** A catalog big enough that the diff view and the textarea have to cope. */
+function denseYaml(): string {
+  const rules = Array.from({ length: 120 }, (_, i) =>
+    `# rule ${i}: keep long comments so the editor and the diff both have to scroll horizontally as well as vertically\n`).join('');
+  return rules;
+}
+
 export function matchDevOps(
   path: string,
   method = 'GET',
@@ -103,9 +254,10 @@ export function matchDevOps(
   scenario: string | null = null,
 ): unknown {
   const clock = now();
+  const dense = scenario === 'dense';
   const base = path.split('?')[0];
-  const listed = names.filter((name) => name !== 'Catalog Only' || true);
-  const yaml = `proxies:\n${listed.filter((n) => n !== 'Catalog Only' || n === 'Catalog Only').filter((n) => n !== 'Buffalo · Erie').map((n) => `  - name: "${n}"\n    type: vless\n`).join('')}`;
+  const listed = roster(dense).filter((name) => name !== 'Catalog Only' || true);
+  const yaml = (dense ? denseYaml() : '') + `proxies:\n${listed.filter((n) => n !== 'Catalog Only' || n === 'Catalog Only').filter((n) => n !== 'Buffalo · Erie').map((n) => `  - name: "${n}"\n    type: vless\n`).join('')}`;
 
   if (method !== 'GET') {
     const payload = (() => {
@@ -272,7 +424,7 @@ export function matchDevOps(
       };
     }
     const snapshotClock = scenario === 'source-stale' ? clock - 2 * 86_400 : clock;
-    const liveNames = names.filter((n) => n !== 'Catalog Only');
+    const liveNames = roster(dense).filter((n) => n !== 'Catalog Only');
     return {
       live: {
         fetchedAt: clock,
@@ -292,7 +444,7 @@ export function matchDevOps(
   }
   if (base === 'node-profiles') {
     return {
-      profiles: names.map((name, i) => ({
+      profiles: roster(dense).map((name, i) => ({
         id: `p${i}`,
         catalogName: name,
         publicIp: `203.0.113.${10 + i}`,
@@ -392,7 +544,10 @@ export function matchDevOps(
         { id: 'u-blocked', email: 'blocked@example.com', deviceLimit: 3, quotaBytes: null, usageBytes: 0, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: 'c2', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: { homeExitId: 'h2', proxyName: 'home-2', displayName: '家宽 2', status: 'assigned' } },
         { id: 'u-quiet', email: 'quiet@example.com', deviceLimit: 3, quotaBytes: 100 * 1024 ** 3, usageBytes: 1, suspended: false, status: 'active', createdAt: clock, hasExitIdentity: true, product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true }, homeBinding: null },
         { id: 'u-old', email: 'old@example.com', deviceLimit: 3, quotaBytes: 50 * 1024 ** 3, usageBytes: 10, suspended: false, status: 'active', createdAt: clock - 90 * 86400, expiresAt: clock - 86400, hasExitIdentity: true, product: { accountRef: 'c3', status: 'assigned', openedAt: clock, replaceCount: 0, incomplete: false }, homeBinding: null },
-      ].map(withExtras),
+      ]
+        .map((user) => user as Record<string, unknown>)
+        .concat(dense ? Array.from({ length: 34 }, (_, index) => denseUser(index, clock)) : [])
+        .map(withExtras),
     };
   }
   if (base.startsWith('users/') && base.endsWith('/detail')) {
@@ -412,20 +567,8 @@ export function matchDevOps(
     };
   }
   if (base === 'metrics') {
-    const points = Array.from({ length: 12 }, (_, i) => ({
-      t: clock - (12 - i) * 300,
-      cpu: 10 + i,
-      memUsed: 1_000_000_000,
-      memTotal: 2_000_000_000,
-      diskUsed: 8_000_000_000,
-      diskTotal: 40_000_000_000,
-      load1: 0.4,
-      netIn: 50_000_000_000 + i * 10_000_000,
-      netOut: 8_000_000_000 + i * 1_000_000,
-      swapUsed: 0,
-      tcpConnections: 40,
-    }));
-    return { metrics: { from: clock - 3600, to: clock, resolutionSeconds: 300, series: { 'Tokyo · Fuji': points } } };
+    const query = new URLSearchParams(path.split('?')[1] ?? '');
+    return { metrics: metricsFixture(query.get('range') ?? '24h', clock, query.get('node'), dense) };
   }
   if (base === 'signup-allowlist') return { entries: [{ email: 'new@example.com', createdAt: clock }] };
   if (base === 'home-exits') {

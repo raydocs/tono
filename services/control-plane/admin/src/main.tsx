@@ -54,6 +54,8 @@ function App() {
         event.preventDefault();
         searchRef.current?.focus();
       }
+      // The overflow strip floats over the page, so Escape has to reach it.
+      if (event.key === 'Escape') setShowMore(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -107,6 +109,9 @@ function App() {
     <a className="skip-link" href="#ops-main">跳到正文</a>
     <OpsBackground />
     <div className={`shell${showMore ? ' show-more' : ''}`}>
+      {showMore && (
+        <button type="button" className="nav-more-scrim" aria-label="收起更多" onClick={() => setShowMore(false)} />
+      )}
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="brand-mark">T</span>

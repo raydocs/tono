@@ -3,7 +3,7 @@ import { operationsApi, type HomeExitDto } from '../../api';
 import { tcpPort } from '../../lib/fields';
 import { timeAgo, timestamp } from '../../lib/format';
 import type { Live } from '../../hooks';
-import { Banner, Empty, Skeleton, Status, Unavailable } from '../../ui';
+import { Banner, Empty, Field, FieldGrid, Skeleton, Status, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
 import { useAsk } from './ask';
 import { useMutation } from './mutate';
@@ -111,23 +111,43 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
             });
           }}
         >
-          <input className="input" required placeholder="名称" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-          <input className="input" required placeholder="节点名" value={proxyName} onChange={(event) => setProxyName(event.target.value)} />
-          <select className="input" value={kind} onChange={(event) => setKind(event.target.value as 'catalog' | 'socks5')}>
-            <option value="catalog">目录里的节点</option>
-            <option value="socks5">SOCKS5 家宽</option>
-          </select>
-          <input className="input" placeholder="出口 IPv4（可选）" value={egressIpv4} onChange={(event) => setEgressIpv4(event.target.value)} />
-          <input className="input" placeholder="备注（可选）" value={notes} onChange={(event) => setNotes(event.target.value)} />
-          {kind === 'socks5' && (
-            <>
-              <input className="input" required placeholder="主机" value={socks5Host} onChange={(event) => setSocks5Host(event.target.value)} />
-              <input className="input" required type="number" min={1} max={65535} placeholder="端口 1–65535" value={socks5Port} onChange={(event) => setSocks5Port(event.target.value)} />
-              <input className="input" required placeholder="用户名" value={socks5Username} onChange={(event) => setSocks5Username(event.target.value)} />
-              <input className="input" required type="password" placeholder="密码" value={socks5Password} onChange={(event) => setSocks5Password(event.target.value)} />
-            </>
-          )}
-          <button className="btn" type="submit" disabled={mutate.busy}>加上</button>
+          <FieldGrid>
+            <Field label="名称">
+              <input className="input" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </Field>
+            <Field label="节点名">
+              <input className="input" required value={proxyName} onChange={(event) => setProxyName(event.target.value)} />
+            </Field>
+            <Field label="类型">
+              <select className="input" value={kind} onChange={(event) => setKind(event.target.value as 'catalog' | 'socks5')}>
+                <option value="catalog">目录里的节点</option>
+                <option value="socks5">SOCKS5 家宽</option>
+              </select>
+            </Field>
+            <Field label="出口 IPv4" hint="可选">
+              <input className="input" value={egressIpv4} onChange={(event) => setEgressIpv4(event.target.value)} />
+            </Field>
+            <Field label="备注" hint="可选">
+              <input className="input" value={notes} onChange={(event) => setNotes(event.target.value)} />
+            </Field>
+            {kind === 'socks5' && (
+              <>
+                <Field label="主机">
+                  <input className="input" required value={socks5Host} onChange={(event) => setSocks5Host(event.target.value)} />
+                </Field>
+                <Field label="端口" hint="1–65535">
+                  <input className="input" required type="number" min={1} max={65535} value={socks5Port} onChange={(event) => setSocks5Port(event.target.value)} />
+                </Field>
+                <Field label="用户名">
+                  <input className="input" required value={socks5Username} onChange={(event) => setSocks5Username(event.target.value)} />
+                </Field>
+                <Field label="密码">
+                  <input className="input" required type="password" value={socks5Password} onChange={(event) => setSocks5Password(event.target.value)} />
+                </Field>
+              </>
+            )}
+          </FieldGrid>
+          <div className="row-actions"><button className="btn" type="submit" disabled={mutate.busy}>加上</button></div>
         </form>
       </details>
       <section className="card">
@@ -141,17 +161,24 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
           {homes.state === 'ready' && homes.data.length === 0 && <Empty title="库存是空的" />}
           {homes.state === 'ready' && homes.data.map((home) => (
             <article key={home.id} className="card home-card">
-              <strong>{home.displayName}</strong>
-              <small className="muted">{home.proxyName} · {home.kind} · 绑定 {home.bindCount ?? 0} 人</small>
-              <span className="mono">{home.kind === 'socks5' ? `${privacy.ip(home.socks5Host)}:${home.socks5Port}` : privacy.ip(home.egressIpv4)}</span>
-              <Status value={home.status} />
-              <small className="muted">
-                {home.probeStatus ? `${home.probeStatus}` : '未检测'}
-                {home.probeUptimeRatio != null ? ` · 在线率 ${Math.round(home.probeUptimeRatio * 100)}%` : ''}
-                {home.lastProbedAt ? ` · ${timeAgo(home.lastProbedAt)}` : ''}
-                {home.notes ? ` · ${home.notes}` : ''}
-                {' · '}{timestamp(home.updatedAt)}
-              </small>
+              <div className="home-card-top">
+                <strong>{home.displayName}</strong>
+                <Status value={home.status} />
+                <span className={`chip ${(home.bindCount ?? 0) > 0 ? 'chip-ok' : 'chip-unknown'}`}>
+                  {(home.bindCount ?? 0) > 0 ? `绑定 ${home.bindCount} 人` : '闲置'}
+                </span>
+              </div>
+              <div className="home-card-meta">
+                <span className="mono">{home.kind === 'socks5' ? `${privacy.ip(home.socks5Host)}:${home.socks5Port}` : privacy.ip(home.egressIpv4)}</span>
+                <span>{home.proxyName} · {home.kind}</span>
+                <span>
+                  探测 {home.probeStatus || '未检测'}
+                  {home.probeUptimeRatio != null ? ` · 在线率 ${Math.round(home.probeUptimeRatio * 100)}%` : ''}
+                  {home.lastProbedAt ? ` · ${timeAgo(home.lastProbedAt)}` : ''}
+                </span>
+                {home.notes ? <span>{home.notes}</span> : null}
+                <span>更新 {timestamp(home.updatedAt)}</span>
+              </div>
               <div className="row-actions">
                 {home.status !== 'active'
                   ? (

@@ -148,7 +148,7 @@ export function TrafficPage() {
                 const tone = ratio == null ? '' : ratio >= 1 ? 'quota-bad' : ratio >= 0.8 ? 'quota-warn' : 'quota-ok';
                 return (
                   <button type="button" className="lb-row lb-row-plain" key={person.userId} onClick={() => openUser(person.userId)}>
-                    <span className="lb-email">{privacy.email(person.email)}</span>
+                    <span className="lb-email" title={privacy.email(person.email)}>{privacy.email(person.email)}</span>
                     {ratio == null ? (
                       <span className="muted">不限额</span>
                     ) : (

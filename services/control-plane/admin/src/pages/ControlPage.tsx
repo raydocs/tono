@@ -30,6 +30,8 @@ const PHASE_LABEL: Record<Phase, string> = {
 };
 
 function DiffView({ diff, revealed }: { diff: ReturnType<typeof lineDiff>; revealed: boolean }) {
+  // An empty bordered box under an untouched draft is noise, not information.
+  if (diff.added === 0 && diff.removed === 0) return null;
   if (!revealed) return <p className="muted">隐私模式已隐藏 diff 原文。提交仍使用原始草稿。</p>;
   return (
     <div className="text-diff">

@@ -509,6 +509,11 @@ p { text-wrap: pretty; }
 .page-head p::before { content: '·'; margin-right: var(--s2); opacity: 0.55; }
 
 .stack { display: grid; gap: var(--s4); }
+/* A grid stretches its children; a button that fills the drawer reads as a
+   banner, not a control. */
+.stack > .btn, .stack > a.btn, .card-body > .btn, .drawer-fold-body > .btn,
+.drawer-section > .btn, form.stack > .btn,
+.onboard-steps > .btn, .onboard-result > .btn { justify-self: start; }
 .muted { color: hsl(var(--muted-foreground)); font-size: var(--t-md); }
 
 /* ── L2 card ──────────────────────────────────────────────────────────────── */
@@ -589,10 +594,16 @@ p { text-wrap: pretty; }
   border-color: var(--l2-border);
 }
 .btn-outline:hover { background: var(--hover-bg); border-color: hsl(var(--input)); }
-.btn-ghost { background: transparent; color: hsl(var(--muted-foreground)); border-color: transparent; }
-.btn-ghost:hover { background: var(--hover-bg); color: hsl(var(--foreground)); }
+/* A ghost button still has to look clickable; borderless plain text next to
+   real buttons reads as a caption. */
+.btn-ghost { background: transparent; color: hsl(var(--muted-foreground)); border-color: var(--l2-border); border-style: dashed; }
+.btn-ghost:hover { background: var(--hover-bg); color: hsl(var(--foreground)); border-style: solid; }
 .btn-destructive { background: hsl(var(--sev-line)); color: #fff; }
 .btn-destructive:hover { background: hsl(var(--sev-line) / 0.86); }
+/* A destructive step that is still reversible reads as an outline, not a slab
+   of red; the slab is reserved for the irreversible confirm. */
+.btn-outline.btn-danger { color: hsl(var(--sev-fg)); border-color: hsl(var(--sev-line) / 0.5); }
+.btn-outline.btn-danger:hover { background: hsl(var(--sev-bg)); border-color: hsl(var(--sev-line)); }
 .btn-sm { height: 1.875rem; padding: 0 var(--s3); font-size: var(--t-base); }
 
 :where(.btn, .input, input, select, textarea, a, summary, .click-row, .chip, .node-card, .person-row, .lb-row, .traffic-row, .kpi, .search-hit, .incident-line, [tabindex]):focus-visible {
@@ -1339,6 +1350,155 @@ tbody tr:last-child td { border-bottom: 0; }
   background: linear-gradient(transparent, var(--l3-bg) 38%);
 }
 
+/* Hero block: the one state the drawer is about, before any detail. */
+.drawer-hero { display: grid; gap: var(--s3); }
+.drawer-hero-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+.drawer-hero .nc-state { height: 1.75rem; padding: 0 var(--s3); font-size: var(--t-base); }
+.drawer-hero-ip { font-size: var(--t-sm); color: hsl(var(--faint-foreground)); overflow-wrap: anywhere; }
+
+.pill-count {
+  display: inline-flex; align-items: center;
+  height: 1.375rem; padding: 0 var(--s2);
+  border-radius: 999px;
+  background: hsl(var(--tone-bg)); color: hsl(var(--tone-fg));
+  font-size: var(--t-xs); font-weight: 650;
+}
+
+/* A labelled fact and its explanation, one per line, never a wrapping run-on. */
+.fact-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s1); }
+.fact-list > li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  font-size: var(--t-base); color: hsl(var(--muted-foreground));
+}
+a.chip-link { text-decoration: none; }
+a.chip-link:hover { background: var(--hover-bg); color: hsl(var(--foreground)); }
+
+.raw-fold > summary { cursor: pointer; font-size: var(--t-base); color: hsl(var(--muted-foreground)); }
+.raw-fold pre {
+  margin: var(--s2) 0 0; padding: var(--s2) var(--s3);
+  max-height: 14rem; overflow: auto;
+  border-radius: var(--r-sm);
+  background: hsl(var(--secondary) / 0.6);
+  font-size: var(--t-sm); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* —— Drawer primitives —————————————————————————————————————————————— */
+.drawer-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s2);
+  min-width: 0;
+}
+.drawer-head-row h3 {
+  margin: 0;
+  font-size: var(--t-xs);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: hsl(var(--faint-foreground));
+  white-space: nowrap;
+}
+.drawer-head-aside {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s1) var(--s2);
+  font-size: var(--t-sm);
+  color: hsl(var(--muted-foreground));
+  min-width: 0;
+}
+/* The head row is the whole affordance, so the marker sits inside it. */
+.drawer-fold > summary { cursor: pointer; list-style: none; border-radius: var(--r-sm); }
+.drawer-fold > summary::-webkit-details-marker { display: none; }
+.drawer-fold > summary .drawer-head-row::after {
+  content: '▸';
+  margin-left: var(--s2);
+  color: hsl(var(--faint-foreground));
+  font-size: var(--t-sm);
+  transition: transform var(--dur) var(--ease);
+}
+.drawer-fold[open] > summary .drawer-head-row::after { transform: rotate(90deg); }
+.drawer-fold > summary:hover .drawer-head-row h3 { color: hsl(var(--foreground)); }
+.drawer-fold-body { display: grid; gap: var(--s3); }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--s2);
+}
+.stat-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.stat-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stat {
+  display: grid;
+  align-content: start;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--l2-border);
+  border-radius: var(--r-sm);
+  background: var(--l2-flat);
+}
+.stat-toned { border-color: hsl(var(--tone-line) / 0.4); background: hsl(var(--tone-bg)); }
+.stat-label { font-size: var(--t-xs); color: hsl(var(--faint-foreground)); }
+.stat-value {
+  font-size: var(--t-md);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.stat-toned .stat-value { color: hsl(var(--tone-fg)); }
+.stat-note {
+  font-size: var(--t-xs);
+  color: hsl(var(--faint-foreground));
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 0;
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid hsl(var(--tone-line) / 0.7);
+  border-radius: 0 var(--r-xs) var(--r-xs) 0;
+  background: hsl(var(--tone-bg));
+  color: hsl(var(--tone-fg));
+  font-size: var(--t-base);
+}
+
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--s3); }
+.field { display: grid; gap: var(--s1); min-width: 0; }
+.field-label { font-size: var(--t-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+.field-hint { font-size: var(--t-xs); color: hsl(var(--faint-foreground)); }
+.field .input { max-width: none; }
+
+/* Devices, home lines and the onboarding checklist all needed the same shape:
+   a heading row that can hold a status, then dimmer metadata, then actions. */
+.device-list { display: grid; gap: var(--s2); }
+.device-card {
+  display: grid;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--l2-border);
+  border-radius: var(--r-sm);
+  background: var(--l2-flat);
+}
+.device-card-top, .home-card-top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  font-size: var(--t-md);
+}
+.device-card-top strong, .home-card-top strong { font-weight: 650; overflow-wrap: anywhere; }
+.device-card .device-actions { margin: 0; }
+.home-card-meta {
+  display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3);
+  font-size: var(--t-sm); color: hsl(var(--faint-foreground));
+}
+.onboard-subject { font-size: var(--t-lg); font-weight: 650; }
+.onboard-check li { align-items: baseline; gap: var(--s2); }
+.onboard-check .ok { color: hsl(var(--ok-fg)); }
+.onboard-check .wait { color: hsl(var(--muted-foreground)); }
+.assign-line { align-items: flex-end; }
+.field-hint code { font-size: var(--t-xs); }
+
 /* Confirm must be readable: it is the most opaque surface in the console. */
 .confirm-card {
   position: absolute;
@@ -1367,7 +1527,29 @@ tbody tr:last-child td { border-bottom: 0; }
 /* ── charts ───────────────────────────────────────────────────────────────── */
 .rate-chart { margin: 0; display: grid; gap: var(--s3); }
 .rate-canvas { width: 100%; max-width: 56rem; }
-.rate-svg { display: block; max-width: 100%; }
+.rate-svg {
+  display: block;
+  max-width: 100%;
+  /* Ours horizontally, the page's vertically, so a drag on the chart does not
+     fight the scroll on a phone. */
+  touch-action: pan-y;
+  cursor: crosshair;
+  border-radius: var(--r-sm);
+}
+.rate-svg:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.rate-svg-locked { cursor: pointer; }
+.rate-knob { stroke: hsl(var(--card)); stroke-width: 2; }
+.rate-knob-down { fill: var(--rate-down); }
+.rate-knob-up { fill: var(--rate-up); }
+.rate-sample {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  margin: 0;
+  min-height: 1.75rem;
+  font-size: var(--t-base);
+  color: hsl(var(--faint-foreground));
+}
+.rate-sample.is-on { color: hsl(var(--foreground)); }
+.rate-sample-text { font-variant-numeric: tabular-nums; }
 .rate-grid { stroke: var(--grid-line); stroke-width: 1; }
 .rate-axis-text { fill: hsl(var(--faint-foreground)); font-size: 10px; font-variant-numeric: tabular-nums; }
 .rate-cursor { stroke: hsl(var(--muted-foreground) / 0.5); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -1483,6 +1665,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .homes-list { display: grid; gap: var(--s2); }
 .home-card { padding: var(--s3) var(--s4); display: grid; gap: var(--s1); }
 .home-form { gap: var(--s2); margin-top: var(--s2); }
+.home-action { justify-self: start; }
 .onboard-steps { display: grid; gap: var(--s3); }
 .onboard-form { display: grid; grid-template-columns: minmax(14rem, 1fr) auto; gap: var(--s2); align-items: end; }
 .onboard-email { display: grid; gap: var(--s1); }
@@ -1665,14 +1848,43 @@ dd { margin: 0; text-align: right; font-weight: 550; }
 }
 @media (max-width: 620px) {
   /* Fixed tab order: 总览 / 故障 / 服务器 / 客户 / 更多. The overflow pages open
-     as a second row above that row, so the five anchors never move. */
-  .sidebar-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-  .nav-item.nav-overflow { display: none; }
+     as a floating strip above the bar. Row 1 is zero-height, so opening the
+     strip never changes the bar's height and the page underneath never jumps. */
+  .sidebar-nav {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-rows: 0 auto;
+  }
+  .nav-item:not(.nav-overflow) { grid-row: 2; }
   .nav-item.nav-more { display: flex; }
-  .shell.show-more .sidebar-nav { row-gap: var(--s1); }
-  .shell.show-more .nav-item.nav-overflow { display: flex; grid-row: 1; }
-  .shell.show-more .nav-item:not(.nav-overflow) { grid-row: 2; }
-  .shell.show-more .main { padding-bottom: calc(var(--tabbar-height) * 2 + env(safe-area-inset-bottom)); }
+  .nav-item.nav-overflow {
+    grid-row: 1;
+    grid-column: span 2;
+    align-self: end;
+    flex-direction: row;
+    justify-content: center;
+    gap: var(--s2);
+    height: 2.5rem;
+    margin-bottom: var(--s2);
+    font-size: var(--t-md);
+    background: var(--l3-bg);
+    border: 1px solid var(--l3-border);
+    box-shadow: var(--l3-shadow);
+    color: hsl(var(--foreground));
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(0.5rem);
+    transition: opacity 160ms var(--ease), transform 160ms var(--ease), visibility 160ms;
+  }
+  .shell.show-more .nav-item.nav-overflow { opacity: 1; visibility: visible; transform: none; }
+  .nav-more-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 49;
+    border: 0;
+    padding: 0;
+    background: var(--scrim);
+    animation: fade var(--dur) var(--ease);
+  }
   .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metrics, .metrics-hero, .revision, .dash-split { grid-template-columns: 1fr; }
   .node-grid { grid-template-columns: minmax(0, 1fr); }

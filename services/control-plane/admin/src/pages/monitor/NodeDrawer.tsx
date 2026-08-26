@@ -12,7 +12,7 @@ import { createExclusiveGate } from '../../lib/exclusive';
 import type { OpsNodeView } from '../../lib/ops-views';
 import { seriesRates } from '../../lib/traffic';
 import { usePrivacy } from '../../privacy';
-import { Banner, Drawer } from '../../ui';
+import { Banner, Drawer, DrawerSection, Field, FieldGrid, Note, Stat, StatGrid } from '../../ui';
 
 const RISK_SIGNAL_LABELS: Record<string, string> = {
   attacker: '攻击者', abuser: '滥用者', threat: '威胁',
@@ -39,9 +39,9 @@ function agentLine(node: OpsNodeView): string {
 }
 
 function NodeTrends({ metrics, name }: { metrics: MetricsDto | null; name: string }) {
-  if (!metrics) return <p className="muted">还没有 24h 趋势</p>;
+  if (!metrics) return <Note>24h 趋势还没绑定到当前快照。</Note>;
   const points = metrics.series[name];
-  if (!points || points.length < 2) return <p className="muted">这台没有足够的趋势点</p>;
+  if (!points || points.length < 2) return <Note>这台只有 {points?.length ?? 0} 个趋势点，两点之间才画得出线。</Note>;
   const mem = points.map((point) => (
     point.memUsed != null && point.memTotal
       ? (point.memUsed / point.memTotal) * 100
@@ -148,33 +148,51 @@ function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void
   return (
     <div className="stack">
       {billing.source !== 'none' && (
-        <p className="muted">
-          {billing.price != null ? `${billing.currency || ''}${billing.price}` : '没有价格'}
+        <p className="field-hint">
+          当前：{billing.price != null ? `${billing.currency || ''}${billing.price}` : '没有价格'}
           {billing.billingCycle ? ` · ${billing.billingCycle} 天一期` : ''}
           {billing.source === 'komari' ? ' · 来自 Komari' : billing.source === 'mixed' ? ' · 自己填的优先，缺的用 Komari 补' : ' · 自己填的'}
         </p>
       )}
-      <input className="input compact" placeholder="https://账单页" value={url} onChange={(event) => setUrl(event.target.value)} />
-      <input className="input compact" placeholder="价格" value={price} onChange={(event) => setPrice(event.target.value)} />
-      <input className="input compact" placeholder="货币，如 USD" value={currency} onChange={(event) => setCurrency(event.target.value)} />
-      <input className="input compact" type="number" min={1} placeholder="账期天数" value={billingCycle} onChange={(event) => setBillingCycle(event.target.value)} />
-      <input className="input compact" type="number" min={0} placeholder="套餐 GB" value={quota} onChange={(event) => setQuota(event.target.value)} />
-      <input className="input compact" type="number" min={0} placeholder="已用 GB（手填）" value={used} onChange={(event) => setUsed(event.target.value)} />
-      <input className="input compact" type="date" value={renew} onChange={(event) => setRenew(event.target.value)} />
-      <small className="muted">某项要清空：把格子清空再保存。填错不会被当成清空。普通保存不会移动本期基线。</small>
-      <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void save()}>保存</button>
-      {profile && (
-        <button
-          type="button"
-          className="btn btn-outline btn-sm"
-          disabled={busy || !agent}
-          title={agent ? undefined : '这台没装探针，看不到当前用量'}
-          onClick={() => void startNewCycle()}
-        >新账期（移动基线）</button>
-      )}
-      {profile?.billingUrl && (
-        <a className="btn btn-outline btn-sm" href={profile.billingUrl} target="_blank" rel="noreferrer">打开账单</a>
-      )}
+      <FieldGrid>
+        <Field label="账单页">
+          <input className="input compact" placeholder="https://…" value={url} onChange={(event) => setUrl(event.target.value)} />
+        </Field>
+        <Field label="价格">
+          <input className="input compact" placeholder="5.5" value={price} onChange={(event) => setPrice(event.target.value)} />
+        </Field>
+        <Field label="货币">
+          <input className="input compact" placeholder="USD" value={currency} onChange={(event) => setCurrency(event.target.value)} />
+        </Field>
+        <Field label="账期天数">
+          <input className="input compact" type="number" min={1} placeholder="30" value={billingCycle} onChange={(event) => setBillingCycle(event.target.value)} />
+        </Field>
+        <Field label="套餐 GB">
+          <input className="input compact" type="number" min={0} placeholder="1024" value={quota} onChange={(event) => setQuota(event.target.value)} />
+        </Field>
+        <Field label="已用 GB" hint="手填，会覆盖探针差分">
+          <input className="input compact" type="number" min={0} value={used} onChange={(event) => setUsed(event.target.value)} />
+        </Field>
+        <Field label="续费日期">
+          <input className="input compact" type="date" value={renew} onChange={(event) => setRenew(event.target.value)} />
+        </Field>
+      </FieldGrid>
+      <p className="field-hint">某项要清空：把格子清空再保存。填错不会被当成清空。普通保存不会移动本期基线。</p>
+      <div className="row-actions">
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void save()}>保存</button>
+        {profile && (
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            disabled={busy || !agent}
+            title={agent ? undefined : '这台没装探针，看不到当前用量'}
+            onClick={() => void startNewCycle()}
+          >新账期（移动基线）</button>
+        )}
+        {profile?.billingUrl && (
+          <a className="btn btn-outline btn-sm" href={profile.billingUrl} target="_blank" rel="noreferrer">打开账单</a>
+        )}
+      </div>
       <Banner message={error} tone="error" />
     </div>
   );
@@ -243,52 +261,55 @@ function RetireZone({
   }
 
   if (node.catalogState !== 'known-listed') {
-    return <p className="muted">不在客户目录里，没有下架动作。</p>;
+    return <Note>不在客户目录里，没有下架动作。</Note>;
   }
 
   return (
     <div className="stack">
       <Banner message={error} tone="error" />
       <Banner message={message} tone="ok" />
-      <button className="btn btn-destructive btn-sm" type="button" disabled={loading || busy} onClick={() => void loadPreview()}>
-        {loading ? '生成预览…' : preview ? '重新预览' : '预览下架'}
-      </button>
+      <Note tone="severe">下架会把这台从客户目录里去掉。先预览，看清受影响的人，再输全名确认。</Note>
+      <div className="row-actions">
+        <button className="btn btn-outline btn-danger btn-sm" type="button" disabled={loading || busy} onClick={() => void loadPreview()}>
+          {loading ? '生成预览…' : preview ? '重新预览' : '预览下架'}
+        </button>
+      </div>
       {preview && (
         <>
-          <p className="muted">冻结目录 r{preview.expectedRevision}。确认时会再核对这个版本。</p>
-          <div className="retire-summary">
-            <div><strong>{preview.affectedUsers.length}</strong><span> 位受影响客户</span></div>
-            <div><strong>{preview.changes.proxyGroupReferencesRemoved.length}</strong><span> 个代理组引用将移除</span></div>
-            <div><strong>{preview.changes.profileMarkedRetired ? '会' : '不会'}</strong><span> 标记账单档案退役</span></div>
-          </div>
+          <Note tone="info">冻结目录 r{preview.expectedRevision}。确认时会再核对这个版本。</Note>
+          <StatGrid columns={3}>
+            <Stat label="受影响客户" value={preview.affectedUsers.length} tone={preview.affectedUsers.length > 0 ? 'severe' : undefined} />
+            <Stat label="代理组引用移除" value={preview.changes.proxyGroupReferencesRemoved.length} />
+            <Stat label="账单档案" value={preview.changes.profileMarkedRetired ? '标记退役' : '不改' } />
+          </StatGrid>
           {preview.affectedUsers.length > 0 && (
-            <ul className="detail-list affected-users">
+            <ul className="fact-list affected-users">
               {preview.affectedUsers.map((user) => (
                 <li key={`${user.userId}-${user.deviceId}`}>
+                  <span className={`chip ${user.online ? 'chip-warn' : 'chip-unknown'}`}>{user.online ? '在线' : '离线'}</span>
                   <strong>{privacy.email(user.email)}</strong>
-                  <span className="muted">{user.online ? '在线' : '离线'}</span>
                 </li>
               ))}
             </ul>
           )}
           {preview.warnings.map((warning) => <div className="banner banner-info" key={warning}>{warning}</div>)}
           {!preview.canRetire && <Banner tone="error" message="后端判定当前不能安全下架；请处理上面的阻断项后重新预览。" />}
-          <label className="retire-field">
-            <span>下架原因（会写入操作记录）</span>
+          <Field label="下架原因" hint="会写入操作记录">
             <textarea className="input" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="例如：整机失联，已确认从客户目录停售" />
-          </label>
-          <label className="retire-field">
-            <span>输入节点全名 <code>{preview.node.name}</code> 确认</span>
+          </Field>
+          <Field label="输入节点全名确认" hint={<>要一字不差地输入 <code>{preview.node.name}</code></>}>
             <input className="input" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" />
-          </label>
-          <button
-            className="btn btn-destructive"
-            type="button"
-            disabled={busy || !preview.canRetire || confirmation !== preview.node.name || !reason.trim()}
-            onClick={() => void retire()}
-          >
-            {busy ? '正在下架…' : '确认从目录下架'}
-          </button>
+          </Field>
+          <div className="row-actions">
+            <button
+              className="btn btn-destructive"
+              type="button"
+              disabled={busy || !preview.canRetire || confirmation !== preview.node.name || !reason.trim()}
+              onClick={() => void retire()}
+            >
+              {busy ? '正在下架…' : '确认从目录下架'}
+            </button>
+          </div>
         </>
       )}
     </div>
@@ -324,148 +345,172 @@ export function NodeDrawer({
 
   return (
     <Drawer open title={node.name} subtitle={`${node.blockLabel} · ${catalogLine(node)} · ${occupancyLine(node)}`} onClose={onClose}>
-      <section className="drawer-section">
-        <h3>状态摘要</h3>
-        <p>{node.blockLabel}</p>
-        <p className="muted">{catalogLine(node)} · {agentLine(node)} · {occupancyLine(node)}</p>
-        <p className="muted">{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</p>
+      <section className="drawer-section drawer-hero">
+        <div className="drawer-hero-top">
+          <span className={`nc-state nc-tone-${node.dot}`}>
+            <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />
+            {node.blockLabel}
+          </span>
+          <span className="drawer-hero-ip mono">{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</span>
+        </div>
+        <StatGrid columns={3}>
+          <Stat label="目录" value={catalogLine(node)} />
+          <Stat label="占用" value={occupancyLine(node)} tone={node.occupancyState === 'known' ? undefined : 'unknown'} />
+          <Stat label="探针" value={agentLine(node)} tone={node.agentState === 'reported' ? undefined : 'unknown'} />
+        </StatGrid>
         {node.signals.length > 0 && (
           <div className="chip-list">
             {node.signals.map((signal) => (
-              <span className={`chip${signal.severity >= 3 ? ' chip-risk' : ' chip-muted'}`} key={signal.label}>{signal.label}</span>
+              <span className={`chip${signal.severity >= 3 ? ' chip-risk' : ' chip-warn'}`} key={signal.label}>{signal.label}</span>
             ))}
           </div>
         )}
         {node.pathSummary && (node.pathSummary.worstExitMs != null || node.pathSummary.worstTcpMs != null) && (
-          <p>
-            客户路径最差
-            {node.pathSummary.worstExitMs != null ? ` 出口 ${node.pathSummary.worstExitMs}ms` : ''}
-            {node.pathSummary.worstTcpMs != null ? ` TCP ${node.pathSummary.worstTcpMs}ms` : ''}
-          </p>
+          <StatGrid columns={2}>
+            <Stat
+              label="客户路径最差 · 出口"
+              value={node.pathSummary.worstExitMs != null ? `${node.pathSummary.worstExitMs} ms` : '未测'}
+            />
+            <Stat
+              label="客户路径最差 · TCP"
+              value={node.pathSummary.worstTcpMs != null ? `${node.pathSummary.worstTcpMs} ms` : '未测'}
+            />
+          </StatGrid>
         )}
       </section>
 
-      <section className="drawer-section">
-        <h3>资源与运行时间</h3>
+      <DrawerSection title="资源与运行时间">
         {node.agentState === 'unavailable' ? (
-          <p className="muted">探针源不可用，不能判断 CPU / 内存 / 流量。</p>
+          <Note>探针源不可用，不能判断 CPU / 内存 / 流量。空着不是 0。</Note>
         ) : node.agentState === 'unreported' ? (
-          <p className="muted">没装探针。</p>
+          <Note>没装探针，这台没有 CPU / 内存 / 硬盘 / 累计流量读数。</Note>
         ) : agent ? (
-          <>
-            <p>
-              CPU {agent.cpu == null ? '—' : `${Math.round(agent.cpu)}%`}
-              {agent.memUsed != null && agent.memTotal != null ? ` · 内存 ${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : ''}
-              {agent.diskUsed != null && agent.diskTotal != null ? ` · 硬盘 ${formatBytes(agent.diskUsed)} / ${formatBytes(agent.diskTotal)}` : ''}
-            </p>
-            <p className="muted">
-              load {agent.load1 == null ? '—' : agent.load1.toFixed(2)}
-              {agent.uptime != null ? ` · 运行 ${formatDuration(agent.uptime)}` : ''}
-            </p>
-            <p className="muted">↓ 累计 {agent.netIn == null ? '—' : formatBytes(agent.netIn)} · ↑ 累计 {agent.netOut == null ? '—' : formatBytes(agent.netOut)}</p>
-          </>
+          <StatGrid>
+            <Stat label="CPU" value={agent.cpu == null ? '—' : `${Math.round(agent.cpu)}%`} note={agent.load1 == null ? undefined : `load ${agent.load1.toFixed(2)}`} />
+            <Stat
+              label="内存"
+              value={agent.memUsed != null && agent.memTotal != null ? `${Math.round((agent.memUsed / agent.memTotal) * 100)}%` : '—'}
+              note={agent.memUsed != null && agent.memTotal != null ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : '未上报'}
+            />
+            <Stat
+              label="硬盘"
+              value={agent.diskUsed != null && agent.diskTotal != null ? `${Math.round((agent.diskUsed / agent.diskTotal) * 100)}%` : '—'}
+              note={agent.diskUsed != null && agent.diskTotal != null ? `${formatBytes(agent.diskUsed)} / ${formatBytes(agent.diskTotal)}` : '未上报'}
+            />
+            <Stat label="运行" value={agent.uptime != null ? formatDuration(agent.uptime) : '—'} />
+            <Stat label="累计 ↓" value={agent.netIn == null ? '—' : formatBytes(agent.netIn)} note="计数器，不是速度" />
+            <Stat label="累计 ↑" value={agent.netOut == null ? '—' : formatBytes(agent.netOut)} note="计数器，不是速度" />
+          </StatGrid>
         ) : null}
-      </section>
+      </DrawerSection>
 
-      <section className="drawer-section">
-        <h3>三网与大陆可达</h3>
+      <DrawerSection title="三网与大陆可达">
         {node.qualityState === 'unavailable' ? (
-          <p className="muted">质量源不可用，不能把空着当成没被墙。</p>
+          <Note>质量源不可用，不能把空着当成没被墙。</Note>
         ) : node.qualityState === 'unmeasured' ? (
-          <p className="muted">大陆没测。不是好，只是没测。</p>
+          <Note>大陆没测。不是好，只是没测。</Note>
         ) : quality?.block?.rule ? (
-          <p className="muted">{quality.block.rule}</p>
+          <Note tone="info">{quality.block.rule}</Note>
         ) : null}
         {node.agentState === 'unavailable' ? (
-          <p className="muted">三网源不可用。</p>
+          <Note>三网源不可用。</Note>
         ) : (
           <CarrierPing carriers={agent?.carriers ?? null} />
         )}
-      </section>
+      </DrawerSection>
 
-      <section className="drawer-section">
-        <h3>24h 趋势</h3>
+      <DrawerSection title="24h 趋势">
         <NodeTrends metrics={metrics} name={node.name} />
-      </section>
+      </DrawerSection>
 
-      <section className="drawer-section">
-        <h3>谁在使用</h3>
+      <DrawerSection
+        title="谁在使用"
+        aside={node.occupancyState === 'known' ? `${node.occupants.length} 人` : '不可判断'}
+      >
         {node.occupancyState !== 'known' ? (
-          <p className="muted">占用不可判断，心跳源没回来。</p>
+          <Note>占用不可判断，心跳源没回来。这不是「没人用」。</Note>
         ) : node.occupants.length === 0 ? (
-          <p className="muted">现在没人连这台</p>
+          <Note>现在没人连这台。</Note>
         ) : (
-          <ul className="detail-list">
+          <div className="chip-list">
             {node.occupants.map((user) => (
-              <li key={user.userId}><strong>{privacy.email(user.email)}</strong></li>
+              <a className="chip chip-link" key={user.userId} href={`#/users?user=${encodeURIComponent(user.userId)}`}>
+                {privacy.email(user.email)}
+              </a>
+            ))}
+          </div>
+        )}
+      </DrawerSection>
+
+      <DrawerSection
+        title="端口与风险"
+        aside={quality?.exposure && quality.exposure.unexpected.length > 0
+          ? <span className="pill-count t-severe">{quality.exposure.unexpected.length} 个意外端口</span>
+          : undefined}
+      >
+        {node.qualityState === 'unavailable' ? (
+          <Note>质量源不可用，没有端口扫描结果。</Note>
+        ) : !quality?.exposure ? (
+          <Note>还没扫过端口。空着不代表安全。</Note>
+        ) : quality.exposure.unexpected.length === 0 ? (
+          <Note tone="ok">对外只开了 SSH（:{quality.exposure.sshPorts.join('、:') || '—'}）和服务端口。</Note>
+        ) : (
+          <div className="chip-list">
+            {quality.exposure.unexpected.map((listener) => (
+              <span className="chip chip-bad" key={`exp-${listener.port}`}>
+                :{listener.port}{listener.process ? ` ${listener.process}` : ''}
+              </span>
+            ))}
+          </div>
+        )}
+        {quality?.exposure && quality.exposure.acknowledged.length > 0 && (
+          <ul className="fact-list">
+            {quality.exposure.acknowledged.map((listener) => (
+              <li key={`ack-${listener.port}`}>
+                <span className="chip chip-unknown">已允许 :{listener.port}</span>
+                <span>{listener.process || '未知进程'}{listener.reason ? ` —— ${listener.reason}` : ''}</span>
+              </li>
             ))}
           </ul>
         )}
-      </section>
-
-      <section className="drawer-section">
-        <h3>端口与风险</h3>
-        {node.qualityState === 'unavailable' ? (
-          <p className="muted">质量源不可用，没有端口扫描结果。</p>
-        ) : !quality?.exposure ? (
-          <p className="muted">还没扫过端口。空着不代表安全。</p>
-        ) : (
-          <>
-            {quality.exposure.unexpected.length === 0 ? (
-              <p>对外只开了 SSH（:{quality.exposure.sshPorts.join('、:') || '—'}）和服务端口。</p>
-            ) : (
-              <p>
-                多开了 {quality.exposure.unexpected.length} 个端口：
-                {quality.exposure.unexpected.map((listener) => (
-                  <span className="chip chip-risk" key={`exp-${listener.port}`}>
-                    :{listener.port}{listener.process ? ` ${listener.process}` : ''}
-                  </span>
-                ))}
-              </p>
-            )}
-            {quality.exposure.acknowledged.map((listener) => (
-              <p className="muted" key={`ack-${listener.port}`}>
-                已允许 :{listener.port}
-                {listener.process ? ` ${listener.process}` : ''}
-                {listener.reason ? ` —— ${listener.reason}` : ''}
-              </p>
-            ))}
-          </>
-        )}
         {quality && quality.riskSignals.length > 0 && (
           <>
-            <p className="muted">查过 17 家名单，少数说有问题先不算。</p>
-            {quality.riskSignals.map((signal) => (
-              <p key={`sig-${signal.tag}`}>
-                {RISK_SIGNAL_LABELS[signal.tag] ?? signal.tag}：
-                {signal.no === 0
-                  ? `${signal.yes} 家标了这个`
-                  : `${signal.yes} 家说是，${signal.no} 家说不是`}
-                {quality.riskKeywords.includes(signal.tag) ? '（算）' : '（证据不够，先不算）'}
-              </p>
-            ))}
+            <ul className="fact-list">
+              {quality.riskSignals.map((signal) => (
+                <li key={`sig-${signal.tag}`}>
+                  <span className={`chip ${quality.riskKeywords.includes(signal.tag) ? 'chip-warn' : 'chip-unknown'}`}>
+                    {RISK_SIGNAL_LABELS[signal.tag] ?? signal.tag}
+                  </span>
+                  <span>
+                    {signal.no === 0
+                      ? `${signal.yes} 家标了这个`
+                      : `${signal.yes} 家说是，${signal.no} 家说不是`}
+                    {quality.riskKeywords.includes(signal.tag) ? ' · 算' : ' · 证据不够，先不算'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="field-hint">查过 17 家名单，少数说有问题先不算。</p>
           </>
         )}
         {!privacy.privacy && (quality?.backtrace || quality?.securityCheck) ? (
-          <details>
+          <details className="raw-fold">
             <summary>线路 / 黑名单原文</summary>
             <pre>{quality.backtrace || '无'}</pre>
             <pre>{quality.securityCheck || '无'}</pre>
           </details>
         ) : privacy.privacy ? (
-          <p className="muted">隐私模式已隐藏原始 backtrace / securityCheck。</p>
+          <Note>隐私模式已隐藏原始 backtrace / securityCheck。</Note>
         ) : null}
-      </section>
+      </DrawerSection>
 
-      <section className="drawer-section">
-        <h3>账单档案</h3>
+      <DrawerSection title="账单档案" fold open={node.billing.source === 'none'}>
         <BillingForm node={node} onSaved={onChanged} />
-      </section>
+      </DrawerSection>
 
-      <section className="drawer-section danger-zone">
-        <h3>危险区：下架</h3>
+      <DrawerSection title="危险区：下架" danger>
         <RetireZone node={node} onDone={onChanged} />
-      </section>
+      </DrawerSection>
     </Drawer>
   );
 }

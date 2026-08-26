@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { operationsApi, type HomeExitDto, type ProductAccountDto } from '../../api';
 import type { Live } from '../../hooks';
-import { Drawer, Banner, Skeleton, Unavailable } from '../../ui';
+import { Drawer, Banner, Field, FieldGrid, Note, Skeleton, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
 import { useMutation } from './mutate';
 
@@ -123,32 +123,32 @@ export function OnboardDrawer({
     <Drawer open={open} title="开通客户" subtitle="先让客户能登录，再绑家宽和 Claude" onClose={onClose}>
       <Banner message={error || mutate.error} tone="error" />
       <form className="onboard-steps" onSubmit={(event) => void submit(event, Boolean(result?.registered))}>
-        <label>
-          <span>客户邮箱</span>
-          <input className="input" type="email" required value={email} onChange={(event) => changeEmail(event.target.value)} placeholder="用来收验证码的邮箱" disabled={mutate.busy} />
-        </label>
+        <Field label="客户邮箱" hint="用来收验证码的邮箱">
+          <input className="input" type="email" required value={email} onChange={(event) => changeEmail(event.target.value)} disabled={mutate.busy} />
+        </Field>
         {!result && (
           <button className="btn" type="submit" disabled={mutate.busy || !email.trim()}>{mutate.busy ? '保存中…' : '保存登录资格'}</button>
         )}
         {waiting && (
           <div className="onboard-result">
-            <strong>{privacy.email(result.email)}</strong>
+            <strong className="onboard-subject">{privacy.email(result.email)}</strong>
             <OnboardChecklist result={result} />
-            <p>请客户先在 App 里用这个邮箱收验证码登录。登录完成后再点一次保存，才会收集家宽和 Claude。</p>
-            <button className="btn" type="submit" disabled={mutate.busy}>我已经登录，再检查一次</button>
+            <Note tone="info">请客户先在 App 里用这个邮箱收验证码登录。登录完成后再点一次保存，才会收集家宽和 Claude。</Note>
+            <div className="row-actions">
+              <button className="btn" type="submit" disabled={mutate.busy}>我已经登录，再检查一次</button>
+            </div>
           </div>
         )}
         {result?.registered && (
           <div className="onboard-result">
-            <strong>{privacy.email(result.email)}</strong>
+            <strong className="onboard-subject">{privacy.email(result.email)}</strong>
             <OnboardChecklist result={result} />
             {homes.state === 'loading' && <Skeleton label="家宽库存" />}
             {homes.state === 'error' && <Unavailable title="家宽库存不可用" detail={homes.message} />}
             {pooled.state === 'loading' && <Skeleton label="号池" />}
             {pooled.state === 'error' && <Unavailable title="号池不可用" detail={pooled.message} />}
-            <div className="form-grid">
-              <label>
-                <span>家宽（直接贴过来）</span>
+            <FieldGrid>
+              <Field label="家宽" hint="直接贴一行 host:port:user:pass">
                 <input
                   className="input"
                   value={extras.line}
@@ -157,9 +157,8 @@ export function OnboardDrawer({
                   disabled={mutate.busy}
                   spellCheck={false}
                 />
-              </label>
-              <label>
-                <span>或从库存里选</span>
+              </Field>
+              <Field label="或从库存里选">
                 <select
                   className="input"
                   value={extras.homeExitId}
@@ -171,18 +170,16 @@ export function OnboardDrawer({
                     <option key={home.id} value={home.id}>{home.displayName} · {privacy.ip(home.socks5Host)}</option>
                   ))}
                 </select>
-              </label>
-              <label>
-                <span>Claude 账号</span>
+              </Field>
+              <Field label="Claude 账号">
                 <input
                   className="input"
                   value={extras.accountRef}
                   onChange={(event) => setExtras({ ...extras, accountRef: event.target.value, productAccountId: event.target.value ? '' : extras.productAccountId })}
                   disabled={mutate.busy}
                 />
-              </label>
-              <label>
-                <span>或从号池里选</span>
+              </Field>
+              <Field label="或从号池里选">
                 <select
                   className="input"
                   value={extras.productAccountId}
@@ -194,13 +191,14 @@ export function OnboardDrawer({
                     <option key={account.id} value={account.id}>{privacy.secret(account.accountRef)}</option>
                   ))}
                 </select>
-              </label>
-              <label>
-                <span>微信或备注</span>
+              </Field>
+              <Field label="微信或备注">
                 <input className="input" value={extras.contact} onChange={(event) => setExtras({ ...extras, contact: event.target.value })} disabled={mutate.busy} />
-              </label>
+              </Field>
+            </FieldGrid>
+            <div className="row-actions">
+              <button className="btn" type="submit" disabled={mutate.busy}>保存家宽 / Claude</button>
             </div>
-            <button className="btn" type="submit" disabled={mutate.busy}>保存家宽 / Claude</button>
           </div>
         )}
       </form>

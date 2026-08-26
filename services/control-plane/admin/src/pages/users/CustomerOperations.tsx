@@ -5,7 +5,7 @@ import { catalogProxyNames } from '../../lib/catalog';
 import { unixDateTimeLocal } from '../../lib/fields';
 import { formatBytes, timestamp } from '../../lib/format';
 import { usePrivacy } from '../../privacy';
-import { Banner, Skeleton, Status, Unavailable } from '../../ui';
+import { Banner, DrawerSection, Field, Note, Skeleton, Stat, StatGrid, Unavailable } from '../../ui';
 import { useAsk } from './ask';
 import { useMutation } from './mutate';
 
@@ -50,9 +50,12 @@ export function CustomerOperations({
       <Banner message={expiry.ok || home.ok} tone="ok" />
       <Banner message={expiry.error || home.error} tone="error" />
 
-      <details className="drawer-section" open={opened('expired') || opened('expiring')}>
-        <summary><h3>到期</h3></summary>
-        <p className="muted">{user.expiresAt ? timestamp(user.expiresAt) : '不限'}</p>
+      <DrawerSection
+        title="到期"
+        fold
+        open={opened('expired') || opened('expiring')}
+        aside={user.expiresAt ? timestamp(user.expiresAt) : '不限'}
+      >
         <div className="form-row">
           <button
             type="button"
@@ -92,16 +95,18 @@ export function CustomerOperations({
             >取消到期</button>
           )}
         </div>
-      </details>
+      </DrawerSection>
 
-      <details className="drawer-section" open={opened('quota')}>
-        <summary><h3>用量</h3></summary>
-        <p className="mono">{formatBytes(user.usageBytes)}{user.quotaBytes == null ? ' / 不限' : ` / ${formatBytes(user.quotaBytes)}`}</p>
-        <p className="muted">清零是把本期基线推到当前累计，不是删服务器历史。</p>
+      <DrawerSection title="用量" fold open={opened('quota')}>
+        <StatGrid columns={2}>
+          <Stat label="本期已用" value={formatBytes(user.usageBytes)} />
+          <Stat label="额度" value={user.quotaBytes == null ? '不限' : formatBytes(user.quotaBytes)} />
+        </StatGrid>
+        <Note>清零是把本期基线推到当前累计，不是删服务器历史。</Note>
         {user.usageBytes > 0 && (
           <button
             type="button"
-            className="btn btn-outline btn-sm"
+            className="btn btn-outline btn-danger btn-sm"
             disabled={expiry.busy}
             onClick={() => ask.prompt(
               `把 ${privacy.email(user.email)} 这期流量清零？`,
@@ -114,20 +119,27 @@ export function CustomerOperations({
             )}
           >这期清零</button>
         )}
-      </details>
+      </DrawerSection>
 
-      <details className="drawer-section" open={opened('home')}>
-        <summary><h3>家宽</h3></summary>
-        <p>{user.homeBinding ? `${user.homeBinding.displayName} · ${privacy.ip(user.homeBinding.socks5Host || user.homeBinding.egressIpv4)}` : '未绑定'}</p>
+      <DrawerSection
+        title="家宽"
+        fold
+        open={opened('home')}
+        aside={user.homeBinding
+          ? `${user.homeBinding.displayName} · ${privacy.ip(user.homeBinding.socks5Host || user.homeBinding.egressIpv4)}`
+          : '未绑定'}
+      >
         {homes.state === 'loading' && <Skeleton label="家宽库存" />}
         {homes.state === 'error' && <Unavailable title="家宽库存不可用" detail={homes.message} />}
-        {catalog.state === 'loading' && <p className="muted">目录还没回来，默认节点列表暂时空着。</p>}
+        {catalog.state === 'loading' && <Note tone="info">目录还没回来，默认节点列表暂时空着。</Note>}
         {catalog.state === 'error' && <Unavailable title="目录不可用" detail={catalog.message} />}
         <div className="stack home-form">
-          <input className="input compact" placeholder="host:port:user:pass" value={assignLine} onChange={(event) => setAssignLine(event.target.value)} spellCheck={false} />
+          <Field label="新线路" hint="host:port:user:pass">
+            <input className="input compact" value={assignLine} onChange={(event) => setAssignLine(event.target.value)} spellCheck={false} />
+          </Field>
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
+            className="btn btn-secondary btn-sm home-action"
             disabled={home.busy || !assignLine.trim()}
             onClick={() => {
               const assign = async () => {
@@ -153,19 +165,25 @@ export function CustomerOperations({
               }
             }}
           >{user.homeBinding ? '换线路' : '绑定线路'}</button>
-          <select className="input compact" value={bindPick} onChange={(event) => setBindPick(event.target.value)} disabled={homes.state !== 'ready'}>
-            <option value="">{homes.state !== 'ready' ? '库存未就绪' : bindable.length ? '从库存选一条' : '没有可绑的线路'}</option>
-            {bindable.map((row) => (
-              <option key={row.id} value={row.id}>{row.displayName} ({privacy.ip(row.socks5Host)})</option>
-            ))}
-          </select>
-          <select className="input compact" value={defaultPick} onChange={(event) => setDefaultPick(event.target.value)}>
-            <option value="">默认节点（可不选）</option>
-            {sharedProxies.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
+          <div className="field-grid">
+            <Field label="从库存选">
+              <select className="input compact" value={bindPick} onChange={(event) => setBindPick(event.target.value)} disabled={homes.state !== 'ready'}>
+                <option value="">{homes.state !== 'ready' ? '库存未就绪' : bindable.length ? `${bindable.length} 条可绑` : '没有可绑的线路'}</option>
+                {bindable.map((row) => (
+                  <option key={row.id} value={row.id}>{row.displayName} ({privacy.ip(row.socks5Host)})</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="默认节点" hint="可不选">
+              <select className="input compact" value={defaultPick} onChange={(event) => setDefaultPick(event.target.value)}>
+                <option value="">不指定</option>
+                {sharedProxies.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </Field>
+          </div>
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
+            className="btn btn-secondary btn-sm home-action"
             disabled={home.busy || !canSaveStock}
             onClick={() => {
               const homeExitId = bindPick || user.homeBinding?.homeExitId;
@@ -181,7 +199,7 @@ export function CustomerOperations({
           {user.homeBinding && (
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-sm home-action"
               disabled={home.busy}
               onClick={() => ask.prompt(
                 `解开 ${privacy.email(user.email)} 的家宽？`,
@@ -195,10 +213,14 @@ export function CustomerOperations({
             >解开</button>
           )}
         </div>
-      </details>
+      </DrawerSection>
 
-      <details className="drawer-section" open={opened('claude')}>
-        <summary><h3>Claude</h3></summary>
+      <DrawerSection
+        title="Claude"
+        fold
+        open={opened('claude')}
+        aside={current ? privacy.secret(current.accountRef) : '没有在用的号'}
+      >
         {detailPending && <Skeleton label="Claude 资料" />}
         <ClaudeBlock
           user={user}
@@ -208,7 +230,7 @@ export function CustomerOperations({
           setAccountRef={setAccountRef}
           onChanged={onChanged}
         />
-      </details>
+      </DrawerSection>
     </div>
   );
 }
@@ -234,15 +256,20 @@ function ClaudeBlock({
       {ask.dialog}
       <Banner message={claude.ok} tone="ok" />
       <Banner message={claude.error} tone="error" />
-      <p className="muted">第一次开通 {user.firstEntitledAt ? timestamp(user.firstEntitledAt) : '—'} · 换过 {user.product?.replaceCount ?? 0} 次</p>
-      {current ? (
-        <p>
-          现在用 <strong>{privacy.secret(current.accountRef)}</strong>
-          {days != null ? ` · 已用 ${days} 天` : ''}
-        </p>
-      ) : <p className="muted">现在没有在用的号</p>}
+      <StatGrid columns={3}>
+        <Stat
+          label="在用账号"
+          value={current ? privacy.secret(current.accountRef) : '无'}
+          note={current && days != null ? `已用 ${days} 天` : undefined}
+          tone={current ? undefined : 'unknown'}
+        />
+        <Stat label="第一次开通" value={user.firstEntitledAt ? timestamp(user.firstEntitledAt) : '—'} />
+        <Stat label="换号次数" value={user.product?.replaceCount ?? 0} />
+      </StatGrid>
       <div className="assign-line">
-        <input className="input compact" placeholder="账号" value={accountRef} onChange={(event) => setAccountRef(event.target.value)} />
+        <Field label={current ? '新账号' : '账号'}>
+          <input className="input compact" value={accountRef} onChange={(event) => setAccountRef(event.target.value)} />
+        </Field>
         {current ? (
           <button
             type="button"
@@ -288,11 +315,12 @@ function ClaudeBlock({
         )}
       </div>
       {events.length > 0 && (
-        <ul className="detail-list">
+        <ul className="fact-list">
           {events.slice(0, 8).map((event) => (
             <li key={event.id}>
-              <span>{event.type}{event.detail ? ` · ${event.detail}` : ''}</span>
-              <span className="muted">{timestamp(event.at)}</span>
+              <span className="chip chip-unknown">{event.type}</span>
+              <span>{event.detail || '—'}</span>
+              <span className="field-hint">{timestamp(event.at)}</span>
             </li>
           ))}
         </ul>

@@ -226,7 +226,7 @@ export function Dashboard() {
               <div className="lb">
                 {occupancy.map((node) => (
                   <button type="button" className="lb-row lb-row-plain" key={node.name} onClick={() => openNode(node.name)}>
-                    <span className="lb-email">{node.name}</span>
+                    <span className="lb-email" title={node.name}>{node.name}</span>
                     <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(8, ((node.occupancy ?? 0) / (occupancy[0].occupancy || 1)) * 100)}%` }} /></div>
                     <span className="lb-value mono">{node.occupancy} 人</span>
                   </button>
@@ -253,7 +253,7 @@ export function Dashboard() {
                 {usageTop.map((person, index) => (
                   <button type="button" className="lb-row" key={person.userId} onClick={() => openUser(person.userId)}>
                     <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
-                    <span className="lb-email">{privacy.email(person.email)}</span>
+                    <span className="lb-email" title={privacy.email(person.email)}>{privacy.email(person.email)}</span>
                     <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(2, (person.usageBytes / (usageTop[0].usageBytes || 1)) * 100)}%` }} /></div>
                     <span className="lb-value mono">{formatBytes(person.usageBytes)}</span>
                   </button>
