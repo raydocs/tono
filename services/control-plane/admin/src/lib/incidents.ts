@@ -1,9 +1,10 @@
 import type { ActivityUserDto } from '../api';
-import type { OpsNodeView, OpsPersonView } from './ops-views';
+import { nodeRootCause, type OpsNodeView, type OpsPersonView } from './ops-views';
+import { HEARTBEAT_FRESH_SECONDS, measurementFresh } from './freshness';
 import { isLikelyBlocked } from './quality';
 import { msEpochToSec } from './time';
 
-export const HEARTBEAT_FRESH_SECONDS = 40 * 60;
+export { HEARTBEAT_FRESH_SECONDS, measurementFresh };
 export const PATH_WARN_MS = 400;
 export const PATH_SEVERE_MS = 800;
 
@@ -37,6 +38,7 @@ export type OpsIncident = {
   node?: string;
   userId?: string;
   impactCount: number;
+  affectedDeviceCount?: number;
   measuredAtSec: number | null;
   measuredAt?: number | null;
   sourceState: IncidentSourceState;
@@ -87,13 +89,16 @@ export function customerPathVerdict(input: {
   }
 
   const delays: Array<{ ms: number; label: string; atSec: number | null }> = [];
-  if (input.exitDelayMs != null) {
-    delays.push({ ms: input.exitDelayMs, label: '出口', atSec: msEpochToSec(input.exitDelayAtMs) });
+  if (input.exitDelayMs != null && measurementFresh(input.exitDelayAtMs, lastSeen, input.nowSec)) {
+    delays.push({ ms: input.exitDelayMs, label: '出口', atSec: msEpochToSec(input.exitDelayAtMs) ?? lastSeen });
   }
-  if (input.tcpDelayMs != null) {
-    delays.push({ ms: input.tcpDelayMs, label: 'TCP', atSec: msEpochToSec(input.tcpDelayAtMs) });
+  if (input.tcpDelayMs != null && measurementFresh(input.tcpDelayAtMs, lastSeen, input.nowSec)) {
+    delays.push({ ms: input.tcpDelayMs, label: 'TCP', atSec: msEpochToSec(input.tcpDelayAtMs) ?? lastSeen });
   }
-  if (delays.length === 0) return { kind: 'unmeasured' };
+  if (delays.length === 0) {
+    const hadAny = input.exitDelayMs != null || input.tcpDelayMs != null;
+    return { kind: hadAny ? 'unmeasured' : 'unmeasured' };
+  }
 
   const worst = delays.reduce((a, b) => (b.ms > a.ms ? b : a));
   const measuredAt = worst.atSec ?? lastSeen;
@@ -179,6 +184,7 @@ export function incidentsFromWorld(input: {
   people: OpsPersonView[];
   catalogRevision: number | null;
   nowSec: number;
+  qualityUpdatedAtSec?: number | null;
 }): OpsIncident[] {
   const incidents: OpsIncident[] = [];
 
@@ -187,9 +193,11 @@ export function incidentsFromWorld(input: {
     const occupied = node.occupancyState === 'known' && (node.occupancy ?? 0) > 0;
     const affecting = occupied || listed;
     const impact = node.occupancyState === 'known' ? (node.occupancy ?? 0) : 0;
-    const measured = node.agent?.observedAt ?? null;
+    const qualityMeasured = input.qualityUpdatedAtSec ?? null;
+    const agentMeasured = node.agent?.observedAt ?? null;
+    const cause = nodeRootCause(node);
 
-    if (node.quality && isLikelyBlocked(node.quality)) {
+    if (cause === 'blocked' && node.quality && isLikelyBlocked(node.quality)) {
       incidents.push(incident({
         id: `node-block:${node.name}`,
         kind: 'node-blocked',
@@ -200,10 +208,10 @@ export function incidentsFromWorld(input: {
         actionRoute: `#/monitor?focus=blocked&node=${encodeURIComponent(node.name)}`,
         node: node.name,
         impactCount: impact,
-        measuredAtSec: measured,
+        measuredAtSec: qualityMeasured,
         sourceState: 'ready',
       }));
-    } else if (node.quality && nodeOffline(node) && affecting) {
+    } else if (cause === 'offline' && affecting) {
       incidents.push(incident({
         id: `node-down:${node.name}`,
         kind: 'node-down',
@@ -216,10 +224,10 @@ export function incidentsFromWorld(input: {
         actionRoute: `#/monitor?focus=offline&node=${encodeURIComponent(node.name)}`,
         node: node.name,
         impactCount: impact,
-        measuredAtSec: measured,
+        measuredAtSec: qualityMeasured,
         sourceState: 'ready',
       }));
-    } else if (node.quality && nodeOffline(node)) {
+    } else if (cause === 'offline') {
       incidents.push(incident({
         id: `node-down-idle:${node.name}`,
         kind: 'node-down',
@@ -230,12 +238,12 @@ export function incidentsFromWorld(input: {
         actionRoute: `#/monitor?focus=offline&node=${encodeURIComponent(node.name)}`,
         node: node.name,
         impactCount: 0,
-        measuredAtSec: measured,
+        measuredAtSec: qualityMeasured,
         sourceState: 'ready',
       }));
     }
 
-    if (listed && node.agentState === 'unreported') {
+    if (cause === 'noprobe' && listed && node.agentState === 'unreported') {
       incidents.push(incident({
         id: `node-noprobe:${node.name}`,
         kind: 'node-no-probe',
@@ -252,7 +260,7 @@ export function incidentsFromWorld(input: {
     }
 
     const load = node.signals.find((signal) => signal.severity >= 3);
-    if (load) {
+    if (cause === 'pressure' && load) {
       incidents.push(incident({
         id: `node-pressure:${node.name}:${load.label}`,
         kind: 'node-pressure',
@@ -263,7 +271,7 @@ export function incidentsFromWorld(input: {
         actionRoute: `#/monitor?focus=pressure&node=${encodeURIComponent(node.name)}`,
         node: node.name,
         impactCount: impact,
-        measuredAtSec: measured,
+        measuredAtSec: agentMeasured,
         sourceState: 'ready',
       }));
     }
@@ -317,7 +325,8 @@ export function incidentsFromWorld(input: {
         actionRoute: `#/users?focus=path&user=${encodeURIComponent(person.userId)}`,
         userId: person.userId,
         node: person.selectedServer ?? undefined,
-        impactCount: person.reportedDeviceCount || 1,
+        impactCount: 1,
+        affectedDeviceCount: person.reportedDeviceCount || 1,
         measuredAtSec: path.measuredAt,
         sourceState: 'ready',
       }));
@@ -461,13 +470,14 @@ export function dashboardKpis(input: {
   qualityAvailable: boolean;
   activityAvailable: boolean;
   usersAvailable: boolean;
+  profilesAvailable: boolean;
   nowSec: number;
 }): DashboardKpi[] {
   const blocked = input.qualityAvailable
-    ? input.nodes.filter((node) => node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED').length
+    ? input.nodes.filter((node) => nodeRootCause(node) === 'blocked').length
     : null;
   const offline = input.qualityAvailable
-    ? input.nodes.filter((node) => node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false)).length
+    ? input.nodes.filter((node) => nodeRootCause(node) === 'offline').length
     : null;
   const path = input.activityAvailable
     ? input.incidents.filter((item) => item.category === 'customer-path').length
@@ -478,17 +488,19 @@ export function dashboardKpis(input: {
   const quota = input.usersAvailable
     ? input.people.filter((person) => person.quotaWarn || person.quotaOver).length
     : null;
-  const expiring = input.nodes.filter((node) => (
-    node.billing.renewsAt != null
-    && node.billing.renewsAt - input.nowSec <= 7 * 86_400
-    && node.billing.renewsAt - input.nowSec >= 0
-  )).length;
+  const expiring = input.profilesAvailable
+    ? input.nodes.filter((node) => (
+      node.billing.renewsAt != null
+      && node.billing.renewsAt - input.nowSec <= 7 * 86_400
+      && node.billing.renewsAt - input.nowSec >= 0
+    )).length
+    : null;
   return [
     { id: 'blocked', label: '被墙', value: blocked, href: KPI_HREFS.blocked, alert: (blocked ?? 0) > 0 },
     { id: 'offline', label: '失联', value: offline, href: KPI_HREFS.offline, alert: (offline ?? 0) > 0 },
     { id: 'path', label: '客户路径差', value: path, href: KPI_HREFS.path, alert: (path ?? 0) > 0 },
     { id: 'online', label: '在线客户', value: online, href: KPI_HREFS.online, alert: false },
     { id: 'quota', label: '额度告急', value: quota, href: KPI_HREFS.quota, alert: (quota ?? 0) > 0 },
-    { id: 'expiring', label: '7 天续费', value: expiring, href: KPI_HREFS.expiring, alert: expiring > 0 },
+    { id: 'expiring', label: '7 天续费', value: expiring, href: KPI_HREFS.expiring, alert: (expiring ?? 0) > 0 },
   ];
 }

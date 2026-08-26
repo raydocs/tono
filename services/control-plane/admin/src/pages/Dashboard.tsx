@@ -1,6 +1,7 @@
 import { formatBytes, timestamp } from '../lib/format';
 import { accidentsOnly, dashboardKpis } from '../lib/incidents';
 import { sortOpsNodes } from '../lib/ops-views';
+import { canDeclareHealthy } from '../lib/source-truth';
 import { useOpsRoute } from '../lib/route';
 import { NodeCard } from '../NodeCard';
 import { useOpsWorld } from '../ops-context';
@@ -18,9 +19,9 @@ export function Dashboard() {
   const world = useOpsWorld();
   const { openNode, openUser } = useOpsRoute();
   const privacy = usePrivacy();
-  const qualityAvailable = world.live.state === 'ready' && !world.live.data.qualityError;
-  const activityAvailable = world.activity.state === 'ready';
-  const usersAvailable = world.users.state === 'ready';
+  const qualityAvailable = world.sources.quality.status === 'current' || world.sources.quality.status === 'stale';
+  const activityAvailable = world.sources.activity.status === 'current' || world.sources.activity.status === 'stale';
+  const usersAvailable = world.sources.users.status === 'current' || world.sources.users.status === 'stale';
   const kpis = dashboardKpis({
     nodes: world.nodes,
     people: world.people,
@@ -28,6 +29,7 @@ export function Dashboard() {
     qualityAvailable,
     activityAvailable,
     usersAvailable,
+    profilesAvailable: world.sources.profiles.status === 'current' || world.sources.profiles.status === 'stale',
     nowSec: world.nowSec,
   });
   const accidents = accidentsOnly(world.incidents);
@@ -40,15 +42,14 @@ export function Dashboard() {
     .sort((a, b) => (b.occupancy ?? 0) - (a.occupancy ?? 0))
     .slice(0, 5);
   const usageTop = [...world.people]
-    .filter((person) => person.user)
+    .filter((person) => person.user && person.usageBytes > 0)
     .sort((a, b) => b.usageBytes - a.usageBytes)
     .slice(0, 5);
   const { quota, ops } = choreGroups(world.chores);
   const inventory = world.dashboard.state === 'ready' ? world.dashboard.data.inventory : null;
-  const accidentSourcesReady = qualityAvailable && activityAvailable;
-  const accidentSourcesFailed = (world.live.state === 'error' && !world.live.refreshedAt)
-    || (world.activity.state === 'error' && !world.activity.refreshedAt);
-  const accidentSourcesPending = world.live.state === 'loading' || world.activity.state === 'loading';
+  const healthy = canDeclareHealthy([world.sources.quality, world.sources.agents, world.sources.activity, world.sources.catalog]);
+  const staleNote = [world.sources.quality, world.sources.agents, world.sources.activity, world.sources.catalog]
+    .some((source) => source.status === 'stale');
 
   return (
     <div className="stack dash-page">
@@ -80,26 +81,26 @@ export function Dashboard() {
               <p>只看被墙、失联、探针、路径。Claude 和家宽在下面待办。</p>
             </div>
           </div>
-          {accidentSourcesFailed && accidents.length === 0 ? (
-            <Unavailable title="还有数据没查完" detail="节点或心跳源不可用，不能写成正常。" />
-          ) : accidentSourcesPending && accidents.length === 0 ? (
-            <p className="muted dash-pad">还有数据没查完</p>
-          ) : accidents.length === 0 ? (
-            accidentSourcesReady
-              ? <div className="attention-ok">节点和客户路径正常</div>
-              : <p className="muted dash-pad">还有数据没查完</p>
+          {accidents.length > 0 ? (
+            <>
+              {staleNote && <p className="muted dash-pad">正在看旧快照，自动刷新失败。</p>}
+              {!healthy && <p className="muted dash-pad">还有来源不可判断，已知事故仍列在下面。</p>}
+              <ul className="attention-list">
+                {accidents.map((item) => (
+                  <li key={item.id} className={`attention-${item.severity === 'severe' ? 'error' : 'warn'}`}>
+                    <span className="attention-dot" aria-hidden />
+                    <a className="table-link" href={item.actionRoute}>
+                      {item.userId ? privacy.email(item.title) : item.title} · {item.detail}
+                      {item.impactCount ? ` · 影响 ${item.impactCount} 人` : ''}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : healthy ? (
+            <div className="attention-ok">节点和客户路径正常</div>
           ) : (
-            <ul className="attention-list">
-              {accidents.map((item) => (
-                <li key={item.id} className={`attention-${item.severity === 'severe' ? 'error' : 'warn'}`}>
-                  <span className="attention-dot" aria-hidden />
-                  <a className="table-link" href={item.actionRoute}>
-                    {item.userId ? privacy.email(item.title) : item.title} · {item.detail}
-                    {item.impactCount ? ` · 影响 ${item.impactCount}` : ''}
-                  </a>
-                </li>
-              ))}
-            </ul>
+            <Unavailable title="还有数据没查完" detail="不能在质量、探针、心跳或目录未 current 时写成正常。" />
           )}
         </GlassCard>
 
@@ -218,7 +219,11 @@ export function Dashboard() {
                 <a className="table-link" href={item.actionRoute}>{item.node ? item.title : privacy.email(item.title)} · {item.detail}</a>
               </li>
             ))}
-            {quota.length === 0 && <li className="muted">没有额度或到期待办</li>}
+            {quota.length === 0 && (
+              <li className="muted">
+                {world.sources.users.status === 'unavailable' ? '客户资料不可用，不能判断额度待办' : '没有额度或到期待办'}
+              </li>
+            )}
           </ul>
         </GlassCard>
         <GlassCard>

@@ -22,7 +22,9 @@ function IncidentRow({ item, nowSec }: { item: OpsIncident; nowSec: number }) {
           <p>{item.detail}</p>
           <small>
             {item.severity === 'severe' ? '严重' : '警告'}
-            {item.impactCount ? ` · 影响 ${item.impactCount}` : ''}
+            {item.category === 'customer-path'
+              ? ` · ${item.impactCount} 位客户${item.affectedDeviceCount ? ` · ${item.affectedDeviceCount} 台设备` : ''}`
+              : item.impactCount ? ` · 影响 ${item.impactCount} 人` : ''}
             {item.measuredAtSec != null ? ` · 测量 ${timeAgo(item.measuredAtSec)}` : ' · 测量时间未知'}
             {item.measuredAtSec != null ? (fresh ? ' · 新鲜' : ' · 已过保鲜') : ''}
             {item.node ? ` · ${item.node}` : ''}
@@ -47,8 +49,12 @@ export function FailuresPage() {
   const severe = visible.filter((item) => item.severity === 'severe' && item.category === 'node');
   const warn = visible.filter((item) => item.severity === 'warn' && item.category === 'node');
   const paths = visible.filter((item) => item.category === 'customer-path');
-  const qualityFailed = world.live.state === 'error' && !world.live.refreshedAt;
-  const activityFailed = world.activity.state === 'error' && !world.activity.refreshedAt;
+  const qualityFailed = world.sources.quality.status === 'unavailable';
+  const agentsFailed = world.sources.agents.status === 'unavailable';
+  const activityFailed = world.sources.activity.status === 'unavailable';
+  const qualityPending = world.sources.quality.status === 'loading';
+  const agentsPending = world.sources.agents.status === 'loading';
+  const activityPending = world.sources.activity.status === 'loading';
   const selectedNode = world.nodes.find((node) => node.name === route.node) ?? null;
   const selectedPerson = world.people.find((person) => person.userId === route.user) ?? null;
 
@@ -69,13 +75,18 @@ export function FailuresPage() {
         <GlassCard>
           <div className="card-header"><div><h2>严重事故</h2></div></div>
           <div className="card-body incident-list">
-            {qualityFailed
-              ? <Unavailable title="节点源不可用，不能判断机房事故" detail={world.live.state === 'error' ? world.live.message : undefined} />
+            {qualityFailed && severe.length === 0
+              ? <Unavailable title="质量源不可用，不能判断机房事故" detail={world.sources.quality.error ?? undefined} />
               : severe.length
-                ? severe.map((item) => <IncidentRow key={item.id} item={item} nowSec={world.nowSec} />)
-                : qualityFailed === false && world.live.state === 'ready'
-                  ? <p className="muted">当前快照没有严重机房事故。缺测不是健康，也不是事故。</p>
-                  : <p className="muted">节点数据还没查完。</p>}
+                ? <>
+                  {qualityFailed || world.sources.quality.status === 'stale' ? <p className="muted">来源不完整或为旧快照，已知事故仍列出。</p> : null}
+                  {severe.map((item) => <IncidentRow key={item.id} item={item} nowSec={world.nowSec} />)}
+                </>
+                : qualityPending
+                  ? <p className="muted">节点数据还没查完。</p>
+                  : world.sources.quality.status === 'current'
+                    ? <p className="muted">当前快照没有严重机房事故。缺测不是健康，也不是事故。</p>
+                    : <p className="muted">质量不是 current，不能写成没有事故。</p>}
           </div>
         </GlassCard>
       )}
@@ -84,9 +95,15 @@ export function FailuresPage() {
         <GlassCard>
           <div className="card-header"><div><h2>警告</h2></div></div>
           <div className="card-body incident-list">
-            {warn.length
-              ? warn.map((item) => <IncidentRow key={item.id} item={item} nowSec={world.nowSec} />)
-              : <p className="muted">没有探针/负载警告。</p>}
+            {agentsFailed && warn.length === 0
+              ? <Unavailable title="探针源不可用，不能判断负载警告" detail={world.sources.agents.error ?? undefined} />
+              : warn.length
+                ? warn.map((item) => <IncidentRow key={item.id} item={item} nowSec={world.nowSec} />)
+                : agentsPending
+                  ? <p className="muted">探针还没查完。</p>
+                  : world.sources.agents.status === 'current'
+                    ? <p className="muted">没有探针/负载警告。</p>
+                    : <p className="muted">探针不是 current，不能写成没有警告。</p>}
           </div>
         </GlassCard>
       )}
@@ -99,13 +116,15 @@ export function FailuresPage() {
           </div>
         </div>
         <div className="card-body incident-list">
-          {activityFailed
-            ? <Unavailable title="客户路径不可判断" detail={world.activity.state === 'error' ? world.activity.message : undefined} />
+          {activityFailed && paths.length === 0
+            ? <Unavailable title="客户路径不可判断" detail={world.sources.activity.error ?? undefined} />
             : paths.length
               ? paths.map((item) => <IncidentRow key={item.id} item={item} nowSec={world.nowSec} />)
-              : world.activity.state === 'ready'
-                ? <p className="muted">没有新鲜的客户路径事故。缺测不是故障。</p>
-                : <p className="muted">心跳还没查完。</p>}
+              : activityPending
+                ? <p className="muted">心跳还没查完。</p>
+                : world.sources.activity.status === 'current'
+                  ? <p className="muted">没有新鲜的客户路径事故。缺测不是故障。</p>
+                  : <p className="muted">心跳不是 current，不能写成没有路径事故。</p>}
         </div>
       </GlassCard>
 
@@ -127,7 +146,7 @@ export function FailuresPage() {
         key={selectedNode?.name ?? 'node-none'}
         node={selectedNode}
         open={Boolean(route.node)}
-        metrics={world.metrics.state === 'ready' ? world.metrics.data : null}
+        metrics={world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready' ? world.metrics.data : null}
         onClose={closeDrawer}
         onChanged={() => { world.live.reload(); world.fleet.reload(); }}
       />

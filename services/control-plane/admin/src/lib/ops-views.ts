@@ -9,6 +9,7 @@ import { catalogProxyNames } from './catalog';
 import { customerPathVerdict, pickWorstActivity, type CustomerPathVerdict } from './incidents';
 import { machineSignals, mergedBilling, trafficRemaining, type BillingView } from './machine';
 import { catalogLag, type CatalogLag } from './revision';
+import { measurementFresh } from './freshness';
 import { blockLabel, blockStatus } from './quality';
 import { msEpochToSec } from './time';
 import { parseTrafficLimitType, type TrafficAccounting } from './traffic';
@@ -42,9 +43,25 @@ export type OpsNodeView = {
   blockLabel: string;
   routeKeywords: string[];
   pathSummary: { worstExitMs: number | null; worstTcpMs: number | null; samples: number } | null;
+  billingState: 'known' | 'partial' | 'unavailable';
   /** Composite presentation: mainland quality AND agent freshness. */
   dot: NodeDot;
 };
+
+export type NodeRootCause = 'blocked' | 'offline' | 'pressure' | 'noprobe' | 'ok' | 'unknown';
+
+export function nodeRootCause(node: OpsNodeView): NodeRootCause {
+  if (node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED') return 'blocked';
+  if (node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false)) {
+    return 'offline';
+  }
+  if (node.agentState === 'unreported' && node.catalogState === 'known-listed') return 'noprobe';
+  if (node.signals.some((signal) => signal.severity >= 3) || node.agentState === 'stale') return 'pressure';
+  if (node.qualityState !== 'reported' || node.agentState === 'unavailable' || node.catalogState === 'unavailable') {
+    return 'unknown';
+  }
+  return 'ok';
+}
 
 export type TelemetrySource = 'loading' | 'unavailable' | 'ready';
 export type TelemetryState = 'loading' | 'unavailable' | 'unreported' | 'reported';
@@ -121,6 +138,7 @@ export function assembleOpsNodes(input: {
   agents?: LiveAgentDto[] | null;
   agentSource?: SourceKind;
   profiles?: NodeProfileDto[] | null;
+  profileSource?: SourceKind;
   activity?: ActivityUserDto[] | null;
   activitySource?: SourceKind;
   nowMs: number;
@@ -136,9 +154,11 @@ export function assembleOpsNodes(input: {
   if (ready(input.agentSource)) {
     for (const agent of input.agents ?? []) names.add(agent.name);
   }
-  for (const profile of input.profiles ?? []) {
-    if (profile.status === 'retired') continue;
-    names.add(profile.catalogName);
+  if (ready(input.profileSource)) {
+    for (const profile of input.profiles ?? []) {
+      if (profile.status === 'retired') continue;
+      names.add(profile.catalogName);
+    }
   }
   if (ready(input.activitySource)) {
     for (const row of input.activity ?? []) {
@@ -148,10 +168,11 @@ export function assembleOpsNodes(input: {
 
   const qualityBy = new Map((ready(input.qualitySource) ? input.qualityNodes ?? [] : []).map((node) => [node.name, node]));
   const agentBy = new Map((ready(input.agentSource) ? input.agents ?? [] : []).map((agent) => [agent.name, agent]));
-  const profileBy = new Map((input.profiles ?? []).map((profile) => [profile.catalogName, profile]));
+  const profileBy = new Map((ready(input.profileSource) ? input.profiles ?? [] : []).map((profile) => [profile.catalogName, profile]));
 
   const occupants = new Map<string, Map<string, string>>();
   const pathByNode = new Map<string, { worstExitMs: number | null; worstTcpMs: number | null; samples: number }>();
+  const nowSec = Math.floor(input.nowMs / 1000);
   if (ready(input.activitySource)) {
     for (const row of input.activity ?? []) {
       if (!row.online || !row.selectedServer) continue;
@@ -160,8 +181,12 @@ export function assembleOpsNodes(input: {
       occupants.set(row.selectedServer, bucket);
       const path = pathByNode.get(row.selectedServer) ?? { worstExitMs: null, worstTcpMs: null, samples: 0 };
       path.samples += 1;
-      if (row.exitDelayMs != null) path.worstExitMs = Math.max(path.worstExitMs ?? 0, row.exitDelayMs);
-      if (row.tcpDelayMs != null) path.worstTcpMs = Math.max(path.worstTcpMs ?? 0, row.tcpDelayMs);
+      if (row.exitDelayMs != null && measurementFresh(row.exitDelayAtMs, row.lastSeenAt, nowSec)) {
+        path.worstExitMs = Math.max(path.worstExitMs ?? 0, row.exitDelayMs);
+      }
+      if (row.tcpDelayMs != null && measurementFresh(row.tcpDelayAtMs, row.lastSeenAt, nowSec)) {
+        path.worstTcpMs = Math.max(path.worstTcpMs ?? 0, row.tcpDelayMs);
+      }
       pathByNode.set(row.selectedServer, path);
     }
   }
@@ -189,6 +214,11 @@ export function assembleOpsNodes(input: {
         : signals.some((signal) => /失联|未更新|未上报/.test(signal.label)) ? 'stale'
           : 'reported';
     const occupancyState: OccupancyState = ready(input.activitySource) ? 'known' : 'unavailable';
+    const billingState: 'known' | 'partial' | 'unavailable' = !ready(input.profileSource)
+      ? (input.profileSource === 'unavailable'
+        ? (agent?.expiredAt != null || agent?.price != null ? 'partial' : 'unavailable')
+        : 'partial')
+      : 'known';
     const status = quality ? blockStatus(quality) : 'UNPROBED';
     const blockLabelText = qualityState === 'unavailable'
       ? '质量源不可用'
@@ -217,6 +247,7 @@ export function assembleOpsNodes(input: {
       blockLabel: blockLabelText,
       routeKeywords: quality?.routeKeywords.filter((keyword) => !['联通', '电信', '移动'].includes(keyword)) ?? [],
       pathSummary: occupancyState === 'known' ? (pathByNode.get(name) ?? { worstExitMs: null, worstTcpMs: null, samples: 0 }) : null,
+      billingState,
       dot: 'unknown' as NodeDot,
     };
     node.dot = nodeDot(node);
@@ -236,18 +267,11 @@ export function isMonitorFocus(value: string | null | undefined): value is Monit
 
 export function nodeMatchesFocus(node: OpsNodeView, focus: string | null, nowSec: number): boolean {
   if (!focus) return true;
-  if (focus === 'blocked') {
-    return node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED';
-  }
-  if (focus === 'offline') {
-    return node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false);
-  }
-  if (focus === 'noprobe') {
-    return node.agentState === 'unreported' && node.catalogState === 'known-listed';
-  }
-  if (focus === 'pressure') {
-    return node.signals.some((signal) => signal.severity >= 3);
-  }
+  const cause = nodeRootCause(node);
+  if (focus === 'blocked') return cause === 'blocked';
+  if (focus === 'offline') return cause === 'offline';
+  if (focus === 'noprobe') return cause === 'noprobe';
+  if (focus === 'pressure') return cause === 'pressure';
   if (focus === 'expiring') {
     return Boolean(node.billing.renewsAt && node.billing.renewsAt - nowSec <= 7 * 86_400 && node.billing.renewsAt - nowSec >= 0);
   }

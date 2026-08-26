@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { operationsApi, type DashboardDto, type MetricsDto } from './api';
-import { useRefresh, useResource, type Live } from './hooks';
-import { parseOpsHash, parseTrafficRange } from './lib/hash';
+import { useKeyedResource, useRefresh, useResource, type KeyedLive, type Live } from './hooks';
+import { parseOpsHash, parseTrafficRange, type TrafficRange } from './lib/hash';
 import { accidentsOnly, choresOnly, incidentsFromWorld, type OpsIncident } from './lib/incidents';
 import { assembleOpsNodes, assembleOpsPeople, type OpsNodeView, type OpsPersonView } from './lib/ops-views';
+import { innerTruth, resourceTruth, type OpsSourceTruth } from './lib/source-truth';
 
 export type OpsWorld = {
   dashboard: Live<DashboardDto>;
@@ -14,7 +15,7 @@ export type OpsWorld = {
   fleet: Live<Awaited<ReturnType<typeof operationsApi.fleetNodes>>>;
   users: Live<Awaited<ReturnType<typeof operationsApi.users>>>;
   audit: Live<Awaited<ReturnType<typeof operationsApi.audit>>>;
-  metrics: Live<MetricsDto>;
+  metrics: KeyedLive<MetricsDto, TrafficRange>;
   nodes: OpsNodeView[];
   people: OpsPersonView[];
   incidents: OpsIncident[];
@@ -22,6 +23,15 @@ export type OpsWorld = {
   chores: OpsIncident[];
   catalogRevision: number | null;
   nowSec: number;
+  sources: {
+    quality: OpsSourceTruth;
+    agents: OpsSourceTruth;
+    profiles: OpsSourceTruth;
+    activity: OpsSourceTruth;
+    users: OpsSourceTruth;
+    catalog: OpsSourceTruth;
+    metrics: OpsSourceTruth;
+  };
 };
 
 const OpsContext = createContext<OpsWorld | null>(null);
@@ -58,26 +68,45 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
   const fleet = useResource(operationsApi.fleetNodes, [], fast);
   const users = useResource(operationsApi.users, [], minute);
   const audit = useResource(operationsApi.audit, [], slow);
-  const metrics = useResource(() => operationsApi.metrics(range), [range], wantMetrics ? minute : 0, wantMetrics);
+  const metrics = useKeyedResource(range, (next) => operationsApi.metrics(next), wantMetrics ? minute : 0, wantMetrics);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const tick = () => setNowSec(Math.floor(Date.now() / 1000));
+    tick();
+    const onVisible = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => { if (!document.hidden) tick(); }, 15_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   const world = useMemo(() => {
-    const clock = Math.floor(Date.now() / 1000);
     const liveReady = live.state === 'ready';
+    const qualityPresent = Boolean(liveReady && live.data.quality);
+    const agentsPresent = Boolean(liveReady && live.data.agents);
+    const sources = {
+      quality: innerTruth(live, qualityPresent, liveReady ? live.data.qualityError : null),
+      agents: innerTruth(live, agentsPresent, liveReady ? live.data.agentsError : null),
+      profiles: resourceTruth(profiles),
+      activity: resourceTruth(activity),
+      users: resourceTruth(users),
+      catalog: resourceTruth(catalog),
+      metrics: resourceTruth(metrics),
+    };
     const nodes = assembleOpsNodes({
       catalogYaml: catalog.state === 'ready' ? catalog.data.yaml : null,
       catalogSource: catalog.state === 'ready' ? 'ready' : catalog.state === 'error' ? 'unavailable' : 'loading',
       qualityNodes: liveReady ? live.data.quality?.nodes : null,
-      qualitySource: !liveReady
-        ? (live.state === 'error' ? 'unavailable' : 'loading')
-        : (live.data.qualityError && live.data.quality == null ? 'unavailable' : 'ready'),
+      qualitySource: sources.quality.status === 'unavailable' ? 'unavailable' : sources.quality.status === 'loading' ? 'loading' : 'ready',
       agents: liveReady ? live.data.agents : null,
-      agentSource: !liveReady
-        ? (live.state === 'error' ? 'unavailable' : 'loading')
-        : (live.data.agentsError && live.data.agents == null ? 'unavailable' : 'ready'),
+      agentSource: sources.agents.status === 'unavailable' ? 'unavailable' : sources.agents.status === 'loading' ? 'loading' : 'ready',
       profiles: profiles.state === 'ready' ? profiles.data : null,
+      profileSource: profiles.state === 'ready' ? 'ready' : profiles.state === 'error' ? 'unavailable' : 'loading',
       activity: activity.state === 'ready' ? activity.data.users : null,
       activitySource: activity.state === 'ready' ? 'ready' : activity.state === 'error' ? 'unavailable' : 'loading',
-      nowMs: Date.now(),
+      nowMs: nowSec * 1000,
     });
     const people = assembleOpsPeople({
       users: users.state === 'ready' ? users.data : null,
@@ -85,10 +114,11 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
       activity: activity.state === 'ready' ? activity.data.users : null,
       telemetrySource: activity.state === 'ready' ? 'ready' : activity.state === 'error' ? 'unavailable' : 'loading',
       catalogRevision: catalog.state === 'ready' ? catalog.data.revision : null,
-      nowSec: clock,
+      nowSec,
     });
     const catalogRevision = catalog.state === 'ready' ? catalog.data.revision : null;
-    const incidents = incidentsFromWorld({ nodes, people, catalogRevision, nowSec: clock });
+    const qualityUpdatedAtSec = liveReady ? live.data.quality?.updatedAt ?? null : null;
+    const incidents = incidentsFromWorld({ nodes, people, catalogRevision, nowSec, qualityUpdatedAtSec });
     return {
       nodes,
       people,
@@ -96,14 +126,17 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
       accidents: accidentsOnly(incidents),
       chores: choresOnly(incidents),
       catalogRevision,
-      nowSec: clock,
+      nowSec,
+      sources,
     };
   }, [
-    live.state, live.refreshedAt,
-    profiles.state, profiles.refreshedAt,
-    activity.state, activity.refreshedAt,
-    catalog.state, catalog.refreshedAt,
-    users.state, users.refreshedAt,
+    nowSec,
+    live.state, live.refreshedAt, live.stale,
+    profiles.state, profiles.refreshedAt, profiles.stale,
+    activity.state, activity.refreshedAt, activity.stale,
+    catalog.state, catalog.refreshedAt, catalog.stale,
+    users.state, users.refreshedAt, users.stale,
+    metrics.state, metrics.refreshedAt, metrics.stale, metrics.snapshotKey,
   ]);
 
   const value: OpsWorld = {
