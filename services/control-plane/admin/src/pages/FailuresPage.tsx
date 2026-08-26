@@ -16,19 +16,22 @@ function IncidentRow({ item, nowSec }: { item: OpsIncident; nowSec: number }) {
   return (
     <article className={`incident incident-${item.severity === 'severe' ? 'error' : 'warn'}`}>
       <div className="incident-main">
-        <span className="attention-dot" aria-hidden />
-        <div>
+        <div className="incident-head">
+          <span className="incident-sev">{item.severity === 'severe' ? '严重' : '警告'}</span>
           <h2>{title}</h2>
-          <p>{item.detail}</p>
-          <small>
-            {item.severity === 'severe' ? '严重' : '警告'}
+        </div>
+        <p>{item.detail}</p>
+        <div className="incident-meta">
+          <span>
             {item.category === 'customer-path'
-              ? ` · ${item.impactCount} 位客户${item.affectedDeviceCount ? ` · ${item.affectedDeviceCount} 台设备` : ''}`
-              : item.impactCount ? ` · 影响 ${item.impactCount} 人` : ''}
-            {item.measuredAtSec != null ? ` · 测量 ${timeAgo(item.measuredAtSec)}` : ' · 测量时间未知'}
+              ? `${item.impactCount} 位客户${item.affectedDeviceCount ? ` · ${item.affectedDeviceCount} 台设备` : ''}`
+              : item.impactCount ? `影响 ${item.impactCount} 人` : '无人在用'}
+          </span>
+          <span>
+            {item.measuredAtSec != null ? `测量 ${timeAgo(item.measuredAtSec)}` : '测量时间未知'}
             {item.measuredAtSec != null ? (fresh ? ' · 新鲜' : ' · 已过保鲜') : ''}
-            {item.node ? ` · ${item.node}` : ''}
-          </small>
+          </span>
+          {item.node ? <span>{item.node}</span> : null}
         </div>
       </div>
       <a className="btn btn-outline btn-sm" href={item.actionRoute}>

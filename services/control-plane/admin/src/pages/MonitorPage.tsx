@@ -6,6 +6,7 @@ import {
   type LiveAgentDto,
 } from '../api';
 import { AgentTrends } from '../charts';
+import { CarrierLegend } from '../carriers';
 import { gibibytes, unixDate } from '../lib/fields';
 import { formatBytes, formatDuration } from '../lib/format';
 import { formatOpsHash } from '../lib/hash';
@@ -21,7 +22,7 @@ import { useOpsRoute } from '../lib/route';
 import { NodeCard } from '../NodeCard';
 import { useOpsWorld } from '../ops-context';
 import { usePrivacy } from '../privacy';
-import { Banner, DataHealth, FilterChips, Skeleton, Unavailable } from '../ui';
+import { Banner, DataHealth, Empty, FilterChips, GlassCard, Skeleton, Unavailable } from '../ui';
 import { NodeDrawer } from './monitor/NodeDrawer';
 
 const FILTERS = [
@@ -293,14 +294,22 @@ export function MonitorPage() {
         options={FILTERS}
         onChange={(id) => setRoute((current) => ({ ...current, page: 'monitor', focus: id || null }))}
       />
-      <p className="muted">{visible.length} / {world.nodes.length} 台 · 卡片和表格同一份全集</p>
+      <div className="count-line">
+        <span>{visible.length} / {world.nodes.length} 台 · 卡片和表格同一份全集</span>
+        <CarrierLegend />
+      </div>
 
       {loading ? (
         <Skeleton label="正在加载服务器" />
       ) : world.live.state === 'error' && world.nodes.length === 0 ? (
         <Unavailable title="服务器数据没加载上来" detail={world.live.state === 'error' ? world.live.message : undefined} />
       ) : visible.length === 0 ? (
-        <div className="state"><strong>没有符合条件的节点</strong></div>
+        <GlassCard>
+          <Empty
+            title="没有符合条件的节点"
+            detail={`全集里有 ${world.nodes.length} 台。换个筛选或清空搜索再看。`}
+          />
+        </GlassCard>
       ) : (
         <>
           <div className="node-grid">

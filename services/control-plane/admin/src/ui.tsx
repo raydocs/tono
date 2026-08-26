@@ -63,17 +63,30 @@ export function Skeleton({ label = '正在加载' }: { label?: string }) {
     <div className="state skeleton-state" aria-busy="true">
       <div className="skeleton-block" />
       <div className="skeleton-block short" />
-      <span className="muted">{label}</span>
+      <div className="skeleton-block" />
+      <span className="muted skeleton-label"><span className="spinner" aria-hidden />{label}</span>
     </div>
   );
 }
 
 export function Empty({ title, detail }: { title: string; detail?: string }) {
-  return <div className="state"><strong>{title}</strong>{detail ? <span>{detail}</span> : null}</div>;
+  return (
+    <div className="state t-unknown">
+      <span className="state-mark" aria-hidden>∅</span>
+      <strong>{title}</strong>
+      {detail ? <span>{detail}</span> : null}
+    </div>
+  );
 }
 
 export function Unavailable({ title, detail }: { title: string; detail?: string }) {
-  return <div className="state state-error"><strong>{title}</strong>{detail ? <span>{detail}</span> : null}</div>;
+  return (
+    <div className="state state-error t-severe" role="status">
+      <span className="state-mark" aria-hidden>!</span>
+      <strong>{title}</strong>
+      {detail ? <span>{detail}</span> : null}
+    </div>
+  );
 }
 
 export function GlassCard({ children, className = '' }: { children: ReactNode; className?: string }) {

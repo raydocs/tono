@@ -73,37 +73,50 @@ export function Dashboard() {
         ))}
       </div>
 
-      <div className="dash-command">
-        <GlassCard className={`attention-card${accidents.length ? ' has-alerts' : ''}`}>
-          <div className="card-header">
-            <div>
-              <h2>机房 / 路径事故</h2>
-              <p>只看被墙、失联、探针、路径。Claude 和家宽在下面待办。</p>
-            </div>
+      {/* Incidents are the first focus; the operational chores sit directly
+          under them as the second tier, which is also what keeps the left
+          column from ending in a hole next to the taller node column. */}
+      <GlassCard className={`attention-card${accidents.length ? ' has-alerts' : ''}`}>
+        <div className="card-header">
+          <div>
+            <h2>机房 / 路径事故</h2>
+            <p>只看被墙、失联、探针、路径。Claude 和家宽在下面待办。</p>
           </div>
-          {accidents.length > 0 ? (
-            <>
-              {staleNote && <p className="muted dash-pad">正在看旧快照，自动刷新失败。</p>}
-              {!healthy && <p className="muted dash-pad">还有来源不可判断，已知事故仍列在下面。</p>}
-              <ul className="attention-list">
-                {accidents.map((item) => (
-                  <li key={item.id} className={`attention-${item.severity === 'severe' ? 'error' : 'warn'}`}>
+          {accidents.length > 0 && <a className="btn btn-outline btn-sm" href="#/failures">全部事故</a>}
+        </div>
+        {accidents.length > 0 ? (
+          <>
+            {staleNote && <p className="muted dash-pad">正在看旧快照，自动刷新失败。</p>}
+            {!healthy && <p className="muted dash-pad">还有来源不可判断，已知事故仍列在下面。</p>}
+            <ul className="attention-list">
+              {accidents.map((item) => (
+                <li key={item.id}>
+                  <a
+                    className={`incident-line attention-${item.severity === 'severe' ? 'error' : 'warn'}`}
+                    href={item.actionRoute}
+                  >
                     <span className="attention-dot" aria-hidden />
-                    <a className="table-link" href={item.actionRoute}>
-                      {item.userId ? privacy.email(item.title) : item.title} · {item.detail}
-                      {item.impactCount ? ` · 影响 ${item.impactCount} 人` : ''}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : healthy ? (
-            <div className="attention-ok">节点和客户路径正常</div>
-          ) : (
-            <Unavailable title="还有数据没查完" detail="不能在质量、探针、心跳或目录未 current 时写成正常。" />
-          )}
-        </GlassCard>
+                    <span className="incident-line-body">
+                      <span className="incident-line-title">{item.userId ? privacy.email(item.title) : item.title}</span>
+                      <span className="incident-line-meta">{item.detail}</span>
+                    </span>
+                    {item.impactCount
+                      ? <span className="incident-line-impact">影响 {item.impactCount} 人</span>
+                      : <span className="incident-line-impact">无人在用</span>}
+                    <span className="incident-line-go" aria-hidden>→</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : healthy ? (
+          <div className="attention-ok">节点和客户路径正常</div>
+        ) : (
+          <Unavailable title="还有数据没查完" detail="不能在质量、探针、心跳或目录未 current 时写成正常。" />
+        )}
+      </GlassCard>
 
+      <div className="dash-command">
         <GlassCard>
           <div className="card-header">
             <div>
@@ -117,13 +130,59 @@ export function Dashboard() {
           ) : problemNodes.length === 0 ? (
             <p className="muted dash-pad">这一屏没有需要先看的机器。</p>
           ) : (
-            <div className="node-grid node-grid-compact">
+            <div className="node-grid node-grid-compact dash-pad">
               {problemNodes.map((node) => (
                 <NodeCard key={node.name} node={node} density="compact" onOpen={() => openNode(node.name)} />
               ))}
             </div>
           )}
         </GlassCard>
+
+        <div className="dash-col">
+          <GlassCard>
+            <div className="card-header">
+              <div>
+                <h2>运营待办</h2>
+                <p>额度、到期、目录落后</p>
+              </div>
+              <a className="btn btn-outline btn-sm" href="#/users?focus=quota">查看全部</a>
+            </div>
+            <ul className="attention-list">
+              {quota.slice(0, 8).map((item) => (
+                <li key={item.id}>
+                  <a className="table-link" href={item.actionRoute}>{item.node ? item.title : privacy.email(item.title)} · {item.detail}</a>
+                </li>
+              ))}
+              {quota.length === 0 && (
+                <li className="muted">
+                  {world.sources.users.status === 'unavailable' ? '客户资料不可用，不能判断额度待办' : '没有额度或到期待办'}
+                </li>
+              )}
+            </ul>
+          </GlassCard>
+
+          <GlassCard>
+            <div className="card-header">
+              <div>
+                <h2>家宽 / Claude / 库存</h2>
+                <p>开通侧的待办和闲置资源</p>
+              </div>
+              <a className="btn btn-outline btn-sm" href="#/users?focus=home">查看全部</a>
+            </div>
+            <ul className="attention-list">
+              {inventory && (
+                <>
+                  <li><a className="table-link" href="#/users?focus=homes">闲置家宽 {inventory.unusedHomes}</a></li>
+                  <li><a className="table-link" href="#/users?focus=claude">闲置 Claude {inventory.unusedAccounts} · 未开 {inventory.incompleteUsers}</a></li>
+                </>
+              )}
+              {ops.slice(0, 5).map((item) => (
+                <li key={item.id}><a className="table-link" href={item.actionRoute}>{privacy.email(item.title)} · {item.detail}</a></li>
+              ))}
+              {!inventory && world.dashboard.state === 'error' && <li className="muted">库存摘要不可用，客户待办仍在上面。</li>}
+            </ul>
+          </GlassCard>
+        </div>
       </div>
 
       <GlassCard>
@@ -202,49 +261,6 @@ export function Dashboard() {
               </div>
             )}
           </div>
-        </GlassCard>
-      </div>
-
-      <div className="dash-split">
-        <GlassCard>
-          <div className="card-header">
-            <div>
-              <h2>额度 / 到期 / 目录</h2>
-            </div>
-            <a className="btn btn-outline btn-sm" href="#/users?focus=quota">查看全部</a>
-          </div>
-          <ul className="attention-list">
-            {quota.slice(0, 6).map((item) => (
-              <li key={item.id}>
-                <a className="table-link" href={item.actionRoute}>{item.node ? item.title : privacy.email(item.title)} · {item.detail}</a>
-              </li>
-            ))}
-            {quota.length === 0 && (
-              <li className="muted">
-                {world.sources.users.status === 'unavailable' ? '客户资料不可用，不能判断额度待办' : '没有额度或到期待办'}
-              </li>
-            )}
-          </ul>
-        </GlassCard>
-        <GlassCard>
-          <div className="card-header">
-            <div>
-              <h2>家宽 / Claude / 库存</h2>
-            </div>
-            <a className="btn btn-outline btn-sm" href="#/users?focus=home">查看全部</a>
-          </div>
-          <ul className="attention-list">
-            {inventory && (
-              <>
-                <li><a className="table-link" href="#/users?focus=homes">闲置家宽 {inventory.unusedHomes}</a></li>
-                <li><a className="table-link" href="#/users?focus=claude">闲置 Claude {inventory.unusedAccounts} · 未开 {inventory.incompleteUsers}</a></li>
-              </>
-            )}
-            {ops.slice(0, 5).map((item) => (
-              <li key={item.id}><a className="table-link" href={item.actionRoute}>{privacy.email(item.title)} · {item.detail}</a></li>
-            ))}
-            {!inventory && world.dashboard.state === 'error' && <li className="muted">库存摘要不可用，客户待办仍在上面。</li>}
-          </ul>
         </GlassCard>
       </div>
 

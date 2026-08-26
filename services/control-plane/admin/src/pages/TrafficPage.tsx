@@ -52,9 +52,12 @@ export function TrafficPage() {
     : [];
   const customers = [...world.people].filter((person) => person.user).sort((a, b) => b.usageBytes - a.usageBytes);
 
+  // "1/11" is only meaningful once it says what the two numbers count.
   const coverageText = expected == null
-    ? '上报台数未知（探针源不可用）'
-    : `下行 ${coverage.inPresent}/${expected} · 上行 ${coverage.outPresent}/${expected}`;
+    ? '上报台数未知：探针源不可用，无法说明这条线代表几台机器。'
+    : expected === 0
+      ? '当前没有在上报的探针机器，这条线不代表任何机器。'
+      : `覆盖：${expected} 台在上报的机器里，任一时刻最多 ${coverage.inPresent} 台给出下行差分、${coverage.outPresent} 台给出上行差分。其余机器在这个区间没有可用的相邻累计点，不是 0。`;
   const summary = latest
     ? `${stale ? '最近有效采样' : '最近采样'} ${timestamp(latest.t)} · 下行 ${latest.inBps == null ? '缺口' : `${formatBytes(latest.inBps)}/s`} · 上行 ${latest.outBps == null ? '缺口' : `${formatBytes(latest.outBps)}/s`}`
     : '没有有效速率采样。累计计数器不能写成当前速度。';
@@ -88,6 +91,9 @@ export function TrafficPage() {
               points={fleet}
               summary={`${summary} · 区间下行 ${transfer.inBytes == null ? '—' : formatBytes(transfer.inBytes)} · 上行 ${transfer.outBytes == null ? '—' : formatBytes(transfer.outBytes)}`}
               coverage={coverageText}
+              latestIn={latest?.inBps ?? null}
+              latestOut={latest?.outBps ?? null}
+              spanSeconds={range === '90d' ? 90 * 86400 : range === '7d' ? 7 * 86400 : 86400}
             />
           )}
         </div>
@@ -101,16 +107,18 @@ export function TrafficPage() {
           </div>
         </div>
         <div className="card-body">
-          <div className="lb">
+          <div className="traffic-top">
             {top.map((row) => (
-              <button type="button" className="lb-row" key={row.name} onClick={() => openNode(row.name, { page: 'monitor' })}>
-                <span className="lb-email">{row.name}</span>
-                <span className="muted">完整 {row.complete}/{row.total}</span>
-                <span className="lb-value mono">
-                  ↓ {row.moved.inBytes == null ? '—' : formatBytes(row.moved.inBytes)}
-                  {' · '}↑ {row.moved.outBytes == null ? '—' : formatBytes(row.moved.outBytes)}
-                  {' · 峰值 ↓'}{row.peakIn ? `${formatBytes(row.peakIn)}/s` : '—'}
-                  {' ↑'}{row.peakOut ? `${formatBytes(row.peakOut)}/s` : '—'}
+              <button type="button" className="traffic-row" key={row.name} onClick={() => openNode(row.name, { page: 'monitor' })}>
+                <span className="traffic-name">
+                  <strong title={row.name}>{row.name}</strong>
+                  <span>{row.total === 0 ? '没有差分点' : `${row.complete}/${row.total} 个桶有合法差分`}</span>
+                </span>
+                <span className="traffic-values">
+                  <span>↓ <b>{row.moved.inBytes == null ? '—' : formatBytes(row.moved.inBytes)}</b></span>
+                  <span>↑ <b>{row.moved.outBytes == null ? '—' : formatBytes(row.moved.outBytes)}</b></span>
+                  <span>峰值 ↓ {row.peakIn ? `${formatBytes(row.peakIn)}/s` : '—'}</span>
+                  <span>↑ {row.peakOut ? `${formatBytes(row.peakOut)}/s` : '—'}</span>
                 </span>
               </button>
             ))}
@@ -139,7 +147,7 @@ export function TrafficPage() {
                 const ratio = person.quotaRatio;
                 const tone = ratio == null ? '' : ratio >= 1 ? 'quota-bad' : ratio >= 0.8 ? 'quota-warn' : 'quota-ok';
                 return (
-                  <button type="button" className="lb-row" key={person.userId} onClick={() => openUser(person.userId)}>
+                  <button type="button" className="lb-row lb-row-plain" key={person.userId} onClick={() => openUser(person.userId)}>
                     <span className="lb-email">{privacy.email(person.email)}</span>
                     {ratio == null ? (
                       <span className="muted">不限额</span>

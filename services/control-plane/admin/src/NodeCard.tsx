@@ -20,7 +20,7 @@ function Bar({ label, value, detail }: { label: string; value: number | null; de
       <div className="nc-track" aria-hidden>
         <span style={{ width: `${width}%` }} />
       </div>
-      <small>{detail}</small>
+      <small title={detail}>{detail}</small>
     </div>
   );
 }
@@ -41,6 +41,13 @@ function agentText(node: OpsNodeView): string {
   if (node.agentState === 'unreported') return '没装探针';
   if (node.agentState === 'stale') return '探针过期';
   return node.agent?.os ?? '';
+}
+
+/** Why this machine is in front of you, in one line, without repeating the pill. */
+function reasonText(node: OpsNodeView): string {
+  const parts = [catalogText(node), occupancyText(node)];
+  if (node.agentState !== 'reported') parts.push(agentText(node));
+  return parts.filter(Boolean).join(' · ');
 }
 
 export function NodeCard({
@@ -67,10 +74,14 @@ export function NodeCard({
   const price = node.billing.price != null ? `${node.billing.currency || ''}${node.billing.price}` : null;
   const offline = node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false);
   const ip = node.quality?.publicIp || node.quality?.host || node.profile?.publicIp;
+  // No probe means no CPU, memory, disk or carrier reading at all. Rendering
+  // four empty meters spends half a card saying nothing; one stated gap says
+  // the same thing and says which readings are missing.
+  const noProbe = node.agentState === 'unreported' || node.agentState === 'unavailable';
 
   return (
     <article
-      className={`node-card node-card-${density}${selected ? ' selected' : ''}${offline ? ' node-card-offline' : ''}`}
+      className={`node-card node-card-${density} nc-tone-${node.dot}${selected ? ' selected' : ''}${offline ? ' node-card-offline' : ''}`}
       data-selected={selected ? 'true' : 'false'}
       tabIndex={0}
       role="button"
@@ -83,96 +94,111 @@ export function NodeCard({
       }}
     >
       <div className="nc-top">
-        <span className={`nc-dot nc-dot-${node.dot}`} />
         <div className="nc-title">
-          <strong>{node.name}</strong>
-          <small>{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</small>
+          <strong title={node.name}>{node.name}</strong>
+          <small title={ip ?? undefined}>{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</small>
         </div>
-        <div className="nc-flags">
-          <span className="nc-badge">{catalogText(node)}</span>
-          <span className="nc-badge">{occupancyText(node)}</span>
-          <span className="nc-status">{node.blockLabel}</span>
-        </div>
+        <span className="nc-state">
+          <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />
+          {node.blockLabel}
+        </span>
       </div>
 
-      {density === 'full' && (
-        <div className="nc-bill">
-          <span>{agent?.uptime != null ? `运行 ${formatDuration(agent.uptime)}` : agentText(node)}</span>
-          <span>{price ? privacy.money(price) : '价格未填'}</span>
-          <span>{node.billing.renewsAt ? `续费 ${new Date(node.billing.renewsAt * 1000).toLocaleDateString('zh-CN')}` : '续费未填'}</span>
-        </div>
-      )}
-
-      <div className={`nc-metrics${density === 'compact' ? ' nc-metrics-compact' : ''}`}>
-        <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentText(node)} />
-        <Bar
-          label="内存"
-          value={mem}
-          detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentText(node)}
-        />
-        {density === 'full' && (
-          <>
-            <Bar
-              label="硬盘"
-              value={disk}
-              detail={agent?.diskUsed != null && agent.diskTotal ? `${formatBytes(agent.diskUsed)} / ${formatBytes(agent.diskTotal)}` : agentText(node)}
-            />
-            <Bar
-              label="本期流量"
-              value={trafficPct}
-              detail={
-                trafficQuota == null
-                  ? '未设额度'
-                  : node.trafficRemain == null
-                    ? '本期用量未建立基线'
-                    : `${formatBytes(trafficUsed ?? 0)} / ${formatBytes(trafficQuota)}`
-              }
-            />
-          </>
-        )}
-      </div>
-
-      {density === 'full' && (
-        <div className="nc-net">
-          <span>load {agent?.load1 == null ? '—' : agent.load1.toFixed(2)}</span>
-          <span>↓ 累计 {agent?.netIn == null ? '—' : formatBytes(agent.netIn)}</span>
-          <span>↑ 累计 {agent?.netOut == null ? '—' : formatBytes(agent.netOut)}</span>
-        </div>
-      )}
-
-      {density === 'full' && (
-        node.agentState === 'unavailable'
-          ? <p className="muted nc-carrier-mini">三网源不可用</p>
-          : node.agentState === 'unreported'
-            ? <p className="muted nc-carrier-mini">没装探针，三网没测</p>
-            : <CarrierMini carriers={agent?.carriers ?? null} />
-      )}
-
-      {density === 'full' && node.routeKeywords.length > 0 && (
-        <div className="chip-list">
-          {node.routeKeywords.slice(0, 4).map((keyword) => (
-            <span className={`chip${/9929|CMIN2|CN2|GIA/.test(keyword) ? ' chip-hot' : ''}`} key={keyword}>{keyword}</span>
-          ))}
-        </div>
-      )}
-
-      {density === 'full' && (
-        <div className="nc-path">
-          {node.pathSummary && (node.pathSummary.worstExitMs != null || node.pathSummary.worstTcpMs != null) ? (
-            <span>
-              客户路径最差
-              {node.pathSummary.worstExitMs != null ? ` 出口 ${node.pathSummary.worstExitMs}ms` : ''}
-              {node.pathSummary.worstTcpMs != null ? ` TCP ${node.pathSummary.worstTcpMs}ms` : ''}
-            </span>
-          ) : node.occupancyState !== 'known' ? (
-            <span>客户路径不可判断</span>
+      {density === 'compact' ? (
+        <>
+          <p className="nc-reason" title={reasonText(node)}>{reasonText(node)}</p>
+          {noProbe ? (
+            <p className="nc-facts nc-facts-gap"><b>{agentText(node)}</b><span>没有 CPU / 内存读数</span></p>
           ) : (
-            <span>没有在线客户路径</span>
+            <div className="nc-metrics">
+              <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentText(node)} />
+              <Bar
+                label="内存"
+                value={mem}
+                detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentText(node)}
+              />
+            </div>
           )}
-          {node.catalogState === 'known-listed' && node.dot === 'bad' && node.occupancyState === 'known' && (
-            <span>需下架 · 受影响 {node.occupancy ?? 0} 人</span>
+          {offline && <span className="nc-offline-flag">离线 · 仍可点开处理</span>}
+        </>
+      ) : (
+        <>
+          {/* Two fixed fact lines rather than one wrapping one, so cards in a
+              row keep the same internal rhythm. */}
+          <div className="nc-facts">
+            <span><b>{catalogText(node)}</b></span>
+            <span>{occupancyText(node)}</span>
+            <span>{agent?.uptime != null ? `运行 ${formatDuration(agent.uptime)}` : agentText(node)}</span>
+          </div>
+          <div className="nc-facts nc-facts-bill">
+            <span>{price ? privacy.money(price) : '价格未填'}</span>
+            <span>{node.billing.renewsAt ? `续费 ${new Date(node.billing.renewsAt * 1000).toLocaleDateString('zh-CN')}` : '续费未填'}</span>
+            <span>累计 ↓ {agent?.netIn == null ? '—' : formatBytes(agent.netIn)} ↑ {agent?.netOut == null ? '—' : formatBytes(agent.netOut)}</span>
+          </div>
+
+          {noProbe ? (
+            <div className="nc-noprobe">
+              <strong>{agentText(node)}</strong>
+              <span>CPU / 内存 / 硬盘 / 三网 均无读数</span>
+              <span>{trafficQuota == null ? '本期流量未设额度' : node.trafficRemain == null ? '本期用量未建立基线' : `本期已用 ${formatBytes(trafficUsed ?? 0)} / ${formatBytes(trafficQuota)}`}</span>
+            </div>
+          ) : (
+            <>
+              <div className="nc-metrics">
+                <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentText(node)} />
+                <Bar
+                  label="内存"
+                  value={mem}
+                  detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentText(node)}
+                />
+                <Bar
+                  label="硬盘"
+                  value={disk}
+                  detail={agent?.diskUsed != null && agent.diskTotal ? `${formatBytes(agent.diskUsed)} / ${formatBytes(agent.diskTotal)}` : agentText(node)}
+                />
+                <Bar
+                  label="本期流量"
+                  value={trafficPct}
+                  detail={
+                    trafficQuota == null
+                      ? '未设额度'
+                      : node.trafficRemain == null
+                        ? '本期用量未建立基线'
+                        : `${formatBytes(trafficUsed ?? 0)} / ${formatBytes(trafficQuota)}`
+                  }
+                />
+              </div>
+
+              <CarrierMini carriers={agent?.carriers ?? null} />
+            </>
           )}
-        </div>
+
+          {node.routeKeywords.length > 0 && (
+            <div className="chip-list">
+              {node.routeKeywords.slice(0, 4).map((keyword) => (
+                <span className={`chip${/9929|CMIN2|CN2|GIA/.test(keyword) ? ' chip-hot' : ''}`} key={keyword}>{keyword}</span>
+              ))}
+            </div>
+          )}
+
+          <div className="nc-foot">
+            {node.pathSummary && (node.pathSummary.worstExitMs != null || node.pathSummary.worstTcpMs != null) ? (
+              <span>
+                客户路径最差
+                {node.pathSummary.worstExitMs != null ? ` 出口 ${node.pathSummary.worstExitMs}ms` : ''}
+                {node.pathSummary.worstTcpMs != null ? ` TCP ${node.pathSummary.worstTcpMs}ms` : ''}
+              </span>
+            ) : node.occupancyState !== 'known' ? (
+              <span>客户路径不可判断</span>
+            ) : (
+              <span>没有在线客户路径</span>
+            )}
+            {node.catalogState === 'known-listed' && node.dot === 'bad' && node.occupancyState === 'known' && (
+              <span className="nc-action">需下架 · 受影响 {node.occupancy ?? 0} 人</span>
+            )}
+            {offline && <span className="nc-offline-flag">离线 · 仍可点开处理</span>}
+          </div>
+        </>
       )}
     </article>
   );

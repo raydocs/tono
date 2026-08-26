@@ -17,6 +17,18 @@ import { Banner, Confirm, DataHealth, GlassCard } from '../ui';
 
 type Phase = 'viewing' | 'editing-clean' | 'editing-dirty' | 'confirming' | 'publishing' | 'success' | 'conflict' | 'error';
 
+/** The raw phase name is an implementation detail; operators need the meaning. */
+const PHASE_LABEL: Record<Phase, string> = {
+  viewing: '查看',
+  'editing-clean': '编辑中 · 无改动',
+  'editing-dirty': '有未发布改动',
+  confirming: '待确认',
+  publishing: '发布中…',
+  success: '已发布',
+  conflict: '版本冲突 409',
+  error: '发布失败',
+};
+
 function DiffView({ diff, revealed }: { diff: ReturnType<typeof lineDiff>; revealed: boolean }) {
   if (!revealed) return <p className="muted">隐私模式已隐藏 diff 原文。提交仍使用原始草稿。</p>;
   return (
@@ -227,37 +239,80 @@ export function ControlPage() {
         <div className="card-header">
           <div>
             <h2>发布概况</h2>
-            <p>
-              目录 {catalogRevision != null ? `r${catalogRevision}` : '未知'}
-              {catalog.state === 'ready' ? ` · ${timestamp(catalog.data.updatedAt)}` : ''}
-              {' · '}规则 {policyRevision != null ? `r${policyRevision}` : '未知'}
-            </p>
+            <p>线上版本，以及客户端拉到了第几版。</p>
           </div>
         </div>
         <div className="card-body">
-          {lagReady ? (
-            <p>客户目录：最新 {latest} · 落后 {behind} · 未上报 {unreported}</p>
-          ) : (
-            <p className="muted">目录落后人数不可判断，心跳源不是 ready。</p>
-          )}
-          {catalog.state === 'error' && <p>目录源不可用。</p>}
-          {policy.state === 'error' && <p>规则源不可用。</p>}
+          <div className="release-stats">
+            <div className="release-stat">
+              <span>节点目录</span>
+              <strong>{catalogRevision != null ? `r${catalogRevision}` : '未知'}</strong>
+              <small>{catalog.state === 'ready' ? timestamp(catalog.data.updatedAt) : catalog.state === 'error' ? '目录源不可用' : '加载中'}</small>
+            </div>
+            <div className="release-stat">
+              <span>直连规则</span>
+              <strong>{policyRevision != null ? `r${policyRevision}` : '未知'}</strong>
+              <small>{policy.state === 'error' ? '规则源不可用' : policy.state === 'ready' ? '已加载' : '加载中'}</small>
+            </div>
+            {lagReady ? (
+              <>
+                <div className="release-stat">
+                  <span>客户端最新</span>
+                  <strong>{latest}</strong>
+                  <small>已经拉到线上版</small>
+                </div>
+                <div className={`release-stat${behind > 0 ? ' t-severe' : ''}`}>
+                  <span>客户端落后</span>
+                  <strong style={behind > 0 ? { color: 'hsl(var(--sev-fg))' } : undefined}>{behind}</strong>
+                  <small>还在用旧目录</small>
+                </div>
+                <div className="release-stat">
+                  <span>未上报</span>
+                  <strong>{unreported}</strong>
+                  <small>没说自己在第几版</small>
+                </div>
+              </>
+            ) : (
+              <div className="release-stat t-unknown">
+                <span>客户端目录版本</span>
+                <strong>不可判断</strong>
+                <small>心跳源不是 ready</small>
+              </div>
+            )}
+          </div>
         </div>
       </GlassCard>
 
       <GlassCard>
-        <div className="card-header">
-          <div>
-            <h2>节点目录 YAML</h2>
-            <p>只比较原始文本，不 parse/dump。占位符必须原样保留。</p>
+        {yamlPhase === 'viewing' ? (
+          <div className="doc-row">
+            <div className="doc-row-main">
+              <h2>节点目录 YAML</h2>
+              <p>只比较原始文本，不 parse/dump。占位符必须原样保留。</p>
+              <div className="doc-meta">
+                <span>线上 r{catalogRevision ?? '—'}</span>
+                {catalog.state === 'ready' ? <span>{timestamp(catalog.data.updatedAt)}</span> : null}
+              </div>
+            </div>
+            <button className="btn btn-outline btn-sm" type="button" disabled={catalog.state !== 'ready'} onClick={startYaml}>开始编辑</button>
           </div>
-        </div>
-        <div className="card-body stack">
-          {yamlPhase === 'viewing' ? (
-            <button className="btn" type="button" disabled={catalog.state !== 'ready'} onClick={startYaml}>开始编辑</button>
-          ) : (
-            <>
-              <p className="muted">状态 {yamlPhase} · 基线 r{yamlBase} · 线上 r{catalogRevision ?? '—'}</p>
+        ) : (
+          <>
+            <div className="card-header">
+              <div>
+                <h2>节点目录 YAML</h2>
+                <p>只比较原始文本，不 parse/dump。占位符必须原样保留。</p>
+              </div>
+              <span className={`phase-pill t-${yamlPhase === 'conflict' || yamlPhase === 'error' ? 'severe' : yamlPhase === 'success' ? 'ok' : yamlPhase === 'editing-dirty' ? 'warn' : 'info'}`}>
+                {PHASE_LABEL[yamlPhase]}
+              </span>
+            </div>
+            <div className="card-body stack">
+              <p className="doc-meta">
+                <span>基线 r{yamlBase}</span>
+                <span>线上 r{catalogRevision ?? '—'}</span>
+                {yamlDiff ? <span>+{yamlDiff.added} / −{yamlDiff.removed}</span> : null}
+              </p>
               {privacy.privacy && !reveal ? (
                 <p className="muted">隐私模式隐藏目录原文。</p>
               ) : (
@@ -291,24 +346,38 @@ export function ControlPage() {
                 <a className="btn btn-outline" href={`data:text/yaml;charset=utf-8,${encodeURIComponent(yamlDraft)}`} download="tono-catalog.yaml">下载草稿</a>
                 <button className="btn btn-outline" type="button" onClick={() => void reloadYaml()}>重新加载线上版</button>
               </div>
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </GlassCard>
 
       <GlassCard>
-        <div className="card-header">
-          <div>
-            <h2>国内直连规则 JSON</h2>
-            <p>diff 比较原始编辑文本。加载时不 pretty-print。</p>
+        {policyPhase === 'viewing' ? (
+          <div className="doc-row">
+            <div className="doc-row-main">
+              <h2>国内直连规则 JSON</h2>
+              <p>diff 比较原始编辑文本。加载时不 pretty-print。</p>
+              <div className="doc-meta"><span>线上 r{policyRevision ?? '—'}</span></div>
+            </div>
+            <button className="btn btn-outline btn-sm" type="button" disabled={policy.state !== 'ready'} onClick={startPolicy}>开始编辑</button>
           </div>
-        </div>
-        <div className="card-body stack">
-          {policyPhase === 'viewing' ? (
-            <button className="btn" type="button" disabled={policy.state !== 'ready'} onClick={startPolicy}>开始编辑</button>
-          ) : (
-            <>
-              <p className="muted">状态 {policyPhase} · 基线 r{policyBase} · 线上 r{policyRevision ?? '—'}</p>
+        ) : (
+          <>
+            <div className="card-header">
+              <div>
+                <h2>国内直连规则 JSON</h2>
+                <p>diff 比较原始编辑文本。加载时不 pretty-print。</p>
+              </div>
+              <span className={`phase-pill t-${policyPhase === 'conflict' || policyPhase === 'error' ? 'severe' : policyPhase === 'success' ? 'ok' : policyPhase === 'editing-dirty' ? 'warn' : 'info'}`}>
+                {PHASE_LABEL[policyPhase]}
+              </span>
+            </div>
+            <div className="card-body stack">
+              <p className="doc-meta">
+                <span>基线 r{policyBase}</span>
+                <span>线上 r{policyRevision ?? '—'}</span>
+                {policyDiff ? <span>+{policyDiff.added} / −{policyDiff.removed}</span> : null}
+              </p>
               {privacy.privacy && !reveal ? (
                 <p className="muted">隐私模式隐藏规则原文。</p>
               ) : (
@@ -382,9 +451,9 @@ export function ControlPage() {
                 >关掉全部直连</button>
                 <button className="btn btn-outline" type="button" onClick={() => void reloadPolicy()}>重新加载</button>
               </div>
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </GlassCard>
 
       <Confirm

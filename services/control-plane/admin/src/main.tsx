@@ -130,7 +130,7 @@ function App() {
             </div>
           ))}
           <button type="button" className="nav-item nav-more" aria-expanded={showMore} onClick={() => setShowMore((value) => !value)}>
-            <span>⋯</span>
+            <span className="nav-more-glyph" aria-hidden>⋯</span>
             <span>更多</span>
           </button>
         </nav>
@@ -229,40 +229,41 @@ function App() {
                 </div>
               )}
             </div>
-            {refreshing && <span className="refreshing-dot">刷新中</span>}
+            {refreshing && <span className="status-pill refreshing-dot">刷新中</span>}
             {health.length > 0 && (
               <span className={`health-compact${health.some((line) => line.includes('没加载')) ? ' bad' : ''}`} title={health.join(' ')}>
                 {health[0]}
               </span>
             )}
             <div className="topbar-extras">
-              <label className="muted">
-                <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
-                隐私
-              </label>
-              <label className="muted">
-                主题
-                <select className="control-select" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
-                  <option value="system">跟随系统</option>
-                  <option value="light">浅色</option>
-                  <option value="dark">深色</option>
-                </select>
-              </label>
-              <label className="muted">
-                自动刷新
-                <select
-                  className="control-select"
-                  value={refreshMs}
-                  onChange={(event) => setRefreshMs(Number(event.target.value))}
-                >
-                  {REFRESH_CHOICES.map((choice) => (
-                    <option key={choice.ms} value={choice.ms}>{choice.label}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="ctl-group">
+                <label className="ctl-item" title="隐私模式：遮住邮箱、IP、密钥和金额">
+                  <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+                  隐私
+                </label>
+                <label className="ctl-item" title="主题">
+                  <select className="control-select" aria-label="主题" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
+                    <option value="system">跟随系统</option>
+                    <option value="light">浅色</option>
+                    <option value="dark">深色</option>
+                  </select>
+                </label>
+                <label className="ctl-item" title="自动刷新间隔">
+                  <select
+                    className="control-select"
+                    aria-label="自动刷新"
+                    value={refreshMs}
+                    onChange={(event) => setRefreshMs(Number(event.target.value))}
+                  >
+                    {REFRESH_CHOICES.map((choice) => (
+                      <option key={choice.ms} value={choice.ms}>{`刷新 ${choice.label}`}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
             <details className="topbar-compact-more">
-              <summary>更多</summary>
+              <summary>设置</summary>
               <div className="topbar-more-panel">
                 <label className="muted">
                   <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
@@ -292,17 +293,15 @@ function App() {
 
         <main className="content" id="ops-main" tabIndex={-1}>
           <div className="page-head">
-            <div>
-              <h1>{selected.label}</h1>
-              <p>
-                {page === 'dashboard' && '事故、在线客户、该处理的节点'}
-                {page === 'failures' && '机房事故和客户路径'}
-                {page === 'monitor' && '机器全集、三网、下架'}
-                {page === 'users' && '开通、家宽、路径'}
-                {page === 'traffic' && '机器累计与客户本期用量'}
-                {page === 'control' && '节点目录和国内直连规则'}
-              </p>
-            </div>
+            <h1>{selected.label}</h1>
+            <p>
+              {page === 'dashboard' && '事故、在线客户、该处理的节点'}
+              {page === 'failures' && '机房事故和客户路径'}
+              {page === 'monitor' && '机器全集、三网、下架'}
+              {page === 'users' && '开通、家宽、路径'}
+              {page === 'traffic' && '机器累计与客户本期用量'}
+              {page === 'control' && '节点目录和国内直连规则'}
+            </p>
           </div>
 
           {page === 'dashboard' && <Dashboard />}
