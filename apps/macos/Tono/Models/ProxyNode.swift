@@ -118,13 +118,16 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     var realityShortId: String?
 
     // Display helpers
+    /// Wire names the catalog still ships without a city. Without an entry the
+    /// card falls back to the raw name ("JP-VLESS-Reality"), which loses the
+    /// localized city title and the city glyph.
+    private static let cityNames: [String: String] = [
+        "US-VLESS-Reality": "Los Angeles · Sunset",
+        "JP-VLESS-Reality": "Tokyo · Dawn",
+    ]
+
     static func displayName(for rawName: String) -> String {
-        switch rawName {
-        case "US-VLESS-Reality":
-            return "Los Angeles · Sunset"
-        default:
-            return rawName
-        }
+        cityNames[rawName] ?? rawName
     }
 
     var displayName: String { Self.displayName(for: name) }

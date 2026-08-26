@@ -291,7 +291,7 @@
     "search": "Search servers",
     "noMatches": "No servers match this search.",
     "readyToConnect": "Available",
-    "untested": "—",
+    "untested": "Not tested",
     "catalogSynced": "Node list synced",
     "testCurrent": "Test Current",
     "testAll": "Test All",

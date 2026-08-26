@@ -152,7 +152,14 @@ export const classifyActivityRoute = (
   ) {
     return 'direct'
   }
-  if (hops.some((hop) => HOME_CHAIN_HOPS.has(hop))) {
+  // A residential chain carries the exit it is dialled through, so
+  // Tono-Home-Residential always means home egress.
+  if (hops.includes('Tono-Home-Residential')) return 'home'
+  // The healthy Claude-home chain is `HomeNode → Tono-Claude-Home`. A runtime
+  // that fell back adds Tono-Exit, and those bytes really did leave through the
+  // datacenter — badging them 家宽 would claim the customer's home IP for
+  // traffic that never used it. Matches AppTrafficLedger on macOS.
+  if (hops.includes('Tono-Claude-Home') && !hops.includes('Tono-Exit')) {
     return 'home'
   }
   return 'proxied'

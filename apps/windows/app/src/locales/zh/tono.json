@@ -291,7 +291,7 @@
     "search": "搜索节点",
     "noMatches": "没有符合条件的节点。",
     "readyToConnect": "可选",
-    "untested": "—",
+    "untested": "未测速",
     "catalogSynced": "节点列表已同步",
     "testCurrent": "测试当前节点",
     "testAll": "测试全部",

@@ -2313,23 +2313,28 @@ final class AppState {
                 // where the user navigated, which is worse than showing none.
                 self.appTrafficLedger.ingest(apiConnections)
             }
-            var stats = self.trafficStats
-            stats.totalUpload = response.uploadTotal
-            stats.totalDownload = response.downloadTotal
-            stats.activeConnections = response.connections?.count ?? 0
-            self.trafficStats = stats
             // Keep the Activity snapshot even when that page is not visible.
             // Gating it made the first paint a lie ("no connections") until the
             // next 2.5s websocket frame. Mapping 2k rows is cheaper than the
             // old 50-card VStack that this used to protect.
-            self.updateConnections(from: response)
+            let visibleConnections = self.updateConnections(from: response)
+            var stats = self.trafficStats
+            stats.totalUpload = response.uploadTotal
+            stats.totalDownload = response.downloadTotal
+            // Count what the list actually shows. Counting the raw array made
+            // the headline include the loopback DNS rows the list hides, so it
+            // read "104 active" above a list of forty.
+            stats.activeConnections = visibleConnections
+            self.trafficStats = stats
         }
 
         ws.onLogs = { [weak self] entries in
             LocalTrafficAudit.shared.recordCoreLogs(entries)
             let logsEnabled = AppProfile.defaults.object(forKey: SettingsKey.logsEnabled) as? Bool ?? true
-            guard logsEnabled, let self, self.isMainWindowVisible,
-                  self.selectedPage == .logs else { return }
+            // Buffer regardless of the visible page. Dropping frames while
+            // Logs was off-screen meant a user who connected, browsed, then
+            // opened Logs was told "0 records" about a session full of traffic.
+            guard logsEnabled, let self else { return }
 
             let now = Date()
             self.logEntries.append(contentsOf: entries.map {
@@ -2722,7 +2727,7 @@ final class AppState {
                         continue
                     }
                     if failure.code != .coreExitUnreachable {
-                        self.errorMessage = String(localized: "正在恢复受保护连接")
+                        self.errorMessage = String(localized: "Recovering protected connection…")
                         continue
                     }
                     guard self.isConnected, !self.isDisconnecting else { return }
@@ -3157,7 +3162,7 @@ final class AppState {
                         throw CoreControllerError.protectionFailed(failure.userMessage)
                     }
                     throw CoreControllerError.protectionFailed(
-                        String(localized: "新节点验证失败，已切回原节点。")
+                        String(localized: "New server failed verification. Switched back to the previous one.")
                     )
                 }
                 if case .failed(let failure) = switchVerdict {
@@ -5957,11 +5962,14 @@ final class AppState {
 
     // MARK: - Update Connections from WebSocket
 
-    private func updateConnections(from response: APIConnectionsResponse) {
+    /// Returns the number of connections the list is willing to show, which is
+    /// what the "active connections" headline must report.
+    @discardableResult
+    private func updateConnections(from response: APIConnectionsResponse) -> Int {
         guard let apiConnections = response.connections else {
             connections = []
             connectionsDisplayLimited = false
-            return
+            return 0
         }
         let timestamp = Date.now.formatted(
             .dateTime.hour(.twoDigits(amPM: .omitted))
@@ -5980,6 +5988,7 @@ final class AppState {
         }
         connections = mapped
         connectionsDisplayLimited = visibleCount > cap
+        return visibleCount
     }
 
     private func connectionEntry(

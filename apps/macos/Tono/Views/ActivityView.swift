@@ -280,7 +280,13 @@ struct ActivityView: View {
                         Text("—")
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
                     }
-                    Text(appState.proxyService.activeNodeName ?? "No exit selected")
+                    // Every other surface localizes the city; this one printed
+                    // the raw catalog name, so Activity said "Tokyo · Fuji"
+                    // while the Dashboard said 东京.
+                    Text(
+                        appState.proxyService.activeNodeName.map(nodeCityTitle)
+                            ?? String(localized: "No exit selected")
+                    )
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)

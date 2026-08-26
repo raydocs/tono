@@ -109,7 +109,14 @@ const ServersPage = () => {
       try {
         await tonoSelectServer(name)
         await Promise.all([mutateServers(), mutateTonoStatus()])
-        showToast(t('tono.nodes.switchedTo', { name: nodeDisplayName(name) }))
+        // Announce the localized city the card shows, not the raw wire name —
+        // otherwise the toast says "Tokyo · Dawn" over a card labelled 东京.
+        const cityKey = nodeCityTitleKey(name)
+        showToast(
+          t('tono.nodes.switchedTo', {
+            name: cityKey ? t(cityKey) : nodeDisplayName(name),
+          }),
+        )
       } catch (error) {
         setSelectError(error instanceof Error ? error.message : String(error))
       }

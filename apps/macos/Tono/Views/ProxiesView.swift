@@ -77,8 +77,11 @@ struct ProxiesView: View {
             let nodes = appState.proxyRegions.flatMap(\.nodes)
             let displayName = nodes.first { $0.id == newValue || $0.name == newValue }?.displayName
                 ?? ProxyNode.displayName(for: newValue)
+            // Announce the same localized city the card shows. Passing the raw
+            // catalog name made the toast say "Tokyo · Fuji" over a card
+            // labelled 东京.
             ToastCenter.shared.show(
-                String(localized: "Switched to \(displayName)"),
+                String(localized: "Switched to \(nodeCityTitle(displayName))"),
                 systemImage: "checkmark.circle.fill"
             )
         }
@@ -309,13 +312,12 @@ struct ProxiesView: View {
                 || ConfigParser.extractFlag(from: $0.name).cleanName
                     == ConfigParser.extractFlag(from: node.name).cleanName
         }
-        let hasLatency = (runtimeNode?.latency ?? 0) > 0
+        // The badge already carries the measurement state ("未测速"/a number), so
+        // this line only speaks to whether the node can be connected to.
         let statusTitle: String = if runtimeNode?.lastTestFailed == true {
             String(localized: "Unavailable")
-        } else if hasLatency {
-            String(localized: "Ready to connect")
         } else {
-            String(localized: "Ready to test")
+            String(localized: "Ready to connect")
         }
         let statusColor: Color = runtimeNode?.lastTestFailed == true
             ? TonoStatus.error
@@ -491,7 +493,7 @@ struct ProxiesView: View {
                 }
                 Spacer(minLength: 0)
                 if node.latency > 0 {
-                    Text("\(node.latency)ms")
+                    Text(LatencyLevel.spokenTitle(for: node.latency, kind: .exit))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency, kind: .exit).color))
                 } else if node.lastTestFailed {
@@ -1003,9 +1005,9 @@ struct ProxiesView: View {
             Int64(count)
         )
         if let version = appState.managedCatalogVersion {
-            return "\(serverCount) · v\(version) · updates automatically"
+            return String(localized: "\(serverCount) · v\(version) · updates automatically")
         }
-        return "\(serverCount) · waiting for the first verified sync"
+        return String(localized: "\(serverCount) · waiting for the first verified sync")
     }
 
     private var catalogStatusIcon: String {

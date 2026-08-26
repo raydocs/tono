@@ -450,7 +450,9 @@ struct NodeLatencyBadge: View {
 
     private var title: String {
         if didFail { return String(localized: "Timeout") }
-        guard latency > 0 else { return "—" }
+        // A word, not a dash. A bare "—" reads as a broken value rather than a
+        // node nobody has measured yet.
+        guard latency > 0 else { return String(localized: "Not tested") }
         return LatencyLevel.spokenTitle(for: latency, kind: .exit)
     }
 

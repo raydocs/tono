@@ -141,6 +141,30 @@ describe('Activity connection presentation', () => {
     ).toBe('proxied')
   })
 
+  it('only badges a flow as home when it really left through home broadband', () => {
+    expect(
+      classifyActivityRoute(
+        connection('residential', { chains: ['Tono-Home-Residential'] }),
+      ),
+    ).toBe('home')
+    expect(
+      classifyActivityRoute(
+        connection('claude-home', {
+          chains: ['HomeNode', 'Tono-Claude-Home'],
+        }),
+      ),
+    ).toBe('home')
+    // Fell back to the datacenter exit: those bytes never used the home IP, so
+    // claiming 家宽 would be a false statement about the customer's identity.
+    expect(
+      classifyActivityRoute(
+        connection('fell-back', {
+          chains: ['Tono-Exit', 'Tono-Claude-Home'],
+        }),
+      ),
+    ).toBe('proxied')
+  })
+
   it('classifies loopback targets as local, never as direct', () => {
     const dns = connection('dns', {
       metadata: {
