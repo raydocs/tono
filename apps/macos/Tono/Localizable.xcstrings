@@ -1603,6 +1603,26 @@
         }
       }
     },
+    "Exit %lldms": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出口 %lldms"
+          }
+        }
+      }
+    },
+    "Slow exit %lldms": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出口较慢 %lldms"
+          }
+        }
+      }
+    },
     "HTTP/SOCKS listener port": {
       "extractionState": "manual",
       "localizations": {

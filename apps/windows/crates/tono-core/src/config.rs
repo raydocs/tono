@@ -670,7 +670,11 @@ fn runtime_value(
     // past the tunnel and the MATCH fallback never runs. Every UDP packet
     // must face the rule engine like TCP does.
     put(&mut root, "udp", Value::Bool(true));
-    put(&mut root, "unified-delay", Value::Bool(false));
+    // Second HTTP sample, so the UI delay is the warm path RTT rather than the
+    // cold Reality+TLS handshake (which reads 400–800 ms on a healthy Japan
+    // exit). Connect no longer treats `/delay` as the data-plane verdict, so
+    // the doubled request cannot stall the fail-closed TUN check.
+    put(&mut root, "unified-delay", Value::Bool(true));
     let process_lookup = home.is_some() || home_socks5.is_some() || direct.is_some();
     put(
         &mut root,
@@ -1059,7 +1063,7 @@ reality-opts:
         assert_eq!(get(&value, &["ipv6"]).as_bool(), Some(false));
         assert_eq!(get(&value, &["mode"]).as_str(), Some("rule"));
         assert_eq!(get(&value, &["log-level"]).as_str(), Some("warning"));
-        assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(false));
+        assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(true));
         assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("off"));
         assert_eq!(
             get(&value, &["profile", "store-selected"]).as_bool(),

@@ -69,6 +69,16 @@ pub struct TonoStatus {
     /// `off` | `on` | `skipped` — whether the optional WeChat/web DIRECT overlay
     /// is live. `skipped` means the tunnel is up but China-direct was not installed.
     pub direct_overlay: String,
+    /// HTTP generate_204 through the selected exit. Not TCP to the node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_delay_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_delay_at_ms: Option<i64>,
+    /// TCP connect to the selected node's :443. Independent of exit_delay_ms.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_at_ms: Option<i64>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -218,6 +228,10 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             "off".to_string()
         },
+        exit_delay_ms: inner.selected_exit_delay_ms(),
+        exit_delay_at_ms: inner.selected_exit_delay_at_ms(),
+        tcp_delay_ms: inner.selected_tcp_delay_ms(),
+        tcp_delay_at_ms: inner.selected_tcp_delay_at_ms(),
     }
 }
 
@@ -702,6 +716,7 @@ async fn test_server_endpoint(
 #[tauri::command]
 pub async fn tono_test_available_servers(
     state: tauri::State<'_, Arc<TonoState>>,
+    app: AppHandle,
 ) -> Result<Vec<TonoServerTestResult>, String> {
     let (generation, auth_generation, catalog_revision, cancellation, nodes) = {
         let mut inner = state.lock().await;
@@ -751,6 +766,14 @@ pub async fn tono_test_available_servers(
     }
     if stale {
         return Err("server test cancelled or superseded".to_string());
+    }
+    if let Some(selected) = inner.selected_node.clone() {
+        if let Some(result) = results.iter().find(|result| result.name == selected) {
+            if let Some(latency_ms) = result.latency_ms {
+                inner.record_tcp_delay(&selected, latency_ms);
+                emit_status(&app, &status_of(&inner));
+            }
+        }
     }
     Ok(results)
 }
@@ -848,8 +871,11 @@ pub async fn tono_select_server(
 /// Execute a fresh controller delay probe through the selected exit. This is intentionally
 /// available only while Connected; cached legacy delay history is not presented as a new test.
 #[tauri::command]
-pub async fn tono_test_current_server(state: tauri::State<'_, Arc<TonoState>>) -> Result<u64, String> {
-    connection::test_current_server(state.inner()).await
+pub async fn tono_test_current_server(
+    state: tauri::State<'_, Arc<TonoState>>,
+    app: AppHandle,
+) -> Result<u64, String> {
+    connection::test_current_server(state.inner(), &app).await
 }
 
 /// Run the §6 connect transaction.

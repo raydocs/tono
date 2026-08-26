@@ -566,6 +566,17 @@ pub struct TelemetryWindowReport {
     pub kill_switch_live: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dns_enabled: Option<bool>,
+    /// HTTP generate_204 through the selected exit. Independent of tcp_delay_ms.
+    /// Ops must never treat this as ping-to-node; the two numbers are different paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_delay_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_delay_at_ms: Option<i64>,
+    /// TCP connect to the selected node's :443.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_at_ms: Option<i64>,
     pub event_count: u32,
     pub events_dropped: u32,
     pub events: Vec<TelemetryEvent>,

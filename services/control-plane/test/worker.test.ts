@@ -534,7 +534,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(rejected.status).toBe(405);
     expect(rejected.headers.get('allow')).toBe('GET, HEAD');
 
-    await env.RELEASES.put('Tono_range.bin', 'abcdefghij');
+    await (env as unknown as Env).RELEASES.put('Tono_range.bin', 'abcdefghij');
     const ranged = await fetchRelease('/download/Tono_range.bin', {
       headers: { range: 'bytes=2-5' },
     });
@@ -5072,5 +5072,77 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(me.uiState).toBe('connected');
     expect(me.catalogRevision).toBe(7);
     expect(me.payloadJson).toBeUndefined();
+    expect(me.exitDelayMs).toBeNull();
+    expect(me.tcpDelayMs).toBeNull();
+    expect(me.nodeHealth).toBe('unknown');
+  });
+
+  it('accepts split path delays on a telemetry window and joins node health for every customer', async () => {
+    const account = await createAccount('path-status');
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const ingested = await api('ops-ingest/snapshot', {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        report: {
+          updated_at: 1_786_270_932,
+          nodes: [
+            {
+              name: 'Tokyo · Fuji',
+              host: '203.0.113.40',
+              ok: true,
+              block: { status: 'OK', label: '正常', overseas: { ok: true, success: 5, total: 5 } },
+            },
+            {
+              name: 'Tokyo · Sakura',
+              host: '203.0.113.41',
+              ok: false,
+              block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', overseas: { ok: false, success: 0, total: 5 } },
+            },
+          ],
+        },
+      }),
+    });
+    expect(ingested.status).toBe(200);
+
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      selectedServer: 'Tokyo · Fuji',
+      exitDelayMs: 816,
+      tcpDelayMs: 42,
+      exitDelayAtMs: Date.now() - 5_000,
+      tcpDelayAtMs: Date.now() - 60_000,
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+
+    const unknownKey = await api('telemetry/windows', json(telemetryWindowPayload({
+      pingMs: 12,
+    }), account.accessToken));
+    expect(unknownKey.status).toBe(400);
+
+    const response = await operations('activity');
+    const { activity } = await response.json() as any;
+    const me = activity.users.find((u: any) => u.userId === account.user.id);
+    expect(me.selectedServer).toBe('Tokyo · Fuji');
+    expect(me.exitDelayMs).toBe(816);
+    expect(me.tcpDelayMs).toBe(42);
+    expect(me.nodeHealth).toBe('ok');
+    expect(me.nodeHealthLabel).toBe('大陆正常');
+
+    const other = await createAccount('path-status-down');
+    const sakura = await api('telemetry/windows', json(telemetryWindowPayload({
+      selectedServer: 'Tokyo · Sakura',
+      exitDelayMs: 775,
+    }), other.accessToken));
+    expect(sakura.status).toBe(201);
+    const after = await operations('activity');
+    const { activity: next } = await after.json() as any;
+    const onSakura = next.users.find((u: any) => u.userId === other.user.id);
+    expect(onSakura.nodeHealth).toBe('down');
+    expect(onSakura.nodeHealthLabel).toBe('整机失联');
+    expect(onSakura.exitDelayMs).toBe(775);
+    expect(onSakura.tcpDelayMs).toBeNull();
   });
 });

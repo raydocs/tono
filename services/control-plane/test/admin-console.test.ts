@@ -6,6 +6,7 @@ import { gibibytes, unixDate } from '../admin/src/lib/fields';
 import { dataHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
 import { carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
+import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../admin/src/lib/path-status';
 import type { CarrierPingMapDto } from '../admin/src/api';
 import type { LiveAgentDto, NodeProfileDto } from '../admin/src/api';
 
@@ -321,5 +322,22 @@ describe('how far behind a catalog a client is', () => {
 
   it('admits when it does not know the published revision', () => {
     expect(catalogLag(36, null)).toEqual({ state: 'unknown-target', revision: 36 });
+  });
+});
+
+describe('client path status on the customer list', () => {
+  it('keeps exit HTTP and TCP as separate readings', () => {
+    expect(formatExitDelay(null)).toBe('出口未测');
+    expect(formatTcpDelay(null)).toBe('TCP 未测');
+    expect(formatExitDelay(80)).toBe('出口 80ms');
+    expect(formatTcpDelay(42)).toBe('TCP 42ms');
+  });
+
+  it('does not call an 800ms exit reading a dead node', () => {
+    expect(formatExitDelay(816)).toBe('出口较慢 816ms');
+    expect(nodeHealthLabel('ok')).toBe('大陆正常');
+    expect(nodeHealthLabel('down')).toBe('整机失联');
+    expect(nodeHealthTone('down')).toBe('bad');
+    expect(nodeHealthTone('ok')).toBe('ok');
   });
 });

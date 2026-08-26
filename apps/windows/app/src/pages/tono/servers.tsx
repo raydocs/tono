@@ -27,7 +27,7 @@ import { useTonoToast } from '@/tono-ui/tono-toast-context'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 
-import { latencyColor, readNodeLatency } from './node-latency'
+import { latencyColor, latencyLabelKey, readNodeLatency } from './node-latency'
 import {
   nodeCityParts,
   nodeCityTitleKey,
@@ -515,21 +515,25 @@ const ServersPage = () => {
                   const exitLatency =
                     currentExitTest?.name === server.name
                       ? currentExitTest.latency
-                      : undefined
+                      : server.selected &&
+                          status?.exitDelayMs &&
+                          status.exitDelayMs > 0
+                        ? status.exitDelayMs
+                        : undefined
                   const cachedLatency = readNodeLatency(server.name)
                   const latency =
                     endpointLatency ?? exitLatency ?? cachedLatency
                   const latencyLabel =
                     endpointLatency !== undefined
-                      ? t('tono.nodes.tcpLatency', {
+                      ? t(latencyLabelKey('tcp', endpointLatency), {
                           latency: endpointLatency,
                         })
                       : exitLatency !== undefined
-                        ? t('tono.nodes.exitLatency', {
+                        ? t(latencyLabelKey('exit', exitLatency), {
                             latency: exitLatency,
                           })
                         : cachedLatency !== null
-                          ? t('tono.nodes.cachedLatency', {
+                          ? t(latencyLabelKey('cached', cachedLatency), {
                               latency: cachedLatency,
                             })
                           : t('tono.nodes.untested')

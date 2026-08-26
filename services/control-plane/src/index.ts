@@ -3203,7 +3203,65 @@ async function operationsLive(e: Env) {
 // A user is "online" when their latest window is fresher than two cadences.
 const ACTIVITY_ONLINE_SECONDS = 40 * 60;
 
+const NODE_HEALTH_LABELS: Record<string, string> = {
+  ok: '大陆正常',
+  blocked: '疑似被墙',
+  down: '整机失联',
+  unknown: '未测',
+};
+
+function optionalTelemetryInt(payload: Row, key: string, min: number, max: number): number | null {
+  const value = payload[key];
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
+    return null;
+  }
+  return value;
+}
+
+function telemetryPathFields(payload: Row) {
+  return {
+    exitDelayMs: optionalTelemetryInt(payload, 'exitDelayMs', 1, 120_000),
+    tcpDelayMs: optionalTelemetryInt(payload, 'tcpDelayMs', 1, 120_000),
+    exitDelayAtMs: optionalTelemetryInt(payload, 'exitDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS),
+    tcpDelayAtMs: optionalTelemetryInt(payload, 'tcpDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS),
+  };
+}
+
+/**
+ * Join a catalog name against the collector quality snapshot.
+ *
+ * `ok: false` is the machine, not GFW: overseas probes failing with the
+ * mainland is how a dead VPS was labelled 疑似被墙. Blocked is only when the
+ * box still answers elsewhere.
+ */
+function nodeHealthFromQuality(node: Row | null | undefined): { nodeHealth: string; nodeHealthLabel: string } {
+  if (!node) {
+    return { nodeHealth: 'unknown', nodeHealthLabel: NODE_HEALTH_LABELS.unknown };
+  }
+  const block = node.block && typeof node.block === 'object' && !Array.isArray(node.block)
+    ? node.block as Row
+    : null;
+  const status = typeof block?.status === 'string' ? block.status : null;
+  if (node.ok !== true) {
+    return { nodeHealth: 'down', nodeHealthLabel: NODE_HEALTH_LABELS.down };
+  }
+  if (status === 'LIKELY_BLOCKED') {
+    return { nodeHealth: 'blocked', nodeHealthLabel: NODE_HEALTH_LABELS.blocked };
+  }
+  if (status === 'OK' || node.ok === true) {
+    return { nodeHealth: 'ok', nodeHealthLabel: NODE_HEALTH_LABELS.ok };
+  }
+  return { nodeHealth: 'unknown', nodeHealthLabel: NODE_HEALTH_LABELS.unknown };
+}
+
+function qualityNodeByName(quality: { nodes: Row[] } | null, name: string | null): Row | null {
+  if (!quality || !name) return null;
+  return quality.nodes.find((node) => node.name === name) ?? null;
+}
+
 async function operationsActivity(e: Env) {
+  const live = await operationsLive(e);
+  const quality = live.quality;
   const rows = await e.DB.prepare(
     `SELECT t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
             t.payload_json, u.email
@@ -3223,6 +3281,8 @@ async function operationsActivity(e: Env) {
       payload = {};
     }
     const lastSeenAt = Number(row.received_at);
+    const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
+    const health = nodeHealthFromQuality(qualityNodeByName(quality, selectedServer));
     return {
       userId: String(row.user_id),
       deviceId: row.device_id === null || row.device_id === undefined ? null : String(row.device_id),
@@ -3231,9 +3291,11 @@ async function operationsActivity(e: Env) {
       online: nowSec - lastSeenAt <= ACTIVITY_ONLINE_SECONDS,
       clientVersion: String(row.client_version),
       osVersion: String(row.os_version),
-      selectedServer: typeof payload.selectedServer === 'string' ? payload.selectedServer : null,
+      selectedServer,
       uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
       catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
+      ...telemetryPathFields(payload),
+      ...health,
     };
   });
   const onlineUsers = users.filter((user) => user.online);
@@ -3879,7 +3941,8 @@ const telemetryWindowKeys = [
   'appVersion', 'osVersion', 'osArch',
   'uiState', 'accountState', 'selectedServer', 'catalogRevision',
   'killSwitchMode', 'killSwitchWanted', 'killSwitchLive',
-  'dnsEnabled', 'eventCount', 'eventsDropped', 'events',
+  'dnsEnabled', 'exitDelayMs', 'tcpDelayMs', 'exitDelayAtMs', 'tcpDelayAtMs',
+  'eventCount', 'eventsDropped', 'events',
 ];
 
 const telemetryEventStringKeys = [
@@ -3999,6 +4062,14 @@ function canonicalTelemetryWindow(value: unknown) {
     }
     window[key] = source[key];
   }
+  const exitDelayMs = diagnosticsInt(source, 'exitDelayMs', 1, 120_000, true);
+  if (exitDelayMs !== undefined) window.exitDelayMs = exitDelayMs;
+  const tcpDelayMs = diagnosticsInt(source, 'tcpDelayMs', 1, 120_000, true);
+  if (tcpDelayMs !== undefined) window.tcpDelayMs = tcpDelayMs;
+  const exitDelayAtMs = diagnosticsInt(source, 'exitDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS, true);
+  if (exitDelayAtMs !== undefined) window.exitDelayAtMs = exitDelayAtMs;
+  const tcpDelayAtMs = diagnosticsInt(source, 'tcpDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS, true);
+  if (tcpDelayAtMs !== undefined) window.tcpDelayAtMs = tcpDelayAtMs;
 
   const json = JSON.stringify(window);
   if (new TextEncoder().encode(json).byteLength > TELEMETRY_PAYLOAD_MAX_BYTES) {
@@ -6265,12 +6336,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           } catch {
             payload = {};
           }
+          const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
+          const live = await operationsLive(e);
           heartbeat = {
             lastSeenAt: Number(activity.received_at),
             clientVersion: String(activity.client_version),
             osVersion: String(activity.os_version),
-            selectedServer: typeof payload.selectedServer === 'string' ? payload.selectedServer : null,
+            selectedServer,
             uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
+            ...telemetryPathFields(payload),
+            ...nodeHealthFromQuality(qualityNodeByName(live.quality, selectedServer)),
           };
         }
         return Response.json({

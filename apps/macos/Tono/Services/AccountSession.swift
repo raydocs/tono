@@ -23,6 +23,7 @@ final class AccountSession {
     private let cloudFallbackConsumer: @MainActor (Bool) throws -> Void
     private let killSwitchDisarmConsumer: @MainActor () async -> Void
     private let diagnosticSnapshotConsumer: @MainActor () -> TonoDiagnosticSnapshot
+    private let pathLatencyConsumer: @MainActor () -> TonoPathLatency
     private let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     private let protectionBlockedConsumer: @MainActor () -> Bool
@@ -114,7 +115,10 @@ final class AccountSession {
          protectionBlockedConsumer: @escaping @MainActor () -> Bool = { false },
          protectedRetryConsumer: @escaping @MainActor () -> Void = {},
          appRoutingResearchActivationConsumer: @escaping
-            @MainActor () -> Void = {}) {
+            @MainActor () -> Void = {},
+         pathLatencyConsumer: @escaping @MainActor () -> TonoPathLatency = {
+             TonoPathLatency()
+         }) {
         self.api = api; self.keychain = keychain; self.sidecar = sidecar
         self.exitNode = exitNode
         self.descriptorConsumer = descriptorConsumer
@@ -129,6 +133,7 @@ final class AccountSession {
         self.protectedRetryConsumer = protectedRetryConsumer
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer
+        self.pathLatencyConsumer = pathLatencyConsumer
     }
 
     func restore() async {
@@ -900,6 +905,7 @@ final class AccountSession {
         #else
         let osArch = "unknown"
         #endif
+        let path = pathLatencyConsumer()
         let window = TonoTelemetryWindowReport(
             schemaVersion: 1,
             kind: "periodic_window",
@@ -918,6 +924,10 @@ final class AccountSession {
             killSwitchWanted: snapshot.killSwitchArmed || snapshot.connected,
             killSwitchLive: snapshot.killSwitchArmed,
             dnsEnabled: snapshot.protectedDNSConfigured,
+            exitDelayMs: path.exitDelayMs,
+            tcpDelayMs: path.tcpDelayMs,
+            exitDelayAtMs: path.exitDelayAtMs,
+            tcpDelayAtMs: path.tcpDelayAtMs,
             eventCount: drained.events.count,
             eventsDropped: drained.dropped,
             events: drained.events

@@ -295,10 +295,83 @@ pub struct TonoInner {
     pub exit_ip: Option<String>,
     pub exit_org: Option<String>,
     pub exit_location: Option<String>,
+    /// Last successful HTTP generate_204 through the selected exit. Display and
+    /// heartbeat only — never a connection verdict.
+    pub last_exit_delay_ms: Option<u64>,
+    pub last_exit_delay_at_ms: Option<i64>,
+    pub last_exit_delay_node: Option<String>,
+    /// Last successful TCP connect to a catalog endpoint. Same restriction.
+    pub last_tcp_delay_ms: Option<u64>,
+    pub last_tcp_delay_at_ms: Option<i64>,
+    pub last_tcp_delay_node: Option<String>,
     pub tasks: TaskRegistry,
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn matching_selected_delay(
+    selected: Option<&str>,
+    delay_ms: Option<u64>,
+    delay_node: Option<&str>,
+) -> Option<u64> {
+    match (selected, delay_ms, delay_node) {
+        (Some(selected), Some(ms), Some(node)) if selected == node && ms > 0 => Some(ms),
+        _ => None,
+    }
+}
+
 impl TonoInner {
+    pub fn record_exit_delay(&mut self, delay_ms: u64) {
+        if delay_ms == 0 {
+            return;
+        }
+        let Some(node) = self.selected_node.clone() else {
+            return;
+        };
+        self.last_exit_delay_ms = Some(delay_ms);
+        self.last_exit_delay_at_ms = Some(now_ms());
+        self.last_exit_delay_node = Some(node);
+    }
+
+    pub fn record_tcp_delay(&mut self, node: &str, delay_ms: u64) {
+        if delay_ms == 0 || node.is_empty() {
+            return;
+        }
+        self.last_tcp_delay_ms = Some(delay_ms);
+        self.last_tcp_delay_at_ms = Some(now_ms());
+        self.last_tcp_delay_node = Some(node.to_string());
+    }
+
+    pub fn selected_exit_delay_ms(&self) -> Option<u64> {
+        matching_selected_delay(
+            self.selected_node.as_deref(),
+            self.last_exit_delay_ms,
+            self.last_exit_delay_node.as_deref(),
+        )
+    }
+
+    pub fn selected_tcp_delay_ms(&self) -> Option<u64> {
+        matching_selected_delay(
+            self.selected_node.as_deref(),
+            self.last_tcp_delay_ms,
+            self.last_tcp_delay_node.as_deref(),
+        )
+    }
+
+    pub fn selected_exit_delay_at_ms(&self) -> Option<i64> {
+        self.selected_exit_delay_ms()
+            .and(self.last_exit_delay_at_ms)
+    }
+
+    pub fn selected_tcp_delay_at_ms(&self) -> Option<i64> {
+        self.selected_tcp_delay_ms().and(self.last_tcp_delay_at_ms)
+    }
+
     pub fn cancel_server_tests(&mut self) {
         if let Some(cancellation) = self.server_test_cancellation.take() {
             cancellation.cancel();
@@ -455,6 +528,12 @@ impl TonoState {
                 exit_ip: None,
                 exit_org: None,
                 exit_location: None,
+                last_exit_delay_ms: None,
+                last_exit_delay_at_ms: None,
+                last_exit_delay_node: None,
+                last_tcp_delay_ms: None,
+                last_tcp_delay_at_ms: None,
+                last_tcp_delay_node: None,
                 tasks: TaskRegistry::default(),
             }),
             audit,
@@ -930,7 +1009,7 @@ impl Drop for CurrentUserSid {
 
 #[cfg(test)]
 mod tests {
-    use super::{AccountState, ReleaseOperation};
+    use super::{matching_selected_delay, AccountState, ReleaseOperation};
     use std::{sync::Arc, time::Duration};
 
     #[test]
@@ -965,5 +1044,21 @@ mod tests {
             assert_eq!(result, Err("kept protected".to_string()));
         }
         assert_eq!(operation.wait().await, Err("kept protected".to_string()));
+    }
+
+    #[test]
+    fn delay_samples_only_count_for_the_selected_node() {
+        assert_eq!(
+            matching_selected_delay(Some("Tokyo · Fuji"), Some(80), Some("Tokyo · Neon")),
+            None
+        );
+        assert_eq!(
+            matching_selected_delay(Some("Tokyo · Fuji"), Some(80), Some("Tokyo · Fuji")),
+            Some(80)
+        );
+        assert_eq!(
+            matching_selected_delay(Some("Tokyo · Fuji"), Some(0), Some("Tokyo · Fuji")),
+            None
+        );
     }
 }

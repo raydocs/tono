@@ -1165,6 +1165,7 @@ export interface TranslationResources {
         cloudServers: string
         empty: string
         exitLatency: string
+        exitLatencySlow: string
         lastSynced: string
         noMatches: string
         readyToConnect: string
@@ -1182,6 +1183,7 @@ export interface TranslationResources {
         subtitle: string
         switchedTo: string
         tcpLatency: string
+        tcpLatencySlow: string
         testAll: string
         testCurrent: string
         testFailed: string

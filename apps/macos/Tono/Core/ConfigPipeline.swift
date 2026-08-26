@@ -1349,7 +1349,8 @@ nonisolated struct ConfigPipeline {
         udp: true
         mode: rule
         log-level: \(overlay.logLevel)
-        unified-delay: false
+        # Warm-path RTT for UI delay. Connect uses the TUN probe, not /delay.
+        unified-delay: true
         find-process-mode: \(directPolicy != nil || overlay.tonoTransport != nil ? "strict" : "off")
         profile:
           # Runtime config order is the committed selection. Never let a stale

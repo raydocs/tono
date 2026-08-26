@@ -729,6 +729,19 @@ struct LiquidClashApp: App {
                     appState.compactRemoteDiagnosticSnapshot()
                 )
             },
+            pathLatencyConsumer: {
+                let selected = appState.proxyService.activeNodeName
+                    ?? appState.activeNode?.name
+                guard let selected,
+                      let sample = appState.proxyService.lastExitSample,
+                      sample.node == selected,
+                      sample.ms > 0
+                else { return TonoPathLatency() }
+                return TonoPathLatency(
+                    exitDelayMs: Int64(sample.ms),
+                    exitDelayAtMs: Int64(sample.at.timeIntervalSince1970 * 1_000)
+                )
+            },
             claudeTrafficResearchConsumer: {
                 await appState.claudeTrafficResearchSnapshot()
             },

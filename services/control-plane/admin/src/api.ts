@@ -167,6 +167,12 @@ export interface UserDetailDto {
     osVersion: string;
     selectedServer: string | null;
     uiState: string | null;
+    exitDelayMs: number | null;
+    tcpDelayMs: number | null;
+    exitDelayAtMs: number | null;
+    tcpDelayAtMs: number | null;
+    nodeHealth: string | null;
+    nodeHealthLabel: string | null;
   } | null;
 }
 
@@ -347,6 +353,12 @@ export interface ActivityUserDto {
   selectedServer: string | null;
   uiState: string | null;
   catalogRevision: number | null;
+  exitDelayMs: number | null;
+  tcpDelayMs: number | null;
+  exitDelayAtMs: number | null;
+  tcpDelayAtMs: number | null;
+  nodeHealth: string | null;
+  nodeHealthLabel: string | null;
 }
 
 export interface ActivityDto {

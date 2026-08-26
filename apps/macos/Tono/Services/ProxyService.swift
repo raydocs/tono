@@ -11,6 +11,8 @@ final class ProxyService {
     /// Currently selected main group and node
     var activeGroupName: String?
     var activeNodeName: String?
+    /// Last HTTP generate_204 sample. Display and heartbeat only.
+    private(set) var lastExitSample: (node: String, ms: Int, at: Date)?
 
     private var api: CoreControllerClient?
 
@@ -158,6 +160,7 @@ final class ProxyService {
                 if delay > 0 {
                     nodes[idx].latency = delay
                     nodes[idx].lastTestFailed = false
+                    lastExitSample = (node: name, ms: delay, at: Date())
                 } else {
                     nodes[idx].lastTestFailed = true
                 }

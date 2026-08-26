@@ -530,6 +530,7 @@ export function MonitorPage() {
         {visible.length === 0 ? (
           <div className="state"><strong>没有符合条件的节点</strong></div>
         ) : view === 'cards' ? (
+          <>
           <div className="server-grid">
             {visible.map((node) => {
               const agent = agentByName.get(node.name);
@@ -579,6 +580,7 @@ export function MonitorPage() {
               ))}
             </div>
           )}
+          </>
         ) : (
           <div className="table-wrap">
             <table className="monitor-table">

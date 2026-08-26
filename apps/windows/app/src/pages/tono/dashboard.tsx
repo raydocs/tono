@@ -35,7 +35,7 @@ import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import parseTraffic from '@/utils/parse-traffic'
 
 import { ConnectProgressCard } from './connect-progress'
-import { latencyColor, readNodeLatency } from './node-latency'
+import { latencyColor, latencyLabelKey, readNodeLatency } from './node-latency'
 import { nodeCityParts, nodeCityTitleKey, nodeCode, nodeDisplayName } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
@@ -124,11 +124,15 @@ const ActiveNodeCard = ({
   connected,
   exitOrg,
   exitLocation,
+  exitDelayMs,
+  tcpDelayMs,
 }: {
   serverName: string
   connected: boolean
   exitOrg?: string | null
   exitLocation?: string | null
+  exitDelayMs?: number | null
+  tcpDelayMs?: number | null
 }) => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -144,7 +148,15 @@ const ActiveNodeCard = ({
   if (latencyState.name !== serverName) {
     setLatencyState({ name: serverName, latency: readNodeLatency(serverName) })
   }
-  const latency = latencyState.latency
+  const reading =
+    connected && exitDelayMs && exitDelayMs > 0
+      ? { kind: 'exit' as const, ms: exitDelayMs }
+      : tcpDelayMs && tcpDelayMs > 0
+        ? { kind: 'tcp' as const, ms: tcpDelayMs }
+        : latencyState.latency
+          ? { kind: 'cached' as const, ms: latencyState.latency }
+          : null
+  const latency = reading?.ms ?? null
 
   return (
     <GlassCard
@@ -270,7 +282,11 @@ const ActiveNodeCard = ({
                   : 'transparent',
             }}
           >
-            {latency !== null ? `${latency}ms` : '—'}
+            {reading
+              ? t(latencyLabelKey(reading.kind, reading.ms), {
+                  latency: reading.ms,
+                })
+              : '—'}
           </span>
         </div>
       </div>
@@ -759,6 +775,8 @@ const DashboardPage = () => {
             connected={connected}
             exitOrg={status.exitOrg}
             exitLocation={status.exitLocation}
+            exitDelayMs={status.exitDelayMs}
+            tcpDelayMs={status.tcpDelayMs}
           />
         )}
         {!status?.selectedServer && !busy && (

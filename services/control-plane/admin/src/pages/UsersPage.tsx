@@ -1,6 +1,7 @@
 import { useMemo, useState, Fragment, type FormEvent } from 'react';
 import {
   operationsApi,
+  type ActivityDto,
   type HomeExitDto,
   type ProductAccountDto,
   type UserDetailDto,
@@ -8,6 +9,7 @@ import {
 } from '../api';
 import { catalogProxyNames } from '../lib/catalog';
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
+import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../lib/path-status';
 import { useRefresh, useResource } from '../hooks';
 import { Banner, DataHealth, StateBoundary, Status } from '../ui';
 
@@ -198,6 +200,7 @@ function OnboardCard({ unusedHomes, pooledAccounts, onDone }: {
 export function UsersPage() {
   const { refreshMs } = useRefresh();
   const users = useResource(operationsApi.users, [], refreshMs);
+  const activity = useResource<ActivityDto>(operationsApi.activity, [], refreshMs);
   const allowlist = useResource(operationsApi.signupAllowlist, [], refreshMs);
   const homes = useResource(operationsApi.homeExits, [], refreshMs);
   const catalog = useResource(operationsApi.exitCatalog, [], refreshMs);
@@ -221,6 +224,7 @@ export function UsersPage() {
     homes.reload();
     catalog.reload();
     pooled.reload();
+    activity.reload();
   };
 
   async function removeAllow(address: string) {
@@ -409,6 +413,7 @@ export function UsersPage() {
       { label: '家宽库存', resource: homes },
       { label: '节点目录', resource: catalog },
       { label: 'Claude 号池', resource: pooled },
+      { label: '客户心跳', resource: activity },
     ]} />
     <Banner message={error} tone="error" />
     <Banner message={message} tone="ok" />
@@ -494,11 +499,15 @@ export function UsersPage() {
             if (visible.length === 0) {
               return <div className="state"><strong>没有找到这样的客户</strong></div>;
             }
+            const heartbeats = new Map(
+              (activity.state === 'ready' ? activity.data.users : []).map((row) => [row.userId, row]),
+            );
             return <table className="users-table">
             <thead>
               <tr>
                 <th>客户</th>
                 <th>状态</th>
+                <th>探测</th>
                 <th>凭证</th>
                 <th>用量</th>
                 <th>家宽</th>
@@ -524,6 +533,23 @@ export function UsersPage() {
                 <td>
                   <Status value={user.status} />
                   {expired && <span className="expired-flag">已过期</span>}
+                </td>
+                <td>
+                  {(() => {
+                    const beat = heartbeats.get(user.id);
+                    if (!beat) return <span className="muted">无心跳</span>;
+                    return (
+                      <div>
+                        <strong>{beat.selectedServer ?? '未选节点'}</strong>
+                        {beat.selectedServer && (
+                          <small className={`chip chip-${nodeHealthTone(beat.nodeHealth)}`}>
+                            {beat.nodeHealthLabel || nodeHealthLabel(beat.nodeHealth)}
+                          </small>
+                        )}
+                        <small className="mono">{formatExitDelay(beat.exitDelayMs)} · {formatTcpDelay(beat.tcpDelayMs)}</small>
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td>
                   {user.hasExitIdentity
@@ -882,6 +908,11 @@ function UserDetailPanel({ user }: { user: UserDto }) {
             <div className="muted detail-note">
               上次心跳 {timeAgo(detail.data.heartbeat.lastSeenAt)}
               {detail.data.heartbeat.selectedServer ? ` · ${detail.data.heartbeat.selectedServer}` : ''}
+              {detail.data.heartbeat.selectedServer
+                ? ` · ${detail.data.heartbeat.nodeHealthLabel || nodeHealthLabel(detail.data.heartbeat.nodeHealth)}`
+                : ''}
+              {` · ${formatExitDelay(detail.data.heartbeat.exitDelayMs)}`}
+              {` · ${formatTcpDelay(detail.data.heartbeat.tcpDelayMs)}`}
               {` · ${detail.data.heartbeat.clientVersion}`}
             </div>
           )}

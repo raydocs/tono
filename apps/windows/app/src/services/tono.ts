@@ -99,6 +99,12 @@ export interface TonoStatus {
   exitLocation?: string | null
   /** `off` | `on` | `skipped` — optional WeChat/web DIRECT overlay. */
   directOverlay?: string
+  /** HTTP generate_204 through the selected exit. Not TCP to the node. */
+  exitDelayMs?: number | null
+  exitDelayAtMs?: number | null
+  /** TCP connect to the selected node's :443. */
+  tcpDelayMs?: number | null
+  tcpDelayAtMs?: number | null
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'

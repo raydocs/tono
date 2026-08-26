@@ -250,6 +250,10 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
         kill_switch_mode,
         kill_switch_wanted,
         kill_switch_live,
+        exit_delay_ms,
+        exit_delay_at_ms,
+        tcp_delay_ms,
+        tcp_delay_at_ms,
     ) = {
         let inner = state.lock().await;
         let status = inner.fsm.status();
@@ -265,6 +269,10 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
                 .map(|status| format!("{:?}", status.mode).to_lowercase()),
             inner.kill_switch.as_ref().map(|status| status.wanted),
             inner.kill_switch.as_ref().map(|status| status.live),
+            inner.selected_exit_delay_ms().map(|ms| ms as i64),
+            inner.selected_exit_delay_at_ms(),
+            inner.selected_tcp_delay_ms().map(|ms| ms as i64),
+            inner.selected_tcp_delay_at_ms(),
         )
     };
 
@@ -285,6 +293,10 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
             kill_switch_wanted,
             kill_switch_live,
             dns_enabled: None,
+            exit_delay_ms,
+            exit_delay_at_ms,
+            tcp_delay_ms,
+            tcp_delay_at_ms,
             event_count: events.len() as u32,
             events_dropped: dropped,
             events: events.clone(),
@@ -314,6 +326,10 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
         kill_switch_wanted,
         kill_switch_live,
         dns_enabled: None,
+        exit_delay_ms,
+        exit_delay_at_ms,
+        tcp_delay_ms,
+        tcp_delay_at_ms,
         event_count: 0,
         events_dropped: dropped,
         events: Vec::new(),

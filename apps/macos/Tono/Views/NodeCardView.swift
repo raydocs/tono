@@ -450,8 +450,11 @@ struct NodeLatencyBadge: View {
 
     private var title: String {
         if didFail { return String(localized: "Timeout") }
-        if latency > 0 { return "\(latency) ms" }
-        return String(localized: "Not tested")
+        guard latency > 0 else { return String(localized: "Not tested") }
+        if latency >= 400 {
+            return String(localized: "Slow exit \(latency)ms")
+        }
+        return String(localized: "Exit \(latency)ms")
     }
 
     private var detail: String? {
@@ -460,7 +463,7 @@ struct NodeLatencyBadge: View {
         switch LatencyLevel.level(for: latency) {
         case .low: return String(localized: "Good")
         case .mid: return String(localized: "Slow")
-        case .high: return String(localized: "Poor")
+        case .high: return nil
         }
     }
 

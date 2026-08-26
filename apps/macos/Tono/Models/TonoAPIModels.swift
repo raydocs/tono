@@ -306,6 +306,10 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
     let killSwitchWanted: Bool?
     let killSwitchLive: Bool?
     let dnsEnabled: Bool?
+    var exitDelayMs: Int64? = nil
+    var tcpDelayMs: Int64? = nil
+    var exitDelayAtMs: Int64? = nil
+    var tcpDelayAtMs: Int64? = nil
     let eventCount: Int
     let eventsDropped: Int
     let events: [TonoTelemetryEvent]
@@ -314,6 +318,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         case schemaVersion, kind, windowStartMs, windowEndMs, appVersion, osVersion
         case osArch, uiState, accountState, selectedServer, catalogRevision
         case killSwitchMode, killSwitchWanted, killSwitchLive, dnsEnabled
+        case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs
         case eventCount, eventsDropped, events
     }
 
@@ -334,6 +339,10 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         if let killSwitchWanted { try container.encode(killSwitchWanted, forKey: .killSwitchWanted) }
         if let killSwitchLive { try container.encode(killSwitchLive, forKey: .killSwitchLive) }
         if let dnsEnabled { try container.encode(dnsEnabled, forKey: .dnsEnabled) }
+        if let exitDelayMs { try container.encode(exitDelayMs, forKey: .exitDelayMs) }
+        if let tcpDelayMs { try container.encode(tcpDelayMs, forKey: .tcpDelayMs) }
+        if let exitDelayAtMs { try container.encode(exitDelayAtMs, forKey: .exitDelayAtMs) }
+        if let tcpDelayAtMs { try container.encode(tcpDelayAtMs, forKey: .tcpDelayAtMs) }
         try container.encode(eventCount, forKey: .eventCount)
         try container.encode(eventsDropped, forKey: .eventsDropped)
         try container.encode(events, forKey: .events)
@@ -425,6 +434,13 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
 
 nonisolated struct TonoTelemetryWindowRequest: Encodable, Sendable {
     let window: TonoTelemetryWindowReport
+}
+
+nonisolated struct TonoPathLatency: Sendable {
+    var exitDelayMs: Int64? = nil
+    var tcpDelayMs: Int64? = nil
+    var exitDelayAtMs: Int64? = nil
+    var tcpDelayAtMs: Int64? = nil
 }
 
 nonisolated struct TonoTelemetryWindowReceipt: Decodable, Sendable {

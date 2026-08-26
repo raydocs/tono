@@ -65,9 +65,9 @@ const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(200);
 /// §6.7 DNS verification retry count.
 const VERIFY_ATTEMPTS: u32 = 3;
 const VERIFY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-/// C2 — §6.8 exit-probe budgets. `unified-delay` is off in the owned runtime, so `/delay`
-/// is a single measurement used only for UI/advisory. One Reality handshake plus the
-/// generate_204 is typically 1.5–3.5 s; 8 s still covers a cold distant exit.
+/// C2 — §6.8 exit-probe budgets. `unified-delay` is on, so `/delay` reports the
+/// second sample (warm RTT) and is UI/advisory only. Completing both samples on a
+/// distant Reality exit is typically 1.5–3.5 s; 8 s still covers it.
 const EXIT_PROBE_CORE_TIMEOUT_MS: u64 = 8_000;
 /// The HTTP client must always outlast the core budget by a real margin, so the *core* decides
 /// the verdict of an exit probe. 3 s over the core budget covers the loopback round trip, the
@@ -1741,7 +1741,16 @@ async fn verify_post_lock(
         let controller_probe = if data_plane.is_ok() {
             match controller_task.as_ref() {
                 Some(task) if task.is_finished() => match controller_task.take().unwrap().await {
-                    Ok(result) => result.map(|_| ()),
+                    Ok(result) => match result {
+                        Ok(delay) => {
+                            if delay > 0 {
+                                let mut inner = state.lock().await;
+                                inner.record_exit_delay(delay);
+                            }
+                            Ok(())
+                        }
+                        Err(error) => Err(error),
+                    },
                     Err(_) => Ok(()),
                 },
                 _ => Ok(()),
@@ -1752,7 +1761,16 @@ async fn verify_post_lock(
                 .wait("advisory exit measurement", async {
                     match task {
                         Some(task) => match task.await {
-                            Ok(result) => result.map(|_| ()),
+                            Ok(result) => match result {
+                                Ok(delay) => {
+                                    if delay > 0 {
+                                        let mut inner = state.lock().await;
+                                        inner.record_exit_delay(delay);
+                                    }
+                                    Ok(())
+                                }
+                                Err(error) => Err(error),
+                            },
                             Err(_) => Err("controller probe cancelled".to_string()),
                         },
                         None => Ok(()),
@@ -3696,7 +3714,7 @@ async fn probe_exit_once(secret: &str, controller_port: u16) -> Result<u64, Stri
 /// Run one real, bounded egress measurement for the currently connected server. The authenticated
 /// in-memory controller endpoint is never exposed to the WebView; only the measured milliseconds
 /// cross the Tauri command boundary.
-pub async fn test_current_server(state: &Arc<TonoState>) -> Result<u64, String> {
+pub async fn test_current_server(state: &Arc<TonoState>, app: &AppHandle) -> Result<u64, String> {
     let (secret, controller_port) = {
         let inner = state.lock().await;
         if !inner.fsm.status().is_connected {
@@ -3708,9 +3726,15 @@ pub async fn test_current_server(state: &Arc<TonoState>) -> Result<u64, String> 
             .zip(inner.controller_port)
             .ok_or_else(|| "connected controller endpoint is unavailable".to_string())?
     };
-    probe_exit_once(&secret, controller_port)
+    let delay = probe_exit_once(&secret, controller_port)
         .await
-        .map_err(|error| format!("current server test failed: {error}"))
+        .map_err(|error| format!("current server test failed: {error}"))?;
+    {
+        let mut inner = state.lock().await;
+        inner.record_exit_delay(delay);
+        crate::tono::commands::emit_status(app, &crate::tono::commands::status_of(&inner));
+    }
+    Ok(delay)
 }
 
 /// V1/H1 — the retry window `verify_locked` spends before it calls a tunnel unverified. Must

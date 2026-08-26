@@ -5,6 +5,7 @@ import { formatBytes, timeAgo, timestamp } from '../lib/format';
 import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
 import { DataHealth, StateBoundary, Status } from '../ui';
 import { catalogLag } from '../lib/revision';
+import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../lib/path-status';
 
 function UsageLeaderboard({ users }: { users: UserDto[] }) {
   const top = useMemo(
@@ -247,7 +248,7 @@ export function Dashboard() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>客户</th><th>状态</th><th>在用节点</th><th>目录</th><th>客户端</th><th>上次心跳</th></tr>
+                <tr><th>客户</th><th>状态</th><th>在用节点</th><th>节点健康</th><th>出口</th><th>TCP</th><th>目录</th><th>客户端</th><th>上次心跳</th></tr>
               </thead>
               <tbody>{activityRes.data.users.map((user) => (
                 <tr key={user.userId}>
@@ -259,6 +260,13 @@ export function Dashboard() {
                     {user.uiState ? <small className="muted">{user.uiState}</small> : null}
                   </td>
                   <td>{user.selectedServer ?? <span className="muted">—</span>}</td>
+                  <td>
+                    {user.selectedServer
+                      ? <span className={`chip chip-${nodeHealthTone(user.nodeHealth)}`}>{user.nodeHealthLabel || nodeHealthLabel(user.nodeHealth)}</span>
+                      : <span className="muted">—</span>}
+                  </td>
+                  <td className="mono" title="隧道里打 gstatic 的往返，不是 ping 节点">{formatExitDelay(user.exitDelayMs)}</td>
+                  <td className="mono" title="TCP 连节点 :443">{formatTcpDelay(user.tcpDelayMs)}</td>
                   <td>{(() => {
                     // Against the published revision, because the number alone
                     // does not answer "did they pick up what I just published".
