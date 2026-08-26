@@ -36,6 +36,57 @@ describe('operations timeseries retention', () => {
     await db().prepare('DELETE FROM operations_agent_rollups').run();
   });
 
+  it('fences the pre-migration rollup writer before it can update or delete source rows', async () => {
+    const bucket = 1_800_000_000;
+    await recordAgentSamples(db(), [
+      sample('Fence existing', bucket, 20),
+      sample('Fence new', bucket, 40),
+    ], bucket);
+    await db().prepare(
+      `INSERT INTO operations_agent_rollups(
+         node_name, resolution_seconds, bucket_at, samples,
+         rollup_writer_version, sample_counts_exact, cpu_samples, cpu_avg
+       ) VALUES('Fence existing', 300, ?, 7, 2, 1, 7, 77)`,
+    ).bind(bucket).run();
+
+    const oldWorkerAttempt = async () => {
+      // This is deliberately the old column list. BEFORE INSERT must run before
+      // SQLite chooses the UPSERT branch, aborting both the conflicting and new
+      // candidates as one statement.
+      await db().prepare(
+        `INSERT INTO operations_agent_rollups(
+           node_name, resolution_seconds, bucket_at, samples, cpu_avg
+         )
+         SELECT node_name, 300, ?, COUNT(*), AVG(cpu)
+         FROM operations_agent_samples
+         GROUP BY node_name
+         ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
+           samples = excluded.samples,
+           cpu_avg = excluded.cpu_avg`,
+      ).bind(bucket).run();
+      // The real retention path awaits the UPSERT before issuing this separate
+      // DELETE. A trigger rejection must keep this line unreachable.
+      await db().prepare('DELETE FROM operations_agent_samples').run();
+    };
+
+    await expect(oldWorkerAttempt()).rejects.toThrow(/requires rollup writer v2/);
+    const existing = await db().prepare(
+      `SELECT samples, cpu_avg FROM operations_agent_rollups
+       WHERE node_name = 'Fence existing'`,
+    ).first<Record<string, any>>();
+    const inserted = await db().prepare(
+      `SELECT samples FROM operations_agent_rollups
+       WHERE node_name = 'Fence new'`,
+    ).first<Record<string, any>>();
+    const source = await db().prepare(
+      'SELECT COUNT(*) AS c FROM operations_agent_samples',
+    ).first<Record<string, any>>();
+    expect(Number(existing!.samples)).toBe(7);
+    expect(Number(existing!.cpu_avg)).toBe(77);
+    expect(inserted).toBeNull();
+    expect(Number(source!.c)).toBe(2);
+  });
+
   it('does not lose the early half of a bucket that ages out across two runs', async () => {
     // One 5-minute bucket, aligned, with a sample every minute.
     const bucket = 1_800_000_000; // divisible by 300
@@ -49,15 +100,20 @@ describe('operations timeseries retention', () => {
     await retainOperationsTimeseries(db(), bucket + 400 + retentionSpan);
 
     const rollup = await db().prepare(
-      `SELECT samples, cpu_avg FROM operations_agent_rollups
+      `SELECT samples, cpu_samples, cpu_avg,
+              rollup_writer_version, sample_counts_exact
+       FROM operations_agent_rollups
        WHERE node_name = 'Split' AND resolution_seconds = 300 AND bucket_at = ?`,
     ).bind(bucket).first<Record<string, any>>();
 
     expect(rollup).not.toBeNull();
     // Five samples went in; the bucket must account for five.
     expect(Number(rollup!.samples)).toBe(5);
+    expect(Number(rollup!.cpu_samples)).toBe(5);
     // Mean of 10,20,30,40,50.
     expect(Number(rollup!.cpu_avg)).toBeCloseTo(30, 5);
+    expect(Number(rollup!.rollup_writer_version)).toBe(2);
+    expect(Number(rollup!.sample_counts_exact)).toBe(1);
   });
 
   it('actually reduces rows when it rolls up', async () => {
@@ -177,6 +233,40 @@ describe('operations timeseries retention', () => {
     expect(Number(hourly!.tcp_avg)).toBeCloseTo((1 + 2 + 3 + 4 + 5) / 5, 5);
     expect(Number(hourly!.mem_total)).toBe(800);
     expect(Number(hourly!.disk_total)).toBe(750);
+  });
+
+  it('keeps legacy rollups usable without claiming their sample counts are exact', async () => {
+    const hour = Math.floor(1_800_300_000 / 3_600) * 3_600;
+    await db().batch([
+      db().prepare(
+        `INSERT INTO operations_agent_rollups(
+           node_name, resolution_seconds, bucket_at, samples,
+           rollup_writer_version, sample_counts_exact, cpu_samples, cpu_avg
+         ) VALUES('Legacy mix', 300, ?, 5, 2, 0, 1, 20)`,
+      ).bind(hour),
+      db().prepare(
+        `INSERT INTO operations_agent_rollups(
+           node_name, resolution_seconds, bucket_at, samples,
+           rollup_writer_version, sample_counts_exact, cpu_samples, cpu_avg
+         ) VALUES('Legacy mix', 300, ?, 2, 2, 1, 2, 100)`,
+      ).bind(hour + 300),
+    ]);
+
+    await retainOperationsTimeseries(db(), hour + 3_600 + 8 * 86_400);
+    const hourly = await db().prepare(
+      `SELECT samples, cpu_samples, cpu_avg,
+              rollup_writer_version, sample_counts_exact
+       FROM operations_agent_rollups
+       WHERE node_name = 'Legacy mix' AND resolution_seconds = 3600 AND bucket_at = ?`,
+    ).bind(hour).first<Record<string, any>>();
+
+    expect(Number(hourly!.samples)).toBe(7);
+    // The legacy row's stale count of 1 is ignored in favour of its historical
+    // `samples` denominator, while the v2 row keeps its exact count of 2.
+    expect(Number(hourly!.cpu_samples)).toBe(7);
+    expect(Number(hourly!.cpu_avg)).toBeCloseTo((20 * 5 + 100 * 2) / 7, 5);
+    expect(Number(hourly!.rollup_writer_version)).toBe(2);
+    expect(Number(hourly!.sample_counts_exact)).toBe(0);
   });
 
   it('pins invalid or far-future clocks to receipt time without rewriting old samples', async () => {

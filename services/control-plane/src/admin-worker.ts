@@ -33,6 +33,10 @@ function adminBuildSha(env: AdminEnv) {
   return /^[0-9a-f]{40}$/.test(value) ? value : 'development';
 }
 
+function isReleaseBuildSha(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
+}
+
 export default {
   async fetch(request: Request, env: AdminEnv, context: ExecutionContext) {
     const url = new URL(request.url);
@@ -76,11 +80,16 @@ export default {
         const payload = await response.json() as { system?: Record<string, unknown> };
         const api = payload.system ?? {};
         const admin = { service: 'admin', version: '0.0.1', buildSha: adminBuildSha(env) };
+        const aligned = isReleaseBuildSha(api.buildSha)
+          && isReleaseBuildSha(admin.buildSha)
+          && api.buildSha === admin.buildSha;
         return Response.json({
           system: {
             api,
             admin,
-            aligned: api.buildSha === admin.buildSha,
+            // Two missing build bindings used to compare as
+            // "development === development" and falsely report a safe pairing.
+            aligned,
           },
         }, { headers: { 'cache-control': 'no-store' } });
       }

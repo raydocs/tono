@@ -242,6 +242,7 @@ async function rollupResolution(
        )
        INSERT INTO operations_agent_rollups(
          node_name, resolution_seconds, bucket_at, samples,
+         rollup_writer_version, sample_counts_exact,
          cpu_samples, mem_used_samples, disk_used_samples,
          load1_samples, swap_used_samples, tcp_samples,
          cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
@@ -252,6 +253,8 @@ async function rollupResolution(
          ?,
          target_bucket,
          COUNT(*),
+         2,
+         1,
          COUNT(cpu),
          COUNT(mem_used),
          COUNT(disk_used),
@@ -272,6 +275,8 @@ async function rollupResolution(
        GROUP BY node_name, target_bucket
        ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
          samples = excluded.samples,
+         rollup_writer_version = excluded.rollup_writer_version,
+         sample_counts_exact = excluded.sample_counts_exact,
          cpu_samples = excluded.cpu_samples,
          mem_used_samples = excluded.mem_used_samples,
          disk_used_samples = excluded.disk_used_samples,
@@ -302,6 +307,18 @@ async function rollupResolution(
     `WITH ranked AS (
        SELECT
          *,
+         CASE WHEN sample_counts_exact = 1 THEN cpu_samples
+              WHEN cpu_avg IS NULL THEN 0 ELSE samples END AS effective_cpu_samples,
+         CASE WHEN sample_counts_exact = 1 THEN mem_used_samples
+              WHEN mem_used_avg IS NULL THEN 0 ELSE samples END AS effective_mem_used_samples,
+         CASE WHEN sample_counts_exact = 1 THEN disk_used_samples
+              WHEN disk_used_avg IS NULL THEN 0 ELSE samples END AS effective_disk_used_samples,
+         CASE WHEN sample_counts_exact = 1 THEN load1_samples
+              WHEN load1_avg IS NULL THEN 0 ELSE samples END AS effective_load1_samples,
+         CASE WHEN sample_counts_exact = 1 THEN swap_used_samples
+              WHEN swap_used_avg IS NULL THEN 0 ELSE samples END AS effective_swap_used_samples,
+         CASE WHEN sample_counts_exact = 1 THEN tcp_samples
+              WHEN tcp_avg IS NULL THEN 0 ELSE samples END AS effective_tcp_samples,
          (bucket_at / CAST(? AS INTEGER)) * CAST(? AS INTEGER) AS target_bucket,
          ROW_NUMBER() OVER (
            PARTITION BY node_name,
@@ -313,6 +330,7 @@ async function rollupResolution(
      )
      INSERT INTO operations_agent_rollups(
        node_name, resolution_seconds, bucket_at, samples,
+       rollup_writer_version, sample_counts_exact,
        cpu_samples, mem_used_samples, disk_used_samples,
        load1_samples, swap_used_samples, tcp_samples,
        cpu_avg, mem_used_avg, mem_total, disk_used_avg, disk_total,
@@ -323,32 +341,36 @@ async function rollupResolution(
        ?,
        target_bucket,
        SUM(samples),
-       SUM(cpu_samples),
-       SUM(mem_used_samples),
-       SUM(disk_used_samples),
-       SUM(load1_samples),
-       SUM(swap_used_samples),
-       SUM(tcp_samples),
-       CASE WHEN SUM(cpu_samples) = 0 THEN NULL
-            ELSE SUM(cpu_avg * cpu_samples) / SUM(cpu_samples) END,
-       CASE WHEN SUM(mem_used_samples) = 0 THEN NULL
-            ELSE SUM(mem_used_avg * mem_used_samples) / SUM(mem_used_samples) END,
+       2,
+       MIN(sample_counts_exact),
+       SUM(effective_cpu_samples),
+       SUM(effective_mem_used_samples),
+       SUM(effective_disk_used_samples),
+       SUM(effective_load1_samples),
+       SUM(effective_swap_used_samples),
+       SUM(effective_tcp_samples),
+       CASE WHEN SUM(effective_cpu_samples) = 0 THEN NULL
+            ELSE SUM(cpu_avg * effective_cpu_samples) / SUM(effective_cpu_samples) END,
+       CASE WHEN SUM(effective_mem_used_samples) = 0 THEN NULL
+            ELSE SUM(mem_used_avg * effective_mem_used_samples) / SUM(effective_mem_used_samples) END,
        MAX(CASE WHEN bucket_rank = 1 THEN mem_total END),
-       CASE WHEN SUM(disk_used_samples) = 0 THEN NULL
-            ELSE SUM(disk_used_avg * disk_used_samples) / SUM(disk_used_samples) END,
+       CASE WHEN SUM(effective_disk_used_samples) = 0 THEN NULL
+            ELSE SUM(disk_used_avg * effective_disk_used_samples) / SUM(effective_disk_used_samples) END,
        MAX(CASE WHEN bucket_rank = 1 THEN disk_total END),
-       CASE WHEN SUM(load1_samples) = 0 THEN NULL
-            ELSE SUM(load1_avg * load1_samples) / SUM(load1_samples) END,
+       CASE WHEN SUM(effective_load1_samples) = 0 THEN NULL
+            ELSE SUM(load1_avg * effective_load1_samples) / SUM(effective_load1_samples) END,
        MAX(CASE WHEN bucket_rank = 1 THEN net_in_last END),
        MAX(CASE WHEN bucket_rank = 1 THEN net_out_last END),
-       CASE WHEN SUM(swap_used_samples) = 0 THEN NULL
-            ELSE SUM(swap_used_avg * swap_used_samples) / SUM(swap_used_samples) END,
-       CASE WHEN SUM(tcp_samples) = 0 THEN NULL
-            ELSE SUM(tcp_avg * tcp_samples) / SUM(tcp_samples) END
+       CASE WHEN SUM(effective_swap_used_samples) = 0 THEN NULL
+            ELSE SUM(swap_used_avg * effective_swap_used_samples) / SUM(effective_swap_used_samples) END,
+       CASE WHEN SUM(effective_tcp_samples) = 0 THEN NULL
+            ELSE SUM(tcp_avg * effective_tcp_samples) / SUM(effective_tcp_samples) END
      FROM ranked
      GROUP BY node_name, target_bucket
      ON CONFLICT(node_name, resolution_seconds, bucket_at) DO UPDATE SET
        samples = excluded.samples,
+       rollup_writer_version = excluded.rollup_writer_version,
+       sample_counts_exact = excluded.sample_counts_exact,
        cpu_samples = excluded.cpu_samples,
        mem_used_samples = excluded.mem_used_samples,
        disk_used_samples = excluded.disk_used_samples,

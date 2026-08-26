@@ -470,6 +470,23 @@ p { text-wrap: pretty; }
 
 .search-wrap { position: relative; flex: 0 1 15rem; min-width: 0; }
 .search-input { width: 100%; min-width: 0; height: 2rem; }
+.topbar-refresh {
+  flex: 0 0 2rem;
+  width: 2rem;
+  height: 2rem;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--l2-border);
+  border-radius: var(--r-sm);
+  background: var(--l2-flat);
+  color: hsl(var(--muted-foreground));
+  font-size: 1rem;
+  cursor: pointer;
+}
+.topbar-refresh:hover:not(:disabled) { color: hsl(var(--foreground)); background: var(--hover-bg); }
+.topbar-refresh:disabled { cursor: wait; opacity: 0.55; }
+.topbar-refresh:disabled > span { animation: spin 0.7s linear infinite; }
 
 .search-pop {
   position: absolute;

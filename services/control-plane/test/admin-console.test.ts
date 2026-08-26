@@ -296,6 +296,20 @@ describe('development fixture failure scenarios', () => {
     expect(stale.fetchedAt - stale.qualityReceivedAt).toBe(2 * 86_400);
   });
 
+  it('can fail each independent browser source instead of always masking Vite 404s', () => {
+    const cases = [
+      ['live-unavailable', 'live'],
+      ['activity-unavailable', 'activity'],
+      ['users-unavailable', 'users'],
+      ['catalog-unavailable', 'exit-catalog'],
+      ['metrics-unavailable', 'metrics?range=24h'],
+      ['policy-unavailable', 'traffic-policy'],
+    ] as const;
+    for (const [scenario, path] of cases) {
+      expect(() => matchDevOps(path, 'GET', undefined, scenario)).toThrow(/DEV：.+不可用/);
+    }
+  });
+
   it('exercises dense carrier history, unknown buckets, and a loss transition', () => {
     const live = (matchDevOps('live') as any).live;
     const history = live.agents[0].carriers.unicom.history as Array<{

@@ -257,6 +257,21 @@ export function matchDevOps(
   const clock = now();
   const dense = scenario === 'dense';
   const base = path.split('?')[0];
+  const unavailableRoute: Record<string, { route: string; message: string }> = {
+    'live-unavailable': { route: 'live', message: 'DEV：live 接口不可用' },
+    'activity-unavailable': { route: 'activity', message: 'DEV：客户心跳接口不可用' },
+    'users-unavailable': { route: 'users', message: 'DEV：客户资料接口不可用' },
+    'catalog-unavailable': { route: 'exit-catalog', message: 'DEV：目录接口不可用' },
+    'metrics-unavailable': { route: 'metrics', message: 'DEV：机器时序接口不可用' },
+    'policy-unavailable': { route: 'traffic-policy', message: 'DEV：直连规则接口不可用' },
+  };
+  const forcedFailure = scenario ? unavailableRoute[scenario] : undefined;
+  if (method === 'GET' && forcedFailure?.route === base) {
+    // `api.ts` calls the fixture only after Vite's missing route response. A
+    // thrown error is therefore the DEV equivalent of a real failed source and
+    // lets the browser exercise first-load errors and stale-snapshot refreshes.
+    throw new Error(forcedFailure.message);
+  }
   const listed = roster(dense).filter((name) => name !== 'Catalog Only' || true);
   const yaml = (dense ? denseYaml() : '') + `proxies:\n${listed.filter((n) => n !== 'Catalog Only' || n === 'Catalog Only').filter((n) => n !== 'Buffalo · Erie').map((n) => `  - name: "${n}"\n    type: vless\n`).join('')}`;
 

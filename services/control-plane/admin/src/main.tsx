@@ -55,8 +55,11 @@ function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if ((event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k')) && !typing) {
+      const textInput = target instanceof HTMLInputElement
+        && !['button', 'checkbox', 'color', 'file', 'radio', 'range', 'reset', 'submit'].includes(target.type);
+      const typing = Boolean(target && (textInput || target.tagName === 'TEXTAREA' || target.isContentEditable));
+      const commandSearch = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k';
+      if (commandSearch || (event.key === '/' && !typing)) {
         event.preventDefault();
         searchRef.current?.focus();
       }
@@ -104,13 +107,32 @@ function App() {
     ...nodeHits.map((node) => ({ kind: 'node' as const, id: node.name, label: node.name })),
     ...personHits.map((person) => ({ kind: 'user' as const, id: person.userId, label: privacy.email(person.email) })),
   ];
-  const refreshing = [world.live, world.users, world.activity].some((resource) => resource.refreshing);
+  const refreshing = [
+    world.live, world.activity, world.users, world.dashboard,
+    world.profiles, world.catalog, world.fleet, world.audit,
+    ...(page === 'traffic' || page === 'monitor' ? [world.metrics] : []),
+  ].some((resource) => resource.refreshing);
 
   function goHit(hit: (typeof hits)[number]) {
     setSearchOpen(false);
     setSearch('');
     if (hit.kind === 'node') openNode(hit.id, { page: 'monitor', focus: null });
     else openUser(hit.id, { page: 'users', focus: null });
+  }
+
+  function refreshPageData() {
+    // A manual refresh is additive: each resource keeps its last snapshot on
+    // screen while the new request runs. Metrics are page-scoped, so do not wake
+    // that heavier endpoint from unrelated pages.
+    world.live.reload();
+    world.activity.reload();
+    world.users.reload();
+    world.dashboard.reload();
+    world.profiles.reload();
+    world.catalog.reload();
+    world.fleet.reload();
+    world.audit.reload();
+    if (page === 'traffic' || page === 'monitor') world.metrics.reload();
   }
 
   return (
@@ -181,7 +203,7 @@ function App() {
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={Boolean(searchOpen && needle)}
-                aria-controls="ops-search-results"
+                aria-controls={searchOpen && needle ? 'ops-search-results' : undefined}
                 aria-activedescendant={searchOpen && needle && hits[searchIndex] ? searchOptionId(hits[searchIndex].kind, hits[searchIndex].id) : undefined}
                 onChange={(event) => { setSearch(event.target.value); setSearchOpen(true); setSearchIndex(0); }}
                 onFocus={() => setSearchOpen(true)}
@@ -250,7 +272,17 @@ function App() {
                 </div>
               )}
             </div>
-            {refreshing && <span className="status-pill refreshing-dot">刷新中</span>}
+            <button
+              type="button"
+              className="topbar-refresh"
+              aria-label="立即刷新页面数据"
+              title="立即刷新页面数据"
+              disabled={refreshing}
+              onClick={refreshPageData}
+            >
+              <span aria-hidden>↻</span>
+            </button>
+            {refreshing && <span className="status-pill refreshing-dot" role="status">刷新中</span>}
             {health.length > 0 && (
               <span
                 className={`health-compact ${healthUnavailable ? 'bad' : 'warn'}`}

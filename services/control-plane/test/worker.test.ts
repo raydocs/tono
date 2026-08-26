@@ -420,6 +420,33 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('only reports API/admin builds aligned when both carry the same release SHA', async () => {
+    const version = async (apiBuildSha: string | undefined, adminBuildSha: string | undefined) => {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request('https://admin.afk.ccwu.cc/api/v1/ops/system/version'),
+        {
+          API: {
+            fetch: async () => Response.json({
+              system: { service: 'api', version: '0.0.1', buildSha: apiBuildSha ?? 'development' },
+            }),
+          } as unknown as Fetcher,
+          BUILD_SHA: adminBuildSha,
+        } as unknown as Parameters<typeof adminWorker.fetch>[1],
+        context,
+      );
+      await waitOnExecutionContext(context);
+      return response.json() as Promise<{ system: { aligned: boolean } }>;
+    };
+    const same = 'a'.repeat(40);
+    const other = 'b'.repeat(40);
+
+    expect((await version(undefined, undefined)).system.aligned).toBe(false);
+    expect((await version(same, undefined)).system.aligned).toBe(false);
+    expect((await version(same, other)).system.aligned).toBe(false);
+    expect((await version(same, same)).system.aligned).toBe(true);
+  });
+
   it('serves an isolated release archive on the release subdomain', async () => {
     const fetchRelease = async (path: string, init: RequestInit = {}) => {
       const context = createExecutionContext();

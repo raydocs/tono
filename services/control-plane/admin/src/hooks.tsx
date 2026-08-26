@@ -138,6 +138,11 @@ export function useResource<T>(
         setRefreshing(false);
         return data;
       } catch (error) {
+        // A timer, key change, unmount, or newer manual request owns the state.
+        // Let the caller know this request did not win, but never let its late
+        // completion overwrite a newer successful snapshot with a false stale
+        // banner.
+        if (id !== generation.current) throw error;
         const message = error instanceof Error ? error.message : '数据加载失败';
         setRefreshing(false);
         if (snapshot.current.state !== 'ready') setResource({ state: 'error', message });
@@ -200,6 +205,7 @@ export function useKeyedResource<T, K extends string>(
   refreshMs = 0,
   enabled = true,
 ): KeyedLive<T, K> {
+  const [tick, setTick] = useState(0);
   const [requestedKey, setRequestedKey] = useState(key);
   const [snapshotKey, setSnapshotKey] = useState<K | null>(null);
   const [resource, setResource] = useState<Resource<T>>({ state: 'loading' });
@@ -213,6 +219,7 @@ export function useKeyedResource<T, K extends string>(
 
   useEffect(() => {
     setRequestedKey(key);
+    setRefreshing(false);
     const cached = cache.current.get(key);
     if (cached) {
       setResource({ state: 'ready', data: cached.data });
@@ -275,17 +282,42 @@ export function useKeyedResource<T, K extends string>(
       document.removeEventListener('visibilitychange', onVisible);
       if (timer) clearInterval(timer);
     };
-  }, [key, refreshMs, enabled]);
+  }, [key, refreshMs, enabled, tick]);
 
   return {
     ...resource,
-    reload: () => {
-      cache.current.delete(key);
-      setResource({ state: 'loading' });
-      setSnapshotKey(null);
-      generation.current += 1;
+    // Keep the key's last snapshot visible while a manual refresh runs. Deleting
+    // it here used to blank the chart and, because no effect dependency changed,
+    // did not start another request at all.
+    reload: () => setTick((value) => value + 1),
+    reloadNow: async () => {
+      const id = ++generation.current;
+      const cached = cache.current.get(key);
+      if (cached) setRefreshing(true);
+      try {
+        const data = await loadRef.current(key);
+        if (id !== generation.current) throw new Error('已被更新的请求取代');
+        const at = Date.now();
+        cache.current.set(key, { data, refreshedAt: at });
+        setResource({ state: 'ready', data });
+        setSnapshotKey(key);
+        setRefreshedAt(at);
+        setStale(null);
+        setRefreshing(false);
+        return data;
+      } catch (error) {
+        // A key change or newer request owns the visible state now.
+        if (id !== generation.current) throw error;
+        const message = error instanceof Error ? error.message : '数据加载失败';
+        setRefreshing(false);
+        if (cache.current.has(key)) setStale(message);
+        else {
+          setSnapshotKey(null);
+          setResource({ state: 'error', message });
+        }
+        throw error;
+      }
     },
-    reloadNow: async () => loadRef.current(key),
     refreshedAt,
     stale,
     refreshing,
