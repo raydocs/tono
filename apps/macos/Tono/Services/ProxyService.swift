@@ -16,6 +16,24 @@ final class ProxyService {
 
     private var api: CoreControllerClient?
 
+    /// Finds a runtime node by catalog name, tolerating the flag prefix the
+    /// catalog sometimes carries.
+    ///
+    /// The Dashboard used to match on the exact name while the node list also
+    /// matched the flag-stripped one, so a flag-prefixed catalog name left the
+    /// home screen with no number while the card for the same node showed one.
+    func node(named name: String) -> MihomoNode? {
+        let clean = ConfigParser.extractFlag(from: name).cleanName
+        return nodes.first {
+            $0.name == name || ConfigParser.extractFlag(from: $0.name).cleanName == clean
+        }
+    }
+
+    /// Last measured latency for a node, 0 when nobody has measured it.
+    func latency(forNodeNamed name: String) -> Int {
+        node(named: name)?.latency ?? 0
+    }
+
     struct MihomoGroup: Identifiable {
         let id: String  // group name
         let name: String

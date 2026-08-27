@@ -206,15 +206,17 @@ struct ActivityView: View {
                 entry.route,
                 entry.network,
                 entry.protocolName,
+                // Windows searches the matched rule too; without it the same
+                // query returns different results on the two clients.
+                entry.rule,
             ].contains { $0.lowercased().contains(query) }
         }
     }
 
     private var selectedExitLatency: Int? {
         guard let name = appState.proxyService.activeNodeName else { return nil }
-        guard let node = appState.proxyService.nodes.first(where: { $0.name == name }),
-              node.latency > 0 else { return nil }
-        return node.latency
+        let ms = appState.proxyService.latency(forNodeNamed: name)
+        return ms > 0 ? ms : nil
     }
 
     var body: some View {

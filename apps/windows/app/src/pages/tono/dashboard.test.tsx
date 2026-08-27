@@ -116,6 +116,28 @@ describe('dashboard action-error ownership', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
+  it('will not release fail-closed protection from the pill without a confirmation', async () => {
+    mocks.status = makeStatus({
+      uiState: 'protectedOffline',
+      selectedServer: 'US West 1',
+      protectionBlocked: true,
+    })
+    renderDashboard()
+
+    const pill = screen.getByRole('button', {
+      name: 'Protected, not connected — Click to restore internet',
+    })
+    fireEvent.click(pill)
+
+    // The click opens the same confirmation the progress card has always used;
+    // protection must not drop on the click itself.
+    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Restore Normal Internet' }),
+    )
+    await waitFor(() => expect(mocks.tonoDisconnect).toHaveBeenCalled())
+  })
+
   it('does not render a second error box once protected offline owns the failure', async () => {
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
     mocks.mutateTonoStatus.mockResolvedValue({

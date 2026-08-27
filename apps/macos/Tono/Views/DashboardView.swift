@@ -41,9 +41,8 @@ struct DashboardView: View {
                        connectionStage: appState.connectionStage,
                        disconnectionStage: appState.disconnectionStage,
                        nodeName: appState.activeNode?.name ?? appState.proxyService.activeNodeName,
-                       nodeLatency: appState.proxyService.nodes.first(
-                           where: { $0.name == (appState.activeNode?.name ?? appState.proxyService.activeNodeName) }
-                       )?.latency ?? 0)
+                       nodeLatency: (appState.activeNode?.name ?? appState.proxyService.activeNodeName)
+                           .map(appState.proxyService.latency(forNodeNamed:)) ?? 0)
                         .glassEffectID("pill", in: dashboardNS)
 
                     if showsConnectionDetails {
@@ -52,7 +51,7 @@ struct DashboardView: View {
                             .glassEffectTransition(.materialize)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if let nodeName = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
-                        let nodeLatency = appState.proxyService.nodes.first(where: { $0.name == nodeName })?.latency ?? 0
+                        let nodeLatency = appState.proxyService.latency(forNodeNamed: nodeName)
                         ActiveNodeCard(
                             nodeName: nodeName,
                             groupName: appState.isConnected ? appState.proxyService.activeGroupName : String(localized: "Ready to connect"),

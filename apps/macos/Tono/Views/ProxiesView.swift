@@ -309,11 +309,7 @@ struct ProxiesView: View {
     private func localNodeCard(_ node: ProxyNode) -> some View {
         let isActive = appState.selectedNodeId == node.id || appState.selectedNodeId == node.name
         let isSwitching = appState.switchingNodeId == node.id || appState.switchingNodeId == node.name
-        let runtimeNode = appState.proxyService.nodes.first {
-            $0.name == node.name
-                || ConfigParser.extractFlag(from: $0.name).cleanName
-                    == ConfigParser.extractFlag(from: node.name).cleanName
-        }
+        let runtimeNode = appState.proxyService.node(named: node.name)
         // The badge already carries the measurement state ("未测速"/a number), so
         // this line only speaks to whether the node can be connected to.
         let statusTitle: String = if runtimeNode?.lastTestFailed == true {

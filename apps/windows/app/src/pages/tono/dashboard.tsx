@@ -511,6 +511,12 @@ const DashboardPage = () => {
     }
   })
 
+  // Releasing protection from the pill has the same consequence as the progress
+  // card's 恢复正常网络 button, which has always confirmed first. One screen
+  // offering both, with only one of them guarded, meant a mis-click could drop
+  // fail-closed protection and let traffic out directly.
+  const [confirmingRelease, setConfirmingRelease] = useState(false)
+
   const handleDisconnect = useLockFn(async () => {
     setActionError(null)
     try {
@@ -661,7 +667,13 @@ const DashboardPage = () => {
             uiState={uiState}
             stage={status?.stage}
             onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
+            onDisconnect={() => {
+              if (uiState === 'protectedOffline') {
+                setConfirmingRelease(true)
+              } else {
+                void handleDisconnect()
+              }
+            }}
           />
           <p
             style={{
@@ -909,6 +921,20 @@ const DashboardPage = () => {
             </GlassCard>
           </div>
         )}
+      {confirmingRelease && (
+        <TonoConfirmDialog
+          dark={dark}
+          title={t('tono.progress.restoreConfirmTitle')}
+          message={t('tono.progress.restoreConfirmMessage')}
+          confirmLabel={t('tono.progress.restore')}
+          cancelLabel={t('shared.actions.cancel')}
+          onConfirm={() => {
+            setConfirmingRelease(false)
+            void handleDisconnect()
+          }}
+          onCancel={() => setConfirmingRelease(false)}
+        />
+      )}
       {confirmingDiagnostics && (
         <TonoConfirmDialog
           dark={dark}
