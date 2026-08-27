@@ -48,12 +48,12 @@
         }
       }
     },
-    "%@ · v%@ · updates automatically": {
+    "%@ · v%lld · updates automatically": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ · v%@ · 自动更新"
+            "value": "%@ · v%lld · 自动更新"
           }
         }
       }
@@ -706,7 +706,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重新连接前请先选择一个可用的云端服务器。"
+            "value": "重新连接前请先选择一个可用的云端节点。"
           }
         }
       }
@@ -799,7 +799,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "云端服务器更新已被拒绝，仍在使用上一次已验证的目录。%@"
+            "value": "云端节点更新已被拒绝，仍在使用上一次已验证的目录。%@"
           }
         }
       }
@@ -1759,7 +1759,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Home-US 暂时不可用，请选择一个受管云端服务器。"
+            "value": "Home-US 暂时不可用，请选择一个受管云端节点。"
           }
         }
       }
@@ -2346,7 +2346,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "暂无云端服务器"
+            "value": "暂无云端节点"
           }
         }
       }
@@ -2356,7 +2356,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有匹配的服务器"
+            "value": "没有匹配的节点"
           }
         }
       }
@@ -2417,7 +2417,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前没有可用的云端服务器"
+            "value": "当前没有可用的云端节点"
           }
         }
       }
@@ -2973,7 +2973,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "受保护的系统流量已无响应，且没有可切换的备用服务器。断网保护正在阻断流量，Tono 正在重新连接。"
+            "value": "当前线路没响应，也没有可切换的备用节点。断网保护正在拦住直连，Tono 正在重新连接。"
           }
         }
       }
@@ -2983,7 +2983,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "受保护的系统流量已无响应。断网保护正在阻断流量，Tono 正在重新连接。"
+            "value": "当前线路没响应。断网保护正在拦住直连，Tono 正在重新连接。"
           }
         }
       }
@@ -3701,7 +3701,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点按切换到此服务器"
+            "value": "点按切换到此节点"
           }
         }
       }
@@ -3948,7 +3948,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "登录后请等待受保护服务器目录同步完成。"
+            "value": "登录后请等待受保护节点目录同步完成。"
           }
         }
       }
@@ -4195,7 +4195,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在切换服务器…"
+            "value": "正在切换节点…"
           }
         }
       }
@@ -4613,7 +4613,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "所选云端服务器已被移除。断网保护仍在阻断流量，请另选一个云端服务器。"
+            "value": "所选云端节点已被移除。断网保护仍在拦住直连，请另选一个云端节点。"
           }
         }
       }
@@ -4623,7 +4623,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "所选云端服务器已被移除，Tono 已切换到受管的默认云端服务器。"
+            "value": "所选云端节点已被移除，Tono 已切换到受管的默认云端节点。"
           }
         }
       }
@@ -5189,7 +5189,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已验证的服务器目录"
+            "value": "已验证的节点目录"
           }
         }
       }
@@ -5237,7 +5237,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在等待服务器目录"
+            "value": "正在等待节点目录"
           }
         }
       }

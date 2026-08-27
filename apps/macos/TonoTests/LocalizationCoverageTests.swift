@@ -55,10 +55,50 @@ final class LocalizationCoverageTests: XCTestCase {
             "Sign in with Apple is not configured.",
             "Google sign-in is not configured.",
             "of %lld",
-            "%@ · v%@ · updates automatically",
+            "%@ · v%lld · updates automatically",
             "%@ · waiting for the first verified sync",
         ]
         let missing = required.filter { !Self.catalogKeys.contains($0) }
         XCTAssertTrue(missing.isEmpty, "not in Localizable.xcstrings: \(missing)")
+    }
+
+    /// Asserting a key exists is not enough: an interpolated string's key is
+    /// built from the *types* of what is interpolated, so `\(anInt)` produces
+    /// `%lld` and a catalog entry written as `%@` never matches. The lookup
+    /// then falls back to the key — English — and only a Chinese build shows
+    /// it. That is exactly how "17 个云端节点 · v40 · updates automatically"
+    /// shipped after the string had supposedly been localized.
+    func testInterpolatedKeysUseThePlaceholderTheTypesActuallyProduce() throws {
+        // Force the Chinese table so the result does not depend on the locale
+        // this test happens to run in.
+        let path = try XCTUnwrap(
+            Bundle.main.path(forResource: "zh-Hans", ofType: "lproj"),
+            "the app bundle carries no zh-Hans table"
+        )
+        let zh = try XCTUnwrap(Bundle(path: path))
+
+        let count = String.localizedStringWithFormat(
+            String(localized: "%lld cloud servers", bundle: zh),
+            Int64(17)
+        )
+        let revision = 40
+
+        let synced = String(
+            localized: "\(count) · v\(revision) · updates automatically",
+            bundle: zh
+        )
+        XCTAssertTrue(
+            synced.contains("自动更新"),
+            "catalog miss — this interpolation's key is not in the catalog: \(synced)"
+        )
+
+        let waiting = String(
+            localized: "\(count) · waiting for the first verified sync",
+            bundle: zh
+        )
+        XCTAssertFalse(
+            waiting.contains("waiting for the first verified sync"),
+            "catalog miss — this interpolation's key is not in the catalog: \(waiting)"
+        )
     }
 }
