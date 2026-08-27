@@ -190,6 +190,8 @@
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {
       "serviceBusy": "服务正在安装或修复。请批准管理员提示，或重启 Tono。",
+      "bfeNotRunning": "Windows 的基础筛选引擎（BFE）没在运行，装不上网络保护。请以管理员身份运行 sc start BFE，然后重试。",
+      "wfpEngineWedged": "Windows 防火墙引擎没有响应，通常是第三方安全软件挂住了它。请重启电脑；若还是这样，先退出杀毒或防火墙软件再重试。",
       "releaseReconciling": "保护还在解除，请稍后再连。",
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
@@ -287,7 +289,7 @@
   },
   "nodes": {
     "title": "节点",
-    "subtitle": "选一个出口。",
+    "subtitle": "为受保护流量选择一个安全出口。",
     "search": "搜索节点",
     "noMatches": "没有符合条件的节点。",
     "readyToConnect": "可选",

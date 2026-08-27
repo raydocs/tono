@@ -1,6 +1,6 @@
 import { useLockFn } from 'ahooks'
 import dayjs from 'dayjs'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
@@ -212,6 +212,17 @@ const ServersPage = () => {
       new Set((servers ?? []).map((server) => nodeCode(server.name))),
     ).sort()
   }, [servers])
+  // zh already has 美国 / 日本 for these, but the chips and group headers
+  // rendered the raw ISO code, so a Chinese customer read "US" and "JP" while
+  // the translations sat unused. An unknown code falls back to itself.
+  const regionLabel = useCallback(
+    (code: string) => {
+      const key = `tono.nodes.regions.${code.toLowerCase()}`
+      const translated = t(key)
+      return translated === key ? code : translated
+    },
+    [t],
+  )
   const serverGroups = useMemo(() => {
     const usable = visibleServers.filter((server) => server.available !== false)
     const codes = Array.from(
@@ -220,7 +231,7 @@ const ServersPage = () => {
     return [
       ...codes.map((code) => ({
         key: code,
-        label: code,
+        label: regionLabel(code),
         servers: usable.filter((server) => nodeCode(server.name) === code),
       })),
       {
@@ -229,7 +240,7 @@ const ServersPage = () => {
         servers: visibleServers.filter((server) => server.available === false),
       },
     ].filter((group) => group.servers.length > 0)
-  }, [t, visibleServers])
+  }, [t, regionLabel, visibleServers])
   const canTestAll =
     status?.uiState === 'notConnected' &&
     catalog?.revision !== null &&
@@ -462,7 +473,7 @@ const ServersPage = () => {
                 background: regionFilter === code ? TONO_COLORS.accent : 'transparent',
               }}
             >
-              {code}
+              {regionLabel(code)}
             </button>
           ))}
         </div>

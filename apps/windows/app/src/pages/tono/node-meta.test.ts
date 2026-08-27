@@ -54,3 +54,17 @@ describe('nodeCityParts', () => {
     expect(nodeCityTitleKey('Paris · Seine')).toBeNull()
   })
 })
+
+describe('region labels', () => {
+  it('has a Chinese name for every region code the catalog produces', async () => {
+    const zh = (await import('@/locales/zh/tono.json')).default
+    const en = (await import('@/locales/en/tono.json')).default
+    // The chips render these; a missing entry silently falls back to the raw
+    // ISO code, which is what shipped before.
+    for (const code of ['us', 'jp']) {
+      expect(zh.nodes.regions[code as 'us' | 'jp']).toBeTruthy()
+      expect(zh.nodes.regions[code as 'us' | 'jp']).not.toBe(code.toUpperCase())
+      expect(en.nodes.regions[code as 'us' | 'jp']).toBeTruthy()
+    }
+  })
+})
