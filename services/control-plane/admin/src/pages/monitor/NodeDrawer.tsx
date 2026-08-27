@@ -9,7 +9,7 @@ import { Sparkline } from '../../charts';
 import { gibibytes, unixDate } from '../../lib/fields';
 import { formatBytes, formatDuration, timestamp } from '../../lib/format';
 import { createExclusiveGate } from '../../lib/exclusive';
-import type { OpsNodeView } from '../../lib/ops-views';
+import { nodeAttentionLabel, type OpsNodeView } from '../../lib/ops-views';
 import { seriesRates } from '../../lib/traffic';
 import { usePrivacy } from '../../privacy';
 import { Banner, Drawer, DrawerSection, Field, FieldGrid, Note, Stat, StatGrid } from '../../ui';
@@ -375,7 +375,7 @@ export function NodeDrawer({
         <div className="drawer-hero-top">
           <span className={`nc-state nc-tone-${node.dot}`}>
             <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />
-            {node.blockLabel}
+            {nodeAttentionLabel(node)}
           </span>
           <span className="drawer-hero-ip mono">{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</span>
         </div>

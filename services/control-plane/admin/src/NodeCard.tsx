@@ -1,6 +1,6 @@
 import { CarrierMini } from './carriers';
 import { formatBytes, formatDuration } from './lib/format';
-import { carrierLossLine, type OpsNodeView } from './lib/ops-views';
+import { carrierLossLine, nodeAttentionLabel, type OpsNodeView } from './lib/ops-views';
 import { usePrivacy } from './privacy';
 
 function pct(used: number | null | undefined, total: number | null | undefined): number | null {
@@ -45,10 +45,15 @@ function agentText(node: OpsNodeView): string {
 
 /** Why this machine is in front of you, in one line, without repeating the pill. */
 function reasonText(node: OpsNodeView): string {
+  const parts: string[] = [];
+  if (nodeAttentionLabel(node) !== node.blockLabel) parts.push(node.blockLabel);
   const loss = carrierLossLine(node);
-  if (loss) return loss;
-  const parts = [catalogText(node), occupancyText(node)];
-  if (node.agentState !== 'reported') parts.push(agentText(node));
+  if (loss) parts.push(loss);
+  else {
+    parts.push(catalogText(node), occupancyText(node));
+    if (node.agentState !== 'reported') parts.push(agentText(node));
+  }
+  if (loss) parts.push(occupancyText(node));
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -103,7 +108,7 @@ export function NodeCard({
         </div>
         <span className="nc-state">
           <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />
-          {node.blockLabel}
+          {nodeAttentionLabel(node)}
         </span>
       </div>
 

@@ -16,6 +16,7 @@ import {
   nodeMatchesFocus,
   nodeSearchHaystack,
   sortOpsNodes,
+  nodeAttentionLabel,
   type OpsNodeView,
 } from '../lib/ops-views';
 import { useOpsRoute } from '../lib/route';
@@ -162,7 +163,7 @@ function NodeTable({
                 <strong>{node.name}</strong>
                 <small className="mono">{privacy.ip(node.quality?.publicIp || node.quality?.host || node.profile?.publicIp)}</small>
               </td>
-              <td>{node.blockLabel}</td>
+              <td>{nodeAttentionLabel(node)}</td>
               <td>
                 {node.agentState === 'unavailable' ? '探针源不可用'
                   : node.agentState === 'unreported' ? '没装探针'

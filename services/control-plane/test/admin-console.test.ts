@@ -488,8 +488,10 @@ import {
   assembleOpsNodes,
   assembleOpsPeople,
   carrierLossLine,
+  carrierLossNeedsAttention,
   catalogBehindLive,
   hasBadCarrierLoss,
+  nodeAttentionLabel,
   nodeMatchesFocus,
   nodeRootCause,
   nodeSearchHaystack,
@@ -1433,7 +1435,7 @@ describe('path measurement freshness', () => {
 });
 
 describe('return-path loss on assembled nodes', () => {
-  it('treats high carrier loss as 需处理 without calling it 高负载', () => {
+  it('treats occupied high carrier loss as 需处理 without calling it 高负载', () => {
     const nowSec = 1_800_000_000;
     const nodes = assembleOpsNodes({
       nowMs: nowSec * 1000,
@@ -1453,18 +1455,55 @@ describe('return-path loss on assembled nodes', () => {
           },
         },
       })],
+      activity: [activity({ selectedServer: 'Canyon', lastSeenAt: nowSec, online: true })],
     });
     const canyon = nodes[0];
     expect(hasBadCarrierLoss(canyon)).toBe(true);
+    expect(carrierLossNeedsAttention(canyon)).toBe(true);
     expect(canyon.signals.some((signal) => signal.label.includes('电信丢包'))).toBe(true);
     expect(nodeRootCause(canyon)).toBe('ok');
     expect(nodeMatchesFocus(canyon, 'pressure', nowSec)).toBe(false);
     expect(nodeMatchesFocus(canyon, 'loss', nowSec)).toBe(true);
     expect(nodeMatchesFocus(canyon, 'needs', nowSec)).toBe(true);
     expect(carrierLossLine(canyon)).toContain('电信丢包 12.3%');
+    expect(nodeAttentionLabel(canyon)).toBe('回程丢包');
+    expect(canyon.blockLabel).toBe('大陆正常');
     expect(canyon.dot).toBe('warn');
     const incidents = incidentsFromWorld({ nodes, people: [], catalogRevision: 1, nowSec });
     expect(incidents.some((item) => item.kind === 'node-pressure')).toBe(false);
+  });
+
+  it('keeps empty high-loss machines in 高丢包 without filling 需处理', () => {
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Buffalo · Erie"\n    type: vless\n',
+      qualityNodes: [qualityNode('Buffalo · Erie')],
+      agents: [agent({
+        name: 'Buffalo · Erie',
+        observedAt: nowSec,
+        load1: 0.2,
+        carriers: {
+          telecom: {
+            latencyMs: 237,
+            lossPct: 13.3,
+            samples: 9,
+            targets: ['三网-电信-上海'],
+            history: [{ latencyMs: 237, lossPct: 13.3 }],
+          },
+        },
+      })],
+      activitySource: 'ready',
+      activity: [],
+    });
+    const idle = nodes[0];
+    expect(idle.occupancy).toBe(0);
+    expect(hasBadCarrierLoss(idle)).toBe(true);
+    expect(carrierLossNeedsAttention(idle)).toBe(false);
+    expect(nodeMatchesFocus(idle, 'loss', nowSec)).toBe(true);
+    expect(nodeMatchesFocus(idle, 'needs', nowSec)).toBe(false);
+    expect(nodeAttentionLabel(idle)).toBe('回程丢包');
+    expect(idle.dot).toBe('ok');
   });
 
   it('does not escalate warn-band carrier loss into 需处理', () => {

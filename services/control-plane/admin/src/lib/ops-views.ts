@@ -62,8 +62,18 @@ function isMachinePressure(node: OpsNodeView): boolean {
     || node.agentState === 'stale';
 }
 
-export function hasBadCarrierLoss(node: OpsNodeView): boolean {
+export function hasBadCarrierLoss(node: { signals: OpsSignal[] }): boolean {
   return node.signals.some((signal) => signal.kind === 'carrier-loss' && signal.severity >= 3);
+}
+
+export function carrierLossNeedsAttention(node: {
+  signals: OpsSignal[];
+  occupancy: number | null;
+  occupancyState: OccupancyState;
+}): boolean {
+  if (!hasBadCarrierLoss(node)) return false;
+  if (node.occupancyState !== 'known') return true;
+  return (node.occupancy ?? 0) > 0;
 }
 
 export function carrierLossLine(node: OpsNodeView): string | null {
@@ -71,6 +81,17 @@ export function carrierLossLine(node: OpsNodeView): string | null {
     .filter((signal) => signal.kind === 'carrier-loss' && signal.severity >= 3)
     .map((signal) => signal.label);
   return labels.length ? labels.join(' · ') : null;
+}
+
+/** What the pill should say: the reason this machine is in front of you. */
+export function nodeAttentionLabel(node: OpsNodeView): string {
+  if (node.qualityState === 'reported' && (
+    node.blockStatus === 'LIKELY_BLOCKED' || node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false
+  )) {
+    return node.blockLabel;
+  }
+  if (hasBadCarrierLoss(node)) return '回程丢包';
+  return node.blockLabel;
 }
 
 export function nodeRootCause(node: OpsNodeView): NodeRootCause {
@@ -137,6 +158,8 @@ export function nodeDot(node: {
   qualityState: QualityState;
   agentState: AgentState;
   signals: OpsSignal[];
+  occupancy: number | null;
+  occupancyState: OccupancyState;
 }): NodeDot {
   if (node.qualityState === 'reported' && (
     node.blockStatus === 'LIKELY_BLOCKED' || node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false
@@ -145,7 +168,8 @@ export function nodeDot(node: {
   }
   if (node.agentState === 'stale') return 'warn';
   if (node.agentState === 'unreported') return 'warn';
-  if (node.signals.some((signal) => signal.severity >= 3)) return 'warn';
+  if (node.signals.some((signal) => signal.severity >= 3 && signal.kind !== 'carrier-loss')) return 'warn';
+  if (carrierLossNeedsAttention(node)) return 'warn';
   if (node.qualityState !== 'reported' || node.agentState === 'unavailable') return 'unknown';
   if (node.ok === true || node.blockStatus === 'OK' || node.blockStatus === 'EDGE_OK') return 'ok';
   return 'unknown';
@@ -312,7 +336,7 @@ export function nodeMatchesFocus(node: OpsNodeView, focus: string | null, nowSec
       || nodeMatchesFocus(node, 'offline', nowSec)
       || nodeMatchesFocus(node, 'noprobe', nowSec)
       || nodeMatchesFocus(node, 'pressure', nowSec)
-      || hasBadCarrierLoss(node)
+      || carrierLossNeedsAttention(node)
       || (node.qualityState === 'reported' && node.quality?.quality === 'poor');
   }
   return true;
@@ -335,9 +359,10 @@ export function sortOpsNodes(nodes: OpsNodeView[]): OpsNodeView[] {
     if (node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED') return 0;
     if (node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false)) return 1;
     if (node.agentState === 'unreported' && node.catalogState === 'known-listed') return 2;
-    if (isMachinePressure(node) || hasBadCarrierLoss(node)) return 3;
-    if (node.quality?.quality === 'poor') return 4;
-    return 5;
+    if (isMachinePressure(node) || carrierLossNeedsAttention(node)) return 3;
+    if (hasBadCarrierLoss(node)) return 4;
+    if (node.quality?.quality === 'poor') return 5;
+    return 6;
   };
   return [...nodes].sort((a, b) => {
     const delta = rank(a) - rank(b);
