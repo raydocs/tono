@@ -1149,6 +1149,16 @@
         }
       }
     },
+    "Crash reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "崩溃上报"
+          }
+        }
+      }
+    },
     "Current exit": {
       "localizations": {
         "zh-Hans": {
@@ -4463,6 +4473,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "目标策略"
+          }
+        }
+      }
+    },
+    "Tell Tono support when this app crashed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用崩溃时告知 Tono 技术支持"
           }
         }
       }

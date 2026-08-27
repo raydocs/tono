@@ -19,6 +19,8 @@ struct SettingsView: View {
     private var localTrafficAuditEnabled = true
     @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
     private var remoteDiagnosticsEnabled = false
+    @AppStorage(SettingsKey.crashReportingEnabled)
+    private var crashReportingEnabled = true
     @AppStorage(SettingsKey.claudeTrafficResearchEnabled)
     private var claudeTrafficResearchEnabled = false
     @AppStorage(
@@ -176,6 +178,14 @@ struct SettingsView: View {
 
     private var privacyCard: some View {
         SettingsCard(icon: "hand.raised", title: "Privacy") {
+            SettingToggleRow(
+                label: "Crash reporting",
+                subtitle: "Tell Tono support when this app crashed",
+                isOn: $crashReportingEnabled
+            )
+
+            settingDivider
+
             SettingToggleRow(
                 label: "Remote diagnostics",
                 subtitle: "Share protection status with Tono support",
