@@ -351,9 +351,10 @@ private actor ManagedTrafficPolicyProcessor {
 
         var seenAddresses = Set<String>()
         let media = policyMedia.compactMap { entry -> TonoTrafficPolicyMediaEndpoint? in
-            guard let address = try? ConfigPipeline.validatedPublicIPv4(
+            guard let address = try? ConfigPipeline.validatedManagedDirectAddress(
                     entry.address,
-                    field: "managed media address"
+                    field: "managed media address",
+                    trusted: trusted
                   ),
                   address == entry.address,
                   !protectedAddresses.contains(address),
@@ -372,9 +373,10 @@ private actor ManagedTrafficPolicyProcessor {
 
         var seenTCPAddresses = Set<String>()
         let tcp = declaredTCP.compactMap { entry -> TonoTrafficPolicyMediaEndpoint? in
-            guard let address = try? ConfigPipeline.validatedPublicIPv4(
+            guard let address = try? ConfigPipeline.validatedManagedDirectAddress(
                     entry.address,
-                    field: "managed TCP address"
+                    field: "managed TCP address",
+                    trusted: trusted
                   ),
                   address == entry.address,
                   !protectedAddresses.contains(address),
