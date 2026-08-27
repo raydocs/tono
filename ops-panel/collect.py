@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Tono ops collector: securityCheck + backtrace + multi-source block probe. 12h serial.
+"""Tono ops collector: securityCheck + backtrace + multi-source block probe.
+
+Two cadences, two timers:
+- full run (default): 12h serial SSH sweep — quality, block probes, report files.
+- --agents-only: fetches the Komari nodes list and PUTs a partial
+  {"agents": ...} snapshot; fast, no SSH, no report files. Meant for a
+  1-5 minute timer so the timeseries tier gets real rate samples.
 
 Block sources (in priority order):
 1) mainland_probes in nodes.secrets.json — real CT/CU/CM TCP :443 agents (authoritative)
@@ -10,6 +16,9 @@ itdog is no longer used (captcha / no wss task payload).
 """
 from __future__ import annotations
 
+import argparse
+import concurrent.futures
+import fcntl
 import http.cookiejar
 import json
 import os
@@ -30,6 +39,8 @@ LOG = Path("/var/log/tono-ops-collect.log")
 KOMARI = "http://127.0.0.1:25774"
 CREDS = Path("/root/komari-admin.txt")
 TOKEN_FILE = Path("/opt/tono-ops/collector.token")
+LOCK_FULL = BASE / "collect.lock"
+LOCK_AGENTS = BASE / "collect-agents.lock"
 API_BASE = os.environ.get("TONO_API_BASE", "https://api.afk.ccwu.cc").rstrip("/")
 
 SC_URL = "https://github.com/oneclickvirt/securityCheck/releases/download/output/securityCheck-linux-amd64"
@@ -69,6 +80,25 @@ def sh(cmd: str, timeout: int = 180) -> tuple[int, str]:
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     except subprocess.TimeoutExpired:
         return 124, "timeout"
+
+
+def acquire_lock(path: Path) -> int | None:
+    """Exclusive non-blocking flock; returns the held fd or None if another run owns it."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def write_atomic(path: Path, text: str, mode: int | None = None) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    if mode is not None:
+        tmp.chmod(mode)
+    os.replace(tmp, path)
 
 
 def check_host_tcp_nodes(ip: str, nodes: list[str], port: int = 443, waits: int = 8) -> dict:
@@ -534,21 +564,57 @@ def probe_home_lines(token: str) -> list[dict]:
     except Exception as exc:
         log(f"home_targets_error {exc}")
         return []
-    probes = []
+    targets = []
     for target in payload.get("targets") or []:
         host = target.get("host")
         port = target.get("port")
         target_id = target.get("id")
         if not host or not port or not target_id:
             continue
-        status = "dead"
+        targets.append((target_id, host, port))
+    if not targets:
+        return []
+
+    def probe(entry: tuple) -> str:
+        _, host, port = entry
         try:
             with socket.create_connection((str(host), int(port)), timeout=5):
-                status = "alive"
+                return "alive"
         except OSError:
-            status = "dead"
-        probes.append({"id": target_id, "status": status})
-    return probes
+            return "dead"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        statuses = list(pool.map(probe, targets))
+    return [
+        {"id": target_id, "status": status}
+        for (target_id, _, _), status in zip(targets, statuses)
+    ]
+
+
+def put_snapshot(token: str, body: dict) -> bool:
+    data = json.dumps(body, ensure_ascii=False).encode()
+    for attempt in range(1, 4):
+        req = urllib.request.Request(
+            f"{API_BASE}/api/v1/ops-ingest/snapshot",
+            data=data,
+            method="PUT",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+                # Zone browser-integrity rejects a bare collector UA with CF 1010.
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-ops-collector/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                log(f"ingest {response.status} {response.read().decode()[:200]}")
+                return True
+        except Exception as e:
+            log(f"ingest_error attempt={attempt}/3 {e}")
+            if attempt < 3:
+                time.sleep(2 ** attempt)
+    return False
 
 
 def push_control_plane(report: dict) -> None:
@@ -563,23 +629,7 @@ def push_control_plane(report: dict) -> None:
     probes = probe_home_lines(token)
     if probes:
         body["homeProbes"] = probes
-    req = urllib.request.Request(
-        f"{API_BASE}/api/v1/ops-ingest/snapshot",
-        data=json.dumps(body, ensure_ascii=False).encode(),
-        method="PUT",
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-            # Zone browser-integrity rejects a bare collector UA with CF 1010.
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tono-ops-collector/1.0",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            log(f"ingest {response.status} {response.read().decode()[:200]}")
-    except Exception as e:
-        log(f"ingest_error {e}")
+    put_snapshot(token, body)
 
 
 def load_config() -> tuple[list[dict], list[dict]]:
@@ -591,9 +641,31 @@ def load_config() -> tuple[list[dict], list[dict]]:
     return nodes, agents
 
 
+def agents_only() -> None:
+    """Fast partial push for the 1-5 min timer: Komari nodes list only, no SSH."""
+    BASE.mkdir(parents=True, exist_ok=True)
+    lock = acquire_lock(LOCK_AGENTS)
+    if lock is None:
+        log("agents-only: previous run still holds the lock; exiting")
+        return
+    token = collector_token()
+    if not token:
+        log("skip ingest: missing TONO_OPS_COLLECTOR_TOKEN or /opt/tono-ops/collector.token")
+        return
+    agents = komari_nodes()
+    if agents is None:
+        log("agents-only: komari nodes unavailable")
+        return
+    put_snapshot(token, {"agents": {"data": agents}})
+
+
 def main() -> None:
     BASE.mkdir(parents=True, exist_ok=True)
     (BASE / "www").mkdir(parents=True, exist_ok=True)
+    lock = acquire_lock(LOCK_FULL)
+    if lock is None:
+        log("previous full run still holds the lock; exiting")
+        return
     if not SECRETS.exists():
         log("missing nodes.secrets.json")
         return
@@ -641,13 +713,22 @@ def main() -> None:
         "nodes": out_nodes,
     }
     text = json.dumps(report, ensure_ascii=False, indent=2)
-    REPORT.write_text(text, encoding="utf-8")
-    REPORT.chmod(0o600)
-    WWW_REPORT.write_text(text, encoding="utf-8")
+    write_atomic(REPORT, text, mode=0o600)
+    write_atomic(WWW_REPORT, text)
     komari_tag(out_nodes)
     push_control_plane(report)
     log("done")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Tono ops collector")
+    parser.add_argument(
+        "--agents-only",
+        action="store_true",
+        help="only fetch the Komari nodes list and push a partial snapshot (fast, no SSH); for a 1-5 min timer",
+    )
+    args = parser.parse_args()
+    if args.agents_only:
+        agents_only()
+    else:
+        main()

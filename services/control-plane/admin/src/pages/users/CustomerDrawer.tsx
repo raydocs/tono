@@ -136,7 +136,7 @@ function CustomerAccountBody({
   );
   const bound = detail.state === 'ready' ? acceptIfCurrent(userId, detail.data.userId, detail.data) : null;
   const detailPending = bound == null && detail.state !== 'error';
-  const actions = useResource(operationsApi.deviceActions, [userId], 0, true);
+  const actions = useResource(() => operationsApi.deviceActions(), [userId], 0, true);
 
   return (
     <>

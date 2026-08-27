@@ -4,7 +4,15 @@ import { matchDevOps } from '../admin/src/dev/ops-fixture';
 import { catalogProxyNames } from '../admin/src/lib/catalog';
 import { formatBytes } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
-import { gibibytes, tcpPort, unixDate, unixDateTimeLocal } from '../admin/src/lib/fields';
+import {
+  calendarDaysUntil,
+  gibibytes,
+  localDateInputValue,
+  tcpPort,
+  unixDate,
+  unixDateTimeLocal,
+  unixFromLocalDate,
+} from '../admin/src/lib/fields';
 import { acceptIfCurrent, bindDetail } from '../admin/src/lib/bound-detail';
 import { compactHealthLine, dataHealthLines, sourceTruthHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
@@ -166,6 +174,33 @@ describe('a form box read as three answers', () => {
     expect(gibibytes('2')).toBe(2 * 1024 ** 3);
     expect(gibibytes('0')).toBe(0);
     expect(unixDate('2026-09-01')).toBe(Math.floor(Date.UTC(2026, 8, 1) / 1000));
+  });
+});
+
+describe('renewal dates on the operator clock', () => {
+  it('round-trips a date box through local midnight, not UTC', () => {
+    // `new Date('2026-09-01')` is UTC midnight; west of Greenwich that second
+    // renders back as 08-31 and every renewal date drifted a day.
+    const saved = unixFromLocalDate('2026-09-01');
+    expect(saved).toBe(Math.floor(new Date(2026, 8, 1).getTime() / 1000));
+    expect(localDateInputValue(saved as number)).toBe('2026-09-01');
+  });
+
+  it('treats an emptied box as clear and refuses garbage', () => {
+    expect(unixFromLocalDate('')).toBeNull();
+    expect(unixFromLocalDate('not-a-date')).toBe('invalid');
+    expect(unixFromLocalDate('2026-13-40')).toBe('invalid');
+    expect(localDateInputValue(null)).toBe('');
+  });
+
+  it('counts calendar days, so late evening is not already tomorrow', () => {
+    const renewal = new Date(2026, 8, 1).getTime() / 1000;
+    const eveningBefore = new Date(2026, 7, 31, 23, 30).getTime() / 1000;
+    const morningOf = new Date(2026, 8, 1, 9, 0).getTime() / 1000;
+    const nextDay = new Date(2026, 8, 2, 0, 30).getTime() / 1000;
+    expect(calendarDaysUntil(renewal, eveningBefore)).toBe(1);
+    expect(calendarDaysUntil(renewal, morningOf)).toBe(0);
+    expect(calendarDaysUntil(renewal, nextDay)).toBe(-1);
   });
 });
 
@@ -513,8 +548,6 @@ const qualityNode = (name: string, over: Partial<LiveQualityNodeDto> = {}): Live
   exposure: null,
   routeKeywords: [],
   block: { status: 'OK', label: '大陆正常', rule: null, mainland: null, asiaEdge: null, overseas: null },
-  securityCheck: null,
-  backtrace: null,
   ...over,
 });
 
@@ -1108,6 +1141,16 @@ describe('customer telemetry and path activity', () => {
     expect(tcpPort('443')).toBe(443);
   });
 
+  it('keeps failures filters when opening either drawer on the failures page', () => {
+    const fromFailures = { ...emptyHash('failures'), focus: 'customer-path' };
+    expect(nextRouteForOpenUser(fromFailures, 'u1', { page: 'failures' })).toEqual({
+      page: 'failures', focus: 'customer-path', node: null, user: 'u1', q: null, range: null,
+    });
+    expect(nextRouteForOpenNode(fromFailures, 'Tokyo · Fuji', { page: 'failures' })).toMatchObject({
+      page: 'failures', focus: 'customer-path', node: 'Tokyo · Fuji', user: null,
+    });
+  });
+
   it('does not carry a monitor focus into a user drawer', () => {
     const fromMonitor = { ...emptyHash('monitor'), focus: 'blocked', node: 'Tokyo · Fuji' };
     expect(nextRouteForOpenUser(fromMonitor, 'u1')).toEqual({
@@ -1470,22 +1513,26 @@ describe('path measurement freshness', () => {
     expect(verdict).toMatchObject({ kind: 'incident', severity: 'warn', metric: 'tcp' });
   });
 
-  it('reports unmeasured when both delay samples are stale', () => {
+  it('reports stale-sample, not unmeasured, when samples exist but expired', () => {
+    // A customer that used to report and stopped is a different triage case
+    // from one that never reported; 缺测不是故障 must not cover the first.
     expect(customerPathVerdict({
       lastSeenAt: now, online: true, nodeHealth: 'ok',
       exitDelayMs: 900, tcpDelayMs: 900,
       exitDelayAtMs: staleMs, tcpDelayAtMs: staleMs,
       nowSec: now,
-    }).kind).toBe('unmeasured');
+    }).kind).toBe('stale-sample');
   });
 
   it('does not let a far-future client clock keep a path sample fresh', () => {
-    expect(customerPathVerdict({
+    const verdict = customerPathVerdict({
       lastSeenAt: now, online: true, nodeHealth: 'ok',
       exitDelayMs: 900, tcpDelayMs: null,
       exitDelayAtMs: (now + 24 * 3600) * 1000,
       nowSec: now,
-    }).kind).toBe('unmeasured');
+    });
+    expect(verdict.kind).not.toBe('incident');
+    expect(verdict.kind).toBe('stale-sample');
   });
 
   it('marks old values as displayable history, not current path readings', () => {
@@ -1627,6 +1674,62 @@ describe('node root cause uniqueness', () => {
     const incidents = incidentsFromWorld({ nodes, people: [], catalogRevision: 1, nowSec: 1_800_000_000, qualityUpdatedAtSec: 1_800_000_000 });
     expect(incidents.filter((item) => item.node === 'Sakura' && (item.severity === 'severe' || item.severity === 'warn'))).toHaveLength(1);
     expect(incidents[0].measuredAtSec).toBe(1_800_000_000);
+  });
+
+  it('judges node incidents by the quality scan window, not the heartbeat window', () => {
+    // Quality scans arrive every twelve hours; a two-hour-old verdict is
+    // current for that source even though the 40-minute heartbeat window has
+    // long passed.
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Sakura"\n    type: vless\n',
+      qualityNodes: [qualityNode('Sakura', {
+        ok: false,
+        block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+      })],
+    });
+    const incidents = incidentsFromWorld({
+      nodes, people: [], catalogRevision: 1, nowSec, qualityUpdatedAtSec: nowSec - 2 * 3600,
+    });
+    const blocked = incidents.find((item) => item.kind === 'node-blocked')!;
+    expect(blocked.staleAfterSec).toBe(24 * 60 * 60);
+    expect(nowSec - (blocked.measuredAtSec ?? 0)).toBeGreaterThan(HEARTBEAT_FRESH_SECONDS);
+    expect(nowSec - (blocked.measuredAtSec ?? 0)).toBeLessThanOrEqual(blocked.staleAfterSec ?? 0);
+  });
+});
+
+describe('an overdue node renewal stays on the console', () => {
+  const nowSec = Math.floor(new Date(2026, 8, 10, 12, 0).getTime() / 1000);
+  const overdueAt = Math.floor(new Date(2026, 8, 1).getTime() / 1000);
+  const nodes = () => assembleOpsNodes({
+    nowMs: nowSec * 1000,
+    catalogYaml: 'proxies:\n  - name: "Late"\n    type: vless\n',
+    qualityNodes: [qualityNode('Late')],
+    profiles: [{
+      id: 'p-late', catalogName: 'Late',
+      price: null, currency: null, billingCycle: null,
+      trafficQuotaBytes: null, trafficUsedBytes: null,
+      trafficCycleStart: null, trafficCycleEnd: null,
+      cycleNetIn: null, cycleNetOut: null,
+      renewsAt: overdueAt,
+      status: 'active', createdAt: 1, updatedAt: 1,
+    } as NodeProfileDto],
+  });
+
+  it('emits a warn chore saying how many days late', () => {
+    const incidents = incidentsFromWorld({ nodes: nodes(), people: [], catalogRevision: 1, nowSec });
+    const chore = incidents.find((item) => item.kind === 'node-expired');
+    expect(chore).toMatchObject({ severity: 'warn', category: 'chore', node: 'Late' });
+    expect(chore?.detail).toBe('续费日已过 9 天');
+    expect(incidents.some((item) => item.kind === 'node-renew' && item.node === 'Late')).toBe(false);
+  });
+
+  it('keeps the machine in the expiring focus and on its pill', () => {
+    const late = nodes()[0];
+    expect(late.renewOverdueDays).toBe(9);
+    expect(nodeMatchesFocus(late, 'expiring', nowSec)).toBe(true);
+    expect(nodeAttentionLabel(late)).toBe('续费日已过 9 天');
   });
 });
 

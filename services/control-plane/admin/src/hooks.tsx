@@ -1,13 +1,16 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { isAbortError } from './api';
+import type { Page } from './lib/hash';
 
-export type Page = 'dashboard' | 'failures' | 'users' | 'monitor' | 'traffic' | 'control';
 export type Resource<T> =
   | { state: 'loading' }
   | { state: 'error'; message: string }
@@ -21,23 +24,6 @@ export const pages: Array<{ id: Page; label: string; group: string }> = [
   { id: 'traffic', label: '流量', group: '日常' },
   { id: 'control', label: '目录和规则', group: '配置' },
 ];
-
-function currentPage(): Page {
-  const value = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-  if (value === 'homes') return 'users';
-  if (value === 'servers' || value === 'nodes' || value === 'catalog') return 'control';
-  return pages.some((page) => page.id === value) ? value as Page : 'dashboard';
-}
-
-export function usePage() {
-  const [page, setPage] = useState(currentPage);
-  useEffect(() => {
-    const update = () => setPage(currentPage());
-    window.addEventListener('hashchange', update);
-    return () => window.removeEventListener('hashchange', update);
-  }, []);
-  return page;
-}
 
 /**
  * A resource plus the two facts about it that are not in the data: when it was
@@ -54,8 +40,15 @@ export type Live<T> = Resource<T> & {
   refreshing: boolean;
 };
 
+/** Consecutive failures double the poll gap, but never beyond this. */
+const BACKOFF_CEILING_MS = 300_000;
+
+function backoffDelay(refreshMs: number, failures: number): number {
+  return Math.min(refreshMs * 2 ** Math.min(failures, 5), BACKOFF_CEILING_MS);
+}
+
 export function useResource<T>(
-  load: () => Promise<T>,
+  load: (signal?: AbortSignal) => Promise<T>,
   deps: unknown[] = [],
   refreshMs = 0,
   enabled = true,
@@ -70,24 +63,63 @@ export function useResource<T>(
   const loadRef = useRef(load);
   loadRef.current = load;
   const generation = useRef(0);
+  const abort = useRef<AbortController | null>(null);
+  const lastLoadedAt = useRef(0);
 
   useEffect(() => {
     if (!enabled) return undefined;
     let active = true;
+    let timer: number | undefined;
+    let failures = 0;
+
+    // The next poll is armed only after the previous request settles, so a
+    // slow Worker never has two of the same request in flight; consecutive
+    // failures widen the gap instead of hammering an outage.
+    const schedule = () => {
+      if (!active || !refreshMs) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        if (!active) return;
+        if (document.hidden || navigator.onLine === false) {
+          schedule();
+          return;
+        }
+        run();
+      }, backoffDelay(refreshMs, failures));
+    };
+
     const run = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
       const id = ++generation.current;
+      abort.current?.abort();
+      const controller = new AbortController();
+      abort.current = controller;
       if (snapshot.current.state === 'ready') setRefreshing(true);
       else if (snapshot.current.state !== 'error') setResource({ state: 'loading' });
-      loadRef.current().then(
+      loadRef.current(controller.signal).then(
         (data) => {
-          if (!active || id !== generation.current) return;
+          if (!active) return;
+          failures = 0;
+          schedule();
+          if (id !== generation.current) return;
+          lastLoadedAt.current = Date.now();
           setResource({ state: 'ready', data });
           setRefreshedAt(Date.now());
           setStale(null);
           setRefreshing(false);
         },
         (error: unknown) => {
-          if (!active || id !== generation.current) return;
+          if (!active) return;
+          if (!isAbortError(error)) failures += 1;
+          schedule();
+          if (id !== generation.current) return;
+          // A superseded request was cancelled on purpose; it is neither an
+          // error nor a stale banner.
+          if (isAbortError(error)) return;
           const message = error instanceof Error ? error.message : '数据加载失败';
           setRefreshing(false);
           if (snapshot.current.state === 'ready') {
@@ -102,58 +134,65 @@ export function useResource<T>(
     run();
 
     const onVisible = () => {
-      if (typeof document !== 'undefined' && !document.hidden) run();
+      if (document.hidden || !refreshMs) return;
+      // A two-second alt-tab must not refire every endpoint.
+      if (Date.now() - lastLoadedAt.current < refreshMs / 2) return;
+      run();
+    };
+    const onOnline = () => {
+      if (!refreshMs || document.hidden) return;
+      run();
     };
     document.addEventListener('visibilitychange', onVisible);
-
-    let timer: ReturnType<typeof setInterval> | undefined;
-    if (refreshMs) {
-      timer = setInterval(() => {
-        if (typeof document !== 'undefined' && document.hidden) return;
-        run();
-      }, refreshMs);
-    }
+    window.addEventListener('online', onOnline);
 
     return () => {
       active = false;
       generation.current += 1;
+      abort.current?.abort();
+      abort.current = null;
       document.removeEventListener('visibilitychange', onVisible);
-      if (timer) clearInterval(timer);
+      window.removeEventListener('online', onOnline);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, refreshMs, enabled, ...deps]);
 
-  return {
+  const reload = useCallback(() => setTick((value) => value + 1), []);
+  const reloadNow = useCallback(async () => {
+    const id = ++generation.current;
+    if (snapshot.current.state === 'ready') setRefreshing(true);
+    try {
+      const data = await loadRef.current();
+      if (id !== generation.current) throw new Error('已被更新的请求取代');
+      lastLoadedAt.current = Date.now();
+      setResource({ state: 'ready', data });
+      setRefreshedAt(Date.now());
+      setStale(null);
+      setRefreshing(false);
+      return data;
+    } catch (error) {
+      // A timer, key change, unmount, or newer manual request owns the state.
+      // Let the caller know this request did not win, but never let its late
+      // completion overwrite a newer successful snapshot with a false stale
+      // banner.
+      if (id !== generation.current) throw error;
+      const message = error instanceof Error ? error.message : '数据加载失败';
+      setRefreshing(false);
+      if (snapshot.current.state !== 'ready') setResource({ state: 'error', message });
+      else setStale(message);
+      throw error;
+    }
+  }, []);
+
+  return useMemo(() => ({
     ...resource,
-    reload: () => setTick((value) => value + 1),
-    reloadNow: async () => {
-      const id = ++generation.current;
-      if (snapshot.current.state === 'ready') setRefreshing(true);
-      try {
-        const data = await loadRef.current();
-        if (id !== generation.current) throw new Error('已被更新的请求取代');
-        setResource({ state: 'ready', data });
-        setRefreshedAt(Date.now());
-        setStale(null);
-        setRefreshing(false);
-        return data;
-      } catch (error) {
-        // A timer, key change, unmount, or newer manual request owns the state.
-        // Let the caller know this request did not win, but never let its late
-        // completion overwrite a newer successful snapshot with a false stale
-        // banner.
-        if (id !== generation.current) throw error;
-        const message = error instanceof Error ? error.message : '数据加载失败';
-        setRefreshing(false);
-        if (snapshot.current.state !== 'ready') setResource({ state: 'error', message });
-        else setStale(message);
-        throw error;
-      }
-    },
+    reload,
+    reloadNow,
     refreshedAt,
     stale,
     refreshing,
-  };
+  }), [resource, reload, reloadNow, refreshedAt, stale, refreshing]);
 }
 
 export const REFRESH_CHOICES = [
@@ -166,9 +205,12 @@ const REFRESH_KEY = 'tono-ops-refresh-ms';
 
 function useRefreshInterval(): [number, (ms: number) => void] {
   const [ms, setMs] = useState(() => {
-    if (typeof localStorage === 'undefined') return 15_000;
-    const stored = Number(localStorage.getItem(REFRESH_KEY));
-    return REFRESH_CHOICES.some((choice) => choice.ms === stored) ? stored : 15_000;
+    try {
+      const stored = Number(localStorage.getItem(REFRESH_KEY));
+      return REFRESH_CHOICES.some((choice) => choice.ms === stored) ? stored : 15_000;
+    } catch {
+      return 15_000;
+    }
   });
   return [ms, (next: number) => {
     setMs(next);
@@ -183,8 +225,9 @@ const RefreshContext = createContext<{
 
 export function RefreshProvider({ children }: { children: ReactNode }) {
   const [refreshMs, setRefreshMs] = useRefreshInterval();
+  const value = useMemo(() => ({ refreshMs, setRefreshMs }), [refreshMs, setRefreshMs]);
   return (
-    <RefreshContext.Provider value={{ refreshMs, setRefreshMs }}>
+    <RefreshContext.Provider value={value}>
       {children}
     </RefreshContext.Provider>
   );
@@ -201,7 +244,7 @@ export type KeyedLive<T, K extends string = string> = Live<T> & {
 
 export function useKeyedResource<T, K extends string>(
   key: K,
-  load: (key: K) => Promise<T>,
+  load: (key: K, signal?: AbortSignal) => Promise<T>,
   refreshMs = 0,
   enabled = true,
 ): KeyedLive<T, K> {
@@ -214,6 +257,7 @@ export function useKeyedResource<T, K extends string>(
   const [refreshing, setRefreshing] = useState(false);
   const cache = useRef(new Map<K, { data: T; refreshedAt: number }>());
   const generation = useRef(0);
+  const abort = useRef<AbortController | null>(null);
   const loadRef = useRef(load);
   loadRef.current = load;
 
@@ -235,13 +279,40 @@ export function useKeyedResource<T, K extends string>(
   useEffect(() => {
     if (!enabled) return undefined;
     let active = true;
+    let timer: number | undefined;
+    let failures = 0;
+
+    const schedule = () => {
+      if (!active || !refreshMs) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        if (!active) return;
+        if (document.hidden || navigator.onLine === false) {
+          schedule();
+          return;
+        }
+        run(key);
+      }, backoffDelay(refreshMs, failures));
+    };
+
     const run = (forKey: K) => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
       const id = ++generation.current;
+      abort.current?.abort();
+      const controller = new AbortController();
+      abort.current = controller;
       const cached = cache.current.get(forKey);
       if (cached) setRefreshing(true);
-      loadRef.current(forKey).then(
+      loadRef.current(forKey, controller.signal).then(
         (data) => {
-          if (!active || id !== generation.current) return;
+          if (!active) return;
+          failures = 0;
+          schedule();
+          if (id !== generation.current) return;
           cache.current.set(forKey, { data, refreshedAt: Date.now() });
           if (forKey !== key) return;
           setResource({ state: 'ready', data });
@@ -251,7 +322,11 @@ export function useKeyedResource<T, K extends string>(
           setRefreshing(false);
         },
         (error: unknown) => {
-          if (!active || id !== generation.current) return;
+          if (!active) return;
+          if (!isAbortError(error)) failures += 1;
+          schedule();
+          if (id !== generation.current) return;
+          if (isAbortError(error)) return;
           if (forKey !== key) return;
           const message = error instanceof Error ? error.message : '数据加载失败';
           setRefreshing(false);
@@ -264,64 +339,74 @@ export function useKeyedResource<T, K extends string>(
         },
       );
     };
+
     run(key);
+
     const onVisible = () => {
-      if (typeof document !== 'undefined' && !document.hidden) run(key);
+      if (document.hidden || !refreshMs) return;
+      const at = cache.current.get(key)?.refreshedAt ?? 0;
+      if (Date.now() - at < refreshMs / 2) return;
+      run(key);
+    };
+    const onOnline = () => {
+      if (!refreshMs || document.hidden) return;
+      run(key);
     };
     document.addEventListener('visibilitychange', onVisible);
-    let timer: ReturnType<typeof setInterval> | undefined;
-    if (refreshMs) {
-      timer = setInterval(() => {
-        if (typeof document !== 'undefined' && document.hidden) return;
-        run(key);
-      }, refreshMs);
-    }
+    window.addEventListener('online', onOnline);
+
     return () => {
       active = false;
       generation.current += 1;
+      abort.current?.abort();
+      abort.current = null;
       document.removeEventListener('visibilitychange', onVisible);
-      if (timer) clearInterval(timer);
+      window.removeEventListener('online', onOnline);
+      if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [key, refreshMs, enabled, tick]);
 
-  return {
-    ...resource,
-    // Keep the key's last snapshot visible while a manual refresh runs. Deleting
-    // it here used to blank the chart and, because no effect dependency changed,
-    // did not start another request at all.
-    reload: () => setTick((value) => value + 1),
-    reloadNow: async () => {
-      const id = ++generation.current;
-      const cached = cache.current.get(key);
-      if (cached) setRefreshing(true);
-      try {
-        const data = await loadRef.current(key);
-        if (id !== generation.current) throw new Error('已被更新的请求取代');
-        const at = Date.now();
-        cache.current.set(key, { data, refreshedAt: at });
-        setResource({ state: 'ready', data });
-        setSnapshotKey(key);
-        setRefreshedAt(at);
-        setStale(null);
-        setRefreshing(false);
-        return data;
-      } catch (error) {
-        // A key change or newer request owns the visible state now.
-        if (id !== generation.current) throw error;
-        const message = error instanceof Error ? error.message : '数据加载失败';
-        setRefreshing(false);
-        if (cache.current.has(key)) setStale(message);
-        else {
-          setSnapshotKey(null);
-          setResource({ state: 'error', message });
-        }
-        throw error;
+  // Keep the key's last snapshot visible while a manual refresh runs. Deleting
+  // it here used to blank the chart and, because no effect dependency changed,
+  // did not start another request at all.
+  const reload = useCallback(() => setTick((value) => value + 1), []);
+  const reloadNow = useCallback(async () => {
+    const id = ++generation.current;
+    const cached = cache.current.get(key);
+    if (cached) setRefreshing(true);
+    try {
+      const data = await loadRef.current(key);
+      if (id !== generation.current) throw new Error('已被更新的请求取代');
+      const at = Date.now();
+      cache.current.set(key, { data, refreshedAt: at });
+      setResource({ state: 'ready', data });
+      setSnapshotKey(key);
+      setRefreshedAt(at);
+      setStale(null);
+      setRefreshing(false);
+      return data;
+    } catch (error) {
+      // A key change or newer request owns the visible state now.
+      if (id !== generation.current) throw error;
+      const message = error instanceof Error ? error.message : '数据加载失败';
+      setRefreshing(false);
+      if (cache.current.has(key)) setStale(message);
+      else {
+        setSnapshotKey(null);
+        setResource({ state: 'error', message });
       }
-    },
+      throw error;
+    }
+  }, [key]);
+
+  return useMemo(() => ({
+    ...resource,
+    reload,
+    reloadNow,
     refreshedAt,
     stale,
     refreshing,
     requestedKey,
     snapshotKey,
-  };
+  }), [resource, reload, reloadNow, refreshedAt, stale, refreshing, requestedKey, snapshotKey]);
 }

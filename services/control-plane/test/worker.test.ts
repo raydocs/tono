@@ -769,14 +769,25 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       name: 'Stored Node',
       publicIp: '203.0.113.20',
       quality: 'poor',
-      securityCheck: 'IP quality body',
-      backtrace: '163 / 4837',
       block: {
         status: 'LIKELY_BLOCKED',
         asiaEdge: { success: 3, total: 3 },
       },
     });
     expect(live.quality.nodes[0].secret).toBeUndefined();
+    // The raw collector text bodies are stored but never shipped in the list
+    // payloads the console polls; the drawer fetches them per node instead.
+    expect(live.quality.nodes[0].securityCheck).toBeUndefined();
+    expect(live.quality.nodes[0].backtrace).toBeUndefined();
+    const qualityText = await operations('fleet-nodes/Stored%20Node/quality-text');
+    expect(qualityText.status).toBe(200);
+    expect(await qualityText.json()).toEqual({
+      securityCheck: 'IP quality body',
+      backtrace: '163 / 4837',
+    });
+    const unknownText = await operations('fleet-nodes/No%20Such%20Node/quality-text');
+    expect(unknownText.status).toBe(200);
+    expect(await unknownText.json()).toEqual({ securityCheck: null, backtrace: null });
     // The tally travels, so the console can say "1 of 3 databases" rather than
     // printing the word "attacker" as though it were settled.
     expect(live.quality.nodes[0].riskSignals).toEqual([
@@ -966,6 +977,55 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('keeps the stored live snapshot when a collector push parses to empty lists', async () => {
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const token = {
+      authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+      'content-type': 'application/json',
+    };
+    try {
+      // While nothing is stored yet an empty list is a legitimate answer.
+      const first = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({ report: { nodes: [] }, agents: [] }),
+      });
+      expect(first.status).toBe(200);
+      const firstBody = await first.json() as any;
+      expect(firstBody.reportIgnoredEmpty).toBeUndefined();
+      expect(firstBody.agentsIgnoredEmpty).toBeUndefined();
+
+      const seeded = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({
+          report: { nodes: [{ name: 'Kept Node', ok: true }] },
+          agents: { data: [{ name: 'Kept Node', cpu: 12 }] },
+        }),
+      });
+      expect(seeded.status).toBe(200);
+
+      // A Komari outage that answers with an empty list must not flip every
+      // node to "missing" under a fresh timestamp.
+      const emptied = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({ report: { nodes: [] }, agents: [] }),
+      });
+      expect(emptied.status).toBe(200);
+      const emptiedBody = await emptied.json() as any;
+      expect(emptiedBody.reportIgnoredEmpty).toBe(true);
+      expect(emptiedBody.agentsIgnoredEmpty).toBe(true);
+
+      const response = await operations('live');
+      const { live } = await response.json() as any;
+      expect(live.quality.nodes.map((n: any) => n.name)).toContain('Kept Node');
+      expect(live.agents.map((a: any) => a.name)).toContain('Kept Node');
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
+  });
+
   it('sends a path-style console link to the page it names instead of a 404', async () => {
     for (const [path, hash] of [
       ['/ops/monitor', '/ops/#/monitor'],
@@ -994,6 +1054,69 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       await waitOnExecutionContext(context);
       expect(response.status).not.toBe(302);
     }
+  });
+
+  it('stops cross-site ops writes before the origin header is stripped for the API worker', async () => {
+    const forwarded: Request[] = [];
+    const adminEnv = {
+      API: {
+        fetch: async (request: Request) => {
+          forwarded.push(request);
+          return Response.json({ ok: true });
+        },
+      },
+    } as unknown as Parameters<typeof adminWorker.fetch>[1];
+    const attempt = async (method: string, headers: Record<string, string>) => {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request('https://admin.afk.ccwu.cc/api/v1/ops/signup-allowlist', {
+          method,
+          headers,
+          ...(method === 'GET' ? {} : { body: '{"email":"csrf@example.com"}' }),
+        }),
+        adminEnv,
+        context,
+      );
+      await waitOnExecutionContext(context);
+      return response;
+    };
+
+    // The no-preflight vector: a cross-site form post carrying the Access
+    // cookie. Sends both the foreign Origin and sec-fetch-site: cross-site.
+    const formPost = await attempt('POST', {
+      origin: 'https://evil.example',
+      'sec-fetch-site': 'cross-site',
+      'content-type': 'text/plain',
+    });
+    expect(formPost.status).toBe(403);
+    expect((await formPost.json() as any).error.code).toBe('ORIGIN_NOT_ALLOWED');
+    expect(forwarded).toHaveLength(0);
+
+    // A write with no provenance at all is refused rather than assumed safe.
+    const anonymous = await attempt('DELETE', { 'content-type': 'application/json' });
+    expect(anonymous.status).toBe(403);
+    expect(forwarded).toHaveLength(0);
+
+    // The console's own writes carry sec-fetch-site: same-origin, or on older
+    // browsers only an Origin matching the admin host — both pass, and the
+    // Origin header is still stripped before the service binding.
+    const sameOrigin = await attempt('POST', {
+      'sec-fetch-site': 'same-origin',
+      'content-type': 'application/json',
+    });
+    expect(sameOrigin.status).toBe(200);
+    const ownOrigin = await attempt('POST', {
+      origin: 'https://admin.afk.ccwu.cc',
+      'content-type': 'application/json',
+    });
+    expect(ownOrigin.status).toBe(200);
+    expect(forwarded).toHaveLength(2);
+    expect(forwarded[1].headers.get('origin')).toBeNull();
+
+    // Reads are unaffected: a cross-site GET leaks no state and still forwards.
+    const read = await attempt('GET', { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' });
+    expect(read.status).toBe(200);
+    expect(forwarded).toHaveLength(3);
   });
 
   it('serves the node roster to the collector, and never an empty list by accident', async () => {
@@ -1349,12 +1472,135 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const users = await operations('users');
     expect(users.status).toBe(200);
-    const listed = (await users.json() as any).users.find((row: any) => row.id === account.user.id);
+    const usersBody = await users.json() as any;
+    const listed = usersBody.users.find((row: any) => row.id === account.user.id);
     expect(listed.homeBinding).toMatchObject({
       homeExitId: homeId,
       proxyName: 'Home Residential Ops',
       egressIpv4: '198.51.100.9',
     });
+    // The list no longer truncates silently: the caller is told how many
+    // customers exist and how to fetch the next page.
+    expect(usersBody.total).toBeGreaterThanOrEqual(usersBody.users.length);
+    expect(usersBody.hasMore).toBe(false);
+    expect(usersBody.nextCursor).toBeNull();
+
+    await createAccount('ops-family-second');
+    const firstPage = await operations('users?limit=1');
+    expect(firstPage.status).toBe(200);
+    const firstBody = await firstPage.json() as any;
+    expect(firstBody.users).toHaveLength(1);
+    expect(firstBody.hasMore).toBe(true);
+    expect(typeof firstBody.nextCursor).toBe('string');
+    const secondPage = await operations(`users?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor)}`);
+    expect(secondPage.status).toBe(200);
+    const secondBody = await secondPage.json() as any;
+    expect(secondBody.users).toHaveLength(1);
+    expect(secondBody.users[0].id).not.toBe(firstBody.users[0].id);
+
+    expect((await operations('users?limit=0')).status).toBe(400);
+    expect((await operations('users?cursor=broken')).status).toBe(400);
+  });
+
+  it('refuses a JSON body that does not declare the JSON media type', async () => {
+    // enctype=text/plain is the cross-site form post that never triggers a
+    // CORS preflight; requiring the media type makes such a write impossible.
+    const formShaped = await api('ops/signup-allowlist', {
+      method: 'POST',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'text/plain',
+      },
+      body: JSON.stringify({ email: 'csrf-target@example.com' }),
+    });
+    expect(formShaped.status).toBe(415);
+    expect((await formShaped.json() as any).error.code).toBe('UNSUPPORTED_MEDIA_TYPE');
+    const stillAbsent = await env.DB.prepare(
+      'SELECT 1 FROM signup_allowlist WHERE email = ?',
+    ).bind('csrf-target@example.com').first();
+    expect(stillAbsent).toBeNull();
+
+    // A charset suffix is still the JSON media type.
+    const withCharset = await api('ops/signup-allowlist', {
+      method: 'POST',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({ email: 'charset-ok@example.com' }),
+    });
+    expect(withCharset.status).toBe(201);
+  });
+
+  it('leaves an audit row for operator user edits and home bindings', async () => {
+    const account = await createAccount('audit-trail');
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const patched = await api(`ops/users/${account.user.id}`, {
+      method: 'PATCH',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        notes: '审计备注',
+        expiresAt: Math.floor(Date.now() / 1_000) + 86_400,
+      }),
+    });
+    expect(patched.status).toBe(200);
+    const patchAudit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'user.update' AND target_id = ?",
+    ).bind(account.user.id).first<any>();
+    expect(patchAudit).toMatchObject({
+      actor_email: ACCESS_ADMIN_EMAIL,
+      target_type: 'user',
+      // The names of the fields that changed, not a bare "updated".
+      summary: 'changed expiresAt, notes',
+    });
+
+    const home = await api('ops/home-exits', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        proxyName: 'Audit Home',
+        displayName: '审计家宽',
+        egressIpv4: '198.51.100.77',
+      }),
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+    const bound = await api(`ops/users/${account.user.id}/home-binding`, {
+      method: 'PUT',
+      headers: accessHeaders,
+      body: JSON.stringify({ homeExitId: homeId }),
+    });
+    expect(bound.status).toBe(201);
+    const bindAudit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'home.assign' AND target_id = ?",
+    ).bind(account.user.id).first<any>();
+    expect(bindAudit).toMatchObject({
+      actor_email: ACCESS_ADMIN_EMAIL,
+      target_type: 'user',
+    });
+    expect(String(bindAudit.summary)).toContain(account.email);
+
+    // The log endpoint answers filtered questions instead of only "newest 100".
+    const filtered = await operations(`audit?targetId=${account.user.id}&limit=1`);
+    expect(filtered.status).toBe(200);
+    const filteredBody = await filtered.json() as any;
+    expect(filteredBody.entries).toHaveLength(1);
+    expect(filteredBody.entries[0].targetId).toBe(account.user.id);
+    expect(filteredBody.hasMore).toBe(true);
+    const older = await operations(
+      `audit?targetId=${account.user.id}&before=${filteredBody.nextBefore + 1}`,
+    );
+    const olderBody = await older.json() as any;
+    expect(olderBody.entries.length).toBeGreaterThanOrEqual(1);
+    for (const entry of olderBody.entries) {
+      expect(entry.targetId).toBe(account.user.id);
+      expect(entry.at).toBeLessThan(filteredBody.nextBefore + 1);
+    }
+    expect((await operations('audit?limit=0')).status).toBe(400);
+    expect((await operations('audit?before=-5')).status).toBe(400);
   });
 
   it('serves the shared administrative resources identically through both front doors', async () => {
@@ -1444,7 +1690,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     })).status).toBe(401);
   });
 
-  it('serves strict redacted operations DTOs through GET-only queries', async () => {
+  it('keeps the phase-1 operations tables out of the API surface', async () => {
     const timestamp = 1_700_000_000;
     await env.DB.batch([
       env.DB.prepare(
@@ -1475,46 +1721,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const dashboard = await operations('dashboard');
     expect(dashboard.status).toBe(200);
     // Dashboard occupancy is the live fleet (catalog + quality + agents), not
-    // the unused operations_servers inventory this test still exercises below.
+    // the unused operations_servers inventory seeded above.
     expect((await dashboard.json() as any).dashboard.servers).toEqual({ total: 0, active: 0 });
 
-    const servers = await operations('servers');
-    expect(servers.status).toBe(200);
-    const serverPayload = await servers.json() as any;
-    expect(serverPayload.servers).toEqual([{
-      id: 'server-us-west',
-      displayName: 'US West',
-      regionCode: 'us-west',
-      provider: 'provider-a',
-      status: 'active',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      latestDeployment: {
-        releaseVersion: '2026.08.1', status: 'active', deployedAt: timestamp,
-      },
-    }]);
-
-    const nodes = await operations('nodes');
-    expect((await nodes.json() as any).nodes).toEqual([{
-      id: 'node-us-west-1',
-      serverId: 'server-us-west',
-      serverDisplayName: 'US West',
-      displayName: 'US West 1',
-      regionCode: 'us-west',
-      status: 'active',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }]);
-
-    const deployments = await operations('deployments');
-    const deploymentPayload = await deployments.json() as any;
-    expect(Object.keys(deploymentPayload.deployments[0]).sort()).toEqual([
-      'createdAt', 'deployedAt', 'environment', 'id', 'logicalNodeDisplayName', 'logicalNodeId',
-      'releaseVersion', 'serverDisplayName', 'serverId', 'status',
-    ]);
-    const serialized = JSON.stringify({ serverPayload, deploymentPayload });
-    for (const forbidden of ['uuid', 'endpoint', 'privateKey', 'ssh', 'token', 'authorization']) {
-      expect(serialized.toLowerCase()).not.toContain(forbidden.toLowerCase());
+    // The migration-0016 read endpoints are gone: nothing drove them (the
+    // dashboard hardcodes deployments) and the seeded rows above must stay
+    // unreachable rather than resurfacing as a forgotten API.
+    for (const retired of ['servers', 'nodes', 'deployments']) {
+      const response = await operations(retired);
+      expect(response.status).toBe(404);
     }
 
     const revisions = await operations('catalog-revisions');

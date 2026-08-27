@@ -1,5 +1,6 @@
-import { formatBytes, timestamp } from '../lib/format';
-import { accidentsOnly, dashboardKpis } from '../lib/incidents';
+import { useState } from 'react';
+import { formatBytes, timeAgo, timestamp } from '../lib/format';
+import { dashboardKpis } from '../lib/incidents';
 import { sortOpsNodes } from '../lib/ops-views';
 import { canDeclareHealthy } from '../lib/source-truth';
 import { useOpsRoute } from '../lib/route';
@@ -16,6 +17,7 @@ function choreGroups(chores: ReturnType<typeof useOpsWorld>['chores']) {
     || item.kind === 'catalog-lag'
     || item.kind === 'catalog-unreported'
     || item.kind === 'node-renew'
+    || item.kind === 'node-expired'
   ));
   const ops = chores.filter((item) => item.kind === 'home' || item.kind === 'claude');
   return { quota, ops };
@@ -25,6 +27,7 @@ export function Dashboard() {
   const world = useOpsWorld();
   const { openNode, openUser } = useOpsRoute();
   const privacy = usePrivacy();
+  const [auditExpanded, setAuditExpanded] = useState(false);
   const qualityAvailable = world.sources.quality.status === 'current' || world.sources.quality.status === 'stale';
   const activityAvailable = world.sources.activity.status === 'current' || world.sources.activity.status === 'stale';
   const usersAvailable = world.sources.users.status === 'current' || world.sources.users.status === 'stale';
@@ -39,12 +42,19 @@ export function Dashboard() {
     agentsAvailable: world.sources.agents.status === 'current' || world.sources.agents.status === 'stale',
     nowSec: world.nowSec,
   });
-  const accidents = accidentsOnly(world.incidents);
-  const accidentNodes = new Set(accidents.map((item) => item.node).filter((name): name is string => Boolean(name)));
+  const accidents = world.accidents;
+  // A customer-path accident names its node too, but that is not the machine's
+  // own problem; only node accidents take a machine out of the 问题节点 list.
+  const accidentNodes = new Set(
+    accidents.filter((item) => item.category === 'node').map((item) => item.node).filter((name): name is string => Boolean(name)),
+  );
   const problemNodes = sortOpsNodes(world.nodes)
     .filter((node) => (node.dot === 'bad' || node.dot === 'warn') && !accidentNodes.has(node.name))
     .slice(0, 6);
-  const pathUnmeasured = world.people.filter((person) => person.online && person.path.kind === 'unmeasured').length;
+  const pathUnmeasured = world.people.filter((person) => (
+    person.online && (person.path.kind === 'unmeasured' || person.path.kind === 'stale-sample')
+  )).length;
+  const nodesUnmeasured = world.nodes.filter((node) => node.qualityState !== 'reported').length;
   const onlinePeople = world.people.filter((person) => person.online).slice(0, 5);
   const occupancy = [...world.nodes]
     .filter((node) => node.occupancyState === 'known' && (node.occupancy ?? 0) > 0)
@@ -84,6 +94,7 @@ export function Dashboard() {
             key={kpi.id}
             className={`kpi${kpi.alert ? ' kpi-alert' : ''}`}
             href={kpi.href}
+            aria-label={`${kpi.label}：${kpi.value == null ? '不可判断' : kpi.value}${kpi.note ? `（${kpi.note}）` : ''}`}
           >
             <span className="kpi-label">{kpi.label}</span>
             <strong className="kpi-value">{kpi.value == null ? '—' : kpi.value}</strong>
@@ -128,10 +139,15 @@ export function Dashboard() {
               ))}
             </ul>
           </>
-        ) : healthy && pathUnmeasured === 0 ? (
+        ) : healthy && pathUnmeasured === 0 && nodesUnmeasured === 0 ? (
           <div className="attention-ok">节点和客户路径正常</div>
         ) : healthy ? (
-          <div className="attention-ok">没有被墙或失联。{pathUnmeasured} 个在线客户还没有路径采样，不能写成路径正常。</div>
+          <div className="attention-ok">
+            没有被墙或失联。
+            {nodesUnmeasured > 0 ? `${nodesUnmeasured} 台节点还没有质量采样，` : ''}
+            {pathUnmeasured > 0 ? `${pathUnmeasured} 个在线客户没有新鲜路径采样，` : ''}
+            不能写成全部正常。
+          </div>
         ) : (
           <Unavailable title="还有数据没查完" detail="不能在质量、探针、心跳或目录未 current 时写成正常。" />
         )}
@@ -153,7 +169,7 @@ export function Dashboard() {
           ) : (
             <div className="node-grid node-grid-compact dash-pad">
               {problemNodes.map((node) => (
-                <NodeCard key={node.name} node={node} density="compact" onOpen={() => openNode(node.name)} />
+                <NodeCard key={node.name} node={node} density="compact" onOpen={openNode} />
               ))}
             </div>
           )}
@@ -245,7 +261,7 @@ export function Dashboard() {
           <div className="card-header">
             <div>
               <h2>节点占用</h2>
-              <p>当前在用人数 Top</p>
+              <p>当前在用人数前 5</p>
             </div>
             <a className="btn btn-outline btn-sm" href="#/monitor">查看全部</a>
           </div>
@@ -271,7 +287,7 @@ export function Dashboard() {
           <div className="card-header">
             <div>
               <h2>客户本期用量</h2>
-              <p>累计 Top 5</p>
+              <p>累计前 5</p>
             </div>
             <a className="btn btn-outline btn-sm" href="#/traffic">查看全部</a>
           </div>
@@ -300,9 +316,9 @@ export function Dashboard() {
         <details className="monitor-secondary">
           <summary>最近操作</summary>
           <ul className="attention-list">
-            {world.audit.data.slice(0, 8).map((entry) => (
-              <li key={entry.id}>
-                <span className="muted">{timestamp(entry.at)}</span>
+            {(auditExpanded ? world.audit.data : world.audit.data.slice(0, 8)).map((entry) => (
+              <li key={entry.id} title={timestamp(entry.at)}>
+                <span className="muted">{timeAgo(entry.at)}</span>
                 {' · '}
                 {privacy.email(entry.actorEmail)}
                 {' · '}
@@ -310,6 +326,11 @@ export function Dashboard() {
               </li>
             ))}
           </ul>
+          {!auditExpanded && world.audit.data.length > 8 && (
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setAuditExpanded(true)}>
+              查看更多（共 {world.audit.data.length} 条）
+            </button>
+          )}
         </details>
       )}
     </div>

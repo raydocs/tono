@@ -20,32 +20,6 @@ export interface DashboardDto {
   };
 }
 
-export interface ServerDto {
-  id: string;
-  displayName: string;
-  regionCode: string;
-  provider: string | null;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-  latestDeployment: {
-    releaseVersion: string;
-    status: string;
-    deployedAt: number | null;
-  } | null;
-}
-
-export interface NodeDto {
-  id: string;
-  serverId: string;
-  serverDisplayName: string;
-  displayName: string;
-  regionCode: string;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface CatalogRevisionDto {
   revision: number;
   sha256: string;
@@ -328,6 +302,10 @@ export interface LiveQualityNodeDto {
     asiaEdge: LiveProbeDto | null;
     overseas: LiveProbeDto | null;
   } | null;
+}
+
+/** Raw collector text for one node, fetched on demand — too big for the list payloads. */
+export interface NodeQualityTextDto {
   securityCheck: string | null;
   backtrace: string | null;
 }
@@ -441,6 +419,35 @@ interface ErrorEnvelope {
   error?: { code?: string; message?: string };
 }
 
+/**
+ * The Cloudflare Access session ran out. This is not a data failure: every
+ * endpoint will now answer with a login page or a 401/403, so retrying and
+ * stale banners are both wrong — the only fix is reloading the page, which
+ * lets Access run its redirect dance again.
+ */
+export const SESSION_EXPIRED_MESSAGE = '登录已过期';
+
+export class SessionExpiredError extends Error {
+  constructor() {
+    super(SESSION_EXPIRED_MESSAGE);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/** The caller's signal plus our own timeout; either one cancels the fetch. */
+function requestSignal(external: AbortSignal | undefined): AbortSignal | undefined {
+  if (typeof AbortSignal === 'undefined' || typeof AbortSignal.timeout !== 'function') return external;
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  if (!external) return timeout;
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([external, timeout]) : external;
+}
+
 async function devFallback<T>(path: string, method: string, body?: string): Promise<T | undefined> {
   if (!import.meta.env.DEV) return undefined;
   const { matchDevOps } = await import('./dev/ops-fixture');
@@ -461,6 +468,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     response = await fetch(`/api/v1/ops/${path}`, {
       credentials: 'same-origin',
       ...init,
+      signal: requestSignal(init.signal ?? undefined),
       headers: {
         accept: 'application/json',
         ...(init.body ? { 'content-type': 'application/json' } : {}),
@@ -468,6 +476,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       },
     });
   } catch (error) {
+    // A superseded request must stay a plain abort so callers can drop it
+    // silently, and a hung Worker becomes a stated timeout instead of a
+    // spinner that never releases the refresh button.
+    if (isAbortError(error)) throw error;
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error('请求超时，稍后会自动重试');
+    }
     // A network-less `vite admin` can use the fixture. HTTP errors are handled
     // below so a real API's 409/503 is never replaced with synthetic success.
     const fake = await devFallback<T>(path, method, requestBody);
@@ -476,6 +491,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   const contentType = response.headers.get('content-type');
+  if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
   if (!response.ok) {
     if (import.meta.env.DEV && shouldUseDevFixtureResponse(response.status, contentType)) {
       const fake = await devFallback<T>(path, method, requestBody);
@@ -491,16 +507,23 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(message);
   }
   if (response.headers.get('content-length') === '0') return undefined as T;
-  if (import.meta.env.DEV && !contentType?.toLowerCase().includes('application/json')) {
-    // Some Vite history-fallback setups answer an unknown API path with the SPA
-    // HTML and status 200. Treat only that non-JSON success as a missing dev API.
-    const fake = await devFallback<T>(path, method, requestBody);
-    if (fake !== undefined) return fake;
+  if (!contentType?.toLowerCase().includes('application/json')) {
+    if (import.meta.env.DEV) {
+      // Some Vite history-fallback setups answer an unknown API path with the
+      // SPA HTML and status 200. Treat only that non-JSON success as a missing
+      // dev API.
+      const fake = await devFallback<T>(path, method, requestBody);
+      if (fake !== undefined) return fake;
+    } else {
+      // In production the only non-JSON 200 on this path is the Cloudflare
+      // Access login page swapped in for an expired session.
+      throw new SessionExpiredError();
+    }
   }
   return response.json() as Promise<T>;
 }
 
-const get = <T>(path: string) => request<T>(path, { method: 'GET' });
+const get = <T>(path: string, signal?: AbortSignal) => request<T>(path, { method: 'GET', signal });
 const post = <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 const put = <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 const patch = <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
@@ -595,11 +618,15 @@ export interface UsageHoursDto {
 }
 
 export const operationsApi = {
-  dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
-  live: async () => (await get<{ live: LiveDto }>('live')).live,
-  fleetNodes: async () => get<FleetDto>('fleet-nodes'),
+  dashboard: async (signal?: AbortSignal) => (await get<{ dashboard: DashboardDto }>('dashboard', signal)).dashboard,
+  live: async (signal?: AbortSignal) => (await get<{ live: LiveDto }>('live', signal)).live,
+  fleetNodes: async (signal?: AbortSignal) => get<FleetDto>('fleet-nodes', signal),
   fleetRetirePreview: async (name: string) => get<FleetRetirePreviewDto>(
     `fleet-nodes/${encodeURIComponent(name)}/retire-preview`,
+  ),
+  nodeQualityText: async (name: string, signal?: AbortSignal) => get<NodeQualityTextDto>(
+    `fleet-nodes/${encodeURIComponent(name)}/quality-text`,
+    signal,
   ),
   retireFleetNode: async (name: string, expectedRevision: number, confirmation: string, reason: string) => (
     post<FleetRetireResultDto>(`fleet-nodes/${encodeURIComponent(name)}/retire`, {
@@ -608,21 +635,19 @@ export const operationsApi = {
       reason,
     })
   ),
-  metrics: async (range = '24h', node?: string) => {
+  metrics: async (range = '24h', node?: string, signal?: AbortSignal) => {
     const query = new URLSearchParams({ range });
     if (node) query.set('node', node);
-    return (await get<{ metrics: MetricsDto }>(`metrics?${query}`)).metrics;
+    return (await get<{ metrics: MetricsDto }>(`metrics?${query}`, signal)).metrics;
   },
-  usageHours: async (range = '24h') => (
-    await get<{ usageHours: UsageHoursDto }>(`usage-hours?range=${encodeURIComponent(range)}`)
+  usageHours: async (range = '24h', signal?: AbortSignal) => (
+    await get<{ usageHours: UsageHoursDto }>(`usage-hours?range=${encodeURIComponent(range)}`, signal)
   ).usageHours,
-  activity: async () => (await get<{ activity: ActivityDto }>('activity')).activity,
-  servers: async () => (await get<{ servers: ServerDto[] }>('servers')).servers,
-  nodes: async () => (await get<{ nodes: NodeDto[] }>('nodes')).nodes,
+  activity: async (signal?: AbortSignal) => (await get<{ activity: ActivityDto }>('activity', signal)).activity,
   catalogRevisions: async () => (
     await get<{ revisions: CatalogRevisionDto[] }>('catalog-revisions')
   ).revisions,
-  users: async () => (await get<{ users: UserDto[] }>('users')).users,
+  users: async (signal?: AbortSignal) => (await get<{ users: UserDto[] }>('users', signal)).users,
   userDetail: async (userId: string) => get<UserDetailDto>(`users/${userId}/detail`),
   signupAllowlist: async () => (await get<{ entries: AllowlistEntry[] }>('signup-allowlist')).entries,
   addSignupEmail: async (email: string) => post<{ email: string; createdAt: number; created: boolean }>(
@@ -676,7 +701,7 @@ export const operationsApi = {
   }>) => (await patch<{ homeExit: HomeExitDto }>(`home-exits/${id}`, input)).homeExit,
   deleteHomeExit: async (id: string) => del<void>(`home-exits/${id}`),
   homeBindings: async () => (await get<{ bindings: HomeBindingDto[] }>('home-bindings')).bindings,
-  exitCatalog: async () => get<ExitCatalogDto>('exit-catalog'),
+  exitCatalog: async (signal?: AbortSignal) => get<ExitCatalogDto>('exit-catalog', signal),
   bindUserHome: async (userId: string, input: {
     homeExitId?: string;
     proxyName?: string;
@@ -753,7 +778,7 @@ export const operationsApi = {
       `product-accounts/${id}/replace`,
       { accountRef, notes },
     )),
-  nodeProfiles: async () => (await get<{ profiles: NodeProfileDto[] }>('node-profiles')).profiles,
+  nodeProfiles: async (signal?: AbortSignal) => (await get<{ profiles: NodeProfileDto[] }>('node-profiles', signal)).profiles,
   createNodeProfile: async (input: NodeProfileInput & { catalogName: string }) =>
     (await post<{ profile: NodeProfileDto }>('node-profiles', input)).profile,
   updateNodeProfile: async (id: string, input: NodeProfileInput) =>
@@ -763,7 +788,7 @@ export const operationsApi = {
     onlineWindowSeconds: number;
     affected: ActivityUserDto[];
   }>(`incidents/node/${encodeURIComponent(name)}`),
-  audit: async () => (await get<{
+  audit: async (signal?: AbortSignal) => (await get<{
     entries: Array<{
       id: string;
       at: number;
@@ -773,5 +798,5 @@ export const operationsApi = {
       targetId: string | null;
       summary: string;
     }>;
-  }>('audit')).entries,
+  }>('audit', signal)).entries,
 };

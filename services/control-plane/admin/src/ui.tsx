@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode, type SVGProps } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type RefObject, type SVGProps } from 'react';
 import { createPortal } from 'react-dom';
 import type { Live, Resource } from './hooks';
 import { dataHealthLines } from './lib/health';
@@ -241,6 +241,79 @@ export function Banner({ message, tone = 'info' }: { message: string | null; ton
   return <div className={`banner banner-${tone}`} role="status" aria-live={tone === 'error' ? 'assertive' : 'polite'}>{message}</div>;
 }
 
+/**
+ * The shared modal shell: mark everything behind as inert, freeze the page
+ * scroll, move focus in, cycle Tab inside the panel, and put everything back
+ * (including focus) on close. Escape stays per-dialog because the two dialogs
+ * disagree about when it may close them.
+ */
+function useModalShell({
+  open,
+  panel,
+  initialFocus,
+  behindSelectors,
+  capture = false,
+  onEscape,
+}: {
+  open: boolean;
+  panel: RefObject<HTMLElement | null>;
+  initialFocus: RefObject<HTMLElement | null>;
+  /** Tried in order; the first element found becomes inert. */
+  behindSelectors: readonly string[];
+  /** Listen in the capture phase, for a dialog stacked on another dialog. */
+  capture?: boolean;
+  onEscape: (event: KeyboardEvent) => void;
+}) {
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+  useEffect(() => {
+    if (!open) return undefined;
+    const previously = document.activeElement as HTMLElement | null;
+    let behind: HTMLElement | null = null;
+    for (const selector of behindSelectors) {
+      behind = document.querySelector<HTMLElement>(selector);
+      if (behind) break;
+    }
+    const previousInert = behind?.hasAttribute('inert') ?? false;
+    const previousOverflow = document.body.style.overflow;
+    behind?.setAttribute('inert', '');
+    document.body.style.overflow = 'hidden';
+    initialFocus.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onEscapeRef.current(event);
+        return;
+      }
+      if (event.key !== 'Tab' || !panel.current) return;
+      const focusable = [...panel.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((node) => !node.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey, capture);
+    return () => {
+      window.removeEventListener('keydown', onKey, capture);
+      if (behind && !previousInert) behind.removeAttribute('inert');
+      else if (behind && previousInert) behind.setAttribute('inert', '');
+      document.body.style.overflow = previousOverflow;
+      previously?.focus?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, capture]);
+}
+
+const DRAWER_BEHIND = ['.shell'] as const;
+const CONFIRM_BEHIND = ['[data-modal="drawer"]', '.shell'] as const;
+
 export function Drawer({
   title,
   subtitle,
@@ -259,45 +332,16 @@ export function Drawer({
   const closeBtn = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  useEffect(() => {
-    if (!open) return undefined;
-    const previously = document.activeElement as HTMLElement | null;
-    const shell = document.querySelector('.shell');
-    const previousInert = shell?.hasAttribute('inert') ?? false;
-    const previousOverflow = document.body.style.overflow;
-    shell?.setAttribute('inert', '');
-    document.body.style.overflow = 'hidden';
-    closeBtn.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (document.querySelector('[data-modal="confirm"]')) return;
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !panel.current) return;
-      const focusable = [...panel.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )].filter((node) => !node.hasAttribute('disabled'));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      if (shell && !previousInert) shell.removeAttribute('inert');
-      else if (shell && previousInert) shell.setAttribute('inert', '');
-      document.body.style.overflow = previousOverflow;
-      previously?.focus?.();
-    };
-  }, [open]);
+  useModalShell({
+    open,
+    panel,
+    initialFocus: closeBtn,
+    behindSelectors: DRAWER_BEHIND,
+    onEscape: () => {
+      if (document.querySelector('[data-modal="confirm"]')) return;
+      onCloseRef.current();
+    },
+  });
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
     <div className="drawer-root">
@@ -343,47 +387,18 @@ export function Confirm({
   const busyRef = useRef(busy);
   onCancelRef.current = onCancel;
   busyRef.current = busy;
-  useEffect(() => {
-    if (!open) return undefined;
-    const previously = document.activeElement as HTMLElement | null;
-    const behind = document.querySelector<HTMLElement>('[data-modal="drawer"]')
-      ?? document.querySelector<HTMLElement>('.shell');
-    const previousInert = behind?.hasAttribute('inert') ?? false;
-    const previousOverflow = document.body.style.overflow;
-    behind?.setAttribute('inert', '');
-    document.body.style.overflow = 'hidden';
-    confirmBtn.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (!busyRef.current) onCancelRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !panel.current) return;
-      const focusable = [...panel.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )].filter((node) => !node.hasAttribute('disabled'));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => {
-      window.removeEventListener('keydown', onKey, true);
-      if (behind && !previousInert) behind.removeAttribute('inert');
-      else if (behind && previousInert) behind.setAttribute('inert', '');
-      document.body.style.overflow = previousOverflow;
-      previously?.focus?.();
-    };
-  }, [open]);
+  useModalShell({
+    open,
+    panel,
+    initialFocus: confirmBtn,
+    behindSelectors: CONFIRM_BEHIND,
+    capture: true,
+    onEscape: (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!busyRef.current) onCancelRef.current();
+    },
+  });
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
     <div className="drawer-root" data-modal="confirm">

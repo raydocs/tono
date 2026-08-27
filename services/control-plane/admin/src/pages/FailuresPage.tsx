@@ -1,7 +1,7 @@
 import { operationsApi } from '../api';
 import { useResource } from '../hooks';
 import { timeAgo } from '../lib/format';
-import { HEARTBEAT_FRESH_SECONDS, sortIncidents, type OpsIncident } from '../lib/incidents';
+import { HEARTBEAT_FRESH_SECONDS, type OpsIncident } from '../lib/incidents';
 import { useOpsRoute } from '../lib/route';
 import { useOpsWorld } from '../ops-context';
 import { usePrivacy } from '../privacy';
@@ -12,7 +12,11 @@ import { PersonRow } from './users/PersonRow';
 
 function IncidentRow({ item, nowSec }: { item: OpsIncident; nowSec: number }) {
   const privacy = usePrivacy();
-  const fresh = item.measuredAtSec != null && nowSec - item.measuredAtSec <= HEARTBEAT_FRESH_SECONDS;
+  const { openNode, openUser } = useOpsRoute();
+  // Each source has its own honest freshness boundary: heartbeats every few
+  // minutes, quality scans every twelve hours.
+  const staleAfter = item.staleAfterSec ?? HEARTBEAT_FRESH_SECONDS;
+  const fresh = item.measuredAtSec != null && nowSec - item.measuredAtSec <= staleAfter;
   const title = item.userId ? privacy.email(item.title) : item.title;
   return (
     <article className={`incident incident-${item.severity === 'severe' ? 'error' : 'warn'}`}>
@@ -35,9 +39,17 @@ function IncidentRow({ item, nowSec }: { item: OpsIncident; nowSec: number }) {
           {item.node ? <span>{item.node}</span> : null}
         </div>
       </div>
-      <a className="btn btn-outline btn-sm" href={item.actionRoute}>
+      <button
+        type="button"
+        className="btn btn-outline btn-sm"
+        onClick={() => {
+          // Triage stays on this page: the drawer opens here, the filters stay.
+          if (item.category === 'customer-path' && item.userId) openUser(item.userId, { page: 'failures' });
+          else if (item.node) openNode(item.node, { page: 'failures' });
+        }}
+      >
         {item.category === 'customer-path' ? '打开客户' : '处理节点'}
-      </a>
+      </button>
     </article>
   );
 }
@@ -47,7 +59,8 @@ export function FailuresPage() {
   const { route, setRoute, closeDrawer, openUser } = useOpsRoute();
   const focus = route.focus;
   const homes = useResource(operationsApi.homeExits, [], 120_000, Boolean(route.user));
-  const board = sortIncidents(world.incidents.filter((item) => item.category === 'node' || item.category === 'customer-path'));
+  // world.incidents already arrives sorted.
+  const board = world.incidents.filter((item) => item.category === 'node' || item.category === 'customer-path');
   const pathOnly = focus === 'customer-path';
   const unmeasuredOnly = focus === 'unmeasured';
   const visible = pathOnly ? board.filter((item) => item.category === 'customer-path') : board;
@@ -60,8 +73,9 @@ export function FailuresPage() {
   const qualityPending = world.sources.quality.status === 'loading';
   const agentsPending = world.sources.agents.status === 'loading';
   const activityPending = world.sources.activity.status === 'loading';
-  const unmeasuredPeople = world.people.filter((person) => person.online && person.path.kind === 'unmeasured');
-  const pathUnmeasured = unmeasuredPeople.length;
+  const neverMeasured = world.people.filter((person) => person.online && person.path.kind === 'unmeasured');
+  const staleSampled = world.people.filter((person) => person.online && person.path.kind === 'stale-sample');
+  const pathUnmeasured = neverMeasured.length + staleSampled.length;
   const selectedNode = world.nodes.find((node) => node.name === route.node) ?? null;
   const selectedPerson = world.people.find((person) => person.userId === route.user) ?? null;
 
@@ -87,7 +101,7 @@ export function FailuresPage() {
           <div className="card-header">
             <div>
               <h2>路径未测</h2>
-              <p>在线但还没有出口/TCP 采样。缺测不是故障。</p>
+              <p>在线但没有新鲜的出口/TCP 采样。</p>
             </div>
           </div>
           <div className="card-body">
@@ -95,15 +109,32 @@ export function FailuresPage() {
               ? <Unavailable title="客户路径不可判断" detail={world.sources.activity.error ?? undefined} />
               : activityPending
                 ? <p className="muted">心跳还没查完。</p>
-                : unmeasuredPeople.length
-                  ? (
-                    <div className="person-list">
-                      {unmeasuredPeople.map((person) => (
-                        <PersonRow key={person.userId} person={person} onOpen={() => openUser(person.userId)} />
-                      ))}
-                    </div>
-                  )
-                  : <p className="muted">在线客户都有路径采样，或目前没有在线客户。</p>}
+                : pathUnmeasured === 0
+                  ? <p className="muted">在线客户都有新鲜的路径采样，或目前没有在线客户。</p>
+                  : (
+                    <>
+                      {neverMeasured.length > 0 && (
+                        <>
+                          <p className="muted">{neverMeasured.length} 位从来没有采样。缺测不是故障。</p>
+                          <div className="person-list">
+                            {neverMeasured.map((person) => (
+                              <PersonRow key={person.userId} person={person} onOpen={() => openUser(person.userId, { page: 'failures' })} />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {staleSampled.length > 0 && (
+                        <>
+                          <p className="muted">{staleSampled.length} 位上次采样已过保鲜。这不是缺测，也不能当成正常。</p>
+                          <div className="person-list">
+                            {staleSampled.map((person) => (
+                              <PersonRow key={person.userId} person={person} onOpen={() => openUser(person.userId, { page: 'failures' })} />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
           </div>
         </GlassCard>
       ) : (
@@ -164,8 +195,18 @@ export function FailuresPage() {
                     ? (
                       <p className="muted">
                         没有新鲜的客户路径事故。
-                        <a className="table-link" href="#/users?focus=unmeasured">{pathUnmeasured} 个在线客户还没有路径采样</a>
-                        ，缺测不是故障。
+                        {neverMeasured.length > 0 && (
+                          <>
+                            <a className="table-link" href="#/failures?focus=unmeasured">{neverMeasured.length} 个在线客户还没有路径采样</a>
+                            ，缺测不是故障。
+                          </>
+                        )}
+                        {staleSampled.length > 0 && (
+                          <>
+                            <a className="table-link" href="#/failures?focus=unmeasured">{staleSampled.length} 个在线客户上次采样已过保鲜</a>
+                            ，不能当成正常。
+                          </>
+                        )}
                       </p>
                     )
                     : <p className="muted">没有新鲜的客户路径事故。缺测不是故障。</p>
@@ -180,7 +221,7 @@ export function FailuresPage() {
           {activityFailed && <p>心跳源不可用，客户路径不可判断。</p>}
           {!qualityFailed && !activityFailed && (
             <p className="muted">
-              catalog-only 或没测的机器不是事故。
+              只在目录里、还没测过的机器不是事故。
               {world.nodes.some((node) => node.qualityState !== 'reported') ? ' 当前有质量未测或源不可用的节点，见服务器页「数据未知」。' : ''}
             </p>
           )}

@@ -85,7 +85,9 @@ export function hashWithoutDrawer(state: OpsHash): OpsHash {
 
 export function nextRouteForOpenUser(current: OpsHash, userId: string, extra: Partial<OpsHash> = {}): OpsHash {
   const page = extra.page ?? 'users';
-  const keepFocus = current.page === 'users' && page === 'users';
+  // Opening a drawer on the page the operator is already on keeps their
+  // filters; jumping to another page starts from that page's default view.
+  const keepFocus = current.page === page;
   return {
     page,
     focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),
@@ -98,7 +100,7 @@ export function nextRouteForOpenUser(current: OpsHash, userId: string, extra: Pa
 
 export function nextRouteForOpenNode(current: OpsHash, name: string, extra: Partial<OpsHash> = {}): OpsHash {
   const page = extra.page ?? 'monitor';
-  const keepFocus = current.page === 'monitor' && page === 'monitor';
+  const keepFocus = current.page === page;
   return {
     page,
     focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),

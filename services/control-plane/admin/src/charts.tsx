@@ -1,7 +1,7 @@
 import type { MetricsDto } from './api';
 import { sparkPath } from './lib/spark';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { formatBytes, formatDuration, timestamp } from './lib/format';
 import type { RatePoint } from './lib/traffic';
 
@@ -81,7 +81,60 @@ export function RateChart({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const usable = points.filter((point) => point.inBps != null || point.outBps != null);
+  // All geometry is derived from the samples and the measured width alone;
+  // without the memo every hover tick rebuilt both paths and the gap scan.
+  const geometry = useMemo(() => {
+    const usable = points.filter((point) => point.inBps != null || point.outBps != null);
+    const values = points.flatMap((point) => [point.inBps, point.outBps]).filter((v): v is number => v != null);
+    const yMax = niceMax(Math.max(...values, 0));
+    const t0 = points[0]?.t ?? 0;
+    const t1 = points[points.length - 1]?.t ?? 0;
+    const span = t1 - t0 || 1;
+    const plotW = RATE_W - PAD_L - PAD_R;
+    const plotH = RATE_H - PAD_T - PAD_B;
+    const x = (t: number) => PAD_L + ((t - t0) / span) * plotW;
+    const y = (v: number) => PAD_T + plotH - (v / yMax) * plotH;
+
+    const seriesPath = (pick: (p: RatePoint) => number | null): string => {
+      const parts: string[] = [];
+      let drawing = false;
+      for (const point of points) {
+        const value = pick(point);
+        if (value == null || !Number.isFinite(value)) { drawing = false; continue; }
+        parts.push(`${drawing ? 'L' : 'M'}${x(point.t).toFixed(1)},${y(value).toFixed(1)}`);
+        drawing = true;
+      }
+      return parts.length >= 2 ? parts.join(' ') : '';
+    };
+
+    // Buckets where neither direction produced a legal delta: shade them so the
+    // hole is visible rather than being read as a quiet period.
+    const gaps: Array<{ from: number; to: number }> = [];
+    for (let i = 0; i < points.length; i += 1) {
+      if (points[i].inBps != null || points[i].outBps != null) continue;
+      const from = i === 0 ? points[0].t : points[i - 1].t;
+      const to = i === points.length - 1 ? points[i].t : points[i + 1].t;
+      const last = gaps[gaps.length - 1];
+      if (last && from <= last.to) last.to = to;
+      else gaps.push({ from, to });
+    }
+
+    return {
+      usable,
+      yMax,
+      t0,
+      span,
+      plotW,
+      plotH,
+      x,
+      y,
+      inPath: seriesPath((p) => p.inBps),
+      outPath: seriesPath((p) => p.outBps),
+      gaps,
+    };
+  }, [points, RATE_W]);
+  const { usable, yMax, t0, span, plotW, plotH, x, y, inPath, outPath, gaps } = geometry;
+
   if (usable.length < 2) {
     return (
       <figure className="rate-chart">
@@ -94,32 +147,6 @@ export function RateChart({
       </figure>
     );
   }
-
-  const values = points.flatMap((point) => [point.inBps, point.outBps]).filter((v): v is number => v != null);
-  const rawMax = Math.max(...values, 0);
-  const yMax = niceMax(rawMax);
-  const t0 = points[0].t;
-  const t1 = points[points.length - 1].t;
-  const span = t1 - t0 || 1;
-  const plotW = RATE_W - PAD_L - PAD_R;
-  const plotH = RATE_H - PAD_T - PAD_B;
-  const x = (t: number) => PAD_L + ((t - t0) / span) * plotW;
-  const y = (v: number) => PAD_T + plotH - (v / yMax) * plotH;
-
-  function seriesPath(pick: (p: RatePoint) => number | null): string {
-    const parts: string[] = [];
-    let drawing = false;
-    for (const point of points) {
-      const value = pick(point);
-      if (value == null || !Number.isFinite(value)) { drawing = false; continue; }
-      parts.push(`${drawing ? 'L' : 'M'}${x(point.t).toFixed(1)},${y(value).toFixed(1)}`);
-      drawing = true;
-    }
-    return parts.length >= 2 ? parts.join(' ') : '';
-  }
-
-  const inPath = seriesPath((p) => p.inBps);
-  const outPath = seriesPath((p) => p.outBps);
   const wide = span > 3 * 24 * 3600;
   const short = spanSeconds != null && span < spanSeconds * 0.5;
   const xLabel = wide ? dayLabel : clockLabel;
@@ -154,18 +181,6 @@ export function RateChart({
       point.outBps != null ? `上行 ${formatBytes(point.outBps)}/s` : '上行缺口',
       point.expected != null ? `下行 ${point.contributingIn ?? 0}/${point.expected} 台 · 上行 ${point.contributingOut ?? 0}/${point.expected} 台` : '',
     ].filter(Boolean).join(' · ');
-  }
-
-  // Buckets where neither direction produced a legal delta: shade them so the
-  // hole is visible rather than being read as a quiet period.
-  const gaps: Array<{ from: number; to: number }> = [];
-  for (let i = 0; i < points.length; i += 1) {
-    if (points[i].inBps != null || points[i].outBps != null) continue;
-    const from = i === 0 ? points[0].t : points[i - 1].t;
-    const to = i === points.length - 1 ? points[i].t : points[i + 1].t;
-    const last = gaps[gaps.length - 1];
-    if (last && from <= last.to) last.to = to;
-    else gaps.push({ from, to });
   }
 
   return (

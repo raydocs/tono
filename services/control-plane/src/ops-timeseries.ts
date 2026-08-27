@@ -11,6 +11,10 @@ const QUALITY_SAMPLE_RETENTION_SECONDS = 90 * 86400;
 const NAME_LIMIT = 120;
 const MAX_SERIES_POINTS = 2_000;
 const MAX_FUTURE_SKEW_SECONDS = 5 * 60;
+// How much source history one retention pass may roll up. After a cron outage
+// the backlog is days of rows, and a single INSERT..SELECT over all of it is
+// the statement D1 kills; successive runs drain the rest incrementally.
+const ROLLUP_MAX_WINDOW_SECONDS = 6 * 3600;
 
 export type AgentSample = {
   name: string;
@@ -40,19 +44,30 @@ export type QualitySample = {
   blockStatus: string | null;
 };
 
-export type MetricPoint = {
-  t: number;
-  cpu: number | null;
-  memUsed: number | null;
-  memTotal: number | null;
-  diskUsed: number | null;
-  diskTotal: number | null;
-  load1: number | null;
-  netIn: number | null;
-  netOut: number | null;
-  swapUsed: number | null;
-  tcpConnections: number | null;
-};
+// One SELECTable column pair per exposed point field, so a caller can ask for
+// just the series it will draw instead of every column for every node.
+const METRIC_FIELDS = {
+  cpu: { sample: 'cpu', rollup: 'cpu_avg' },
+  memUsed: { sample: 'mem_used', rollup: 'mem_used_avg' },
+  memTotal: { sample: 'mem_total', rollup: 'mem_total' },
+  diskUsed: { sample: 'disk_used', rollup: 'disk_used_avg' },
+  diskTotal: { sample: 'disk_total', rollup: 'disk_total' },
+  load1: { sample: 'load1', rollup: 'load1_avg' },
+  netIn: { sample: 'net_in', rollup: 'net_in_last' },
+  netOut: { sample: 'net_out', rollup: 'net_out_last' },
+  swapUsed: { sample: 'swap_used', rollup: 'swap_used_avg' },
+  tcpConnections: { sample: 'tcp_connections', rollup: 'tcp_avg' },
+} as const;
+
+export type MetricField = keyof typeof METRIC_FIELDS;
+
+export const METRIC_FIELD_NAMES = Object.keys(METRIC_FIELDS) as MetricField[];
+
+export function isMetricField(value: string): value is MetricField {
+  return Object.prototype.hasOwnProperty.call(METRIC_FIELDS, value);
+}
+
+export type MetricPoint = { t: number } & { [K in MetricField]?: number | null };
 
 function finite(value: unknown): number | null {
   if (value === null || value === undefined) return null;
@@ -223,6 +238,17 @@ async function rollupResolution(
   // five minutes at a time, so without this the boundary lands inside a bucket
   // on essentially every pass.
   const cutoff = Math.floor(olderThan / toResolution) * toResolution;
+  const oldestRow = await db.prepare(
+    source === 'samples'
+      ? 'SELECT MIN(observed_at) AS oldest FROM operations_agent_samples WHERE observed_at < ?'
+      : 'SELECT MIN(bucket_at) AS oldest FROM operations_agent_rollups WHERE resolution_seconds = ? AND bucket_at < ?',
+  ).bind(...(source === 'samples' ? [cutoff] : [fromResolution, cutoff])).first<Row>();
+  const oldest = finite(oldestRow?.oldest);
+  if (oldest === null) return;
+  const bound = Math.min(
+    cutoff,
+    Math.floor((oldest + ROLLUP_MAX_WINDOW_SECONDS) / toResolution) * toResolution,
+  );
   // net_in/net_out are cumulative counters, not gauges. A node restart can make
   // them smaller inside a bucket, so MAX(value) is not the bucket's closing
   // counter. Rank by time and carry the final observation into the next tier.
@@ -297,10 +323,10 @@ async function rollupResolution(
     ).bind(
       toResolution, toResolution,
       toResolution, toResolution,
-      cutoff, toResolution,
+      bound, toResolution,
     ).run();
     await db.prepare('DELETE FROM operations_agent_samples WHERE observed_at < ?')
-      .bind(cutoff).run();
+      .bind(bound).run();
     return;
   }
   await db.prepare(
@@ -390,11 +416,11 @@ async function rollupResolution(
   ).bind(
     toResolution, toResolution,
     toResolution, toResolution,
-    fromResolution, cutoff, toResolution,
+    fromResolution, bound, toResolution,
   ).run();
   await db.prepare(
     'DELETE FROM operations_agent_rollups WHERE resolution_seconds = ? AND bucket_at < ?',
-  ).bind(fromResolution, cutoff).run();
+  ).bind(fromResolution, bound).run();
 }
 
 export async function retainOperationsTimeseries(db: D1Database, nowUnix: number): Promise<void> {
@@ -432,7 +458,7 @@ function thin<T extends { t: number }>(points: T[], limit: number): T[] {
 
 export async function queryAgentMetrics(
   db: D1Database,
-  input: { range: string | null; node: string | null; nowUnix: number },
+  input: { range: string | null; node: string | null; nowUnix: number; fields?: string[] | null },
 ): Promise<{
   from: number;
   to: number;
@@ -443,14 +469,25 @@ export async function queryAgentMetrics(
   const to = input.nowUnix;
   const from = to - span;
   const node = input.node ? nodeName(input.node) : null;
+  const requested: MetricField[] = input.fields?.length
+    ? input.fields.filter(isMetricField)
+    : METRIC_FIELD_NAMES;
   let resolutionSeconds = 60;
   if (span > ROLLUP_5M_RETENTION_SECONDS) resolutionSeconds = 3600;
   else if (span > SAMPLE_RETENTION_SECONDS) resolutionSeconds = 300;
 
   const series: Record<string, MetricPoint[]> = {};
-  const push = (name: string, point: MetricPoint) => {
+  const push = (name: string, row: Row) => {
+    const point: MetricPoint = { t: Number(row.t) };
+    for (const field of requested) point[field] = finite(row[field]);
     (series[name] ??= []).push(point);
   };
+
+  // Thin in SQL when a tier holds more buckets than the point budget: every Nth
+  // bucket by the time column, so the rows a chart would never draw are never
+  // materialized. Below the budget the stride is 1 and nothing changes.
+  const stride = (resolution: number, since: number) =>
+    Math.max(1, Math.ceil((Math.floor((to - since) / resolution) + 1) / MAX_SERIES_POINTS));
 
   // Each tier only holds what has aged into it: hour buckets exist only for
   // data older than seven days, five-minute buckets only for data older than
@@ -459,67 +496,39 @@ export async function queryAgentMetrics(
   // ago, which is the part of the chart anyone actually looks at. So the tiers
   // are stitched, coarsest first, and the finer points overwrite on collision.
   const readSamples = async (since: number) => {
+    const columns = requested.map((field) => `${METRIC_FIELDS[field].sample} AS ${field}`).join(', ');
+    const step = stride(60, since);
     const rows = await db.prepare(
-      node
-        ? `SELECT node_name, observed_at AS t, cpu, mem_used, mem_total, disk_used, disk_total,
-                  load1, net_in, net_out, swap_used, tcp_connections
-           FROM operations_agent_samples
-           WHERE observed_at >= ? AND observed_at <= ? AND node_name = ?
-           ORDER BY observed_at ASC`
-        : `SELECT node_name, observed_at AS t, cpu, mem_used, mem_total, disk_used, disk_total,
-                  load1, net_in, net_out, swap_used, tcp_connections
-           FROM operations_agent_samples
-           WHERE observed_at >= ? AND observed_at <= ?
-           ORDER BY observed_at ASC`,
-    ).bind(...(node ? [since, to, node] : [since, to])).all<Row>();
-    for (const row of rows.results) {
-      push(String(row.node_name), {
-        t: Number(row.t),
-        cpu: finite(row.cpu),
-        memUsed: finite(row.mem_used),
-        memTotal: finite(row.mem_total),
-        diskUsed: finite(row.disk_used),
-        diskTotal: finite(row.disk_total),
-        load1: finite(row.load1),
-        netIn: finite(row.net_in),
-        netOut: finite(row.net_out),
-        swapUsed: finite(row.swap_used),
-        tcpConnections: finite(row.tcp_connections),
-      });
-    }
+      `SELECT node_name, observed_at AS t, ${columns}
+       FROM operations_agent_samples
+       WHERE observed_at >= ? AND observed_at <= ?
+         ${step > 1 ? 'AND (observed_at / CAST(? AS INTEGER)) % CAST(? AS INTEGER) = 0' : ''}
+         ${node ? 'AND node_name = ?' : ''}
+       ORDER BY observed_at ASC`,
+    ).bind(...[
+      since, to,
+      ...(step > 1 ? [60, step] : []),
+      ...(node ? [node] : []),
+    ]).all<Row>();
+    for (const row of rows.results) push(String(row.node_name), row);
   };
 
   const readRollups = async (resolution: number, since: number) => {
+    const columns = requested.map((field) => `${METRIC_FIELDS[field].rollup} AS ${field}`).join(', ');
+    const step = stride(resolution, since);
     const rows = await db.prepare(
-      node
-        ? `SELECT node_name, bucket_at AS t, cpu_avg, mem_used_avg, mem_total, disk_used_avg,
-                  disk_total, load1_avg, net_in_last, net_out_last, swap_used_avg, tcp_avg
-           FROM operations_agent_rollups
-           WHERE resolution_seconds = ? AND bucket_at >= ? AND bucket_at <= ? AND node_name = ?
-           ORDER BY bucket_at ASC`
-        : `SELECT node_name, bucket_at AS t, cpu_avg, mem_used_avg, mem_total, disk_used_avg,
-                  disk_total, load1_avg, net_in_last, net_out_last, swap_used_avg, tcp_avg
-           FROM operations_agent_rollups
-           WHERE resolution_seconds = ? AND bucket_at >= ? AND bucket_at <= ?
-           ORDER BY bucket_at ASC`,
-    ).bind(...(node
-      ? [resolution, since, to, node]
-      : [resolution, since, to])).all<Row>();
-    for (const row of rows.results) {
-      push(String(row.node_name), {
-        t: Number(row.t),
-        cpu: finite(row.cpu_avg),
-        memUsed: finite(row.mem_used_avg),
-        memTotal: finite(row.mem_total),
-        diskUsed: finite(row.disk_used_avg),
-        diskTotal: finite(row.disk_total),
-        load1: finite(row.load1_avg),
-        netIn: finite(row.net_in_last),
-        netOut: finite(row.net_out_last),
-        swapUsed: finite(row.swap_used_avg),
-        tcpConnections: finite(row.tcp_avg),
-      });
-    }
+      `SELECT node_name, bucket_at AS t, ${columns}
+       FROM operations_agent_rollups
+       WHERE resolution_seconds = ? AND bucket_at >= ? AND bucket_at <= ?
+         ${step > 1 ? 'AND (bucket_at / CAST(? AS INTEGER)) % CAST(? AS INTEGER) = 0' : ''}
+         ${node ? 'AND node_name = ?' : ''}
+       ORDER BY bucket_at ASC`,
+    ).bind(...[
+      resolution, since, to,
+      ...(step > 1 ? [resolution, step] : []),
+      ...(node ? [node] : []),
+    ]).all<Row>();
+    for (const row of rows.results) push(String(row.node_name), row);
   };
 
   try {
@@ -554,6 +563,7 @@ export async function queryHomeProbeHistory(
   db: D1Database,
   homeExitId: string,
   nowUnix: number,
+  range?: string | null,
 ): Promise<{
   from: number;
   to: number;
@@ -562,23 +572,39 @@ export async function queryHomeProbeHistory(
   uptimeRatio: number | null;
   samples: Array<{ t: number; status: string }>;
 }> {
-  const from = nowUnix - HOME_PROBE_RETENTION_SECONDS;
+  const span = range == null ? HOME_PROBE_RETENTION_SECONDS : parseRangeSeconds(range);
+  const from = nowUnix - span;
+  // The ratio is counted over every retained probe, but the timeline is capped
+  // at the same point budget as the metric series: ninety days of probes is
+  // tens of thousands of rows for a sparkline that can show two thousand.
+  const bucketSeconds = Math.max(1, Math.ceil(span / MAX_SERIES_POINTS));
+  let alive = 0;
+  let dead = 0;
   let samples: Array<{ t: number; status: string }> = [];
   try {
+    const counts = await db.prepare(
+      `SELECT
+         SUM(CASE WHEN status = 'alive' THEN 1 ELSE 0 END) AS alive,
+         SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END) AS dead
+       FROM operations_home_probe_samples
+       WHERE home_exit_id = ? AND probed_at >= ?`,
+    ).bind(homeExitId, from).first<Row>();
+    alive = finite(counts?.alive) ?? 0;
+    dead = finite(counts?.dead) ?? 0;
     const rows = await db.prepare(
-      `SELECT probed_at, status FROM operations_home_probe_samples
+      `SELECT MAX(probed_at) AS t, status
+       FROM operations_home_probe_samples
        WHERE home_exit_id = ? AND probed_at >= ?
-       ORDER BY probed_at ASC`,
-    ).bind(homeExitId, from).all<Row>();
+       GROUP BY probed_at / CAST(? AS INTEGER)
+       ORDER BY t ASC`,
+    ).bind(homeExitId, from, bucketSeconds).all<Row>();
     samples = rows.results.map((row) => ({
-      t: Number(row.probed_at),
+      t: Number(row.t),
       status: String(row.status),
     }));
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  const alive = samples.filter((sample) => sample.status === 'alive').length;
-  const dead = samples.filter((sample) => sample.status === 'dead').length;
   const total = alive + dead;
   return {
     from,
@@ -586,6 +612,6 @@ export async function queryHomeProbeHistory(
     alive,
     dead,
     uptimeRatio: total === 0 ? null : alive / total,
-    samples,
+    samples: thin(samples, MAX_SERIES_POINTS),
   };
 }

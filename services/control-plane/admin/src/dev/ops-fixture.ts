@@ -241,6 +241,38 @@ function metricsFixture(range: string, clock: number, onlyNode?: string | null, 
   return { from, to: clock, resolutionSeconds, series };
 }
 
+/**
+ * Hourly usage rollups in the same spirit as `metricsFixture`: a diurnal fleet
+ * curve with one missing bucket (a rollup that never ran must render as a gap,
+ * not as a zero), and a few customers whose totals differ enough to rank.
+ */
+function usageHoursFixture(range: string, clock: number) {
+  const shape = RANGE_SHAPES[range] ?? RANGE_SHAPES['24h'];
+  const resolutionSeconds = 3600;
+  const buckets = Math.floor(shape.windowSeconds / resolutionSeconds);
+  const from = clock - shape.windowSeconds;
+  const point = (i: number, seed: number, scale: number) => {
+    const t = from + (i + 1) * resolutionSeconds;
+    const phase = ((t % 86_400) / 86_400) * Math.PI * 2;
+    return { t, bytes: Math.round(scale * (1.2 + Math.sin(phase - 1.1)) * (0.7 + wobble(seed * 13 + i) * 0.6)) };
+  };
+  const hole = Math.floor(buckets * 0.45);
+  const fleet = Array.from({ length: buckets }, (_, i) => (
+    i === hole
+      ? { t: from + (i + 1) * resolutionSeconds, bytes: null }
+      : point(i, 1, 9 * 1024 ** 3)
+  ));
+  const users = [
+    { userId: 'u-fast', seed: 2, scale: 3.2 * 1024 ** 3 },
+    { userId: 'u-slow', seed: 3, scale: 1.4 * 1024 ** 3 },
+    { userId: 'u-blocked', seed: 4, scale: 0.5 * 1024 ** 3 },
+  ].map(({ userId, seed, scale }) => ({
+    userId,
+    points: Array.from({ length: buckets }, (_, i) => point(i, seed, scale)),
+  }));
+  return { from, to: clock, resolutionSeconds, fleet, users };
+}
+
 /** A catalog big enough that the diff view and the textarea have to cope. */
 function denseYaml(): string {
   const rules = Array.from({ length: 120 }, (_, i) =>
@@ -536,6 +568,18 @@ export function matchDevOps(
   if (base === 'fleet-nodes') {
     return { nodes: [], sources: { catalog: { state: 'ready', updatedAt: clock } } };
   }
+  if (base.startsWith('fleet-nodes/') && base.endsWith('/quality-text')) {
+    const name = decodeURIComponent(base.slice('fleet-nodes/'.length, -'/quality-text'.length));
+    // One node with both texts, one with neither, so the drawer fold shows a
+    // real payload and the stated absence.
+    if (name === 'Catalog Only') return { securityCheck: null, backtrace: null };
+    return {
+      securityCheck: name.includes('Sakura')
+        ? `${name}\nSPAMHAUS: listed (2/17)\nabuser: no (0/17)\n`
+        : `${name}\n17 databases checked, none listed\n`,
+      backtrace: `traceroute from ${name}\n 1  203.0.113.1  1.2 ms\n 2  59.43.187.0  38.6 ms  [CN2]\n 3  202.97.94.150  41.9 ms\n`,
+    };
+  }
   if (base === 'device-actions') {
     return { actions: extraActions };
   }
@@ -587,15 +631,8 @@ export function matchDevOps(
     return { metrics: metricsFixture(query.get('range') ?? '24h', clock, query.get('node'), dense) };
   }
   if (base === 'usage-hours') {
-    return {
-      usageHours: {
-        from: clock - 86400,
-        to: clock,
-        resolutionSeconds: 3600,
-        fleet: [],
-        users: [],
-      },
-    };
+    const query = new URLSearchParams(path.split('?')[1] ?? '');
+    return { usageHours: usageHoursFixture(query.get('range') ?? '24h', clock) };
   }
   if (base === 'signup-allowlist') return { entries: [{ email: 'new@example.com', createdAt: clock }] };
   if (base === 'home-exits') {
@@ -627,7 +664,24 @@ export function matchDevOps(
       updatedAt: clock,
     };
   }
-  if (base === 'audit') return { entries: [] };
-  if (base.startsWith('product-accounts')) return { accounts: [] };
+  if (base === 'audit') {
+    return {
+      entries: [
+        { id: 'au1', at: clock - 420, actorEmail: 'ops@example.com', action: 'home.assign', targetType: 'user', targetId: 'u-slow', summary: 'assigned home for slow@example.com' },
+        { id: 'au2', at: clock - 3_600, actorEmail: 'ops@example.com', action: 'device.action', targetType: 'device', targetId: 'd1', summary: 'queued diagnostic_snapshot' },
+        { id: 'au3', at: clock - 26_000, actorEmail: 'ops@example.com', action: 'user.close', targetType: 'user', targetId: 'u-old', summary: 'closed old@example.com' },
+        { id: 'au4', at: clock - 2 * 86_400, actorEmail: 'boss@example.com', action: 'catalog.publish', targetType: 'catalog', targetId: null, summary: 'r39 → r40' },
+      ],
+    };
+  }
+  if (base.startsWith('product-accounts')) {
+    const status = new URLSearchParams(path.split('?')[1] ?? '').get('status');
+    const accounts = [
+      { id: 'pa-fast', userId: 'u-fast', email: 'fast@example.com', product: 'claude', accountRef: 'c1', status: 'assigned', openedAt: clock - 12 * 86_400, closedAt: null, closeReason: null, createdAt: clock - 12 * 86_400, updatedAt: clock - 86_400 },
+      { id: 'pa-pool', userId: null, product: 'claude', accountRef: 'pool-7', status: 'pooled', openedAt: null, closedAt: null, closeReason: null, notes: '备用', createdAt: clock - 30 * 86_400, updatedAt: clock - 30 * 86_400 },
+      { id: 'pa-banned', userId: 'u-old', email: 'old@example.com', product: 'claude', accountRef: 'c9', status: 'banned', openedAt: clock - 60 * 86_400, closedAt: clock - 3 * 86_400, closeReason: 'banned', createdAt: clock - 60 * 86_400, updatedAt: clock - 3 * 86_400 },
+    ];
+    return { accounts: status ? accounts.filter((account) => account.status === status) : accounts };
+  }
   return undefined;
 }

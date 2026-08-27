@@ -1,6 +1,15 @@
+import { memo } from 'react';
 import { CarrierMini } from './carriers';
 import { formatBytes, formatDuration } from './lib/format';
-import { carrierLossLine, mainlandLabel, nodeAttentionLabel, type OpsNodeView } from './lib/ops-views';
+import {
+  agentLabel,
+  carrierLossLine,
+  catalogLabel,
+  mainlandLabel,
+  nodeAttentionLabel,
+  occupancyLabel,
+  type OpsNodeView,
+} from './lib/ops-views';
 import { usePrivacy } from './privacy';
 
 function pct(used: number | null | undefined, total: number | null | undefined): number | null {
@@ -25,24 +34,6 @@ function Bar({ label, value, detail }: { label: string; value: number | null; de
   );
 }
 
-function occupancyText(node: OpsNodeView): string {
-  if (node.occupancyState !== 'known') return '占用不可判断';
-  return `${node.occupancy ?? 0} 人在用`;
-}
-
-function catalogText(node: OpsNodeView): string {
-  if (node.catalogState === 'known-listed') return '在售';
-  if (node.catalogState === 'known-unlisted') return '不在目录';
-  return '目录未知';
-}
-
-function agentText(node: OpsNodeView): string {
-  if (node.agentState === 'unavailable') return '探针源不可用';
-  if (node.agentState === 'unreported') return '没装探针';
-  if (node.agentState === 'stale') return '探针过期';
-  return node.agent?.os ?? '';
-}
-
 /** Why this machine is in front of you, in one line, without repeating the pill. */
 function reasonText(node: OpsNodeView): string {
   const parts: string[] = [];
@@ -50,14 +41,14 @@ function reasonText(node: OpsNodeView): string {
   const loss = carrierLossLine(node);
   if (loss) parts.push(loss);
   else {
-    parts.push(catalogText(node), occupancyText(node));
-    if (node.agentState !== 'reported') parts.push(agentText(node));
+    parts.push(catalogLabel(node), occupancyLabel(node));
+    if (node.agentState !== 'reported') parts.push(agentLabel(node));
   }
-  if (loss) parts.push(occupancyText(node));
+  if (loss) parts.push(occupancyLabel(node));
   return parts.filter(Boolean).join(' · ');
 }
 
-export function NodeCard({
+export const NodeCard = memo(function NodeCard({
   node,
   density = 'full',
   selected = false,
@@ -66,7 +57,8 @@ export function NodeCard({
   node: OpsNodeView;
   density?: 'full' | 'compact';
   selected?: boolean;
-  onOpen: () => void;
+  /** Called with the node name so parents can pass one stable handler to every card. */
+  onOpen: (name: string) => void;
 }) {
   const privacy = usePrivacy();
   const agent = node.agent;
@@ -93,18 +85,18 @@ export function NodeCard({
       data-selected={selected ? 'true' : 'false'}
       tabIndex={0}
       role="button"
-      onClick={onOpen}
+      onClick={() => onOpen(node.name)}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          onOpen();
+          onOpen(node.name);
         }
       }}
     >
       <div className="nc-top">
         <div className="nc-title">
           <strong title={node.name}>{node.name}</strong>
-          <small title={subtitle || undefined}>{subtitle || (noProbe ? agentText(node) : '\u00a0')}</small>
+          <small title={subtitle || undefined}>{subtitle || (noProbe ? agentLabel(node) : '\u00a0')}</small>
         </div>
         <span className="nc-state">
           <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />
@@ -116,14 +108,14 @@ export function NodeCard({
         <>
           <p className="nc-reason" title={reasonText(node)}>{reasonText(node)}</p>
           {noProbe ? (
-            <p className="nc-facts nc-facts-gap"><b>{agentText(node)}</b><span>没有 CPU / 内存读数</span></p>
+            <p className="nc-facts nc-facts-gap"><b>{agentLabel(node)}</b><span>没有 CPU / 内存读数</span></p>
           ) : (
             <div className="nc-metrics">
-              <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentText(node)} />
+              <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentLabel(node)} />
               <Bar
                 label="内存"
                 value={mem}
-                detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentText(node)}
+                detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentLabel(node)}
               />
             </div>
           )}
@@ -137,9 +129,9 @@ export function NodeCard({
           {/* Two fixed fact lines rather than one wrapping one, so cards in a
               row keep the same internal rhythm. */}
           <div className="nc-facts">
-            <span><b>{catalogText(node)}</b></span>
-            <span>{occupancyText(node)}</span>
-            <span>{agent?.uptime != null ? `运行 ${formatDuration(agent.uptime)}` : agentText(node)}</span>
+            <span><b>{catalogLabel(node)}</b></span>
+            <span>{occupancyLabel(node)}</span>
+            <span>{agent?.uptime != null ? `运行 ${formatDuration(agent.uptime)}` : agentLabel(node)}</span>
           </div>
           <div className="nc-facts nc-facts-bill">
             <span>{price ? privacy.money(price) : '价格未填'}</span>
@@ -149,23 +141,23 @@ export function NodeCard({
 
           {noProbe ? (
             <div className="nc-noprobe">
-              <strong>{agentText(node)}</strong>
+              <strong>{agentLabel(node)}</strong>
               <span>CPU / 内存 / 硬盘 / 三网 均无读数</span>
               <span>{trafficQuota == null ? '本期流量未设额度' : node.trafficRemain == null ? '本期用量未建立基线' : `本期已用 ${formatBytes(trafficUsed ?? 0)} / ${formatBytes(trafficQuota)}`}</span>
             </div>
           ) : (
             <>
               <div className="nc-metrics">
-                <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentText(node)} />
+                <Bar label="CPU" value={cpu} detail={agent?.load1 != null ? `load ${agent.load1.toFixed(2)}` : agentLabel(node)} />
                 <Bar
                   label="内存"
                   value={mem}
-                  detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentText(node)}
+                  detail={agent?.memUsed != null && agent.memTotal ? `${formatBytes(agent.memUsed)} / ${formatBytes(agent.memTotal)}` : agentLabel(node)}
                 />
                 <Bar
                   label="硬盘"
                   value={disk}
-                  detail={agent?.diskUsed != null && agent.diskTotal ? `${formatBytes(agent.diskUsed)} / ${formatBytes(agent.diskTotal)}` : agentText(node)}
+                  detail={agent?.diskUsed != null && agent.diskTotal ? `${formatBytes(agent.diskUsed)} / ${formatBytes(agent.diskTotal)}` : agentLabel(node)}
                 />
                 <Bar
                   label="本期流量"
@@ -214,4 +206,4 @@ export function NodeCard({
       )}
     </article>
   );
-}
+});

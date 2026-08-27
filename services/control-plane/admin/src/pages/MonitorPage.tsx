@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   operationsApi,
-  type FleetNodeDto,
   type FleetSourceDto,
   type LiveAgentDto,
 } from '../api';
 import { AgentTrends } from '../charts';
 import { CarrierLegend } from '../carriers';
-import { gibibytes, unixDate } from '../lib/fields';
+import { gibibytes, unixFromLocalDate } from '../lib/fields';
 import { formatBytes, formatDuration } from '../lib/format';
-import { formatOpsHash } from '../lib/hash';
+import { formatOpsHash, nextRouteForOpenNode, parseOpsHash } from '../lib/hash';
 import { machineSignals } from '../lib/machine';
 import {
+  agentLabel,
+  catalogLabel,
   isMonitorFocus,
   nodeMatchesFocus,
   nodeSearchHaystack,
+  occupancyLabel,
   sortOpsNodes,
   nodeAttentionLabel,
   type OpsNodeView,
@@ -40,19 +42,20 @@ const FILTERS = [
 ];
 
 function FleetQueue({
-  nodes,
   views,
+  nowSec,
   catalogSource,
 }: {
-  nodes: FleetNodeDto[];
   views: OpsNodeView[];
+  nowSec: number;
   catalogSource?: FleetSourceDto;
 }) {
   const { openNode } = useOpsRoute();
-  const viewBy = new Map(views.map((node) => [node.name, node]));
-  const needs = [...nodes]
-    .filter((node) => node.needsAttention)
-    .sort((a, b) => (viewBy.get(b.name)?.occupancy ?? -1) - (viewBy.get(a.name)?.occupancy ?? -1)
+  // Same verdict as the 需处理 chip; the queue and the chip counting different
+  // machines would send an operator hunting for a row that is not there.
+  const needs = views
+    .filter((node) => nodeMatchesFocus(node, 'needs', nowSec))
+    .sort((a, b) => (b.occupancy ?? -1) - (a.occupancy ?? -1)
       || a.name.localeCompare(b.name, 'zh'));
 
   if (needs.length === 0) {
@@ -64,33 +67,26 @@ function FleetQueue({
       {catalogSource && catalogSource.state !== 'ready' && (
         <Banner tone="error" message={`目录状态未知：${catalogSource.message || '目录源当前不可读'}。`} />
       )}
-      {needs.map((node) => {
-        const view = viewBy.get(node.name);
-        const occupancy = view
-          ? (view.occupancyState === 'known' ? `${view.occupancy ?? 0} 人` : '占用不可判断')
-          : '—';
-        return (
-          <article className="fleet-row fleet-row-alert" key={node.name}>
-            <div className="fleet-identity">
-              <strong>{node.name}</strong>
-              <small>{view ? (view.catalogState === 'known-listed' ? '在售' : view.catalogState === 'known-unlisted' ? '不在目录' : '目录未知') : '—'}</small>
-            </div>
-            <div className="fleet-impact">
-              <strong>{occupancy}</strong>
-              <small>{view?.blockLabel}</small>
-            </div>
-            <div className="row-actions">
-              <button className="btn btn-outline btn-sm" type="button" onClick={() => openNode(node.name)}>打开处理</button>
-            </div>
-          </article>
-        );
-      })}
+      {needs.map((node) => (
+        <article className="fleet-row fleet-row-alert" key={node.name}>
+          <div className="fleet-identity">
+            <strong>{node.name}</strong>
+            <small>{catalogLabel(node)}</small>
+          </div>
+          <div className="fleet-impact">
+            <strong>{occupancyLabel(node)}</strong>
+            <small>{node.blockLabel}</small>
+          </div>
+          <div className="row-actions">
+            <button className="btn btn-outline btn-sm" type="button" onClick={() => openNode(node.name)}>打开处理</button>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }
 
-function MachinePressure({ nodes }: { nodes: OpsNodeView[] }) {
-  const nowMs = Date.now();
+function MachinePressure({ nodes, nowMs }: { nodes: OpsNodeView[]; nowMs: number }) {
   const rows = nodes
     .filter((node) => node.agent)
     .map((node) => ({ node, agent: node.agent as LiveAgentDto, ...machineSignals(node.agent as LiveAgentDto, nowMs) }))
@@ -105,8 +101,8 @@ function MachinePressure({ nodes }: { nodes: OpsNodeView[] }) {
       <table>
         <thead>
           <tr>
-            <th>节点</th><th>CPU</th><th>内存</th><th>磁盘</th>
-            <th>负载 1/5/15</th><th>TCP</th><th>运行</th><th>信号</th>
+            <th scope="col">节点</th><th scope="col">CPU</th><th scope="col">内存</th><th scope="col">磁盘</th>
+            <th scope="col">负载 1/5/15</th><th scope="col">TCP</th><th scope="col">运行</th><th scope="col">信号</th>
           </tr>
         </thead>
         <tbody>
@@ -136,6 +132,8 @@ function MachinePressure({ nodes }: { nodes: OpsNodeView[] }) {
   );
 }
 
+type TableSort = { key: 'remain' | 'renew'; dir: 'asc' | 'desc' };
+
 function NodeTable({
   nodes,
   selected,
@@ -146,35 +144,80 @@ function NodeTable({
   onOpen: (name: string) => void;
 }) {
   const privacy = usePrivacy();
+  const [sort, setSort] = useState<TableSort | null>(null);
+  const rows = useMemo(() => {
+    if (!sort) return nodes;
+    const value = (node: OpsNodeView) => (sort.key === 'remain' ? node.trafficRemain : node.billing.renewsAt);
+    // Unfilled values sink to the bottom in either direction.
+    return [...nodes].sort((a, b) => {
+      const av = value(a);
+      const bv = value(b);
+      if (av == null && bv == null) return a.name.localeCompare(b.name, 'zh');
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return sort.dir === 'asc' ? av - bv : bv - av;
+    });
+  }, [nodes, sort]);
+  const sortableTh = (key: TableSort['key'], label: string) => (
+    <th
+      scope="col"
+      aria-sort={sort?.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+    >
+      <button
+        type="button"
+        className="th-sort"
+        onClick={() => setSort((current) => (
+          current?.key === key && current.dir === 'asc' ? { key, dir: 'desc' } : { key, dir: 'asc' }
+        ))}
+      >
+        {label}
+        <span className="th-sort-mark" aria-hidden>{sort?.key === key ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    </th>
+  );
   return (
     <div className="table-wrap monitor-table-wrap monitor-wide">
       <table className="monitor-table">
         <thead>
-          <tr><th>节点</th><th>状态</th><th>探针</th><th>占用</th><th>余量</th><th>续费</th><th>目录</th></tr>
+          <tr>
+            <th scope="col">节点</th>
+            <th scope="col">状态</th>
+            <th scope="col">探针</th>
+            <th scope="col">占用</th>
+            {sortableTh('remain', '余量')}
+            {sortableTh('renew', '续费')}
+            <th scope="col">目录</th>
+          </tr>
         </thead>
         <tbody>
-          {nodes.map((node) => (
+          {rows.map((node) => (
             <tr
               key={node.name}
               className={selected === node.name ? 'open' : undefined}
               onClick={() => onOpen(node.name)}
             >
               <td>
-                <strong>{node.name}</strong>
+                <button
+                  type="button"
+                  className="table-row-open"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpen(node.name);
+                  }}
+                >
+                  <strong>{node.name}</strong>
+                </button>
                 <small className="mono">{privacy.ip(node.quality?.publicIp || node.quality?.host || node.profile?.publicIp)}</small>
               </td>
               <td>{nodeAttentionLabel(node)}</td>
               <td>
-                {node.agentState === 'unavailable' ? '探针源不可用'
-                  : node.agentState === 'unreported' ? '没装探针'
-                    : node.agentState === 'stale' ? '探针过期'
-                      : '已上报'}
+                {agentLabel(node)}
                 {node.agent?.cpu != null && <small className="muted">CPU {Math.round(node.agent.cpu)}%</small>}
               </td>
               <td className="mono">{node.occupancyState === 'known' ? node.occupancy : '—'}</td>
               <td className="mono">{node.trafficRemain == null ? '—' : formatBytes(node.trafficRemain)}</td>
               <td className="muted">{node.billing.renewsAt ? new Date(node.billing.renewsAt * 1000).toLocaleDateString('zh-CN') : '—'}</td>
-              <td>{node.catalogState === 'known-listed' ? '在售' : node.catalogState === 'known-unlisted' ? '不在目录' : '未知'}</td>
+              <td>{catalogLabel(node)}</td>
             </tr>
           ))}
         </tbody>
@@ -197,7 +240,7 @@ function BillingCreate({ onSaved }: { onSaved: () => void }) {
         event.preventDefault();
         if (!newName.trim()) return;
         const trafficQuotaBytes = gibibytes(newQuota);
-        const renewsAt = unixDate(newRenew);
+        const renewsAt = unixFromLocalDate(newRenew);
         if (trafficQuotaBytes === 'invalid' || renewsAt === 'invalid') {
           setNewError('套餐或续费日期格式不对，没保存。');
           return;
@@ -233,19 +276,32 @@ function BillingCreate({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+const MONITOR_VIEW_KEY = 'tono-ops-monitor-view';
+
+function storedMonitorView(): 'cards' | 'table' {
+  try {
+    return localStorage.getItem(MONITOR_VIEW_KEY) === 'table' ? 'table' : 'cards';
+  } catch {
+    return 'cards';
+  }
+}
+
 export function MonitorPage() {
   const world = useOpsWorld();
   const privacy = usePrivacy();
-  const { route, setRoute, openNode, closeDrawer } = useOpsRoute();
-  const [view, setView] = useState<'cards' | 'table'>('cards');
+  const { route, setRoute, closeDrawer } = useOpsRoute();
+  const [view, setView] = useState<'cards' | 'table'>(storedMonitorView);
+  const [openPanels, setOpenPanels] = useState({ fleet: false, pressure: false, trends: false });
   const [query, setQuery] = useState(route.q ?? '');
   useEffect(() => { setQuery(route.q ?? ''); }, [route.q]);
   useEffect(() => {
     // A persisted search can contain an IP. Entering screenshot/privacy mode
-    // must remove it from the browser URL as well as obscuring the input.
-    if (privacy.privacy && route.q) {
-      const next = formatOpsHash({ ...route, page: 'monitor', q: null });
-      history.replaceState(null, '', next);
+    // must remove it from the browser URL as well as obscuring the input. Read
+    // the hash itself rather than `route`, which can lag a replaceState.
+    if (!privacy.privacy) return;
+    const current = parseOpsHash(window.location.hash);
+    if (current.q) {
+      history.replaceState(null, '', formatOpsHash({ ...current, page: 'monitor', q: null }));
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     }
   }, [privacy.privacy, route]);
@@ -263,15 +319,41 @@ export function MonitorPage() {
     return sortOpsNodes(filtered);
   }, [world.nodes, focus, query, nowSec]);
 
+  const focusCounts = useMemo(() => {
+    const counts = new Map<string, number>(FILTERS.map((item) => [item.id, 0]));
+    for (const node of world.nodes) {
+      for (const item of FILTERS) {
+        if (item.id === '' || nodeMatchesFocus(node, item.id, nowSec)) {
+          counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
+        }
+      }
+    }
+    return counts;
+  }, [world.nodes, nowSec]);
+
+  function switchView(next: 'cards' | 'table') {
+    setView(next);
+    try { localStorage.setItem(MONITOR_VIEW_KEY, next); } catch { /* private mode */ }
+  }
+
   function onSearch(value: string) {
     setQuery(value);
     const next = formatOpsHash({
       ...route,
       page: 'monitor',
-      q: privacy.privacy ? null : value.trim() || null,
+      q: privacy.privacy ? null : value || null,
     });
-    if (window.location.hash !== next) history.replaceState(null, '', next);
+    if (window.location.hash !== next) {
+      history.replaceState(null, '', next);
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    }
   }
+
+  const toggleNode = useCallback((name: string) => {
+    setRoute((current) => (current.node === name
+      ? { ...current, node: null, user: null }
+      : nextRouteForOpenNode(current, name)));
+  }, [setRoute]);
 
   const selected = world.nodes.find((node) => node.name === route.node) ?? null;
   const loading = world.nodes.length === 0 && (world.live.state === 'loading' || world.catalog.state === 'loading');
@@ -303,22 +385,17 @@ export function MonitorPage() {
           value={query}
           onChange={(event) => onSearch(event.target.value)}
         />
-        <button type="button" className={`btn btn-sm ${view === 'cards' ? '' : 'btn-outline'}`} onClick={() => setView('cards')}>卡片</button>
-        <button type="button" className={`btn btn-sm view-toggle-table ${view === 'table' ? '' : 'btn-outline'}`} onClick={() => setView('table')}>表格</button>
+        <button type="button" className={`btn btn-sm ${view === 'cards' ? '' : 'btn-outline'}`} onClick={() => switchView('cards')}>卡片</button>
+        <button type="button" className={`btn btn-sm view-toggle-table ${view === 'table' ? '' : 'btn-outline'}`} onClick={() => switchView('table')}>表格</button>
         <button type="button" className="btn btn-outline btn-sm" onClick={() => { world.live.reload(); world.activity.reload(); world.profiles.reload(); }}>刷新</button>
       </div>
       <FilterChips
         value={focus ?? ''}
-        options={FILTERS.map((item) => ({
-          ...item,
-          count: item.id === ''
-            ? world.nodes.length
-            : world.nodes.filter((node) => nodeMatchesFocus(node, item.id, nowSec)).length,
-        }))}
+        options={FILTERS.map((item) => ({ ...item, count: focusCounts.get(item.id) ?? 0 }))}
         onChange={(id) => setRoute((current) => ({ ...current, page: 'monitor', focus: id || null }))}
       />
       <div className="count-line">
-        <span>{visible.length} / {world.nodes.length} 台 · 卡片和表格同一份全集</span>
+        <span aria-live="polite">{visible.length} / {world.nodes.length} 台 · 卡片和表格同一份全集</span>
         <CarrierLegend />
       </div>
 
@@ -333,25 +410,24 @@ export function MonitorPage() {
             detail={`全集里有 ${world.nodes.length} 台。换个筛选或清空搜索再看。`}
           />
         </GlassCard>
+      ) : view === 'cards' ? (
+        <div className="node-grid">
+          {visible.map((node) => (
+            <NodeCard
+              key={node.name}
+              node={node}
+              density="full"
+              selected={route.node === node.name}
+              onOpen={toggleNode}
+            />
+          ))}
+        </div>
       ) : (
-        <>
-          <div className="node-grid">
-            {visible.map((node) => (
-              <NodeCard
-                key={node.name}
-                node={node}
-                density="full"
-                selected={route.node === node.name}
-                onOpen={() => (route.node === node.name ? closeDrawer() : openNode(node.name))}
-              />
-            ))}
-          </div>
-          <NodeTable
-            nodes={visible}
-            selected={route.node}
-            onOpen={(name) => (route.node === name ? closeDrawer() : openNode(name))}
-          />
-        </>
+        <NodeTable
+          nodes={visible}
+          selected={route.node}
+          onOpen={toggleNode}
+        />
       )}
 
       <NodeDrawer
@@ -365,23 +441,25 @@ export function MonitorPage() {
       />
 
       <div className="monitor-secondary">
-        <details>
+        <details onToggle={(event) => { const open = event.currentTarget.open; setOpenPanels((panels) => ({ ...panels, fleet: open })); }}>
           <summary>机队处理队列</summary>
-          {world.fleet.state === 'ready'
-            ? <FleetQueue nodes={world.fleet.data.nodes} views={world.nodes} catalogSource={world.fleet.data.sources.catalog} />
-            : world.fleet.state === 'error'
-              ? <Unavailable title="机队队列没加载上来" detail={world.fleet.message} />
-              : <Skeleton label="机队" />}
+          {openPanels.fleet && (
+            <FleetQueue
+              views={world.nodes}
+              nowSec={nowSec}
+              catalogSource={world.fleet.state === 'ready' ? world.fleet.data.sources.catalog : undefined}
+            />
+          )}
         </details>
-        <details>
+        <details onToggle={(event) => { const open = event.currentTarget.open; setOpenPanels((panels) => ({ ...panels, pressure: open })); }}>
           <summary>机器负载表</summary>
-          <MachinePressure nodes={world.nodes} />
+          {openPanels.pressure && <MachinePressure nodes={world.nodes} nowMs={nowSec * 1000} />}
         </details>
-        <details>
+        <details onToggle={(event) => { const open = event.currentTarget.open; setOpenPanels((panels) => ({ ...panels, trends: open })); }}>
           <summary>全机队 24h 趋势</summary>
-          {world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready'
+          {openPanels.trends && (world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready'
             ? <AgentTrends metrics={world.metrics.data} />
-            : <p className="muted">24h 趋势还没绑定到当前快照。</p>}
+            : <p className="muted">24h 趋势还没绑定到当前快照。</p>)}
         </details>
         <details>
           <summary>补账单资料</summary>
