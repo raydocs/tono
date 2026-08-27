@@ -1038,6 +1038,7 @@ export interface TranslationResources {
         encryptedDnsHint: string
         errorRetry: string
         errors: {
+          bfeNotRunning: string
           coreMismatch: string
           coreUnpinned: string
           dnsPortBusy: string
@@ -1048,7 +1049,9 @@ export interface TranslationResources {
           releaseReconciling: string
           sendDiagnostics: string
           serviceBusy: string
+          serviceNotRunning: string
           serviceTooOld: string
+          wfpEngineWedged: string
         }
         errorSwitchServer: string
         info: {
@@ -1271,6 +1274,14 @@ export interface TranslationResources {
         cloudGroup: string
         empty: string
         selected: string
+        title: string
+      }
+      servicePrereq: {
+        bfe: string
+        generic: string
+        repair: string
+        repairFailed: string
+        repairing: string
         title: string
       }
       settings: {

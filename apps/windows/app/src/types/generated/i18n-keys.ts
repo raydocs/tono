@@ -707,6 +707,9 @@ export const translationKeys = [
   'tono.dashboard.killSwitchError',
   'tono.dashboard.killSwitchErrorNote',
   'tono.dashboard.errors.serviceBusy',
+  'tono.dashboard.errors.serviceNotRunning',
+  'tono.dashboard.errors.bfeNotRunning',
+  'tono.dashboard.errors.wfpEngineWedged',
   'tono.dashboard.errors.releaseReconciling',
   'tono.dashboard.errors.serviceTooOld',
   'tono.dashboard.errors.nodeUnreachable',
@@ -911,6 +914,12 @@ export const translationKeys = [
   'tono.cities.osaka',
   'tono.startup.stateInitRetrying',
   'tono.startup.stateInitFailed',
+  'tono.servicePrereq.title',
+  'tono.servicePrereq.bfe',
+  'tono.servicePrereq.generic',
+  'tono.servicePrereq.repair',
+  'tono.servicePrereq.repairing',
+  'tono.servicePrereq.repairFailed',
 ] as const
 
 export type TranslationKey = (typeof translationKeys)[number]

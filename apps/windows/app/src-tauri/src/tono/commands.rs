@@ -381,6 +381,29 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
 }
 
 /// Start email sign-in (`POST auth/email/start`, §1/§2).
+/// Read-only prerequisite check, safe to call before and without connecting.
+///
+/// The App used to have no way to say why nothing worked when TonoService was not running; this
+/// lets the UI name the cause — usually BFE having been switched off — instead of showing
+/// "protected, not connected" with every field unknown.
+/// Run the established elevated install/repair entry to get the Service running again.
+///
+/// This is the same path a connect takes when it finds the Service stopped, exposed so the shell
+/// can offer it before the user has tried to connect and been told nothing useful. The installer
+/// it runs also restores BFE, which is the dependency that most often blocks the start, so one
+/// authorisation covers both.
+#[tauri::command]
+pub async fn tono_repair_service() -> Result<(), String> {
+    crate::core::service::tono_service_ready_or_repair()
+        .await
+        .map_err(|error| super::connection::map_service_ready_error(&error))
+}
+
+#[tauri::command]
+pub fn tono_service_prerequisites() -> crate::core::service::ServicePrerequisites {
+    crate::core::service::service_prerequisites()
+}
+
 #[tauri::command]
 pub async fn tono_sign_in_start(
     state: tauri::State<'_, Arc<TonoState>>,

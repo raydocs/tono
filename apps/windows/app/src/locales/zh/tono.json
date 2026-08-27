@@ -454,5 +454,13 @@
   "startup": {
     "stateInitRetrying": "打不开数据文件夹，正在重试。多半是磁盘满了，或用户配置还没就绪。",
     "stateInitFailed": "打不开数据文件夹，无法启动（{{error}}）。请腾出磁盘空间后重启。若已没网，管理员运行 tono-service.exe --emergency-disarm 解除保护。"
+  },
+  "servicePrereq": {
+    "title": "Tono 服务没有运行",
+    "bfe": "Windows 的基础筛选引擎（BFE）被关掉了，Tono 服务依赖它才能启动。点「修复」会请求管理员权限，把两者都启动。",
+    "generic": "Tono 服务没有启动，现在无法连接。点「修复」会请求管理员权限重新启动它。",
+    "repair": "修复",
+    "repairing": "正在修复…",
+    "repairFailed": "修复没成功。请用管理员身份的 PowerShell 运行 sc.exe start BFE，再运行 sc.exe start TonoService。"
   }
 }

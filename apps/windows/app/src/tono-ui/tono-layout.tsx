@@ -29,6 +29,7 @@ import { MeshBackground } from './MeshBackground'
 import { TONO_FONT_STACK, tonoText } from './theme'
 import { TonoSidebar } from './TonoSidebar'
 import { ProtectedOfflineBanner } from './ProtectedOfflineBanner'
+import { ServicePrereqBanner } from './ServicePrereqBanner'
 import { TonoToastProvider } from './TonoToast'
 
 import './design-tokens.css'
@@ -160,6 +161,7 @@ const TonoLayout = () => {
                   flexDirection: isTrayRoute ? undefined : 'column',
                 }}
               >
+                {!isTrayRoute && <ServicePrereqBanner />}
                 {!isLoginRoute && !isTrayRoute && <ProtectedOfflineBanner />}
                 <div style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}>
                   <BaseErrorBoundary>

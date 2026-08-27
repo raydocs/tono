@@ -328,6 +328,19 @@ export const tonoTestAvailableServers = () =>
 export const tonoCancelServerTests = () =>
   call<void>('tono_cancel_server_tests')
 
+export interface TonoServicePrerequisites {
+  serviceRunning: boolean
+  serviceRegistered: boolean
+  bfeRunning: boolean
+}
+
+/// Read-only and unelevated, so the shell can call it before the user does anything.
+export const tonoServicePrerequisites = () =>
+  call<TonoServicePrerequisites>('tono_service_prerequisites')
+
+/// Runs the elevated install/repair path, which also restores BFE.
+export const tonoRepairService = () => call<void>('tono_repair_service')
+
 export const tonoConnect = () => call<void>('tono_connect')
 
 export const tonoDisconnect = () => call<void>('tono_disconnect')

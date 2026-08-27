@@ -454,5 +454,13 @@
   "startup": {
     "stateInitRetrying": "Tono cannot open its own data folder yet, and is retrying. This is usually a full disk or a user profile that is still coming online. It recovers on its own if the cause clears.",
     "stateInitFailed": "Tono cannot open its own data folder, so it cannot start ({{error}}). Free up disk space or make sure your user profile is available, then start Tono again. If this PC has no internet, network protection may still be armed: open Command Prompt as Administrator and run tono-service.exe --emergency-disarm to release it."
+  },
+  "servicePrereq": {
+    "title": "The Tono service is not running",
+    "bfe": "Windows Base Filtering Engine (BFE) is switched off, and the Tono service depends on it to start. Repair asks for administrator rights and starts both.",
+    "generic": "The Tono service has not started, so connecting is not possible. Repair asks for administrator rights and starts it again.",
+    "repair": "Repair",
+    "repairing": "Repairing…",
+    "repairFailed": "The repair did not succeed. In an administrator PowerShell run sc.exe start BFE, then sc.exe start TonoService."
   }
 }

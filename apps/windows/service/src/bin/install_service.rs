@@ -1456,6 +1456,75 @@ fn replace_existing_service_and_runtime(
     }
 }
 
+/// Make sure the dependency TonoService declares can actually be satisfied.
+///
+/// TonoService is AutoStart and hard-depends on BFE, so a machine where BFE has been switched
+/// off — routinely done by "network accelerator" and "anti-freeloader" utilities — refuses to
+/// start it at boot and never retries. Nothing in the product recovered from that: the App
+/// showed "protected, not connected" with every diagnostic field reading unknown, and rebooting
+/// did not help. The installer already holds the elevation needed to fix it, and BFE is a core
+/// Windows service that Windows Firewall and IPsec also require, so restoring it repairs the
+/// machine rather than reconfiguring it.
+///
+/// The start type goes through `sc.exe` rather than `change_config`, which takes a whole
+/// `ServiceInfo`: reconstructing one for a core OS service from our side risks writing a wrong
+/// binary path or account onto the component Windows Firewall depends on. Starting it is a
+/// single unambiguous call, so that part uses the API.
+///
+/// Never fatal: an install that otherwise succeeded must not fail over this, and the connect
+/// path reports a still-stopped BFE with instructions of its own.
+#[cfg(windows)]
+fn ensure_bfe_ready() -> Vec<String> {
+    use platform_lib::service::{ServiceAccess, ServiceState};
+    use platform_lib::service_manager::{ServiceManager, ServiceManagerAccess};
+
+    let mut notes = Vec::new();
+    let manager = match ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) {
+        Ok(manager) => manager,
+        Err(error) => {
+            notes.push(format!("could not open the service manager to check BFE: {error}"));
+            return notes;
+        }
+    };
+    let service =
+        match manager.open_service("BFE", ServiceAccess::QUERY_STATUS | ServiceAccess::START) {
+            Ok(service) => service,
+            Err(error) => {
+                notes.push(format!("could not open the Base Filtering Engine: {error}"));
+                return notes;
+            }
+        };
+
+    let running = match service.query_status() {
+        Ok(status) => status.current_state == ServiceState::Running,
+        Err(error) => {
+            notes.push(format!("could not query the Base Filtering Engine: {error}"));
+            return notes;
+        }
+    };
+    if running {
+        return notes;
+    }
+
+    // Manual or Disabled is how this survives a reboot and reaches a customer again, so restore
+    // the start type before starting: a Disabled service cannot be started at all.
+    match std::process::Command::new("sc.exe")
+        .args(["config", "BFE", "start=", "auto"])
+        .output()
+    {
+        Ok(output) if !output.status.success() => notes.push(format!(
+            "could not set the Base Filtering Engine to start automatically: sc.exe exited {}",
+            output.status
+        )),
+        Err(error) => notes.push(format!("could not run sc.exe for the Base Filtering Engine: {error}")),
+        Ok(_) => {}
+    }
+    if let Err(error) = service.start(&Vec::<&std::ffi::OsStr>::new()) {
+        notes.push(format!("could not start the Base Filtering Engine: {error}"));
+    }
+    notes
+}
+
 /// install and start the service
 #[cfg(windows)]
 fn main() -> anyhow::Result<()> {
@@ -1496,6 +1565,11 @@ fn main() -> anyhow::Result<()> {
         adopt_or_refuse_update_scratch(&target, &path_with_suffix(&target, PUBLISH_SUFFIX))?;
     }
     let staged = stage_service_binary(&source, &target)?;
+
+    // Before the service is created or started, its BFE dependency must be satisfiable.
+    for note in ensure_bfe_ready() {
+        eprintln!("tono-install: {note}");
+    }
 
     let manager_access = ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE;
     let service_manager = ServiceManager::local_computer(None::<&str>, manager_access)?;
