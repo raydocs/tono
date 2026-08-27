@@ -11,7 +11,7 @@
     "open": "Open Tono",
     "quit": "Quit",
     "closeKeepsConnected": "Closing the window does not disconnect. Use the tray.",
-    "noServer": "No server selected",
+    "noServer": "No node selected",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "retry": "Retry",
@@ -26,6 +26,9 @@
     "routeFilter": "Route filter",
     "disconnected": "Connect Tono to view live activity.",
     "empty": "No active connections.",
+    "emptyHiddenDns": "Only local DNS lookups are open; those stay hidden.",
+    "reading": "Reading connections…",
+    "telemetryFailed": "The dashboard has not reached the core yet and is retrying. Pages loading still means the tunnel is up.",
     "noMatches": "No connections match these filters.",
     "closingAll": "Closing…",
     "closeConnection": "Close connection to {{target}}",
@@ -154,7 +157,7 @@
     "disconnecting": "Disconnecting…",
     "protectedOffline": "Protected, not connected",
     "protectedOfflineDescription": "Direct traffic is blocked. Switching routes and retrying.",
-    "server": "Server",
+    "server": "Node",
     "noServer": "No server selected",
     "killSwitchMode": "Leak protection: {{mode}}",
     "killSwitchModes": {
@@ -176,10 +179,10 @@
       "browserDns": "Turn off Secure DNS in Chrome and Edge.",
       "leakTest": "After connecting, run the WebRTC check on Support. You should not see your home IP."
     },
-    "pickServer": "Choose a server to get started",
+    "pickServer": "Choose a node to get started",
     "openDnsSettings": "Open Windows DNS settings",
     "errorRetry": "Try again",
-    "errorSwitchServer": "Switch server",
+    "errorSwitchServer": "Switch node",
     "whatFailed": "What failed",
     "copyDetails": "Copy details",
     "catalogRequiresChoice": "That node is gone — pick another",
@@ -187,12 +190,15 @@
     "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {
       "serviceBusy": "The service is installing or repairing. Approve the admin prompt, or restart Tono.",
+      "serviceNotRunning": "The Tono service is not running. The usual cause is Windows Base Filtering Engine (BFE) being turned off — TonoService depends on it to start. In an administrator PowerShell run sc.exe config BFE start= auto, then sc.exe start BFE, then sc.exe start TonoService, and connect again.",
+      "bfeNotRunning": "Windows Base Filtering Engine (BFE) is not running, so protection cannot be installed. Run sc start BFE as administrator, then retry.",
+      "wfpEngineWedged": "The Windows firewall engine is not responding, usually because security software is hooking it. Restart the PC; if it persists, quit your antivirus or firewall and retry.",
       "releaseReconciling": "Protection is still releasing. Wait, then connect.",
       "serviceTooOld": "Service is too old. Reinstall from the latest package.",
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
-      "protectedHttpsFailed": "Protected HTTPS did not complete (TLS handshake closed). If every server fails the same way, switching cities will not help — send diagnostics to support.",
-      "coreUnpinned": "This Tono install is missing its kernel check. Install the latest Tono — reinstalling the same copy will not help.",
-      "coreMismatch": "The Tono kernel does not match this install. Install the latest Tono.",
+      "protectedHttpsFailed": "The protected connection could not complete. If every server fails the same way, switching cities will not help — send diagnostics to support.",
+      "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
+      "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
       "dnsPortBusy": "Another app is using local DNS port 53. Close that app and try again.",
       "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
       "encryptedDns": "Windows Encrypted DNS is still on. Open Settings below, turn it off, then reconnect.",
@@ -215,7 +221,9 @@
       "verifiedCatalog": "Verified catalog",
       "refreshingCatalog": "Refreshing catalog",
       "idle": "Idle",
-      "noActiveRoute": "No active route"
+      "noActiveRoute": "No active route",
+      "reading": "Reading traffic…",
+      "telemetryFailed": "Dashboard has not reached the core yet — retrying"
     },
     "info": {
       "protection": "Traffic protection",
@@ -271,13 +279,13 @@
     "steps": {
       "preparing": "Preparing protection…",
       "preparingService": "Preparing Windows Service…",
-      "startingKillSwitch": "Enabling protection and installing the tunnel adapter…",
+      "startingKillSwitch": "Enabling protection…",
       "startingTunnel": "Starting the protected tunnel…",
-      "lockingTraffic": "Locking traffic to protected interface…",
+      "lockingTraffic": "Locking traffic to the protected interface…",
       "applyingCloudPolicy": "Applying cloud routing policy…",
       "securingDNS": "Securing and verifying DNS…",
       "checkingExit": "Checking final exit…",
-      "verifyingTraffic": "Verifying real TUN data plane…"
+      "verifyingTraffic": "Verifying the connection…"
     }
   },
   "nodes": {
@@ -295,15 +303,15 @@
     "refreshing": "Refreshing…",
     "refreshSuccess": "Cloud servers are up to date.",
     "switchedTo": "Switched to {{name}}",
-    "cloudServers": "Cloud Servers",
+    "cloudServers": "Cloud nodes",
     "empty": "No servers available",
     "timeout": "Timeout",
     "testFailed": "Failed",
-    "tcpLatency": "TCP {{latency}}ms",
-    "tcpLatencySlow": "Slow TCP {{latency}}ms",
-    "exitLatency": "Exit {{latency}}ms",
-    "exitLatencySlow": "Slow exit {{latency}}ms",
-    "cachedLatency": "Cached {{latency}}ms",
+    "tcpLatency": "{{latency}}ms",
+    "tcpLatencySlow": "{{latency}}ms",
+    "exitLatency": "{{seconds}}s",
+    "exitLatencySlow": "{{seconds}}s",
+    "cachedLatency": "{{seconds}}s",
     "unavailable": "Unavailable",
     "unavailableHint": "This server is currently unavailable (network blocked). Pick another exit.",
     "catalogRevision": "Catalog v{{revision}}",
@@ -322,7 +330,7 @@
     }
   },
   "servers": {
-    "title": "Servers",
+    "title": "Nodes",
     "cloudGroup": "TONO CLOUD",
     "empty": "No servers available",
     "selected": "Selected"
@@ -446,5 +454,13 @@
   "startup": {
     "stateInitRetrying": "Tono cannot open its own data folder yet, and is retrying. This is usually a full disk or a user profile that is still coming online. It recovers on its own if the cause clears.",
     "stateInitFailed": "Tono cannot open its own data folder, so it cannot start ({{error}}). Free up disk space or make sure your user profile is available, then start Tono again. If this PC has no internet, network protection may still be armed: open Command Prompt as Administrator and run tono-service.exe --emergency-disarm to release it."
+  },
+  "servicePrereq": {
+    "title": "The Tono service is not running",
+    "bfe": "Windows Base Filtering Engine (BFE) is switched off, and the Tono service depends on it to start. Repair asks for administrator rights and starts both.",
+    "generic": "The Tono service has not started, so connecting is not possible. Repair asks for administrator rights and starts it again.",
+    "repair": "Repair",
+    "repairing": "Repairing…",
+    "repairFailed": "The repair did not succeed. In an administrator PowerShell run sc.exe start BFE, then sc.exe start TonoService."
   }
 }

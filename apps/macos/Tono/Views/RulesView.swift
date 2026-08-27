@@ -345,7 +345,7 @@ struct RulesView: View {
                 Circle()
                     .fill(Color(hex: activeRuleDotColor(rule.proxy)))
                     .frame(width: 8, height: 8)
-                Text(rule.proxy)
+                Text(ruleTargetTitle(rule.proxy))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)

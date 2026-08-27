@@ -665,9 +665,24 @@ nonisolated struct ConfigParser {
             (["brazil", "sao paulo", "br", "🇧🇷"], "🇧🇷"),
             (["netherlands", "amsterdam", "nl", "🇳🇱"], "🇳🇱"),
         ]
+        // Match whole words, never substrings. A chain name like
+        // "Tono-Home-Residential" contains "de" and "Tono-China-Direct"
+        // contains "in", so a plain `contains` painted home traffic as German
+        // and WeChat's Tencent hops as Indian.
+        let tokens = Set(
+            lower.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .map(String.init)
+        )
         for entry in flagMap {
             for keyword in entry.keywords {
-                if lower.contains(keyword) { return entry.flag }
+                let matched = if keyword.contains(" ") || keyword.unicodeScalars.contains(
+                    where: { $0.properties.isEmoji }
+                ) {
+                    lower.contains(keyword)
+                } else {
+                    tokens.contains(keyword)
+                }
+                if matched { return entry.flag }
             }
         }
         return "🌐"

@@ -28,6 +28,17 @@ enum SettingsKey {
     /// for the other.
     nonisolated static let networkLogUploadEnabled =
         "networkLogUploadEnabled"
+    /// Whether a crash from the previous run may be named in the diagnostic
+    /// snapshot this client already sends every twenty minutes.
+    ///
+    /// Deliberately not `remoteDiagnosticsEnabled`: that switch also starts a
+    /// fifteen-second poll for remote device actions, so gating crash labels on
+    /// it meant nobody could report a crash without also granting the control
+    /// plane the ability to act on their machine. Reporting a crash and being
+    /// remotely actionable are different consents, and only the first should be
+    /// on by default.
+    nonisolated static let crashReportingEnabled =
+        "crashReportingEnabled"
     static let hasCompletedOnboarding = "hasCompletedOnboarding"
     static let hasChosenInterfaceLanguage = "hasChosenInterfaceLanguage"
     static let selectedProxyTargetName = "selectedProxyTargetName"

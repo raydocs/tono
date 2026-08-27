@@ -254,6 +254,57 @@ fn macos_service_install_marker_exists() -> std::io::Result<bool> {
     Ok(false)
 }
 
+/// What the App can learn about its own prerequisites without elevation.
+///
+/// Both queries are read-only and open with QUERY_STATUS only, which authenticated users hold on
+/// these services, so this runs at startup without an admin prompt. It exists because the state
+/// it reports was previously unknowable from inside the product: a customer whose BFE had been
+/// switched off saw only "protected, not connected", every diagnostic field reading unknown, and
+/// no way to tell that TonoService had never started.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServicePrerequisites {
+    /// `false` also when the service is not registered at all.
+    pub service_running: bool,
+    pub service_registered: bool,
+    pub bfe_running: bool,
+}
+
+#[cfg(windows)]
+pub(crate) fn service_prerequisites() -> ServicePrerequisites {
+    use windows_service::service::{ServiceAccess, ServiceState};
+    use windows_service::service_manager::{ServiceManager as WinManager, ServiceManagerAccess};
+
+    let mut report = ServicePrerequisites {
+        service_running: false,
+        service_registered: false,
+        bfe_running: false,
+    };
+    let Ok(manager) = WinManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) else {
+        return report;
+    };
+    let running = |name: &str| -> Option<bool> {
+        let service = manager.open_service(name, ServiceAccess::QUERY_STATUS).ok()?;
+        let status = service.query_status().ok()?;
+        Some(status.current_state == ServiceState::Running)
+    };
+    if let Some(state) = running(tono_service_protocol::WINDOWS_SERVICE_NAME) {
+        report.service_registered = true;
+        report.service_running = state;
+    }
+    report.bfe_running = running("BFE").unwrap_or(false);
+    report
+}
+
+#[cfg(not(windows))]
+pub(crate) fn service_prerequisites() -> ServicePrerequisites {
+    ServicePrerequisites {
+        service_running: true,
+        service_registered: true,
+        bfe_running: true,
+    }
+}
+
 #[cfg(windows)]
 pub(crate) fn trusted_service_evidence() -> Result<bool> {
     use windows_service::{

@@ -658,6 +658,10 @@ final class AppState {
     var activeNode: ProxyNode? = nil
     var networkInfo: NetworkInfo = NetworkInfo()
     var trafficStats: TrafficStats = TrafficStats()
+    /// True after `/traffic` has delivered at least one frame for this session.
+    var trafficFeedLive = false
+    /// True after `/connections` has delivered at least one frame for this session.
+    var connectionsFeedLive = false
     var errorMessage: String? = nil {
         didSet {
             guard let errorMessage, errorMessage != oldValue else { return }
@@ -714,6 +718,8 @@ final class AppState {
 
     // Activity
     var connections: [ConnectionEntry] = []
+    /// True when live flows (after hiding loopback DNS) exceed the displayed cap.
+    var connectionsDisplayLimited = false
     /// Per-app totals with a route split. Fed from every connections
     /// snapshot, not only while the Activity page is visible.
     let appTrafficLedger = AppTrafficLedger()
@@ -2062,7 +2068,10 @@ final class AppState {
         isProxyDegraded = false
         networkInfo = NetworkInfo()
         trafficStats = TrafficStats()
+        trafficFeedLive = false
+        connectionsFeedLive = false
         connections = []
+        connectionsDisplayLimited = false
         appTrafficLedger.reset()
         logEntries = []
         activeRules = []
@@ -2272,6 +2281,8 @@ final class AppState {
         let port = config.externalController.split(separator: ":").last.flatMap { Int($0) } ?? 9090
 
         // Start WebSocket streams
+        trafficFeedLive = false
+        connectionsFeedLive = false
         let ws = ClashWebSocket(port: port, secret: config.secret)
         webSocket = ws
 
@@ -2281,10 +2292,12 @@ final class AppState {
             stats.uploadSpeed = traffic.up
             stats.downloadSpeed = traffic.down
             self.trafficStats = stats
+            self.trafficFeedLive = true
         }
 
         ws.onConnections = { [weak self] response in
             guard let self else { return }
+            self.connectionsFeedLive = true
             if let apiConnections = response.connections {
                 LocalTrafficAudit.shared.recordConnections(
                     apiConnections,
@@ -2300,21 +2313,28 @@ final class AppState {
                 // where the user navigated, which is worse than showing none.
                 self.appTrafficLedger.ingest(apiConnections)
             }
+            // Keep the Activity snapshot even when that page is not visible.
+            // Gating it made the first paint a lie ("no connections") until the
+            // next 2.5s websocket frame. Mapping 2k rows is cheaper than the
+            // old 50-card VStack that this used to protect.
+            let visibleConnections = self.updateConnections(from: response)
             var stats = self.trafficStats
             stats.totalUpload = response.uploadTotal
             stats.totalDownload = response.downloadTotal
-            stats.activeConnections = response.connections?.count ?? 0
+            // Count what the list actually shows. Counting the raw array made
+            // the headline include the loopback DNS rows the list hides, so it
+            // read "104 active" above a list of forty.
+            stats.activeConnections = visibleConnections
             self.trafficStats = stats
-            guard self.isMainWindowVisible,
-                  self.selectedPage == .activity else { return }
-            self.updateConnections(from: response)
         }
 
         ws.onLogs = { [weak self] entries in
             LocalTrafficAudit.shared.recordCoreLogs(entries)
             let logsEnabled = AppProfile.defaults.object(forKey: SettingsKey.logsEnabled) as? Bool ?? true
-            guard logsEnabled, let self, self.isMainWindowVisible,
-                  self.selectedPage == .logs else { return }
+            // Buffer regardless of the visible page. Dropping frames while
+            // Logs was off-screen meant a user who connected, browsed, then
+            // opened Logs was told "0 records" about a session full of traffic.
+            guard logsEnabled, let self else { return }
 
             let now = Date()
             self.logEntries.append(contentsOf: entries.map {
@@ -2326,7 +2346,7 @@ final class AppState {
             }
         }
 
-        ws.onStreamStalled = { stream in
+        ws.onStreamStalled = { [weak self] stream in
             LocalTrafficAudit.shared.recordEvent(
                 "audit_observer_stream_stalled",
                 details: [
@@ -2334,8 +2354,11 @@ final class AppState {
                     "protection_impact": "none",
                 ]
             )
+            guard let self else { return }
+            if stream == "traffic" { self.trafficFeedLive = false }
+            if stream == "connections" { self.connectionsFeedLive = false }
         }
-        ws.onStreamRecovered = { stream in
+        ws.onStreamRecovered = { [weak self] stream in
             LocalTrafficAudit.shared.recordEvent(
                 "audit_observer_stream_recovered",
                 details: [
@@ -2343,6 +2366,9 @@ final class AppState {
                     "protection_impact": "none",
                 ]
             )
+            guard let self else { return }
+            if stream == "traffic" { self.trafficFeedLive = true }
+            if stream == "connections" { self.connectionsFeedLive = true }
         }
 
         updateLiveStreamSubscriptions()
@@ -2372,9 +2398,7 @@ final class AppState {
             await self.fetchNetworkInfo()
         }
         Task { await fetchActiveRules() }
-        if !isOwnedTonoMode {
-            startLatencyTestTimer()
-        }
+        startLatencyTestTimer()
 
         // Legacy subscription networking is available only in the explicitly
         // isolated developer profile. Production server state comes solely
@@ -2397,12 +2421,16 @@ final class AppState {
     private func updateLiveStreamSubscriptions() {
         guard isConnected, let webSocket else { return }
 
-        if isMainWindowVisible, selectedPage == .dashboard {
+        if isMainWindowVisible,
+           selectedPage == .dashboard || selectedPage == .activity {
             webSocket.startTrafficStream()
         } else {
             webSocket.stopTrafficStream()
             trafficStats.uploadSpeed = 0
             trafficStats.downloadSpeed = 0
+            // Leaving the dashboard used to keep `trafficFeedLive` true with
+            // zeroed rates, so coming back showed "Connected" next to 0 B/s.
+            trafficFeedLive = false
         }
 
         let localAuditEnabled = LocalTrafficAudit.isEnabled
@@ -2648,6 +2676,11 @@ final class AppState {
                     }
                     self.isProxyDegraded = advisory != nil
                     self.isRecoveringProtectedConnection = false
+                    // The connection healed on its own. Leaving the retry-loop
+                    // message in place kept "last error" showing a failure that
+                    // had already resolved, which sends support down the wrong
+                    // path.
+                    if advisory == nil { self.errorMessage = nil }
                     continue
                 case .retry(let failure):
                     self.lastClassifiedFailure = failure
@@ -2697,7 +2730,7 @@ final class AppState {
                         continue
                     }
                     if failure.code != .coreExitUnreachable {
-                        self.errorMessage = String(localized: "正在恢复受保护连接")
+                        self.errorMessage = String(localized: "Recovering protected connection…")
                         continue
                     }
                     guard self.isConnected, !self.isDisconnecting else { return }
@@ -3132,7 +3165,7 @@ final class AppState {
                         throw CoreControllerError.protectionFailed(failure.userMessage)
                     }
                     throw CoreControllerError.protectionFailed(
-                        String(localized: "新节点验证失败，已切回原节点。")
+                        String(localized: "New server failed verification. Switched back to the previous one.")
                     )
                 }
                 if case .failed(let failure) = switchVerdict {
@@ -3164,7 +3197,13 @@ final class AppState {
                 )
                 networkInfoTask?.cancel()
                 networkInfoTask = Task { [weak self] in
-                    await self?.fetchNetworkInfo()
+                    guard let self else { return }
+                    // Re-probe the exit we just moved to. Without this the
+                    // badge keeps showing the previous node's number under the
+                    // new node's name until something else happens to measure.
+                    _ = await self.proxyService.testLatency(name: nodeName)
+                    guard !Task.isCancelled else { return }
+                    await self.fetchNetworkInfo()
                 }
             } catch is CancellationError {
                 return
@@ -3634,9 +3673,12 @@ final class AppState {
         _ = await proxyService.testLatency(name: proxyService.activeNodeName ?? name)
     }
 
-    func testAllLatency() async {
-        // Testing all imported endpoints would require opening all of them in
-        // PF. Protected mode probes only the current selection.
+    /// Probes the selected exit only.
+    ///
+    /// Not a catalog sweep: with the kill switch armed, PF permits just the
+    /// endpoints of the exit in use, so probing every node would mean opening
+    /// all of them — that is the fail-closed guarantee, not an oversight.
+    func testSelectedExitLatency() async {
         guard isOwnedTonoMode, coreController != nil else { return }
         guard let selected = proxyService.activeNodeName else { return }
         _ = await proxyService.testLatency(name: selected)
@@ -5002,12 +5044,20 @@ final class AppState {
 
     private func startLatencyTestTimer() {
         stopLatencyTestTimer()
-        // Never run bulk subscription outbound latency tests in Tono mode.
-        if isOwnedTonoMode { return }
-        latencyTestTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        // Bulk subscription sweeps stay banned in Tono mode — they would probe
+        // the whole catalog. But the selected exit still needs re-measuring, or
+        // the badge shows the number from connect time for the whole session
+        // even after the line degrades.
+        let interval: TimeInterval = isOwnedTonoMode ? 120 : 300
+        latencyTestTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isConnected, !self.isOwnedTonoMode else { return }
-                await self.proxyService.testAllLatency()
+                guard let self, self.isConnected else { return }
+                if self.isOwnedTonoMode {
+                    guard let selected = self.proxyService.activeNodeName else { return }
+                    _ = await self.proxyService.testLatency(name: selected)
+                } else {
+                    await self.proxyService.testAllLatency()
+                }
             }
         }
     }
@@ -5932,58 +5982,73 @@ final class AppState {
 
     // MARK: - Update Connections from WebSocket
 
-    private func updateConnections(from response: APIConnectionsResponse) {
-        guard let apiConnections = response.connections else { return }
+    /// Returns the number of connections the list is willing to show, which is
+    /// what the "active connections" headline must report.
+    @discardableResult
+    private func updateConnections(from response: APIConnectionsResponse) -> Int {
+        guard let apiConnections = response.connections else {
+            connections = []
+            connectionsDisplayLimited = false
+            return 0
+        }
         let timestamp = Date.now.formatted(
             .dateTime.hour(.twoDigits(amPM: .omitted))
                 .minute(.twoDigits)
                 .second(.twoDigits)
         )
-
-        connections = apiConnections.prefix(50).map { conn in
-            let type: ConnectionType
-            switch AppTrafficLedger.routeClass(for: conn) {
-            case .blocked:
-                type = .rejected
-            case .direct:
-                type = .direct
-            case .residential, .tunnel:
-                type = .proxied
-            }
-
-            let chainNode = conn.chains.first ?? "Direct"
-            let flag = ConfigParser.guessFlag(from: chainNode)
-            let destinationHost = conn.metadata.destinationIP ?? "unknown"
-            let destination = conn.metadata.destinationPort.map {
-                "\(destinationHost):\($0)"
-            } ?? destinationHost
-
-            return ConnectionEntry(
-                id: conn.id,
-                domain: conn.metadata.host.isEmpty ? (conn.metadata.destinationIP ?? "unknown") : conn.metadata.host,
-                protocolName: conn.metadata.type,
-                rule: "\(conn.rule)\(conn.rulePayload.map { " (\($0))" } ?? "")",
-                nodeFlag: flag,
-                nodeName: chainNode,
-                latency: nil,
-                dataSize: formatBytes(conn.download + conn.upload),
-                dataLabel: "Traffic",
-                timestamp: timestamp,
-                type: type,
-                network: conn.metadata.network.uppercased(),
-                destination: destination,
-                processName: {
-                    let name = appTrafficLedger.resolvedProcessName(for: conn)
-                    if name == AppTrafficLedger.unattributed { return nil }
-                    return name
-                }(),
-                route: conn.chains.isEmpty
-                    ? "Direct"
-                    : conn.chains.joined(separator: " → "),
-                uploadText: formatBytes(conn.upload),
-                downloadText: formatBytes(conn.download)
-            )
+        let cap = ConnectionActivityPresentation.maxDisplayed
+        // /connections comes back in no guaranteed order, so capping it raw
+        // could drop the newest flows while claiming to show them, and rows
+        // reshuffled on every frame. `start` is RFC3339, so descending string
+        // order is descending time order.
+        let visible = apiConnections
+            .filter { !ConnectionActivityPresentation.isLoopback($0) }
+            .sorted { $0.start > $1.start }
+        let visibleCount = visible.count
+        let mapped = visible.prefix(cap).map {
+            connectionEntry(from: $0, timestamp: timestamp)
         }
+        connections = Array(mapped)
+        connectionsDisplayLimited = visibleCount > cap
+        return visibleCount
+    }
+
+    private func connectionEntry(
+        from conn: APIConnection,
+        timestamp: String
+    ) -> ConnectionEntry {
+        let type = ConnectionActivityPresentation.type(for: conn)
+        let chainNode = conn.chains.first ?? "Direct"
+        let flag = ConfigParser.guessFlag(from: chainNode)
+        let destinationHost = conn.metadata.destinationIP ?? "unknown"
+        let destination = conn.metadata.destinationPort.map {
+            "\(destinationHost):\($0)"
+        } ?? destinationHost
+        let host = conn.metadata.host.isEmpty
+            ? (conn.metadata.destinationIP ?? "unknown")
+            : conn.metadata.host
+        let process = appTrafficLedger.resolvedProcessName(for: conn)
+        return ConnectionEntry(
+            id: conn.id,
+            domain: host,
+            protocolName: conn.metadata.type,
+            rule: "\(conn.rule)\(conn.rulePayload.map { " (\($0))" } ?? "")",
+            nodeFlag: flag,
+            nodeName: chainNode,
+            latency: nil,
+            dataSize: formatBytes(conn.download + conn.upload),
+            dataLabel: "Traffic",
+            timestamp: timestamp,
+            type: type,
+            network: conn.metadata.network.uppercased(),
+            destination: destination,
+            processName: process == AppTrafficLedger.unattributed ? nil : process,
+            route: conn.chains.isEmpty
+                ? "Direct"
+                : conn.chains.joined(separator: " → "),
+            uploadText: formatBytes(conn.upload),
+            downloadText: formatBytes(conn.download)
+        )
     }
 
     /// Resolves the control-plane host through the protected resolver and stores
@@ -6178,6 +6243,8 @@ final class AppState {
         proxyRegions = mockProxyRegions
         rules = mockRules
         connections = mockConnections
+        trafficFeedLive = true
+        connectionsFeedLive = true
         selectedNodeId = proxyRegions.first?.nodes.first?.id
         activeNode = proxyRegions.first?.nodes.first
     }

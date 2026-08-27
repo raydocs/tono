@@ -298,6 +298,30 @@ nonisolated struct ConfigPipeline {
         "Codex",
         "codex",
         "Codex.exe",
+        // Editors that host Claude/Codex/ChatGPT. A Cursor or VS Code process
+        // talking to Anthropic must share the residential hop when one is
+        // bound; without a hop these rows still target Tono-Exit, same as MATCH.
+        // Helper names with parentheses are covered by the bundle path regexes.
+        "Cursor",
+        "Cursor Helper",
+        "Cursor.exe",
+        "Code",
+        "Code Helper",
+        "Code.exe",
+        "Windsurf",
+        "Windsurf Helper",
+        "Windsurf.exe",
+        "Trae",
+        "Trae Helper",
+        "Trae.exe",
+        "Zed",
+        "Zed.exe",
+        "VSCodium",
+        "VSCodium.exe",
+        "Grok",
+        "grok",
+        "grok.exe",
+        "Grok Helper",
     ]
     /// Basename matching misses two shapes that matter, so these are matched by
     /// install path instead.
@@ -344,10 +368,21 @@ nonisolated struct ConfigPipeline {
     static let assistantHomeProcessPathRegexes = [
         "/\\.local/share/claude/versions/",
         "/node_modules/@anthropic-ai/claude-code/",
+        "/\\.pnpm/@anthropic-ai\\+claude-code",
+        "/\\.local/bin/claude",
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
         "/Claude\\.app/",
         "/ChatGPT\\.app/",
         "/\\.local/share/codex/",
         "/node_modules/@openai/codex/",
+        "/Cursor\\.app/",
+        "/Visual Studio Code\\.app/",
+        "/Windsurf\\.app/",
+        "/Trae\\.app/",
+        "/Zed\\.app/",
+        "/VSCodium\\.app/",
+        "/Grok\\.app/",
     ]
 
     /// Claude Code's versioned launcher is named `2.1.223`, not `claude`.
@@ -1351,7 +1386,7 @@ nonisolated struct ConfigPipeline {
         log-level: \(overlay.logLevel)
         # Warm-path RTT for UI delay. Connect uses the TUN probe, not /delay.
         unified-delay: true
-        find-process-mode: \(directPolicy != nil || overlay.tonoTransport != nil ? "strict" : "off")
+        find-process-mode: \(directPolicy != nil || overlay.tonoTransport != nil || overlay.claudeHomeSocks5 != nil || overlay.claudeHomeNodeName != nil ? "strict" : "off")
         profile:
           # Runtime config order is the committed selection. Never let a stale
           # cache.db choice override it after a protected config reload.

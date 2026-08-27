@@ -1,6 +1,6 @@
 import { useLockFn } from 'ahooks'
 import dayjs from 'dayjs'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { tonoServersQueryKey, useTonoStatus } from '@/hooks/use-tono'
@@ -27,7 +27,12 @@ import { useTonoToast } from '@/tono-ui/tono-toast-context'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 
-import { latencyColor, latencyLabelKey, readNodeLatency } from './node-latency'
+import {
+  latencyColor,
+  latencyLabelKey,
+  latencyLabelVars,
+  readNodeLatency,
+} from './node-latency'
 import {
   nodeCityParts,
   nodeCityTitleKey,
@@ -104,7 +109,14 @@ const ServersPage = () => {
       try {
         await tonoSelectServer(name)
         await Promise.all([mutateServers(), mutateTonoStatus()])
-        showToast(t('tono.nodes.switchedTo', { name: nodeDisplayName(name) }))
+        // Announce the localized city the card shows, not the raw wire name —
+        // otherwise the toast says "Tokyo · Dawn" over a card labelled 东京.
+        const cityKey = nodeCityTitleKey(name)
+        showToast(
+          t('tono.nodes.switchedTo', {
+            name: cityKey ? t(cityKey) : nodeDisplayName(name),
+          }),
+        )
       } catch (error) {
         setSelectError(error instanceof Error ? error.message : String(error))
       }
@@ -200,6 +212,17 @@ const ServersPage = () => {
       new Set((servers ?? []).map((server) => nodeCode(server.name))),
     ).sort()
   }, [servers])
+  // zh already has 美国 / 日本 for these, but the chips and group headers
+  // rendered the raw ISO code, so a Chinese customer read "US" and "JP" while
+  // the translations sat unused. An unknown code falls back to itself.
+  const regionLabel = useCallback(
+    (code: string) => {
+      const key = `tono.nodes.regions.${code.toLowerCase()}`
+      const translated = t(key)
+      return translated === key ? code : translated
+    },
+    [t],
+  )
   const serverGroups = useMemo(() => {
     const usable = visibleServers.filter((server) => server.available !== false)
     const codes = Array.from(
@@ -208,7 +231,7 @@ const ServersPage = () => {
     return [
       ...codes.map((code) => ({
         key: code,
-        label: code,
+        label: regionLabel(code),
         servers: usable.filter((server) => nodeCode(server.name) === code),
       })),
       {
@@ -217,7 +240,7 @@ const ServersPage = () => {
         servers: visibleServers.filter((server) => server.available === false),
       },
     ].filter((group) => group.servers.length > 0)
-  }, [t, visibleServers])
+  }, [t, regionLabel, visibleServers])
   const canTestAll =
     status?.uiState === 'notConnected' &&
     catalog?.revision !== null &&
@@ -450,7 +473,7 @@ const ServersPage = () => {
                 background: regionFilter === code ? TONO_COLORS.accent : 'transparent',
               }}
             >
-              {code}
+              {regionLabel(code)}
             </button>
           ))}
         </div>
@@ -525,24 +548,34 @@ const ServersPage = () => {
                     endpointLatency ?? exitLatency ?? cachedLatency
                   const latencyLabel =
                     endpointLatency !== undefined
-                      ? t(latencyLabelKey('tcp', endpointLatency), {
-                          latency: endpointLatency,
-                        })
+                      ? t(
+                          latencyLabelKey('tcp', endpointLatency),
+                          latencyLabelVars(endpointLatency),
+                        )
                       : exitLatency !== undefined
-                        ? t(latencyLabelKey('exit', exitLatency), {
-                            latency: exitLatency,
-                          })
+                        ? t(
+                            latencyLabelKey('exit', exitLatency),
+                            latencyLabelVars(exitLatency),
+                          )
                         : cachedLatency !== null
-                          ? t(latencyLabelKey('cached', cachedLatency), {
-                              latency: cachedLatency,
-                            })
+                          ? t(
+                              latencyLabelKey('cached', cachedLatency),
+                              latencyLabelVars(cachedLatency),
+                            )
                           : t('tono.nodes.untested')
                   const available = server.available !== false
                   const latencyTone =
                     !available || endpointFailure
                       ? TONO_COLORS.error
                       : latency !== null
-                        ? latencyColor(latency)
+                        ? latencyColor(
+                            latency,
+                            endpointLatency !== undefined
+                              ? 'tcp'
+                              : exitLatency !== undefined
+                                ? 'exit'
+                                : 'cached',
+                          )
                         : text.tertiary
                   const latencyHasTone =
                     !available ||
@@ -556,7 +589,7 @@ const ServersPage = () => {
                         ? t('tono.nodes.testFailed')
                         : server.selected
                           ? t('tono.node.activeServer')
-                          : t('tono.nodes.untested')
+                          : t('tono.nodes.readyToConnect')
                   return (
                     <button
                       key={server.name}

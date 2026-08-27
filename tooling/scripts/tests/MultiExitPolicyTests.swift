@@ -263,12 +263,18 @@ struct MultiExitPolicyTests {
             transport: nil,
             customNodes: sanitizedNodes
         )
+        guard claudeHomeRuntime.contains("\nfind-process-mode: strict\n") else {
+            throw TestFailure("Claude home route must demand process lookup")
+        }
         let claudeHomeRequired = [
             "name: \"\(ConfigPipeline.claudeHomeGroupName)\"",
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude.exe)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude Helper)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Cursor)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Code)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Windsurf)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.ai)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claude.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,anthropic.com)),\(ConfigPipeline.claudeHomeGroupName)",
@@ -625,12 +631,21 @@ struct MultiExitPolicyTests {
             ("/Users/x/.local/share/claude/versions/2.1.223", true),
             ("/Users/lys/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", true),
             ("/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe", true),
+            ("/opt/homebrew/bin/claude", true),
+            ("/usr/local/bin/claude", true),
+            ("/Users/x/.local/bin/claude", true),
+            ("/Users/x/.pnpm/@anthropic-ai+claude-code@1.2.3/node_modules/@anthropic-ai/claude-code/bin/claude", true),
             ("/Applications/ChatGPT.app/Contents/MacOS/ChatGPT", true),
             ("/Users/x/.local/share/codex/versions/0.5.0", true),
             ("/opt/homebrew/lib/node_modules/@openai/codex/bin/codex", true),
+            ("/Users/x/Applications/Cursor.app/Contents/MacOS/Cursor", true),
+            ("/Applications/Visual Studio Code.app/Contents/MacOS/Code", true),
+            ("/Applications/Windsurf.app/Contents/MacOS/Windsurf", true),
+            ("/Applications/Trae.app/Contents/MacOS/Trae", true),
             // Must not swallow unrelated processes.
             ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", false),
             ("/Applications/WeChat.app/Contents/MacOS/WeChat", false),
+            ("/Applications/Xcode.app/Contents/MacOS/Xcode", false),
             ("/usr/bin/curl", false),
         ]
         let assistantPathVerdictsHold = assistantPathCases.allSatisfy { path, expected in
@@ -718,7 +733,16 @@ struct MultiExitPolicyTests {
             ("bundle-path-adoption-verdicts", bundlePathVerdictsHold),
             ("rule-delimiters-are-hex-escaped", delimitersAreHexEscaped),
             ("assistant-path-verdicts", assistantPathVerdictsHold),
-            ("no-domain-suffix", !managedDirectRuntime.contains("DOMAIN-SUFFIX")),
+            (
+                "no-assistant-domain-suffix-without-home",
+                ConfigPipeline.assistantHomeDomainSuffixes.allSatisfy { suffix in
+                    !managedDirectRuntime.contains(
+                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.claudeHomeGroupName)"
+                    ) && !managedDirectRuntime.contains(
+                        "DOMAIN-SUFFIX,\(suffix)),\(ConfigPipeline.exitGroupName)"
+                    )
+                }
+            ),
             (
                 "reviewed-bundle-tcp80-has-no-exit-detour",
                 bundleTCP80HasNoExitDetour

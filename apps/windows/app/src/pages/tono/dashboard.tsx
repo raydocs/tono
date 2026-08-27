@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
@@ -35,7 +35,12 @@ import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import parseTraffic from '@/utils/parse-traffic'
 
 import { ConnectProgressCard } from './connect-progress'
-import { latencyColor, latencyLabelKey, readNodeLatency } from './node-latency'
+import {
+  latencyColor,
+  latencyLabelKey,
+  latencyLabelVars,
+  readNodeLatency,
+} from './node-latency'
 import { nodeCityParts, nodeCityTitleKey, nodeCode, nodeDisplayName } from './node-meta'
 
 const hex = (color: string, alpha: number) =>
@@ -275,17 +280,18 @@ const ActiveNodeCard = ({
               fontFamily: TONO_MONO_STACK,
               borderRadius: 8,
               padding: '5px 9px',
-              color: latency !== null ? latencyColor(latency) : text.tertiary,
+              color:
+                latency !== null
+                  ? latencyColor(latency, reading?.kind ?? 'exit')
+                  : text.tertiary,
               background:
                 latency !== null
-                  ? hex(latencyColor(latency), 0.15)
+                  ? hex(latencyColor(latency, reading?.kind ?? 'exit'), 0.15)
                   : 'transparent',
             }}
           >
             {reading
-              ? t(latencyLabelKey(reading.kind, reading.ms), {
-                  latency: reading.ms,
-                })
+              ? t(latencyLabelKey(reading.kind, reading.ms), latencyLabelVars(reading.ms))
               : '—'}
           </span>
         </div>
@@ -427,10 +433,46 @@ const DashboardPage = () => {
 
   const {
     response: { data: traffic },
+    live: trafficLive,
+    refreshGetClashTraffic,
   } = useTrafficData({
     enabled: connected,
     generation: status?.controllerGeneration,
   })
+  const [trafficWaited, setTrafficWaited] = useState(false)
+  useEffect(() => {
+    if (!connected || trafficLive) {
+      setTrafficWaited(false)
+      return
+    }
+    const timer = window.setTimeout(() => setTrafficWaited(true), 4_000)
+    return () => window.clearTimeout(timer)
+  }, [connected, trafficLive, status?.controllerGeneration])
+  useEffect(() => {
+    if (!trafficWaited || trafficLive) return
+    // Back off rather than polling at 4s forever, and rebuild on a controller
+    // restart: without the generation here, a poll could keep running against
+    // the generation that just went away.
+    let cancelled = false
+    let attempt = 0
+    let timer = 0
+    const tick = () => {
+      if (cancelled) return
+      refreshGetClashTraffic()
+      attempt += 1
+      timer = window.setTimeout(tick, Math.min(4_000 * 2 ** (attempt - 1), 30_000))
+    }
+    tick()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [
+    trafficWaited,
+    trafficLive,
+    status?.controllerGeneration,
+    refreshGetClashTraffic,
+  ])
 
   const handleConnect = useLockFn(async () => {
     setActionError(null)
@@ -468,6 +510,12 @@ const DashboardPage = () => {
       })
     }
   })
+
+  // Releasing protection from the pill has the same consequence as the progress
+  // card's 恢复正常网络 button, which has always confirmed first. One screen
+  // offering both, with only one of them guarded, meant a mis-click could drop
+  // fail-closed protection and let traffic out directly.
+  const [confirmingRelease, setConfirmingRelease] = useState(false)
 
   const handleDisconnect = useLockFn(async () => {
     setActionError(null)
@@ -526,12 +574,22 @@ const DashboardPage = () => {
     : t('tono.dashboard.noServer')
   const protectionValue = selectedCity
   const protectionDetail = connectHint
-  const trafficValue = connected
-    ? `${down} ${downUnit}/s`
-    : t('tono.dashboard.overview.idle')
-  const trafficDetail = connected
-    ? `↑ ${up} ${upUnit}/s`
-    : t('tono.dashboard.overview.noActiveRoute')
+  // Never present a stale 0 B/s as live throughput: that is the fallback
+  // before the controller WebSocket has delivered a frame, not an idle tunnel.
+  const trafficValue = !connected
+    ? t('tono.dashboard.overview.idle')
+    : !trafficLive
+      ? t(
+          trafficWaited
+            ? 'tono.dashboard.overview.telemetryFailed'
+            : 'tono.dashboard.overview.reading',
+        )
+      : `${down} ${downUnit}/s`
+  const trafficDetail = !connected
+    ? t('tono.dashboard.overview.noActiveRoute')
+    : trafficLive
+      ? `↑ ${up} ${upUnit}/s`
+      : ''
 
   return (
     // Structural layout inline as well as in the stylesheet (see TonoSidebar):
@@ -609,7 +667,13 @@ const DashboardPage = () => {
             uiState={uiState}
             stage={status?.stage}
             onConnect={handleConnect}
-            onDisconnect={handleDisconnect}
+            onDisconnect={() => {
+              if (uiState === 'protectedOffline') {
+                setConfirmingRelease(true)
+              } else {
+                void handleDisconnect()
+              }
+            }}
           />
           <p
             style={{
@@ -857,6 +921,20 @@ const DashboardPage = () => {
             </GlassCard>
           </div>
         )}
+      {confirmingRelease && (
+        <TonoConfirmDialog
+          dark={dark}
+          title={t('tono.progress.restoreConfirmTitle')}
+          message={t('tono.progress.restoreConfirmMessage')}
+          confirmLabel={t('tono.progress.restore')}
+          cancelLabel={t('shared.actions.cancel')}
+          onConfirm={() => {
+            setConfirmingRelease(false)
+            void handleDisconnect()
+          }}
+          onCancel={() => setConfirmingRelease(false)}
+        />
+      )}
       {confirmingDiagnostics && (
         <TonoConfirmDialog
           dark={dark}

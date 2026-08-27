@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { MihomoWebSocket, Traffic } from 'tono-plugin-core-api'
 
 import { useMihomoWsSubscription } from './use-mihomo-ws-subscription'
@@ -31,6 +32,11 @@ export const useTrafficData = (options?: {
 }) => {
   const enabled = options?.enabled ?? true
   const generation = options?.generation
+  const [live, setLive] = useState(false)
+
+  useEffect(() => {
+    setLive(false)
+  }, [generation, enabled])
 
   const {
     graphData: { appendData },
@@ -58,6 +64,7 @@ export const useTrafficData = (options?: {
 
         try {
           const parsed = JSON.parse(data) as Traffic
+          setLive(true)
           if (shouldSkipDuplicateTraffic(parsed)) {
             return
           }
@@ -70,5 +77,5 @@ export const useTrafficData = (options?: {
     }),
   })
 
-  return { response, refreshGetClashTraffic: refresh }
+  return { response, live, refreshGetClashTraffic: refresh }
 }

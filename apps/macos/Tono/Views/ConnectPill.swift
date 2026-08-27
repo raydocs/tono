@@ -141,7 +141,7 @@ struct ConnectPill: View {
     private var statusText: LocalizedStringKey {
         if isConnecting { return "Connecting…" }
         if isDisconnecting { return "Disconnecting…" }
-        if isRecovering { return "正在恢复受保护连接" }
+        if isRecovering { return "Recovering protected connection…" }
         if isProtectionBlocked { return "Protected Offline" }
         return isConnected ? "Connected" : "Not Connected"
     }
@@ -157,11 +157,11 @@ struct ConnectPill: View {
     private var contextText: String {
         if isConnecting { return String(localized: String.LocalizationValue(connectionStage.rawValue)) }
         if isDisconnecting { return String(localized: String.LocalizationValue(disconnectionStage.rawValue)) }
-        if isRecovering { return String(localized: "正在恢复受保护连接") }
+        if isRecovering { return String(localized: "Recovering protected connection…") }
         if isProtectionBlocked { return String(localized: "Tap to restore internet") }
         if isConnected {
             if let nodeDisplay, nodeLatency > 0 {
-                return "\(nodeDisplay) — \(nodeLatency) ms"
+                return "\(nodeDisplay) — \(LatencyLevel.spokenTitle(for: nodeLatency, kind: .exit))"
             }
             if let nodeDisplay { return nodeDisplay }
             return String(localized: "Tap to disconnect")

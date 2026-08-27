@@ -77,8 +77,11 @@ struct ProxiesView: View {
             let nodes = appState.proxyRegions.flatMap(\.nodes)
             let displayName = nodes.first { $0.id == newValue || $0.name == newValue }?.displayName
                 ?? ProxyNode.displayName(for: newValue)
+            // Announce the same localized city the card shows. Passing the raw
+            // catalog name made the toast say "Tokyo · Fuji" over a card
+            // labelled 东京.
             ToastCenter.shared.show(
-                String(localized: "Switched to \(displayName)"),
+                String(localized: "Switched to \(nodeCityTitle(displayName))"),
                 systemImage: "checkmark.circle.fill"
             )
         }
@@ -266,7 +269,9 @@ struct ProxiesView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         sectionTitle("Cloud Servers", count: localNodes.count)
                         if localNodes.count != allNodes.count {
-                            Text("of " + String(allNodes.count))
+                            // Concatenation bypassed the catalog entirely, so
+                            // this read "of 17" in Chinese.
+                            Text("of \(allNodes.count)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.tertiary)
                         }
@@ -304,18 +309,13 @@ struct ProxiesView: View {
     private func localNodeCard(_ node: ProxyNode) -> some View {
         let isActive = appState.selectedNodeId == node.id || appState.selectedNodeId == node.name
         let isSwitching = appState.switchingNodeId == node.id || appState.switchingNodeId == node.name
-        let runtimeNode = appState.proxyService.nodes.first {
-            $0.name == node.name
-                || ConfigParser.extractFlag(from: $0.name).cleanName
-                    == ConfigParser.extractFlag(from: node.name).cleanName
-        }
-        let hasLatency = (runtimeNode?.latency ?? 0) > 0
+        let runtimeNode = appState.proxyService.node(named: node.name)
+        // The badge already carries the measurement state ("未测速"/a number), so
+        // this line only speaks to whether the node can be connected to.
         let statusTitle: String = if runtimeNode?.lastTestFailed == true {
             String(localized: "Unavailable")
-        } else if hasLatency {
-            String(localized: "Ready to connect")
         } else {
-            String(localized: "Ready to test")
+            String(localized: "Ready to connect")
         }
         let statusColor: Color = runtimeNode?.lastTestFailed == true
             ? TonoStatus.error
@@ -491,9 +491,9 @@ struct ProxiesView: View {
                 }
                 Spacer(minLength: 0)
                 if node.latency > 0 {
-                    Text("\(node.latency)ms")
+                    Text(LatencyLevel.spokenTitle(for: node.latency, kind: .exit))
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency).color))
+                        .foregroundStyle(Color(hex: LatencyLevel.level(for: node.latency, kind: .exit).color))
                 } else if node.lastTestFailed {
                     Text("Timeout")
                         .font(.system(size: 10, design: .monospaced))
@@ -844,7 +844,7 @@ struct ProxiesView: View {
                         guard !isTesting else { return }
                         isTesting = true
                         Task {
-                            await appState.testAllLatency()
+                            await appState.testSelectedExitLatency()
                             isTesting = false
                         }
                     } label: {
@@ -856,7 +856,11 @@ struct ProxiesView: View {
                                 Image(systemName: "bolt.fill")
                                     .font(.system(size: 11))
                             }
-                            Text("Test Latency")
+                            // Says what it measures. "Test Latency" next to a
+                            // grid of untested cards read as a list-wide sweep,
+                            // and users concluded testing was broken when the
+                            // other cards stayed unmeasured.
+                            Text("Test current exit")
                             .font(.system(size: 12, weight: .semibold))
                         }
                         .foregroundStyle(.primary)
@@ -1003,9 +1007,9 @@ struct ProxiesView: View {
             Int64(count)
         )
         if let version = appState.managedCatalogVersion {
-            return "\(serverCount) · v\(version) · updates automatically"
+            return String(localized: "\(serverCount) · v\(version) · updates automatically")
         }
-        return "\(serverCount) · waiting for the first verified sync"
+        return String(localized: "\(serverCount) · waiting for the first verified sync")
     }
 
     private var catalogStatusIcon: String {

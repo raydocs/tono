@@ -181,6 +181,16 @@ pub enum AuditEvent {
         probe: &'static str,
         error: String,
     },
+    /// Dashboard telemetry could not be pointed at this connection's controller.
+    ///
+    /// Deliberately non-fatal — a verified tunnel must not be failed over a dashboard — but the
+    /// warning it used to raise went only to the local app log, which is not the file that
+    /// uploads. The symptom reaching support was "the tunnel works, the dashboard says it cannot
+    /// reach the core", with nothing on our side to explain it. This rides the audit log so the
+    /// next occurrence is answerable without asking the customer for a file.
+    TelemetryConfigFail {
+        error: String,
+    },
     // cloud traffic policy (Build 28)
     PolicySyncOk {
         revision: i64,
@@ -280,6 +290,7 @@ impl AuditEvent {
                 probe,
                 error: redact(&error),
             },
+            TelemetryConfigFail { error } => TelemetryConfigFail { error: redact(&error) },
             PolicyActivationSkipped { reason } => PolicyActivationSkipped {
                 reason: redact(&reason),
             },

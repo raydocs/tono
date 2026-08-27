@@ -49,6 +49,13 @@ private enum ClientAppIconCache {
                 break
             }
         }
+        // Claude Code is a CLI: it never registers with Launch Services, so it
+        // cannot appear in runningApplications, and most of its users have no
+        // separate Claude.app installed either. Both lookups above miss and the
+        // row fell back to a dashed placeholder box. Ship the mark instead.
+        if resolved == nil, processName == "Claude" || processName == "Claude Code" {
+            resolved = NSImage(named: "ClaudeMark")
+        }
         cache[processName] = resolved
         return resolved
     }
@@ -75,26 +82,8 @@ private struct ClientAppIcon: View {
     }
 }
 
-/// Byte formatting matching the connection rows, which come from AppState's own
-/// formatter. Duplicated rather than shared because the two live on opposite
-/// sides of the view boundary and a shared helper would be one file holding one
-/// function; if a third caller appears, promote it then.
 private func activityBytes(_ bytes: Int64) -> String {
-    ActivityByteFormat.string(bytes)
-}
-
-private enum ActivityByteFormat {
-    static func string(_ bytes: Int64) -> String {
-        formatter.string(fromByteCount: bytes)
-    }
-
-    private static let formatter: ByteCountFormatter = {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
-        formatter.countStyle = .binary
-        formatter.allowsNonnumericFormatting = false
-        return formatter
-    }()
+    TonoByteFormat.bytes(bytes)
 }
 
 /// One colour per path class, used by every split bar and legend on this page so
@@ -191,6 +180,7 @@ struct ActivityView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedFilter: String = "All"
     @State private var section: Section = .apps
+    @State private var connectionQuery = ""
     @State private var isTestingLatency = false
     @State private var trafficHistory = TrafficHistory()
 
@@ -199,18 +189,34 @@ struct ActivityView: View {
         case connections = "Connections"
     }
 
-    private let filters = ["All", "Proxied", "Direct", "Rejected"]
+    private let filters = ["All", "Proxied", "Home", "Direct", "Rejected"]
 
     private var filteredConnections: [ConnectionEntry] {
-        if selectedFilter == "All" { return appState.connections }
-        return appState.connections.filter { $0.type.rawValue == selectedFilter }
+        let query = connectionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return appState.connections.filter { entry in
+            if selectedFilter != "All", entry.type.rawValue != selectedFilter {
+                return false
+            }
+            if query.isEmpty { return true }
+            return [
+                entry.domain,
+                entry.processName ?? "",
+                entry.destination,
+                entry.nodeName,
+                entry.route,
+                entry.network,
+                entry.protocolName,
+                // Windows searches the matched rule too; without it the same
+                // query returns different results on the two clients.
+                entry.rule,
+            ].contains { $0.lowercased().contains(query) }
+        }
     }
 
     private var selectedExitLatency: Int? {
         guard let name = appState.proxyService.activeNodeName else { return nil }
-        guard let node = appState.proxyService.nodes.first(where: { $0.name == name }),
-              node.latency > 0 else { return nil }
-        return node.latency
+        let ms = appState.proxyService.latency(forNodeNamed: name)
+        return ms > 0 ? ms : nil
     }
 
     var body: some View {
@@ -239,6 +245,7 @@ struct ActivityView: View {
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: appState.trafficStats.downloadSpeed) { _, _ in
+            guard appState.trafficFeedLive else { return }
             trafficHistory.record(
                 up: appState.trafficStats.uploadSpeed,
                 down: appState.trafficStats.downloadSpeed
@@ -252,30 +259,50 @@ struct ActivityView: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 ActivityCard(
-                    title: "Selected exit latency",
+                    title: "Current exit",
                     accessory: AnyView(latencyRefreshButton)
                 ) {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(selectedExitLatency.map(String.init) ?? "—")
+                    if let ms = selectedExitLatency {
+                        Text(LatencyLevel.spokenTitle(for: ms, kind: .exit))
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
-                        if selectedExitLatency != nil {
-                            Text("ms").font(.system(size: 12)).foregroundStyle(.secondary)
-                        }
+                            .foregroundStyle(
+                                Color(hex: LatencyLevel.level(for: ms, kind: .exit).color)
+                            )
+                    } else {
+                        Text("Not tested")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
                     }
-                    Text(appState.proxyService.activeNodeName ?? "No exit selected")
+                    // Every other surface localizes the city; this one printed
+                    // the raw catalog name, so Activity said "Tokyo · Fuji"
+                    // while the Dashboard said 东京.
+                    Text(
+                        appState.proxyService.activeNodeName.map(nodeCityTitle)
+                            ?? String(localized: "No exit selected")
+                    )
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
 
                 ActivityCard(title: "Upload") {
-                    rateValue(appState.trafficStats.uploadSpeed, tint: TonoTraffic.upload)
+                    if appState.trafficFeedLive {
+                        rateValue(appState.trafficStats.uploadSpeed, tint: TonoTraffic.upload)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    }
                     Text("\(activityBytes(appState.trafficStats.totalUpload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
 
                 ActivityCard(title: "Download") {
-                    rateValue(appState.trafficStats.downloadSpeed, tint: TonoTraffic.download)
+                    if appState.trafficFeedLive {
+                        rateValue(appState.trafficStats.downloadSpeed, tint: TonoTraffic.download)
+                    } else {
+                        Text("—")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    }
                     Text("\(activityBytes(appState.trafficStats.totalDownload)) total")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                 }
@@ -283,8 +310,12 @@ struct ActivityView: View {
 
             HStack(spacing: 10) {
                 ActivityCard(title: "Active connections") {
-                    Text("\(appState.trafficStats.activeConnections)")
-                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    Text(
+                        appState.connectionsFeedLive
+                            ? "\(appState.connections.count)"
+                            : "—"
+                    )
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     Text("\(appState.appTrafficLedger.apps.count) apps seen this session")
                         .font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
                 }
@@ -303,9 +334,11 @@ struct ActivityView: View {
 
     private func rateValue(_ bytesPerSecond: Int64, tint: Color) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(activityBytes(bytesPerSecond))
+            Text(TonoByteFormat.bytes(bytesPerSecond))
                 .font(.system(size: 26, weight: .semibold, design: .rounded))
-                .foregroundStyle(tint)
+                // An idle line is not a healthy line; only a moving rate earns
+                // the accent colour.
+                .foregroundStyle(bytesPerSecond > 0 ? tint : Color.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             Text("/s").font(.system(size: 12)).foregroundStyle(.secondary)
@@ -313,12 +346,15 @@ struct ActivityView: View {
     }
 
     private func routeLegend(_ split: AppTrafficLedger.RouteSplit) -> some View {
+        // The same four labels the filter pills use. This legend used to say
+        // 直连/家宽/隧道/已拦截 for the exact colours the pills call
+        // 直连/家宽/云端/已拒绝 — four classes, eight names, on one screen.
         HStack(spacing: 10) {
             legendItem("Direct", RouteTint.direct, split.direct)
-            legendItem("Residential", RouteTint.residential, split.residential)
-            legendItem("Tunnel", RouteTint.tunnel, split.tunnel)
+            legendItem("Home", RouteTint.residential, split.residential)
+            legendItem("Proxied", RouteTint.tunnel, split.tunnel)
             if split.blocked > 0 {
-                legendItem("Blocked", RouteTint.blocked, split.blocked)
+                legendItem("Rejected", RouteTint.blocked, split.blocked)
             }
             Spacer(minLength: 0)
         }
@@ -347,7 +383,7 @@ struct ActivityView: View {
             guard !isTestingLatency, appState.isConnected else { return }
             isTestingLatency = true
             Task {
-                await appState.testAllLatency()
+                await appState.testSelectedExitLatency()
                 isTestingLatency = false
             }
         } label: {
@@ -395,6 +431,24 @@ struct ActivityView: View {
             if section == .connections {
                 Divider().frame(height: 16).padding(.horizontal, 4)
                 filterPills
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "Filter by app, domain, or destination",
+                        text: $connectionQuery
+                    )
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .frame(width: 200)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    .white.opacity(colorScheme == .dark ? 0.08 : 0.4),
+                    in: Capsule()
+                )
             }
 
             Spacer(minLength: 0)
@@ -410,9 +464,7 @@ struct ActivityView: View {
                     AppTrafficRow(app: app, peak: appState.appTrafficLedger.apps.first?.total ?? 1)
                 }
                 if appState.appTrafficLedger.apps.isEmpty {
-                    Text(appState.isConnected
-                        ? "Waiting for the first traffic sample…"
-                        : "Connect to see which apps use which route.")
+                    Text(appsEmptyCopy)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -425,21 +477,67 @@ struct ActivityView: View {
 
     // MARK: - Connections
 
+    @ViewBuilder
     private var connectionsList: some View {
-        ScrollView {
-            ZStack(alignment: .leading) {
-                timelineLine
-                VStack(spacing: 14) {
-                    ForEach(filteredConnections) { entry in
-                        LogEntryRow(entry: entry) {
-                            Task { await appState.closeConnection(entry.id) }
+        if filteredConnections.isEmpty {
+            Text(connectionsEmptyCopy)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 40)
+        } else {
+            ScrollView {
+                ZStack(alignment: .leading) {
+                    timelineLine
+                    LazyVStack(spacing: 14) {
+                        ForEach(filteredConnections) { entry in
+                            LogEntryRow(entry: entry) {
+                                Task { await appState.closeConnection(entry.id) }
+                            }
+                        }
+                        // Say it under a filter too. Suppressing it there hid
+                        // the truncation exactly when a search could be
+                        // silently missing matches beyond the cap.
+                        if appState.connectionsDisplayLimited {
+                            Text("Showing the newest \(ConnectionActivityPresentation.maxDisplayed) connections.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 4)
                         }
                     }
+                    .padding(.leading, 32)
+                    .padding(.bottom, 8)
                 }
-                .padding(.leading, 32)
             }
+            .scrollIndicators(.hidden)
         }
-        .scrollIndicators(.hidden)
+    }
+
+    private var appsEmptyCopy: String {
+        if !appState.isConnected {
+            return String(localized: "Connect to see which apps use which route.")
+        }
+        if !appState.connectionsFeedLive {
+            return String(localized: "Reading connections…")
+        }
+        return String(localized: "Waiting for the first traffic sample…")
+    }
+
+    private var connectionsEmptyCopy: String {
+        if !appState.isConnected {
+            return String(localized: "Connect Tono to view live activity.")
+        }
+        if !appState.connectionsFeedLive {
+            return String(localized: "Reading connections…")
+        }
+        if selectedFilter != "All" || !connectionQuery.isEmpty {
+            return String(localized: "No connections match these filters.")
+        }
+        if appState.trafficStats.activeConnections > 0 {
+            return String(localized: "Only local DNS lookups are open; those stay hidden.")
+        }
+        return String(localized: "No active connections.")
     }
 
     // MARK: - Timeline Line
@@ -599,6 +697,7 @@ private struct LogEntryRow: View {
     private var dotColor: Color {
         switch entry.type {
         case .proxied:  return RouteTint.tunnel
+        case .home:     return RouteTint.residential
         case .direct:   return RouteTint.direct
         case .rejected: return RouteTint.blocked
         }
@@ -624,7 +723,7 @@ private struct LogEntryRow: View {
         // Same latency banding as the node cards (LatencyLevel.level(for:)),
         // so a given millisecond count is the same colour app-wide.
         guard let ms = entry.latency else { return ("98989D", "000000") }
-        let color = LatencyLevel.level(for: ms).color
+        let color = LatencyLevel.level(for: ms, kind: .exit).color
         return (color, color)
     }
 
@@ -698,7 +797,8 @@ private struct LogEntryRow: View {
                 .frame(width: 160, alignment: .leading)
                 .help(entry.route.isEmpty ? entry.nodeName : entry.route)
 
-                // Latency
+                // Per-flow latency is not in the `/connections` snapshot.
+                // A permanent "--" looked like every row had timed out.
                 if let ms = entry.latency {
                     Text("\(ms)ms")
                         .font(.system(size: 12, weight: .semibold))
@@ -706,14 +806,6 @@ private struct LogEntryRow: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color(hex: latencyStyle.bg).opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-                        .frame(width: 80)
-                } else {
-                    Text("- -")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
                         .frame(width: 80)
                 }
 

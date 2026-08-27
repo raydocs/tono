@@ -533,8 +533,15 @@ nonisolated final class CrashReporter: @unchecked Sendable {
     func annotatedRemoteDiagnosticSnapshot(
         _ snapshot: TonoDiagnosticSnapshot
     ) -> TonoDiagnosticSnapshot {
-        guard AppProfile.defaults.bool(forKey: SettingsKey.remoteDiagnosticsEnabled)
-        else { return snapshot }
+        // Defaults to on: a build under test that cannot say it crashed cannot
+        // be fixed. The snapshot this rides in is already uploaded on the
+        // twenty-minute telemetry cadence regardless of this switch; all this
+        // decides is whether the crash gets named.
+        let enabled = AppProfile.defaults
+            .object(forKey: SettingsKey.crashReportingEnabled) == nil
+            ? true
+            : AppProfile.defaults.bool(forKey: SettingsKey.crashReportingEnabled)
+        guard enabled else { return snapshot }
         lock.lock()
         let label = sessionCrashLabel
         lock.unlock()

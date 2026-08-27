@@ -974,6 +974,7 @@ export interface TranslationResources {
         connectionCount: string
         disconnected: string
         empty: string
+        emptyHiddenDns: string
         filters: {
           all: string
           direct: string
@@ -984,6 +985,7 @@ export interface TranslationResources {
         }
         limitNotice: string
         noMatches: string
+        reading: string
         routeFilter: string
         routes: {
           direct: string
@@ -995,6 +997,7 @@ export interface TranslationResources {
         search: string
         splitHint: string
         subtitle: string
+        telemetryFailed: string
         title: string
         view: string
         views: {
@@ -1035,6 +1038,7 @@ export interface TranslationResources {
         encryptedDnsHint: string
         errorRetry: string
         errors: {
+          bfeNotRunning: string
           coreMismatch: string
           coreUnpinned: string
           dnsPortBusy: string
@@ -1045,7 +1049,9 @@ export interface TranslationResources {
           releaseReconciling: string
           sendDiagnostics: string
           serviceBusy: string
+          serviceNotRunning: string
           serviceTooOld: string
+          wfpEngineWedged: string
         }
         errorSwitchServer: string
         info: {
@@ -1072,9 +1078,11 @@ export interface TranslationResources {
           liveTraffic: string
           noActiveRoute: string
           protection: string
+          reading: string
           ready: string
           refreshingCatalog: string
           serverPool: string
+          telemetryFailed: string
           trafficRouted: string
           verifiedCatalog: string
         }
@@ -1266,6 +1274,14 @@ export interface TranslationResources {
         cloudGroup: string
         empty: string
         selected: string
+        title: string
+      }
+      servicePrereq: {
+        bfe: string
+        generic: string
+        repair: string
+        repairFailed: string
+        repairing: string
         title: string
       }
       settings: {

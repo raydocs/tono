@@ -380,7 +380,7 @@
       "fields": {
         "webdavUrl": "WebDAV 服务器地址 http(s)://",
         "username": "用户名",
-        "info": "在应用数据目录中创建本地备份，您可以通过下方列表进行恢复或删除。"
+        "info": "在应用数据目录中创建本地备份，你可以通过下方列表进行恢复或删除。"
       },
       "messages": {
         "webdavUrlRequired": "WebDAV 服务器地址不能为空",

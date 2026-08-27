@@ -26,6 +26,9 @@
     "routeFilter": "路由筛选",
     "disconnected": "连接 Tono 后即可查看实时活动。",
     "empty": "暂无活动连接。",
+    "emptyHiddenDns": "当前只有本机 DNS 查询，已从列表隐藏。",
+    "reading": "正在读取连接…",
+    "telemetryFailed": "仪表盘还没接到核心，正在重试。网页能打开说明隧道是通的。",
     "noMatches": "没有符合筛选条件的连接。",
     "closingAll": "正在关闭…",
     "closeConnection": "关闭前往 {{target}} 的连接",
@@ -78,7 +81,7 @@
       "protocol": "协议",
       "route": "路由",
       "rule": "规则",
-      "count": "连接",
+      "count": "连接数",
       "split": "路径拆分"
     }
   },
@@ -187,6 +190,9 @@
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {
       "serviceBusy": "服务正在安装或修复。请批准管理员提示，或重启 Tono。",
+      "serviceNotRunning": "Tono 服务没在运行。最常见的原因是 Windows 的基础筛选引擎（BFE）被关掉了——TonoService 依赖它才能启动。请用管理员身份的 PowerShell 依次运行 sc.exe config BFE start= auto、sc.exe start BFE、sc.exe start TonoService，然后重新连接。",
+      "bfeNotRunning": "Windows 的基础筛选引擎（BFE）没在运行，装不上网络保护。请以管理员身份运行 sc start BFE，然后重试。",
+      "wfpEngineWedged": "Windows 防火墙引擎没有响应，通常是第三方安全软件挂住了它。请重启电脑；若还是这样，先退出杀毒或防火墙软件再重试。",
       "releaseReconciling": "保护还在解除，请稍后再连。",
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
@@ -215,7 +221,9 @@
       "verifiedCatalog": "目录已校验",
       "refreshingCatalog": "正在更新目录",
       "idle": "空闲",
-      "noActiveRoute": "当前没有活动线路"
+      "noActiveRoute": "当前没有活动线路",
+      "reading": "正在读取流量…",
+      "telemetryFailed": "仪表盘还没接到核心，正在重试"
     },
     "info": {
       "protection": "流量保护",
@@ -282,7 +290,7 @@
   },
   "nodes": {
     "title": "节点",
-    "subtitle": "选一个出口。",
+    "subtitle": "为受保护流量选择一个安全出口。",
     "search": "搜索节点",
     "noMatches": "没有符合条件的节点。",
     "readyToConnect": "可选",
@@ -299,11 +307,11 @@
     "empty": "暂无可用节点",
     "timeout": "超时",
     "testFailed": "失败",
-    "tcpLatency": "TCP {{latency}}ms",
-    "tcpLatencySlow": "TCP 较慢 {{latency}}ms",
-    "exitLatency": "出口 {{latency}}ms",
-    "exitLatencySlow": "出口较慢 {{latency}}ms",
-    "cachedLatency": "缓存 {{latency}}ms",
+    "tcpLatency": "{{latency}}ms",
+    "tcpLatencySlow": "{{latency}}ms",
+    "exitLatency": "{{seconds}} 秒",
+    "exitLatencySlow": "{{seconds}} 秒",
+    "cachedLatency": "{{seconds}} 秒",
     "unavailable": "不可用",
     "unavailableHint": "该节点当前不可用（线路被干扰），请选择其他节点。",
     "catalogRevision": "目录版本 v{{revision}}",
@@ -446,5 +454,13 @@
   "startup": {
     "stateInitRetrying": "打不开数据文件夹，正在重试。多半是磁盘满了，或用户配置还没就绪。",
     "stateInitFailed": "打不开数据文件夹，无法启动（{{error}}）。请腾出磁盘空间后重启。若已没网，管理员运行 tono-service.exe --emergency-disarm 解除保护。"
+  },
+  "servicePrereq": {
+    "title": "Tono 服务没有运行",
+    "bfe": "Windows 的基础筛选引擎（BFE）被关掉了，Tono 服务依赖它才能启动。点「修复」会请求管理员权限，把两者都启动。",
+    "generic": "Tono 服务没有启动，现在无法连接。点「修复」会请求管理员权限重新启动它。",
+    "repair": "修复",
+    "repairing": "正在修复…",
+    "repairFailed": "修复没成功。请用管理员身份的 PowerShell 运行 sc.exe start BFE，再运行 sc.exe start TonoService。"
   }
 }

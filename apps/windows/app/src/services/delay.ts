@@ -476,8 +476,8 @@ class DelayManager {
       case 'measured':
         // How a measurement is graded is this widget's own decision; the thresholds differ
         // from the signal icon's on purpose, because a colour has fewer steps than four bars.
-        if (delay >= 400) return 'warning.main'
-        if (delay >= 250) return 'primary.main'
+        if (delay >= 1500) return 'warning.main'
+        if (delay >= 1000) return 'primary.main'
         return 'success.main'
     }
   }

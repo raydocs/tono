@@ -48,6 +48,36 @@
         }
       }
     },
+    "%@ · v%lld · updates automatically": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · v%lld · 自动更新"
+          }
+        }
+      }
+    },
+    "%@ · waiting for the first verified sync": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 正在等待首次校验同步"
+          }
+        }
+      }
+    },
+    "%@s": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 秒"
+          }
+        }
+      }
+    },
     "%lld": {
       "localizations": {
         "zh-Hans": {
@@ -238,7 +268,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前服务器"
+            "value": "当前节点"
           }
         }
       }
@@ -269,7 +299,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前服务器"
+            "value": "当前节点"
           }
         }
       }
@@ -676,7 +706,17 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "重新连接前请先选择一个可用的云端服务器。"
+            "value": "重新连接前请先选择一个可用的云端节点。"
+          }
+        }
+      }
+    },
+    "Choose another route": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "换一条线路"
           }
         }
       }
@@ -759,7 +799,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "云端服务器更新已被拒绝，仍在使用上一次已验证的目录。%@"
+            "value": "云端节点更新已被拒绝，仍在使用上一次已验证的目录。%@"
           }
         }
       }
@@ -801,6 +841,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "连接"
+          }
+        }
+      }
+    },
+    "Connect Tono to view live activity.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接 Tono 后可查看实时活动。"
           }
         }
       }
@@ -1009,6 +1059,16 @@
         }
       }
     },
+    "Copy version for support": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制版本信息给技术支持"
+          }
+        }
+      }
+    },
     "Core did not become ready in time": {
       "localizations": {
         "zh-Hans": {
@@ -1074,7 +1134,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "无法解析订阅内容，请检查订阅格式"
+            "value": "无法解析订阅内容，请检查订阅格式。"
           }
         }
       }
@@ -1085,6 +1145,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法连接 Tono 服务，请检查网络后重试。"
+          }
+        }
+      }
+    },
+    "Crash reporting": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "崩溃上报"
+          }
+        }
+      }
+    },
+    "Current exit": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前出口"
           }
         }
       }
@@ -1127,6 +1207,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "首页"
+          }
+        }
+      }
+    },
+    "Dashboard has not reached the core yet — retrying": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仪表盘还没接到核心，正在重试"
           }
         }
       }
@@ -1228,7 +1318,17 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "直连流量已阻断"
+            "value": "已拦住直连流量"
+          }
+        }
+      }
+    },
+    "Direct traffic is blocked. Restore internet from here if you need the network.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拦住直连流量。需要上网的话，可以从这里恢复。"
           }
         }
       }
@@ -1508,12 +1608,22 @@
         }
       }
     },
+    "Filter by app, domain, or destination": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按应用、域名或目标筛选"
+          }
+        }
+      }
+    },
     "Filter logs...": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "过滤日志..."
+            "value": "过滤日志…"
           }
         }
       }
@@ -1593,32 +1703,12 @@
         }
       }
     },
-    "Good": {
+    "Google sign-in is not configured.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "良好"
-          }
-        }
-      }
-    },
-    "Exit %lldms": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "出口 %lldms"
-          }
-        }
-      }
-    },
-    "Slow exit %lldms": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "出口较慢 %lldms"
+            "value": "尚未配置 Google 登录。"
           }
         }
       }
@@ -1654,6 +1744,16 @@
         }
       }
     },
+    "Home": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "家宽"
+          }
+        }
+      }
+    },
     "Home line": {
       "localizations": {
         "zh-Hans": {
@@ -1669,7 +1769,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Home-US 暂时不可用，请选择一个受管云端服务器。"
+            "value": "Home-US 暂时不可用，请选择一个受管云端节点。"
           }
         }
       }
@@ -1772,7 +1872,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请将 Tono 安装到“应用程序”"
+            "value": "请将 Tono 安装到「应用程序」"
           }
         }
       }
@@ -1990,17 +2090,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "浅色、深色或跟随系统"
-          }
-        }
-      }
-    },
-    "LiquidClash": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "LiquidClash"
           }
         }
       }
@@ -2226,7 +2315,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "网络助手"
+            "value": "网络组件"
           }
         }
       }
@@ -2252,12 +2341,22 @@
         }
       }
     },
+    "New server failed verification. Switched back to the previous one.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新节点没通过验证，已切回原来的节点。"
+          }
+        }
+      }
+    },
     "No Cloud Servers": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "暂无云端服务器"
+            "value": "暂无云端节点"
           }
         }
       }
@@ -2267,7 +2366,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "没有匹配的服务器"
+            "value": "没有匹配的节点"
           }
         }
       }
@@ -2288,7 +2387,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未选择服务器"
+            "value": "未选择节点"
           }
         }
       }
@@ -2299,6 +2398,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有可注册的 Tono 设备。"
+          }
+        }
+      }
+    },
+    "No active connections.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有活动连接。"
           }
         }
       }
@@ -2318,13 +2427,22 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当前没有可用的云端服务器"
+            "value": "当前没有可用的云端节点"
+          }
+        }
+      }
+    },
+    "No connections match these filters.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有符合这些筛选条件的连接。"
           }
         }
       }
     },
     "No exit selected": {
-      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -2401,6 +2519,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "暂无采样"
+          }
+        }
+      }
+    },
+    "No server selected": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未选择节点"
           }
         }
       }
@@ -2567,12 +2695,22 @@
         }
       }
     },
+    "Only local DNS lookups are open; those stay hidden.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前只有本机 DNS 查询，已从列表隐藏。"
+          }
+        }
+      }
+    },
     "Open Applications": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "打开“应用程序”"
+            "value": "打开「应用程序」"
           }
         }
       }
@@ -2587,6 +2725,26 @@
         }
       }
     },
+    "Open Tono": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 Tono"
+          }
+        }
+      }
+    },
+    "Open WebRTC check": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 WebRTC 检查"
+          }
+        }
+      }
+    },
     "Open at login": {
       "extractionState": "stale",
       "localizations": {
@@ -2594,6 +2752,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "登录时打开"
+          }
+        }
+      }
+    },
+    "Opens a page that shows whether your browser is leaking a local or tunnel address. Compare": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开一个页面，显示浏览器是否泄漏了本地或隧道地址。用于对照"
           }
         }
       }
@@ -2636,16 +2804,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "套餐"
-          }
-        }
-      }
-    },
-    "Poor": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "极慢"
           }
         }
       }
@@ -2751,7 +2909,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "保护已开启，当前未连接"
+            "value": "保护中，未连上"
           }
         }
       }
@@ -2815,7 +2973,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已保护但离线"
+            "value": "保护中，未连上"
           }
         }
       }
@@ -2825,7 +2983,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "受保护的系统流量已无响应，且没有可切换的备用服务器。断网保护正在阻断流量，Tono 正在重新连接。"
+            "value": "当前线路没响应，也没有可切换的备用节点。断网保护正在拦住直连，Tono 正在重新连接。"
           }
         }
       }
@@ -2835,7 +2993,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "受保护的系统流量已无响应。断网保护正在阻断流量，Tono 正在重新连接。"
+            "value": "当前线路没响应。断网保护正在拦住直连，Tono 正在重新连接。"
           }
         }
       }
@@ -2876,7 +3034,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "代理"
+            "value": "云端"
           }
         }
       }
@@ -2944,12 +3102,42 @@
         }
       }
     },
+    "Quit Tono": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出 Tono"
+          }
+        }
+      }
+    },
     "Re-test the selected exit": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "重新测试所选出口"
+          }
+        }
+      }
+    },
+    "Reading connections…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在读取连接…"
+          }
+        }
+      }
+    },
+    "Reading traffic…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在读取流量…"
           }
         }
       }
@@ -2969,17 +3157,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "准备连接"
-          }
-        }
-      }
-    },
-    "Ready to test": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "待测速"
+            "value": "可以连接"
           }
         }
       }
@@ -2989,7 +3167,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reality 云保护"
+            "value": "云端保护"
           }
         }
       }
@@ -3000,6 +3178,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在安全重连"
+          }
+        }
+      }
+    },
+    "Recovering protected connection…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在恢复受保护连接…"
           }
         }
       }
@@ -3081,7 +3269,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "拒绝"
+            "value": "已拒绝"
           }
         }
       }
@@ -3154,7 +3342,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要先开启远程诊断。共享 Claude 保护与微信原生试用路由的聚合计数（含被拒或未知应用归因）以及固定的出口与绕行判定。可能包含官方 claude.ai/anthropic.com 主机名、端口与字节总量；其他所有目标只归入“其他”桶，仅携带路由类别、端口与字节总量——绝不包含主机名。原始 IP、进程名、路径、内容与原始日志均保留在本地。"
+            "value": "需要先开启远程诊断。共享 Claude 保护与微信原生试用路由的聚合计数（含被拒或未知应用归因）以及固定的出口与绕行判定。可能包含官方 claude.ai/anthropic.com 主机名、端口与字节总量；其他所有目标只归入「其他」桶，仅携带路由类别、端口与字节总量——绝不包含主机名。原始 IP、进程名、路径、内容与原始日志均保留在本地。"
           }
         }
       }
@@ -3359,7 +3547,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已选服务器"
+            "value": "已选节点"
           }
         }
       }
@@ -3461,7 +3649,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索服务器"
+            "value": "搜索节点"
           }
         }
       }
@@ -3523,7 +3711,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点按切换到此服务器"
+            "value": "点按切换到此节点"
           }
         }
       }
@@ -3535,16 +3723,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已选择"
-          }
-        }
-      }
-    },
-    "Selected exit latency": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当前出口延迟"
           }
         }
       }
@@ -3635,7 +3813,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "服务器池"
+            "value": "节点池"
           }
         }
       }
@@ -3755,6 +3933,16 @@
         }
       }
     },
+    "Showing the newest %lld connections.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅显示最新的 %lld 条连接。"
+          }
+        }
+      }
+    },
     "Sign Out": {
       "localizations": {
         "zh-Hans": {
@@ -3770,7 +3958,17 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "登录后请等待受保护服务器目录同步完成。"
+            "value": "登录后请等待受保护节点目录同步完成。"
+          }
+        }
+      }
+    },
+    "Sign in with Apple is not configured.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未配置「通过 Apple 登录」。"
           }
         }
       }
@@ -3791,16 +3989,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "六位邮箱验证码"
-          }
-        }
-      }
-    },
-    "Slow": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "较慢"
           }
         }
       }
@@ -3946,7 +4134,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "订阅服务器返回了 HTML 页面而非配置文件，请检查链接"
+            "value": "订阅服务器返回了 HTML 页面而非配置文件，请检查链接。"
           }
         }
       }
@@ -4017,7 +4205,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在切换服务器…"
+            "value": "正在切换节点…"
           }
         }
       }
@@ -4232,7 +4420,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点击启动连接"
+            "value": "点按连接"
           }
         }
       }
@@ -4242,7 +4430,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点按经 %@ 连接"
+            "value": "点按连接到 %@"
           }
         }
       }
@@ -4252,7 +4440,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点击断开连接"
+            "value": "点按断开"
           }
         }
       }
@@ -4262,7 +4450,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "点击恢复正常网络"
+            "value": "点按恢复上网"
           }
         }
       }
@@ -4289,13 +4477,12 @@
         }
       }
     },
-    "Test All": {
-      "extractionState": "stale",
+    "Tell Tono support when this app crashed": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "全部测速"
+            "value": "应用崩溃时告知 Tono 技术支持"
           }
         }
       }
@@ -4306,6 +4493,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "测试延迟"
+          }
+        }
+      }
+    },
+    "Test current exit": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "测试当前节点"
           }
         }
       }
@@ -4376,7 +4573,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已安装的网络组件不再接受这份 Tono。点按\"重试\"并在管理员弹窗中确认以修复，或运行文档中的 sudo 紧急解除命令后重新打开 Tono。%@"
+            "value": "已安装的网络组件不再接受这份 Tono。点按「重试」并在管理员弹窗中确认以修复，或运行文档中的 sudo 紧急解除命令后重新打开 Tono。%@"
           }
         }
       }
@@ -4436,7 +4633,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "所选云端服务器已被移除。断网保护仍在阻断流量，请另选一个云端服务器。"
+            "value": "所选云端节点已被移除。断网保护仍在拦住直连，请另选一个云端节点。"
           }
         }
       }
@@ -4446,7 +4643,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "所选云端服务器已被移除，Tono 已切换到受管的默认云端服务器。"
+            "value": "所选云端节点已被移除，Tono 已切换到受管的默认云端节点。"
           }
         }
       }
@@ -4569,7 +4766,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "为确保 Tono 稳定运行，必须从“应用程序”文件夹启动。请退出 Tono，在安装窗口中将它拖到“应用程序”，然后打开已安装的副本。"
+            "value": "为确保 Tono 稳定运行，必须从「应用程序」文件夹启动。请退出 Tono，在安装窗口中将它拖到「应用程序」，然后打开已安装的副本。"
           }
         }
       }
@@ -4761,7 +4958,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本会话按线路"
+            "value": "本会话流量 · 按线路"
           }
         }
       }
@@ -4771,7 +4968,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "流量已经过隧道"
+            "value": "流量已走受保护线路"
           }
         }
       }
@@ -5012,7 +5209,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已验证的服务器目录"
+            "value": "已验证的节点目录"
           }
         }
       }
@@ -5044,17 +5241,6 @@
         }
       }
     },
-    "Version 0.0.1": {
-      "extractionState": "stale",
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "版本 0.0.1"
-          }
-        }
-      }
-    },
     "Virtual network adapter for system-wide proxy": {
       "extractionState": "stale",
       "localizations": {
@@ -5071,7 +5257,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在等待服务器目录"
+            "value": "正在等待节点目录"
           }
         }
       }
@@ -5103,6 +5289,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "警告"
+          }
+        }
+      }
+    },
+    "WebRTC leak check": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WebRTC 泄漏检查"
           }
         }
       }
@@ -5220,6 +5416,16 @@
       }
     },
     "ms": {},
+    "of %lld": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共 %lld 个"
+          }
+        }
+      }
+    },
     "or": {
       "localizations": {
         "zh-Hans": {

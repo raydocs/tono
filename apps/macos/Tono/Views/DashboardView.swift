@@ -41,9 +41,8 @@ struct DashboardView: View {
                        connectionStage: appState.connectionStage,
                        disconnectionStage: appState.disconnectionStage,
                        nodeName: appState.activeNode?.name ?? appState.proxyService.activeNodeName,
-                       nodeLatency: appState.proxyService.nodes.first(
-                           where: { $0.name == (appState.activeNode?.name ?? appState.proxyService.activeNodeName) }
-                       )?.latency ?? 0)
+                       nodeLatency: (appState.activeNode?.name ?? appState.proxyService.activeNodeName)
+                           .map(appState.proxyService.latency(forNodeNamed:)) ?? 0)
                         .glassEffectID("pill", in: dashboardNS)
 
                     if showsConnectionDetails {
@@ -52,7 +51,7 @@ struct DashboardView: View {
                             .glassEffectTransition(.materialize)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     } else if let nodeName = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
-                        let nodeLatency = appState.proxyService.nodes.first(where: { $0.name == nodeName })?.latency ?? 0
+                        let nodeLatency = appState.proxyService.latency(forNodeNamed: nodeName)
                         ActiveNodeCard(
                             nodeName: nodeName,
                             groupName: appState.isConnected ? appState.proxyService.activeGroupName : String(localized: "Ready to connect"),
@@ -212,12 +211,18 @@ struct DashboardView: View {
 
     private var trafficSummaryValue: String {
         guard appState.isConnected else { return String(localized: "Idle") }
+        if !appState.trafficFeedLive {
+            return String(localized: "Reading traffic…")
+        }
         let speed = max(appState.trafficStats.uploadSpeed, appState.trafficStats.downloadSpeed)
         return speed > 0 ? formatSpeed(speed) : String(localized: "Connected")
     }
 
     private var trafficSummaryDetail: String {
         guard appState.isConnected else { return String(localized: "No active route") }
+        if !appState.trafficFeedLive {
+            return String(localized: "Dashboard has not reached the core yet — retrying")
+        }
         return String(localized: "\(appState.trafficStats.activeConnections) active")
     }
 
@@ -263,7 +268,7 @@ struct DashboardView: View {
             HStack(spacing: 10) {
                 TrafficSparkline(
                     history: trafficHistory,
-                    isLive: appState.isConnected
+                    isLive: appState.isConnected && appState.trafficFeedLive
                 )
 
                 VStack(alignment: .trailing, spacing: 2) {
@@ -300,10 +305,15 @@ struct DashboardView: View {
             // AppState publishes only the newest reading, so sample on a fixed
             // cadence: an idle stretch is as meaningful to the series as a spike.
             while !Task.isCancelled {
-                trafficHistory.record(
-                    up: appState.trafficStats.uploadSpeed,
-                    down: appState.trafficStats.downloadSpeed
-                )
+                // Only plot readings the feed actually delivered. Sampling
+                // while it is down drew a flat zero line that looks like a
+                // measured idle stretch.
+                if appState.trafficFeedLive {
+                    trafficHistory.record(
+                        up: appState.trafficStats.uploadSpeed,
+                        down: appState.trafficStats.downloadSpeed
+                    )
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -336,10 +346,7 @@ struct DashboardView: View {
     }
 
     private func formatSpeed(_ bytesPerSec: Int64) -> String {
-        let kb = Double(bytesPerSec) / 1024
-        if kb < 1024 { return String(format: "%.1f KB/s", kb) }
-        let mb = kb / 1024
-        return String(format: "%.1f MB/s", mb)
+        TonoByteFormat.rate(bytesPerSec)
     }
 }
 
