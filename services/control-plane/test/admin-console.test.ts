@@ -1163,6 +1163,7 @@ describe('dashboard KPI routes stay pinned', () => {
       quota: '#/users?focus=quota',
       expiring: '#/monitor?focus=expiring',
       unfilledRenew: '#/monitor?focus=unfilled-renew',
+      loss: '#/monitor?focus=loss',
     });
   });
 
@@ -1175,9 +1176,11 @@ describe('dashboard KPI routes stay pinned', () => {
       activityAvailable: false,
       usersAvailable: false,
       profilesAvailable: false,
+      agentsAvailable: false,
       nowSec: 1,
     });
     expect(kpis.find((item) => item.id === 'blocked')?.value).toBeNull();
+    expect(kpis.find((item) => item.id === 'loss')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'online')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'quota')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'expiring')?.value).toBeNull();
@@ -1195,6 +1198,7 @@ describe('dashboard KPI routes stay pinned', () => {
       activityAvailable: true,
       usersAvailable: true,
       profilesAvailable: true,
+      agentsAvailable: true,
       nowSec: 1,
     });
     const path = kpis.find((item) => item.id === 'unmeasured' || item.id === 'path');
@@ -1221,12 +1225,64 @@ describe('dashboard KPI routes stay pinned', () => {
       activityAvailable: true,
       usersAvailable: true,
       profilesAvailable: true,
+      agentsAvailable: true,
       nowSec: 1_000,
     });
     const expiring = kpis.find((item) => item.id === 'expiring' || item.id === 'unfilledRenew');
     expect(expiring?.value).toBeNull();
     expect(expiring?.note).toMatch(/未填/);
     expect(expiring?.href).toBe('#/monitor?focus=unfilled-renew');
+  });
+
+  it('counts occupied high loss on the KPI and notes the idle remainder', () => {
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Canyon"\n    type: vless\n  - name: "Erie"\n    type: vless\n',
+      qualityNodes: [qualityNode('Canyon'), qualityNode('Erie')],
+      agents: [
+        agent({
+          name: 'Canyon',
+          observedAt: nowSec,
+          load1: 0.2,
+          carriers: {
+            telecom: {
+              latencyMs: 180, lossPct: 12.3, samples: 9,
+              targets: ['三网-电信-上海'], history: [{ latencyMs: 180, lossPct: 12.3 }],
+            },
+          },
+        }),
+        agent({
+          name: 'Erie',
+          observedAt: nowSec,
+          load1: 0.2,
+          carriers: {
+            telecom: {
+              latencyMs: 237, lossPct: 13.3, samples: 9,
+              targets: ['三网-电信-上海'], history: [{ latencyMs: 237, lossPct: 13.3 }],
+            },
+          },
+        }),
+      ],
+      activitySource: 'ready',
+      activity: [activity({ selectedServer: 'Canyon', lastSeenAt: nowSec, online: true })],
+    });
+    const kpis = dashboardKpis({
+      nodes,
+      people: [],
+      incidents: [],
+      qualityAvailable: true,
+      activityAvailable: true,
+      usersAvailable: true,
+      profilesAvailable: true,
+      agentsAvailable: true,
+      nowSec,
+    });
+    const loss = kpis.find((item) => item.id === 'loss');
+    expect(loss?.value).toBe(1);
+    expect(loss?.note).toBe('2 台测到');
+    expect(loss?.alert).toBe(true);
+    expect(loss?.href).toBe('#/monitor?focus=loss');
   });
 });
 

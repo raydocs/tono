@@ -1,5 +1,12 @@
 import type { ActivityUserDto } from '../api';
-import { catalogBehindLive, nodeRootCause, type OpsNodeView, type OpsPersonView } from './ops-views';
+import {
+  carrierLossNeedsAttention,
+  catalogBehindLive,
+  hasBadCarrierLoss,
+  nodeRootCause,
+  type OpsNodeView,
+  type OpsPersonView,
+} from './ops-views';
 import { HEARTBEAT_FRESH_SECONDS, measurementFresh } from './freshness';
 import { isLikelyBlocked } from './quality';
 import { msEpochToSec } from './time';
@@ -56,6 +63,7 @@ export const KPI_HREFS = {
   quota: '#/users?focus=quota',
   expiring: '#/monitor?focus=expiring',
   unfilledRenew: '#/monitor?focus=unfilled-renew',
+  loss: '#/monitor?focus=loss',
 } as const;
 
 export type CustomerPathVerdict =
@@ -489,6 +497,7 @@ export function dashboardKpis(input: {
   activityAvailable: boolean;
   usersAvailable: boolean;
   profilesAvailable: boolean;
+  agentsAvailable: boolean;
   nowSec: number;
 }): DashboardKpi[] {
   const blocked = input.qualityAvailable
@@ -524,6 +533,24 @@ export function dashboardKpis(input: {
           alert: true,
         }
         : { id: 'path' as const, label: '客户路径差', value: 0, href: KPI_HREFS.path, alert: false };
+  const lossMeasured = input.agentsAvailable
+    ? input.nodes.filter((node) => hasBadCarrierLoss(node)).length
+    : null;
+  const lossOccupied = input.agentsAvailable
+    ? input.nodes.filter((node) => carrierLossNeedsAttention(node)).length
+    : null;
+  const loss = lossOccupied == null
+    ? { id: 'loss' as const, label: '高丢包', value: null, href: KPI_HREFS.loss, alert: false }
+    : {
+      id: 'loss' as const,
+      label: '高丢包',
+      value: lossOccupied,
+      note: lossMeasured != null && lossMeasured > lossOccupied
+        ? `${lossMeasured} 台测到`
+        : undefined,
+      href: KPI_HREFS.loss,
+      alert: lossOccupied > 0,
+    };
   const online = input.activityAvailable
     ? input.people.filter((person) => person.online).length
     : null;
@@ -563,6 +590,7 @@ export function dashboardKpis(input: {
   return [
     { id: 'blocked', label: '被墙', value: blocked, href: KPI_HREFS.blocked, alert: (blocked ?? 0) > 0 },
     { id: 'offline', label: '失联', value: offline, href: KPI_HREFS.offline, alert: (offline ?? 0) > 0 },
+    loss,
     path,
     { id: 'online', label: '在线客户', value: online, href: KPI_HREFS.online, alert: false },
     { id: 'quota', label: '额度告急', value: quota, href: KPI_HREFS.quota, alert: (quota ?? 0) > 0 },

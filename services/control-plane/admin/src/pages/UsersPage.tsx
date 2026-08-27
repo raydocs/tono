@@ -71,7 +71,12 @@ export function UsersPage() {
           </div>
           <FilterChips
             value={focus}
-            options={FILTERS}
+            options={FILTERS.map((item) => ({
+              ...item,
+              count: item.id === ''
+                ? world.people.length
+                : world.people.filter((person) => personMatchesFocus(person, item.id)).length,
+            }))}
             onChange={(id) => setRoute((current) => ({ ...current, page: 'users', focus: id || null, user: current.user }))}
           />
           {world.users.state === 'loading' && world.people.length === 0

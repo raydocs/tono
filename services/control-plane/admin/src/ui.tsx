@@ -195,7 +195,7 @@ export function FilterChips({
   onChange,
 }: {
   value: string;
-  options: Array<{ id: string; label: string }>;
+  options: Array<{ id: string; label: string; count?: number }>;
   onChange: (id: string) => void;
 }) {
   return (
@@ -209,6 +209,7 @@ export function FilterChips({
           onClick={() => onChange(option.id)}
         >
           {option.label}
+          {option.count != null ? <span className="chip-count">{option.count}</span> : null}
         </button>
       ))}
     </div>

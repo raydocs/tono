@@ -75,9 +75,9 @@ export function FailuresPage() {
       <FilterChips
         value={focus ?? ''}
         options={[
-          { id: '', label: '全部事故' },
-          { id: 'customer-path', label: '客户路径' },
-          { id: 'unmeasured', label: '路径未测' },
+          { id: '', label: '全部事故', count: board.length },
+          { id: 'customer-path', label: '客户路径', count: paths.length },
+          { id: 'unmeasured', label: '路径未测', count: pathUnmeasured },
         ]}
         onChange={(id) => setRoute((current) => ({ ...current, page: 'failures', focus: id || null }))}
       />

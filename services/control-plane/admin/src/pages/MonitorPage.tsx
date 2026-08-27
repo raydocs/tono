@@ -309,7 +309,12 @@ export function MonitorPage() {
       </div>
       <FilterChips
         value={focus ?? ''}
-        options={FILTERS}
+        options={FILTERS.map((item) => ({
+          ...item,
+          count: item.id === ''
+            ? world.nodes.length
+            : world.nodes.filter((node) => nodeMatchesFocus(node, item.id, nowSec)).length,
+        }))}
         onChange={(id) => setRoute((current) => ({ ...current, page: 'monitor', focus: id || null }))}
       />
       <div className="count-line">

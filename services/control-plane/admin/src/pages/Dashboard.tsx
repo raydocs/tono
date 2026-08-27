@@ -36,6 +36,7 @@ export function Dashboard() {
     activityAvailable,
     usersAvailable,
     profilesAvailable: world.sources.profiles.status === 'current' || world.sources.profiles.status === 'stale',
+    agentsAvailable: world.sources.agents.status === 'current' || world.sources.agents.status === 'stale',
     nowSec: world.nowSec,
   });
   const accidents = accidentsOnly(world.incidents);
