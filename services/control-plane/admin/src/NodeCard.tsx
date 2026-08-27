@@ -1,6 +1,6 @@
 import { CarrierMini } from './carriers';
 import { formatBytes, formatDuration } from './lib/format';
-import type { OpsNodeView } from './lib/ops-views';
+import { carrierLossLine, type OpsNodeView } from './lib/ops-views';
 import { usePrivacy } from './privacy';
 
 function pct(used: number | null | undefined, total: number | null | undefined): number | null {
@@ -45,6 +45,8 @@ function agentText(node: OpsNodeView): string {
 
 /** Why this machine is in front of you, in one line, without repeating the pill. */
 function reasonText(node: OpsNodeView): string {
+  const loss = carrierLossLine(node);
+  if (loss) return loss;
   const parts = [catalogText(node), occupancyText(node)];
   if (node.agentState !== 'reported') parts.push(agentText(node));
   return parts.filter(Boolean).join(' · ');
@@ -121,7 +123,9 @@ export function NodeCard({
             </div>
           )}
           {offline && <span className="nc-offline-flag">离线 · 仍可点开处理</span>}
-          {!node.billing.renewsAt && <span className="nc-action-fill">点开补续费日</span>}
+          {carrierLossLine(node)
+            ? <span className="nc-action-fill">回程丢包 · 点开看三网</span>
+            : !node.billing.renewsAt && <span className="nc-action-fill">点开补续费日</span>}
         </>
       ) : (
         <>

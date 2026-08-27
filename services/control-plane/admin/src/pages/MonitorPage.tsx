@@ -28,6 +28,7 @@ import { NodeDrawer } from './monitor/NodeDrawer';
 const FILTERS = [
   { id: '', label: '全部' },
   { id: 'needs', label: '需处理' },
+  { id: 'loss', label: '高丢包' },
   { id: 'blocked', label: '被墙' },
   { id: 'offline', label: '离线' },
   { id: 'pressure', label: '高负载' },

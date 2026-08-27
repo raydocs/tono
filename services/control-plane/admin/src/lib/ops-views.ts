@@ -66,6 +66,13 @@ export function hasBadCarrierLoss(node: OpsNodeView): boolean {
   return node.signals.some((signal) => signal.kind === 'carrier-loss' && signal.severity >= 3);
 }
 
+export function carrierLossLine(node: OpsNodeView): string | null {
+  const labels = node.signals
+    .filter((signal) => signal.kind === 'carrier-loss' && signal.severity >= 3)
+    .map((signal) => signal.label);
+  return labels.length ? labels.join(' · ') : null;
+}
+
 export function nodeRootCause(node: OpsNodeView): NodeRootCause {
   if (node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED') return 'blocked';
   if (node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false)) {
@@ -277,7 +284,7 @@ export function assembleOpsNodes(input: {
 }
 
 export const MONITOR_FOCUS = [
-  'needs', 'blocked', 'offline', 'pressure', 'expiring', 'unfilled-renew', 'noprobe', 'unknown',
+  'needs', 'loss', 'blocked', 'offline', 'pressure', 'expiring', 'unfilled-renew', 'noprobe', 'unknown',
 ] as const;
 export type MonitorFocus = typeof MONITOR_FOCUS[number];
 
@@ -292,6 +299,7 @@ export function nodeMatchesFocus(node: OpsNodeView, focus: string | null, nowSec
   if (focus === 'offline') return cause === 'offline';
   if (focus === 'noprobe') return cause === 'noprobe';
   if (focus === 'pressure') return cause === 'pressure';
+  if (focus === 'loss') return hasBadCarrierLoss(node);
   if (focus === 'expiring') {
     return Boolean(node.billing.renewsAt && node.billing.renewsAt - nowSec <= 7 * 86_400 && node.billing.renewsAt - nowSec >= 0);
   }
@@ -470,6 +478,13 @@ export function isPersonFocus(value: string | null | undefined): value is Person
   return PERSON_FOCUS.includes(value as PersonFocus);
 }
 
+export function catalogBehindLive(person: OpsPersonView): boolean {
+  return person.catalogLag.state === 'behind'
+    && person.online
+    && person.accountState === 'present'
+    && person.user?.status === 'active';
+}
+
 export function personMatchesFocus(person: OpsPersonView, focus: string | null): boolean {
   if (!focus || focus === 'homes') return true;
   if (focus === 'quota') return person.quotaWarn || person.quotaOver;
@@ -480,7 +495,7 @@ export function personMatchesFocus(person: OpsPersonView, focus: string | null):
   if (focus === 'online') return person.online;
   if (focus === 'path') return person.path.kind === 'incident';
   if (focus === 'unmeasured') return person.online && person.path.kind === 'unmeasured';
-  if (focus === 'catalog') return person.catalogLag.state === 'behind';
+  if (focus === 'catalog') return catalogBehindLive(person);
   if (focus === 'catalog-unreported') return person.catalogLag.state === 'unreported' && person.online;
   if (focus === 'credential') return Boolean(person.user && !person.hasExitIdentity);
   return true;

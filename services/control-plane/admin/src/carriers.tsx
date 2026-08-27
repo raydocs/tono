@@ -55,11 +55,11 @@ function Panel({ title, rows, metric }: {
 }
 
 /**
- * The strip on a node card. Each row is one carrier: the current latency as a
- * number, then the last buckets as bars. The bar colour is the latency band and
- * nothing else — a bucket with no sample is drawn hatched, so a gap can never be
- * mistaken for a good reading. The legend under the rows says exactly that,
- * because a bare colour bar is ambiguous the first time you see it.
+ * The strip on a node card. Each row is one carrier: latency, return-path
+ * loss, then the last latency buckets as bars. Loss is a number because that
+ * is what now puts a machine in 需处理; the bars stay latency so a 240 ms
+ * reading can still be told from a spike. A bucket with no sample is drawn
+ * hatched, so a gap can never be mistaken for a good reading.
  */
 export function CarrierMini({ carriers }: { carriers: CarrierPingMapDto }) {
   const rows = carrierRows(carriers);
@@ -80,6 +80,7 @@ export function CarrierMini({ carriers }: { carriers: CarrierPingMapDto }) {
             <span className={`carrier-dot carrier-dot-${row.key}`} aria-hidden />
             <span>{row.label}</span>
             <span className={`mono carrier-${row.latencyTone}-text`}>{row.probed ? row.latencyText : '没测'}</span>
+            <span className={`mono carrier-${row.lossTone}-text`}>{row.probed ? row.lossText : '—'}</span>
             {row.probed && row.history.length > 0
               ? <Bars row={row} metric="latency" />
               : <span className="carrier-bars carrier-bars-empty" title="这段时间没有采样" />}
@@ -97,7 +98,7 @@ export function CarrierMini({ carriers }: { carriers: CarrierPingMapDto }) {
 export function CarrierLegend() {
   return (
     <p className="carrier-legend">
-      <span>三网色条 = 回国延迟</span>
+      <span>色条 = 回国延迟 · 百分数 = 回程丢包</span>
       <span><i className="carrier-good" />好</span>
       <span><i className="carrier-warn" />偏高</span>
       <span><i className="carrier-bad" />差</span>

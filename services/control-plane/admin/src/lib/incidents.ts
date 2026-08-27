@@ -1,5 +1,5 @@
 import type { ActivityUserDto } from '../api';
-import { nodeRootCause, type OpsNodeView, type OpsPersonView } from './ops-views';
+import { catalogBehindLive, nodeRootCause, type OpsNodeView, type OpsPersonView } from './ops-views';
 import { HEARTBEAT_FRESH_SECONDS, measurementFresh } from './freshness';
 import { isLikelyBlocked } from './quality';
 import { msEpochToSec } from './time';
@@ -384,7 +384,7 @@ export function incidentsFromWorld(input: {
         }));
       }
     }
-    if (person.catalogLag.state === 'behind') {
+    if (catalogBehindLive(person) && person.catalogLag.state === 'behind') {
       incidents.push(incident({
         id: `catalog-lag:${person.userId}`,
         kind: 'catalog-lag',

@@ -143,7 +143,7 @@ export function Dashboard() {
               <h2>问题节点</h2>
               <p>事故没覆盖到的问题机器，最多 6 台</p>
             </div>
-            <a className="btn btn-outline btn-sm" href="#/monitor">全部服务器</a>
+            <a className="btn btn-outline btn-sm" href="#/monitor?focus=needs">全部服务器</a>
           </div>
           {world.nodes.length === 0 && world.live.state === 'loading' ? (
             <Skeleton label="节点" />

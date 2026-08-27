@@ -487,6 +487,8 @@ import {
 import {
   assembleOpsNodes,
   assembleOpsPeople,
+  carrierLossLine,
+  catalogBehindLive,
   hasBadCarrierLoss,
   nodeMatchesFocus,
   nodeRootCause,
@@ -1016,6 +1018,34 @@ describe('customer telemetry and path activity', () => {
     expect(incidents.some((item) => item.kind === 'catalog-unreported')).toBe(false);
   });
 
+  it('does not treat cancelled or offline catalog lag as a live chore', () => {
+    const behind = (over: Partial<UserDto> = {}, activityOver: Partial<ActivityUserDto> = {}) => assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      catalogRevision: 40,
+      users: [{
+        id: 'u-lag', email: 'lag@example.com', deviceLimit: 1, quotaBytes: null, usageBytes: 0,
+        suspended: false, status: 'active', createdAt: now, homeBinding: null, ...over,
+      } as UserDto],
+      activity: [activity({ userId: 'u-lag', catalogRevision: 28, lastSeenAt: now, online: true, ...activityOver })],
+    });
+    const cancelled = behind({ status: 'disabled' });
+    expect(catalogBehindLive(cancelled[0])).toBe(false);
+    expect(personMatchesFocus(cancelled[0], 'catalog')).toBe(false);
+    expect(incidentsFromWorld({ nodes: [], people: cancelled, catalogRevision: 40, nowSec: now }).some((item) => item.kind === 'catalog-lag')).toBe(false);
+
+    const offline = behind({}, { online: false, lastSeenAt: now - 16 * 86_400 });
+    expect(offline[0].catalogLag.state).toBe('behind');
+    expect(catalogBehindLive(offline[0])).toBe(false);
+    expect(personMatchesFocus(offline[0], 'catalog')).toBe(false);
+    expect(incidentsFromWorld({ nodes: [], people: offline, catalogRevision: 40, nowSec: now }).some((item) => item.kind === 'catalog-lag')).toBe(false);
+
+    const live = behind();
+    expect(catalogBehindLive(live[0])).toBe(true);
+    expect(personMatchesFocus(live[0], 'catalog')).toBe(true);
+    expect(incidentsFromWorld({ nodes: [], people: live, catalogRevision: 40, nowSec: now }).some((item) => item.kind === 'catalog-lag')).toBe(true);
+  });
+
   it('does not call heartbeat-only people ghosts while the users source is loading or down', () => {
     const loading = assembleOpsPeople({
       nowSec: now,
@@ -1429,7 +1459,9 @@ describe('return-path loss on assembled nodes', () => {
     expect(canyon.signals.some((signal) => signal.label.includes('电信丢包'))).toBe(true);
     expect(nodeRootCause(canyon)).toBe('ok');
     expect(nodeMatchesFocus(canyon, 'pressure', nowSec)).toBe(false);
+    expect(nodeMatchesFocus(canyon, 'loss', nowSec)).toBe(true);
     expect(nodeMatchesFocus(canyon, 'needs', nowSec)).toBe(true);
+    expect(carrierLossLine(canyon)).toContain('电信丢包 12.3%');
     expect(canyon.dot).toBe('warn');
     const incidents = incidentsFromWorld({ nodes, people: [], catalogRevision: 1, nowSec });
     expect(incidents.some((item) => item.kind === 'node-pressure')).toBe(false);
@@ -1457,7 +1489,9 @@ describe('return-path loss on assembled nodes', () => {
       })],
     });
     expect(hasBadCarrierLoss(nodes[0])).toBe(false);
+    expect(nodeMatchesFocus(nodes[0], 'loss', nowSec)).toBe(false);
     expect(nodeMatchesFocus(nodes[0], 'needs', nowSec)).toBe(false);
+    expect(carrierLossLine(nodes[0])).toBeNull();
     expect(nodes[0].dot).toBe('ok');
   });
 });
