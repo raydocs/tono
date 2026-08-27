@@ -887,6 +887,25 @@ pub fn is_retryable_lock_error(message: &str) -> bool {
 /// Fail fast when BFE is known stopped. A query failure is not a refusal —
 /// StartClash still diagnoses a wedged or missing engine. StartPending is
 /// allowed through so a machine that is bringing BFE up is not rejected.
+/// BFE's verdict for the service-readiness failure path, in the shape `map_wfp_engine_error`
+/// already translates. `Ok(())` on any platform or condition where BFE is not the answer, so
+/// the caller falls through to its own classification.
+fn blocking_bfe_verdict() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        match query_bfe_state() {
+            Ok((running, state)) if !running && !state.eq_ignore_ascii_case("StartPending") => {
+                Err(format!("{BFE_NOT_RUNNING_PREFIX}: state {state}"))
+            }
+            _ => Ok(()),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 async fn preflight_bfe() -> Result<(), String> {
     #[cfg(windows)]
     {
@@ -933,7 +952,17 @@ async fn ensure_service_ready() -> Result<(), String> {
     // first connect afterwards revives it through the established install/repair entry.
     service::tono_service_ready_or_repair()
         .await
-        .map_err(|err| map_service_ready_error(&err))?;
+        .map_err(|err| {
+            // Ask BFE before answering. TonoService is AutoStart with a hard BFE dependency, so
+            // when BFE is off the SCM refuses to start it and does not retry — a reboot does not
+            // help either. `preflight_bfe` already knows how to say that, but it runs later in
+            // the connect flow and this failure returns before it, so the customer used to get
+            // "the Service is not ready" plus an internal error and no way forward.
+            if let Err(bfe) = blocking_bfe_verdict() {
+                return bfe;
+            }
+            map_service_ready_error(&err)
+        })?;
     match service::tono_probe_kill_switch_release_support().await {
         Ok(None) => Ok(()),
         // The detail carries both sides' epoch/revision. The old wording asserted "too old",
