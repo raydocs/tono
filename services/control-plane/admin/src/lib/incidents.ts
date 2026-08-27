@@ -55,6 +55,7 @@ export const KPI_HREFS = {
   online: '#/users?focus=online',
   quota: '#/users?focus=quota',
   expiring: '#/monitor?focus=expiring',
+  unfilledRenew: '#/monitor?focus=unfilled-renew',
 } as const;
 
 export type CustomerPathVerdict =
@@ -544,11 +545,11 @@ export function dashboardKpis(input: {
     ? { id: 'expiring' as const, label: '7 天续费', value: null, href: KPI_HREFS.expiring, alert: false }
     : dated.length === 0
       ? {
-        id: 'expiring' as const,
+        id: 'unfilledRenew' as const,
         label: '7 天续费',
         value: null,
         note: input.nodes.length ? `${input.nodes.length} 台未填` : undefined,
-        href: KPI_HREFS.expiring,
+        href: KPI_HREFS.unfilledRenew,
         alert: false,
       }
       : {
@@ -556,7 +557,7 @@ export function dashboardKpis(input: {
         label: '7 天续费',
         value: expiringCount,
         note: missingRenew > 0 ? `${missingRenew} 台未填` : undefined,
-        href: KPI_HREFS.expiring,
+        href: expiringCount === 0 && missingRenew > 0 ? KPI_HREFS.unfilledRenew : KPI_HREFS.expiring,
         alert: expiringCount > 0,
       };
   return [

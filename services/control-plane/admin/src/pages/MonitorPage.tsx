@@ -32,6 +32,7 @@ const FILTERS = [
   { id: 'offline', label: '离线' },
   { id: 'pressure', label: '高负载' },
   { id: 'expiring', label: '将到期' },
+  { id: 'unfilled-renew', label: '续费未填' },
   { id: 'noprobe', label: '没探针' },
   { id: 'unknown', label: '数据未知' },
 ];

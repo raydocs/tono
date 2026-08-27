@@ -259,7 +259,7 @@ export function assembleOpsNodes(input: {
 }
 
 export const MONITOR_FOCUS = [
-  'needs', 'blocked', 'offline', 'pressure', 'expiring', 'noprobe', 'unknown',
+  'needs', 'blocked', 'offline', 'pressure', 'expiring', 'unfilled-renew', 'noprobe', 'unknown',
 ] as const;
 export type MonitorFocus = typeof MONITOR_FOCUS[number];
 
@@ -277,6 +277,7 @@ export function nodeMatchesFocus(node: OpsNodeView, focus: string | null, nowSec
   if (focus === 'expiring') {
     return Boolean(node.billing.renewsAt && node.billing.renewsAt - nowSec <= 7 * 86_400 && node.billing.renewsAt - nowSec >= 0);
   }
+  if (focus === 'unfilled-renew') return node.billing.renewsAt == null;
   if (focus === 'unknown') {
     return node.qualityState !== 'reported' || node.agentState === 'unavailable' || node.catalogState === 'unavailable';
   }

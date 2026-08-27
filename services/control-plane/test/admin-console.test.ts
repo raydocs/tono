@@ -824,6 +824,9 @@ describe('ops node union and incident ranking', () => {
     expect(nodeMatchesFocus(listed, 'noprobe', 1)).toBe(false);
     expect(nodeMatchesFocus(listed, 'unknown', 1)).toBe(true);
     expect(nodeMatchesFocus(occupied, 'unknown', 1)).toBe(true);
+    expect(listed.billing.renewsAt).toBeNull();
+    expect(nodeMatchesFocus(listed, 'unfilled-renew', 1)).toBe(true);
+    expect(nodeMatchesFocus(listed, 'expiring', 1)).toBe(false);
   });
 
   it('sorts blocked listed nodes ahead of healthy occupied ones', () => {
@@ -1100,6 +1103,7 @@ describe('dashboard KPI routes stay pinned', () => {
       online: '#/users?focus=online',
       quota: '#/users?focus=quota',
       expiring: '#/monitor?focus=expiring',
+      unfilledRenew: '#/monitor?focus=unfilled-renew',
     });
   });
 
@@ -1160,9 +1164,10 @@ describe('dashboard KPI routes stay pinned', () => {
       profilesAvailable: true,
       nowSec: 1_000,
     });
-    const expiring = kpis.find((item) => item.id === 'expiring');
+    const expiring = kpis.find((item) => item.id === 'expiring' || item.id === 'unfilledRenew');
     expect(expiring?.value).toBeNull();
     expect(expiring?.note).toMatch(/未填/);
+    expect(expiring?.href).toBe('#/monitor?focus=unfilled-renew');
   });
 });
 

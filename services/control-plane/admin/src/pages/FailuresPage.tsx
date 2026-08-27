@@ -58,6 +58,7 @@ export function FailuresPage() {
   const qualityPending = world.sources.quality.status === 'loading';
   const agentsPending = world.sources.agents.status === 'loading';
   const activityPending = world.sources.activity.status === 'loading';
+  const pathUnmeasured = world.people.filter((person) => person.online && person.path.kind === 'unmeasured').length;
   const selectedNode = world.nodes.find((node) => node.name === route.node) ?? null;
   const selectedPerson = world.people.find((person) => person.userId === route.user) ?? null;
 
@@ -126,7 +127,15 @@ export function FailuresPage() {
               : activityPending
                 ? <p className="muted">心跳还没查完。</p>
                 : world.sources.activity.status === 'current'
-                  ? <p className="muted">没有新鲜的客户路径事故。缺测不是故障。</p>
+                  ? pathUnmeasured > 0
+                    ? (
+                      <p className="muted">
+                        没有新鲜的客户路径事故。
+                        <a className="table-link" href="#/users?focus=unmeasured">{pathUnmeasured} 个在线客户还没有路径采样</a>
+                        ，缺测不是故障。
+                      </p>
+                    )
+                    : <p className="muted">没有新鲜的客户路径事故。缺测不是故障。</p>
                   : <p className="muted">心跳不是 current，不能写成没有路径事故。</p>}
         </div>
       </GlassCard>

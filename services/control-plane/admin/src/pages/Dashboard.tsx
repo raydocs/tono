@@ -54,6 +54,13 @@ export function Dashboard() {
     .sort((a, b) => b.usageBytes - a.usageBytes)
     .slice(0, 5);
   const { quota, ops } = choreGroups(world.chores);
+  const catalogUnreported = quota.filter((item) => item.kind === 'catalog-unreported');
+  const quotaRest = quota.filter((item) => item.kind !== 'catalog-unreported');
+  const choreAllHref = catalogUnreported.length > 0
+    ? '#/users?focus=catalog-unreported'
+    : quotaRest.some((item) => item.kind === 'catalog-lag')
+      ? '#/users?focus=catalog'
+      : '#/users?focus=quota';
   const inventory = world.dashboard.state === 'ready' ? world.dashboard.data.inventory : null;
   const healthy = canDeclareHealthy([world.sources.quality, world.sources.agents, world.sources.activity, world.sources.catalog]);
   const staleNote = [world.sources.quality, world.sources.agents, world.sources.activity, world.sources.catalog]
@@ -156,10 +163,15 @@ export function Dashboard() {
                 <h2>运营待办</h2>
                 <p>额度、到期、目录落后或未上报</p>
               </div>
-              <a className="btn btn-outline btn-sm" href="#/users?focus=quota">查看全部</a>
+              <a className="btn btn-outline btn-sm" href={choreAllHref}>查看全部</a>
             </div>
             <ul className="attention-list">
-              {quota.slice(0, 8).map((item) => (
+              {catalogUnreported.length > 0 && (
+                <li>
+                  <a className="table-link" href="#/users?focus=catalog-unreported">{catalogUnreported.length} 人未上报目录版本</a>
+                </li>
+              )}
+              {quotaRest.slice(0, catalogUnreported.length > 0 ? 7 : 8).map((item) => (
                 <li key={item.id}>
                   <a className="table-link" href={item.actionRoute}>{item.node ? item.title : privacy.email(item.title)} · {item.detail}</a>
                 </li>
