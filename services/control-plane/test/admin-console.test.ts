@@ -957,11 +957,33 @@ describe('customer telemetry and path activity', () => {
     });
     expect(personMatchesFocus(people[0], 'quota')).toBe(true);
     expect(personMatchesFocus(people[0], 'path')).toBe(true);
+    expect(personMatchesFocus(people[0], 'catalog')).toBe(true);
+    expect(personMatchesFocus(people[0], 'catalog-unreported')).toBe(false);
     expect(personMatchesFocus(people[0], 'claude')).toBe(true);
     expect(people[0].catalogLag.state).toBe('behind');
     expect(people[0].chores).toContain('没开 Claude');
     expect(people[0].chores.some((chore) => chore.includes('目录落后'))).toBe(false);
     expect(people[0].accountState).toBe('present');
+  });
+
+  it('keeps unreported catalog version out of the behind filter', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      catalogRevision: 40,
+      users: [{
+        id: 'u2', email: 'n@example.com', deviceLimit: 1, quotaBytes: null, usageBytes: 0,
+        suspended: false, status: 'active', createdAt: now, homeBinding: null,
+      } as UserDto],
+      activity: [activity({ userId: 'u2', catalogRevision: null, lastSeenAt: now })],
+    });
+    expect(people[0].catalogLag.state).toBe('unreported');
+    expect(personMatchesFocus(people[0], 'catalog')).toBe(false);
+    expect(personMatchesFocus(people[0], 'catalog-unreported')).toBe(true);
+    expect(personMatchesFocus(people[0], 'unmeasured')).toBe(true);
+    const incidents = incidentsFromWorld({ nodes: [], people, catalogRevision: 40, nowSec: now });
+    expect(incidents.some((item) => item.kind === 'catalog-unreported')).toBe(true);
+    expect(incidents.some((item) => item.kind === 'catalog-lag')).toBe(false);
   });
 
   it('does not call heartbeat-only people ghosts while the users source is loading or down', () => {
@@ -1074,6 +1096,7 @@ describe('dashboard KPI routes stay pinned', () => {
       blocked: '#/monitor?focus=blocked',
       offline: '#/monitor?focus=offline',
       path: '#/failures?focus=customer-path',
+      unmeasured: '#/users?focus=unmeasured',
       online: '#/users?focus=online',
       quota: '#/users?focus=quota',
       expiring: '#/monitor?focus=expiring',
@@ -1095,6 +1118,51 @@ describe('dashboard KPI routes stay pinned', () => {
     expect(kpis.find((item) => item.id === 'online')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'quota')?.value).toBeNull();
     expect(kpis.find((item) => item.id === 'expiring')?.value).toBeNull();
+  });
+
+  it('does not report a quiet path KPI when online customers have no path samples', () => {
+    const kpis = dashboardKpis({
+      nodes: [],
+      people: [{
+        online: true,
+        path: { kind: 'unmeasured' },
+      } as never],
+      incidents: [],
+      qualityAvailable: true,
+      activityAvailable: true,
+      usersAvailable: true,
+      profilesAvailable: true,
+      nowSec: 1,
+    });
+    const path = kpis.find((item) => item.id === 'unmeasured' || item.id === 'path');
+    expect(path?.id).toBe('unmeasured');
+    expect(path?.value).toBe(1);
+    expect(path?.label).toBe('路径未测');
+    expect(path?.alert).toBe(true);
+  });
+
+  it('does not treat missing renew dates as nobody expiring', () => {
+    const kpis = dashboardKpis({
+      nodes: [{
+        billing: { renewsAt: null },
+        signals: [],
+        qualityState: 'unmeasured',
+        agentState: 'unreported',
+        catalogState: 'known-listed',
+        blockStatus: '',
+        ok: null,
+      } as never],
+      people: [],
+      incidents: [],
+      qualityAvailable: true,
+      activityAvailable: true,
+      usersAvailable: true,
+      profilesAvailable: true,
+      nowSec: 1_000,
+    });
+    const expiring = kpis.find((item) => item.id === 'expiring');
+    expect(expiring?.value).toBeNull();
+    expect(expiring?.note).toMatch(/未填/);
   });
 });
 

@@ -440,7 +440,8 @@ export function assembleOpsPeople(input: {
 }
 
 export const PERSON_FOCUS = [
-  'quota', 'expiring', 'expired', 'claude', 'home', 'online', 'path', 'credential',
+  'quota', 'expiring', 'expired', 'claude', 'home', 'online', 'path', 'unmeasured',
+  'credential', 'catalog', 'catalog-unreported',
 ] as const;
 
 export type PersonFocus = typeof PERSON_FOCUS[number];
@@ -458,6 +459,9 @@ export function personMatchesFocus(person: OpsPersonView, focus: string | null):
   if (focus === 'home') return Boolean(person.user && !person.hasHome);
   if (focus === 'online') return person.online;
   if (focus === 'path') return person.path.kind === 'incident';
+  if (focus === 'unmeasured') return person.online && person.path.kind === 'unmeasured';
+  if (focus === 'catalog') return person.catalogLag.state === 'behind';
+  if (focus === 'catalog-unreported') return person.catalogLag.state === 'unreported';
   if (focus === 'credential') return Boolean(person.user && !person.hasExitIdentity);
   return true;
 }

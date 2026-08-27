@@ -19,6 +19,52 @@ const PRIMARY: Array<'dashboard' | 'failures' | 'monitor' | 'users'> = [
   'dashboard', 'failures', 'monitor', 'users',
 ];
 
+function TopbarPrefs({
+  privacy,
+  theme,
+  setTheme,
+  refreshMs,
+  setRefreshMs,
+  compact,
+}: {
+  privacy: ReturnType<typeof usePrivacy>;
+  theme: 'system' | 'light' | 'dark';
+  setTheme: (value: 'system' | 'light' | 'dark') => void;
+  refreshMs: number;
+  setRefreshMs: (value: number) => void;
+  compact: boolean;
+}) {
+  return (
+    <>
+      <label className={compact ? 'muted' : 'ctl-item'} title="隐私模式：遮住邮箱、IP、密钥和金额">
+        <input type="checkbox" aria-label="隐私模式" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+        隐私
+      </label>
+      <label className={compact ? 'muted' : 'ctl-item'} title="主题">
+        {compact ? '主题' : null}
+        <select className="control-select" aria-label="主题" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
+          <option value="system">跟随系统</option>
+          <option value="light">浅色</option>
+          <option value="dark">深色</option>
+        </select>
+      </label>
+      <label className={compact ? 'muted' : 'ctl-item'} title="自动刷新间隔">
+        {compact ? '自动刷新' : null}
+        <select
+          className="control-select"
+          aria-label="自动刷新"
+          value={refreshMs}
+          onChange={(event) => setRefreshMs(Number(event.target.value))}
+        >
+          {REFRESH_CHOICES.map((choice) => (
+            <option key={choice.ms} value={choice.ms}>{compact ? choice.label : `刷新 ${choice.label}`}</option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
 function searchOptionId(kind: 'node' | 'user', value: string) {
   // `aria-activedescendant` is an ID reference. Node names contain spaces and
   // middle dots, so the human label cannot safely double as the DOM id.
@@ -295,54 +341,13 @@ function App() {
             )}
             <div className="topbar-extras">
               <div className="ctl-group">
-                <label className="ctl-item" title="隐私模式：遮住邮箱、IP、密钥和金额">
-                  <input type="checkbox" aria-label="隐私模式" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
-                  隐私
-                </label>
-                <label className="ctl-item" title="主题">
-                  <select className="control-select" aria-label="主题" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
-                    <option value="system">跟随系统</option>
-                    <option value="light">浅色</option>
-                    <option value="dark">深色</option>
-                  </select>
-                </label>
-                <label className="ctl-item" title="自动刷新间隔">
-                  <select
-                    className="control-select"
-                    aria-label="自动刷新"
-                    value={refreshMs}
-                    onChange={(event) => setRefreshMs(Number(event.target.value))}
-                  >
-                    {REFRESH_CHOICES.map((choice) => (
-                      <option key={choice.ms} value={choice.ms}>{`刷新 ${choice.label}`}</option>
-                    ))}
-                  </select>
-                </label>
+                <TopbarPrefs privacy={privacy} theme={theme} setTheme={setTheme} refreshMs={refreshMs} setRefreshMs={setRefreshMs} compact={false} />
               </div>
             </div>
             <details className="topbar-compact-more">
               <summary>设置</summary>
               <div className="topbar-more-panel">
-                <label className="muted">
-                  <input type="checkbox" aria-label="隐私模式" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
-                  隐私
-                </label>
-                <label className="muted">
-                  主题
-                  <select className="control-select" value={theme} onChange={(event) => setTheme(event.target.value as typeof theme)}>
-                    <option value="system">跟随系统</option>
-                    <option value="light">浅色</option>
-                    <option value="dark">深色</option>
-                  </select>
-                </label>
-                <label className="muted">
-                  自动刷新
-                  <select className="control-select" value={refreshMs} onChange={(event) => setRefreshMs(Number(event.target.value))}>
-                    {REFRESH_CHOICES.map((choice) => (
-                      <option key={choice.ms} value={choice.ms}>{choice.label}</option>
-                    ))}
-                  </select>
-                </label>
+                <TopbarPrefs privacy={privacy} theme={theme} setTheme={setTheme} refreshMs={refreshMs} setRefreshMs={setRefreshMs} compact />
               </div>
             </details>
             <span className="badge">已登录</span>

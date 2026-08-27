@@ -848,7 +848,7 @@ tbody tr:last-child td { border-bottom: 0; }
   display: grid;
   gap: 0.15rem;
   align-content: space-between;
-  min-height: 4.5rem;
+  min-height: 5.25rem;
   padding: var(--s3) var(--s3) var(--s3) var(--s4);
   border: 1px solid var(--l2-border);
   border-radius: var(--r-md);
@@ -882,6 +882,13 @@ tbody tr:last-child td { border-bottom: 0; }
   line-height: 1.1;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
+}
+.kpi-note {
+  font-size: var(--t-xs);
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .kpi-alert .kpi-value { color: hsl(var(--sev-fg)); }
 

@@ -131,7 +131,7 @@ export function TrafficPage() {
         <div className="card-header">
           <div>
             <h2>客户本期累计</h2>
-            <p>没有客户级小时数据，不画线。</p>
+            <p>绝对计数的本期用量。小时趋势需要客户级时间桶，控制面还没有这张表，所以不画线。</p>
           </div>
         </div>
         <div className="card-body">
@@ -172,7 +172,10 @@ export function TrafficPage() {
       <GlassCard className="unavailable-card">
         <div className="card-body">
           <h2>客户小时趋势尚不可用</h2>
-          <p className="muted">当前只保存本期累计，没有客户级小时数据。这里不会画假线。</p>
+          <p className="muted">
+            机器图来自探针累计计数器的合法 delta。客户用量只有本期绝对值，没有按小时落库的序列，
+            所以这里不会用一条平滑线冒充趋势。
+          </p>
         </div>
       </GlassCard>
     </div>

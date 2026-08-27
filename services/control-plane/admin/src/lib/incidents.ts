@@ -22,6 +22,7 @@ export type IncidentKind =
   | 'quota'
   | 'expired'
   | 'catalog-lag'
+  | 'catalog-unreported'
   | 'claude'
   | 'home';
 export type IncidentSourceState = 'ready' | 'unavailable' | 'unmeasured';
@@ -50,6 +51,7 @@ export const KPI_HREFS = {
   blocked: '#/monitor?focus=blocked',
   offline: '#/monitor?focus=offline',
   path: '#/failures?focus=customer-path',
+  unmeasured: '#/users?focus=unmeasured',
   online: '#/users?focus=online',
   quota: '#/users?focus=quota',
   expiring: '#/monitor?focus=expiring',
@@ -389,7 +391,21 @@ export function incidentsFromWorld(input: {
         severity: 'notice',
         title: person.email,
         detail: `目录落后 ${person.catalogLag.by} 版`,
-        actionRoute: `#/users?user=${encodeURIComponent(person.userId)}`,
+        actionRoute: `#/users?focus=catalog&user=${encodeURIComponent(person.userId)}`,
+        userId: person.userId,
+        impactCount: 1,
+        measuredAtSec: null,
+        sourceState: 'ready',
+      }));
+    } else if (person.catalogLag.state === 'unreported' && person.accountState === 'present') {
+      incidents.push(incident({
+        id: `catalog-unreported:${person.userId}`,
+        kind: 'catalog-unreported',
+        category: 'chore',
+        severity: 'notice',
+        title: person.email,
+        detail: '未上报目录版本',
+        actionRoute: `#/users?focus=catalog-unreported&user=${encodeURIComponent(person.userId)}`,
         userId: person.userId,
         impactCount: 1,
         measuredAtSec: null,
@@ -459,6 +475,7 @@ export type DashboardKpi = {
   id: keyof typeof KPI_HREFS;
   label: string;
   value: number | null;
+  note?: string;
   href: string;
   alert: boolean;
 };
@@ -479,28 +496,75 @@ export function dashboardKpis(input: {
   const offline = input.qualityAvailable
     ? input.nodes.filter((node) => nodeRootCause(node) === 'offline').length
     : null;
-  const path = input.activityAvailable
+  const pathIncidents = input.activityAvailable
     ? input.incidents.filter((item) => item.category === 'customer-path').length
     : null;
+  const pathUnmeasured = input.activityAvailable
+    ? input.people.filter((person) => person.online && person.path.kind === 'unmeasured').length
+    : 0;
+  const path = pathIncidents == null
+    ? { id: 'path' as const, label: '客户路径差', value: null, href: KPI_HREFS.path, alert: false }
+    : pathIncidents > 0
+      ? {
+        id: 'path' as const,
+        label: '客户路径差',
+        value: pathIncidents,
+        note: pathUnmeasured > 0 ? `${pathUnmeasured} 人未测` : undefined,
+        href: KPI_HREFS.path,
+        alert: true,
+      }
+      : pathUnmeasured > 0
+        ? {
+          id: 'unmeasured' as const,
+          label: '路径未测',
+          value: pathUnmeasured,
+          note: '不是 0 事故',
+          href: KPI_HREFS.unmeasured,
+          alert: true,
+        }
+        : { id: 'path' as const, label: '客户路径差', value: 0, href: KPI_HREFS.path, alert: false };
   const online = input.activityAvailable
     ? input.people.filter((person) => person.online).length
     : null;
   const quota = input.usersAvailable
     ? input.people.filter((person) => person.quotaWarn || person.quotaOver).length
     : null;
-  const expiring = input.profilesAvailable
-    ? input.nodes.filter((node) => (
-      node.billing.renewsAt != null
-      && node.billing.renewsAt - input.nowSec <= 7 * 86_400
-      && node.billing.renewsAt - input.nowSec >= 0
-    )).length
-    : null;
+  const dated = input.profilesAvailable
+    ? input.nodes.filter((node) => node.billing.renewsAt != null)
+    : [];
+  const expiringCount = dated.filter((node) => (
+    node.billing.renewsAt != null
+    && node.billing.renewsAt - input.nowSec <= 7 * 86_400
+    && node.billing.renewsAt - input.nowSec >= 0
+  )).length;
+  const missingRenew = input.profilesAvailable
+    ? input.nodes.length - dated.length
+    : 0;
+  const expiring = !input.profilesAvailable
+    ? { id: 'expiring' as const, label: '7 天续费', value: null, href: KPI_HREFS.expiring, alert: false }
+    : dated.length === 0
+      ? {
+        id: 'expiring' as const,
+        label: '7 天续费',
+        value: null,
+        note: input.nodes.length ? `${input.nodes.length} 台未填` : undefined,
+        href: KPI_HREFS.expiring,
+        alert: false,
+      }
+      : {
+        id: 'expiring' as const,
+        label: '7 天续费',
+        value: expiringCount,
+        note: missingRenew > 0 ? `${missingRenew} 台未填` : undefined,
+        href: KPI_HREFS.expiring,
+        alert: expiringCount > 0,
+      };
   return [
     { id: 'blocked', label: '被墙', value: blocked, href: KPI_HREFS.blocked, alert: (blocked ?? 0) > 0 },
     { id: 'offline', label: '失联', value: offline, href: KPI_HREFS.offline, alert: (offline ?? 0) > 0 },
-    { id: 'path', label: '客户路径差', value: path, href: KPI_HREFS.path, alert: (path ?? 0) > 0 },
+    path,
     { id: 'online', label: '在线客户', value: online, href: KPI_HREFS.online, alert: false },
     { id: 'quota', label: '额度告急', value: quota, href: KPI_HREFS.quota, alert: (quota ?? 0) > 0 },
-    { id: 'expiring', label: '7 天续费', value: expiring, href: KPI_HREFS.expiring, alert: (expiring ?? 0) > 0 },
+    expiring,
   ];
 }

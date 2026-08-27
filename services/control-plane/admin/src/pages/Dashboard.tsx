@@ -10,7 +10,13 @@ import { DataHealth, GlassCard, Skeleton, Unavailable } from '../ui';
 import { PersonRow } from './users/PersonRow';
 
 function choreGroups(chores: ReturnType<typeof useOpsWorld>['chores']) {
-  const quota = chores.filter((item) => item.kind === 'quota' || item.kind === 'expired' || item.kind === 'catalog-lag' || item.kind === 'node-renew');
+  const quota = chores.filter((item) => (
+    item.kind === 'quota'
+    || item.kind === 'expired'
+    || item.kind === 'catalog-lag'
+    || item.kind === 'catalog-unreported'
+    || item.kind === 'node-renew'
+  ));
   const ops = chores.filter((item) => item.kind === 'home' || item.kind === 'claude');
   return { quota, ops };
 }
@@ -33,9 +39,11 @@ export function Dashboard() {
     nowSec: world.nowSec,
   });
   const accidents = accidentsOnly(world.incidents);
+  const accidentNodes = new Set(accidents.map((item) => item.node).filter((name): name is string => Boolean(name)));
   const problemNodes = sortOpsNodes(world.nodes)
-    .filter((node) => node.dot === 'bad' || node.dot === 'warn' || accidents.some((item) => item.node === node.name))
+    .filter((node) => (node.dot === 'bad' || node.dot === 'warn') && !accidentNodes.has(node.name))
     .slice(0, 6);
+  const pathUnmeasured = world.people.filter((person) => person.online && person.path.kind === 'unmeasured').length;
   const onlinePeople = world.people.filter((person) => person.online).slice(0, 5);
   const occupancy = [...world.nodes]
     .filter((node) => node.occupancyState === 'known' && (node.occupancy ?? 0) > 0)
@@ -69,6 +77,7 @@ export function Dashboard() {
           >
             <span className="kpi-label">{kpi.label}</span>
             <strong className="kpi-value">{kpi.value == null ? '—' : kpi.value}</strong>
+            {kpi.note ? <small className="kpi-note">{kpi.note}</small> : null}
           </a>
         ))}
       </div>
@@ -109,8 +118,10 @@ export function Dashboard() {
               ))}
             </ul>
           </>
-        ) : healthy ? (
+        ) : healthy && pathUnmeasured === 0 ? (
           <div className="attention-ok">节点和客户路径正常</div>
+        ) : healthy ? (
+          <div className="attention-ok">没有被墙或失联。{pathUnmeasured} 个在线客户还没有路径采样，不能写成路径正常。</div>
         ) : (
           <Unavailable title="还有数据没查完" detail="不能在质量、探针、心跳或目录未 current 时写成正常。" />
         )}
@@ -121,14 +132,14 @@ export function Dashboard() {
           <div className="card-header">
             <div>
               <h2>问题节点</h2>
-              <p>问题优先，最多 6 台</p>
+              <p>事故没覆盖到的问题机器，最多 6 台</p>
             </div>
             <a className="btn btn-outline btn-sm" href="#/monitor">全部服务器</a>
           </div>
           {world.nodes.length === 0 && world.live.state === 'loading' ? (
             <Skeleton label="节点" />
           ) : problemNodes.length === 0 ? (
-            <p className="muted dash-pad">这一屏没有需要先看的机器。</p>
+            <p className="muted dash-pad">{accidents.length ? '事故已列在上面，没有额外的问题机器。' : '这一屏没有需要先看的机器。'}</p>
           ) : (
             <div className="node-grid node-grid-compact dash-pad">
               {problemNodes.map((node) => (
@@ -143,7 +154,7 @@ export function Dashboard() {
             <div className="card-header">
               <div>
                 <h2>运营待办</h2>
-                <p>额度、到期、目录落后</p>
+                <p>额度、到期、目录落后或未上报</p>
               </div>
               <a className="btn btn-outline btn-sm" href="#/users?focus=quota">查看全部</a>
             </div>

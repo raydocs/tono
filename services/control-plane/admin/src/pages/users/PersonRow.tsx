@@ -56,7 +56,12 @@ export function PersonRow({ person, selected, onOpen }: {
   const privacy = usePrivacy();
   const path = person.pathActivity;
   return (
-    <button type="button" className={`card person-row${selected ? ' selected' : ''}`} onClick={onOpen}>
+    <button
+      type="button"
+      className={`card person-row${selected ? ' selected' : ''}`}
+      aria-label={`打开客户 ${privacy.email(person.email)}`}
+      onClick={onOpen}
+    >
       <div className="person-col person-id">
         <strong>{privacy.email(person.email)}</strong>
         <span className="person-live">
