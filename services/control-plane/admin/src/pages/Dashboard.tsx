@@ -189,7 +189,7 @@ export function Dashboard() {
         <div className="card-header">
           <div>
             <h2>谁在线</h2>
-            <p>最多 5 人，同一份客户 View Model</p>
+            <p>当前在线的客户，最多列出 5 人</p>
           </div>
           <a className="btn btn-outline btn-sm" href="#/users?focus=online">查看全部</a>
         </div>

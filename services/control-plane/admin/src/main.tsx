@@ -296,7 +296,7 @@ function App() {
             <div className="topbar-extras">
               <div className="ctl-group">
                 <label className="ctl-item" title="隐私模式：遮住邮箱、IP、密钥和金额">
-                  <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+                  <input type="checkbox" aria-label="隐私模式" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
                   隐私
                 </label>
                 <label className="ctl-item" title="主题">
@@ -324,7 +324,7 @@ function App() {
               <summary>设置</summary>
               <div className="topbar-more-panel">
                 <label className="muted">
-                  <input type="checkbox" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
+                  <input type="checkbox" aria-label="隐私模式" checked={privacy.privacy} onChange={(event) => privacy.setPrivacy(event.target.checked)} />
                   隐私
                 </label>
                 <label className="muted">

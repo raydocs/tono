@@ -78,6 +78,7 @@ export function NodeCard({
   // four empty meters spends half a card saying nothing; one stated gap says
   // the same thing and says which readings are missing.
   const noProbe = node.agentState === 'unreported' || node.agentState === 'unavailable';
+  const subtitle = [ip ? privacy.ip(ip) : null, agent?.os ?? null].filter(Boolean).join(' · ');
 
   return (
     <article
@@ -96,7 +97,7 @@ export function NodeCard({
       <div className="nc-top">
         <div className="nc-title">
           <strong title={node.name}>{node.name}</strong>
-          <small title={ip ? privacy.ip(ip) : undefined}>{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</small>
+          <small title={subtitle || undefined}>{subtitle || (noProbe ? agentText(node) : '\u00a0')}</small>
         </div>
         <span className="nc-state">
           <span className={`nc-dot nc-dot-${node.dot}`} aria-hidden />
