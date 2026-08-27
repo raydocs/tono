@@ -122,7 +122,10 @@ nonisolated struct ProxyNode: Identifiable, Codable, Hashable, Sendable {
     /// card falls back to the raw name ("JP-VLESS-Reality"), which loses the
     /// localized city title and the city glyph.
     private static let cityNames: [String: String] = [
-        "US-VLESS-Reality": "Los Angeles · Sunset",
+        // Matches node-meta.ts on Windows. macOS used to say "Sunset", which
+        // both named the same server differently across platforms and collided
+        // with the catalog's own 洛杉矶 · Sunset node.
+        "US-VLESS-Reality": "Los Angeles · Grove",
         "JP-VLESS-Reality": "Tokyo · Dawn",
     ]
 

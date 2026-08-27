@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import Tono
 
 final class ByteFormatTests: XCTestCase {
@@ -60,5 +61,16 @@ final class RouteNamingTests: XCTestCase {
 
     func testACatalogNodeKeepsItsCityTitle() {
         XCTAssertEqual(ruleTargetTitle("JP-VLESS-Reality"), nodeCityTitle("Tokyo · Dawn"))
+    }
+}
+
+final class ClientAppIconTests: XCTestCase {
+    func testClaudeCodeAlwaysHasAMarkEvenWithNoClaudeAppInstalled() {
+        // Claude Code is a CLI: it never registers with Launch Services, so the
+        // running-applications lookup can never find it. The bundled asset is
+        // the only thing standing between it and a dashed placeholder box.
+        let mark = NSImage(named: "ClaudeMark")
+        XCTAssertNotNil(mark, "ClaudeMark is missing from the asset catalog")
+        XCTAssertGreaterThan(mark?.size.width ?? 0, 0)
     }
 }

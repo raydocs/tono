@@ -49,6 +49,13 @@ private enum ClientAppIconCache {
                 break
             }
         }
+        // Claude Code is a CLI: it never registers with Launch Services, so it
+        // cannot appear in runningApplications, and most of its users have no
+        // separate Claude.app installed either. Both lookups above miss and the
+        // row fell back to a dashed placeholder box. Ship the mark instead.
+        if resolved == nil, processName == "Claude" || processName == "Claude Code" {
+            resolved = NSImage(named: "ClaudeMark")
+        }
         cache[processName] = resolved
         return resolved
     }

@@ -51,7 +51,8 @@ final class ConnectionActivityTests: XCTestCase {
 
     func testTokyoWireNameResolvesToACityLikeItsWindowsCounterpart() {
         XCTAssertEqual(ProxyNode.displayName(for: "JP-VLESS-Reality"), "Tokyo · Dawn")
-        XCTAssertEqual(ProxyNode.displayName(for: "US-VLESS-Reality"), "Los Angeles · Sunset")
+        // Same wire name, same codename as Windows' node-meta.ts.
+        XCTAssertEqual(ProxyNode.displayName(for: "US-VLESS-Reality"), "Los Angeles · Grove")
         XCTAssertEqual(ProxyNode.displayName(for: "Tokyo · Fuji"), "Tokyo · Fuji")
     }
 
