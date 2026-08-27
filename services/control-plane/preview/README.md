@@ -62,10 +62,17 @@ Still required before a public preview hostname exists:
    route. The renderer refuses every other `*.afk.ccwu.cc` hostname.
 4. Create a new Cloudflare Access self-hosted application for exactly that
    hostname with a separate audience and a least-privilege preview-only Allow
-   policy. Do not modify the production Access application or policy.
-5. Set fresh preview-only secrets on the API and Access configuration on both
-   Workers, and deploy both Workers with one identical `BUILD_SHA`. Do not
-   apply 0026–0028 to production as part of this preview.
+   policy. Wrangler OAuth cannot write Access applications; this step is
+   dashboard or an API token with `Access: Apps and Policies Write`. Do not
+   modify any production Access application or policy.
+5. Put the new application's team domain, audience, and operator allowlist on
+   **both** preview Workers, then deploy the admin Worker with the same
+   `BUILD_SHA` already used for the private API Worker. Do not apply 0026–0028
+   to production as part of this preview.
+
+The private API Worker may be deployed first (`workers_dev: false`, no route).
+Do not attach the admin custom domain until step 4 exists; otherwise the
+hostname is public without an Access login wall.
 
 The Access administrator address is an operator secret/configuration value. It
 belongs only in `ACCESS_ADMIN_EMAILS` through `wrangler secret put`; it is never

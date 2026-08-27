@@ -2,6 +2,7 @@ node_modules/
 .wrangler/
 .dev.vars
 .preview.env
+.preview.secrets.json
 wrangler.preview.generated.jsonc
 wrangler.preview.admin.generated.jsonc
 dist/
