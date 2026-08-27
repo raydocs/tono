@@ -130,6 +130,12 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
   { prefix: 'TONO_AUTH_DEVICE_LIMIT', key: 'tono.login.errors.deviceLimit' },
   { prefix: 'TONO_AUTH_UNAUTHORIZED', key: 'tono.login.errors.sessionExpired' },
   { prefix: 'TONO_SERVICE_BUSY', key: 'tono.dashboard.errors.serviceBusy' },
+  // TonoService itself is down. It is AutoStart and depends on BFE, so this is almost
+  // always BFE having been switched off by a third-party "network optimiser".
+  {
+    prefix: 'TONO_SERVICE_NOT_RUNNING',
+    key: 'tono.dashboard.errors.serviceNotRunning',
+  },
   // Without these two the Rust side's own Chinese sentence reached the UI
   // verbatim, prefix and all, whatever locale the user had chosen.
   {

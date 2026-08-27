@@ -190,6 +190,7 @@
     "killSwitchErrorNote": "Last error — it may already be clear.",
     "errors": {
       "serviceBusy": "The service is installing or repairing. Approve the admin prompt, or restart Tono.",
+      "serviceNotRunning": "The Tono service is not running. The usual cause is Windows Base Filtering Engine (BFE) being turned off — TonoService depends on it to start. In an administrator PowerShell run sc.exe config BFE start= auto, then sc.exe start BFE, then sc.exe start TonoService, and connect again.",
       "bfeNotRunning": "Windows Base Filtering Engine (BFE) is not running, so protection cannot be installed. Run sc start BFE as administrator, then retry.",
       "wfpEngineWedged": "The Windows firewall engine is not responding, usually because security software is hooking it. Restart the PC; if it persists, quit your antivirus or firewall and retry.",
       "releaseReconciling": "Protection is still releasing. Wait, then connect.",

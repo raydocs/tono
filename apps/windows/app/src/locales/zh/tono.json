@@ -190,6 +190,7 @@
     "killSwitchErrorNote": "上次错误，可能已恢复。",
     "errors": {
       "serviceBusy": "服务正在安装或修复。请批准管理员提示，或重启 Tono。",
+      "serviceNotRunning": "Tono 服务没在运行。最常见的原因是 Windows 的基础筛选引擎（BFE）被关掉了——TonoService 依赖它才能启动。请用管理员身份的 PowerShell 依次运行 sc.exe config BFE start= auto、sc.exe start BFE、sc.exe start TonoService，然后重新连接。",
       "bfeNotRunning": "Windows 的基础筛选引擎（BFE）没在运行，装不上网络保护。请以管理员身份运行 sc start BFE，然后重试。",
       "wfpEngineWedged": "Windows 防火墙引擎没有响应，通常是第三方安全软件挂住了它。请重启电脑；若还是这样，先退出杀毒或防火墙软件再重试。",
       "releaseReconciling": "保护还在解除，请稍后再连。",

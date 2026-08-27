@@ -242,6 +242,20 @@ const NETWORK_EVENT_DEBOUNCE: Duration = Duration::from_secs(2);
 /// F2: exit-probe cadence while Connected (the Mac "9.17 h fake-green"
 /// lesson — a silent tunnel must be caught by probing, not by watching).
 const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(120);
+/// How long a successful data-plane proof stands in for the next network-change event.
+///
+/// The event-driven probe below exists to tell a real network change apart from Tono's own
+/// asynchronous WinTUN/route callbacks, and that reasoning is unchanged. What was missing is a
+/// ceiling on how often it may run: the monitor ticks every
+/// [`NETWORK_MONITOR_INTERVAL`], and on a machine whose adapters churn — a "network optimiser",
+/// a second VPN, a flapping driver — Windows reports a new counter on nearly every tick. One
+/// customer's audit log shows thirty-five events in four minutes, each starting a fresh
+/// multi-origin HTTPS proof whose own budget is several seconds, so the probes overlapped and
+/// piled up on a client that was otherwise healthy. Inside this window a proof that already
+/// succeeded is reused; outside it the probe runs exactly as before. Detection is not weakened:
+/// the periodic probe, the kill-switch leg, the DNS leg and the core-identity leg are all
+/// untouched, and a burst that follows a genuine break still fails the first probe.
+const NETWORK_EVENT_PROBE_COOLDOWN: Duration = Duration::from_secs(15);
 /// F2: consecutive failures before the tunnel is declared dead.
 ///
 /// H7 — the threshold's premise ("two consecutive failures ≈ 4 s of sustained failure") holds
@@ -798,6 +812,15 @@ pub const SERVICE_TOO_OLD_PREFIX: &str = "TONO_SERVICE_TOO_OLD";
 pub const WFP_ENGINE_WEDGED_PREFIX: &str = "TONO_WFP_ENGINE_WEDGED";
 /// Windows' Base Filtering Engine service is not running, so no kill switch can be installed.
 pub const BFE_NOT_RUNNING_PREFIX: &str = "TONO_BFE_NOT_RUNNING";
+/// The Service could not be reached at all, so nothing about protection can be read.
+///
+/// Distinct from every marker above: those are answers *from* a running Service. This one
+/// means TonoService itself is not up. It is AutoStart, and it declares a hard dependency on
+/// BFE, so the overwhelmingly common cause is BFE having been turned off by a "network
+/// optimiser" — Windows then refuses to start TonoService at boot and never retries. Without
+/// this marker the App showed only "protected, not connected" with every diagnostic field
+/// reading `(unknown)`, which is unactionable for the customer and for support.
+pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
 /// Stable post-lock classifications. The loopback-proxy cross-check distinguishes a selected
 /// node/Core path that works without WinTUN from a failure shared by every Mihomo ingress path.
 /// None of these markers relaxes the real TUN proof required for Connected.
@@ -832,7 +855,10 @@ pub fn map_service_ready_error(err: &anyhow::Error) -> String {
             "{SERVICE_BUSY_PREFIX}: Tono Service 正在安装/修复中，请检查是否有待授权的管理员提示；若无反应请重启 Tono"
         );
     }
-    format!("Tono Service is not ready: {text}")
+    // Everything that reaches here is "the Service did not answer", which the App used to
+    // render as raw English with the internal error appended. The detail stays for
+    // diagnostics, but the marker lets the UI say the one thing that actually fixes it.
+    format!("{SERVICE_NOT_RUNNING_PREFIX}: Tono Service is not ready: {text}")
 }
 
 /// Whether a lock failure is the expected "WinTUN still coming up" class that must be
@@ -1201,7 +1227,7 @@ async fn run_stages(
     // dashboard reuses the Mihomo plugin's traffic WebSocket, so point that plugin at this
     // generation before publishing Connected. Updating the protocol last prevents a subscriber
     // from observing a half-configured HTTP context.
-    configure_owned_controller_for_ui(app, &secret, controller_port);
+    configure_owned_controller_for_ui(state, app, &secret, controller_port);
 
     // §6.10: only now Connected; monitors start.
     {
@@ -2976,6 +3002,9 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
     let mut legs = HealthLegs::default();
     let mut missing_core_samples = 0_u32;
     let mut last_probe = std::time::Instant::now();
+    // `None` until the first event-driven proof, so the first network change after connect is
+    // always probed rather than inheriting the connect-time verdict.
+    let mut last_event_probe_ok: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
         {
@@ -3113,7 +3142,24 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
         // current tunnel still carries user traffic; failure corroborates the event and keeps the
         // existing fail-closed reconnect. Core identity and health failures remain unconditional.
         let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid {
-            periodic_data_plane_probe_failed(&state).await
+            let recently_proven = last_event_probe_ok
+                .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
+            if recently_proven {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: another Windows network change inside the proof window; reusing the last data-plane proof instead of probing again"
+                );
+                false
+            } else {
+                let failed = periodic_data_plane_probe_failed(&state).await;
+                last_event_probe_ok = if failed {
+                    None
+                } else {
+                    Some(std::time::Instant::now())
+                };
+                failed
+            }
         } else {
             false
         };
@@ -3489,7 +3535,12 @@ pub async fn close_owned_controller_connection(
     }
 }
 
-fn configure_owned_controller_for_ui(app: &AppHandle, secret: &str, controller_port: u16) {
+fn configure_owned_controller_for_ui(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    secret: &str,
+    controller_port: u16,
+) {
     let mihomo = app.mihomo();
     mihomo.update_external_host(Some("127.0.0.1"));
     mihomo.update_external_port(Some(controller_port));
@@ -3502,6 +3553,11 @@ fn configure_owned_controller_for_ui(app: &AppHandle, secret: &str, controller_p
             Type::Frontend,
             "Tono: failed to configure dashboard traffic telemetry: {error:#}"
         );
+        // The app log this warning lands in is not the file that uploads, so this failure
+        // used to be invisible to support. Put it where it can be read remotely.
+        state.audit().log(AuditEvent::TelemetryConfigFail {
+            error: format!("{error:#}"),
+        });
     }
 }
 
