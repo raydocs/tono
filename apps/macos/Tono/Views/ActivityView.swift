@@ -344,12 +344,15 @@ struct ActivityView: View {
     }
 
     private func routeLegend(_ split: AppTrafficLedger.RouteSplit) -> some View {
+        // The same four labels the filter pills use. This legend used to say
+        // 直连/家宽/隧道/已拦截 for the exact colours the pills call
+        // 直连/家宽/云端/已拒绝 — four classes, eight names, on one screen.
         HStack(spacing: 10) {
             legendItem("Direct", RouteTint.direct, split.direct)
-            legendItem("Residential", RouteTint.residential, split.residential)
-            legendItem("Tunnel", RouteTint.tunnel, split.tunnel)
+            legendItem("Home", RouteTint.residential, split.residential)
+            legendItem("Proxied", RouteTint.tunnel, split.tunnel)
             if split.blocked > 0 {
-                legendItem("Blocked", RouteTint.blocked, split.blocked)
+                legendItem("Rejected", RouteTint.blocked, split.blocked)
             }
             Spacer(minLength: 0)
         }

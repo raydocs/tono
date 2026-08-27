@@ -269,7 +269,9 @@ struct ProxiesView: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         sectionTitle("Cloud Servers", count: localNodes.count)
                         if localNodes.count != allNodes.count {
-                            Text("of " + String(allNodes.count))
+                            // Concatenation bypassed the catalog entirely, so
+                            // this read "of 17" in Chinese.
+                            Text("of \(allNodes.count)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(.tertiary)
                         }

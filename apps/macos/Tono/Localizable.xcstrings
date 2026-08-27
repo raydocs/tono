@@ -711,6 +711,16 @@
         }
       }
     },
+    "Choose another route": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "换一条线路"
+          }
+        }
+      }
+    },
     "Claude & WeChat Traffic Research": {
       "extractionState": "stale",
       "localizations": {
@@ -1049,6 +1059,16 @@
         }
       }
     },
+    "Copy version for support": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制版本信息给技术支持"
+          }
+        }
+      }
+    },
     "Core did not become ready in time": {
       "localizations": {
         "zh-Hans": {
@@ -1289,6 +1309,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "已拦住直连流量"
+          }
+        }
+      }
+    },
+    "Direct traffic is blocked. Restore internet from here if you need the network.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已拦住直连流量。需要上网的话，可以从这里恢复。"
           }
         }
       }
@@ -1659,6 +1689,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "全局"
+          }
+        }
+      }
+    },
+    "Google sign-in is not configured.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未配置 Google 登录。"
           }
         }
       }
@@ -2473,6 +2513,16 @@
         }
       }
     },
+    "No server selected": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未选择节点"
+          }
+        }
+      }
+    },
     "No sign-in method configured": {
       "localizations": {
         "zh-Hans": {
@@ -2665,6 +2715,26 @@
         }
       }
     },
+    "Open Tono": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 Tono"
+          }
+        }
+      }
+    },
+    "Open WebRTC check": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 WebRTC 检查"
+          }
+        }
+      }
+    },
     "Open at login": {
       "extractionState": "stale",
       "localizations": {
@@ -2672,6 +2742,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "登录时打开"
+          }
+        }
+      }
+    },
+    "Opens a page that shows whether your browser is leaking a local or tunnel address. Compare": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开一个页面，显示浏览器是否泄漏了本地或隧道地址。用于对照"
           }
         }
       }
@@ -3008,6 +3088,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出"
+          }
+        }
+      }
+    },
+    "Quit Tono": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出 Tono"
           }
         }
       }
@@ -3859,6 +3949,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "登录后请等待受保护服务器目录同步完成。"
+          }
+        }
+      }
+    },
+    "Sign in with Apple is not configured.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未配置「通过 Apple 登录」。"
           }
         }
       }
@@ -4838,7 +4938,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本会话按线路"
+            "value": "本会话流量 · 按线路"
           }
         }
       }
@@ -5173,6 +5273,16 @@
         }
       }
     },
+    "WebRTC leak check": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WebRTC 泄漏检查"
+          }
+        }
+      }
+    },
     "Website": {
       "extractionState": "stale",
       "localizations": {
@@ -5286,6 +5396,16 @@
       }
     },
     "ms": {},
+    "of %lld": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共 %lld 个"
+          }
+        }
+      }
+    },
     "or": {
       "localizations": {
         "zh-Hans": {
