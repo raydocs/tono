@@ -54,6 +54,8 @@ export function Dashboard() {
     .sort((a, b) => b.usageBytes - a.usageBytes)
     .slice(0, 5);
   const { quota, ops } = choreGroups(world.chores);
+  const claudeOps = ops.filter((item) => item.kind === 'claude');
+  const homeOps = ops.filter((item) => item.kind === 'home');
   const catalogUnreported = quota.filter((item) => item.kind === 'catalog-unreported');
   const quotaRest = quota.filter((item) => item.kind !== 'catalog-unreported');
   const choreAllHref = catalogUnreported.length > 0
@@ -196,12 +198,18 @@ export function Dashboard() {
               {inventory && (
                 <>
                   <li><a className="table-link" href="#/users?focus=homes">闲置家宽 {inventory.unusedHomes}</a></li>
-                  <li><a className="table-link" href="#/users?focus=claude">闲置 Claude {inventory.unusedAccounts} · 未开 {inventory.incompleteUsers}</a></li>
+                  <li><a className="table-link" href="#/users?focus=claude">闲置 Claude {inventory.unusedAccounts}</a></li>
                 </>
               )}
-              {ops.slice(0, 5).map((item) => (
-                <li key={item.id}><a className="table-link" href={item.actionRoute}>{privacy.email(item.title)} · {item.detail}</a></li>
-              ))}
+              {claudeOps.length > 0 && (
+                <li><a className="table-link" href="#/users?focus=claude">{claudeOps.length} 人未开 Claude</a></li>
+              )}
+              {homeOps.length > 0 && (
+                <li><a className="table-link" href="#/users?focus=home">{homeOps.length} 人没绑家宽</a></li>
+              )}
+              {claudeOps.length === 0 && homeOps.length === 0 && !inventory && world.dashboard.state !== 'error' && (
+                <li className="muted">没有开通侧待办</li>
+              )}
               {!inventory && world.dashboard.state === 'error' && <li className="muted">库存摘要不可用，客户待办仍在上面。</li>}
             </ul>
           </GlassCard>

@@ -7,6 +7,7 @@ import type {
 } from '../api';
 import { catalogProxyNames } from './catalog';
 import { customerPathVerdict, pickWorstActivity, type CustomerPathVerdict } from './incidents';
+import { carrierLossSignals } from './carrier';
 import { machineSignals, mergedBilling, trafficRemaining, type BillingView } from './machine';
 import { catalogLag, type CatalogLag } from './revision';
 import { measurementFresh } from './freshness';
@@ -20,6 +21,12 @@ export type CatalogState = 'known-listed' | 'known-unlisted' | 'unavailable';
 export type QualityState = 'reported' | 'unmeasured' | 'unavailable';
 export type AgentState = 'reported' | 'stale' | 'unreported' | 'unavailable';
 export type OccupancyState = 'known' | 'unavailable';
+
+export type OpsSignal = {
+  label: string;
+  severity: number;
+  kind?: 'carrier-loss';
+};
 
 export type OpsNodeView = {
   name: string;
@@ -37,7 +44,7 @@ export type OpsNodeView = {
   trafficRemain: number | null;
   quotaAccounting: TrafficAccounting;
   quotaAssumed: boolean;
-  signals: { label: string; severity: number }[];
+  signals: OpsSignal[];
   ok: boolean | null;
   blockStatus: string;
   blockLabel: string;
@@ -50,13 +57,22 @@ export type OpsNodeView = {
 
 export type NodeRootCause = 'blocked' | 'offline' | 'pressure' | 'noprobe' | 'ok' | 'unknown';
 
+function isMachinePressure(node: OpsNodeView): boolean {
+  return node.signals.some((signal) => signal.severity >= 3 && signal.kind !== 'carrier-loss')
+    || node.agentState === 'stale';
+}
+
+export function hasBadCarrierLoss(node: OpsNodeView): boolean {
+  return node.signals.some((signal) => signal.kind === 'carrier-loss' && signal.severity >= 3);
+}
+
 export function nodeRootCause(node: OpsNodeView): NodeRootCause {
   if (node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED') return 'blocked';
   if (node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false)) {
     return 'offline';
   }
   if (node.agentState === 'unreported' && node.catalogState === 'known-listed') return 'noprobe';
-  if (node.signals.some((signal) => signal.severity >= 3) || node.agentState === 'stale') return 'pressure';
+  if (isMachinePressure(node)) return 'pressure';
   if (node.qualityState !== 'reported' || node.agentState === 'unavailable' || node.catalogState === 'unavailable') {
     return 'unknown';
   }
@@ -113,7 +129,7 @@ export function nodeDot(node: {
   ok: boolean | null;
   qualityState: QualityState;
   agentState: AgentState;
-  signals: { label: string; severity: number }[];
+  signals: OpsSignal[];
 }): NodeDot {
   if (node.qualityState === 'reported' && (
     node.blockStatus === 'LIKELY_BLOCKED' || node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false
@@ -203,7 +219,9 @@ export function assembleOpsNodes(input: {
       : [];
     const { accounting, assumed } = parseTrafficLimitType(agent?.trafficLimitType);
     const billing = mergedBilling(profile ?? undefined, agent ?? undefined);
-    const signals = agent ? machineSignals(agent, input.nowMs).signals : [];
+    const signals: OpsSignal[] = agent
+      ? [...machineSignals(agent, input.nowMs).signals, ...carrierLossSignals(agent.carriers)]
+      : [];
     const catalogState: CatalogState = !ready(input.catalogSource)
       ? 'unavailable'
       : catalogNames?.includes(name) ? 'known-listed' : 'known-unlisted';
@@ -286,6 +304,7 @@ export function nodeMatchesFocus(node: OpsNodeView, focus: string | null, nowSec
       || nodeMatchesFocus(node, 'offline', nowSec)
       || nodeMatchesFocus(node, 'noprobe', nowSec)
       || nodeMatchesFocus(node, 'pressure', nowSec)
+      || hasBadCarrierLoss(node)
       || (node.qualityState === 'reported' && node.quality?.quality === 'poor');
   }
   return true;
@@ -308,7 +327,7 @@ export function sortOpsNodes(nodes: OpsNodeView[]): OpsNodeView[] {
     if (node.qualityState === 'reported' && node.blockStatus === 'LIKELY_BLOCKED') return 0;
     if (node.qualityState === 'reported' && (node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false)) return 1;
     if (node.agentState === 'unreported' && node.catalogState === 'known-listed') return 2;
-    if (node.signals.some((signal) => signal.severity >= 3) || node.agentState === 'stale') return 3;
+    if (isMachinePressure(node) || hasBadCarrierLoss(node)) return 3;
     if (node.quality?.quality === 'poor') return 4;
     return 5;
   };

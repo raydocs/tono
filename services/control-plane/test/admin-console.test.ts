@@ -8,7 +8,7 @@ import { gibibytes, tcpPort, unixDate, unixDateTimeLocal } from '../admin/src/li
 import { acceptIfCurrent, bindDetail } from '../admin/src/lib/bound-detail';
 import { compactHealthLine, dataHealthLines, sourceTruthHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
-import { carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
+import { carrierLossSignals, carrierRows, worstCarrier, latencyTone, lossTone } from '../admin/src/lib/carrier';
 import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../admin/src/lib/path-status';
 import { innerTruth } from '../admin/src/lib/source-truth';
 import type { CarrierPingMapDto } from '../admin/src/api';
@@ -424,6 +424,14 @@ describe('three-network ping, and what it refuses to claim', () => {
     expect(worstCarrier(null)).toBeNull();
     expect(worstCarrier({ mobile: carrier({ samples: 0 }) } as CarrierPingMapDto)).toBeNull();
   });
+
+  it('emits a console signal only for the bad loss band', () => {
+    expect(carrierLossSignals({ telecom: carrier({ lossPct: 12.3 }) } as CarrierPingMapDto)).toEqual([
+      { label: '电信丢包 12.3%', severity: 3, kind: 'carrier-loss' },
+    ]);
+    expect(carrierLossSignals({ telecom: carrier({ lossPct: 3 }) } as CarrierPingMapDto)).toEqual([]);
+    expect(carrierLossSignals(null)).toEqual([]);
+  });
 });
 
 describe('how far behind a catalog a client is', () => {
@@ -479,6 +487,7 @@ import {
 import {
   assembleOpsNodes,
   assembleOpsPeople,
+  hasBadCarrierLoss,
   nodeMatchesFocus,
   nodeRootCause,
   nodeSearchHaystack,
@@ -1390,6 +1399,66 @@ describe('path measurement freshness', () => {
     expect(person.exitDelayFresh).toBe(false);
     expect(person.tcpDelayFresh).toBe(false);
     expect(person.path.kind).toBe('stale');
+  });
+});
+
+describe('return-path loss on assembled nodes', () => {
+  it('treats high carrier loss as 需处理 without calling it 高负载', () => {
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Canyon"\n    type: vless\n',
+      qualityNodes: [qualityNode('Canyon')],
+      agents: [agent({
+        name: 'Canyon',
+        observedAt: nowSec,
+        load1: 0.2,
+        carriers: {
+          telecom: {
+            latencyMs: 180,
+            lossPct: 12.3,
+            samples: 9,
+            targets: ['三网-电信-上海'],
+            history: [{ latencyMs: 180, lossPct: 12.3 }],
+          },
+        },
+      })],
+    });
+    const canyon = nodes[0];
+    expect(hasBadCarrierLoss(canyon)).toBe(true);
+    expect(canyon.signals.some((signal) => signal.label.includes('电信丢包'))).toBe(true);
+    expect(nodeRootCause(canyon)).toBe('ok');
+    expect(nodeMatchesFocus(canyon, 'pressure', nowSec)).toBe(false);
+    expect(nodeMatchesFocus(canyon, 'needs', nowSec)).toBe(true);
+    expect(canyon.dot).toBe('warn');
+    const incidents = incidentsFromWorld({ nodes, people: [], catalogRevision: 1, nowSec });
+    expect(incidents.some((item) => item.kind === 'node-pressure')).toBe(false);
+  });
+
+  it('does not escalate warn-band carrier loss into 需处理', () => {
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Quiet"\n    type: vless\n',
+      qualityNodes: [qualityNode('Quiet')],
+      agents: [agent({
+        name: 'Quiet',
+        observedAt: nowSec,
+        load1: 0.2,
+        carriers: {
+          telecom: {
+            latencyMs: 180,
+            lossPct: 3,
+            samples: 9,
+            targets: ['三网-电信-上海'],
+            history: [{ latencyMs: 180, lossPct: 3 }],
+          },
+        },
+      })],
+    });
+    expect(hasBadCarrierLoss(nodes[0])).toBe(false);
+    expect(nodeMatchesFocus(nodes[0], 'needs', nowSec)).toBe(false);
+    expect(nodes[0].dot).toBe('ok');
   });
 });
 

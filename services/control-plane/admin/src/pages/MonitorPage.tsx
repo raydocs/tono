@@ -348,10 +348,11 @@ export function MonitorPage() {
       )}
 
       <NodeDrawer
-        key={`${selected?.name ?? 'none'}:${selected?.profile?.id ?? 'new'}`}
+        key={`${selected?.name ?? 'none'}:${selected?.profile?.id ?? 'new'}:${focus ?? ''}`}
         node={selected}
         open={Boolean(route.node)}
         metrics={world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready' ? world.metrics.data : null}
+        focus={focus}
         onClose={closeDrawer}
         onChanged={() => { world.live.reload(); world.profiles.reload(); world.fleet.reload(); world.catalog.reload(); world.activity.reload(); }}
       />

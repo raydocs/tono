@@ -262,7 +262,7 @@ export function incidentsFromWorld(input: {
       }));
     }
 
-    const load = node.signals.find((signal) => signal.severity >= 3);
+    const load = node.signals.find((signal) => signal.severity >= 3 && signal.kind !== 'carrier-loss');
     if (cause === 'pressure' && load) {
       incidents.push(incident({
         id: `node-pressure:${node.name}:${load.label}`,

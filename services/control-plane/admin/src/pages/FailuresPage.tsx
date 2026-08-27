@@ -194,6 +194,7 @@ export function FailuresPage() {
         node={selectedNode}
         open={Boolean(route.node)}
         metrics={world.metrics.snapshotKey === '24h' && world.metrics.state === 'ready' ? world.metrics.data : null}
+        focus={route.focus}
         onClose={closeDrawer}
         onChanged={() => { world.live.reload(); world.fleet.reload(); }}
       />

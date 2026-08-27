@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   operationsApi,
   type FleetRetirePreviewDto,
@@ -65,10 +65,19 @@ function NodeTrends({ metrics, name }: { metrics: MetricsDto | null; name: strin
   );
 }
 
-function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void }) {
+function BillingForm({
+  node,
+  onSaved,
+  focusRenew = false,
+}: {
+  node: OpsNodeView;
+  onSaved: () => void;
+  focusRenew?: boolean;
+}) {
   const privacy = usePrivacy();
   const profile = node.profile;
   const agent = node.agent;
+  const renewInput = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState(profile?.billingUrl ?? '');
   const [quota, setQuota] = useState(profile?.trafficQuotaBytes != null ? String(Math.round(profile.trafficQuotaBytes / (1024 ** 3))) : '');
   const [used, setUsed] = useState(profile?.trafficUsedBytes != null ? String(Math.round(profile.trafficUsedBytes / (1024 ** 3))) : '');
@@ -78,6 +87,11 @@ function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void
   const [billingCycle, setBillingCycle] = useState(profile?.billingCycle != null ? String(profile.billingCycle) : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusRenew) return;
+    renewInput.current?.focus();
+  }, [focusRenew, node.name]);
 
   async function save() {
     const trafficQuotaBytes = gibibytes(quota);
@@ -175,7 +189,13 @@ function BillingForm({ node, onSaved }: { node: OpsNodeView; onSaved: () => void
           <input className="input compact" type="number" min={0} value={used} onChange={(event) => setUsed(event.target.value)} />
         </Field>
         <Field label="续费日期">
-          <input className="input compact" type="date" value={renew} onChange={(event) => setRenew(event.target.value)} />
+          <input
+            ref={renewInput}
+            className="input compact"
+            type="date"
+            value={renew}
+            onChange={(event) => setRenew(event.target.value)}
+          />
         </Field>
       </FieldGrid>
       <p className="field-hint">某项要清空：把格子清空再保存。填错不会被当成清空。普通保存不会移动本期基线。</p>
@@ -323,12 +343,14 @@ export function NodeDrawer({
   node,
   open,
   metrics,
+  focus = null,
   onClose,
   onChanged,
 }: {
   node: OpsNodeView | null;
   open: boolean;
   metrics: MetricsDto | null;
+  focus?: string | null;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -507,8 +529,12 @@ export function NodeDrawer({
         ) : null}
       </DrawerSection>
 
-      <DrawerSection title="账单档案" fold open={node.billing.source === 'none'}>
-        <BillingForm node={node} onSaved={onChanged} />
+      <DrawerSection
+        title="账单档案"
+        fold
+        open={focus === 'unfilled-renew' || node.billing.renewsAt == null || node.billing.source === 'none'}
+      >
+        <BillingForm node={node} onSaved={onChanged} focusRenew={focus === 'unfilled-renew'} />
       </DrawerSection>
 
       <DrawerSection title="危险区：下架" danger>
