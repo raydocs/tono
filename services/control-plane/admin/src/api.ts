@@ -581,6 +581,19 @@ export interface MetricsDto {
   series: Record<string, MetricPointDto[]>;
 }
 
+export interface UsageHourPointDto {
+  t: number;
+  bytes: number | null;
+}
+
+export interface UsageHoursDto {
+  from: number;
+  to: number;
+  resolutionSeconds: number;
+  fleet: UsageHourPointDto[];
+  users: Array<{ userId: string; points: UsageHourPointDto[] }>;
+}
+
 export const operationsApi = {
   dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
   live: async () => (await get<{ live: LiveDto }>('live')).live,
@@ -600,6 +613,9 @@ export const operationsApi = {
     if (node) query.set('node', node);
     return (await get<{ metrics: MetricsDto }>(`metrics?${query}`)).metrics;
   },
+  usageHours: async (range = '24h') => (
+    await get<{ usageHours: UsageHoursDto }>(`usage-hours?range=${encodeURIComponent(range)}`)
+  ).usageHours,
   activity: async () => (await get<{ activity: ActivityDto }>('activity')).activity,
   servers: async () => (await get<{ servers: ServerDto[] }>('servers')).servers,
   nodes: async () => (await get<{ nodes: NodeDto[] }>('nodes')).nodes,

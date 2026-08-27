@@ -1048,6 +1048,26 @@ describe('customer telemetry and path activity', () => {
     expect(incidentsFromWorld({ nodes: [], people: live, catalogRevision: 40, nowSec: now }).some((item) => item.kind === 'catalog-lag')).toBe(true);
   });
 
+  it('does not count cancelled accounts as Claude, home, or credential chores', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      users: [{
+        id: 'u-off', email: 'gone@example.com', deviceLimit: 1, quotaBytes: 100, usageBytes: 90,
+        suspended: false, status: 'disabled', createdAt: now, homeBinding: null,
+        product: { accountRef: null, status: null, openedAt: null, replaceCount: 0, incomplete: true },
+      } as UserDto],
+    });
+    expect(people[0].chores).toEqual([]);
+    expect(personMatchesFocus(people[0], 'claude')).toBe(false);
+    expect(personMatchesFocus(people[0], 'home')).toBe(false);
+    expect(personMatchesFocus(people[0], 'credential')).toBe(false);
+    expect(personMatchesFocus(people[0], 'quota')).toBe(false);
+    expect(incidentsFromWorld({ nodes: [], people, catalogRevision: 40, nowSec: now }).some((item) => (
+      item.kind === 'claude' || item.kind === 'home' || item.kind === 'quota'
+    ))).toBe(false);
+  });
+
   it('does not call heartbeat-only people ghosts while the users source is loading or down', () => {
     const loading = assembleOpsPeople({
       nowSec: now,

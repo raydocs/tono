@@ -453,10 +453,11 @@ export function assembleOpsPeople(input: {
     const accountState: AccountState = !usersReady
       ? (input.usersSource === 'unavailable' ? 'unavailable' : 'loading')
       : user ? 'present' : 'absent';
+    const live = accountState === 'present' && user?.status === 'active';
     const chores: string[] = [];
-    if (accountState === 'present' && user && !hasExitIdentity) chores.push('没凭证');
-    if (accountState === 'present' && user?.product?.incomplete) chores.push('没开 Claude');
-    if (accountState === 'present' && user && !hasHome) chores.push('家宽');
+    if (live && user && !hasExitIdentity) chores.push('没凭证');
+    if (live && user?.product?.incomplete) chores.push('没开 Claude');
+    if (live && user && !hasHome) chores.push('家宽');
     return {
       userId,
       email: user?.email ?? latest?.email ?? userId,
@@ -516,18 +517,22 @@ export function catalogBehindLive(person: OpsPersonView): boolean {
     && person.user?.status === 'active';
 }
 
+function liveCustomer(person: OpsPersonView): boolean {
+  return person.accountState === 'present' && person.user?.status === 'active';
+}
+
 export function personMatchesFocus(person: OpsPersonView, focus: string | null): boolean {
   if (!focus || focus === 'homes') return true;
-  if (focus === 'quota') return person.quotaWarn || person.quotaOver;
-  if (focus === 'expiring') return person.expiring;
-  if (focus === 'expired') return person.expired;
-  if (focus === 'claude') return Boolean(person.user?.product?.incomplete);
-  if (focus === 'home') return Boolean(person.user && !person.hasHome);
+  if (focus === 'quota') return liveCustomer(person) && (person.quotaWarn || person.quotaOver);
+  if (focus === 'expiring') return liveCustomer(person) && person.expiring;
+  if (focus === 'expired') return liveCustomer(person) && person.expired;
+  if (focus === 'claude') return liveCustomer(person) && Boolean(person.user?.product?.incomplete);
+  if (focus === 'home') return liveCustomer(person) && !person.hasHome;
   if (focus === 'online') return person.online;
   if (focus === 'path') return person.path.kind === 'incident';
   if (focus === 'unmeasured') return person.online && person.path.kind === 'unmeasured';
   if (focus === 'catalog') return catalogBehindLive(person);
   if (focus === 'catalog-unreported') return person.catalogLag.state === 'unreported' && person.online;
-  if (focus === 'credential') return Boolean(person.user && !person.hasExitIdentity);
+  if (focus === 'credential') return liveCustomer(person) && !person.hasExitIdentity;
   return true;
 }

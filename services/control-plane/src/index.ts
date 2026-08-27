@@ -25,6 +25,7 @@ import {
   recordQualitySamples,
   retainOperationsTimeseries,
 } from './ops-timeseries';
+import { queryUserUsageHours, snapshotUserUsageHours } from './ops-usage-hours';
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
@@ -5664,6 +5665,11 @@ async function enforceAll(e: Env) {
   } catch (x) {
     console.error('ops timeseries retention failed', x instanceof Error ? x.message : String(x));
   }
+  try {
+    await snapshotUserUsageHours(e.DB, t);
+  } catch (x) {
+    console.error('user usage hour snapshot failed', x instanceof Error ? x.message : String(x));
+  }
   const routingResearchRetention = Math.min(
     envInt(
       e,
@@ -6871,6 +6877,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             node: url.searchParams.get('node'),
             nowUnix: now(),
           }),
+        });
+      }
+      if (p === '/api/v1/ops/usage-hours') {
+        const url = new URL(req.url);
+        const range = url.searchParams.get('range');
+        const hours = range === '7d' ? 24 * 7 : range === '90d' ? 24 * 90 : 24;
+        if (range !== null && !['24h', '7d', '90d'].includes(range)) {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Unsupported usage-hours range');
+        }
+        return Response.json({
+          usageHours: await queryUserUsageHours(e.DB, now(), hours),
         });
       }
       if (p === '/api/v1/ops/activity') {

@@ -1,4 +1,6 @@
-import { RateChart } from '../charts';
+import { operationsApi } from '../api';
+import { RateChart, Sparkline } from '../charts';
+import { useResource } from '../hooks';
 import { formatBytes, timestamp } from '../lib/format';
 import { parseTrafficRange } from '../lib/hash';
 import { metricsForRange } from '../lib/metrics-bind';
@@ -51,6 +53,9 @@ export function TrafficPage() {
     }).sort((a, b) => (b.moved.inBytes ?? 0) + (b.moved.outBytes ?? 0) - ((a.moved.inBytes ?? 0) + (a.moved.outBytes ?? 0))).slice(0, 8)
     : [];
   const customers = [...world.people].filter((person) => person.user).sort((a, b) => b.usageBytes - a.usageBytes);
+  const usageHours = useResource(() => operationsApi.usageHours(range), [range], 60_000);
+  const hourSeries = usageHours.state === 'ready' ? usageHours.data.fleet : [];
+  const hourMeasured = hourSeries.filter((point) => point.bytes != null).length;
 
   // "1/11" is only meaningful once it says what the two numbers count.
   const coverageText = expected == null
@@ -131,7 +136,7 @@ export function TrafficPage() {
         <div className="card-header">
           <div>
             <h2>客户本期累计</h2>
-            <p>绝对计数的本期用量。小时趋势需要客户级时间桶，控制面还没有这张表，所以不画线。</p>
+            <p>绝对计数的本期用量。按小时的差分在下面，不会拿这个累计冒充趋势。</p>
           </div>
         </div>
         <div className="card-body">
@@ -169,13 +174,35 @@ export function TrafficPage() {
         </div>
       </GlassCard>
 
-      <GlassCard className="unavailable-card">
+      <GlassCard>
+        <div className="card-header">
+          <div>
+            <h2>客户小时用量</h2>
+            <p>相邻整点的本期用量之差。缺小时或账期重置都断开，不画成 0。</p>
+          </div>
+        </div>
         <div className="card-body">
-          <h2>客户小时趋势尚不可用</h2>
-          <p className="muted">
-            机器图来自探针累计计数器的合法 delta。客户用量只有本期绝对值，没有按小时落库的序列，
-            所以这里不会用一条平滑线冒充趋势。
-          </p>
+          {usageHours.state === 'error' && !usageHours.refreshedAt ? (
+            <Unavailable title="客户小时用量不可用" detail={usageHours.message} />
+          ) : usageHours.state === 'loading' ? (
+            <Skeleton label="客户小时用量" />
+          ) : hourMeasured === 0 ? (
+            <p className="muted">
+              已经按小时记账。相邻两个整点之间才画得出线，现在还没有满一小时的差分。
+            </p>
+          ) : (
+            <div>
+              <Sparkline values={hourSeries.map((point) => point.bytes)} label="客户小时用量" />
+              <p className="muted">
+                {hourMeasured} 个小时有合法差分
+                {hourSeries.length ? ` · 最近 ${timestamp(hourSeries[hourSeries.length - 1].t)}` : ''}
+                {(() => {
+                  const last = [...hourSeries].reverse().find((point) => point.bytes != null);
+                  return last?.bytes != null ? ` · ${formatBytes(last.bytes)}` : '';
+                })()}
+              </p>
+            </div>
+          )}
         </div>
       </GlassCard>
     </div>

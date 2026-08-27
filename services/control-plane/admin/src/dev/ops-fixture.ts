@@ -586,6 +586,17 @@ export function matchDevOps(
     const query = new URLSearchParams(path.split('?')[1] ?? '');
     return { metrics: metricsFixture(query.get('range') ?? '24h', clock, query.get('node'), dense) };
   }
+  if (base === 'usage-hours') {
+    return {
+      usageHours: {
+        from: clock - 86400,
+        to: clock,
+        resolutionSeconds: 3600,
+        fleet: [],
+        users: [],
+      },
+    };
+  }
   if (base === 'signup-allowlist') return { entries: [{ email: 'new@example.com', createdAt: clock }] };
   if (base === 'home-exits') {
     return {
