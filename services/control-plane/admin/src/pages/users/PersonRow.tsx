@@ -1,29 +1,15 @@
+import { memo, useId } from 'react';
 import { formatBytes, timeAgo } from '../../lib/format';
 import { nodeHealthLabel, nodeHealthTone } from '../../lib/path-status';
-import type { OpsPersonView } from '../../lib/ops-views';
+import { personAccountLabel, personTelemetryLabel, type OpsPersonView } from '../../lib/ops-views';
 import { Status } from '../../ui';
 import { usePrivacy } from '../../privacy';
-
-function telemetryLabel(person: OpsPersonView): string {
-  if (person.telemetryState === 'loading') return '心跳加载中';
-  if (person.telemetryState === 'unavailable') return '心跳不可用';
-  if (person.telemetryState === 'unreported') return '未上报';
-  if (person.online) return `${person.onlineDeviceCount} 台在线`;
-  return '离线';
-}
 
 function telemetryTone(person: OpsPersonView): 'ok' | 'warn' | 'unknown' {
   if (person.telemetryState !== 'reported') return 'unknown';
   // A customer simply being offline is not an incident. Yellow is reserved for
   // something that needs attention; an old heartbeat is context, not a warning.
   return person.online ? 'ok' : 'unknown';
-}
-
-function accountChip(person: OpsPersonView) {
-  if (person.accountState === 'present' && person.user) return null;
-  if (person.accountState === 'loading') return '客户资料加载中';
-  if (person.accountState === 'unavailable') return '客户资料不可用';
-  return '心跳身份未进入客户库';
 }
 
 /**
@@ -48,36 +34,45 @@ function PathMetric({ label, value, at, fresh }: {
   );
 }
 
-export function PersonRow({ person, selected, onOpen }: {
+export const PersonRow = memo(function PersonRow({ person, selected, onOpen }: {
   person: OpsPersonView;
   selected?: boolean;
-  onOpen: () => void;
+  onOpen: (userId: string) => void;
 }) {
   const privacy = usePrivacy();
+  const descId = useId();
   const path = person.pathActivity;
   return (
-    <button
-      type="button"
+    <article
       className={`card person-row${selected ? ' selected' : ''}`}
-      aria-label={`打开客户 ${privacy.email(person.email)}`}
-      onClick={onOpen}
+      onClick={() => onOpen(person.userId)}
     >
       <div className="person-col person-id">
-        <strong>{privacy.email(person.email)}</strong>
+        <button
+          type="button"
+          className="person-open"
+          aria-describedby={`${descId}-node ${descId}-path ${descId}-usage`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(person.userId);
+          }}
+        >
+          <strong>{privacy.email(person.email)}</strong>
+        </button>
         <span className="person-live">
           <span className={`nc-dot nc-dot-${telemetryTone(person)}`} aria-hidden />
-          {telemetryLabel(person)}{person.lastSeenAt ? ` · ${timeAgo(person.lastSeenAt)}` : ''}
+          {personTelemetryLabel(person)}{person.lastSeenAt ? ` · ${timeAgo(person.lastSeenAt)}` : ''}
         </span>
         <div className="person-tags">
           {person.accountState === 'present' && person.user
             ? <Status value={person.user.status} />
-            : <span className="chip chip-unknown">{accountChip(person)}</span>}
+            : <span className="chip chip-unknown">{personAccountLabel(person)}</span>}
           {person.expired && <span className="expired-flag">已过期</span>}
           {person.expiring && !person.expired && <span className="chip chip-warn">将到期</span>}
         </div>
       </div>
 
-      <div className="person-col person-node">
+      <div className="person-col person-node" id={`${descId}-node`}>
         <span className="col-label">节点</span>
         {person.telemetryState !== 'reported' ? (
           <span className="muted">
@@ -95,7 +90,7 @@ export function PersonRow({ person, selected, onOpen }: {
         )}
       </div>
 
-      <div className="person-col person-path">
+      <div className="person-col person-path" id={`${descId}-path`}>
         <span className="col-label">客户路径</span>
         {person.telemetryState !== 'reported' ? (
           <span className="muted">
@@ -119,7 +114,7 @@ export function PersonRow({ person, selected, onOpen }: {
         )}
       </div>
 
-      <div className="person-col person-usage">
+      <div className="person-col person-usage" id={`${descId}-usage`}>
         <span className="col-label">额度 / 待办</span>
         {person.accountState === 'present' && person.user ? (
           <>
@@ -144,6 +139,6 @@ export function PersonRow({ person, selected, onOpen }: {
         )}
         {path?.osVersion ? <span className="person-device">{path.osVersion}</span> : null}
       </div>
-    </button>
+    </article>
   );
-}
+});

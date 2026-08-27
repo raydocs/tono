@@ -2920,6 +2920,22 @@ async function managedCatalogTemplate(e: Env) {
   };
 }
 
+// Every status the fleet quality endpoints can emit: the collector's block
+// verdicts (ops-panel/collect.py classify_block) plus the ones synthesized in
+// fleetQualityStatus below. The console's label table is pinned to this list
+// by a drift test, so a new verdict cannot ship without an operator label.
+export const FLEET_QUALITY_STATUSES = [
+  'OK',
+  'LIKELY_BLOCKED',
+  'DEGRADED',
+  'EDGE_OK',
+  'EDGE_FAIL',
+  'DOWN',
+  'UNPROBED',
+  'CHECK_FAILED',
+  'UNKNOWN',
+] as const;
+
 function fleetQualityStatus(node: Row | undefined): { status: string; label: string } {
   if (!node) return { status: 'UNKNOWN', label: '未测' };
   const block = node.block && typeof node.block === 'object' && !Array.isArray(node.block)

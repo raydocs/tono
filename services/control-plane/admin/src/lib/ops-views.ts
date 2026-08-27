@@ -486,7 +486,7 @@ export function assembleOpsPeople(input: {
     const chores: string[] = [];
     if (live && user && !hasExitIdentity) chores.push('没凭证');
     if (live && user?.product?.incomplete) chores.push('没开 Claude');
-    if (live && user && !hasHome) chores.push('家宽');
+    if (live && user && !hasHome) chores.push('没家宽');
     return {
       userId,
       email: user?.email ?? latest?.email ?? userId,
@@ -548,6 +548,23 @@ export function catalogBehindLive(person: OpsPersonView): boolean {
 
 function liveCustomer(person: OpsPersonView): boolean {
   return person.accountState === 'present' && person.user?.status === 'active';
+}
+
+/** One copy of the heartbeat ladder, shared by the list row and the drawer. */
+export function personTelemetryLabel(person: Pick<OpsPersonView, 'telemetryState' | 'online' | 'onlineDeviceCount'>): string {
+  if (person.telemetryState === 'loading') return '心跳加载中';
+  if (person.telemetryState === 'unavailable') return '心跳不可用';
+  if (person.telemetryState === 'unreported') return '未上报';
+  if (person.online) return `${person.onlineDeviceCount} 台在线`;
+  return '离线';
+}
+
+/** Account-source caveat; null once the customer record is actually present. */
+export function personAccountLabel(person: Pick<OpsPersonView, 'accountState'>): string | null {
+  if (person.accountState === 'loading') return '客户资料加载中';
+  if (person.accountState === 'unavailable') return '客户资料不可用';
+  if (person.accountState === 'absent') return '心跳身份未进入客户库';
+  return null;
 }
 
 export function personMatchesFocus(person: OpsPersonView, focus: string | null): boolean {

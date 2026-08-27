@@ -12,6 +12,7 @@ export function useAsk() {
   const action = useRef<(() => Promise<void>) | null>(null);
 
   return {
+    busy,
     dialog: (
       <Confirm
         open={open}

@@ -1,21 +1,53 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { operationsApi } from '../api';
-import { useResource } from '../hooks';
+import { useRefresh, useResource } from '../hooks';
 import { createExclusiveGate } from '../lib/exclusive';
 import { timestamp } from '../lib/format';
 import { publishGate } from '../lib/revision';
 import { lineDiff } from '../lib/textdiff';
 import {
+  clearAllDirect,
   clearWebDomains,
-  emptyDirectPolicy,
   hasWebDomains,
   parseTrafficPolicyText,
 } from '../lib/traffic-policy';
 import { useOpsWorld } from '../ops-context';
 import { usePrivacy } from '../privacy';
-import { Banner, Confirm, DataHealth, GlassCard } from '../ui';
+import { Banner, Confirm, DataHealth, GlassCard, Skeleton, Unavailable } from '../ui';
 
 type Phase = 'viewing' | 'editing-clean' | 'editing-dirty' | 'confirming' | 'publishing' | 'success' | 'conflict' | 'error';
+
+/**
+ * A dirty draft survives navigation by living in sessionStorage, keyed on the
+ * frozen base revision. It is only ever restored onto the exact base it was
+ * written against — after someone else publishes, the stored copy stays put
+ * but never silently reattaches to a different base.
+ */
+type StoredDraft = { draft: string; baseText: string; base: number };
+
+const YAML_DRAFT_KEY = 'tono-ops-draft-catalog';
+const POLICY_DRAFT_KEY = 'tono-ops-draft-policy';
+
+function readStoredDraft(key: string): StoredDraft | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredDraft>;
+    if (typeof parsed.draft !== 'string' || typeof parsed.baseText !== 'string' || typeof parsed.base !== 'number') {
+      return null;
+    }
+    return { draft: parsed.draft, baseText: parsed.baseText, base: parsed.base };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDraft(key: string, value: StoredDraft | null) {
+  try {
+    if (value) sessionStorage.setItem(key, JSON.stringify(value));
+    else sessionStorage.removeItem(key);
+  } catch { /* private mode */ }
+}
 
 /** The raw phase name is an implementation detail; operators need the meaning. */
 const PHASE_LABEL: Record<Phase, string> = {
@@ -50,8 +82,9 @@ function DiffView({ diff, revealed }: { diff: ReturnType<typeof lineDiff>; revea
 export function ControlPage() {
   const world = useOpsWorld();
   const privacy = usePrivacy();
+  const { refreshMs } = useRefresh();
   const catalog = world.catalog;
-  const policy = useResource(operationsApi.trafficPolicy, [], 120_000);
+  const policy = useResource(operationsApi.trafficPolicy, [], refreshMs ? Math.max(refreshMs, 120_000) : 0);
   const gate = useRef(createExclusiveGate());
   const [yamlDraft, setYamlDraft] = useState('');
   const [yamlBaseText, setYamlBaseText] = useState('');
@@ -63,8 +96,11 @@ export function ControlPage() {
   const [policyPhase, setPolicyPhase] = useState<Phase>('viewing');
   const [revealYaml, setRevealYaml] = useState(false);
   const [revealPolicy, setRevealPolicy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // One banner slot: a later outcome replaces the previous one instead of the
+  // two-state pair whose "mutual exclusion" could render neither.
+  const [banner, setBanner] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const revisions = useResource(operationsApi.catalogRevisions, [], 0, historyOpen);
   const [confirm, setConfirm] = useState<{
     title: string;
     detail: string;
@@ -80,6 +116,61 @@ export function ControlPage() {
       setRevealPolicy(false);
     }
   }, [privacy.privacy]);
+
+  // Restore a stashed draft once its document is loaded, and only onto the
+  // same base revision it was frozen against.
+  const restoredYaml = useRef(false);
+  useEffect(() => {
+    if (restoredYaml.current || catalog.state !== 'ready') return;
+    restoredYaml.current = true;
+    const stored = readStoredDraft(YAML_DRAFT_KEY);
+    if (!stored || stored.base !== catalog.data.revision) return;
+    setYamlBaseText(stored.baseText);
+    setYamlDraft(stored.draft);
+    setYamlBase(stored.base);
+    setYamlPhase(stored.draft === stored.baseText ? 'editing-clean' : 'editing-dirty');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalog.state]);
+  const restoredPolicy = useRef(false);
+  useEffect(() => {
+    if (restoredPolicy.current || policy.state !== 'ready') return;
+    restoredPolicy.current = true;
+    const stored = readStoredDraft(POLICY_DRAFT_KEY);
+    if (!stored || stored.base !== policy.data.revision) return;
+    setPolicyBaseText(stored.baseText);
+    setPolicyDraft(stored.draft);
+    setPolicyBase(stored.base);
+    setPolicyPhase(stored.draft === stored.baseText ? 'editing-clean' : 'editing-dirty');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policy.state]);
+
+  // Only a dirty draft is worth stashing; a clean or just-published one is the
+  // online text again. The initial 'viewing' phase deliberately writes nothing
+  // so mounting cannot wipe a stash before the restore above has run.
+  useEffect(() => {
+    if (yamlPhase === 'editing-dirty' && yamlBase != null) {
+      writeStoredDraft(YAML_DRAFT_KEY, { draft: yamlDraft, baseText: yamlBaseText, base: yamlBase });
+    } else if (yamlPhase === 'editing-clean' || yamlPhase === 'success') {
+      writeStoredDraft(YAML_DRAFT_KEY, null);
+    }
+  }, [yamlPhase, yamlDraft, yamlBaseText, yamlBase]);
+  useEffect(() => {
+    if (policyPhase === 'editing-dirty' && policyBase != null) {
+      writeStoredDraft(POLICY_DRAFT_KEY, { draft: policyDraft, baseText: policyBaseText, base: policyBase });
+    } else if (policyPhase === 'editing-clean' || policyPhase === 'success') {
+      writeStoredDraft(POLICY_DRAFT_KEY, null);
+    }
+  }, [policyPhase, policyDraft, policyBaseText, policyBase]);
+
+  useEffect(() => {
+    if (yamlPhase !== 'editing-dirty' && policyPhase !== 'editing-dirty') return undefined;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [yamlPhase, policyPhase]);
 
   const catalogRevision = catalog.state === 'ready' ? catalog.data.revision : null;
   const policyRevision = policy.state === 'ready' ? policy.data.revision : null;
@@ -105,8 +196,7 @@ export function ControlPage() {
     setYamlDraft(catalog.data.yaml);
     setYamlBase(catalog.data.revision);
     setYamlPhase('editing-clean');
-    setError(null);
-    setMessage(null);
+    setBanner(null);
   }
 
   function startPolicy() {
@@ -115,8 +205,7 @@ export function ControlPage() {
     setPolicyDraft(policy.data.json);
     setPolicyBase(policy.data.revision);
     setPolicyPhase('editing-clean');
-    setError(null);
-    setMessage(null);
+    setBanner(null);
   }
 
   function changeYaml(text: string) {
@@ -129,6 +218,12 @@ export function ControlPage() {
     setPolicyPhase(text === policyBaseText ? 'editing-clean' : 'editing-dirty');
   }
 
+  function askAction(title: string, detail: string, target: 'yaml' | 'policy', run: () => Promise<void>) {
+    setBanner(null);
+    setConfirmError(null);
+    setConfirm({ title, detail, target, run });
+  }
+
   async function reloadYaml() {
     const fetchOnline = async () => {
       const data = await catalog.reloadNow();
@@ -136,22 +231,16 @@ export function ControlPage() {
       setYamlDraft(data.yaml);
       setYamlBase(data.revision);
       setYamlPhase('editing-clean');
-      setError(null);
-      setMessage(`已加载线上目录 r${data.revision}`);
+      setBanner({ tone: 'ok', text: `已加载线上目录 r${data.revision}` });
     };
     if (yamlPhase === 'editing-dirty') {
-      setConfirm({
-        title: '重新加载会丢掉当前草稿',
-        detail: '成功拿到线上版后才会替换编辑框。失败则草稿还在。',
-        target: 'yaml',
-        run: fetchOnline,
-      });
+      askAction('重新加载会丢掉当前草稿', '成功拿到线上版后才会替换编辑框。失败则草稿还在。', 'yaml', fetchOnline);
       return;
     }
     try {
       await fetchOnline();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '没加载上来，草稿没动');
+      setBanner({ tone: 'error', text: err instanceof Error ? err.message : '没加载上来，草稿没动' });
       setYamlPhase((phase) => (phase === 'viewing' ? phase : 'error'));
     }
   }
@@ -163,31 +252,38 @@ export function ControlPage() {
       setPolicyDraft(data.json);
       setPolicyBase(data.revision);
       setPolicyPhase('editing-clean');
-      setError(null);
-      setMessage(`已加载线上规则 r${data.revision}`);
+      setBanner({ tone: 'ok', text: `已加载线上规则 r${data.revision}` });
     };
     if (policyPhase === 'editing-dirty') {
-      setConfirm({
-        title: '重新加载会丢掉当前草稿',
-        detail: '成功拿到线上版后才会替换编辑框。失败则草稿还在。',
-        target: 'policy',
-        run: fetchOnline,
-      });
+      askAction('重新加载会丢掉当前草稿', '成功拿到线上版后才会替换编辑框。失败则草稿还在。', 'policy', fetchOnline);
       return;
     }
     try {
       await fetchOnline();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '没加载上来，草稿没动');
+      setBanner({ tone: 'error', text: err instanceof Error ? err.message : '没加载上来，草稿没动' });
       setPolicyPhase((phase) => (phase === 'viewing' ? phase : 'error'));
     }
   }
 
-  function askAction(title: string, detail: string, target: 'yaml' | 'policy', run: () => Promise<void>) {
-    setMessage(null);
-    setError(null);
-    setConfirmError(null);
-    setConfirm({ title, detail, target, run });
+  // Only the current revision's text exists anywhere — the history table keeps
+  // sha256 and counts, not the yaml — so only that one can be loaded. Loading
+  // fills the editor; publishing stays a separate, confirmed step.
+  function loadRevisionAsDraft(revision: number) {
+    if (catalog.state !== 'ready' || catalog.data.revision !== revision) return;
+    const data = catalog.data;
+    const apply = () => {
+      setYamlBaseText(data.yaml);
+      setYamlDraft(data.yaml);
+      setYamlBase(data.revision);
+      setYamlPhase('editing-clean');
+      setBanner({ tone: 'ok', text: `已把 r${data.revision} 原文载入编辑框，没有发布` });
+    };
+    if (yamlPhase === 'editing-dirty') {
+      askAction('载入会丢掉当前草稿', `把 r${data.revision} 原文放进编辑框，只作为草稿，不会发布。`, 'yaml', async () => { apply(); });
+      return;
+    }
+    apply();
   }
 
   async function publishYaml() {
@@ -200,7 +296,7 @@ export function ControlPage() {
     setYamlBase(result.revision);
     setYamlBaseText(yamlDraft);
     setYamlPhase('success');
-    setMessage(`节点目录 r${expected} → r${result.revision}`);
+    setBanner({ tone: 'ok', text: `节点目录 r${expected} → r${result.revision}` });
     catalog.reload();
   }
 
@@ -215,7 +311,7 @@ export function ControlPage() {
     setPolicyBaseText(draftText);
     setPolicyBase(result.revision);
     setPolicyPhase('success');
-    setMessage(`国内直连规则 r${expected} → r${result.revision}`);
+    setBanner({ tone: 'ok', text: `国内直连规则 r${expected} → r${result.revision}` });
     policy.reload();
   }
 
@@ -238,8 +334,7 @@ export function ControlPage() {
         { label: '直连规则', resource: policy },
         { label: '客户心跳', resource: world.activity },
       ]} />
-      {error && !message ? <Banner message={error} tone="error" /> : null}
-      {message && !error ? <Banner message={message} tone="ok" /> : null}
+      {banner ? <Banner message={banner.text} tone={banner.tone} /> : null}
 
       <GlassCard>
         <div className="card-header">
@@ -430,12 +525,12 @@ export function ControlPage() {
                   title={!parsedDraft.ok ? parsedDraft.reason : parsedDraft.policy.version === 1 ? '当前没有网页直连规则' : undefined}
                   onClick={() => {
                     if (!parsedDraft.ok) {
-                      setError(parsedDraft.reason);
+                      setBanner({ tone: 'error', text: parsedDraft.reason });
                       return;
                     }
                     const cleared = clearWebDomains(parsedDraft.policy);
                     if (!cleared.ok) {
-                      setError(cleared.reason);
+                      setBanner({ tone: 'error', text: cleared.reason });
                       return;
                     }
                     const text = JSON.stringify(cleared.policy);
@@ -454,14 +549,19 @@ export function ControlPage() {
                 <button
                   className="btn btn-outline"
                   type="button"
-                  disabled={publishing}
+                  disabled={publishing || !parsedDraft.ok}
+                  title={!parsedDraft.ok ? parsedDraft.reason : undefined}
                   onClick={() => {
-                    const next = emptyDirectPolicy();
+                    if (!parsedDraft.ok) {
+                      setBanner({ tone: 'error', text: parsedDraft.reason });
+                      return;
+                    }
+                    const next = clearAllDirect(parsedDraft.policy);
                     const text = JSON.stringify(next);
                     const diff = lineDiff(policyDraft, text);
                     askAction(
                       '关闭全部直连',
-                      `将发布空的 v1 规则（+${diff.added}/−${diff.removed}）。客户端会安全重连。`,
+                      `清空 v${next.version} 规则的全部直连列表（+${diff.added}/−${diff.removed}），不改 version。客户端会安全重连。`,
                       'policy',
                       async () => {
                         setPolicyDraft(text);
@@ -477,6 +577,45 @@ export function ControlPage() {
         )}
       </GlassCard>
 
+      <GlassCard>
+        <div className="card-body">
+          <details className="control-history" onToggle={(event) => setHistoryOpen(event.currentTarget.open)}>
+            <summary>历史版本 · 展开才拉取发布记录</summary>
+            {historyOpen && (
+              revisions.state === 'error' ? (
+                <Unavailable title="发布记录不可用" detail={revisions.message} />
+              ) : revisions.state === 'loading' ? (
+                <Skeleton label="发布记录" />
+              ) : revisions.data.length === 0 ? (
+                <p className="muted">还没有发布记录。</p>
+              ) : (
+                <>
+                  <div className="control-history-list">
+                    {revisions.data.map((rev) => (
+                      <div className="control-history-row" key={rev.revision}>
+                        <span className="mono">r{rev.revision}</span>
+                        {rev.current ? <span className="phase-pill t-ok">当前线上</span> : null}
+                        <span className="muted">{timestamp(rev.publishedAt)}</span>
+                        <span className="muted">{rev.serverCount} 台机器 · {rev.logicalNodeCount} 节点 · {rev.deploymentCount} 部署</span>
+                        <span className="mono muted" title={rev.sha256}>{rev.sha256.slice(0, 10)}</span>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          disabled={!rev.current || catalog.state !== 'ready'}
+                          title={rev.current ? '把线上原文放进编辑框，不会发布' : '历史修订只存了摘要，原文未存档，载入不了'}
+                          onClick={() => loadRevisionAsDraft(rev.revision)}
+                        >载入为草稿</button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="muted">载入只替换编辑框草稿，从不自动发布。历史修订没有存原文，只能对照时间、数量和 sha256。</p>
+                </>
+              )
+            )}
+          </details>
+        </div>
+      </GlassCard>
+
       <Confirm
         open={Boolean(confirm)}
         title={confirm?.title ?? ''}
@@ -489,8 +628,7 @@ export function ControlPage() {
           const target = confirm.target;
           setConfirmBusy(true);
           setConfirmError(null);
-          setError(null);
-          setMessage(null);
+          setBanner(null);
           if (target === 'policy') setPolicyPhase('publishing');
           else setYamlPhase('publishing');
           try {

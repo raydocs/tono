@@ -565,6 +565,17 @@ export function matchDevOps(
   if (base === 'exit-catalog') {
     return { revision: 40, yaml, sha256: 'dev', updatedAt: clock };
   }
+  if (base === 'catalog-revisions') {
+    // r40 mirrors the exit-catalog fixture above so "当前线上" lines up with
+    // what the editor loads; older rows exercise the metadata-only rendering.
+    return {
+      revisions: [
+        { revision: 40, sha256: 'dev', publishedAt: clock, serverCount: 12, logicalNodeCount: 14, deploymentCount: 12, current: true },
+        { revision: 39, sha256: 'f1e2d3c4b5a6978877665544332211ffeeddccbbaa99887766554433221100ff', publishedAt: clock - 2 * 86_400, serverCount: 12, logicalNodeCount: 13, deploymentCount: 12, current: false },
+        { revision: 38, sha256: '00ff112233445566778899aabbccddeeff00112233445566778899aabbccddee', publishedAt: clock - 9 * 86_400, serverCount: 11, logicalNodeCount: 13, deploymentCount: 11, current: false },
+      ],
+    };
+  }
   if (base === 'fleet-nodes') {
     return { nodes: [], sources: { catalog: { state: 'ready', updatedAt: clock } } };
   }

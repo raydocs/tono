@@ -1996,3 +1996,44 @@ dd { margin: 0; text-align: right; font-weight: 550; }
      stay visible on narrow screens instead of relying on the card fallback. */
   .monitor-view-table .monitor-table-wrap { display: block; }
 }
+
+/* ── ControlPage 历史版本 fold ────────────────────────────────────────────── */
+.control-history summary {
+  cursor: pointer;
+  font-size: var(--t-md);
+  font-weight: 550;
+  color: hsl(var(--muted-foreground));
+}
+.control-history[open] summary { margin-bottom: var(--s3); color: hsl(var(--foreground)); }
+.control-history-list { display: grid; gap: var(--s1); }
+.control-history-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--l2-border);
+  border-radius: var(--r-sm);
+  background: var(--l2-flat);
+  font-size: var(--t-base);
+}
+.control-history-row > .btn { margin-left: auto; }
+
+/* ── users: row open control + cohort action bar (appended) ──────────────── */
+.person-open {
+  display: inline;
+  padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; text-align: left;
+  cursor: pointer;
+}
+.person-open:hover strong { text-decoration: underline; text-underline-offset: 0.2em; }
+.person-open:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.cohort-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+}
+.cohort-bar .banner { flex: 1 1 100%; }
+button.chip { cursor: pointer; }

@@ -93,7 +93,7 @@ export function nextRouteForOpenUser(current: OpsHash, userId: string, extra: Pa
     focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),
     node: null,
     user: userId,
-    q: extra.q !== undefined ? extra.q : null,
+    q: extra.q !== undefined ? extra.q : (keepFocus ? current.q : null),
     range: null,
   };
 }

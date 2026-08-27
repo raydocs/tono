@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { operationsApi } from '../api';
 import { RateChart, Sparkline } from '../charts';
-import { useResource } from '../hooks';
+import { useKeyedResource, useRefresh } from '../hooks';
 import { formatBytes, timestamp } from '../lib/format';
 import { parseTrafficRange } from '../lib/hash';
 import { metricsForRange } from '../lib/metrics-bind';
@@ -8,10 +9,9 @@ import { useOpsRoute } from '../lib/route';
 import {
   aggregateFleetRates,
   coverageByBucket,
-  fleetByteTransfer,
   latestValidRate,
-  nodeByteTransfer,
-  nodeRateSeries,
+  rangeTransfer,
+  seriesRates,
 } from '../lib/traffic';
 import { useOpsWorld } from '../ops-context';
 import { usePrivacy } from '../privacy';
@@ -26,6 +26,7 @@ const RANGES = [
 export function TrafficPage() {
   const world = useOpsWorld();
   const privacy = usePrivacy();
+  const { refreshMs } = useRefresh();
   const { route, setRoute, openNode, openUser } = useOpsRoute();
   const range = parseTrafficRange(route.range);
   const bound = metricsForRange(range, world.metrics.snapshotKey, world.metrics.state === 'ready' ? world.metrics.data : null);
@@ -33,28 +34,45 @@ export function TrafficPage() {
   const expected = agentKnown
     ? world.nodes.filter((node) => node.agentState === 'reported' || node.agentState === 'stale').length
     : null;
-  const series = bound
-    ? Object.fromEntries(Object.entries(bound.series).map(([name, points]) => [name, nodeRateSeries(points, bound.resolutionSeconds)]))
-    : {};
-  const fleet = aggregateFleetRates(series, expected);
-  const coverage = coverageByBucket(fleet);
-  const latest = latestValidRate(fleet);
-  const nowSec = world.nowSec;
-  const stale = latest != null && nowSec - latest.t > (bound?.resolutionSeconds ?? 60) * 3;
-  const transfer = bound ? fleetByteTransfer(bound.series, bound.resolutionSeconds) : { inBytes: null, outBytes: null };
-  const top = bound
-    ? Object.entries(bound.series).map(([name, points]) => {
-      const moved = nodeByteTransfer(points, bound.resolutionSeconds);
-      const rates = nodeRateSeries(points, bound.resolutionSeconds);
+  const { fleet, coverage, latest, transfer, top } = useMemo(() => {
+    const series = bound
+      ? Object.fromEntries(Object.entries(bound.series).map(([name, points]) => [name, seriesRates(points, bound.resolutionSeconds)]))
+      : {};
+    const aggregated = aggregateFleetRates(series, expected);
+    const perNode = Object.entries(series).map(([name, rates]) => {
+      const moved = rangeTransfer(rates);
       const peakIn = rates.reduce((max, point) => Math.max(max, point.inBps ?? 0), 0);
       const peakOut = rates.reduce((max, point) => Math.max(max, point.outBps ?? 0), 0);
       const complete = rates.filter((point) => point.inBps != null || point.outBps != null).length;
       return { name, moved, peakIn, peakOut, complete, total: rates.length };
-    }).sort((a, b) => (b.moved.inBytes ?? 0) + (b.moved.outBytes ?? 0) - ((a.moved.inBytes ?? 0) + (a.moved.outBytes ?? 0))).slice(0, 8)
-    : [];
+    });
+    // The fleet total is the sum of the same per-node deltas the rows show;
+    // a node with no legal delta stays null rather than counting as 0.
+    let inBytes = 0;
+    let outBytes = 0;
+    let inAny = false;
+    let outAny = false;
+    for (const row of perNode) {
+      if (row.moved.inBytes != null) { inBytes += row.moved.inBytes; inAny = true; }
+      if (row.moved.outBytes != null) { outBytes += row.moved.outBytes; outAny = true; }
+    }
+    return {
+      series,
+      fleet: aggregated,
+      coverage: coverageByBucket(aggregated),
+      latest: latestValidRate(aggregated),
+      transfer: { inBytes: inAny ? inBytes : null, outBytes: outAny ? outBytes : null },
+      top: [...perNode]
+        .sort((a, b) => (b.moved.inBytes ?? 0) + (b.moved.outBytes ?? 0) - ((a.moved.inBytes ?? 0) + (a.moved.outBytes ?? 0)))
+        .slice(0, 8),
+    };
+  }, [bound, expected]);
+  const nowSec = world.nowSec;
+  const stale = latest != null && nowSec - latest.t > (bound?.resolutionSeconds ?? 60) * 3;
   const customers = [...world.people].filter((person) => person.user).sort((a, b) => b.usageBytes - a.usageBytes);
-  const usageHours = useResource(() => operationsApi.usageHours(range), [range], 60_000);
-  const hourSeries = usageHours.state === 'ready' ? usageHours.data.fleet : [];
+  const usageHours = useKeyedResource(range, (key, signal) => operationsApi.usageHours(key, signal), refreshMs ? Math.max(refreshMs, 60_000) : 0);
+  const boundHours = metricsForRange(range, usageHours.snapshotKey, usageHours.state === 'ready' ? usageHours.data : null);
+  const hourSeries = boundHours ? boundHours.fleet : [];
   const hourMeasured = hourSeries.filter((point) => point.bytes != null).length;
 
   // "1/11" is only meaningful once it says what the two numbers count.
@@ -151,8 +169,16 @@ export function TrafficPage() {
               {customers.slice(0, 12).map((person) => {
                 const ratio = person.quotaRatio;
                 const tone = ratio == null ? '' : ratio >= 1 ? 'quota-bad' : ratio >= 0.8 ? 'quota-warn' : 'quota-ok';
+                const readingsId = `lb-usage-${person.userId}`;
                 return (
-                  <button type="button" className="lb-row lb-row-plain" key={person.userId} onClick={() => openUser(person.userId)}>
+                  <button
+                    type="button"
+                    className="lb-row lb-row-plain"
+                    key={person.userId}
+                    aria-label={`打开客户 ${privacy.email(person.email)} 详情`}
+                    aria-describedby={readingsId}
+                    onClick={() => openUser(person.userId)}
+                  >
                     <span className="lb-email" title={privacy.email(person.email)}>{privacy.email(person.email)}</span>
                     {ratio == null ? (
                       <span className="muted">不限额</span>
@@ -161,7 +187,7 @@ export function TrafficPage() {
                         <span style={{ width: `${Math.max(2, Math.min(100, ratio * 100))}%` }} />
                       </div>
                     )}
-                    <span className="lb-value mono">
+                    <span id={readingsId} className="lb-value mono">
                       {formatBytes(person.usageBytes)}
                       {person.quotaBytes == null ? ' / 不限' : ` / ${formatBytes(person.quotaBytes)}`}
                       {ratio != null ? ` · ${Math.round(ratio * 100)}%` : ''}
@@ -182,10 +208,10 @@ export function TrafficPage() {
           </div>
         </div>
         <div className="card-body">
-          {usageHours.state === 'error' && !usageHours.refreshedAt ? (
-            <Unavailable title="客户小时用量不可用" detail={usageHours.message} />
-          ) : usageHours.state === 'loading' ? (
-            <Skeleton label="客户小时用量" />
+          {usageHours.state === 'error' && usageHours.snapshotKey !== range ? (
+            <Unavailable title="客户小时用量不可用" detail={usageHours.state === 'error' ? usageHours.message : undefined} />
+          ) : !boundHours ? (
+            <Skeleton label={`${range} 客户小时用量加载中，不会拿其他范围冒充`} />
           ) : hourMeasured === 0 ? (
             <p className="muted">
               已经按小时记账。相邻两个整点之间才画得出线，现在还没有满一小时的差分。

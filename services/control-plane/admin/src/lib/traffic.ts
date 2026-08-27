@@ -80,13 +80,6 @@ export function seriesRates(
   return out;
 }
 
-export function nodeRateSeries(
-  points: Array<{ t: number; netIn: number | null; netOut: number | null }>,
-  resolutionSeconds: number,
-): RatePoint[] {
-  return seriesRates(points, resolutionSeconds);
-}
-
 export function aggregateFleetRates(
   series: Record<string, RatePoint[]>,
   expectedNodes: number | null,

@@ -932,7 +932,7 @@ describe('screenshot privacy masks', () => {
 });
 
 import { createExclusiveGate } from '../admin/src/lib/exclusive';
-import { personMatchesFocus } from '../admin/src/lib/ops-views';
+import { personAccountLabel, personMatchesFocus, personTelemetryLabel } from '../admin/src/lib/ops-views';
 import { nextRouteForOpenUser, nextRouteForOpenNode } from '../admin/src/lib/hash';
 import { msEpochToSec } from '../admin/src/lib/time';
 import { emptyHash } from '../admin/src/lib/hash';
@@ -1011,6 +1011,7 @@ describe('customer telemetry and path activity', () => {
     expect(personMatchesFocus(people[0], 'claude')).toBe(true);
     expect(people[0].catalogLag.state).toBe('behind');
     expect(people[0].chores).toContain('没开 Claude');
+    expect(people[0].chores).toContain('没家宽');
     expect(people[0].chores.some((chore) => chore.includes('目录落后'))).toBe(false);
     expect(people[0].accountState).toBe('present');
   });
@@ -1213,7 +1214,7 @@ describe('confirm exclusive gate', () => {
 import { dashboardKpis, KPI_HREFS } from '../admin/src/lib/incidents';
 import { lineDiff } from '../admin/src/lib/textdiff';
 import { metricsForRange } from '../admin/src/lib/metrics-bind';
-import { aggregateFleetRates, coverageByBucket, fleetByteTransfer, latestValidRate, nodeRateSeries, rangeTransfer } from '../admin/src/lib/traffic';
+import { aggregateFleetRates, coverageByBucket, fleetByteTransfer, latestValidRate, rangeTransfer } from '../admin/src/lib/traffic';
 
 describe('dashboard KPI routes stay pinned', () => {
   it('does not drift off the hash contract', () => {
@@ -1351,12 +1352,12 @@ describe('dashboard KPI routes stay pinned', () => {
 
 describe('honest traffic aggregation', () => {
   it('does not treat missing nodes as zero and keeps reset gaps', () => {
-    const a = nodeRateSeries([
+    const a = seriesRates([
       { t: 0, netIn: 100, netOut: 10 },
       { t: 60, netIn: 160, netOut: 40 },
       { t: 120, netIn: 10, netOut: 50 },
     ], 60);
-    const b = nodeRateSeries([
+    const b = seriesRates([
       { t: 0, netIn: 200, netOut: 20 },
       { t: 60, netIn: 260, netOut: 50 },
     ], 60);
@@ -1387,7 +1388,7 @@ describe('honest traffic aggregation', () => {
 
   it('uses eligible node count as coverage denominator', () => {
     const series = {
-      only: nodeRateSeries([
+      only: seriesRates([
         { t: 0, netIn: 0, netOut: null },
         { t: 60, netIn: 60, netOut: null },
       ], 60),
@@ -1404,7 +1405,7 @@ describe('honest traffic aggregation', () => {
   });
 });
 
-import { clearWebDomains, parseTrafficPolicy } from '../admin/src/lib/traffic-policy';
+import { clearAllDirect, clearWebDomains, parseTrafficPolicy } from '../admin/src/lib/traffic-policy';
 
 describe('traffic policy web-direct shortcut', () => {
   const v2 = {
@@ -1460,6 +1461,35 @@ describe('traffic policy web-direct shortcut', () => {
     expect(clearWebDomains({ version: 1, domains: [], mediaEndpoints: [] }).ok).toBe(false);
     expect(parseTrafficPolicy({ version: 2, domains: [] }).ok).toBe(false);
     expect(parseTrafficPolicy({ version: 4, domains: [], mediaEndpoints: [], webDomains: [] }).ok).toBe(false);
+  });
+
+  it('closes all direct by emptying every v4 list without downgrading the version', () => {
+    const frozen = JSON.parse(JSON.stringify(v4));
+    const result = clearAllDirect(v4);
+    expect(result).toEqual({
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: [],
+    });
+    expect(v4).toEqual(frozen);
+    // The emptied document must still be a valid policy of the same version.
+    expect(parseTrafficPolicy(result)).toEqual({ ok: true, policy: result });
+  });
+
+  it('keeps each version its own shape when closing all direct', () => {
+    expect(clearAllDirect({ version: 1, domains: v2.domains, mediaEndpoints: v2.mediaEndpoints }))
+      .toEqual({ version: 1, domains: [], mediaEndpoints: [] });
+    expect(clearAllDirect(v2)).toEqual({ version: 2, domains: [], mediaEndpoints: [], webDomains: [] });
+    expect(clearAllDirect(v3)).toEqual({
+      version: 3,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+    });
   });
 });
 
@@ -1737,5 +1767,192 @@ describe('metrics range binding', () => {
   it('does not present a 24h snapshot as 90d', () => {
     expect(metricsForRange('90d', '24h', { from: 1 })).toBeNull();
     expect(metricsForRange('24h', '24h', { from: 1 })).toEqual({ from: 1 });
+  });
+});
+
+describe('one label ladder for account and heartbeat state', () => {
+  it('keeps drawer and list row reading the heartbeat the same way', () => {
+    expect(personTelemetryLabel({ telemetryState: 'loading', online: false, onlineDeviceCount: 0 })).toBe('心跳加载中');
+    expect(personTelemetryLabel({ telemetryState: 'unavailable', online: false, onlineDeviceCount: 0 })).toBe('心跳不可用');
+    expect(personTelemetryLabel({ telemetryState: 'unreported', online: false, onlineDeviceCount: 0 })).toBe('未上报');
+    expect(personTelemetryLabel({ telemetryState: 'reported', online: true, onlineDeviceCount: 2 })).toBe('2 台在线');
+    expect(personTelemetryLabel({ telemetryState: 'reported', online: false, onlineDeviceCount: 0 })).toBe('离线');
+  });
+
+  it('puts the account-source caveat ahead of any heartbeat reading', () => {
+    expect(personAccountLabel({ accountState: 'loading' })).toBe('客户资料加载中');
+    expect(personAccountLabel({ accountState: 'unavailable' })).toBe('客户资料不可用');
+    expect(personAccountLabel({ accountState: 'absent' })).toBe('心跳身份未进入客户库');
+    expect(personAccountLabel({ accountState: 'present' })).toBeNull();
+  });
+});
+
+describe('opening a customer drawer keeps the search', () => {
+  it('preserves q on the same page and drops it across pages', () => {
+    expect(nextRouteForOpenUser({ ...emptyHash('users'), focus: 'home', q: 'fuji' }, 'u1'))
+      .toMatchObject({ page: 'users', focus: 'home', user: 'u1', q: 'fuji' });
+    expect(nextRouteForOpenUser({ ...emptyHash('monitor'), q: 'fuji' }, 'u1').q).toBeNull();
+  });
+});
+
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import {
+  HEARTBEAT_FRESH_SECONDS as FRESH_WINDOW_SECONDS,
+  measurementFresh,
+} from '../admin/src/lib/freshness';
+import { blockLabel, blockLabels, blockStatus, isLikelyBlocked, probeRatio } from '../admin/src/lib/quality';
+import { useOpsRoute } from '../admin/src/lib/route';
+import { FLEET_QUALITY_STATUSES } from '../src/index';
+
+describe('measurement freshness windows', () => {
+  const nowSec = 100_000;
+
+  it('keeps a sample fresh through 40:00 and drops it at 40:01', () => {
+    expect(measurementFresh((nowSec - FRESH_WINDOW_SECONDS) * 1000, nowSec, nowSec)).toBe(true);
+    expect(measurementFresh((nowSec - FRESH_WINDOW_SECONDS - 1) * 1000, nowSec, nowSec)).toBe(false);
+  });
+
+  it('tolerates five minutes of forward clock skew and not a second more', () => {
+    expect(measurementFresh((nowSec + 5 * 60) * 1000, nowSec, nowSec)).toBe(true);
+    expect(measurementFresh((nowSec + 5 * 60 + 1) * 1000, nowSec, nowSec)).toBe(false);
+  });
+
+  it('inherits heartbeat freshness when the sample has no usable timestamp', () => {
+    expect(measurementFresh(null, nowSec - FRESH_WINDOW_SECONDS, nowSec)).toBe(true);
+    expect(measurementFresh(undefined, nowSec - FRESH_WINDOW_SECONDS - 1, nowSec)).toBe(false);
+    // A NaN timestamp is unusable, not stale forever and not fresh forever.
+    expect(measurementFresh(Number.NaN, nowSec, nowSec)).toBe(true);
+    expect(measurementFresh(Number.NaN, nowSec - FRESH_WINDOW_SECONDS - 1, nowSec)).toBe(false);
+  });
+});
+
+describe('quality block labels', () => {
+  it('reads the collector verdict and falls back to machine liveness', () => {
+    expect(blockStatus(qualityNode('n'))).toBe('OK');
+    expect(blockStatus(qualityNode('n', {
+      block: { status: 'DEGRADED', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('DEGRADED');
+    expect(blockStatus(qualityNode('n', { block: null, ok: true }))).toBe('OK');
+    expect(blockStatus(qualityNode('n', { block: null, ok: false }))).toBe('DOWN');
+    // An empty reported status is no verdict at all.
+    expect(blockStatus(qualityNode('n', {
+      ok: false,
+      block: { status: '', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('DOWN');
+  });
+
+  it('prefers the collector label, then the local table, then the raw status', () => {
+    expect(blockLabel(qualityNode('n'))).toBe('大陆正常');
+    expect(blockLabel(qualityNode('n', {
+      block: { status: 'DEGRADED', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('部分不通');
+    expect(blockLabel(qualityNode('n', {
+      block: { status: 'NEW_VERDICT', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('NEW_VERDICT');
+  });
+
+  it('only calls a node blocked on the exact verdict', () => {
+    expect(isLikelyBlocked(qualityNode('n', {
+      block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe(true);
+    expect(isLikelyBlocked(qualityNode('n', { block: null, ok: false }))).toBe(false);
+  });
+
+  it('renders probe tallies without inventing a denominator', () => {
+    expect(probeRatio(null)).toBe('—');
+    expect(probeRatio({ success: 2 })).toBe('—');
+    expect(probeRatio({ total: 3 })).toBe('0/3');
+    expect(probeRatio({ success: 2, total: 3 })).toBe('2/3');
+  });
+});
+
+describe('fleet quality status vocabulary', () => {
+  it('gives every status the server can emit a console label', () => {
+    for (const status of FLEET_QUALITY_STATUSES) {
+      expect(blockLabels[status], `missing label for ${status}`).toBeTruthy();
+    }
+  });
+
+  it('keeps console-only statuses a deliberate, known set', () => {
+    const serverStatuses: readonly string[] = FLEET_QUALITY_STATUSES;
+    const extras = Object.keys(blockLabels).filter((status) => !serverStatuses.includes(status));
+    expect(extras).toEqual(['PROBE_PARTIAL']);
+  });
+});
+
+describe('ops route hook', () => {
+  type WindowStub = {
+    location: { hash: string };
+    addEventListener(type: string, listener: () => void): void;
+    removeEventListener(type: string, listener: () => void): void;
+  };
+  const withWindow = <T,>(hash: string, run: () => T): T => {
+    const stub: WindowStub = {
+      location: { hash },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    (globalThis as { window?: WindowStub }).window = stub;
+    try {
+      return run();
+    } finally {
+      delete (globalThis as { window?: WindowStub }).window;
+    }
+  };
+  const mount = () => {
+    let captured: ReturnType<typeof useOpsRoute> | null = null;
+    const Probe = () => {
+      captured = useOpsRoute();
+      return null;
+    };
+    renderToStaticMarkup(createElement(Probe));
+    return captured!;
+  };
+
+  it('reads the page, drawer, and search from the location hash', () => {
+    withWindow('#/users?q=fuji&user=u1', () => {
+      const { route, page } = mount();
+      expect(page).toBe('users');
+      expect(route).toMatchObject({ page: 'users', q: 'fuji', user: 'u1', node: null });
+    });
+  });
+
+  it('opens a node drawer by writing a hash that parses back to itself', () => {
+    withWindow('#/users?q=fuji', () => {
+      const { openNode } = mount();
+      openNode('Tokyo · Fuji');
+      expect(parseOpsHash(window.location.hash)).toMatchObject({
+        page: 'monitor',
+        node: 'Tokyo · Fuji',
+        user: null,
+        // Crossing pages starts from that page's default view.
+        q: null,
+      });
+    });
+  });
+
+  it('keeps the search when the drawer opens on the same page', () => {
+    withWindow('#/users?q=fuji', () => {
+      const { openUser } = mount();
+      openUser('u2');
+      expect(parseOpsHash(window.location.hash)).toMatchObject({
+        page: 'users',
+        user: 'u2',
+        q: 'fuji',
+      });
+    });
+  });
+
+  it('closes the drawer without losing the page', () => {
+    withWindow('#/monitor?node=Tokyo+%C2%B7+Fuji', () => {
+      const { closeDrawer } = mount();
+      closeDrawer();
+      expect(parseOpsHash(window.location.hash)).toMatchObject({
+        page: 'monitor',
+        node: null,
+        user: null,
+      });
+    });
   });
 });

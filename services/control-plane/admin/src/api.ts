@@ -635,9 +635,13 @@ export const operationsApi = {
       reason,
     })
   ),
-  metrics: async (range = '24h', node?: string, signal?: AbortSignal) => {
+  // `fields` narrows the payload to the named MetricPointDto members (e.g.
+  // ['netIn', 'netOut']); omitted means the full point, so existing callers
+  // keep their current shape.
+  metrics: async (range = '24h', node?: string, signal?: AbortSignal, fields?: string[]) => {
     const query = new URLSearchParams({ range });
     if (node) query.set('node', node);
+    if (fields?.length) query.set('fields', fields.join(','));
     return (await get<{ metrics: MetricsDto }>(`metrics?${query}`, signal)).metrics;
   },
   usageHours: async (range = '24h', signal?: AbortSignal) => (
