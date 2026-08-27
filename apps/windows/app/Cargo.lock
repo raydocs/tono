@@ -8161,7 +8161,7 @@ dependencies = [
 
 [[package]]
 name = "tono-windows"
-version = "0.0.42"
+version = "0.0.43"
 dependencies = [
  "aes-gcm",
  "anyhow",
