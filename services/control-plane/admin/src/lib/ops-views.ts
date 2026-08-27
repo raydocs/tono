@@ -462,7 +462,7 @@ export function personMatchesFocus(person: OpsPersonView, focus: string | null):
   if (focus === 'path') return person.path.kind === 'incident';
   if (focus === 'unmeasured') return person.online && person.path.kind === 'unmeasured';
   if (focus === 'catalog') return person.catalogLag.state === 'behind';
-  if (focus === 'catalog-unreported') return person.catalogLag.state === 'unreported';
+  if (focus === 'catalog-unreported') return person.catalogLag.state === 'unreported' && person.online;
   if (focus === 'credential') return Boolean(person.user && !person.hasExitIdentity);
   return true;
 }

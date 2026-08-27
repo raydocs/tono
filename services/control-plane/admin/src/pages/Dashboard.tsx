@@ -168,7 +168,7 @@ export function Dashboard() {
             <ul className="attention-list">
               {catalogUnreported.length > 0 && (
                 <li>
-                  <a className="table-link" href="#/users?focus=catalog-unreported">{catalogUnreported.length} 人未上报目录版本</a>
+                  <a className="table-link" href="#/users?focus=catalog-unreported">{catalogUnreported.length} 个在线客户未上报目录版本</a>
                 </li>
               )}
               {quotaRest.slice(0, catalogUnreported.length > 0 ? 7 : 8).map((item) => (

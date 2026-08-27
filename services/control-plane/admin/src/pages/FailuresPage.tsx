@@ -8,6 +8,7 @@ import { usePrivacy } from '../privacy';
 import { DataHealth, FilterChips, GlassCard, Unavailable } from '../ui';
 import { NodeDrawer } from './monitor/NodeDrawer';
 import { CustomerDrawer } from './users/CustomerDrawer';
+import { PersonRow } from './users/PersonRow';
 
 function IncidentRow({ item, nowSec }: { item: OpsIncident; nowSec: number }) {
   const privacy = usePrivacy();
@@ -43,11 +44,12 @@ function IncidentRow({ item, nowSec }: { item: OpsIncident; nowSec: number }) {
 
 export function FailuresPage() {
   const world = useOpsWorld();
-  const { route, setRoute, closeDrawer } = useOpsRoute();
+  const { route, setRoute, closeDrawer, openUser } = useOpsRoute();
   const focus = route.focus;
   const homes = useResource(operationsApi.homeExits, [], 120_000, Boolean(route.user));
   const board = sortIncidents(world.incidents.filter((item) => item.category === 'node' || item.category === 'customer-path'));
   const pathOnly = focus === 'customer-path';
+  const unmeasuredOnly = focus === 'unmeasured';
   const visible = pathOnly ? board.filter((item) => item.category === 'customer-path') : board;
   const severe = visible.filter((item) => item.severity === 'severe' && item.category === 'node');
   const warn = visible.filter((item) => item.severity === 'warn' && item.category === 'node');
@@ -58,7 +60,8 @@ export function FailuresPage() {
   const qualityPending = world.sources.quality.status === 'loading';
   const agentsPending = world.sources.agents.status === 'loading';
   const activityPending = world.sources.activity.status === 'loading';
-  const pathUnmeasured = world.people.filter((person) => person.online && person.path.kind === 'unmeasured').length;
+  const unmeasuredPeople = world.people.filter((person) => person.online && person.path.kind === 'unmeasured');
+  const pathUnmeasured = unmeasuredPeople.length;
   const selectedNode = world.nodes.find((node) => node.name === route.node) ?? null;
   const selectedPerson = world.people.find((person) => person.userId === route.user) ?? null;
 
@@ -71,10 +74,40 @@ export function FailuresPage() {
       <p className="muted">这是当前快照，不是事故历史。没有持续时长，也没有已恢复事故。</p>
       <FilterChips
         value={focus ?? ''}
-        options={[{ id: '', label: '全部事故' }, { id: 'customer-path', label: '客户路径' }]}
+        options={[
+          { id: '', label: '全部事故' },
+          { id: 'customer-path', label: '客户路径' },
+          { id: 'unmeasured', label: '路径未测' },
+        ]}
         onChange={(id) => setRoute((current) => ({ ...current, page: 'failures', focus: id || null }))}
       />
 
+      {unmeasuredOnly ? (
+        <GlassCard>
+          <div className="card-header">
+            <div>
+              <h2>路径未测</h2>
+              <p>在线但还没有出口/TCP 采样。缺测不是故障。</p>
+            </div>
+          </div>
+          <div className="card-body">
+            {activityFailed
+              ? <Unavailable title="客户路径不可判断" detail={world.sources.activity.error ?? undefined} />
+              : activityPending
+                ? <p className="muted">心跳还没查完。</p>
+                : unmeasuredPeople.length
+                  ? (
+                    <div className="person-list">
+                      {unmeasuredPeople.map((person) => (
+                        <PersonRow key={person.userId} person={person} onOpen={() => openUser(person.userId)} />
+                      ))}
+                    </div>
+                  )
+                  : <p className="muted">在线客户都有路径采样，或目前没有在线客户。</p>}
+          </div>
+        </GlassCard>
+      ) : (
+      <>
       {!pathOnly && (
         <GlassCard>
           <div className="card-header"><div><h2>严重事故</h2></div></div>
@@ -153,6 +186,8 @@ export function FailuresPage() {
           )}
         </div>
       </GlassCard>
+      </>
+      )}
 
       <NodeDrawer
         key={selectedNode?.name ?? 'node-none'}

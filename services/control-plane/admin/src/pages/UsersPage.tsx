@@ -19,7 +19,7 @@ const FILTERS = [
   { id: 'expired', label: '过期' },
   { id: 'expiring', label: '将到期' },
   { id: 'catalog', label: '目录落后' },
-  { id: 'catalog-unreported', label: '目录未报' },
+  { id: 'catalog-unreported', label: '在线未报' },
   { id: 'claude', label: 'Claude' },
   { id: 'home', label: '没家宽' },
   { id: 'credential', label: '没凭证' },

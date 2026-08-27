@@ -121,6 +121,7 @@ export function NodeCard({
             </div>
           )}
           {offline && <span className="nc-offline-flag">离线 · 仍可点开处理</span>}
+          {!node.billing.renewsAt && <span className="nc-action-fill">点开补续费日</span>}
         </>
       ) : (
         <>
@@ -133,7 +134,7 @@ export function NodeCard({
           </div>
           <div className="nc-facts nc-facts-bill">
             <span>{price ? privacy.money(price) : '价格未填'}</span>
-            <span>{node.billing.renewsAt ? `续费 ${new Date(node.billing.renewsAt * 1000).toLocaleDateString('zh-CN')}` : '续费未填'}</span>
+            <span>{node.billing.renewsAt ? `续费 ${new Date(node.billing.renewsAt * 1000).toLocaleDateString('zh-CN')}` : '续费未填 · 点开补日期'}</span>
             <span>累计 ↓ {agent?.netIn == null ? '—' : formatBytes(agent.netIn)} ↑ {agent?.netOut == null ? '—' : formatBytes(agent.netOut)}</span>
           </div>
 
@@ -198,6 +199,7 @@ export function NodeCard({
               <span className="nc-action">需下架 · 受影响 {node.occupancy ?? 0} 人</span>
             )}
             {offline && <span className="nc-offline-flag">离线 · 仍可点开处理</span>}
+            {!node.billing.renewsAt && <span className="nc-action-fill">点开补续费日</span>}
           </div>
         </>
       )}

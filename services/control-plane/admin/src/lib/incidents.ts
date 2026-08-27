@@ -398,14 +398,14 @@ export function incidentsFromWorld(input: {
         measuredAtSec: null,
         sourceState: 'ready',
       }));
-    } else if (person.catalogLag.state === 'unreported' && person.accountState === 'present') {
+    } else if (person.catalogLag.state === 'unreported' && person.accountState === 'present' && person.online) {
       incidents.push(incident({
         id: `catalog-unreported:${person.userId}`,
         kind: 'catalog-unreported',
         category: 'chore',
         severity: 'notice',
         title: person.email,
-        detail: '未上报目录版本',
+        detail: '在线未上报目录版本',
         actionRoute: `#/users?focus=catalog-unreported&user=${encodeURIComponent(person.userId)}`,
         userId: person.userId,
         impactCount: 1,

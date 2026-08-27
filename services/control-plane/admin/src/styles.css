@@ -1147,6 +1147,7 @@ tbody tr:last-child td { border-bottom: 0; }
   color: hsl(var(--faint-foreground));
 }
 .nc-foot .nc-action { color: hsl(var(--sev-fg)); font-weight: 600; }
+.nc-action-fill { font-size: var(--t-sm); font-weight: 650; color: hsl(var(--warn-fg)); }
 .nc-offline-flag {
   display: inline-flex; align-items: center; gap: var(--s1);
   font-size: var(--t-xs); font-weight: 650;

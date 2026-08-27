@@ -989,6 +989,24 @@ describe('customer telemetry and path activity', () => {
     expect(incidents.some((item) => item.kind === 'catalog-lag')).toBe(false);
   });
 
+  it('does not treat offline unreported catalog as a dashboard chore', () => {
+    const people = assembleOpsPeople({
+      nowSec: now,
+      telemetrySource: 'ready',
+      catalogRevision: 40,
+      users: [{
+        id: 'u3', email: 'off@example.com', deviceLimit: 1, quotaBytes: null, usageBytes: 0,
+        suspended: false, status: 'active', createdAt: now, homeBinding: null,
+      } as UserDto],
+      activity: [activity({ userId: 'u3', catalogRevision: null, lastSeenAt: now - 86_400, online: false })],
+    });
+    expect(people[0].online).toBe(false);
+    expect(people[0].catalogLag.state).toBe('unreported');
+    expect(personMatchesFocus(people[0], 'catalog-unreported')).toBe(false);
+    const incidents = incidentsFromWorld({ nodes: [], people, catalogRevision: 40, nowSec: now });
+    expect(incidents.some((item) => item.kind === 'catalog-unreported')).toBe(false);
+  });
+
   it('does not call heartbeat-only people ghosts while the users source is loading or down', () => {
     const loading = assembleOpsPeople({
       nowSec: now,
