@@ -903,8 +903,9 @@ final class AppState {
                 details: self.auditProtectionDetails()
             )
             self.disconnect(releaseKillSwitch: false)
-            self.errorMessage =
-                "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
+            self.errorMessage = String(
+                localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
+            )
             self.scheduleProtectedReconnect(immediate: true)
         }
     }
@@ -1024,15 +1025,17 @@ final class AppState {
                         barrierReady = true
                     } catch {
                         self.isProtectionBlocked = true
-                        self.errorMessage =
-                            "Wake protection is still being reasserted; Internet remains blocked. \(error.localizedDescription)"
+                        self.errorMessage = String(
+                            localized: "Wake protection is still being reasserted; Internet remains blocked. \(error.localizedDescription)"
+                        )
                         continue
                     }
                 }
                 guard self.isTonoReady else {
                     self.isProtectionBlocked = true
-                    self.errorMessage =
-                        "Waiting for the protected route after wake; Internet remains blocked."
+                    self.errorMessage = String(
+                        localized: "Waiting for the protected route after wake; Internet remains blocked."
+                    )
                     continue
                 }
                 guard !self.isConnected, !self.isConnecting,
@@ -1046,8 +1049,9 @@ final class AppState {
                     return
                 }
                 self.isProtectionBlocked = true
-                self.errorMessage =
-                    "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
+                self.errorMessage = String(
+                    localized: "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
+                )
                 self.connect()
                 self.wakeRecoveryTask = nil
                 return
@@ -1111,7 +1115,12 @@ final class AppState {
                 "The managed cloud exit could not be selected."
             )
         }
-        persistProxySelection(selected.name)
+        // A sweep's rotation reaches here through `proxyService.activeNodeName`,
+        // and it has proven nothing yet; saving it would lose the user's own
+        // region to a detour. The persist after a successful connect commits it.
+        if !isUnprovenFailoverTarget(selected.name) {
+            persistProxySelection(selected.name)
+        }
         catalogSelectionRequiresChoice = false
         // A normal signed-in launch remains an explicit user choice. After a
         // crash, however, PF is already fail-closed; recover the selected route
@@ -1196,6 +1205,7 @@ final class AppState {
 
     private func persistProxySelection(_ target: String?) {
         if let target = normalizedProxyTarget(target) {
+            noteCatalogFailoverLanding(on: target)
             AppProfile.defaults.set(target, forKey: SettingsKey.selectedProxyTargetName)
         } else {
             AppProfile.defaults.removeObject(forKey: SettingsKey.selectedProxyTargetName)
@@ -1277,6 +1287,57 @@ final class AppState {
         })
     }
 
+    /// The city the user chose, and the city a failover sweep is currently
+    /// trying instead. A rotation is a recovery detour, not a new preference:
+    /// nothing reaches the saved selection until a session has actually come up
+    /// on the rotated city.
+    private var catalogFailoverOriginalTarget: String?
+    private var catalogFailoverAttemptTarget: String?
+
+    /// Commits a failover detour to the saved selection once the connection it
+    /// was made for is live, and says so — the user picked another city and is
+    /// otherwise never told that theirs could not be reached.
+    private func noteCatalogFailoverLanding(on target: String) {
+        guard let original = catalogFailoverOriginalTarget,
+              let attempted = catalogFailoverAttemptTarget else { return }
+        // Anything reaching the saved target ends the detour: a landed rotation
+        // because it landed, and any other selection — an explicit switch, a
+        // catalog default — on its own terms. A detour left armed outlives the
+        // sweep and commits itself against whatever connect comes next, naming
+        // a city the user chose as one Tono had to fall back to.
+        catalogFailoverOriginalTarget = nil
+        catalogFailoverAttemptTarget = nil
+        guard proxyTarget(attempted, matches: target), isConnected else { return }
+        guard !proxyTarget(original, matches: target) else { return }
+        LocalTrafficAudit.shared.recordEvent(
+            "connect_catalog_failover_committed",
+            details: [
+                "from": original,
+                "to": target,
+            ]
+        )
+        errorMessage = String(
+            localized: "\(original) could not be reached, so Tono connected through \(target) and made it the selected cloud server."
+        )
+    }
+
+    /// Whether this name is the rotation a sweep is currently trying. It has
+    /// carried no session yet, so nothing may save it as the user's own region;
+    /// the persist that follows a successful connect is what commits it.
+    private func isUnprovenFailoverTarget(_ name: String) -> Bool {
+        guard let attempted = catalogFailoverAttemptTarget else { return false }
+        return proxyTarget(attempted, matches: name)
+    }
+
+    /// Ends a failover sweep: the counter of cities already tried, and the
+    /// detour that has not landed. Both belong to one sweep, so both go together
+    /// — an attempt left behind arms a banner against an unrelated connect.
+    private func clearCatalogFailoverSweep() {
+        catalogFailoverNamesTried = []
+        catalogFailoverOriginalTarget = nil
+        catalogFailoverAttemptTarget = nil
+    }
+
     /// After a China connect that proved the selected city dead, move to the
     /// next unused catalog exit before the fail-closed reconnect fires.
     @discardableResult
@@ -1298,8 +1359,13 @@ final class AppState {
             return false
         }
         catalogFailoverNamesTried.insert(next.name)
+        if catalogFailoverOriginalTarget == nil {
+            catalogFailoverOriginalTarget = savedProxyTargetName ?? current?.name
+        }
+        catalogFailoverAttemptTarget = next.name
+        // In memory only. This city has proven nothing yet, and a sweep that
+        // ends without a connection must leave the user's own choice saved.
         _ = applyProxySelection(next.name)
-        persistProxySelection(next.name)
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
         LocalTrafficAudit.shared.recordEvent(
@@ -1459,7 +1525,7 @@ final class AppState {
         if !isProtectedReconnectScheduled {
             protectedReconnectAttempt = 0
             protectedReconnectNextAttemptAt = nil
-            catalogFailoverNamesTried = []
+            clearCatalogFailoverSweep()
         }
         lastClassifiedFailure = nil
         isConnecting = true
@@ -2481,8 +2547,9 @@ final class AppState {
                     )
                     guard tunExists else {
                         self.disconnect(releaseKillSwitch: false)
-                        self.errorMessage =
-                            "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries."
+                        self.errorMessage = String(
+                            localized: "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries."
+                        )
                         self.scheduleProtectedReconnect()
                         return
                     }
@@ -2510,8 +2577,9 @@ final class AppState {
                         else { return }
                         guard primaryService == service else {
                             self.disconnect(releaseKillSwitch: false)
-                            self.errorMessage =
-                                "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
+                            self.errorMessage = String(
+                                localized: "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection."
+                            )
                             self.scheduleProtectedReconnect()
                             return
                         }
@@ -2524,8 +2592,9 @@ final class AppState {
                         guard dnsIntegrity != .unverifiable else { continue }
                         guard dnsIntegrity == .intact else {
                             self.disconnect(releaseKillSwitch: false)
-                            self.errorMessage =
-                                "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries."
+                            self.errorMessage = String(
+                                localized: "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries."
+                            )
                             self.scheduleProtectedReconnect()
                             return
                         }
@@ -3021,7 +3090,7 @@ final class AppState {
         // single shot against a counter already sitting at the threshold.
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
-        catalogFailoverNamesTried = []
+        clearCatalogFailoverSweep()
         protectedReconnectTask?.cancel()
         protectedReconnectTask = nil
         protectedReconnectID = nil
@@ -3037,8 +3106,9 @@ final class AppState {
     func selectNode(_ nameOrId: String) {
         guard !isDisconnecting, switchingNodeId == nil else { return }
         guard configReloadTask == nil else {
-            errorMessage =
-                "Secure routing is updating. Try switching the cloud server again in a moment."
+            errorMessage = String(
+                localized: "Secure routing is updating. Try switching the cloud server again in a moment."
+            )
             return
         }
         if nameOrId == ConfigPipeline.homeNodeName,
@@ -3545,8 +3615,9 @@ final class AppState {
                     "managed_direct_pf_convergence_cancelled"
                 )
                 disconnect(releaseKillSwitch: false)
-                errorMessage =
-                    "Secure WeChat routing was interrupted while updating; Kill Switch is blocking traffic while Tono retries."
+                errorMessage = String(
+                    localized: "Secure WeChat routing was interrupted while updating; Kill Switch is blocking traffic while Tono retries."
+                )
                 scheduleProtectedReconnect(immediate: true)
             } catch {
                 // Once Mihomo accepted new pins, neither cancellation nor a
@@ -3564,8 +3635,9 @@ final class AppState {
                         details: ["error": String(describing: error)]
                     )
                     disconnect(releaseKillSwitch: false)
-                    errorMessage =
-                        "Secure WeChat routing could not finish updating; Kill Switch is blocking traffic while Tono retries."
+                    errorMessage = String(
+                        localized: "Secure WeChat routing could not finish updating; Kill Switch is blocking traffic while Tono retries."
+                    )
                     scheduleProtectedReconnect(immediate: true)
                     return
                 }
@@ -3584,13 +3656,15 @@ final class AppState {
                 } else if ownedRuntime {
                     finishConfigReloadRequest(requestID, startPending: false)
                     disconnect(releaseKillSwitch: false)
-                    errorMessage =
-                        "Updated cloud route failed; Kill Switch is blocking traffic while Tono retries. \(error.localizedDescription)"
+                    errorMessage = String(
+                        localized: "Updated cloud route failed; Kill Switch is blocking traffic while Tono retries. \(error.localizedDescription)"
+                    )
                     scheduleProtectedReconnect()
                 } else {
                     finishConfigReloadRequest(requestID)
-                    errorMessage =
-                        "Failed to apply the updated core configuration: \(error.localizedDescription)"
+                    errorMessage = String(
+                        localized: "Failed to apply the updated core configuration: \(error.localizedDescription)"
+                    )
                 }
             }
         }
@@ -3644,8 +3718,9 @@ final class AppState {
                 connections.removeAll { $0.id == connectionId }
             }
         } catch {
-            errorMessage =
-                "Could not close the connection: \(error.localizedDescription)"
+            errorMessage = String(
+                localized: "Could not close the connection: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -3662,8 +3737,9 @@ final class AppState {
                 trafficStats.activeConnections = 0
             }
         } catch {
-            errorMessage =
-                "Could not close active connections: \(error.localizedDescription)"
+            errorMessage = String(
+                localized: "Could not close active connections: \(error.localizedDescription)"
+            )
         }
     }
 
@@ -3906,8 +3982,9 @@ final class AppState {
                 allowRuntimeTransition: true
             )
         } catch {
-            errorMessage =
-                "Cloud app-routing update was rejected; all traffic remains protected by the current route."
+            errorMessage = String(
+                localized: "Cloud app-routing update was rejected; all traffic remains protected by the current route."
+            )
             throw error
         }
     }
@@ -4046,8 +4123,9 @@ final class AppState {
         // reconnect instead of hot-editing PF states under an active Reality
         // socket. The bootstrap-only transition clears every session exception.
         disconnect(releaseKillSwitch: false)
-        errorMessage =
-            "Secure app routing was updated; Tono is applying it without opening direct Internet."
+        errorMessage = String(
+            localized: "Secure app routing was updated; Tono is applying it without opening direct Internet."
+        )
         scheduleProtectedReconnect(immediate: true)
     }
 
@@ -5104,8 +5182,9 @@ final class AppState {
                                     socksPort: config.mixedPort
                                 )
                         } catch {
-                            self.errorMessage =
-                                "System proxy: \(error.localizedDescription)"
+                            self.errorMessage = String(
+                                localized: "System proxy: \(error.localizedDescription)"
+                            )
                         }
                     }
                 }
@@ -5126,8 +5205,9 @@ final class AppState {
                             isProxyDegraded = false
                         } catch {
                             isProxyDegraded = true
-                            errorMessage =
-                                "System proxy: \(error.localizedDescription)"
+                            errorMessage = String(
+                                localized: "System proxy: \(error.localizedDescription)"
+                            )
                         }
                     } else {
                         // TUN off — enable system proxy
@@ -5141,14 +5221,16 @@ final class AppState {
                             isProxyDegraded = false
                         } catch {
                             isProxyDegraded = true
-                            errorMessage =
-                                "System proxy: \(error.localizedDescription)"
+                            errorMessage = String(
+                                localized: "System proxy: \(error.localizedDescription)"
+                            )
                         }
                     }
                 }
             } catch {
-                errorMessage =
-                    "Could not apply the setting: \(error.localizedDescription)"
+                errorMessage = String(
+                    localized: "Could not apply the setting: \(error.localizedDescription)"
+                )
             }
         }
     }

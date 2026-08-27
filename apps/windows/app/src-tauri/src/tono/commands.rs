@@ -394,7 +394,7 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
 /// authorisation covers both.
 #[tauri::command]
 pub async fn tono_repair_service() -> Result<(), String> {
-    crate::core::service::tono_service_ready_or_repair()
+    crate::core::service::tono_service_ready_or_repair_now()
         .await
         .map_err(|error| super::connection::map_service_ready_error(&error))
 }

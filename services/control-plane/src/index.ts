@@ -7833,6 +7833,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   // has SSH to all sixteen nodes and therefore what reads the per-user byte
   // counters; giving it the home agent's token instead would widen that one
   // rather than scope this.
+  //
+  // Every reporter keeps its own cumulative figure, named by `sourceId`, and an
+  // account's counter is the sum of them. Folding them with MAX() — which was
+  // right when one collector held the whole fleet's total — bills an account
+  // spread over three exits for the largest of the three.
   if ((p === '/api/v1/home/usage' || p === '/api/v1/ops-ingest/usage') && m === 'POST') {
     if (p === '/api/v1/ops-ingest/usage') {
       if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
@@ -7851,6 +7856,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const unique = new Map<string, {
       reportId: string;
       userId: string;
+      sourceId: string;
       totalBytes: number;
       observedAt: number;
     }>();
@@ -7861,6 +7867,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       const reportId = str(x.reportId, 'reportId', 1, 100);
       const reportUserId = str(x.userId, 'userId', 1, 100);
+      // A reporter that names itself gets a counter of its own. One that does
+      // not — an un-upgraded agent, or the collector — keeps the single legacy
+      // source it has always been accounted under.
+      const reportSourceId = x.sourceId === undefined || x.sourceId === null
+        ? ''
+        : str(x.sourceId, 'sourceId', 1, 64);
       if (
         !Number.isSafeInteger(x.totalBytes) ||
         x.totalBytes < 0 ||
@@ -7873,6 +7885,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const normalized = {
         reportId,
         userId: reportUserId,
+        sourceId: reportSourceId,
         totalBytes: x.totalBytes as number,
         observedAt: x.observedAt as number,
       };
@@ -7909,45 +7922,115 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            SELECT
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
+             json_extract(value, '$.sourceId') AS source_id,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          )
          INSERT OR IGNORE INTO usage_reports(
-           report_id, user_id, total_bytes, observed_at, created_at
+           report_id, user_id, source_id, total_bytes, observed_at, created_at
          )
-         SELECT report_id, user_id, total_bytes, observed_at, ?
+         SELECT report_id, user_id, source_id, total_bytes, observed_at, ?
          FROM input`,
+        ).bind(encodedReports, receivedAt),
+        // One cumulative figure per (account, source). Within a source the
+        // figure only ever rises, so the difference from the last one is what
+        // this source has newly carried; a figure *below* the last one is a node
+        // that was rebuilt and started counting again, and all of it is new. The
+        // legacy source keeps MAX instead: it is an aggregate over a changing
+        // set of nodes, so it falls when a node leaves the fleet, and reading
+        // that as a reset would bill the account for its history a second time.
+        e.DB.prepare(
+        `WITH input AS (
+           SELECT
+             json_extract(value, '$.reportId') AS report_id,
+             json_extract(value, '$.userId') AS user_id,
+             json_extract(value, '$.sourceId') AS source_id,
+             CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
+             CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
+           FROM json_each(?)
+         ),
+         accepted AS (
+           SELECT input.user_id AS user_id,
+                  input.source_id AS source_id,
+                  MAX(input.total_bytes) AS total_bytes,
+                  MAX(input.observed_at) AS observed_at
+           FROM input
+           JOIN usage_reports
+             ON usage_reports.report_id = input.report_id
+            AND usage_reports.user_id = input.user_id
+            AND usage_reports.source_id = input.source_id
+            AND usage_reports.total_bytes = input.total_bytes
+            AND usage_reports.observed_at = input.observed_at
+           GROUP BY input.user_id, input.source_id
+         )
+         INSERT INTO usage_report_sources(
+           user_id, source_id, last_total_bytes, accumulated_bytes, observed_at, updated_at
+         )
+         SELECT user_id, source_id, total_bytes, total_bytes, observed_at, ?
+         FROM accepted
+         WHERE true
+         ON CONFLICT(user_id, source_id) DO UPDATE SET
+           accumulated_bytes = CASE
+             WHEN usage_report_sources.source_id = ''
+               THEN MAX(usage_report_sources.accumulated_bytes, excluded.last_total_bytes)
+             WHEN excluded.last_total_bytes >= usage_report_sources.last_total_bytes
+               THEN usage_report_sources.accumulated_bytes
+                    + (excluded.last_total_bytes - usage_report_sources.last_total_bytes)
+             ELSE usage_report_sources.accumulated_bytes + excluded.last_total_bytes
+           END,
+           last_total_bytes = CASE
+             WHEN usage_report_sources.source_id = ''
+               THEN MAX(usage_report_sources.last_total_bytes, excluded.last_total_bytes)
+             ELSE excluded.last_total_bytes
+           END,
+           observed_at = MAX(usage_report_sources.observed_at, excluded.observed_at),
+           updated_at = excluded.updated_at
+         -- A figure that grew is taken whatever its timestamp says, because what
+         -- is taken from it is the difference and a repeat of it adds nothing. A
+         -- figure that fell is only a rebuilt node if it is the newest word from
+         -- that source; arriving after a higher one it is a stale batch, and
+         -- counting it as a reset would bill the account for it twice.
+         WHERE usage_report_sources.source_id = ''
+            OR excluded.last_total_bytes > usage_report_sources.last_total_bytes
+            OR excluded.observed_at >= usage_report_sources.observed_at`,
         ).bind(encodedReports, receivedAt),
         e.DB.prepare(
         `WITH input AS (
            SELECT
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
+             json_extract(value, '$.sourceId') AS source_id,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          ),
          accepted AS (
-           SELECT input.user_id, MAX(input.total_bytes) AS total_bytes
+           SELECT DISTINCT input.user_id AS user_id
            FROM input
            JOIN usage_reports
              ON usage_reports.report_id = input.report_id
             AND usage_reports.user_id = input.user_id
+            AND usage_reports.source_id = input.source_id
             AND usage_reports.total_bytes = input.total_bytes
             AND usage_reports.observed_at = input.observed_at
-           GROUP BY input.user_id
          )
          UPDATE users
          SET usage_reported_bytes = MAX(
                usage_reported_bytes,
-               (SELECT accepted.total_bytes FROM accepted WHERE accepted.user_id = users.id)
+               COALESCE((
+                 SELECT SUM(accumulated_bytes) FROM usage_report_sources
+                  WHERE usage_report_sources.user_id = users.id
+               ), 0)
              ),
              usage_bytes = MAX(
                0,
                MAX(
                  usage_reported_bytes,
-                 (SELECT accepted.total_bytes FROM accepted WHERE accepted.user_id = users.id)
+                 COALESCE((
+                   SELECT SUM(accumulated_bytes) FROM usage_report_sources
+                    WHERE usage_report_sources.user_id = users.id
+                 ), 0)
                ) - usage_baseline_bytes
              ),
              updated_at = ?

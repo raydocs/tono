@@ -98,27 +98,51 @@ impl ConnectionStatus {
 }
 
 /// Auto-reconnect backoff behind an armed kill switch: 2/5/10/20/30 s,
-/// capped at 30 s (§6).
+/// capped at 30 s and bounded by [`Self::BUDGET`] (§6).
 #[derive(Debug, Clone, Default)]
 pub struct ReconnectBackoff {
     step: usize,
+    /// Everything the ladder has already handed out for this outage.
+    scheduled: Duration,
 }
 
 impl ReconnectBackoff {
     pub const DELAYS_SECS: [u64; 5] = [2, 5, 10, 20, 30];
 
+    /// How long the ladder retries on its own before it hands the machine back to the user.
+    ///
+    /// `DELAYS_SECS` caps the *interval*, not the ladder. A deterministic failure — a broken
+    /// install, a Service that cannot start — never stops failing, so a capped-only ladder
+    /// repeated the identical attempt every 30 s for as long as the app ran, and every rung
+    /// re-entered the elevated repair path with an administrator prompt of its own. Automatic
+    /// recovery is untouched inside the budget: a transient failure still reconnects with no
+    /// user action, a success resets the ladder, and an explicit retry starts a fresh one.
+    pub const BUDGET: Duration = Duration::from_secs(30 * 60);
+
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn next_delay(&mut self) -> Duration {
+    /// The next rung, or `None` once the budget is spent.
+    pub fn next_delay(&mut self) -> Option<Duration> {
+        if self.exhausted() {
+            return None;
+        }
         let seconds = Self::DELAYS_SECS[self.step.min(Self::DELAYS_SECS.len() - 1)];
         self.step += 1;
-        Duration::from_secs(seconds)
+        let delay = Duration::from_secs(seconds);
+        self.scheduled += delay;
+        Some(delay)
+    }
+
+    /// Whether the ladder has spent [`Self::BUDGET`] and stopped retrying by itself.
+    pub fn exhausted(&self) -> bool {
+        self.scheduled >= Self::BUDGET
     }
 
     pub fn reset(&mut self) {
         self.step = 0;
+        self.scheduled = Duration::ZERO;
     }
 }
 
@@ -328,13 +352,28 @@ impl ConnectionFsm {
     }
 
     /// Delay before the next protected reconnect attempt, consuming one step of
-    /// the ladder. Handed out only while [`Self::reconnect_permitted_now`].
+    /// the ladder. Handed out only while [`Self::reconnect_permitted_now`], and
+    /// only while the ladder still has budget.
     pub fn next_reconnect_delay(&mut self) -> Option<Duration> {
         if self.reconnect_permitted_now() {
-            Some(self.backoff.next_delay())
+            self.backoff.next_delay()
         } else {
             None
         }
+    }
+
+    /// Whether the ladder spent [`ReconnectBackoff::BUDGET`] on this outage without
+    /// reconnecting. [`Self::reconnect_permitted_now`] deliberately stays true: the machine
+    /// keeps its explicit Retry, it only stops asking by itself.
+    pub fn reconnect_budget_exhausted(&self) -> bool {
+        self.backoff.exhausted()
+    }
+
+    /// Give the ladder its budget back, for an explicit user retry: the user acting on the
+    /// failure is the evidence that the machine may have changed, and one click is worth a
+    /// full automatic recovery run again.
+    pub fn reset_reconnect_backoff(&mut self) {
+        self.backoff.reset();
     }
 
     /// Explicit disconnect is allowed from Connected or Protected Offline
@@ -418,7 +457,7 @@ mod tests {
     #[test]
     fn backoff_produces_capped_sequence() {
         let mut backoff = ReconnectBackoff::new();
-        let delays: Vec<Duration> = (0..8).map(|_| backoff.next_delay()).collect();
+        let delays: Vec<Duration> = (0..8).map(|_| backoff.next_delay().unwrap()).collect();
         assert_eq!(
             delays,
             [2, 5, 10, 20, 30, 30, 30, 30]
@@ -426,7 +465,56 @@ mod tests {
                 .to_vec()
         );
         backoff.reset();
-        assert_eq!(backoff.next_delay(), Duration::from_secs(2));
+        assert_eq!(backoff.next_delay(), Some(Duration::from_secs(2)));
+    }
+
+    /// The ladder has an end.
+    ///
+    /// The 30 s cap bounds one wait, not the sequence, so a failure that never clears — a
+    /// broken install, a Service that cannot start — used to be retried every 30 s for the
+    /// life of the app, and each retry re-entered the elevated repair path and asked the user
+    /// to approve an administrator prompt.
+    #[test]
+    fn backoff_stops_after_its_budget() {
+        let mut backoff = ReconnectBackoff::new();
+        let mut scheduled = Duration::ZERO;
+        let mut rungs = 0_u32;
+        while let Some(delay) = backoff.next_delay() {
+            scheduled += delay;
+            rungs += 1;
+            assert!(rungs < 1_000, "the ladder must not run forever");
+        }
+        assert!(backoff.exhausted());
+        assert!(scheduled >= ReconnectBackoff::BUDGET);
+        // The early rungs are the transient-failure path and are unchanged, so the budget must
+        // be worth far more than the handful of retries a Wi-Fi flap needs.
+        assert!(rungs > ReconnectBackoff::DELAYS_SECS.len() as u32 * 2);
+        // Spent means spent: it keeps saying no until something resets it.
+        assert_eq!(backoff.next_delay(), None);
+        backoff.reset();
+        assert!(!backoff.exhausted());
+        assert_eq!(backoff.next_delay(), Some(Duration::from_secs(2)));
+    }
+
+    /// A user who acts on the failed state gets a whole recovery run again, so the bound
+    /// above can never strand a machine whose problem has since been fixed.
+    #[test]
+    fn an_explicit_retry_restores_the_ladder() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_session_verified();
+        fsm.connect_failed();
+        while fsm.next_reconnect_delay().is_some() {}
+        assert!(fsm.reconnect_budget_exhausted());
+        // Still Protected Offline, and the explicit path still allowed: only the automatic
+        // ladder gave up.
+        assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
+        assert!(fsm.reconnect_permitted_now());
+
+        fsm.reset_reconnect_backoff();
+        assert!(!fsm.reconnect_budget_exhausted());
+        assert_eq!(fsm.next_reconnect_delay(), Some(Duration::from_secs(2)));
     }
 
     #[test]

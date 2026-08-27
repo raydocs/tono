@@ -1220,6 +1220,107 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('adds up the exits metering an account instead of billing the largest one', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_sources', 'sources@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const report = (reportId: string, sourceId: string, totalBytes: number, at = seeded) =>
+      api('home/usage', json({
+        reports: [{ reportId, userId: 'usr_sources', sourceId, totalBytes, observedAt: at }],
+      }, HOME_TOKEN));
+    const counted = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes FROM users WHERE id = ?',
+      ).bind('usr_sources').first<Record<string, unknown>>();
+      return Number(row!.usage_bytes);
+    };
+
+    // Each exit meters only what crossed it. Folded with MAX() this account was
+    // billed 500 of the 1000 it used, so it never reached a quota it had passed.
+    expect((await report('src-a-1', 'exit-a', 300)).status).toBe(200);
+    expect((await report('src-b-1', 'exit-b', 500)).status).toBe(200);
+    expect((await report('src-c-1', 'exit-c', 200)).status).toBe(200);
+    expect(await counted()).toBe(1_000);
+
+    // A source's figure is cumulative, so a later one replaces its own
+    // predecessor rather than adding to it.
+    expect((await report('src-a-2', 'exit-a', 450, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_150);
+
+    // Replaying is what an agent does when it loses an acknowledgement, and it
+    // must cost nothing.
+    expect((await report('src-a-2', 'exit-a', 450, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_150);
+
+    // A batch that arrives after a newer one is stale, not a rebuilt node.
+    expect((await report('src-a-3', 'exit-a', 400, seeded + 30)).status).toBe(200);
+    expect(await counted()).toBe(1_150);
+
+    // Growth is taken whatever the timestamp says: a clock that steps backwards
+    // between rounds must not stop an exit being counted, and the difference is
+    // what is taken from it either way.
+    expect((await report('src-a-4', 'exit-a', 500, seeded + 30)).status).toBe(200);
+    expect(await counted()).toBe(1_200);
+
+    // The same report id under a different source is a conflict, not a silent
+    // keep of whichever row reached the table first.
+    expect((await report('src-a-2', 'exit-b', 450, seeded + 60)).status).toBe(409);
+    expect(await counted()).toBe(1_200);
+
+    const oversized = await api('home/usage', json({
+      reports: [{
+        reportId: 'src-long', userId: 'usr_sources', sourceId: 'x'.repeat(65),
+        totalBytes: 1, observedAt: seeded,
+      }],
+    }, HOME_TOKEN));
+    expect(oversized.status).toBe(400);
+  });
+
+  it('carries a rebuilt exit forward, and leaves a reporter that names none on MAX', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_rebuilt', 'rebuilt@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const report = (reportId: string, totalBytes: number, at: number, sourceId?: string) =>
+      api('home/usage', json({
+        reports: [{
+          reportId, userId: 'usr_rebuilt', totalBytes, observedAt: at,
+          ...(sourceId === undefined ? {} : { sourceId }),
+        }],
+      }, HOME_TOKEN));
+    const counted = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes FROM users WHERE id = ?',
+      ).bind('usr_rebuilt').first<Record<string, unknown>>();
+      return Number(row!.usage_bytes);
+    };
+
+    expect((await report('rb-1', 900, seeded, 'exit-r')).status).toBe(200);
+    expect(await counted()).toBe(900);
+
+    // The node was rebuilt and its counter starts again from zero. Under MAX the
+    // account was billed nothing at all until the new counter climbed past 900;
+    // taking the new figure as the total would forgive the 900 instead.
+    expect((await report('rb-2', 120, seeded + 60, 'exit-r')).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+
+    // A report that names no source is the collector, or an agent that has not
+    // been upgraded. Its figure is an aggregate over a changing set of nodes, so
+    // a fall means a node left the fleet rather than a counter reset: it keeps
+    // the MAX contract it was written against, beside the exit's own counter.
+    expect((await report('rb-3', 400, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_420);
+    expect((await report('rb-4', 250, seeded + 120)).status).toBe(200);
+    expect(await counted()).toBe(1_420);
+    expect((await report('rb-5', 600, seeded + 120)).status).toBe(200);
+    expect(await counted()).toBe(1_620);
+  });
+
   it('lets a billing cycle be reset without the next report undoing it', async () => {
     const t = Math.floor(Date.now() / 1000);
     await (env as unknown as Env).DB.prepare(
