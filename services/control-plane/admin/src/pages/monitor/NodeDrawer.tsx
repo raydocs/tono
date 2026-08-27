@@ -90,7 +90,8 @@ function BillingForm({
 
   useEffect(() => {
     if (!focusRenew) return;
-    renewInput.current?.focus();
+    const id = window.setTimeout(() => renewInput.current?.focus(), 0);
+    return () => window.clearTimeout(id);
   }, [focusRenew, node.name]);
 
   async function save() {
