@@ -17,11 +17,26 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import urllib.request
 
 HUB = "199.30.91.172"
 HUB_SSH = "tono-199.30.91.172"
 CONTROL_PLANE = "https://api.afk.ccwu.cc"
 ADMIN_KEYCHAIN = "tono-admin"
+HOST_KEY_UNPINNED = ("host key not verified against /opt/tono-ops/tono-collector-known-hosts on the hub — "
+                     "compare the fingerprint with the provider console, pin it there, and re-run")
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects, the way curl does without -L.
+
+    urllib follows 3xx by default and copies Authorization onto the new
+    request, cross-host included, so a Location the operator never saw would
+    be handed the fleet admin token.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def keychain(service: str) -> str:
@@ -42,7 +57,9 @@ def node(host: str, script: str, timeout: int = 45) -> tuple[bool, str]:
                            capture_output=True, text=True, timeout=timeout)
         if r.returncode == 0:
             return True, r.stdout.strip()
-    # Fall back to the hub, which holds credentials for every node.
+    # Fall back to the hub, which holds credentials for every node. Both auth
+    # branches pin the collector's known-hosts file, because a node's root
+    # password must never be offered to a host that has not been verified.
     out = hub(
         "python3 - <<'PY'\n"
         "import json,subprocess,os\n"
@@ -53,12 +70,16 @@ def node(host: str, script: str, timeout: int = 45) -> tuple[bool, str]:
         "base=(['ssh','-i','/opt/tono-ops/tono-collector','-o','IdentitiesOnly=yes','-o','BatchMode=yes',\n"
         "       '-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts']\n"
         "      if n.get('key') else\n"
-        "      ['sshpass','-e','ssh','-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null'])\n"
+        "      ['sshpass','-e','ssh','-o','StrictHostKeyChecking=yes',\n"
+        "       '-o','UserKnownHostsFile=/opt/tono-ops/tono-collector-known-hosts'])\n"
         "base += ['-o','LogLevel=ERROR','-o','ConnectTimeout=15','-p',str(n.get('port',22)),\n"
         "         '%s@%s' % (n.get('user','root'), n['host'])]\n"
         f"r=subprocess.run(base+[{script!r}],capture_output=True,text=True,timeout=40,env=env)\n"
-        "print(r.stdout.strip() or '__UNREACHABLE__')\n"
+        "print('__HOST_KEY_UNPINNED__' if 'Host key verification failed' in r.stderr\n"
+        "      else (r.stdout.strip() or '__UNREACHABLE__'))\n"
         "PY", timeout=90)
+    if "__HOST_KEY_UNPINNED__" in out:
+        return False, HOST_KEY_UNPINNED
     if "__NOT_REGISTERED__" in out or "__UNREACHABLE__" in out or not out:
         return False, out
     return True, out
@@ -74,10 +95,14 @@ def main() -> int:
 
     token = keychain(ADMIN_KEYCHAIN)
     try:
-        raw = subprocess.run(
-            ["curl", "-s", "--max-time", "25", "-H", f"Authorization: Bearer {token}",
-             "-H", "Accept: application/json", f"{CONTROL_PLANE}/api/v1/admin/exit-catalog"],
-            capture_output=True, text=True, timeout=40).stdout
+        # The admin token stays in a request header inside this process: argv is
+        # readable by anything else running as this user.
+        req = urllib.request.Request(
+            f"{CONTROL_PLANE}/api/v1/admin/exit-catalog",
+            headers={"Accept": "application/json"})
+        req.add_unredirected_header("Authorization", f"Bearer {token}")
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=25) as resp:
+            raw = resp.read().decode()
         cat = json.loads(raw)
         yaml = cat.get("yaml", "")
         listed = name in yaml
@@ -201,7 +226,8 @@ def main() -> int:
             # record that is not exactly four non-empty fields is refused rather
             # than interpreted.
             why = "could not read the box" if not f else f"unreadable record: {len(f)} field(s)"
-            results.append(("  └ catalog credentials match the box", None, why))
+            results.append(("  └ catalog credentials match the box", None,
+                            live if live == HOST_KEY_UNPINNED else why))
 
     ok, out = node(host,
                    "printf '%s %s %s %s' "
@@ -219,7 +245,8 @@ def main() -> int:
         results.append(("tcp tuning applied", wmem == "16777216", f"wmem_max={wmem}"))
         results.append(("account identities installed", ids.isdigit() and int(ids) > 0, f"{ids} u:<userId> clients"))
     else:
-        results.append(("node itself", False, "unreachable over SSH from here and from the hub"))
+        results.append(("node itself", False,
+                        out if out == HOST_KEY_UNPINNED else "unreachable over SSH from here and from the hub"))
 
     width = max(len(r[0]) for r in results)
     bad = 0
