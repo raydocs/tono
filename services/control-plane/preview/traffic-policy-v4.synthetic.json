@@ -1,0 +1,13 @@
+{
+  "version": 4,
+  "domains": [],
+  "mediaEndpoints": [],
+  "webDomains": [
+    {
+      "host": "bilibili.com",
+      "ports": [443]
+    }
+  ],
+  "directSuffixes": [],
+  "tcpEndpoints": []
+}

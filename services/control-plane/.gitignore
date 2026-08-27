@@ -1,5 +1,8 @@
 node_modules/
 .wrangler/
 .dev.vars
+.preview.env
+wrangler.preview.generated.jsonc
+wrangler.preview.admin.generated.jsonc
 dist/
 public/ops/

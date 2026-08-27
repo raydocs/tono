@@ -1,0 +1,45 @@
+# Preview-only fixture. Every endpoint value is a documentation address and the
+# client UUID placeholder must remain exactly as written.
+proxies:
+  - name: "Preview Tokyo"
+    type: vless
+    server: 203.0.113.20
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    network: tcp
+    tls: true
+    udp: true
+    servername: preview.example.test
+    client-fingerprint: chrome
+    flow: xtls-rprx-vision
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
+  - name: "Preview Seoul"
+    type: vless
+    server: 192.0.2.41
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    network: tcp
+    tls: true
+    udp: true
+    servername: preview.example.test
+    client-fingerprint: chrome
+    flow: xtls-rprx-vision
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234
+  - name: "Preview Catalog-only"
+    type: vless
+    server: 198.51.100.42
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    network: tcp
+    tls: true
+    udp: true
+    servername: preview.example.test
+    client-fingerprint: chrome
+    flow: xtls-rprx-vision
+    reality-opts:
+      public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+      short-id: abcd1234

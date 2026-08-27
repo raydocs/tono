@@ -86,7 +86,9 @@ SHA 时才会报告 aligned。migration `0028` 的数据库 trigger 会在 schem
 `api.afk.ccwu.cc` / `releases.afk.ccwu.cc` 和共享的 `tono-control-plane` D1；
 `wrangler.admin.jsonc` 绑定 `admin.afk.ccwu.cc`。两份都不是一次性 preview
 配置。没有独立 D1、Worker、Access hostname 和无客户数据的资源组时，禁止
-拿这两份配置部署 feature branch 做预览。
+拿这两份配置部署 feature branch 做预览。隔离 preview 的配置、合成数据和
+远程变更清单在 `preview/`。`0026`–`0028` 只允许打到该独立 D1；生产库要等
+`main` 上的统一部署脚本，不要从这条分支 apply。
 
 本地开发：复制 `.dev.vars.example` 为 `.dev.vars`（不可提交），创建本地数据库后运行 `npx wrangler d1 migrations apply tono-control-plane --local && npm run dev`。部署前修改 `ALLOWED_ORIGIN`、`TAILSCALE_TAILNET` 和 `EMAIL_FROM`。`DIRECT_SIGNUP_ALLOWLIST` 只作为初始管理员的兼容启动配置；日常添加精确邮箱应使用 `/api/v1/admin/signup-allowlist`，避免修改配置并重新部署 Worker。测试仍可用 `@example.com` 配置允许一个完整域，但管理员 API 只接受精确邮箱。`APPLE_CLIENT_ID`、`GOOGLE_CLIENT_ID` 是公开的 OAuth client ID，不是 secret；留空时对应按钮会从 `/auth/methods` 隐藏。建议对管理页面及 `/api/v1/admin/*` **额外配置 Cloudflare Access**；Worker 内的 `ADMIN_API_TOKEN` 仍为第二层鉴权。
 
