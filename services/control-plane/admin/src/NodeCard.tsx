@@ -1,6 +1,6 @@
 import { CarrierMini } from './carriers';
 import { formatBytes, formatDuration } from './lib/format';
-import { carrierLossLine, nodeAttentionLabel, type OpsNodeView } from './lib/ops-views';
+import { carrierLossLine, mainlandLabel, nodeAttentionLabel, type OpsNodeView } from './lib/ops-views';
 import { usePrivacy } from './privacy';
 
 function pct(used: number | null | undefined, total: number | null | undefined): number | null {
@@ -46,7 +46,7 @@ function agentText(node: OpsNodeView): string {
 /** Why this machine is in front of you, in one line, without repeating the pill. */
 function reasonText(node: OpsNodeView): string {
   const parts: string[] = [];
-  if (nodeAttentionLabel(node) !== node.blockLabel) parts.push(node.blockLabel);
+  if (nodeAttentionLabel(node) !== mainlandLabel(node)) parts.push(mainlandLabel(node));
   const loss = carrierLossLine(node);
   if (loss) parts.push(loss);
   else {

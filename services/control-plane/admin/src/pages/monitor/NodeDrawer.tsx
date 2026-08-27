@@ -9,7 +9,7 @@ import { Sparkline } from '../../charts';
 import { gibibytes, unixDate } from '../../lib/fields';
 import { formatBytes, formatDuration, timestamp } from '../../lib/format';
 import { createExclusiveGate } from '../../lib/exclusive';
-import { nodeAttentionLabel, type OpsNodeView } from '../../lib/ops-views';
+import { mainlandLabel, nodeAttentionLabel, type OpsNodeView } from '../../lib/ops-views';
 import { seriesRates } from '../../lib/traffic';
 import { usePrivacy } from '../../privacy';
 import { Banner, Drawer, DrawerSection, Field, FieldGrid, Note, Stat, StatGrid } from '../../ui';
@@ -370,7 +370,7 @@ export function NodeDrawer({
   const ip = quality?.publicIp || quality?.host || node.profile?.publicIp;
 
   return (
-    <Drawer open title={node.name} subtitle={`${node.blockLabel} · ${catalogLine(node)} · ${occupancyLine(node)}`} onClose={onClose}>
+    <Drawer open title={node.name} subtitle={`${mainlandLabel(node)} · ${catalogLine(node)} · ${occupancyLine(node)}`} onClose={onClose}>
       <section className="drawer-section drawer-hero">
         <div className="drawer-hero-top">
           <span className={`nc-state nc-tone-${node.dot}`}>

@@ -83,15 +83,21 @@ export function carrierLossLine(node: OpsNodeView): string | null {
   return labels.length ? labels.join(' · ') : null;
 }
 
+/** Mainland reachability, never the composite attention reason. */
+export function mainlandLabel(node: OpsNodeView): string {
+  if (node.blockLabel === '正常') return '大陆正常';
+  return node.blockLabel;
+}
+
 /** What the pill should say: the reason this machine is in front of you. */
 export function nodeAttentionLabel(node: OpsNodeView): string {
   if (node.qualityState === 'reported' && (
     node.blockStatus === 'LIKELY_BLOCKED' || node.blockStatus === 'DOWN' || node.blockStatus === 'EDGE_FAIL' || node.ok === false
   )) {
-    return node.blockLabel;
+    return mainlandLabel(node);
   }
   if (hasBadCarrierLoss(node)) return '回程丢包';
-  return node.blockLabel;
+  return mainlandLabel(node);
 }
 
 export function nodeRootCause(node: OpsNodeView): NodeRootCause {
