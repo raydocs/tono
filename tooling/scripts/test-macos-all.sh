@@ -50,10 +50,12 @@ run "subscription url policy" tooling/scripts/test-subscription-url-policy.sh
 run "helper peer authorization" tooling/scripts/test-helper-peer-authorization.sh
 run "multi-exit policy (mihomo validates)" \
   tooling/scripts/test-multi-exit-policy.sh "$fixture"
+run "policy signing contract" tooling/scripts/test-policy-signing-contract.sh
 run "macos incident regressions" tooling/scripts/test-macos-incident-regressions.sh
 run "reload preserves connections" tooling/scripts/test-reload-preserves-connections.sh
 run "app traffic ledger" tooling/scripts/test-app-traffic-ledger.sh
 run "diagnostics log upload cursor" tooling/scripts/test-diagnostics-log-upload.sh
+run "access token expiry parsing" tooling/scripts/test-jwt-expiry.sh
 run "appcast publisher" node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
 
 # Root-only. These cover the two faults that shipped, so a skip is reported

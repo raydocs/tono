@@ -76,25 +76,12 @@ fi
 /usr/bin/file "$installer"
 /usr/bin/shasum -a 256 "$installer"
 
-# Payload truth for Test 6: list the NSIS archive and refuse dual Mihomo / Unix junk.
-# Full tag+manifest preflight still runs after commit/tag; this is the unpack gate that
-# must pass on every candidate installer before anyone installs it.
-if command -v 7zz >/dev/null 2>&1; then
-  listing=$(/usr/bin/mktemp)
-  7zz l -ba "$installer" >"$listing"
-  if /usr/bin/grep -Eiq 'verge-mihomo-alpha|clash-verge-service|set_dns\.sh|unset_dns\.sh' "$listing"; then
-    echo "installer payload still contains Test 5 junk (alpha Mihomo / Unix helpers):" >&2
-    /usr/bin/grep -Ei 'verge-mihomo|clash-verge-service|set_dns|unset_dns|tono-service|Tono\.exe' "$listing" >&2 || true
-    /bin/rm -f "$listing"
-    exit 1
-  fi
-  if ! /usr/bin/grep -Eiq 'verge-mihomo([.-]|$)' "$listing"; then
-    echo "installer payload is missing stable Mihomo" >&2
-    /bin/rm -f "$listing"
-    exit 1
-  fi
-  /bin/rm -f "$listing"
-  echo "NSIS payload smoke check OK (no alpha / Unix helpers)"
-else
-  echo "warning: 7zz not found; skipped NSIS payload smoke check" >&2
-fi
+# Payload truth for Test 6: the same unpack gate the PowerShell build and the release
+# workflow run, so all three paths refuse the same installer. It unpacks the NSIS
+# archive to reject dual Mihomo / Unix helpers and to prove the shipped executables and
+# core-sha256.txt carry the digest pinned above. A missing 7zz/7z is fatal inside the
+# preflight itself, so this gate cannot skip.
+(
+  cd "$app_root"
+  "$toolchain_root/bin/pnpm" release:preflight --payload-only "$installer"
+)

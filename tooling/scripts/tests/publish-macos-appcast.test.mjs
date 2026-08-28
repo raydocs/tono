@@ -16,11 +16,16 @@ import {
   validateEnclosureUrl,
   validateHardwareRequirements,
   validateReleaseNotes,
+  verifyEnclosureSignature,
 } from '../publish-macos-appcast.mjs'
 
 const ENCLOSURE = Buffer.concat([
   Buffer.from([0x50, 0x4b, 0x03, 0x04]),
   Buffer.from('tono signed archive payload'),
+])
+const OTHER_ENCLOSURE = Buffer.concat([
+  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  Buffer.from('a different archive, signed by nobody'),
 ])
 
 const { privateKey, publicKey } = generateKeyPairSync('ed25519')
@@ -29,6 +34,11 @@ const PUBLIC_ED_KEY = publicKey
   .subarray(-32)
   .toString('base64')
 const SIGNATURE = sign(null, ENCLOSURE, privateKey).toString('base64')
+
+// A key that never reached an Info.plist: the shape of the release where the
+// operator signs with the wrong entry in their keychain.
+const OTHER_SIGNING_KEY = generateKeyPairSync('ed25519')
+const OTHER_KEY_SIGNATURE = sign(null, ENCLOSURE, OTHER_SIGNING_KEY.privateKey).toString('base64')
 
 const INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -193,6 +203,17 @@ test('refuses reusing a signature already present in the feed', () => {
     },
     /already used by another item in the feed/,
   )
+})
+
+test('refuses a signature made with a key the app does not embed', () => {
+  refusal(
+    { edSignature: OTHER_KEY_SIGNATURE },
+    /sparkle:edSignature does not verify over Tono-0\.0\.2-build43-arm64\.zip under the app's SUPublicEDKey/,
+  )
+})
+
+test('refuses a signature that does not cover the archive being published', () => {
+  refusal({ enclosureBytes: OTHER_ENCLOSURE }, /sparkle:edSignature does not verify over/)
 })
 
 test('refuses an app bundle that ships no SUPublicEDKey', () => {
@@ -390,6 +411,12 @@ test('pure helpers refuse independently of the aggregate validator', () => {
   assert.throws(
     () => inspectEnclosure(Buffer.alloc(0), { fileName: 'Tono.zip' }),
     /is empty/,
+  )
+  const shippedKey = readSparklePublicKey(parsePlistXml(INFO_PLIST))
+  assert.equal(verifyEnclosureSignature(shippedKey, SIGNATURE, ENCLOSURE), true)
+  assert.throws(
+    () => verifyEnclosureSignature(shippedKey, OTHER_KEY_SIGNATURE, ENCLOSURE),
+    AppcastRefusal,
   )
   assert.equal(compareDottedVersions('0.0.10', '0.0.9'), 1)
   assert.equal(compareDottedVersions('1.2', '1.2.0'), 0)

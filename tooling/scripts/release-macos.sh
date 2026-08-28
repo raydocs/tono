@@ -157,9 +157,40 @@ shipped_contract=$("$app/Contents/Resources/liquidclash-helper" --version 2>/dev
 print "  helper contract $shipped_contract"
 
 step "signing the archive for the update feed"
-sign_update=$(/usr/bin/find "$HOME/Library/Developer/Xcode/DerivedData" \
-  -name sign_update -type f 2>/dev/null | /usr/bin/head -1)
-[[ -n $sign_update ]] || fail "Sparkle's sign_update was not found; build once in Xcode to fetch it"
+# The signing tool comes from the Sparkle the app embeds, resolved here from the
+# pin the project declares — the same thing `macos-release.yml` does before it
+# signs. Picking the first `sign_update` any past build left under DerivedData
+# signs with whichever copy happens to be lying around, and the key that copy
+# reaches for decides whether a customer can install the update at all.
+sparkle_version=2.9.4
+sparkle_pin_pattern="\"version\"[[:space:]]*:[[:space:]]*\"${sparkle_version//./\\.}\""
+resolved="$repo_root/apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+# Read out of Sparkle's own pin entry. Matched against the whole file, any other
+# dependency sitting at this version would satisfy it while Sparkle moved, which
+# is the substitution this check exists to refuse.
+sparkle_pin=$(/usr/bin/grep -A6 '"identity" : "sparkle"' "$resolved" 2>/dev/null)
+[[ $sparkle_pin =~ $sparkle_pin_pattern ]] \
+  || fail "$resolved no longer pins Sparkle $sparkle_version; the signing tool must come from the Sparkle version the app embeds"
+sparkle_tools="$out/.sparkle-$sparkle_version"
+[[ -L $sparkle_tools ]] && fail "refusing to use $sparkle_tools: it is a symlink"
+/usr/bin/xcodebuild -project "$repo_root/apps/macos/LiquidClash.xcodeproj" \
+  -scheme LiquidClash -resolvePackageDependencies \
+  -derivedDataPath "$sparkle_tools" >/dev/null \
+  || fail "could not resolve the Sparkle $sparkle_version package artifacts"
+# -u+x, not -111: an artifact bundle extracted under a restrictive umask leaves
+# the tool executable only by its owner, and -111 would report no sign_update at
+# all in a directory that holds one.
+sign_update_candidates=(${(f)"$(/usr/bin/find "$sparkle_tools/SourcePackages/artifacts" \
+  -type f -name sign_update -perm -u+x 2>/dev/null)"})
+sign_update_candidates=(${sign_update_candidates:#})
+(( ${#sign_update_candidates} > 0 )) \
+  || fail "the resolved Sparkle $sparkle_version artifacts hold no sign_update; remove $sparkle_tools and run again"
+if (( ${#sign_update_candidates} > 1 )); then
+  for candidate in $sign_update_candidates; do print -r -- "  $candidate" >&2; done
+  fail "several sign_update tools resolved under $sparkle_tools; remove that directory and run again rather than signing with whichever one is listed first"
+fi
+sign_update=$sign_update_candidates[1]
+print "  signing with sign_update from Sparkle $sparkle_version"
 named="$out/$archive_name"
 # Repackaged, not copied. `package-macos-test.sh` renames the bundle to the
 # artifact name so several test builds can sit side by side, and copying its

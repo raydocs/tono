@@ -17,6 +17,9 @@ XRAY_ASSETS = {
 }
 REPO = Path(__file__).resolve().parents[1]
 HELPER = Path(__file__).with_name("remote") / "manage-tono-node-v2.sh"
+# The one place the Reality front measurement lives, shared with
+# provision-reality-node.rb and check-node-in-fleet.py.
+REALITY_FRONTS = json.loads(Path(__file__).with_name("reality-fronts.json").read_text("utf-8"))
 
 class ProvisionError(RuntimeError): pass
 class IndeterminateRestart(ProvisionError): pass
@@ -105,6 +108,11 @@ def read_inventory(path: Path, node_id: str) -> dict:
         if not str(n[k]).startswith("/"): raise ProvisionError("remote paths must be absolute")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+\.service", n["serviceName"]): raise ProvisionError("invalid service name")
     if not re.fullmatch(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.json", n["configPath"]): raise ProvisionError("configPath must be a simple absolute JSON path")
+    # The front reaches the customer or nothing does, and nothing else in this
+    # flow stands where the customer stands: the remote precheck runs on the VPS
+    # and the verification runs here, so an unreachable front passes both.
+    host = str(n["realityTarget"]).strip().lower()
+    if any(host == d or host.endswith(f".{d}") for d in REALITY_FRONTS["unusable"]): raise ProvisionError(f"realityTarget {host} was measured unusable from inside the main market; see tooling/scripts/reality-fronts.json")
     return n
 
 def desired(inv: dict, flags: argparse.Namespace) -> dict:

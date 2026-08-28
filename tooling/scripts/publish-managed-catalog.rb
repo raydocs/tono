@@ -11,6 +11,8 @@ require "yaml"
 
 CONTROL_PLANE_ORIGIN = "https://api.afk.ccwu.cc"
 KEYCHAIN_SERVICE = "com.raydocs.tono.staging.admin-api-token"
+CLIENT_UUID_PLACEHOLDER = "{{TONO_CLIENT_UUID}}"
+CATALOG_ITEM_INDENT = 2
 MAXIMUM_YAML_BYTES = 1024 * 1024
 MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
 
@@ -47,6 +49,101 @@ rescue JSON::ParserError
   fail!("The control plane returned invalid JSON.")
 end
 
+def placeholder_count(text)
+  text.scan(CLIENT_UUID_PLACEHOLDER).length
+end
+
+# Parses a throwaway copy purely to read structure. Nothing this returns is ever
+# written back into a catalog: "{{TONO_CLIENT_UUID}}" is a valid YAML flow
+# mapping, so a load/dump round trip rewrites every per-account identity into a
+# nested key and leaves the uuid line empty.
+def catalog_nodes(text)
+  document = YAML.safe_load(
+    text.dup,
+    permitted_classes: [],
+    permitted_symbols: [],
+    aliases: false
+  )
+  document.is_a?(Hash) ? document["proxies"] : nil
+end
+
+# Locates the proxies list in catalog text and returns the text before it, one
+# verbatim text block per list item, the item indent, and the text after it.
+# Returns nil when there is no top-level proxies list to edit as text.
+def split_catalog(text)
+  lines = text.gsub("\r\n", "\n").split("\n", -1)
+  header = lines.index { |line| line.match?(/\Aproxies\s*:\s*(?:\[\s*\]\s*)?(?:#.*)?\z/) }
+  return nil if header.nil?
+
+  if lines[header].match?(/\Aproxies\s*:\s*\[\s*\]/)
+    prefix = (lines[0...header] + ["proxies:"]).join("\n")
+    return { prefix: "#{prefix}\n", blocks: [], indent: nil, suffix: lines[(header + 1)..].join("\n") }
+  end
+
+  item_indent = nil
+  starts = []
+  list_end = lines.length
+  ((header + 1)...lines.length).each do |index|
+    line = lines[index]
+    next if line.strip.empty? || line.match?(/\A\s*#/)
+    indent = line[/\A */].length
+    if indent.zero? && !line.lstrip.start_with?("-")
+      list_end = index
+      break
+    end
+    next unless line.match?(/\A\s*-\s+/)
+    item_indent ||= indent
+    starts << index if indent == item_indent
+  end
+
+  # Anything written between the header and the first item, and any comment or
+  # blank line that closes the list after the last item, belongs to the document
+  # rather than to an item. Held in the prefix and the suffix, it survives an
+  # append verbatim and the new nodes land inside the list rather than below a
+  # line that terminates it.
+  prefix_end = starts.empty? ? header : starts.first - 1
+  tail = list_end
+  while starts.any? && tail > starts.last + 1 &&
+        (lines[tail - 1].strip.empty? || lines[tail - 1].lstrip.start_with?("#"))
+    tail -= 1
+  end
+
+  blocks = starts.each_with_index.map do |start, position|
+    stop = position + 1 < starts.length ? starts[position + 1] : tail
+    lines[start...stop].join("\n").sub(/\s+\z/, "")
+  end
+  {
+    prefix: "#{lines[0..prefix_end].join("\n")}\n",
+    blocks: blocks,
+    indent: item_indent,
+    suffix: lines[tail..].join("\n"),
+  }
+end
+
+# Shifts a whole item block by a fixed number of spaces so it can be spliced
+# under a list written at a different indent. Relative indentation, and every
+# byte that is not leading whitespace, is preserved.
+def reindent_block(block, from, to)
+  return block if from.nil? || to.nil? || from == to
+  block.split("\n", -1).map do |line|
+    next line if line.strip.empty?
+    if to > from
+      "#{" " * (to - from)}#{line}"
+    else
+      fail!("A catalog node uses indentation this tool cannot splice as text.") unless
+        line.start_with?(" " * (from - to))
+      line[(from - to)..]
+    end
+  end.join("\n")
+end
+
+def catalog_text(prefix, blocks, suffix)
+  body = blocks.empty? ? "" : "#{blocks.join("\n")}\n"
+  text = "#{prefix}#{body}#{suffix}"
+  text << "\n" unless text.end_with?("\n")
+  text
+end
+
 mode = :dry_run
 parser = OptionParser.new do |options|
   options.banner = "Usage: publish-managed-catalog.rb [--dry-run|--publish|--append] /absolute/node-a.yaml [...]"
@@ -65,7 +162,9 @@ yaml = nil
 begin
 fail!(parser.banner) if ARGV.empty?
 
-proxies = []
+names = []
+incoming_blocks = []
+added_placeholders = 0
 ARGV.each do |path|
   fail!("Every catalog source must use an absolute path.") unless path.start_with?("/")
   stat = File.lstat(path)
@@ -76,28 +175,52 @@ ARGV.each do |path|
 
   content = File.binread(path).force_encoding(Encoding::UTF_8)
   fail!("Catalog sources must be valid UTF-8.") unless content.valid_encoding?
-  document = YAML.safe_load(
-    content,
-    permitted_classes: [],
-    permitted_symbols: [],
-    aliases: false
-  )
-  nodes = document.is_a?(Hash) ? document["proxies"] : nil
+  nodes = catalog_nodes(content)
   fail!("Every catalog source must contain a non-empty proxies array.") unless nodes.is_a?(Array) && !nodes.empty?
-  proxies.concat(nodes)
+  source = split_catalog(content)
+  fail!("Every catalog source must contain a proxies list this tool can edit as text.") if source.nil?
+  fail!("A catalog source's proxies list does not match its parsed node count.") unless
+    source[:blocks].length == nodes.length
+  names.concat(nodes.map { |node| node.is_a?(Hash) ? node["name"] : nil })
+  # Counted over the source file, not over the blocks taken out of it. Counted
+  # over the blocks the tally would be whatever was spliced, and the invariant
+  # below would restate the splice instead of checking it.
+  added_placeholders += placeholder_count(content)
+  source[:blocks].each do |block|
+    incoming_blocks << reindent_block(block, source[:indent], CATALOG_ITEM_INDENT)
+  end
 rescue Errno::ENOENT, Errno::EACCES, Psych::Exception => error
   fail!("Could not safely parse a catalog source (#{error.class}).")
 end
 
-names = proxies.map { |node| node.is_a?(Hash) ? node["name"] : nil }
 fail!("Every managed node needs a non-empty string name.") unless names.all? { |name| name.is_a?(String) && !name.empty? }
 fail!("Managed node names must be unique.") unless names.uniq.length == names.length
 
-yaml = YAML.dump({ "proxies" => proxies }).sub(/\A---\s*\n/, "")
+# The catalog is assembled by concatenating the source text, never by dumping a
+# parsed document, so every per-account identity placeholder survives byte for
+# byte. added_placeholders and kept_placeholders back the invariant asserted
+# before the upload.
+kept_placeholders = 0
+yaml = catalog_text("proxies:\n", incoming_blocks, "")
 fail!("Combined catalog exceeds 1 MiB.") if yaml.bytesize > MAXIMUM_YAML_BYTES
+begin
+  combined = catalog_nodes(yaml)
+rescue Psych::Exception
+  combined = nil
+end
+# Names, not a count. The names were validated against a parse of each source,
+# and the text was spliced out of the same sources by a separate scan; a source
+# the two read differently — a second top-level `proxies:` key, say — would pass
+# a count check while publishing a list nothing checked.
+fail!("The combined catalog is not a valid proxies document.") unless
+  combined.is_a?(Array) &&
+  combined.map { |node| node.is_a?(Hash) ? node["name"] : nil } == names
 
 if mode == :dry_run
-  puts("Validated #{proxies.length} uniquely named incoming nodes; no credentials or network were used.")
+  puts(
+    "Validated #{names.length} uniquely named incoming nodes carrying #{added_placeholders} " \
+    "per-account identity placeholders; no credentials or network were used."
+  )
   exit(0)
 end
 
@@ -125,25 +248,52 @@ if mode == :append
   fail!("The control plane does not support safe catalog append; deploy the matching Worker first.") unless
     current_yaml.is_a?(String) && current_yaml.bytesize <= MAXIMUM_YAML_BYTES
   begin
-    current_document = YAML.safe_load(
-      current_yaml,
-      permitted_classes: [],
-      permitted_symbols: [],
-      aliases: false
-    )
+    current_proxies = catalog_nodes(current_yaml)
   rescue Psych::Exception
     fail!("The current managed catalog is invalid YAML; refusing to append.")
   end
-  current_proxies = current_document.is_a?(Hash) ? current_document["proxies"] : nil
   fail!("The current managed catalog does not contain a proxies array.") unless current_proxies.is_a?(Array)
   current_names = current_proxies.map { |node| node.is_a?(Hash) ? node["name"] : nil }
   fail!("The current managed catalog has invalid node names.") unless
     current_names.all? { |name| name.is_a?(String) && !name.empty? } && current_names.uniq.length == current_names.length
   duplicates = current_names & names
   fail!("Append would duplicate an existing managed node name: #{duplicates.first}") unless duplicates.empty?
-  proxies = current_proxies + proxies
-  yaml = YAML.dump({ "proxies" => proxies }).sub(/\A---\s*\n/, "")
+
+  # The deployed catalog is spliced, not re-emitted: its own text is kept
+  # verbatim and the new nodes are concatenated after the last list item.
+  current = split_catalog(current_yaml)
+  fail!("The current managed catalog has no proxies list this tool can edit as text; refusing to append.") if current.nil?
+  fail!("The current managed catalog's proxies list does not match its parsed node count; refusing to append.") unless
+    current[:blocks].length == current_proxies.length
+  kept_placeholders = placeholder_count(current_yaml)
+  appended_blocks = incoming_blocks.map do |block|
+    reindent_block(block, CATALOG_ITEM_INDENT, current[:indent] || CATALOG_ITEM_INDENT)
+  end
+  yaml = catalog_text(current[:prefix], current[:blocks] + appended_blocks, current[:suffix])
   fail!("Combined catalog exceeds 1 MiB.") if yaml.bytesize > MAXIMUM_YAML_BYTES
+  begin
+    combined = catalog_nodes(yaml)
+  rescue Psych::Exception
+    combined = nil
+  end
+  names = current_names + names
+  fail!("The appended catalog is not a valid proxies document.") unless
+    combined.is_a?(Array) &&
+    combined.map { |node| node.is_a?(Hash) ? node["name"] : nil } == names
+end
+
+# The identity placeholder is what makes the served catalog per-account. Anything
+# that rewrote the document instead of splicing it would silently drop tokens
+# here, and the control plane accepts a catalog with none.
+expected_placeholders = kept_placeholders + added_placeholders
+outgoing_placeholders = placeholder_count(yaml)
+unless outgoing_placeholders == expected_placeholders
+  fail!(
+    "Refusing to publish: the catalog to upload carries #{outgoing_placeholders} #{CLIENT_UUID_PLACEHOLDER} " \
+    "tokens but #{expected_placeholders} were expected (#{kept_placeholders} kept from the deployed catalog " \
+    "plus #{added_placeholders} from the sources). Publishing it would strip per-account identities and leave " \
+    "every account sharing one empty identity with no per-account metering."
+  )
 end
 
 result = request(
@@ -157,7 +307,7 @@ digest = result["sha256"]
 fail!("The control plane returned invalid replacement metadata.") unless new_revision == revision + 1 && digest.is_a?(String)
 
 verb = mode == :append ? "Appended and published" : "Published"
-puts("#{verb} #{proxies.length} managed nodes as control-plane catalog revision #{new_revision}; secrets were not printed or written.")
+puts("#{verb} #{names.length} managed nodes as control-plane catalog revision #{new_revision}; secrets were not printed or written.")
 ensure
   metadata_yaml = metadata.is_a?(Hash) ? metadata["yaml"] : nil
   metadata_yaml&.replace("\0" * metadata_yaml.bytesize)
