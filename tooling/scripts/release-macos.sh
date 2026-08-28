@@ -24,6 +24,7 @@ script_path=${0:A}
 
 usage() {
   print "usage: $script_path --version <x.y.z> --build <n> [--publish] [--notes <file>]" >&2
+  print "                    [--lifecycle-token <token>]" >&2
   print "" >&2
   print "  Without --publish: builds, notarises, verifies the gate, signs the" >&2
   print "  archive, validates the feed entry, and stops. Nothing leaves this" >&2
@@ -33,6 +34,15 @@ usage() {
   print "  writes the feed entry, and tells you to deploy the Worker. Deploying is" >&2
   print "  left to you because it publishes the whole public/ directory, and a" >&2
   print "  stale file in there has already nearly shipped a broken build." >&2
+  print "" >&2
+  print "  --lifecycle-token is required to publish. It is printed by" >&2
+  print "  test-helper-install-lifecycle.sh and names the bundle that script" >&2
+  print "  installed from, so publishing reuses that exact bundle rather than" >&2
+  print "  building a new one nothing has been installed from. The token is a" >&2
+  print "  reminder with a bundle attached rather than an attestation: it is a" >&2
+  print "  digest of the artifact, so anyone holding the artifact can compute" >&2
+  print "  it. It stops a lifecycle run that was forgotten, not one that was" >&2
+  print "  deliberately skipped." >&2
 }
 
 repo_root=${script_path:h:h:h}
@@ -40,6 +50,7 @@ short_version=""
 build=""
 publish=no
 notes=""
+lifecycle_token=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -47,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --build) build=${2:-}; shift 2 ;;
     --notes) notes=${2:-}; shift 2 ;;
     --publish) publish=yes; shift ;;
+    --lifecycle-token) lifecycle_token=${2:-}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
@@ -55,6 +67,20 @@ done
 [[ -n $short_version && -n $build ]] || { usage; exit 2 }
 [[ $short_version =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]] || { print -r -- "--version must be x.y.z" >&2; exit 2 }
 [[ $build =~ '^[0-9]+$' ]] || { print -r -- "--build must be a number" >&2; exit 2 }
+[[ -z $lifecycle_token || $lifecycle_token =~ '^install-lifecycle:[0-9a-f]{16}$' ]] \
+  || { print -r -- "--lifecycle-token is the token test-helper-install-lifecycle.sh printed" >&2; exit 2 }
+# Refused here rather than after a build and a notarisation: the install
+# lifecycle is the only gate that runs the privileged install end to end, and it
+# needs root on a machine with no live session, so it cannot be run from inside
+# this script. Requiring its token is how the release stops depending on whether
+# somebody remembered.
+if [[ $publish == yes && -z $lifecycle_token ]]; then
+  print -r -- "release-macos: publishing requires --lifecycle-token." >&2
+  print -r -- "  Build first without --publish, then, with Tono disconnected and quit:" >&2
+  print -r -- "    sudo tooling/scripts/test-helper-install-lifecycle.sh --app <artifacts>/<bundle>.app" >&2
+  print -r -- "  and pass the token it prints back here." >&2
+  exit 2
+fi
 [[ -z $notes ]] && notes="$repo_root/apps/macos/release-notes/build$build.md"
 [[ -f $notes ]] || { print "release notes not found: $notes" >&2; exit 2 }
 
@@ -94,42 +120,84 @@ fi
 source_commit=$(git -C "$repo_root" rev-parse HEAD) \
   || fail "could not resolve the source commit"
 
-step "building and notarising"
 out="$repo_root/artifacts"
 base="Tono-macOS-$short_version-build$build"
-# The flow this script documents is "run it, look at what it would do, run it
-# again with --publish". That could never complete: the packaging step refuses to
-# overwrite an existing artifact, so the second run always failed on the output the
-# first one left behind, reported as "the build or notarisation failed".
-#
-# Only this version's own outputs are removed, and only ones that are files or
-# directories directly under artifacts/ — never a symlink, and never anything whose
-# name this run did not compose. Rebuilding is safe because the tree is verified
-# clean above, so the inputs cannot have moved between the two runs.
-for stale in "$out/$base.app" "$out/$base.zip" "$out/$archive_name"; do
-  if [[ -L $stale ]]; then
-    fail "refusing to remove $stale: it is a symlink, not an artifact this script wrote"
-  fi
-  if [[ -e $stale ]]; then
-    print "  replacing previous artifact ${stale:t}"
-    /bin/rm -rf -- "$stale" || fail "could not remove the previous ${stale:t}"
-  fi
-done
-# Output is kept and shown on failure. Swallowing it turned "refusing to
-# overwrite an existing artifact" into "the build or notarisation failed", which
-# describes the outcome and hides the one thing the operator needs to act on.
-build_log=$(/usr/bin/mktemp -t tono-release-build)
-if ! TONO_MACOS_NOTARIZE=1 TONO_MACOS_NOTARY_PROFILE=${TONO_MACOS_NOTARY_PROFILE:-tono-notary} \
-     "$repo_root/tooling/scripts/package-macos-test.sh" "$out" "$base" > "$build_log" 2>&1; then
-  print "release-macos: the build or notarisation failed:" >&2
-  /usr/bin/tail -12 "$build_log" | /usr/bin/sed 's/^/  /' >&2
-  /bin/rm -f "$build_log"
-  exit 1
-fi
-/bin/rm -f "$build_log"
 app="$out/$base.app"
 zip="$out/$base.zip"
-[[ -d $app && -f $zip ]] || fail "the build produced no app or archive"
+# Written when a build succeeds and read when a bundle is reused, so a bundle
+# left over from another commit cannot be published under this one's tag.
+built_from="$out/.$base.commit"
+
+# The digest test-helper-install-lifecycle.sh prints its token from. The two
+# recipes must stay identical: they are what binds "the install lifecycle
+# passed" to a particular bundle rather than to what an operator remembers
+# running it against. Hashed from inside the bundle so the same app answers the
+# same wherever it was copied to, and whole lines are sorted rather than the file
+# list, because paths inside a framework carry spaces and `sort -z` is not
+# everywhere.
+bundle_token() {
+  local listing digest
+  listing=$( cd "$1" 2>/dev/null \
+             && LC_ALL=C /usr/bin/find . -type f -exec /usr/bin/shasum -a 256 {} + 2>/dev/null \
+             | LC_ALL=C /usr/bin/sort )
+  [[ -n $listing ]] || return 1
+  digest=$(print -r -- "$listing" | /usr/bin/shasum -a 256)
+  digest=${digest%% *}
+  [[ -n $digest ]] || return 1
+  print -r -- "install-lifecycle:${digest[1,16]}"
+}
+
+if [[ -n $lifecycle_token ]]; then
+  step "reusing the bundle the install lifecycle ran against"
+  # Rebuilding here would defeat the whole gate: a fresh signature timestamp
+  # alone makes a new bundle, and the token names the one the daemon was
+  # actually installed from. So a run carrying a token ships that bundle or
+  # nothing. Everything below still runs against it — the gate, the staple, the
+  # contract, the feed entry — because a token says a bundle was installed once,
+  # not that it is fit to ship.
+  [[ -d $app && -f $zip ]] \
+    || fail "no bundle at $app to publish; run this without --lifecycle-token first, then run the install lifecycle against what it builds"
+  [[ -f $built_from ]] \
+    || fail "$app carries no build receipt; rebuild it without --lifecycle-token"
+  built_commit=$(<"$built_from")
+  [[ $built_commit == $source_commit ]] \
+    || fail "$app was built from $built_commit, not the checked-out $source_commit"
+  print "  $app, built from $source_commit"
+else
+  step "building and notarising"
+  # The flow this script documents is "run it, look at what it would do, run it
+  # again with --publish". That could never complete: the packaging step refuses to
+  # overwrite an existing artifact, so the second run always failed on the output the
+  # first one left behind, reported as "the build or notarisation failed".
+  #
+  # Only this version's own outputs are removed, and only ones that are files or
+  # directories directly under artifacts/ — never a symlink, and never anything whose
+  # name this run did not compose. Rebuilding is safe because the tree is verified
+  # clean above, so the inputs cannot have moved between the two runs.
+  for stale in "$app" "$zip" "$out/$archive_name" "$built_from"; do
+    if [[ -L $stale ]]; then
+      fail "refusing to remove $stale: it is a symlink, not an artifact this script wrote"
+    fi
+    if [[ -e $stale ]]; then
+      print "  replacing previous artifact ${stale:t}"
+      /bin/rm -rf -- "$stale" || fail "could not remove the previous ${stale:t}"
+    fi
+  done
+  # Output is kept and shown on failure. Swallowing it turned "refusing to
+  # overwrite an existing artifact" into "the build or notarisation failed", which
+  # describes the outcome and hides the one thing the operator needs to act on.
+  build_log=$(/usr/bin/mktemp -t tono-release-build)
+  if ! TONO_MACOS_NOTARIZE=1 TONO_MACOS_NOTARY_PROFILE=${TONO_MACOS_NOTARY_PROFILE:-tono-notary} \
+       "$repo_root/tooling/scripts/package-macos-test.sh" "$out" "$base" > "$build_log" 2>&1; then
+    print "release-macos: the build or notarisation failed:" >&2
+    /usr/bin/tail -12 "$build_log" | /usr/bin/sed 's/^/  /' >&2
+    /bin/rm -f "$build_log"
+    exit 1
+  fi
+  /bin/rm -f "$build_log"
+  [[ -d $app && -f $zip ]] || fail "the build produced no app or archive"
+  print -r -- "$source_commit" > "$built_from" || fail "could not record what $app was built from"
+fi
 
 step "confirming the built app is the release being made"
 # The authoritative check: what the bundle says about itself. Publishing a feed
@@ -140,6 +208,16 @@ built_build=$(/usr/bin/plutil -extract CFBundleVersion raw -o - "$app/Contents/I
 [[ $built_version == $short_version && $built_build == $build ]] \
   || fail "the built app is $built_version ($built_build), not $short_version ($build)"
 print "  built $built_version ($built_build)"
+
+if [[ -n $lifecycle_token ]]; then
+  step "confirming the install lifecycle ran against this bundle"
+  # Never printed by this script, only compared. Handing the expected token to
+  # the operator would turn the gate back into the suggestion it replaces.
+  bundle_named=$(bundle_token "$app") || fail "could not digest $app"
+  [[ $lifecycle_token == $bundle_named ]] \
+    || fail "--lifecycle-token names a different bundle than $app; run the install lifecycle against this one. A file under $app this user cannot read digests as absent, so an ownership difference left by the sudo lifecycle run reads as a different bundle too."
+  print "  $lifecycle_token"
+fi
 
 step "verifying the release gate"
 gate_ok=$("$repo_root/tooling/scripts/verify-release-gate.sh" "$app" 2>&1 | /usr/bin/grep -cE '^  ok:')
@@ -248,9 +326,13 @@ if [[ $publish != yes ]]; then
   print "  would tag:      $tag"
   print "  source commit:  $source_commit"
   print "  would enclose:  $enclosure"
-  print "\n  Before publishing, run the install lifecycle against this exact bundle:"
+  print "\n  Publishing needs the install lifecycle to have run against this exact"
+  print "  bundle. With Tono disconnected and quit:"
   print "    sudo tooling/scripts/test-helper-install-lifecycle.sh --app $app"
-  print "  It installs the daemon, checks what landed, and puts the previous one back."
+  print "  It installs the daemon, checks what landed, puts the previous one back,"
+  print "  and prints a token naming this bundle. Then:"
+  print "    $script_path --version $short_version --build $build --publish \\"
+  print "      --lifecycle-token <the token it printed>"
   exit 0
 fi
 

@@ -23,7 +23,10 @@ Contract notes that are easy to get wrong:
     is taken from the machine's own identity and then kept on disk.
   * xray's counters reset when it restarts, so lifetime totals live here, on disk,
     and restarts contribute deltas. Without that, every restart would silently
-    forgive whatever an account had used.
+    forgive whatever an account had used. The restart itself is read off the node
+    — the boot id and the process' own start tick — rather than inferred from a
+    counter that fell, because a busy account can pass its pre-restart figure
+    before the next run and a counter that rose looks exactly like growth.
   * Delivery is queued, bounded and retried. Progress is recorded per request, so
     a round that fails halfway keeps what it delivered; the queue holds one entry
     per account and source, because a cumulative figure supersedes the one before
@@ -297,7 +300,7 @@ def load_state(path: Path) -> dict:
             raise Refusal(f"state file is corrupt: {key}")
     # Absent on a state file written before this agent recorded them, which is
     # not corruption — it is the case that has to remove nothing.
-    for key, kind in (("installedClients", list), ("sourceId", str)):
+    for key, kind in (("installedClients", list), ("sourceId", str), ("startMarker", str)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
     return state
@@ -313,6 +316,67 @@ def save_state(path: Path, state: dict) -> None:
     # lifetime totals truncated, and truncated totals bill nobody for what they
     # already used.
     temporary.replace(path)
+
+
+def xray_start_marker(binary: Path, proc: Path = Path("/proc")) -> str | None:
+    """A node-level mark that changes exactly when the xray process comes up again.
+
+    A restart is otherwise inferred from the counter going backwards, and that
+    cannot see a restart whose first reading lands at or above the last one — a
+    busy account passes its old figure between two runs and the difference is
+    quietly forgiven. The boot id and the process' own start tick are not a
+    measurement of usage at all, so one observation settles every account.
+
+    Nothing here asks xray anything: the subcommands differ between versions, and
+    a meter must not depend on one that may not be there. Anything unreadable, or
+    more than one candidate process, is *not* a restart — the marker is absent and
+    the fold falls back to comparing counters, which is the conservative direction.
+    """
+    try:
+        boot_id = (proc / "sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not boot_id:
+        return None
+    resolved = binary.resolve()
+    starts: list[str] = []
+    try:
+        entries = sorted(proc.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        # `exe` resolves the versioned binary behind the `current` symlink and is
+        # the accurate answer; `cmdline` is what is left when it cannot be read.
+        try:
+            executable = Path(os.readlink(entry / "exe"))
+        except OSError:
+            try:
+                first = (entry / "cmdline").read_bytes().split(b"\0")[0]
+            except OSError:
+                continue
+            if not first:
+                continue
+            executable = Path(first.decode("utf-8", "replace"))
+        if executable != binary and executable.resolve() != resolved:
+            continue
+        try:
+            stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # `comm` is parenthesised and may itself contain spaces, so the fields are
+        # counted from after the closing parenthesis: starttime is the 22nd field
+        # overall, which is the 20th of those.
+        fields = stat.rpartition(")")[2].split()
+        if len(fields) < 20:
+            continue
+        starts.append(fields[19])
+    if len(starts) != 1:
+        return None
+    # The tick count is per boot, so it is only meaningful alongside the boot it
+    # was counted in — a reboot restarts both.
+    return f"{boot_id}:{starts[0]}"
 
 
 def read_counters(binary: Path, command: str, address: str) -> dict[str, int]:
@@ -432,16 +496,24 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     return added, removed, set(wanted)
 
 
-def lifetime_totals(state: dict, counters: dict[str, int]) -> dict[str, int]:
-    """Fold restart-resetting counters into monotonic lifetime totals."""
+def lifetime_totals(state: dict, counters: dict[str, int], *,
+                    restarted: bool = False) -> dict[str, int]:
+    """Fold restart-resetting counters into monotonic lifetime totals.
+
+    `restarted` is the node saying xray came up again since the last reading. It
+    is out of band from the numbers, so it settles every account at once —
+    including the ones whose first reading after the restart landed at or above
+    the last one, which a counter comparison reads as growth and forgives the
+    difference for. Absent that signal the comparison is all there is.
+    """
     totals: dict[str, int] = {}
     baseline: dict[str, int] = {}
     for label, observed in counters.items():
         previous_raw = int(state["counterBaseline"].get(label, 0))
         carried = int(state["totals"].get(label, 0))
-        # A counter below its last raw reading means xray restarted, so the whole
-        # of the new reading is fresh usage rather than a decrease.
-        delta = observed - previous_raw if observed >= previous_raw else observed
+        # After a restart the whole of the new reading is fresh usage rather than
+        # a decrease; a counter below its last raw reading says so on its own.
+        delta = observed if restarted or observed < previous_raw else observed - previous_raw
         total = carried + delta
         if total > MAX_SAFE_INTEGER:
             raise Refusal(f"lifetime total for {label} exceeds the reportable range")
@@ -578,12 +650,33 @@ def main() -> None:
     )
     if installed is not None:
         state["installedClients"] = sorted(installed)
+    # Compared before the counters are read, never after: this way a restart
+    # landing between the two pairs a post-restart reading with a stale marker,
+    # which the counter comparison catches by itself. The reverse order would
+    # pair a pre-restart reading with a fresh marker and count those bytes twice.
+    start_marker = xray_start_marker(binary)
+    recorded_marker = state.get("startMarker")
+    restarted = bool(
+        start_marker
+        and isinstance(recorded_marker, str)
+        and recorded_marker
+        and start_marker != recorded_marker
+    )
     # Read after reconciling so a freshly added account is counted from its own
     # baseline rather than from whatever it had before.
     counters = read_counters(binary, commands["stats_query"], address)
-    print(f"roster observed at {observed_at}: +{added} -{removed}, {len(counters)} counted")
+    # What is recorded is the marker for the process these counters came from,
+    # so it is read after them. A restart inside the window above is folded here
+    # by the counter comparison; recording the marker from before the reading
+    # would have the next round call that same restart again and bill the bytes
+    # it already folded a second time.
+    settled_marker = xray_start_marker(binary)
+    print(
+        f"roster observed at {observed_at}: +{added} -{removed}, {len(counters)} counted"
+        + (", after an xray restart" if restarted else "")
+    )
 
-    totals = lifetime_totals(state, counters)
+    totals = lifetime_totals(state, counters, restarted=restarted)
     timestamp = int(time.time())
     reports: list[dict] = []
     for label in sorted(totals):
@@ -603,6 +696,13 @@ def main() -> None:
                 "observedAt": timestamp,
             })
     state["totals"] = {label: int(value) for label, value in totals.items()}
+    # A marker that could not be read this round is forgotten rather than kept:
+    # comparing a later reading against a stale one would call a restart that had
+    # already been folded in a second time, and bill it twice.
+    if settled_marker:
+        state["startMarker"] = settled_marker
+    else:
+        state.pop("startMarker", None)
     state["pendingReports"] = merge_reports(state["pendingReports"], reports)
 
     # Persist before delivering: a crash after the server accepts must replay, and

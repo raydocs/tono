@@ -55,6 +55,38 @@ class LifetimeTotals(unittest.TestCase):
         # decrease would roll the lifetime total backwards and forgive the 900.
         self.assertEqual(agent.lifetime_totals(state, {"u1": 120}), {"u1": 1020})
 
+    def test_a_restart_landing_above_the_old_reading_is_still_a_restart(self) -> None:
+        state = fresh_state()
+        agent.lifetime_totals(state, {"u1": 900})
+        state["totals"] = {"u1": 900}
+        # The other direction of the same restart. A busy account can pass its
+        # pre-restart figure before this agent's next run, and a counter that rose
+        # is indistinguishable from 300 bytes of growth — reading it as growth
+        # forgives the 900 that came before the restart. Only the node saying it
+        # restarted can tell the two apart.
+        self.assertEqual(
+            agent.lifetime_totals(state, {"u1": 1200}, restarted=True), {"u1": 2100}
+        )
+
+    def test_a_restart_settles_every_account_in_one_observation(self) -> None:
+        state = fresh_state()
+        agent.lifetime_totals(state, {"u1": 900, "u2": 100})
+        state["totals"] = {"u1": 900, "u2": 100}
+        # A restart is node-level: it resets every counter at once, whichever
+        # direction each account's next reading happens to land in.
+        self.assertEqual(
+            agent.lifetime_totals(state, {"u1": 1200, "u2": 40}, restarted=True),
+            {"u1": 2100, "u2": 140},
+        )
+
+    def test_without_a_restart_a_risen_counter_is_growth(self) -> None:
+        state = fresh_state()
+        agent.lifetime_totals(state, {"u1": 900})
+        state["totals"] = {"u1": 900}
+        # And the signal is only ever additive: absent it, nothing changes, and a
+        # false one would bill the account for its own history a second time.
+        self.assertEqual(agent.lifetime_totals(state, {"u1": 1200}), {"u1": 1200})
+
     def test_an_account_missing_from_a_reading_keeps_its_total(self) -> None:
         state = fresh_state()
         agent.lifetime_totals(state, {"u1": 700, "u2": 300})
@@ -80,6 +112,171 @@ class LifetimeTotals(unittest.TestCase):
         state["counterBaseline"] = {"u1": 0}
         with self.assertRaises(agent.Refusal):
             agent.lifetime_totals(state, {"u1": 1})
+
+
+class RestartMarker(unittest.TestCase):
+    """The out-of-band restart signal, read off /proc rather than asked of xray.
+
+    It only ever adds a restart the counters could not see, so an unreadable or
+    ambiguous node must produce nothing at all: a marker invented here would bill
+    an account for its own history a second time on the next round.
+    """
+
+    BINARY = Path("/opt/tono-xray/current/xray")
+    BOOT_ID = "6f1b0f2c-0000-4000-8000-0123456789ab"
+    # `comm` is parenthesised and may contain spaces; starttime is the 22nd field.
+    STAT = "{pid} (x ray) S 1 {pid} {pid} 0 -1 4194560 90 0 0 0 7 3 0 0 20 0 12 0 {start}"
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.proc = Path(directory.name)
+        random = self.proc / "sys/kernel/random"
+        random.mkdir(parents=True)
+        (random / "boot_id").write_text(f"{self.BOOT_ID}\n", encoding="utf-8")
+
+    def process(self, pid: int, start: int, *, executable: str,
+                by_cmdline: bool = False) -> None:
+        entry = self.proc / str(pid)
+        entry.mkdir()
+        entry.joinpath("stat").write_text(
+            self.STAT.format(pid=pid, start=start), encoding="utf-8"
+        )
+        if by_cmdline:
+            # No readable `exe`, which is what an unprivileged run sees.
+            entry.joinpath("cmdline").write_bytes(
+                executable.encode("utf-8") + b"\0run\0-c\0/etc/xray/config.json\0"
+            )
+        else:
+            entry.joinpath("exe").symlink_to(executable)
+
+    def test_the_marker_names_the_boot_and_the_process_start(self) -> None:
+        self.process(4242, 987654, executable=str(self.BINARY))
+        self.assertEqual(
+            agent.xray_start_marker(self.BINARY, self.proc),
+            f"{self.BOOT_ID}:987654",
+        )
+
+    def test_a_restart_changes_the_marker(self) -> None:
+        self.process(4242, 987654, executable=str(self.BINARY))
+        before = agent.xray_start_marker(self.BINARY, self.proc)
+        (self.proc / "4242" / "exe").unlink()
+        (self.proc / "4242" / "stat").unlink()
+        (self.proc / "4242").rmdir()
+        self.process(5150, 1122334, executable=str(self.BINARY))
+        self.assertNotEqual(agent.xray_start_marker(self.BINARY, self.proc), before)
+
+    def test_cmdline_answers_when_exe_cannot_be_read(self) -> None:
+        self.process(4242, 555, executable=str(self.BINARY), by_cmdline=True)
+        self.assertEqual(
+            agent.xray_start_marker(self.BINARY, self.proc), f"{self.BOOT_ID}:555"
+        )
+
+    def test_other_processes_are_not_the_exit(self) -> None:
+        self.process(4242, 555, executable="/usr/bin/python3")
+        self.assertIsNone(agent.xray_start_marker(self.BINARY, self.proc))
+
+    def test_two_candidates_are_ambiguous_rather_than_a_restart(self) -> None:
+        # Nothing here can say which of them the counters came from, and guessing
+        # wrong reads as a restart on every run.
+        self.process(4242, 555, executable=str(self.BINARY))
+        self.process(4243, 666, executable=str(self.BINARY))
+        self.assertIsNone(agent.xray_start_marker(self.BINARY, self.proc))
+
+    def test_a_node_that_cannot_be_read_reports_no_restart(self) -> None:
+        self.process(4242, 555, executable=str(self.BINARY))
+        (self.proc / "sys/kernel/random/boot_id").unlink()
+        self.assertIsNone(agent.xray_start_marker(self.BINARY, self.proc))
+
+
+class RestartMarkerRound(unittest.TestCase):
+    """What a whole round records about the process its counters came from.
+
+    A restart can land between reading the marker and reading the counters. That
+    round folds it correctly, because the counters fell; the question is which
+    marker it leaves behind for the next round. Leaving the one read before the
+    counters has the next round see a marker it has never recorded, call the same
+    restart a second time, and bill the bytes this round already folded.
+    """
+
+    def rounds(self, markers: list[str], readings: list[dict[str, int]],
+               recorded_marker: str) -> dict:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps({
+            "totals": {"u:alice": 900},
+            "counterBaseline": {"u:alice": 900},
+            "pendingReports": [],
+            "sourceId": "node-under-test",
+            "startMarker": recorded_marker,
+        }), encoding="utf-8")
+
+        def fake_env(name: str, *, required: bool = True) -> str:
+            values = {
+                "TONO_HOME_AGENT_TOKEN": "agent-token",
+                "TONO_EXIT_SOURCE_ID": "node-under-test",
+            }
+            value = values.get(name, "")
+            if not value and required:
+                raise agent.Refusal(f"missing {name}")
+            return value
+
+        def fake_deliver(base: str, token: str, queue_path: Path, state: dict):
+            delivered = len(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(queue_path, state)
+            return delivered, 0
+
+        with patch.object(agent, "env", fake_env), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/opt/tono-xray/current/xray")), \
+             patch.object(agent, "api_address", return_value="127.0.0.1:10085"), \
+             patch.object(agent, "inbound_tag", return_value="vless-in"), \
+             patch.object(agent, "state_path", return_value=path), \
+             patch.object(agent, "require_commands", return_value={"stats_query": "statsquery"}), \
+             patch.object(agent, "fetch_roster", return_value=(1_700_000_000, [])), \
+             patch.object(agent, "installed_clients", return_value={"u:alice"}), \
+             patch.object(agent, "reconcile", return_value=(0, 0, {"u:alice"})), \
+             patch.object(agent, "read_counters", side_effect=readings), \
+             patch.object(agent, "xray_start_marker", side_effect=markers), \
+             patch.object(agent, "deliver_queue", side_effect=fake_deliver):
+            for _ in readings:
+                agent.main()
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def test_a_restart_between_the_two_reads_is_folded_once(self) -> None:
+        # Round one reads the marker, xray restarts, then the counters come back
+        # at 50 — below the recorded 900, so the fall folds the 50 as fresh.
+        # Round two must see nothing new to fold: 300 - 50 is the usage since.
+        state = self.rounds(
+            markers=["boot:100", "boot:200", "boot:200", "boot:200"],
+            readings=[{"u:alice": 50}, {"u:alice": 300}],
+            recorded_marker="boot:100",
+        )
+        self.assertEqual(state["totals"], {"u:alice": 1200})
+        self.assertEqual(state["startMarker"], "boot:200")
+
+    def test_a_restart_between_rounds_is_still_folded(self) -> None:
+        # The signal's own case, unchanged: the restart lands between two rounds,
+        # the second round's reading rose past the first, and only the marker can
+        # say the counters started over.
+        state = self.rounds(
+            markers=["boot:100", "boot:100", "boot:200", "boot:200"],
+            readings=[{"u:alice": 950}, {"u:alice": 1200}],
+            recorded_marker="boot:100",
+        )
+        self.assertEqual(state["totals"], {"u:alice": 2150})
+        self.assertEqual(state["startMarker"], "boot:200")
+
+    def test_an_unreadable_marker_is_forgotten_rather_than_kept(self) -> None:
+        state = self.rounds(
+            markers=["boot:100", None, "boot:100", "boot:100"],
+            readings=[{"u:alice": 950}, {"u:alice": 1000}],
+            recorded_marker="boot:100",
+        )
+        self.assertEqual(state["startMarker"], "boot:100")
+        self.assertEqual(state["totals"], {"u:alice": 1000})
 
 
 class RosterValidation(unittest.TestCase):

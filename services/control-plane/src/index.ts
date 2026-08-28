@@ -404,7 +404,7 @@ function canonicalActionResult(value: unknown) {
     const s = value.snapshot as Row;
     const bools = ['connected', 'connecting', 'disconnecting', 'protectionBlocked', 'killSwitchArmed', 'utunPresent', 'protectedDNSConfigured'];
     const strings = ['appVersion', 'build', 'selectedExit', 'connectionStage'];
-    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory', 'lastCrashLabel']);
+    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory', 'lastCrashLabel', 'catalogRevision']);
     const snapshot: Row = {};
     for (const key of bools) {
       if (s[key] !== undefined && typeof s[key] !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
@@ -428,6 +428,14 @@ function canonicalActionResult(value: unknown) {
     if (s.reconnectAttempt !== undefined) {
       if (!Number.isSafeInteger(s.reconnectAttempt) || s.reconnectAttempt < 0 || s.reconnectAttempt > 1000) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid reconnectAttempt');
       snapshot.reconnectAttempt = s.reconnectAttempt;
+    }
+    // Which managed catalog the device is actually running. The telemetry
+    // window carries the same field under the same name and bounds; a snapshot
+    // result is that claim on demand, which is the whole point of asking one
+    // Mac for a snapshot rather than waiting for its next window.
+    if (s.catalogRevision !== undefined && s.catalogRevision !== null) {
+      if (!Number.isSafeInteger(s.catalogRevision) || s.catalogRevision < 0 || s.catalogRevision > 1_000_000_000_000) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid catalogRevision');
+      snapshot.catalogRevision = s.catalogRevision;
     }
     result.snapshot = snapshot;
   }
@@ -1462,6 +1470,36 @@ async function homeRoutingForUser(e: Env, userId: string) {
   return { routing, restricted, allowed };
 }
 
+// The routing document is per-account server state that the fleet-wide catalog
+// revision does not describe: a rebind, a default-proxy change or a credential
+// rotation can leave both `revision` and the served `sha256` exactly where they
+// were. Clients key catalog freshness on (revision, sha256), so a routing-only
+// rotation would otherwise be invisible and the client would keep dialing
+// retired credentials. `routingSha256` is the third component of that key — it
+// digests the served routing directives, and the empty document has a digest of
+// its own so an unbind moves the field back rather than dropping it.
+async function routingSha256(routing: CatalogRouting | undefined) {
+  const socks5 = routing?.homeSocks5;
+  return sha256([
+    routing?.homeProxy ?? '',
+    routing?.defaultProxy ?? '',
+    socks5
+      ? [socks5.host, String(socks5.port), socks5.username, socks5.password].join('\n')
+      : '',
+  ].join('\n'));
+}
+
+/**
+ * The served exit catalog.
+ *
+ * - `revision` is fleet-wide and moves for every account at once.
+ * - `sha256` covers the served proxies YAML, which is per account: the same
+ *   revision legitimately yields different digests for two users, because the
+ *   client identity is substituted and restricted home exits are filtered out.
+ * - `routingSha256` covers the sibling routing document and is present only on
+ *   the per-account view (the ops/admin plaintext catalog carries no routing).
+ *   It moves on its own when routing rotates under an unchanged revision.
+ */
 async function publicManagedCatalog(
   e: Env,
   options?: { userId?: string; filterHomeExits?: boolean },
@@ -1499,8 +1537,9 @@ async function publicManagedCatalog(
     served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
   }
   let routing: CatalogRouting | undefined;
-  if (options?.filterHomeExits && options.userId) {
-    const home = await homeRoutingForUser(e, options.userId);
+  const routedUserId = options?.filterHomeExits ? options.userId : undefined;
+  if (routedUserId) {
+    const home = await homeRoutingForUser(e, routedUserId);
     routing = home.routing;
     if (home.restricted.size > 0) {
       served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
@@ -1511,6 +1550,7 @@ async function publicManagedCatalog(
     yaml: served,
     sha256: served === yaml ? digest : await sha256(served),
     updatedAt,
+    ...(routedUserId ? { routingSha256: await routingSha256(routing) } : {}),
     ...(routing ? { routing } : {}),
   };
 }

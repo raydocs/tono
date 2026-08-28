@@ -31,6 +31,10 @@ struct SettingsView: View {
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
     ) private var networkLogUploadEnabled = true
+    @AppStorage(
+        SettingsKey.periodicTelemetryEnabled,
+        store: AppProfile.defaults
+    ) private var periodicTelemetryEnabled = true
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
 
     private let languages = InterfaceLanguagePreference.options
@@ -189,8 +193,23 @@ struct SettingsView: View {
             settingDivider
 
             SettingToggleRow(
+                label: "Protection snapshot",
+                subtitle: "About every 20 minutes, share protection status, the selected server and recent connection events with Tono support",
+                isOn: $periodicTelemetryEnabled
+            )
+            .onChange(of: periodicTelemetryEnabled) { _, _ in
+                accountSession.periodicTelemetrySettingChanged()
+            }
+
+            settingDivider
+
+            // The subtitle names the remote actions rather than the protection
+            // status: this switch has never governed the periodic snapshot
+            // above, and describing it as sharing status told people the
+            // snapshot was off when it was uploading regardless.
+            SettingToggleRow(
                 label: "Remote diagnostics",
-                subtitle: "Share protection status with Tono support",
+                subtitle: "Let Tono support ask this Mac for a snapshot, refresh its server list or retry protection",
                 isOn: $remoteDiagnosticsEnabled
             )
             .onChange(of: remoteDiagnosticsEnabled) { _, enabled in

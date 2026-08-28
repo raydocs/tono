@@ -283,6 +283,16 @@
         }
       }
     },
+    "About every 20 minutes, share protection status, the selected server and recent connection events with Tono support": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大约每 20 分钟，向 Tono 支持团队分享保护状态、所选节点和最近的连接事件"
+          }
+        }
+      }
+    },
     "Active": {
       "extractionState": "manual",
       "localizations": {
@@ -2205,6 +2215,16 @@
         }
       }
     },
+    "Let Tono support ask this Mac for a snapshot, refresh its server list or retry protection": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许 Tono 支持团队向这台 Mac 索取诊断快照、刷新节点列表或重试保护"
+          }
+        }
+      }
+    },
     "Light": {
       "extractionState": "manual",
       "localizations": {
@@ -2337,6 +2357,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在锁定流量到隧道…"
+          }
+        }
+      }
+    },
+    "Log export failed. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志导出失败。%@"
           }
         }
       }
@@ -2696,6 +2726,16 @@
         }
       }
     },
+    "No verified catalog installed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未安装已验证的目录"
+          }
+        }
+      }
+    },
     "Node Name": {
       "localizations": {
         "zh-Hans": {
@@ -2777,6 +2817,16 @@
         }
       }
     },
+    "Not refreshed since launch": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本次启动后尚未刷新"
+          }
+        }
+      }
+    },
     "Not signed in": {
       "localizations": {
         "zh-Hans": {
@@ -2804,6 +2854,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "除非你在「设置 › 通用」中开启「远程诊断与安全操作」，否则不会有任何内容离开这台 Mac。"
+          }
+        }
+      }
+    },
+    "Nothing to send — the log has not advanced since the last upload.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可发送的内容——自上次上传以来日志没有新增。"
+          }
+        }
+      }
+    },
+    "Nothing was sent: log upload is off in Settings › Privacy.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未发送任何内容：日志上传已在「设置 › 隐私」中关闭。"
           }
         }
       }
@@ -3155,6 +3225,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "保护"
+          }
+        }
+      }
+    },
+    "Protection snapshot": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保护状态快照"
           }
         }
       }
@@ -3989,6 +4069,16 @@
         }
       }
     },
+    "Sent. The newest log segment is with Tono support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发送。最新的日志分段已送达 Tono 支持团队。"
+          }
+        }
+      }
+    },
     "Server": {
       "extractionState": "manual",
       "localizations": {
@@ -4016,6 +4106,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "请输入服务器地址"
+          }
+        }
+      }
+    },
+    "Server catalog": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "节点目录"
+          }
+        }
+      }
+    },
+    "Server catalog refresh failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "节点目录刷新失败"
           }
         }
       }
@@ -4931,6 +5041,16 @@
         }
       }
     },
+    "This Mac has no network connection. Protection resumes automatically when the network returns.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前物理网络不可用。网络恢复后会自动继续保护。"
+          }
+        }
+      }
+    },
     "This Mac is still using Encrypted DNS or iCloud Private Relay, so apps bypass Tono's protected resolver. Turn Encrypted DNS and Private Relay off, then reconnect.": {
       "localizations": {
         "zh-Hans": {
@@ -5028,6 +5148,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "这正是支持团队请求诊断快照时 Tono 上报的内容。其中不含主机名、IP 地址、进程名或账号令牌。它与上面的审计日志是两份不同的报告，体积更小；审计日志在这个测试版本中会被完整上传。"
+          }
+        }
+      }
+    },
+    "This is what Tono reports when support requests a diagnostic snapshot, followed by the catalog and traffic-policy state the uploaded snapshot has no field for. It carries no hostnames, IP addresses, process names or account tokens. It is a separate, smaller report than the audit log above, which in this test build is uploaded in full.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这是支持团队索取诊断快照时 Tono 会上报的内容，后面附上了上传的快照没有字段承载的目录与分流策略状态。其中不含主机名、IP 地址、进程名或账户令牌。它与上面的审计日志是两份不同的报告，后者在此测试版本中会被完整上传。"
           }
         }
       }
@@ -5274,6 +5404,26 @@
         }
       }
     },
+    "Traffic policy": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分流策略"
+          }
+        }
+      }
+    },
+    "Traffic policy refresh failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "分流策略刷新失败"
+          }
+        }
+      }
+    },
     "Try a different search or region filter.": {
       "localizations": {
         "zh-Hans": {
@@ -5419,6 +5569,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "上传"
+          }
+        }
+      }
+    },
+    "Upload failed. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传失败。%@"
           }
         }
       }

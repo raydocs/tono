@@ -2614,6 +2614,147 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
   });
 
+  it('moves routingSha256 for a routing-only rotation that leaves revision and yaml untouched', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    // A socks5 home exit names no catalog node, so its rotations never touch
+    // the served proxies YAML — the routing document is the only thing moving.
+    const home = await admin('home-exits', {
+      proxyName: 'Home Socks Rotation',
+      displayName: '家宽轮换',
+      kind: 'socks5',
+      socks5Host: 'resi-gateway.example.com',
+      socks5Port: 11080,
+      socks5Username: 'resi-user',
+      socks5Password: 'resi-secret',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+
+    const owner = await createAccount('routing-digest-owner');
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(201);
+
+    const fetchOwner = async () => (await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    })).json()) as any;
+
+    const bound = await fetchOwner();
+    expect(bound.routingSha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // Refetching without a change is stable across all three components.
+    const refetched = await fetchOwner();
+    expect(refetched.revision).toBe(bound.revision);
+    expect(refetched.sha256).toBe(bound.sha256);
+    expect(refetched.routingSha256).toBe(bound.routingSha256);
+
+    // Rotate the upstream credential in place. The admin PATCH also advances
+    // the fleet revision as belt and braces; writing the row directly is the
+    // server state a client has to be able to detect on its own.
+    await env.DB.prepare('UPDATE home_exits SET socks5_password = ? WHERE id = ?')
+      .bind('resi-rotated', homeId).run();
+
+    const rotated = await fetchOwner();
+    expect(rotated.revision).toBe(bound.revision);
+    expect(rotated.sha256).toBe(bound.sha256);
+    expect(rotated.routingSha256).not.toBe(bound.routingSha256);
+    expect(rotated.routing.homeSocks5.password).toBe('resi-rotated');
+
+    // A default-proxy change is a routing-only change too.
+    await env.DB.prepare('UPDATE user_home_bindings SET default_proxy_name = ? WHERE user_id = ?')
+      .bind('Shared VPS JP', owner.user.id).run();
+    const defaulted = await fetchOwner();
+    expect(defaulted.revision).toBe(bound.revision);
+    expect(defaulted.sha256).toBe(bound.sha256);
+    expect(defaulted.routingSha256).not.toBe(rotated.routingSha256);
+
+    // Unbinding moves the digest rather than dropping the field, so a client
+    // that lost its routing sees the key move instead of going blind.
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    const unbound = await fetchOwner();
+    expect(unbound).not.toHaveProperty('routing');
+    expect(unbound.routingSha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(unbound.routingSha256).not.toBe(defaulted.routingSha256);
+
+    // The ops/admin plaintext catalogs carry no routing, so no routing digest.
+    expect((await (await operations('exit-catalog')).json() as any))
+      .not.toHaveProperty('routingSha256');
+    expect((await (await admin('exit-catalog', undefined, 'GET')).json() as any))
+      .not.toHaveProperty('routingSha256');
+
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('serves two accounts different yaml digests at one revision without calling it an error', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential Split"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const home = await admin('home-exits', {
+      proxyName: 'Home Residential Split',
+      displayName: '家庭分流',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+
+    const owner = await createAccount('digest-split-owner');
+    const other = await createAccount('digest-split-other');
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(201);
+
+    const fetchFor = async (accessToken: string) => {
+      const response = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as any;
+    };
+
+    const ownerBody = await fetchFor(owner.accessToken);
+    const otherBody = await fetchFor(other.accessToken);
+
+    // Same fleet revision, different bodies: the identity substitution and the
+    // home-exit filter are both per account. Different digests at one revision
+    // are the normal shape of this endpoint, not tampering.
+    expect(otherBody.revision).toBe(ownerBody.revision);
+    expect(otherBody.sha256).not.toBe(ownerBody.sha256);
+    expect(ownerBody.yaml).toContain('Home Residential Split');
+    expect(otherBody.yaml).not.toContain('Home Residential Split');
+    expect(otherBody.routingSha256).not.toBe(ownerBody.routingSha256);
+
+    // Each account's own digest is stable on a refetch at the same revision.
+    const ownerAgain = await fetchFor(owner.accessToken);
+    expect(ownerAgain.sha256).toBe(ownerBody.sha256);
+    expect(ownerAgain.routingSha256).toBe(ownerBody.routingSha256);
+    const otherAgain = await fetchFor(other.accessToken);
+    expect(otherAgain.sha256).toBe(otherBody.sha256);
+    expect(otherAgain.routingSha256).toBe(otherBody.routingSha256);
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
   it('assigns a pasted home line to a user and imports unused stock', async () => {
     const accessHeaders = {
       'content-type': 'application/json',
@@ -4268,6 +4409,36 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const response = await api('home/usage', json({ reports: [null] }, HOME_TOKEN));
     expect(response.status).toBe(400);
     expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('stores the catalog revision a snapshot result reports and bounds it', async () => {
+    const owner = await createAccount('snapshot-catalog-owner');
+    const queued = await admin('device-actions', {
+      deviceId: owner.device.id, action: 'diagnostic_snapshot', ttlSeconds: 300,
+    });
+    expect(queued.status).toBe(201);
+    const command = (await queued.json() as any).action;
+    const poll = await api('device-actions', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect((await poll.json() as any).actions[0].id).toBe(command.id);
+
+    // Out of range is still refused, the same bounds the telemetry window uses.
+    expect((await api(`device-actions/${command.id}/result`, json({
+      outcome: 'succeeded', snapshot: { connected: true, catalogRevision: -1 },
+    }, owner.accessToken))).status).toBe(400);
+
+    // Every signed-in client with a catalog installed puts this field in the
+    // snapshot, and answering "which catalog is that Mac running" on demand is
+    // what the action is for, so the result has to land rather than 400.
+    const result = {
+      outcome: 'succeeded',
+      snapshot: { connected: true, catalogRevision: 41 },
+    };
+    expect((await api(`device-actions/${command.id}/result`, json(result, owner.accessToken))).status).toBe(200);
+    const stored = await env.DB.prepare('SELECT result_json FROM device_actions WHERE id = ?')
+      .bind(command.id).first<any>();
+    expect(JSON.parse(stored.result_json)).toEqual(result);
   });
 
   it('isolates allowlisted device actions and safely replays bounded canonical results', async () => {

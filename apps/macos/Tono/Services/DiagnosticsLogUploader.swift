@@ -140,9 +140,16 @@ actor DiagnosticsLogUploader {
     }
 
     enum SweepOutcome: Sendable {
+        /// The upload switch is off, so nothing was read and nothing was sent.
+        /// Distinct from `idle`, which means the log had not advanced: a caller
+        /// that shows the outcome must not offer "nothing new" as the reason a
+        /// disabled pipeline sent nothing.
+        case disabled
         case idle
         case uploaded
-        case failed
+        /// Carries the failure description so the manual upload can name why the
+        /// segment did not reach support instead of reporting a finished run.
+        case failed(String)
     }
 
     /// Backoff that tops out rather than growing without bound: a device offline
@@ -159,7 +166,7 @@ actor DiagnosticsLogUploader {
             return min(scaled, Self.sweepIntervalSeconds * 8)
         }
         switch outcome {
-        case .idle: return Self.idleIntervalSeconds
+        case .disabled, .idle: return Self.idleIntervalSeconds
         case .uploaded: return Self.sweepIntervalSeconds
         // Unreachable while `consecutiveFailures` drives the branch above; kept
         // so the sweep's own vocabulary stays honest about what happened.
@@ -173,18 +180,18 @@ actor DiagnosticsLogUploader {
     /// unsent bytes.
     @discardableResult
     func sweep() async -> SweepOutcome {
-        guard isEnabled() else { return .idle }
+        guard isEnabled() else { return .disabled }
         var uploaded = false
         // A rotation moved the bytes we were reading into `.1`. Finish that tail
         // first: the alternative is losing exactly the window where the log was
         // busiest, which is the window worth having.
         while let pending = pendingBackupSegment() {
-            guard await send(pending) else { return .failed }
+            if let failure = await send(pending) { return .failed(failure) }
             uploaded = true
             if pending.remainingBytes == 0 { break }
         }
         while let segment = pendingCurrentSegment() {
-            guard await send(segment) else { return .failed }
+            if let failure = await send(segment) { return .failed(failure) }
             uploaded = true
             if segment.remainingBytes == 0 { break }
             // Yield so a multi-megabyte catch-up does not pin a performance core
@@ -201,7 +208,9 @@ actor DiagnosticsLogUploader {
         let remainingBytes: UInt64
     }
 
-    private func send(_ segment: Segment) async -> Bool {
+    /// Returns nil on success, or the failure description for the caller to
+    /// report. The cursor is only advanced once the segment is accepted.
+    private func send(_ segment: Segment) async -> String? {
         do {
             try await upload(
                 segment.payload,
@@ -214,13 +223,14 @@ actor DiagnosticsLogUploader {
         } catch {
             consecutiveFailures += 1
             logger.error("log segment upload failed: \(String(describing: error), privacy: .public)")
-            return false
+            return (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
         }
         consecutiveFailures = 0
         sequence += 1
         cursor = segment.nextCursor
         persistCursor()
-        return true
+        return nil
     }
 
     // MARK: - Reading
