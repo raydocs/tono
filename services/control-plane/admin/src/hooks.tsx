@@ -148,6 +148,10 @@ export function useResource<T>(
 
     return () => {
       active = false;
+      // The in-flight request settles into an early return from here on, so the
+      // pill it turned on is this cleanup's to turn off. A page that stops
+      // polling mid-request would otherwise say 刷新中 until a reload.
+      setRefreshing(false);
       generation.current += 1;
       abort.current?.abort();
       abort.current = null;
@@ -273,6 +277,10 @@ export function useKeyedResource<T, K extends string>(
     } else {
       setResource({ state: 'loading' });
       setSnapshotKey(null);
+      // Nothing of the previous key is on screen any more, so neither its load
+      // time nor its refresh failure describes what the page is showing.
+      setRefreshedAt(0);
+      setStale(null);
     }
   }, [key]);
 
@@ -357,6 +365,7 @@ export function useKeyedResource<T, K extends string>(
 
     return () => {
       active = false;
+      setRefreshing(false);
       generation.current += 1;
       abort.current?.abort();
       abort.current = null;

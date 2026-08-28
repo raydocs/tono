@@ -29,6 +29,13 @@ struct AccountSettingsCard: View {
                         else { Button("Revoke", role: .destructive) { Task { await session.revoke(device) } } }
                     }
                 }
+                if let deviceActionError = session.deviceActionError {
+                    // Reported here rather than through the account gate: a
+                    // failed revoke leaves the tunnel and the window alone.
+                    Label(deviceActionError, systemImage: "exclamationmark.circle")
+                        .font(.callout)
+                        .foregroundStyle(TonoStatus.error)
+                }
                 if session.isAtDeviceLimit {
                     Label("\(session.deviceLimit)-device limit reached", systemImage: "info.circle")
                         .foregroundStyle(.orange)
@@ -49,6 +56,12 @@ struct AccountSettingsView: View {
             HStack { Spacer(); Button("Sign Out", role: .destructive) { Task { await session.logout() } } }
         }
         .padding()
-        .task { try? await session.reloadDevices() }
+        .task {
+            session.clearDeviceActionError()
+            // Plan, expiry, quota and usage are otherwise whatever they were at
+            // sign-in, which for a resident menu-bar client can be days old.
+            await session.refreshAccount()
+            try? await session.reloadDevices()
+        }
     }
 }

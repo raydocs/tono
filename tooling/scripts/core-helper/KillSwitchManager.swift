@@ -286,24 +286,15 @@ final class KillSwitchManager {
         // there severs every established flow on the host for no protection
         // gain. Any removed pass rule still forces the full flush.
         let passRules = Self.passRules(in: renderedRules)
-        let withdrawn = lastLoadedPassRules.map { $0.subtracting(passRules) }
-        // A first arm after daemon start has no baseline, so it cannot know what
-        // it is replacing and takes the machine-wide flush.
-        let disposal: StateDisposal
-        switch withdrawn {
-        case .none:
-            disposal = .full
-        case .some(let rules) where rules.isEmpty:
-            disposal = .keep
-        case .some(let rules):
-            // Address-scoped withdrawals — a node switch moving the exit permit,
-            // a refreshed control-plane pin — kill only those addresses' states.
-            // Anything structural falls back to the flush. A customer's log
-            // showed seventeen machine-wide flushes in sixty-three minutes, one
-            // every 3.7 minutes, mostly from node switches; each of those took
-            // every unrelated connection on the host down with it.
-            disposal = Self.withdrawnHosts(rules).map { StateDisposal.targeted($0) } ?? .full
-        }
+        let disposal = Self.stateDisposal(replacing: lastLoadedPassRules, with: passRules)
+        // The kernel takes the new ruleset part-way through the call below, ahead
+        // of the PF enable, the state disposal, and the verification probes that
+        // can each still throw. Recording nothing across it is what keeps a
+        // partial commit honest: the baseline is left with no generation to diff
+        // against, so the next arm takes the machine-wide flush instead of
+        // measuring against a ruleset that was never fully live — which would
+        // hide a withdrawn permit and leave its states passing.
+        lastLoadedPassRules = nil
         try Self.ensureAnchorLoaded(disposal: disposal)
         lastLoadedPassRules = passRules
         stateGeneration &+= 1
@@ -325,6 +316,29 @@ final class KillSwitchManager {
                 .map(String.init)
                 .filter { $0.hasPrefix("pass ") }
         )
+    }
+
+    /// What a re-arm must do about states established under the generation it
+    /// is replacing.
+    ///
+    /// A nil baseline cannot know what it is replacing, so it takes the
+    /// machine-wide flush. That covers a first arm after daemon start and every
+    /// mutator that opened egress or committed rules it could not finish
+    /// recording — the conservative answer is the only one that can never
+    /// under-kill.
+    static func stateDisposal(
+        replacing previous: Set<String>?,
+        with passRules: Set<String>
+    ) -> StateDisposal {
+        guard let withdrawn = previous?.subtracting(passRules) else { return .full }
+        guard !withdrawn.isEmpty else { return .keep }
+        // Address-scoped withdrawals — a node switch moving the exit permit, a
+        // refreshed control-plane pin — kill only those addresses' states.
+        // Anything structural falls back to the flush. A customer's log showed
+        // seventeen machine-wide flushes in sixty-three minutes, one every 3.7
+        // minutes, mostly from node switches; each of those took every unrelated
+        // connection on the host down with it.
+        return withdrawnHosts(withdrawn).map { StateDisposal.targeted($0) } ?? .full
     }
 
     /// Power transitions are secured inside the root helper rather than
@@ -2281,6 +2295,32 @@ final class KillSwitchManager {
                   // would leave behind the states of the rule it could not read.
                   withdrawnHosts([exitPermit, interfaceRule]) == nil,
                   withdrawnHosts([]) == [] else {
+                return false
+            }
+            // The baseline-to-disposal mapping, which `withdrawnHosts` alone
+            // does not cover. The nil case carries the most weight: every
+            // mutator that opens egress, or that commits a ruleset it cannot
+            // finish recording, clears the baseline precisely so the next arm
+            // lands here — and a nil resolving to anything but `.full` would
+            // turn each of those into a silent skip of the flush.
+            guard stateDisposal(replacing: nil, with: [exitPermit]) == .full,
+                  stateDisposal(replacing: Set([exitPermit]), with: [exitPermit]) == .keep,
+                  // Widening keeps states: the endpoint was added for the very
+                  // session those states belong to.
+                  stateDisposal(
+                    replacing: Set([exitPermit]),
+                    with: [exitPermit, otherPermit]
+                  ) == .keep,
+                  stateDisposal(
+                    replacing: Set([exitPermit, otherPermit]),
+                    with: [otherPermit]
+                  ) == .targeted(["198.12.84.154"]),
+                  // One unreducible withdrawal takes the machine-wide flush
+                  // rather than a partial targeted kill.
+                  stateDisposal(
+                    replacing: Set([exitPermit, interfaceRule]),
+                    with: []
+                  ) == .full else {
                 return false
             }
             let sample = Data(

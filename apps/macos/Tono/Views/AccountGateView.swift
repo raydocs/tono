@@ -51,11 +51,7 @@ struct AccountGateView<Content: View>: View {
                         case .enrolling:
                             ProgressView("Enrolling this Mac with Tono…")
                         case .suspended:
-                            ContentUnavailableView(
-                                "Tono account suspended",
-                                systemImage: "exclamationmark.shield",
-                                description: Text("Contact your administrator to restore access.")
-                            )
+                            AccountBlockedView(session: session)
                         case .ready:
                             EmptyView()
                         }
@@ -232,6 +228,14 @@ struct LoginView: View {
                                 .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                             )
+                        }
+                        if let deviceActionError = session.deviceActionError {
+                            // A failed removal is reported in place; it is not
+                            // an account failure and must not restart the gate.
+                            Label(deviceActionError, systemImage: "exclamationmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(TonoStatus.error)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
@@ -500,6 +504,126 @@ struct LoginView: View {
             Text(title)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Authenticated, but the account may not connect — an expired plan, an
+/// exhausted data allowance, or an account an operator disabled. Reachable now
+/// that the client keeps the control plane's reason instead of reporting every
+/// refusal as an expired session and signing the user out.
+private struct AccountBlockedView: View {
+    @Bindable var session: AccountSession
+    @Environment(\.colorScheme) private var colorScheme
+    /// The recheck keeps this screen on screen while it runs, so the button
+    /// carries its own progress rather than reading a session state that this
+    /// screen can never be shown in.
+    @State private var rechecking = false
+    @State private var restoredInternetFromGate = false
+
+    private var explanation: String {
+        // A nil detail means the control plane refused this session without
+        // naming a reason, and today a revoked session and an unusable plan
+        // answer identically — so the fallback covers both.
+        session.entitlementDetail
+            ?? String(localized: "Check this plan's expiry date and data allowance, or sign out and sign in again. Contact Tono support if this continues.")
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.shield")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundStyle(TonoStatus.blocked)
+                Text("This Tono account cannot connect")
+                    .font(.system(size: 17, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                Text(explanation)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.bottom, 6)
+
+            // The three values that decide this, so the reason is checkable on
+            // screen rather than only from a support reply.
+            if let user = session.user {
+                VStack(spacing: 6) {
+                    accountRow(String(localized: "Plan"), user.plan ?? "Tono")
+                    accountRow(
+                        String(localized: "Expires"),
+                        TonoAccountRules.expiryText(user.expiresAt)
+                    )
+                    if let quota = user.quotaBytes, let usage = user.usageBytes {
+                        accountRow(
+                            String(localized: "Usage"),
+                            "\(ByteCountFormatter.string(fromByteCount: usage, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: quota, countStyle: .file))"
+                        )
+                    }
+                }
+            }
+
+            Button {
+                Task {
+                    rechecking = true
+                    await session.retryRestore()
+                    rechecking = false
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if rechecking { ProgressView().controlSize(.small) }
+                    Text("Check again")
+                }
+            }
+            .buttonStyle(GateProminentButtonStyle())
+            .disabled(rechecking)
+
+            Button("Sign Out", role: .destructive) { Task { await session.logout() } }
+
+            if KillSwitchService.isArmed, !restoredInternetFromGate {
+                // Renewing a plan needs a browser, and this screen is reachable
+                // with protection armed and no exit running. Signing out is the
+                // only other way off a fail-closed host, and it should not be
+                // the price of reading the renewal page. isArmed is a plain
+                // static (not observable), so the local flag forces the section
+                // to update once the restore completes.
+                Divider().padding(.vertical, 4)
+                Label(
+                    "Kill Switch is blocking direct Internet from an earlier session.",
+                    systemImage: "shield.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Button("Restore internet (turn off protection)") {
+                    Task {
+                        await session.restoreDirectInternet()
+                        restoredInternetFromGate = !KillSwitchService.isArmed
+                    }
+                }
+                .disabled(rechecking)
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(width: 360)
+    }
+
+    @ViewBuilder
+    private func accountRow(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            .white.opacity(colorScheme == .dark ? 0.05 : 0.5),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }
 

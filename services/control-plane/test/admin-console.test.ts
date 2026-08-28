@@ -592,6 +592,22 @@ describe('ops hash routing', () => {
     });
   });
 
+  it('keeps a plus in the search where the operator typed it', () => {
+    const hash = formatOpsHash({
+      page: 'users',
+      focus: null,
+      node: null,
+      user: null,
+      q: 'bob+vpn@example.com',
+      range: null,
+    });
+    expect(parseOpsHash(hash).q).toBe('bob+vpn@example.com');
+    // A hand-written link that escapes the plus itself reads the same way.
+    expect(parseOpsHash('#/users?q=bob%2Bvpn%40example.com').q).toBe('bob+vpn@example.com');
+    // And a space, which the console writes as a plus, is still a space.
+    expect(parseOpsHash('#/monitor?node=Tokyo+%C2%B7+Fuji').node).toBe('Tokyo · Fuji');
+  });
+
   it('maps old aliases and missing page to known pages', () => {
     expect(parseOpsHash('#/homes').page).toBe('users');
     expect(parseOpsHash('#/catalog').page).toBe('control');

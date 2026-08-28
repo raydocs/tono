@@ -11,6 +11,17 @@ final class AccountSession {
     private(set) var devices: [TonoDevice] = []
     private(set) var authMethods: TonoAuthMethodsResponse?
     private(set) var emailChallenge: TonoEmailChallengeResponse?
+    /// Device management reports here instead of through `fail`: a failed
+    /// revoke is not an authentication or runtime failure, and must not take
+    /// the tunnel, the background tasks and the whole window with it.
+    private(set) var deviceActionError: String?
+    /// Why an authenticated account may not connect — expiry, data allowance or
+    /// an operator disabling it. Rendered by the suspended screen.
+    private(set) var entitlementDetail: String?
+    /// Whether the entitlement block interrupted a session that was already
+    /// running. Only that session can be resumed by a re-read of the account;
+    /// a block raised before the runtime came up still needs a full restore.
+    private var blockedWhileReady = false
     private var enrollmentAuthKey: String?
     private var enrollmentHostname: String?
     private let api: TonoAPIClient
@@ -159,6 +170,9 @@ final class AccountSession {
                 try await RuntimeCleanup.cleanupStaleRuntime()
             guard try keychain.string(for: .refreshToken) != nil else {
                 deactivateAppRoutingResearch()
+                // No account owns this launch, so the cache loaded from disk a
+                // moment ago may not stay installed or selectable.
+                ManagedExitCatalogOwnership.purge()
                 // Signed out: never leave a previous session's kill switch armed.
                 if !AppProfile.homeExitEnabled {
                     // A force-quit of an older Home-US build may have left its
@@ -189,8 +203,10 @@ final class AccountSession {
                 // then populate device-management UI in parallel with local
                 // runtime preparation instead of adding another round trip to
                 // the first-screen critical path.
-                user = try await api.me().user
-                guard user?.suspended != true else {
+                let restoredUser = try await api.me().user
+                user = restoredUser
+                ManagedExitCatalogOwnership.adopt(restoredUser.id)
+                guard restoredUser.suspended != true else {
                     pauseAppRoutingResearch()
                     state = .suspended
                     return
@@ -210,6 +226,7 @@ final class AccountSession {
             )
             user = restoredUser
             devices = restoredDevices
+            ManagedExitCatalogOwnership.adopt(restoredUser.id)
             guard user?.suspended != true else {
                 pauseAppRoutingResearch()
                 state = .suspended
@@ -250,10 +267,25 @@ final class AccountSession {
     }
 
     /// Re-runs the complete token/account validation after a transient launch
-    /// failure. Retrying only the sign-in-method request would leave an existing
-    /// refresh token stranded behind the login screen.
+    /// failure, or after the account state that blocked it has been settled.
+    /// Retrying only the sign-in-method request would leave an existing refresh
+    /// token stranded behind the login screen.
     func retryRestore() async {
-        guard case .error = state else { return }
+        switch state {
+        case .error: break
+        case .suspended:
+            // A block raised over a running session is an account fact, not a
+            // broken session. Re-read the account instead of re-running the
+            // launch sequence, whose first step stops the core this Mac is
+            // still protected by.
+            if blockedWhileReady {
+                await refreshAccount()
+                return
+            }
+        default: return
+        }
+        entitlementDetail = nil
+        blockedWhileReady = false
         hasStartedRestore = false
         await restore()
     }
@@ -349,6 +381,7 @@ final class AccountSession {
         // Purge before any suspension point so no pending aggregate can cross
         // into a later account even when server logout is slow or unavailable.
         deactivateAppRoutingResearch()
+        ManagedExitCatalogOwnership.purge()
         await stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
         await api.logout(); clearAccount(); state = .signedOut
     }
@@ -410,10 +443,90 @@ final class AccountSession {
 
     func reloadDevices() async throws { devices = try await api.devices().devices }
 
+    func clearDeviceActionError() { deviceActionError = nil }
+
+    /// Device management never routes through `fail`. An unreachable or 5xx
+    /// control plane here is not an authentication or runtime failure, and
+    /// dropping the descriptor over one would take a protected Mac offline
+    /// behind an armed kill switch and replace the window with the gate.
     func revoke(_ target: TonoDevice) async {
-        guard target.id != device?.id && target.current != true else { state = .error(String(localized: "The current device cannot revoke itself.")); return }
-        do { try await api.revokeDevice(target.id); try await reloadDevices() }
-        catch { await fail(error) }
+        guard target.id != device?.id && target.current != true else {
+            deviceActionError = String(localized: "The current device cannot revoke itself.")
+            return
+        }
+        deviceActionError = nil
+        do {
+            try await api.revokeDevice(target.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            deviceActionError = (error as? LocalizedError)?.errorDescription
+                ?? String(localized: "Something went wrong. Please try again.")
+            return
+        }
+        // The device is revoked either way; only the refreshed inventory is
+        // missing, and the next panel appearance reloads it.
+        try? await reloadDevices()
+    }
+
+    /// Plan, expiry, quota and usage are read once at sign-in and then drift for
+    /// as long as this menu-bar client stays resident. Re-read on the catalog
+    /// cadence, when the account panel appears, and after a wake.
+    func refreshAccount() async {
+        guard user != nil else { return }
+        do {
+            let refreshed = try await api.me().user
+            // The account may have been cleared across the request.
+            guard user != nil else { return }
+            user = refreshed
+            if refreshed.suspended == true {
+                enterEntitlementBlock(detail: nil)
+            } else {
+                leaveEntitlementBlock()
+            }
+        } catch is CancellationError {
+            return
+        } catch let error as TonoAPIClient.APIError where Self.isEntitlementFailure(error) {
+            enterEntitlementBlock(detail: error.errorDescription)
+        } catch TonoAPIClient.APIError.unauthorized {
+            // The control plane still refuses this session after the client's
+            // own token renewal. Today it answers the same way for an expired
+            // plan, an exhausted allowance and a revoked session, so show what
+            // is actually known and leave signing out to the user rather than
+            // reporting an account problem as an expired sign-in.
+            enterEntitlementBlock(detail: nil)
+        } catch {
+            // Transient control-plane failure; the next cadence re-reads it.
+        }
+    }
+
+    private static func isEntitlementFailure(
+        _ error: TonoAPIClient.APIError
+    ) -> Bool {
+        if case .entitlementBlocked = error { return true }
+        return false
+    }
+
+    /// The credential is good and the account may not use it. The user is told
+    /// which — expiry, allowance or a disabled account — instead of being signed
+    /// out with a session-expired message, and protection is left exactly as it
+    /// is. A nil detail falls back to the screen's own general copy.
+    private func enterEntitlementBlock(detail: String?) {
+        entitlementDetail = detail
+        if state == .ready { blockedWhileReady = true }
+        pauseAppRoutingResearch()
+        state = .suspended
+    }
+
+    /// The control plane accepted this account again, so the block is lifted
+    /// and the running session it interrupted resumes where it paused —
+    /// including the synchronization loop, which stops outside `.ready`.
+    private func leaveEntitlementBlock() {
+        guard state == .suspended, blockedWhileReady else { return }
+        blockedWhileReady = false
+        entitlementDetail = nil
+        state = .ready
+        startCatalogSync()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
@@ -468,11 +581,17 @@ final class AccountSession {
 
     private func authenticate(_ operation: () async throws -> TonoAuthResponse) async {
         state = .authenticating
+        // A failed revoke from the device-limit list belongs to the attempt
+        // that raised it, not to the one starting here.
+        deviceActionError = nil
         do {
             let response = try await operation(); try await api.adopt(response)
             emailChallenge = nil
             user = response.user
             device = response.device
+            // Before any transport can select an exit, so nothing published for
+            // the previous account is reachable by this one.
+            ManagedExitCatalogOwnership.adopt(response.user.id)
             adoptEnrollment(response.enrollment)
             try await reloadDevices()
             if response.user.suspended == true {
@@ -745,6 +864,7 @@ final class AccountSession {
                 async let catalog: Bool = refreshManagedCatalog()
                 async let policy: Bool = refreshManagedTrafficPolicy()
                 _ = await (catalog, policy)
+                await refreshAccount()
             }
         }
         updateRemoteDiagnosticsPolling()
@@ -786,7 +906,8 @@ final class AccountSession {
         updateDiagnosticsLogUploading()
         updatePeriodicTelemetry()
         // startCatalogSync resumes opted-in actions immediately, while its
-        // catalog request waits for the normal timer and cannot race wake protection.
+        // catalog request — and the account re-read that follows it — wait for
+        // the normal timer and cannot race wake protection.
     }
 
     private func updateRemoteDiagnosticsPolling() {
@@ -945,8 +1066,8 @@ final class AccountSession {
     }
 
     /// Sends whatever is unsent right now, for the Support page's button. Returns
-    /// nothing: the button reports "queued", because a segment can legitimately
-    /// be empty when the log has not advanced since the last sweep.
+    /// nothing: the button reports that the run finished, because a segment can
+    /// legitimately be empty when the log has not advanced since the last sweep.
     func uploadDiagnosticsLogNow() async {
         updateDiagnosticsLogUploading()
         await diagnosticsLogUploader?.sweep()
@@ -1105,6 +1226,14 @@ final class AccountSession {
         // control-plane failure. In particular, do not turn URLSession -999
         // into a login error or tear down an otherwise protected route.
         guard !(error is CancellationError) else { return }
+        // Authenticated but not entitled. Signing out here would replace the
+        // real reason with "your session has expired", and the account is not
+        // lost, so nothing about the runtime is torn down.
+        if let apiError = error as? TonoAPIClient.APIError,
+           Self.isEntitlementFailure(apiError) {
+            enterEntitlementBlock(detail: apiError.errorDescription)
+            return
+        }
         let accountLost = signsOutOnUnauthorized
             && error as? TonoAPIClient.APIError == .unauthorized
         // Account loss purges synchronously before the first suspension point;
@@ -1112,6 +1241,7 @@ final class AccountSession {
         // aggregate available to a later session.
         if accountLost {
             deactivateAppRoutingResearch()
+            ManagedExitCatalogOwnership.purge()
             await abandonDiagnosticsLogUploader()
         } else {
             pauseAppRoutingResearch()
@@ -1155,6 +1285,10 @@ final class AccountSession {
     }
 
     private func clearAccount() {
+        // Managed exits carry this account's own client identity, so they are
+        // dropped here rather than being left for the next account to connect
+        // with. Idempotent: the logout and account-loss paths already purged.
+        ManagedExitCatalogOwnership.purge()
         shouldResumeProtection = false
         user = nil
         device = nil
@@ -1163,5 +1297,8 @@ final class AccountSession {
         enrollmentAuthKey = nil
         enrollmentHostname = nil
         emailChallenge = nil
+        deviceActionError = nil
+        entitlementDetail = nil
+        blockedWhileReady = false
     }
 }

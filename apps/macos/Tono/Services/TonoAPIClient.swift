@@ -18,6 +18,12 @@ actor TonoAPIClient {
     enum APIError: LocalizedError, Equatable {
         case invalidConfiguration, transport(String), unauthorized, forbidden, notFound
         case deviceLimit, server(status: Int, message: String), invalidResponse
+        /// The credential is valid but the account may not use it — disabled,
+        /// past its expiry, or at its data allowance. Kept apart from
+        /// `unauthorized` so it is neither retried behind a token refresh nor
+        /// reported to the user as an expired session.
+        case entitlementBlocked(code: String, message: String?)
+
         var errorDescription: String? {
             switch self {
             case .invalidConfiguration: String(localized: "Tono service is not configured.")
@@ -29,9 +35,37 @@ actor TonoAPIClient {
             // Server-provided text is shown verbatim; not a catalog key.
             case let .server(_, message): message
             case .invalidResponse: String(localized: "Tono returned an invalid response.")
+            case let .entitlementBlocked(code, _): Self.entitlementDescription(code)
+            }
+        }
+
+        /// Localized copy per entitlement reason. The envelope's own message is
+        /// English operator text, so it is carried as detail rather than shown.
+        private static func entitlementDescription(_ code: String) -> String {
+            switch code {
+            case "ACCOUNT_EXPIRED":
+                String(localized: "This Tono plan has expired. Renew it to keep connecting.")
+            case "QUOTA_EXCEEDED":
+                String(localized: "This Tono plan has used its full data allowance.")
+            default:
+                String(localized: "This Tono account is not active. Contact Tono support to restore access.")
             }
         }
     }
+
+    /// Reasons the control plane refuses an authenticated caller for an account
+    /// problem rather than a credential problem. `USER_DISABLED` is the only one
+    /// it names today — expiry and quota still answer 401 `UNAUTHORIZED`, which
+    /// is indistinguishable from a stale access token — so the rest are accepted
+    /// ahead of that server change instead of needing another client release.
+    private static let entitlementCodes: Set<String> = [
+        "ACCOUNT_DISABLED",
+        "ACCOUNT_EXPIRED",
+        "ACCOUNT_SUSPENDED",
+        "ENTITLEMENT_REQUIRED",
+        "QUOTA_EXCEEDED",
+        "USER_DISABLED",
+    ]
 
     private struct APIErrorBody: Decodable { let message: String?; let code: String? }
     private struct ErrorEnvelope: Decodable { let error: APIErrorBody }
@@ -195,9 +229,24 @@ actor TonoAPIClient {
     }
 
     func adopt(_ auth: TonoAuthResponse) throws {
+        guard let refresh = auth.refreshToken, !refresh.isEmpty else {
+            throw APIError.invalidResponse
+        }
         accessToken = auth.accessToken
         accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
-        if let refresh = auth.refreshToken { try keychain.set(refresh, for: .refreshToken) }
+        do {
+            try keychain.set(refresh, for: .refreshToken)
+            // A rotated-but-unpersisted token from the previous session
+            // outranks the keychain copy wherever it is read, so leaving it
+            // would write the old account's credential back over this one.
+            unpersistedRefreshToken = nil
+        } catch {
+            // The keychain still holds the previous account's token. Keeping
+            // the adopted one in memory is what makes it outrank that copy;
+            // clearing it here would be an irreversible sign-in failure.
+            unpersistedRefreshToken = refresh
+            throw error
+        }
     }
 
     /// `exp` from a JWT payload, or nil when the token is not a readable JWT.
@@ -546,6 +595,13 @@ actor TonoAPIClient {
                     details: rejectionDetails
                 )
                 let envelope = try? TonoCoding.decoder().decode(ErrorEnvelope.self, from: data)
+                if http.statusCode == 401 || http.statusCode == 403,
+                   let code = envelope?.error.code,
+                   Self.entitlementCodes.contains(code) {
+                    throw APIError.entitlementBlocked(
+                        code: code, message: envelope?.error.message
+                    )
+                }
                 if http.statusCode == 401 { throw APIError.unauthorized }; if http.statusCode == 403 { throw APIError.forbidden }
                 if http.statusCode == 404 { throw APIError.notFound }
                 if http.statusCode == 409 && envelope?.error.code == "DEVICE_LIMIT" { throw APIError.deviceLimit }

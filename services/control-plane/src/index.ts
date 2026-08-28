@@ -2829,22 +2829,43 @@ async function sharedAdministrativeResource(
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid before');
       }
     }
+    // A second is not unique — a PATCH that resets usage and changes a field
+    // writes two rows in the same one — so paging on the timestamp alone drops
+    // whichever of them did not fit on the page. `beforeId` carries the rest of
+    // the cursor; `before` on its own still means what it always did.
+    const rawBeforeId = params.get('beforeId');
+    let beforeId: string | null = null;
+    if (rawBeforeId !== null) {
+      if (before === null || !/^.{1,100}$/.test(rawBeforeId)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid beforeId');
+      }
+      beforeId = rawBeforeId;
+    }
     const targetId = params.get('targetId');
     const actorEmail = params.get('actorEmail');
+    // The two equality filters are spliced in rather than guarded by a bound
+    // flag: one plan is compiled for every binding, and `? = 0 OR target_id = ?`
+    // can never reach an index on `target_id`, so following one customer back
+    // through the log would read all of it.
+    const filters = [
+      ...(targetId === null ? [] : ['AND target_id = ?']),
+      ...(actorEmail === null ? [] : ['AND actor_email = ?']),
+    ].join('\n         ');
     const q = await e.DB.prepare(
       `SELECT * FROM ops_audit
-       WHERE (? = 0 OR at < ?)
-         AND (? = 0 OR target_id = ?)
-         AND (? = 0 OR actor_email = ?)
-       ORDER BY at DESC LIMIT ?`,
-    ).bind(
+       WHERE (? = 0 OR at < ? OR (? = 1 AND at = ? AND id < ?))
+         ${filters}
+       ORDER BY at DESC, id DESC LIMIT ?`,
+    ).bind(...[
       before === null ? 0 : 1, before ?? 0,
-      targetId === null ? 0 : 1, targetId ?? '',
-      actorEmail === null ? 0 : 1, actorEmail ?? '',
+      beforeId === null ? 0 : 1, before ?? 0, beforeId ?? '',
+      ...(targetId === null ? [] : [targetId]),
+      ...(actorEmail === null ? [] : [actorEmail]),
       limit + 1,
-    ).all<Row>();
+    ]).all<Row>();
     const hasMore = q.results.length > limit;
     const rows = hasMore ? q.results.slice(0, limit) : q.results;
+    const last = rows.length ? rows[rows.length - 1] : null;
     return Response.json({
       entries: rows.map((row) => ({
         id: String(row.id),
@@ -2856,7 +2877,8 @@ async function sharedAdministrativeResource(
         summary: String(row.summary),
       })),
       hasMore,
-      nextBefore: hasMore && rows.length ? Number(rows[rows.length - 1].at) : null,
+      nextBefore: hasMore && last ? Number(last.at) : null,
+      nextBeforeId: hasMore && last ? String(last.id) : null,
     });
   }
 
@@ -2996,14 +3018,7 @@ async function operationsFleetNodes(e: Env, cache?: OpsRequestCache) {
     const agentStatus = observedAt === null ? 'missing' : nowSec - observedAt > 15 * 60 ? 'stale' : 'online';
     const q = fleetQualityStatus(qualityNode ?? undefined);
     const affectedRows = activity.users.filter((user) => user.selectedServer === name);
-    const affectedByUser = new Map<string, Row>();
-    for (const user of affectedRows) {
-      const current = affectedByUser.get(String(user.userId));
-      if (!current || Number(user.lastSeenAt) > Number(current.lastSeenAt)) {
-        affectedByUser.set(String(user.userId), user);
-      }
-    }
-    const affectedUsers = [...affectedByUser.values()];
+    const affectedUsers = latestPerUser(affectedRows);
     const reasons: string[] = [];
     const listed = catalogNames?.has(name) ?? null;
     if (listed === true && q.status === 'DOWN') reasons.push('catalog_health_down');
@@ -3250,7 +3265,11 @@ export function retirementCatalogPlan(yaml: string, name: string): {
 }
 
 async function operationsRetirePreview(e: Env, name: string, cache?: OpsRequestCache) {
-  const [fleet, catalog] = await Promise.all([operationsFleetNodes(e, cache), managedCatalogTemplate(e)]);
+  const [fleet, catalog, selections] = await Promise.all([
+    operationsFleetNodes(e, cache),
+    managedCatalogTemplate(e),
+    operationsNodeSelections(e, name, cache),
+  ]);
   const node = fleet.nodes.find((candidate) => candidate.name === name);
   if (!node) throw new ApiError(404, 'NOT_FOUND', 'Fleet node not found');
   const catalogPlan = retirementCatalogPlan(catalog.yaml, name);
@@ -3265,7 +3284,7 @@ async function operationsRetirePreview(e: Env, name: string, cache?: OpsRequestC
     node,
     expectedRevision: catalog.revision,
     currentRevision: catalog.revision,
-    affectedUsers: node.affectedUsers,
+    affectedUsers: latestPerUser(selections),
     changes,
     warnings: catalogPlan.warnings,
     canRetire: catalogPlan.safe && changes.catalogEntryRemoved,
@@ -3919,6 +3938,78 @@ function qualityNodeByName(quality: { nodes: Row[] } | null, name: string | null
   return quality.nodes.find((node) => node.name === name) ?? null;
 }
 
+function activityUser(row: Row, quality: { nodes: Row[] } | null, nowSec: number) {
+  let payload: Row = {};
+  try {
+    payload = JSON.parse(String(row.payload_json));
+  } catch {
+    payload = {};
+  }
+  const lastSeenAt = Number(row.received_at);
+  const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
+  const health = nodeHealthFromQuality(qualityNodeByName(quality, selectedServer));
+  return {
+    userId: String(row.user_id),
+    deviceId: row.device_id === null || row.device_id === undefined ? null : String(row.device_id),
+    email: String(row.email),
+    lastSeenAt,
+    online: nowSec - lastSeenAt <= ACTIVITY_ONLINE_SECONDS,
+    clientVersion: String(row.client_version),
+    osVersion: String(row.os_version),
+    selectedServer,
+    uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
+    catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
+    ...telemetryPathFields(payload, lastSeenAt),
+    ...health,
+  };
+}
+
+/** One row per customer: the device that reported the node most recently. */
+function latestPerUser<T extends { userId: string; lastSeenAt: number }>(rows: T[]): T[] {
+  const byUser = new Map<string, T>();
+  for (const row of rows) {
+    const current = byUser.get(row.userId);
+    if (!current || row.lastSeenAt > current.lastSeenAt) byUser.set(row.userId, row);
+  }
+  return [...byUser.values()];
+}
+
+/**
+ * Everyone whose latest telemetry window names this node, over the whole
+ * telemetry retention rather than the activity view's one-day scan.
+ *
+ * Who loses an exit when it is retired is not a liveness question: a customer
+ * who has not opened their laptop this week has still selected it and still
+ * finds it gone. The day-bounded scan stays where it belongs — the online and
+ * active lists — and this pays for the full window only when an operator asks
+ * about one node.
+ */
+async function operationsNodeSelections(e: Env, name: string, cache?: OpsRequestCache) {
+  const live = await operationsLive(e, cache);
+  const nowSec = now();
+  // Rank ids only: those columns all live in the (user_id, device_id,
+  // received_at, id) index, so the whole retention is ranked without touching a
+  // row, and the payload is read and parsed once per device rather than once
+  // per window.
+  const rows = await e.DB.prepare(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY user_id, COALESCE(device_id, '')
+                ORDER BY received_at DESC, id DESC
+              ) AS rank
+       FROM telemetry_windows
+     )
+     SELECT t.id, t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
+            t.payload_json, u.email
+     FROM ranked
+     JOIN telemetry_windows t ON t.id = ranked.id
+     JOIN users u ON u.id = t.user_id
+     WHERE ranked.rank = 1 AND json_extract(t.payload_json, '$.selectedServer') = ?
+     ORDER BY t.received_at DESC, t.id DESC`,
+  ).bind(name).all<Row>();
+  return rows.results.map((row) => activityUser(row, live.quality, nowSec));
+}
+
 async function loadOperationsActivity(e: Env, cache?: OpsRequestCache) {
   const live = await operationsLive(e, cache);
   const quality = live.quality;
@@ -3940,31 +4031,7 @@ async function loadOperationsActivity(e: Env, cache?: OpsRequestCache) {
      WHERE rank = 1
      ORDER BY received_at DESC, id DESC`,
   ).bind(nowSec - ACTIVITY_SCAN_SECONDS).all<Row>();
-  const users = rows.results.map((row) => {
-    let payload: Row = {};
-    try {
-      payload = JSON.parse(String(row.payload_json));
-    } catch {
-      payload = {};
-    }
-    const lastSeenAt = Number(row.received_at);
-    const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
-    const health = nodeHealthFromQuality(qualityNodeByName(quality, selectedServer));
-    return {
-      userId: String(row.user_id),
-      deviceId: row.device_id === null || row.device_id === undefined ? null : String(row.device_id),
-      email: String(row.email),
-      lastSeenAt,
-      online: nowSec - lastSeenAt <= ACTIVITY_ONLINE_SECONDS,
-      clientVersion: String(row.client_version),
-      osVersion: String(row.os_version),
-      selectedServer,
-      uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
-      catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
-      ...telemetryPathFields(payload, lastSeenAt),
-      ...health,
-    };
-  });
+  const users = rows.results.map((row) => activityUser(row, quality, nowSec));
   const onlineRows = users.filter((user) => user.online);
   // Pre-0019 windows carry no device id; fall back to per-user counting there.
   const onlineDevices = new Set(onlineRows.map(
@@ -7149,12 +7216,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (mt) {
         const name = decodeURIComponent(mt[1]);
         if (!name || name.length > 200) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid node name');
-        const activity = await operationsActivity(e, opsCache);
-        const affected = activity.users.filter((user) => user.selectedServer === name);
         return Response.json({
           node: name,
-          onlineWindowSeconds: activity.onlineWindowSeconds,
-          affected,
+          onlineWindowSeconds: ACTIVITY_ONLINE_SECONDS,
+          affected: await operationsNodeSelections(e, name, opsCache),
         });
       }
       throw new ApiError(404, 'NOT_FOUND', 'Route not found');
@@ -7989,11 +8054,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          -- A figure that grew is taken whatever its timestamp says, because what
          -- is taken from it is the difference and a repeat of it adds nothing. A
          -- figure that fell is only a rebuilt node if it is the newest word from
-         -- that source; arriving after a higher one it is a stale batch, and
-         -- counting it as a reset would bill the account for it twice.
+         -- that source; arriving at or before a higher one it is a stale batch,
+         -- and counting it as a reset would add its whole cumulative figure and
+         -- bill the account for its history a second time.
          WHERE usage_report_sources.source_id = ''
             OR excluded.last_total_bytes > usage_report_sources.last_total_bytes
-            OR excluded.observed_at >= usage_report_sources.observed_at`,
+            OR excluded.observed_at > usage_report_sources.observed_at`,
         ).bind(encodedReports, receivedAt),
         e.DB.prepare(
         `WITH input AS (

@@ -2610,28 +2610,45 @@ pub fn select_action(
     SelectAction::UpdateOnly
 }
 
+/// F3: publish (or withdraw) the deadline the Protected Offline card counts down to.
+///
+/// [`schedule_reconnect_locked`] and the immediate retry write it for the rung they hand out,
+/// but every rung after the first belongs to [`reconnect_loop`], which only computed a delay and
+/// slept. The card therefore showed Protected Offline and a stale error through the whole
+/// 5/10/20/30 s wait with nothing saying a retry was queued.
+async fn publish_next_retry(state: &Arc<TonoState>, delay: Option<Duration>) {
+    let mut inner = state.lock().await;
+    inner.next_retry_at_ms = delay.map(|delay| commands::epoch_millis() + delay.as_millis() as i64);
+}
+
 async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Duration) {
     let mut delay = first_delay;
     loop {
         tokio::time::sleep(delay).await;
-        {
+        let allowed = {
             let inner = state.lock().await;
-            if !reconnect_allowed(
+            reconnect_allowed(
                 inner.catalog_requires_choice,
                 inner.fsm.status(),
                 inner.fsm.kill_switch_armed(),
-            ) {
-                return;
-            }
+            )
+        };
+        if !allowed {
+            publish_next_retry(&state, None).await;
+            return;
         }
         match attempt(&state, &app).await {
             Attempt::Connected => {
                 seed_autostart_after_connect();
                 return;
             }
-            Attempt::Stale => return,
+            Attempt::Stale => {
+                publish_next_retry(&state, None).await;
+                return;
+            }
             Attempt::GuardRejected(reason) => {
                 if !guard_rejection_is_transient(&reason) {
+                    publish_next_retry(&state, None).await;
                     return;
                 }
                 // The attempt never started, so this is not a connect failure: no `fail_connect`,
@@ -2643,6 +2660,7 @@ async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Dura
                     let next = inner.fsm.next_reconnect_delay();
                     (next, inner.fsm.reconnect_budget_exhausted())
                 };
+                publish_next_retry(&state, next).await;
                 match next {
                     Some(next_delay) => delay = next_delay,
                     None => {
@@ -2664,6 +2682,7 @@ async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Dura
                     };
                     (next, inner.fsm.reconnect_budget_exhausted())
                 };
+                publish_next_retry(&state, next).await;
                 match next {
                     Some(next_delay) => delay = next_delay,
                     None => {
@@ -3107,6 +3126,24 @@ async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>) -> bool {
     }
 }
 
+/// Whether the in-place recovery hold may still stand in for a teardown the Service leg asked
+/// for. The cooldown bounds how long that hold runs; this is what it is held *on*: a data-plane
+/// proof, taken fresh unless one is still inside [`NETWORK_EVENT_PROBE_COOLDOWN`] — without that
+/// reuse a Service that never answers again would probe every other tick for the whole session.
+async fn in_place_hold_still_proven(
+    state: &Arc<TonoState>,
+    legs: &mut HealthLegs,
+    last_proof: &mut Option<std::time::Instant>,
+) -> bool {
+    if last_proof.is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN) {
+        return true;
+    }
+    let failed = periodic_data_plane_probe_failed(state).await;
+    *last_proof = if failed { None } else { Some(std::time::Instant::now()) };
+    legs.observe_probe(failed);
+    !failed
+}
+
 async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
     // H7: `Delay`, never the default `Burst` — see `HEALTH_FAILURE_THRESHOLD`.
     let mut interval = monitor_interval();
@@ -3114,8 +3151,11 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
     let mut legs = HealthLegs::default();
     let mut missing_core_samples = 0_u32;
     let mut last_probe = std::time::Instant::now();
-    // `None` until the first event-driven proof, so the first network change after connect is
-    // always probed rather than inheriting the connect-time verdict.
+    // The last successful data-plane proof taken outside the periodic cadence, `None` until the
+    // first one so the first network change after connect is always probed rather than inheriting
+    // the connect-time verdict. The service-unreachable hold below reads and writes it too: a
+    // proof is a proof whichever path paid for it, and reusing it inside
+    // [`NETWORK_EVENT_PROBE_COOLDOWN`] is what keeps the hold from probing every other tick.
     let mut last_event_probe_ok: Option<std::time::Instant> = None;
     // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
     // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
@@ -3144,10 +3184,19 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
                 });
                 if legs.invalid() {
                     // A Service that never answers again reaches the threshold two ticks after
-                    // every re-seed; inside the cooldown the last data-plane proof still stands.
+                    // every re-seed; the cooldown is what stops that firing for the whole session.
                     if last_in_place_recovery.is_some_and(|at| at.elapsed() < IN_PLACE_RECOVERY_COOLDOWN) {
-                        legs = HealthLegs::default();
-                        continue;
+                        // Re-seed the one leg this poll observed. Wiping the whole record threw
+                        // away kill-switch, protected-DNS and probe counts that a failed Service
+                        // poll never contradicted — and nothing re-observes those legs for as
+                        // long as the Service stays unreachable, so they were lost, not deferred.
+                        legs.observe_service_ok();
+                        // Elapsed time on its own is not evidence: this path continues before
+                        // the periodic probe below, so nothing watches the tunnel while the hold
+                        // runs.
+                        if in_place_hold_still_proven(&state, &mut legs, &mut last_event_probe_ok).await {
+                            continue;
+                        }
                     }
                     if !connection_loop_continues(handle_network_change(&state, &app).await) {
                         return;

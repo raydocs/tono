@@ -70,7 +70,7 @@ struct ProxiesView: View {
         .onChange(of: showingAddNode) { _, showing in
             if !showing { editingNode = nil }
         }
-        .onChange(of: appState.selectedNodeId) { oldValue, newValue in
+        .onChange(of: selectedNodeName) { oldValue, newValue in
             // Restore/initial catalog sync assigns the selection without a
             // user switch; only announce a real node-to-node change.
             guard oldValue != nil, let newValue, oldValue != newValue else { return }
@@ -113,6 +113,26 @@ struct ProxiesView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    /// The selection resolved to the exit's name.
+    ///
+    /// Catalog nodes carry an `id` generated fresh on every parse, so installing
+    /// a revision hands every server a new one while the selection — restored by
+    /// name onto the same server — has not moved. The name is what a real switch
+    /// changes, which is what the "Switched to" toast is announcing.
+    private var selectedNodeName: String? {
+        guard let selected = appState.selectedNodeId else { return nil }
+        if let node = appState.proxyRegions.flatMap(\.nodes)
+            .first(where: { $0.id == selected || $0.name == selected }) {
+            return node.name
+        }
+        // Everything that is not a catalog node — a proxy group, the home exit,
+        // a runtime-only node — is already stored under its own stable name and
+        // reaches `activeNodeName` unchanged. An id that matches neither is a
+        // selection left behind by a catalog that was dropped, not a switch.
+        guard appState.proxyService.activeNodeName == selected else { return nil }
+        return selected
     }
 
     /// Region chips are derived from the catalog itself: "All" plus every

@@ -1321,6 +1321,42 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(await counted()).toBe(1_620);
   });
 
+  it('does not read a fallen figure sharing a timestamp as a rebuilt exit', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_tied', 'tied@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const report = (reportId: string, totalBytes: number, at: number) =>
+      api('home/usage', json({
+        reports: [{
+          reportId, userId: 'usr_tied', sourceId: 'exit-t', totalBytes, observedAt: at,
+        }],
+      }, HOME_TOKEN));
+    const counted = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes FROM users WHERE id = ?',
+      ).bind('usr_tied').first<Record<string, unknown>>();
+      return Number(row!.usage_bytes);
+    };
+
+    expect((await report('tie-1', 900, seeded)).status).toBe(200);
+    expect(await counted()).toBe(900);
+
+    // The agent stamps one timestamp per run and holds no lock, so a timer
+    // firing beside a manual run can land two reports in the same second with
+    // the higher one first. The lower one is a reading from that same second,
+    // not a rebuild: carrying it forward would bill the whole cumulative figure
+    // a second time.
+    expect((await report('tie-2', 400, seeded)).status).toBe(200);
+    expect(await counted()).toBe(900);
+
+    // A rebuilt node's counter is always later than the figure it replaces.
+    expect((await report('tie-3', 120, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+  });
+
   it('lets a billing cycle be reset without the next report undoing it', async () => {
     const t = Math.floor(Date.now() / 1000);
     await (env as unknown as Env).DB.prepare(
@@ -5900,6 +5936,88 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await again.json() as any).error.code).toBe('RETIRE_UNSAFE');
   });
 
+  it('counts a customer offline for days among those a retirement would affect', async () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Fuji',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const putCatalog = await api('ops/exit-catalog', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+      },
+      body: JSON.stringify({ yaml, expectedRevision: 0 }),
+    });
+    expect(putCatalog.status).toBe(200);
+
+    const away = await createAccount('retire-away');
+    const moved = await createAccount('retire-moved');
+    const heartbeat = (
+      rowId: string,
+      account: { user: { id: string }; device: { id: string } },
+      at: number,
+      selectedServer: string,
+    ) => env.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+         client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, '0.0.90', 'macOS 26', ?)`,
+    ).bind(
+      rowId,
+      account.user.id,
+      account.device.id,
+      at,
+      (at - 1_200) * 1_000,
+      at * 1_000,
+      JSON.stringify(telemetryWindowPayload({ selectedServer }).window),
+    );
+
+    const nowSec = Math.floor(Date.now() / 1_000);
+    await env.DB.batch([
+      // Telemetry is retained for thirty days; the activity view ranks one.
+      heartbeat('retire-away-window', away, nowSec - 5 * 86_400, 'Tokyo · Sakura'),
+      // This customer had it selected once and has since moved off it.
+      heartbeat('retire-moved-old', moved, nowSec - 6 * 86_400, 'Tokyo · Sakura'),
+      heartbeat('retire-moved-new', moved, nowSec - 4 * 86_400, 'Tokyo · Fuji'),
+    ]);
+
+    const sakura = encodeURIComponent('Tokyo · Sakura');
+    const preview = await (await operations(`fleet-nodes/${sakura}/retire-preview`)).json() as any;
+    // Being asleep is not being unaffected: this exit is still their selection
+    // and they are still the ones who lose it.
+    expect(preview.affectedUsers).toHaveLength(1);
+    expect(preview.affectedUsers[0]).toMatchObject({
+      userId: away.user.id,
+      selectedServer: 'Tokyo · Sakura',
+      online: false,
+    });
+
+    const incidents = await (await operations(`incidents/node/${sakura}`)).json() as any;
+    expect(incidents.affected.map((row: any) => row.userId)).toEqual([away.user.id]);
+
+    // The activity endpoint is a liveness view and stays inside its day.
+    const { activity } = await (await operations('activity')).json() as any;
+    expect(activity.users.map((row: any) => row.userId)).toEqual([]);
+  });
+
   it('keeps collector text bodies out of the fleet list but reachable per node', async () => {
     expect((await api('ops/fleet-nodes', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
@@ -6095,6 +6213,40 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     for (const bad of ['limit=0', 'limit=501', 'limit=ten', 'before=0', 'before=soon']) {
       expect((await operations(`audit?${bad}`)).status).toBe(400);
     }
+  });
+
+  it('pages the audit log past rows written in the same second', async () => {
+    // A PATCH that both resets usage and changes a field writes two rows one
+    // after the other, and the log's clock has no room between them.
+    const seed = (rowId: string, at: number) =>
+      env.DB.prepare(
+        `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
+         VALUES(?, ?, 'a@example.com', 'user.update', 'user', 'usr_tie', ?)`,
+      ).bind(rowId, at, `update ${rowId}`).run();
+    await seed('aud-tie-a', 5000);
+    await seed('aud-tie-b', 5000);
+    await seed('aud-tie-older', 4000);
+
+    const walk = async () => {
+      const ids: string[] = [];
+      let cursor = '';
+      for (let page = 0; page < 10; page += 1) {
+        const body = await (await operations(`audit?limit=1${cursor}`)).json() as any;
+        ids.push(...body.entries.map((entry: any) => entry.id));
+        if (!body.hasMore) return ids;
+        cursor = `&before=${body.nextBefore}&beforeId=${encodeURIComponent(body.nextBeforeId)}`;
+      }
+      throw new Error('audit paging did not terminate');
+    };
+
+    // One row per page, so the boundary falls inside the pair. Neither of them
+    // may be skipped, and the newest-first order stays deterministic.
+    expect(await walk()).toEqual(['aud-tie-b', 'aud-tie-a', 'aud-tie-older']);
+
+    // The timestamp alone is still a valid cursor for a hand-written request.
+    const older = await (await operations('audit?before=5000')).json() as any;
+    expect(older.entries.map((entry: any) => entry.id)).toEqual(['aud-tie-older']);
+    expect((await operations('audit?beforeId=aud-tie-a')).status).toBe(400);
   });
 
   it('lists the customers currently on a node for incident triage', async () => {

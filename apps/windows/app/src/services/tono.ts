@@ -158,6 +158,20 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
     key: 'tono.dashboard.errors.nodeUnreachable',
   },
+  // The other two post-lock classifications. The backend composes them into
+  // English sentences carrying raw probe detail, and the failure they describe
+  // takes the full-release path, so without these the marker and its detail
+  // reached the dashboard's main error box verbatim. The untranslated string
+  // still reaches Copy details and the diagnostics upload, which is where that
+  // probe detail belongs.
+  {
+    prefix: 'TONO_TUN_DATA_PLANE_BROKEN',
+    key: 'tono.dashboard.errors.tunDataPlaneBroken',
+  },
+  {
+    prefix: 'TONO_TUN_INGRESS_BROKEN',
+    key: 'tono.dashboard.errors.tunIngressBroken',
+  },
   // Diagnostics upload (`diagnostics_upload_error` in tono/commands.rs).
   {
     prefix: 'TONO_DIAG_SIGNED_OUT',

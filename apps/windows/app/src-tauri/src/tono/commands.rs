@@ -847,6 +847,13 @@ pub async fn tono_select_server(
         if action == connection::SelectAction::Reconnect {
             // The reconnect re-arms rather than releases (H-1 intent).
             inner.invalidate_connection(false);
+            // Picking a city is the same evidence "Retry now" carries: someone is at the
+            // machine and has just chosen a different exit. A spent ladder left
+            // `schedule_reconnect` below with no rung to hand out, so it logged and returned
+            // while this command still persisted the selection and reported success — the UI
+            // confirmed a switch nothing had attempted. The unattended `reconnect_loop` is
+            // bounded by the budget it consumes, not by this reset.
+            inner.fsm.reset_reconnect_backoff();
         }
         let generation = inner.connect_generation;
         if let Err(err) = crate::tono::state::save_selection(&inner.catalog_dir, &name) {

@@ -311,6 +311,44 @@ describe('operations timeseries retention', () => {
     expect(points.length).toBeGreaterThan(0);
   });
 
+  it('keeps the recent minutes in a 7-day view when the cadence misses even minutes', async () => {
+    const now = 1_800_000_000;
+    // Above 24h the sample tier is strided. The collector's cadence is a
+    // setting (the runbook documents one to five minutes), so a stride over
+    // wall-clock minute numbers keeps only the minutes it happens to name —
+    // here, none of them, and the curve stops where the rollups stop.
+    const observed = [9, 7, 5, 3, 1].map((minute) => now - minute * 60);
+    await recordAgentSamples(
+      db(), observed.map((t, i) => sample('Odd cadence', t, (i + 1) * 10)), now,
+    );
+
+    const metrics = await queryAgentMetrics(db(), {
+      range: '7d', node: 'Odd cadence', nowUnix: now,
+    });
+    const points = metrics.series['Odd cadence'] ?? [];
+    expect(points.length).toBeGreaterThanOrEqual(3);
+    expect(points[0].t).toBe(now - 9 * 60);
+    expect(points[points.length - 1].t).toBe(now - 60);
+  });
+
+  it('keeps the newest sample when the strided series has an even length', async () => {
+    const now = 1_800_000_000;
+    // Counting positions from the oldest row keeps the last one only when the
+    // count is odd, so an even-length series lost exactly the point the chart
+    // is read for.
+    const observed = [8, 6, 4, 2].map((minute) => now - minute * 60);
+    await recordAgentSamples(
+      db(), observed.map((t, i) => sample('Even cadence', t, (i + 1) * 10)), now,
+    );
+
+    const metrics = await queryAgentMetrics(db(), {
+      range: '7d', node: 'Even cadence', nowUnix: now,
+    });
+    const points = metrics.series['Even cadence'] ?? [];
+    expect(points.length).toBeGreaterThanOrEqual(2);
+    expect(points[points.length - 1].t).toBe(now - 2 * 60);
+  });
+
   it('emits only the requested point fields', async () => {
     const now = 1_800_000_000;
     await recordAgentSamples(db(), [sample('Fields', now - 120, 33)], now);

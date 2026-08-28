@@ -483,9 +483,9 @@ export async function queryAgentMetrics(
     (series[name] ??= []).push(point);
   };
 
-  // Thin in SQL when a tier holds more buckets than the point budget: every Nth
-  // bucket by the time column, so the rows a chart would never draw are never
-  // materialized. Below the budget the stride is 1 and nothing changes.
+  // Thin in SQL when a tier holds more points than the point budget, so the
+  // rows a chart would never draw are never materialized. Below the budget the
+  // stride is 1 and nothing changes.
   const stride = (resolution: number, since: number) =>
     Math.max(1, Math.ceil((Math.floor((to - since) / resolution) + 1) / MAX_SERIES_POINTS));
 
@@ -498,17 +498,31 @@ export async function queryAgentMetrics(
   const readSamples = async (since: number) => {
     const columns = requested.map((field) => `${METRIC_FIELDS[field].sample} AS ${field}`).join(', ');
     const step = stride(60, since);
+    // A rollup tier's buckets are dense, so every Nth bucket by the time column
+    // is every Nth point. Samples are not: the collector's cadence is a setting,
+    // and a stride over wall-clock minutes keeps only the minute numbers it
+    // happens to name — none of them when the cadence is an aligned even number
+    // of minutes, which silently ends the curve where this tier begins. The
+    // stride here counts position within the node's own series instead, from
+    // the newest end: counting from the oldest keeps the last row only when the
+    // series length happens to be odd, and the newest sample is the one the
+    // recent-minutes tier exists for.
+    const position = step > 1
+      ? ', ROW_NUMBER() OVER (PARTITION BY node_name ORDER BY observed_at DESC) AS position'
+      : '';
     const rows = await db.prepare(
-      `SELECT node_name, observed_at AS t, ${columns}
-       FROM operations_agent_samples
-       WHERE observed_at >= ? AND observed_at <= ?
-         ${step > 1 ? 'AND (observed_at / CAST(? AS INTEGER)) % CAST(? AS INTEGER) = 0' : ''}
-         ${node ? 'AND node_name = ?' : ''}
-       ORDER BY observed_at ASC`,
+      `SELECT node_name, t, ${requested.join(', ')} FROM (
+         SELECT node_name, observed_at AS t, ${columns}${position}
+         FROM operations_agent_samples
+         WHERE observed_at >= ? AND observed_at <= ?
+           ${node ? 'AND node_name = ?' : ''}
+       )
+       ${step > 1 ? 'WHERE (position - 1) % CAST(? AS INTEGER) = 0' : ''}
+       ORDER BY t ASC`,
     ).bind(...[
       since, to,
-      ...(step > 1 ? [60, step] : []),
       ...(node ? [node] : []),
+      ...(step > 1 ? [step] : []),
     ]).all<Row>();
     for (const row of rows.results) push(String(row.node_name), row);
   };

@@ -649,12 +649,32 @@
         }
       }
     },
+    "Check again": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新检查"
+          }
+        }
+      }
+    },
     "Check for Updates": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "检查更新"
+          }
+        }
+      }
+    },
+    "Check this plan's expiry date and data allowance, or sign out and sign in again. Contact Tono support if this continues.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请查看该套餐的到期时间与流量额度，或退出登录后重新登录。若问题持续，请联系 Tono 客服。"
           }
         }
       }
@@ -2317,6 +2337,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在锁定流量到隧道…"
+          }
+        }
+      }
+    },
+    "Log upload is off. Turn it on in Settings › Privacy.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志上传已关闭。请在「设置 › 隐私」中开启。"
           }
         }
       }
@@ -4145,6 +4175,16 @@
         }
       }
     },
+    "Sign in to send the log to support.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "登录后才能把日志发送给支持团队。"
+          }
+        }
+      }
+    },
     "Sign in with Apple is not configured.": {
       "localizations": {
         "zh-Hans": {
@@ -4901,12 +4941,52 @@
         }
       }
     },
+    "This Tono account cannot connect": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Tono 账户无法连接"
+          }
+        }
+      }
+    },
     "This Tono account has reached its device allowance. Revoke another device first.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "此 Tono 账户已达到设备数量上限，请先撤销另一台设备。"
+          }
+        }
+      }
+    },
+    "This Tono account is not active. Contact Tono support to restore access.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Tono 账户当前不可用，请联系 Tono 客服恢复访问。"
+          }
+        }
+      }
+    },
+    "This Tono plan has expired. Renew it to keep connecting.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Tono 套餐已到期，续费后即可继续连接。"
+          }
+        }
+      }
+    },
+    "This Tono plan has used its full data allowance.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此 Tono 套餐的流量额度已用完。"
           }
         }
       }
@@ -5349,6 +5429,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即上传"
+          }
+        }
+      }
+    },
+    "Upload run finished. Nothing is sent when the log has not advanced since the last upload.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上传已执行。若日志自上次上传后没有新增内容，则不会发送任何内容。"
           }
         }
       }

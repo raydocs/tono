@@ -7,10 +7,18 @@ struct SupportView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
     private var remoteDiagnosticsEnabled = false
+    @AppStorage(
+        SettingsKey.networkLogUploadEnabled,
+        store: AppProfile.defaults
+    ) private var networkLogUploadEnabled = true
 
     @State private var probe: RuntimeProbe?
     @State private var isProbing = false
     @State private var isUploadingLog = false
+    /// Whether the manual upload has been run since this page was opened. The
+    /// sweep's outcome does not come back through `uploadDiagnosticsLogNow()`,
+    /// so this reports that the run happened and claims nothing about delivery.
+    @State private var logUploadRan = false
     @State private var copiedTarget: CopyTarget?
 
     private static let recoveryCommand =
@@ -270,27 +278,71 @@ struct SupportView: View {
             // The upload already runs on a timer; this exists for the support
             // conversation, where waiting two minutes for the tick is the
             // difference between diagnosing a live symptom and losing it.
-            HStack(spacing: 8) {
-                Text(String(localized: "Send the newest log segment to support now"))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Button(isUploadingLog
-                    ? String(localized: "Sending…")
-                    : String(localized: "Upload now")) {
-                    guard !isUploadingLog, let accountSession else { return }
-                    isUploadingLog = true
-                    Task {
-                        await accountSession.uploadDiagnosticsLogNow()
-                        isUploadingLog = false
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(String(localized: "Send the newest log segment to support now"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button(isUploadingLog
+                        ? String(localized: "Sending…")
+                        : String(localized: "Upload now")) {
+                        guard !isUploadingLog, logUploadBlockedReason == nil,
+                              let accountSession else { return }
+                        isUploadingLog = true
+                        logUploadRan = false
+                        Task {
+                            await accountSession.uploadDiagnosticsLogNow()
+                            isUploadingLog = false
+                            logUploadRan = true
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .disabled(isUploadingLog || logUploadBlockedReason != nil)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tint)
-                .disabled(isUploadingLog || accountSession == nil)
+
+                // Each of these preconditions makes the sweep return without
+                // sending anything, and the button cannot tell that apart from a
+                // send once it has finished. Naming the missing one beats
+                // spending the wait on "Sending…" and then reporting nothing.
+                if let blocked = logUploadBlockedReason {
+                    HStack(spacing: 8) {
+                        Text(blocked)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !networkLogUploadEnabled {
+                            Button(String(localized: "Open Settings")) {
+                                appState.selectedPage = .settings
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tint)
+                        }
+                    }
+                } else if logUploadRan {
+                    Text(String(localized: "Upload run finished. Nothing is sent when the log has not advanced since the last upload."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
+    }
+
+    /// Why the manual upload would send nothing right now, or nil when it can
+    /// run. These mirror the preconditions the session's own upload loop checks:
+    /// with any of them missing the sweep returns without touching the network.
+    private var logUploadBlockedReason: String? {
+        guard let accountSession, accountSession.user != nil, accountSession.isReady else {
+            return String(localized: "Sign in to send the log to support.")
+        }
+        guard networkLogUploadEnabled else {
+            return String(localized: "Log upload is off. Turn it on in Settings › Privacy.")
+        }
+        return nil
     }
 
     // MARK: - Diagnostics Report

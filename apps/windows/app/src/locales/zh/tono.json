@@ -196,6 +196,8 @@
       "releaseReconciling": "保护还在解除，请稍后再连。",
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
+      "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",
+      "tunIngressBroken": "节点是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
       "protectedHttpsFailed": "受保护的 HTTPS 失败。多个节点都这样时，换节点没用，请发诊断。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
