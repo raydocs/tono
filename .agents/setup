@@ -25,7 +25,9 @@ install_system_packages() {
     patchelf
     pkg-config
     python3-venv
+    ruby
     xz-utils
+    zsh
   )
   local missing=()
   local package
