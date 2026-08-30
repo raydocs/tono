@@ -53,6 +53,17 @@ def placeholder_count(text)
   text.scan(CLIENT_UUID_PLACEHOLDER).length
 end
 
+def managed_identity_block?(block)
+  uuid_keys = block.scan(/^\s*(?:-\s*)?uuid\s*:/).length +
+              block.scan(/[{,]\s*uuid\s*:/).length
+  return false unless uuid_keys == 1
+
+  placeholder = Regexp.escape(CLIENT_UUID_PLACEHOLDER)
+  scalar = /(?:["']#{placeholder}["']|#{placeholder})/
+  block.match?(/^\s*(?:-\s*)?uuid\s*:\s*#{scalar}\s*(?:#.*)?$/) ||
+    block.match?(/[{,]\s*uuid\s*:\s*#{scalar}\s*(?=[,}])/)
+end
+
 # Parses a throwaway copy purely to read structure. Nothing this returns is ever
 # written back into a catalog: "{{TONO_CLIENT_UUID}}" is a valid YAML flow
 # mapping, so a load/dump round trip rewrites every per-account identity into a
@@ -181,11 +192,10 @@ ARGV.each do |path|
   fail!("Every catalog source must contain a proxies list this tool can edit as text.") if source.nil?
   fail!("A catalog source's proxies list does not match its parsed node count.") unless
     source[:blocks].length == nodes.length
+  fail!("Every managed node must have exactly one per-account uuid placeholder.") unless
+    source[:blocks].all? { |block| managed_identity_block?(block) }
   names.concat(nodes.map { |node| node.is_a?(Hash) ? node["name"] : nil })
-  # Counted over the source file, not over the blocks taken out of it. Counted
-  # over the blocks the tally would be whatever was spliced, and the invariant
-  # below would restate the splice instead of checking it.
-  added_placeholders += placeholder_count(content)
+  added_placeholders += source[:blocks].sum { |block| placeholder_count(block) }
   source[:blocks].each do |block|
     incoming_blocks << reindent_block(block, source[:indent], CATALOG_ITEM_INDENT)
   end
@@ -265,7 +275,9 @@ if mode == :append
   fail!("The current managed catalog has no proxies list this tool can edit as text; refusing to append.") if current.nil?
   fail!("The current managed catalog's proxies list does not match its parsed node count; refusing to append.") unless
     current[:blocks].length == current_proxies.length
-  kept_placeholders = placeholder_count(current_yaml)
+  fail!("The current managed catalog has a node without exactly one per-account uuid placeholder; refusing to append.") unless
+    current[:blocks].all? { |block| managed_identity_block?(block) }
+  kept_placeholders = current[:blocks].sum { |block| placeholder_count(block) }
   appended_blocks = incoming_blocks.map do |block|
     reindent_block(block, CATALOG_ITEM_INDENT, current[:indent] || CATALOG_ITEM_INDENT)
   end
@@ -284,7 +296,8 @@ end
 
 # The identity placeholder is what makes the served catalog per-account. Anything
 # that rewrote the document instead of splicing it would silently drop tokens
-# here, and the control plane accepts a catalog with none.
+# here; keep the publisher's local refusal as a first line of defence before the
+# control plane independently validates the upload.
 expected_placeholders = kept_placeholders + added_placeholders
 outgoing_placeholders = placeholder_count(yaml)
 unless outgoing_placeholders == expected_placeholders
@@ -294,6 +307,10 @@ unless outgoing_placeholders == expected_placeholders
     "plus #{added_placeholders} from the sources). Publishing it would strip per-account identities and leave " \
     "every account sharing one empty identity with no per-account metering."
   )
+end
+outgoing = split_catalog(yaml)
+unless outgoing && outgoing[:blocks].all? { |block| managed_identity_block?(block) }
+  fail!("Refusing to publish: every managed node must keep exactly one per-account uuid placeholder.")
 end
 
 result = request(

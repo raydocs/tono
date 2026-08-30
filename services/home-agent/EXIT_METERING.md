@@ -54,7 +54,9 @@ removal safe rather than what makes the agent work.
 these nodes come from cloned images and a clone carries the source image's
 `/etc/machine-id`: two exits presenting one name read each other's lower figures
 as counter resets, and the account's total runs away. Set the override on any node
-whose hostname and machine-id are both shared with another.
+whose hostname and machine-id are both shared with another. Identities longer
+than the API's 64-character limit keep a readable hostname prefix plus a digest
+of the complete value; truncating from the right would discard the machine-id.
 
 `test_reconcile_and_report.py` covers the arithmetic, because an error there costs
 money in both directions and looks plausible either way. Each case was checked to

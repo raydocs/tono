@@ -219,6 +219,20 @@ class PublishManagedCatalogTest < Minitest::Test
     )
   end
 
+  def test_publish_refuses_null_missing_and_decoy_identities
+    invalid_sources = {
+      "null.yaml" => NEW_SOURCE.sub("uuid: #{PLACEHOLDER}", "uuid: null"),
+      "missing.yaml" => NEW_SOURCE.sub("  uuid: #{PLACEHOLDER}\n", "  # #{PLACEHOLDER}\n"),
+      "flow.yaml" => "proxies:\n  - {name: Broken, type: vless, uuid: null} # #{PLACEHOLDER}\n",
+    }
+    invalid_sources.each do |name, content|
+      code, output, uploaded = run_publisher(["--publish", source(name, content)])
+      assert_equal(1, code, output)
+      assert_match(/exactly one per-account uuid placeholder/, output)
+      assert_nil(uploaded)
+    end
+  end
+
   def test_publish_refuses_a_source_whose_parse_and_text_disagree
     # `YAML.safe_load` takes the last of two top-level `proxies:` keys; the text
     # scan takes the first. Every name check — including the append path's

@@ -1270,6 +1270,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await report('src-a-2', 'exit-b', 450, seeded + 60)).status).toBe(409);
     expect(await counted()).toBe(1_200);
 
+    const ambiguousBatch = await api('home/usage', json({
+      reports: [
+        {
+          reportId: 'src-a-5', userId: 'usr_sources', sourceId: 'exit-a',
+          totalBytes: 550, observedAt: seeded + 90,
+        },
+        {
+          reportId: 'src-a-6', userId: 'usr_sources', sourceId: 'exit-a',
+          totalBytes: 100, observedAt: seeded + 120,
+        },
+      ],
+    }, HOME_TOKEN));
+    expect(ambiguousBatch.status).toBe(400);
+    expect((await ambiguousBatch.json() as any).error.code).toBe('VALIDATION_ERROR');
+    expect(await counted()).toBe(1_200);
+
     const oversized = await api('home/usage', json({
       reports: [{
         reportId: 'src-long', userId: 'usr_sources', sourceId: 'x'.repeat(65),
@@ -2035,6 +2051,20 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     );
     expect(literalIdentity.status).toBe(400);
     expect((await literalIdentity.json() as any).error.code).toBe('INVALID_CATALOG');
+
+    for (const invalidYaml of [
+      yaml.replace('uuid: {{TONO_CLIENT_UUID}}', 'uuid: null'),
+      yaml.replace('    uuid: {{TONO_CLIENT_UUID}}\n', '    # {{TONO_CLIENT_UUID}}\n'),
+      'proxies:\n  - {name: Broken, type: vless, uuid: null} # {{TONO_CLIENT_UUID}}\n',
+    ]) {
+      const invalidIdentity = await admin(
+        'exit-catalog',
+        { yaml: invalidYaml, expectedRevision: 0 },
+        'PUT',
+      );
+      expect(invalidIdentity.status).toBe(400);
+      expect((await invalidIdentity.json() as any).error.code).toBe('INVALID_CATALOG');
+    }
 
     const created = await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT');
     expect(created.status).toBe(200);

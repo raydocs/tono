@@ -633,22 +633,23 @@ function managedCatalogYAML(value: unknown): string {
   ) {
     throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must be bounded Clash YAML with a proxies section');
   }
-  // Every identity in a published catalog must be the placeholder, never a
-  // literal. One catalog served verbatim to everyone is how every account came
-  // to share one exit identity, and why the exit can count bytes but not say
-  // whose. Refusing it here means that state cannot be re-published by accident:
-  // a real UUID in the document is rejected before it is ever encrypted.
-  for (const line of yaml.split(/\r?\n/)) {
-    const identity = /^\s*(?:-\s*)?uuid\s*:\s*(.+?)\s*$/.exec(line);
-    if (!identity) continue;
-    const value = identity[1].replace(/^['"]|['"]$/g, '');
-    if (value !== CLIENT_UUID_PLACEHOLDER) {
-      throw new ApiError(
-        400,
-        'INVALID_CATALOG',
-        `Catalog identities must be ${CLIENT_UUID_PLACEHOLDER}, so each account is served its own`,
-      );
-    }
+  // Validate one identity on every proxy block, not merely every `uuid:` line
+  // a line-oriented regex happens to see. `uuid: null`, a missing field, and a
+  // flow mapping all evaded the old loop; a placeholder in a comment could then
+  // make the publish tool's file-wide count look healthy while customers were
+  // served a node they could never authenticate to.
+  let items: Array<{ name: string; block: string }>;
+  try {
+    items = splitManagedCatalogProxies(yaml).items;
+  } catch {
+    throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must contain a readable proxies list');
+  }
+  if (items.some(({ block }) => !catalogProxyUsesManagedIdentity(block))) {
+    throw new ApiError(
+      400,
+      'INVALID_CATALOG',
+      `Every catalog proxy must have exactly one uuid set to ${CLIENT_UUID_PLACEHOLDER}`,
+    );
   }
   return yaml;
 }
@@ -656,6 +657,13 @@ function managedCatalogYAML(value: unknown): string {
 /** Extract the Clash proxy `name` from one list-item block under `proxies:`. */
 function catalogProxyName(block: string): string | null {
   for (const line of block.split(/\r?\n/)) {
+    const flowMatch = line.match(
+      /[{,]\s*name\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^,}]+))/,
+    );
+    if (flowMatch) {
+      const raw = flowMatch[1] ?? flowMatch[2] ?? flowMatch[3] ?? '';
+      return raw.trim().replace(/\\(["'\\])/g, '$1');
+    }
     const match = line.match(
       // The plain-scalar branch must accept internal spaces ("Los Angeles · Mesa"):
       // the publish tooling validates names with a real YAML parser, and a name this
@@ -741,6 +749,25 @@ function splitManagedCatalogProxies(yaml: string): {
     items,
     suffix: lines.slice(listEnd).join('\n'),
   };
+}
+
+/** A proxy block has exactly one UUID key and it carries the account placeholder. */
+function catalogProxyUsesManagedIdentity(block: string): boolean {
+  const uuidKeys = [
+    ...block.matchAll(/^\s*(?:-\s*)?uuid\s*:/gm),
+    ...block.matchAll(/[{,]\s*uuid\s*:/g),
+  ];
+  if (uuidKeys.length !== 1) return false;
+
+  const placeholder = String.raw`(?:["']\{\{TONO_CLIENT_UUID\}\}["']|\{\{TONO_CLIENT_UUID\}\})`;
+  const blockValue = new RegExp(
+    String.raw`^\s*(?:-\s*)?uuid\s*:\s*${placeholder}\s*(?:#.*)?$`,
+    'm',
+  );
+  const flowValue = new RegExp(
+    String.raw`[{,]\s*uuid\s*:\s*${placeholder}\s*(?=[,}])`,
+  );
+  return blockValue.test(block) || flowValue.test(block);
 }
 
 /**
@@ -8003,6 +8030,24 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (users.size > 100) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'A batch may contain at most 100 distinct users');
+    }
+
+    // The fold below consumes one observation per (account, source). Combining
+    // two rows with independent MAX(totalBytes) and MAX(observedAt) manufactures
+    // a pair that no reporter sent and can hide a real counter reset. Agents
+    // already queue at most one cumulative report per source/account, so reject
+    // ambiguous callers instead of guessing an order.
+    const sourceReports = new Set<string>();
+    for (const report of unique.values()) {
+      const key = JSON.stringify([report.userId, report.sourceId]);
+      if (sourceReports.has(key)) {
+        throw new ApiError(
+          400,
+          'VALIDATION_ERROR',
+          'A batch may contain at most one report per user and source',
+        );
+      }
+      sourceReports.add(key);
     }
 
     const encodedReports = JSON.stringify([...unique.values()]);

@@ -45,6 +45,9 @@ working meter reporting zero.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -170,7 +173,16 @@ def source_id(state: dict) -> str:
     bill the account for the same bytes twice.
     """
     configured = env("TONO_EXIT_SOURCE_ID", required=False) or machine_identity()
-    source = re.sub(r"[^A-Za-z0-9._-]", "-", configured).strip("-")[:64]
+    normalized = re.sub(r"[^A-Za-z0-9._-]", "-", configured).strip("-")
+    # Preserve both halves of a long default identity. Left-truncating at 64
+    # characters can discard the machine-id entirely, so two exits with the same
+    # long hostname present one source and read each other's lower cumulative
+    # figures as counter resets. A readable prefix plus a digest of the complete
+    # input stays stable and keeps those nodes distinct.
+    if len(normalized) > 64:
+        digest = hashlib.sha256(configured.encode("utf-8")).hexdigest()[:32]
+        normalized = f"{normalized[:31].rstrip('-')}-{digest}"
+    source = normalized
     if not SOURCE_ID_PATTERN.fullmatch(source):
         raise Refusal(
             "this exit has no stable identity to report under; set TONO_EXIT_SOURCE_ID"
@@ -318,6 +330,33 @@ def save_state(path: Path, state: dict) -> None:
     temporary.replace(path)
 
 
+@contextmanager
+def agent_run_lock(path: Path):
+    """Hold one lock across roster mutation, counter folding, and delivery.
+
+    A systemd timer and an operator-started run can otherwise both read the same
+    state and then overwrite each other's baselines and pending queue. The fixed
+    `.new` path also makes concurrent saves race at rename time. Skipping the
+    overlapping run is safe because every counter and report is cumulative.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(f"{path.name}.lock")
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(lock_path, flags, STATE_MODE)
+    handle = os.fdopen(descriptor, "r+")
+    try:
+        os.fchmod(handle.fileno(), STATE_MODE)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Refusal("another exit-agent run is still active") from error
+        yield
+    finally:
+        handle.close()
+
+
 def xray_start_marker(binary: Path, proc: Path = Path("/proc")) -> str | None:
     """A node-level mark that changes exactly when the xray process comes up again.
 
@@ -433,8 +472,9 @@ def installed_clients(binary: Path, commands: dict[str, str], address: str,
         if not isinstance(entry, dict):
             return None
         label = entry.get("email")
-        if isinstance(label, str) and label:
-            labels.add(label)
+        if not isinstance(label, str) or not label:
+            return None
+        labels.add(label)
     return labels
 
 
@@ -455,10 +495,13 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     known, nothing is removed.
     """
     wanted = {client_label(entry["userId"]): entry["clientUUID"] for entry in roster}
-    # An empty roster is the common case until accounts have fetched a
-    # placeholder catalog. Treating it as "remove everyone" would delete the
-    # shared-legacy client and disconnect the fleet.
-    if not wanted:
+    # A verified empty roster is the enforcement result after the final active
+    # account expires, is disabled, or reaches quota. It must remove this
+    # agent's `u:` clients or those accounts keep connecting forever. When both
+    # the live listing and our durable record are unknown, retain the original
+    # fail-safe and remove nothing; the shared legacy identity is outside the
+    # namespace in either case.
+    if not wanted and listed is None and recorded is None:
         return 0, 0, None
     added = 0
     for label, client_uuid in sorted(wanted.items()):
@@ -621,13 +664,49 @@ def deliver_queue(base: str, token: str, path: Path, state: dict) -> tuple[int, 
     return delivered, dropped
 
 
-def main() -> None:
+def reconcile_and_read_stable(
+    binary: Path,
+    commands: dict[str, str],
+    address: str,
+    tag: str,
+    roster: list[dict[str, str]],
+    recorded: set[str] | None,
+) -> tuple[int, int, set[str] | None, dict[str, int], str | None]:
+    """Reconcile and read counters from one Xray process generation.
+
+    A restart after the first marker can drop every API-installed client and
+    reset every counter. Comparing only the new reading with the old baseline is
+    insufficient when a busy account's new counter has already climbed above
+    that baseline: it looks like a small increase and silently forgives the
+    bytes before it. Retry the whole mutation/read once against the new process;
+    a node that keeps restarting is unknown rather than billable guesswork.
+    """
+    for attempt in range(2):
+        marker_before = xray_start_marker(binary)
+        listed = installed_clients(binary, commands, address, tag)
+        added, removed, installed = reconcile(
+            binary, commands, address, tag, roster, listed, recorded,
+        )
+        counters = read_counters(binary, commands["stats_query"], address)
+        marker_after = xray_start_marker(binary)
+        if marker_before and marker_after and marker_before != marker_after:
+            if attempt == 0:
+                print("xray restarted during reconciliation; retrying against the new process")
+                continue
+            raise Refusal("xray kept restarting while clients and counters were reconciled")
+        # The marker after the counter read is the only one known to still
+        # describe that reading. If it is unavailable, forget the old marker so
+        # a later process is not compared with stale evidence and folded twice.
+        return added, removed, installed, counters, marker_after
+    raise AssertionError("bounded xray reconciliation loop did not return")
+
+
+def run_once(path: Path) -> None:
     base = api_base()
     token = env("TONO_HOME_AGENT_TOKEN")
     binary = xray_binary()
     address = api_address()
     tag = inbound_tag()
-    path = state_path()
     state = load_state(path)
     source = source_id(state)
     commands = require_commands(binary)
@@ -642,35 +721,20 @@ def main() -> None:
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
     observed_at, roster = fetch_roster(base, token)
-    listed = installed_clients(binary, commands, address, tag)
     remembered = state.get("installedClients")
-    added, removed, installed = reconcile(
-        binary, commands, address, tag, roster, listed,
+    added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
+        binary, commands, address, tag, roster,
         set(remembered) if isinstance(remembered, list) else None,
     )
     if installed is not None:
         state["installedClients"] = sorted(installed)
-    # Compared before the counters are read, never after: this way a restart
-    # landing between the two pairs a post-restart reading with a stale marker,
-    # which the counter comparison catches by itself. The reverse order would
-    # pair a pre-restart reading with a fresh marker and count those bytes twice.
-    start_marker = xray_start_marker(binary)
     recorded_marker = state.get("startMarker")
     restarted = bool(
-        start_marker
+        settled_marker
         and isinstance(recorded_marker, str)
         and recorded_marker
-        and start_marker != recorded_marker
+        and settled_marker != recorded_marker
     )
-    # Read after reconciling so a freshly added account is counted from its own
-    # baseline rather than from whatever it had before.
-    counters = read_counters(binary, commands["stats_query"], address)
-    # What is recorded is the marker for the process these counters came from,
-    # so it is read after them. A restart inside the window above is folded here
-    # by the counter comparison; recording the marker from before the reading
-    # would have the next round call that same restart again and bill the bytes
-    # it already folded a second time.
-    settled_marker = xray_start_marker(binary)
     print(
         f"roster observed at {observed_at}: +{added} -{removed}, {len(counters)} counted"
         + (", after an xray restart" if restarted else "")
@@ -713,6 +777,12 @@ def main() -> None:
         return
     delivered, dropped = deliver_queue(base, token, path, state)
     print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
+
+
+def main() -> None:
+    path = state_path()
+    with agent_run_lock(path):
+        run_once(path)
 
 
 if __name__ == "__main__":

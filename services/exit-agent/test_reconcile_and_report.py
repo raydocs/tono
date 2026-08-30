@@ -200,7 +200,7 @@ class RestartMarkerRound(unittest.TestCase):
     """
 
     def rounds(self, markers: list[str], readings: list[dict[str, int]],
-               recorded_marker: str) -> dict:
+               recorded_marker: str, round_count: int | None = None) -> dict:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "state.json"
@@ -241,18 +241,23 @@ class RestartMarkerRound(unittest.TestCase):
              patch.object(agent, "read_counters", side_effect=readings), \
              patch.object(agent, "xray_start_marker", side_effect=markers), \
              patch.object(agent, "deliver_queue", side_effect=fake_deliver):
-            for _ in readings:
+            for _ in range(round_count if round_count is not None else len(readings)):
                 agent.main()
         return json.loads(path.read_text(encoding="utf-8"))
 
     def test_a_restart_between_the_two_reads_is_folded_once(self) -> None:
-        # Round one reads the marker, xray restarts, then the counters come back
-        # at 50 — below the recorded 900, so the fall folds the 50 as fresh.
-        # Round two must see nothing new to fold: 300 - 50 is the usage since.
+        # Round one reads the marker, xray restarts, and the first 50-byte read
+        # cannot be assigned safely to either process. The retry reads the new
+        # process at 50 and folds it once. Round two then adds only 300 - 50.
         state = self.rounds(
-            markers=["boot:100", "boot:200", "boot:200", "boot:200"],
-            readings=[{"u:alice": 50}, {"u:alice": 300}],
+            markers=[
+                "boot:100", "boot:200",
+                "boot:200", "boot:200",
+                "boot:200", "boot:200",
+            ],
+            readings=[{"u:alice": 50}, {"u:alice": 50}, {"u:alice": 300}],
             recorded_marker="boot:100",
+            round_count=2,
         )
         self.assertEqual(state["totals"], {"u:alice": 1200})
         self.assertEqual(state["startMarker"], "boot:200")
@@ -379,6 +384,18 @@ class SourceIdentity(unittest.TestCase):
         # And the part set per node survives the 64-character limit.
         self.assertTrue(first.startswith("tono-exit-hk-1"))
 
+    def test_long_equal_hostnames_keep_the_machine_identity_in_the_source(self) -> None:
+        hostname = "h" * 64
+        first_state = fresh_state()
+        second_state = fresh_state()
+        with patch.object(agent, "machine_identity", return_value=f"{hostname}-machine-a"):
+            first = agent.source_id(first_state)
+        with patch.object(agent, "machine_identity", return_value=f"{hostname}-machine-b"):
+            second = agent.source_id(second_state)
+        self.assertNotEqual(first, second)
+        self.assertEqual(len(first), 64)
+        self.assertEqual(len(second), 64)
+
     def test_an_unusable_identity_is_refused_rather_than_invented(self) -> None:
         with patch.object(agent, "machine_identity", return_value="   "):
             with self.assertRaises(agent.Refusal):
@@ -474,11 +491,24 @@ class ReconcileSafety(unittest.TestCase):
             recorded,
         )
 
-    def test_empty_roster_does_not_remove_anyone(self) -> None:
+    def test_a_verified_empty_roster_removes_only_managed_clients(self) -> None:
         added, removed, installed = self.reconcile([], {"u:usr_1", agent.LEGACY_CLIENT_EMAIL}, None)
+        self.assertEqual((added, removed), (0, 1))
+        self.assertEqual(installed, set())
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("--email=u:usr_1", self.calls[0])
+
+    def test_an_empty_roster_with_no_installed_inventory_removes_nothing(self) -> None:
+        added, removed, installed = self.reconcile([], None, None)
         self.assertEqual((added, removed), (0, 0))
         self.assertIsNone(installed)
         self.assertEqual(self.calls, [])
+
+    def test_an_empty_roster_uses_the_durable_inventory_when_listing_is_unavailable(self) -> None:
+        added, removed, installed = self.reconcile([], None, {"u:usr_1"})
+        self.assertEqual((added, removed), (0, 1))
+        self.assertEqual(installed, set())
+        self.assertIn("--email=u:usr_1", self.calls[0])
 
     def test_nothing_is_removed_when_the_installed_set_is_unknown(self) -> None:
         # Counters used to stand in for this. They are created on first connect
@@ -557,12 +587,49 @@ class InstalledClients(unittest.TestCase):
         self.assertIsNone(self.listing(1, ""))
         self.assertIsNone(self.listing(0, "not json"))
         self.assertIsNone(self.listing(0, '{"users": ["u:usr_1"]}'))
+        self.assertIsNone(self.listing(0, '{"users": [{"email": "u:usr_1"}, {}]}'))
+        self.assertIsNone(self.listing(0, '{"users": [{"email": null}]}'))
+        self.assertIsNone(self.listing(0, '{"users": [{"email": 42}]}'))
 
     def test_labels_come_back_in_the_form_the_control_plane_issues(self) -> None:
         listed = self.listing(
             0, '{"users": [{"email": "u:usr_1"}, {"email": "shared-legacy"}]}'
         )
         self.assertEqual(listed, {"u:usr_1", "shared-legacy"})
+
+
+class RunLock(unittest.TestCase):
+    def test_an_overlapping_run_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            with agent.agent_run_lock(path):
+                with self.assertRaisesRegex(agent.Refusal, "another exit-agent run"):
+                    with agent.agent_run_lock(path):
+                        self.fail("the second run acquired the same state lock")
+
+
+class StableXrayRead(unittest.TestCase):
+    def test_a_restart_during_the_read_reconciles_and_reads_the_new_process_again(self) -> None:
+        with patch.object(agent, "xray_start_marker", side_effect=["old", "new", "new", "new"]), \
+             patch.object(agent, "installed_clients", side_effect=[set(), set()]), \
+             patch.object(agent, "reconcile", side_effect=[
+                 (1, 0, {"u:usr_1"}),
+                 (1, 0, {"u:usr_1"}),
+             ]) as reconcile, \
+             patch.object(agent, "read_counters", side_effect=[
+                 {"u:usr_1": 150},
+                 {"u:usr_1": 120},
+             ]):
+            result = agent.reconcile_and_read_stable(
+                Path("/unused"),
+                {"stats_query": "stats", "add_user": "add", "remove_user": "remove"},
+                "127.0.0.1:10085",
+                "tono-vless",
+                [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+                None,
+            )
+        self.assertEqual(result, (1, 0, {"u:usr_1"}, {"u:usr_1": 120}, "new"))
+        self.assertEqual(reconcile.call_count, 2)
 
 
 class Delivery(unittest.TestCase):
