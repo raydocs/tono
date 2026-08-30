@@ -346,6 +346,15 @@ impl HealthLegs {
             || health_threshold_reached(self.probe)
             || health_threshold_reached(self.service)
     }
+
+    /// A sustained failure of the fail-closed boundary itself. A working HTTPS
+    /// request cannot overrule this: traffic may flow now while the missing WFP
+    /// barrier would leak it the moment the tunnel dies, and unprotected DNS is
+    /// already outside the tunnel contract.
+    pub const fn protection_invalid(&self) -> bool {
+        health_threshold_reached(self.kill_switch)
+            || health_threshold_reached(self.protected_dns)
+    }
 }
 
 /// One core-identity observation against the recorded baseline (H4).
@@ -3229,6 +3238,7 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
             legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
         }
         let health_invalid = legs.invalid();
+        let protection_invalid = legs.protection_invalid();
 
         let (invalidate, network_changed, core_changed, kill_switch_snapshot, service_events) = {
             let mut inner = state.lock().await;
@@ -3352,19 +3362,15 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
         if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed) {
-            // A core restart or a failed data-plane proof is fresh evidence and always acts. A
-            // standing health leg is not: inside the cooldown the last proof still stands, and
-            // without that a wedged WFP or an unhealthy protected DNS re-proves the data plane
-            // every two ticks for the whole session.
-            if health_invalid
-                && !core_changed
-                && !event_probe_failed
-                && last_in_place_recovery.is_some_and(|at| at.elapsed() < IN_PLACE_RECOVERY_COOLDOWN)
-            {
-                legs = HealthLegs::default();
-                continue;
-            }
-            if !connection_loop_continues(handle_network_change(&state, &app).await) {
+            // A Service transport outage may reuse a recent proof in the branch
+            // above. A successful Service snapshot that explicitly says WFP or
+            // protected DNS is broken may not: HTTPS can still work while the
+            // fail-closed boundary is absent. Force that case through repair;
+            // ordinary network hints and exit-probe failures may still be
+            // contradicted by a fresh in-place data-plane proof.
+            if !connection_loop_continues(
+                handle_network_change_inner(&state, &app, !protection_invalid).await,
+            ) {
                 return;
             }
             // Nothing was torn down, so this monitor still owns the live session. Re-seed the
@@ -3383,6 +3389,14 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
 /// [`NetworkChangeOutcome::RecoveredInPlace`] means nothing was torn down and the caller is
 /// still running inside the session it started in (see [`connection_loop_continues`]).
 pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandle) -> NetworkChangeOutcome {
+    handle_network_change_inner(state, app, true).await
+}
+
+async fn handle_network_change_inner(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    allow_in_place: bool,
+) -> NetworkChangeOutcome {
     logging!(warn, Type::Service, "Tono: 检测到网络或核心变化，失效 Connected 并重连");
     // Captured under the same guard as the `is_connected` check, because that check is the
     // *entry* condition and everything below it runs across awaits. This helper is reached from
@@ -3411,7 +3425,7 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
     // Sleep/Wi-Fi flaps used to stop the core unconditionally, then burn the
     // first reconnect on "DNS 53 busy" because the just-killed listener was
     // the one we needed.
-    if verify_tun_data_plane().await.is_ok() {
+    if allow_in_place && verify_tun_data_plane().await.is_ok() {
         logging!(
             info,
             Type::Service,
@@ -6233,6 +6247,28 @@ mod tests {
             apply(&mut legs);
             assert!(legs.invalid(), "{name}: a sustained failure must invalidate");
         }
+    }
+
+    #[test]
+    fn only_boundary_legs_can_forbid_in_place_recovery() {
+        let mut probe = HealthLegs::default();
+        for _ in 0..HEALTH_FAILURE_THRESHOLD {
+            probe.observe_probe(true);
+        }
+        assert!(probe.invalid());
+        assert!(!probe.protection_invalid());
+
+        let mut kill_switch = HealthLegs::default();
+        for _ in 0..HEALTH_FAILURE_THRESHOLD {
+            kill_switch.observe_kill_switch(true);
+        }
+        assert!(kill_switch.protection_invalid());
+
+        let mut dns = HealthLegs::default();
+        for _ in 0..HEALTH_FAILURE_THRESHOLD {
+            dns.observe_protected_dns(true);
+        }
+        assert!(dns.protection_invalid());
     }
 
     // ---- H4: a quiet `core_pid: None` cannot tear down a healthy tunnel ----

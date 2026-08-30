@@ -841,6 +841,24 @@ pub async fn tono_select_server(
         if action == connection::SelectAction::Noop {
             return Ok(());
         }
+        if action == connection::SelectAction::Switch {
+            if inner
+                .tasks
+                .switch
+                .as_ref()
+                .is_some_and(|task| !task.inner().is_finished())
+            {
+                // A hot switch mutates the selector and WFP across several
+                // awaits. Replacing its JoinHandle only detaches it; it does not
+                // cancel it, so two rapid choices could roll each other back and
+                // leave the UI, selector, and permitted endpoints disagreeing.
+                // Refuse before publishing or persisting the second choice. The
+                // first task remains the sole owner and the user can retry as
+                // soon as it settles.
+                return Err("a server switch is already in progress".to_string());
+            }
+            inner.tasks.switch.take();
+        }
         inner.selected_node = Some(name.clone());
         // A fresh user choice re-arms auto-reconnect (§3).
         inner.catalog_requires_choice = false;
