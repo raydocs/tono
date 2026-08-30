@@ -57,6 +57,13 @@ final class AccountSession {
     private let exitNode: String
     private var runtimeMonitor: Task<Void, Never>?
     private var catalogSyncTask: Task<Void, Never>?
+    /// One catalog request owns fetch, validation, persistence, and runtime
+    /// application all the way to completion. Replacing only the final write
+    /// gate is insufficient: two account-specific bodies can legitimately have
+    /// the same fleet revision, so an older response arriving last would still
+    /// replace the newer routing and credentials.
+    private var catalogRefreshTask: (id: UInt64, task: Task<Bool, Never>)?
+    private var nextCatalogRefreshID: UInt64 = 0
     private var deviceRefreshTask: Task<Void, Never>?
     private var deviceActionTask: Task<Void, Never>?
     private var appRoutingResearchTask: Task<Void, Never>?
@@ -429,13 +436,42 @@ final class AccountSession {
 
     @discardableResult
     func refreshManagedCatalog(attempts: Int = 1) async -> Bool {
+        if let current = catalogRefreshTask {
+            return await current.task.value
+        }
+        nextCatalogRefreshID &+= 1
+        let id = nextCatalogRefreshID
+        let task = Task { [weak self] in
+            guard let self else { return false }
+            return await self.performManagedCatalogRefresh(attempts: attempts)
+        }
+        catalogRefreshTask = (id, task)
+        let succeeded = await task.value
+        // Cancellation cleanup owns a cancelled slot until it has awaited the
+        // worker. This prevents a stop/logout from admitting a second refresh
+        // while the first consumer is still suspended, and the ID prevents an
+        // older waiter from clearing a later task.
+        if catalogRefreshTask?.id == id, !task.isCancelled {
+            catalogRefreshTask = nil
+        }
+        return succeeded
+    }
+
+    private func performManagedCatalogRefresh(attempts: Int) async -> Bool {
         let boundedAttempts = min(max(attempts, 1), 3)
         for attempt in 0..<boundedAttempts {
+            guard !Task.isCancelled else { return false }
             do {
-                try await catalogConsumer(try await api.exitCatalog())
+                let catalog = try await api.exitCatalog()
+                try Task.checkCancellation()
+                try await catalogConsumer(catalog)
+                try Task.checkCancellation()
                 lastCatalogFailureMessage = nil
                 return true
+            } catch is CancellationError {
+                return false
             } catch {
+                guard !Task.isCancelled else { return false }
                 // Keep the last verified, mode-0600 cache. Catalog
                 // availability must never turn a temporary control-plane
                 // failure into a clearnet fallback or erase usable exits.
@@ -443,11 +479,24 @@ final class AccountSession {
                     (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
                 if attempt + 1 < boundedAttempts {
-                    try? await Task.sleep(for: .seconds(1))
+                    do {
+                        try await Task.sleep(for: .seconds(1))
+                    } catch {
+                        return false
+                    }
                 }
             }
         }
         return false
+    }
+
+    private func cancelManagedCatalogRefresh() async {
+        guard let current = catalogRefreshTask else { return }
+        current.task.cancel()
+        _ = await current.task.value
+        if catalogRefreshTask?.id == current.id {
+            catalogRefreshTask = nil
+        }
     }
 
     @discardableResult
@@ -663,6 +712,7 @@ final class AccountSession {
         runtimeMonitor = nil
         catalogSyncTask?.cancel()
         catalogSyncTask = nil
+        await cancelManagedCatalogRefresh()
         deviceRefreshTask?.cancel()
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
@@ -1304,6 +1354,7 @@ final class AccountSession {
         runtimeMonitor = nil
         catalogSyncTask?.cancel()
         catalogSyncTask = nil
+        await cancelManagedCatalogRefresh()
         deviceRefreshTask?.cancel()
         deviceRefreshTask = nil
         deviceActionTask?.cancel()

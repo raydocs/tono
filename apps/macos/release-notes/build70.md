@@ -1,8 +1,8 @@
 # Tono 0.0.70
 
 This build stops the interface making claims the data did not support:
-numbers, flags, and counts that disagreed with what was happening.
-Connection and routing behaviour is unchanged.
+numbers, flags, and counts that disagreed with what was happening. It also
+repairs two protection/catalog races; routing policy is otherwise unchanged.
 
 0.0.69's China-network probe fixes carry forward: probes skip system DNS,
 require a fake-IP, and open TLS to that address with the real SNI.
@@ -34,6 +34,12 @@ require a fake-IP, and open TLS to that address with the real SNI.
   instead of the raw catalog name.
 - The rules table no longer prints DIRECT and REJECT verbatim.
 - Claude Code has an icon in the app list.
+- Managed-catalog refreshes now run one at a time, so an older response at the
+  same fleet revision cannot arrive late and replace newer per-account routing.
+- The network helper is 3.13.1. If a PF ruleset commits only partially, the next
+  arm now takes the conservative full state cleanup instead of trusting an
+  unfinished generation. Existing installs will request an administrator
+  password once to replace the helper.
 
 Google, Cloudflare, and Apple remain the three origins; one success is
 enough. Controller `/delay` stays advisory.

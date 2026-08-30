@@ -5454,9 +5454,15 @@
         }
       }
     },
-    "Type": {
+    "Type label": {
       "extractionState": "manual",
       "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
