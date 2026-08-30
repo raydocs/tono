@@ -249,15 +249,23 @@ private actor ManagedCatalogProcessor {
         if catalog.revision < persistedRevision {
             return
         }
-        if catalog.revision == persistedRevision {
-            guard persistedDigest == catalog.sha256 else {
-                throw TonoAPIClient.APIError.invalidResponse
-            }
+        // The revision is fleet-wide while the body is issued per account, so a
+        // matching revision carrying a different digest is the next account's
+        // own payload, not a conflicting copy of this one.
+        if catalog.revision == persistedRevision, persistedDigest == catalog.sha256 {
             return
         }
         try ConfigStorage.shared.saveManagedExitCatalog(catalog)
         persistedRevision = catalog.revision
         persistedDigest = catalog.sha256
+    }
+
+    /// Releases the write gate when the cache it describes has been discarded,
+    /// so the next account's catalog is not compared against a revision and
+    /// digest that no longer exist on disk.
+    func reset() {
+        persistedRevision = -1
+        persistedDigest = nil
     }
 
     private static func digest(_ yaml: String) -> String {
@@ -3768,6 +3776,10 @@ final class AppState {
     func acceptManagedExitCatalog(
         _ response: TonoExitCatalogResponse
     ) async throws {
+        // No account is bound any more, so nothing fetched for the previous one
+        // may land. A sign-out that raced this request is not a rejected update
+        // and must not be reported as one.
+        guard let owner = ManagedExitCatalogOwnership.currentAccount else { return }
         do {
             try await installManagedExitCatalog(
                 ManagedExitCatalogCache(
@@ -3775,7 +3787,8 @@ final class AppState {
                     yaml: response.yaml,
                     sha256: response.sha256,
                     updatedAt: response.updatedAt,
-                    routing: response.routing
+                    routing: response.routing,
+                    owner: owner
                 ),
                 persistCache: true,
                 allowRuntimeTransition: true
@@ -3791,14 +3804,19 @@ final class AppState {
         persistCache: Bool,
         allowRuntimeTransition: Bool
     ) async throws {
+        // Exits are issued per account, so a catalog belonging to a different
+        // one is refused however current its revision is.
+        guard ManagedExitCatalogOwnership.accepts(catalog.owner) else {
+            throw TonoAPIClient.APIError.invalidResponse
+        }
         if catalog.revision < managedCatalogRevision {
             // Never accept a control-plane rollback over a newer cached catalog.
             return
         }
-        if catalog.revision == managedCatalogRevision {
-            guard managedCatalogDigest == catalog.sha256 else {
-                throw TonoAPIClient.APIError.invalidResponse
-            }
+        // The revision is fleet-wide while the body is per account: only a
+        // matching revision AND digest is the catalog already installed.
+        if catalog.revision == managedCatalogRevision,
+           managedCatalogDigest == catalog.sha256 {
             return
         }
 
@@ -3808,26 +3826,31 @@ final class AppState {
         )
 
         // A slower older validation must never overwrite a newer catalog if
-        // callers overlap (for example, manual refresh plus periodic sync).
+        // callers overlap (for example, manual refresh plus periodic sync), and
+        // the signed-in account can change across the same suspension point.
+        guard ManagedExitCatalogOwnership.accepts(catalog.owner) else {
+            throw TonoAPIClient.APIError.invalidResponse
+        }
         if catalog.revision < managedCatalogRevision {
             return
         }
-        if catalog.revision == managedCatalogRevision {
-            guard managedCatalogDigest == catalog.sha256 else {
-                throw TonoAPIClient.APIError.invalidResponse
-            }
+        if catalog.revision == managedCatalogRevision,
+           managedCatalogDigest == catalog.sha256 {
             return
         }
         if persistCache {
             try await managedCatalogProcessor.persistIfNewest(catalog)
-            // Another catalog can apply while the disk actor is writing.
+            // Another catalog can apply while the disk actor is writing, and a
+            // sign-out that raced the write leaves its file behind.
+            guard ManagedExitCatalogOwnership.accepts(catalog.owner) else {
+                ConfigStorage.shared.removeManagedExitCatalog()
+                throw TonoAPIClient.APIError.invalidResponse
+            }
             if catalog.revision < managedCatalogRevision {
                 return
             }
-            if catalog.revision == managedCatalogRevision {
-                guard managedCatalogDigest == catalog.sha256 else {
-                    throw TonoAPIClient.APIError.invalidResponse
-                }
+            if catalog.revision == managedCatalogRevision,
+               managedCatalogDigest == catalog.sha256 {
                 return
             }
         }
@@ -3869,6 +3892,13 @@ final class AppState {
         managedCatalogDigest = catalog.sha256
         managedCatalogRouting = validatedRouting
         refreshTrafficInfrastructureDestinations()
+        ManagedExitCatalogOwnership.recordInstalled(
+            owner: catalog.owner,
+            discard: { [weak self] in
+                guard let self else { return }
+                self.discardManagedExitCatalogState()
+            }
+        )
 
         if selectedCloudNodeWasRemoved {
             applyDefaultProxySelection(persist: true)
@@ -3900,6 +3930,21 @@ final class AppState {
         } else if isConnecting {
             managedCatalogReloadPending = true
         }
+    }
+
+    /// Drops every managed exit and the revision/digest that gate a newer one.
+    /// Called by ownership when the account changes, so no exit — and no gate
+    /// that would reject the next account's own catalog — outlives the session
+    /// it was issued for. Custom nodes are the user's own and are kept.
+    private func discardManagedExitCatalogState() {
+        proxyRegions.removeAll { $0.id != "custom" }
+        managedCatalogRevision = -1
+        managedCatalogDigest = nil
+        managedCatalogRouting = nil
+        refreshTrafficInfrastructureDestinations()
+        saveProxyRegionsOnly()
+        let processor = managedCatalogProcessor
+        Task { await processor.reset() }
     }
 
     private func refreshTrafficInfrastructureDestinations() {
