@@ -713,6 +713,8 @@ export const translationKeys = [
   'tono.dashboard.errors.releaseReconciling',
   'tono.dashboard.errors.serviceTooOld',
   'tono.dashboard.errors.nodeUnreachable',
+  'tono.dashboard.errors.tunDataPlaneBroken',
+  'tono.dashboard.errors.tunIngressBroken',
   'tono.dashboard.errors.protectedHttpsFailed',
   'tono.dashboard.errors.coreUnpinned',
   'tono.dashboard.errors.coreMismatch',

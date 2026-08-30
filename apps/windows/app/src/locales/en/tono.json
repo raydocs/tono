@@ -196,6 +196,8 @@
       "releaseReconciling": "Protection is still releasing. Wait, then connect.",
       "serviceTooOld": "Service is too old. Reinstall from the latest package.",
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
+      "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
+      "tunIngressBroken": "The node answered, but no traffic on this PC could enter the tunnel. Another VPN or security tool is usually holding the network — close it, then connect again.",
       "protectedHttpsFailed": "The protected connection could not complete. If every server fails the same way, switching cities will not help — send diagnostics to support.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
