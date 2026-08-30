@@ -18,6 +18,16 @@
         }
       }
     },
+    "%@ could not be reached, so Tono connected through %@ and made it the selected cloud server.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法连接到 %1$@，Tono 已改用 %2$@ 并将其设为当前云端节点。"
+          }
+        }
+      }
+    },
     "%@ rules": {
       "localizations": {
         "zh-Hans": {
@@ -629,6 +639,16 @@
         }
       }
     },
+    "Change the language and reopen Tono?": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改语言并重新打开 Tono？"
+          }
+        }
+      }
+    },
     "Check for Updates": {
       "localizations": {
         "zh-Hans": {
@@ -790,6 +810,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "云端节点"
+          }
+        }
+      }
+    },
+    "Cloud app-routing update was rejected; all traffic remains protected by the current route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端应用分流更新已被拒绝，所有流量仍由当前线路保护。"
           }
         }
       }
@@ -1119,6 +1149,36 @@
         }
       }
     },
+    "Could not apply the setting: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法应用该设置：%@"
+          }
+        }
+      }
+    },
+    "Could not close active connections: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法关闭活动连接：%@"
+          }
+        }
+      }
+    },
+    "Could not close the connection: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法关闭该连接：%@"
+          }
+        }
+      }
+    },
     "Could not communicate with the network helper.": {
       "localizations": {
         "zh-Hans": {
@@ -1179,7 +1239,17 @@
         }
       }
     },
-    "DNS": {},
+    "DNS": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS"
+          }
+        }
+      }
+    },
     "Dallas": {
       "localizations": {
         "zh-Hans": {
@@ -1360,6 +1430,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "受保护的 Reality 路由已禁用此项"
+          }
+        }
+      }
+    },
+    "Disconnect and restore internet": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断开连接并恢复正常网络"
           }
         }
       }
@@ -1568,12 +1649,33 @@
         }
       }
     },
+    "External subscription links are disabled. Servers are synchronized from the authenticated Tono cloud catalog.": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外部订阅链接已停用。节点均由已认证的 Tono 云端目录同步。"
+          }
+        }
+      }
+    },
     "Failed at": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "失败步骤"
+          }
+        }
+      }
+    },
+    "Failed to apply the updated core configuration: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用更新后的核心配置失败：%@"
           }
         }
       }
@@ -1780,6 +1882,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "最近一次连接中每一步各花了多久。最慢的一步已标出——反馈连接慢时请附上它。"
+          }
+        }
+      }
+    },
+    "IP": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IP"
           }
         }
       }
@@ -2756,12 +2869,12 @@
         }
       }
     },
-    "Opens a page that shows whether your browser is leaking a local or tunnel address. Compare": {
+    "Opens a page that shows whether your browser is leaking a local or tunnel address. Compare it with the protected IP on the dashboard.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "打开一个页面，显示浏览器是否泄漏了本地或隧道地址。用于对照"
+            "value": "打开一个页面，显示浏览器是否泄漏了本地或隧道地址。用于对照首页上受保护的 IP。"
           }
         }
       }
@@ -2894,7 +3007,6 @@
       }
     },
     "Protected DNS stopped; Kill Switch is blocking traffic while Tono retries.": {
-      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -2936,7 +3048,6 @@
       }
     },
     "Protected TUN stopped; Kill Switch is blocking traffic while Tono retries.": {
-      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -3108,6 +3219,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "退出 Tono"
+          }
+        }
+      }
+    },
+    "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "唤醒后正在重新保护这台 Mac。断网保护正在拦住直连流量。"
           }
         }
       }
@@ -3311,6 +3432,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "移除"
+          }
+        }
+      }
+    },
+    "Reopen Tono": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新打开 Tono"
           }
         }
       }
@@ -3552,6 +3683,17 @@
         }
       }
     },
+    "SNI (optional)": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SNI（可选）"
+          }
+        }
+      }
+    },
     "STEP %llds": {
       "localizations": {
         "zh-Hans": {
@@ -3671,6 +3813,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "安全连接"
+          }
+        }
+      }
+    },
+    "Secure WeChat routing could not finish updating; Kill Switch is blocking traffic while Tono retries.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "微信安全分流未能完成更新。断网保护正在阻断流量，Tono 正在重试。"
+          }
+        }
+      }
+    },
+    "Secure WeChat routing was interrupted while updating; Kill Switch is blocking traffic while Tono retries.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "微信安全分流在更新时被中断。断网保护正在阻断流量，Tono 正在重试。"
+          }
+        }
+      }
+    },
+    "Secure app routing was updated; Tono is applying it without opening direct Internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全应用分流已更新，Tono 正在应用，期间不会打开直连网络。"
+          }
+        }
+      }
+    },
+    "Secure routing is updating. Try switching the cloud server again in a moment.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全分流正在更新，请稍后再切换云端节点。"
           }
         }
       }
@@ -4271,6 +4453,16 @@
         }
       }
     },
+    "System proxy: %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统代理：%@"
+          }
+        }
+      }
+    },
     "System-wide display language": {
       "extractionState": "manual",
       "localizations": {
@@ -4518,7 +4710,6 @@
       }
     },
     "The active network changed; Kill Switch is blocking traffic while Tono protects the new connection.": {
-      "extractionState": "stale",
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4584,6 +4775,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "已安装的网络组件拒绝了这份 Tono。"
+          }
+        }
+      }
+    },
+    "The macOS protected DNS path did not pass its end-to-end check.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 的受保护 DNS 通道未通过端到端检查。"
           }
         }
       }
@@ -4686,6 +4887,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "这台 Mac"
+          }
+        }
+      }
+    },
+    "This Mac is still using Encrypted DNS or iCloud Private Relay, so apps bypass Tono's protected resolver. Turn Encrypted DNS and Private Relay off, then reconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台 Mac 仍在使用加密 DNS 或 iCloud 私密转发，应用会绕过 Tono 的受保护解析器。请关闭加密 DNS 与私密转发，然后重新连接。"
           }
         }
       }
@@ -4828,6 +5039,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tono 不会把受保护线路开放给局域网客户端。"
+          }
+        }
+      }
+    },
+    "Tono has to quit and reopen to change languages. This Mac is protected right now, so the connection is dropped and Kill Switch is released until you connect again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改语言需要退出并重新打开 Tono。这台 Mac 当前处于受保护状态，连接会被断开，断网保护也会解除，直到你再次连接。"
           }
         }
       }
@@ -5003,12 +5224,34 @@
         }
       }
     },
+    "Type": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "类型"
+          }
+        }
+      }
+    },
     "URL Test": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "自动测速"
+          }
+        }
+      }
+    },
+    "UUID": {
+      "extractionState": "manual",
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UUID"
           }
         }
       }
@@ -5066,6 +5309,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "已更新"
+          }
+        }
+      }
+    },
+    "Updated cloud route failed; Kill Switch is blocking traffic while Tono retries. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新后的云端线路启用失败。断网保护正在阻断流量，Tono 正在重试。%@"
           }
         }
       }
@@ -5272,6 +5525,16 @@
         }
       }
     },
+    "Waiting for the protected route after wake; Internet remains blocked.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "唤醒后正在等待受保护线路，网络仍处于阻断状态。"
+          }
+        }
+      }
+    },
     "Waiting to retry…": {
       "extractionState": "stale",
       "localizations": {
@@ -5279,6 +5542,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在等待重试…"
+          }
+        }
+      }
+    },
+    "Wake protection is still being reasserted; Internet remains blocked. %@": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "唤醒后的保护仍在重新生效，网络仍处于阻断状态。%@"
           }
         }
       }

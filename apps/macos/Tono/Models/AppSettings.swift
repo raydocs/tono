@@ -109,12 +109,30 @@ enum InterfaceLanguagePreference {
         }
     }
 
+    /// Reopens Tono only once this process has actually exited.
+    ///
+    /// Termination is asynchronous and deliberately slow: AppKit answers
+    /// `terminateLater` while the core, DNS and PF policy are torn down over
+    /// helper IPC, and a helper repair can sit on an administrator prompt for
+    /// minutes. A fixed sleep therefore hands `open` a process that is still
+    /// running — Launch Services only activates it, and the reopen is lost when
+    /// that process finally exits. Poll the PID instead, bounded so a wedged
+    /// teardown still ends in a reopen attempt rather than an endless watcher.
     static func relaunch() {
         let path = Bundle.main.bundlePath
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        let script = "n=0; "
+            + "while /bin/kill -0 \"$1\" 2>/dev/null && [ $n -lt 480 ]; do "
+            + "/bin/sleep 0.5; n=$((n + 1)); done; "
+            + "/usr/bin/open \"$2\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-c", "sleep 0.4; /usr/bin/open \"$1\"", "--", path]
+        process.arguments = ["-c", script, "--", pid, path]
         try? process.run()
-        NSApp.terminate(nil)
+        if let delegate = NSApp.delegate as? AppDelegate {
+            delegate.terminateForRelaunch()
+        } else {
+            NSApp.terminate(nil)
+        }
     }
 }

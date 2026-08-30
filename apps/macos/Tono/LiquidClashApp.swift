@@ -473,8 +473,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    static let managedCatalogImportMessage =
-        "External subscription links are disabled. Servers are synchronized from the authenticated Tono cloud catalog."
+    /// Computed, so the lookup happens where it is read: this is the one
+    /// `errorMessage` value the banner receives through a constant rather than
+    /// from a `String(localized:)` at the assignment, and a stored literal here
+    /// shipped Chinese users the English sentence.
+    static var managedCatalogImportMessage: String {
+        String(
+            localized: "External subscription links are disabled. Servers are synchronized from the authenticated Tono cloud catalog."
+        )
+    }
 
     private func writeDebug(_ msg: String) {
         // Subscription URLs commonly contain bearer tokens. Never persist URL-event
@@ -499,6 +506,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    /// Quit for a language change, which reopens Tono afterwards. Termination
+    /// cleanup stops the core, restores DNS and disarms PF over helper IPC and
+    /// can spend minutes on an administrator prompt, so a runtime that owns no
+    /// network state takes the immediate exit instead of that budget.
+    ///
+    /// The tests below are what decide that, not the launch phase: `didStartCore`
+    /// is also cleared by a clean release, so a switch made after a normal
+    /// connect-then-disconnect takes the fast path too. That is correct — the
+    /// release already stopped the core, restored DNS and disarmed PF — but it
+    /// means the fast path is a live one, not only the first-launch chooser's.
+    func terminateForRelaunch() {
+        let runtimeMayOwnNetwork = (appState?.isConnected ?? false)
+            || (appState?.isConnecting ?? false)
+            || KillSwitchService.isArmed
+            || AppProfile.defaults.object(forKey: SettingsKey.didStartCore) != nil
+        if !runtimeMayOwnNetwork {
+            runtimeStopped = true
+        }
+        NSApp.terminate(nil)
     }
 
     /// A main-queue dispatch source must not synchronously enter AppKit's
