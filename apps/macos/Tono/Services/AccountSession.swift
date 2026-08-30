@@ -1,6 +1,20 @@
 import Foundation
 import Observation
 
+extension SettingsKey {
+    /// Test-programme protection snapshot: the twenty-minute telemetry window
+    /// carrying UI state, selected exit, catalog revision, kill-switch and DNS
+    /// state, path latencies and the connection event ring.
+    ///
+    /// Deliberately not `remoteDiagnosticsEnabled`: that switch starts the
+    /// fifteen-second poll for the four fixed remote device actions, and a
+    /// consent to be remotely actionable is not a consent to a periodic upload
+    /// it never described. Mirrors the Windows client's
+    /// `periodic_telemetry_enabled`, down to reading a missing value as on.
+    nonisolated static let periodicTelemetryEnabled =
+        "periodicTelemetryEnabled"
+}
+
 @MainActor @Observable
 final class AccountSession {
     enum State: Equatable { case restoring, signedOut, authenticating, enrolling, ready, suspended, error(String) }
@@ -58,6 +72,7 @@ final class AccountSession {
     private var systemSleeping = false
     private var lastCatalogFailureMessage: String?
     private var lastTrafficPolicyFailureMessage: String?
+    private var lastTrafficPolicyRevision: Int?
     private var authMethodsLoading = false
     private var hasStartedRestore = false
     private var shouldResumeProtection = false
@@ -70,6 +85,22 @@ final class AccountSession {
     /// route; without this accessor the stored failure was write-only and
     /// invisible to every UI and diagnostic surface.
     var trafficPolicyFailureMessage: String? { lastTrafficPolicyFailureMessage }
+    /// Revision of the managed traffic policy this run last accepted, or nil
+    /// before the first successful refresh. Support needs it beside the catalog
+    /// revision to tell "the policy is old" from "the policy never arrived".
+    var trafficPolicyRevision: Int? { lastTrafficPolicyRevision }
+
+    /// Whether the twenty-minute protection snapshot may be uploaded.
+    ///
+    /// A missing value reads as on: the Windows client defaults the same wire
+    /// shape on for the test programme, and a Mac that never appears on the
+    /// dashboard cannot be supported. Turning it off in Settings › Privacy
+    /// stops the upload for good.
+    nonisolated static var isPeriodicTelemetryEnabled: Bool {
+        AppProfile.defaults.object(forKey: SettingsKey.periodicTelemetryEnabled) == nil
+            ? true
+            : AppProfile.defaults.bool(forKey: SettingsKey.periodicTelemetryEnabled)
+    }
 
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
@@ -424,8 +455,10 @@ final class AccountSession {
         let boundedAttempts = min(max(attempts, 1), 3)
         for attempt in 0..<boundedAttempts {
             do {
-                try await trafficPolicyConsumer(try await api.trafficPolicy())
+                let policy = try await api.trafficPolicy()
+                try await trafficPolicyConsumer(policy)
                 lastTrafficPolicyFailureMessage = nil
+                lastTrafficPolicyRevision = policy.revision
                 return true
             } catch {
                 // Direct routing is optional. A failed refresh keeps the last
@@ -927,9 +960,10 @@ final class AccountSession {
     /// Starts or stops the raw-log upload loop.
     ///
     /// Deliberately not gated on `remoteDiagnosticsEnabled`: that switch governs
-    /// the four fixed remote actions and the compact protection snapshot, and
-    /// borrowing it here would make one consent cover a pipeline it never
-    /// described. This has its own switch and its own Settings copy.
+    /// the four fixed remote device actions and nothing else, and borrowing it
+    /// here would make one consent cover a pipeline it never described. This has
+    /// its own switch and its own Settings copy, as does the periodic protection
+    /// snapshot below.
     private func updateDiagnosticsLogUploading() {
         let enabled = AppProfile.defaults
             .object(forKey: SettingsKey.networkLogUploadEnabled) == nil
@@ -971,10 +1005,20 @@ final class AccountSession {
         updateDiagnosticsLogUploading()
     }
 
+    func periodicTelemetrySettingChanged() {
+        updatePeriodicTelemetry()
+    }
+
     /// Ops "online" is derived from `POST telemetry/windows`. Windows already
     /// sends this; without it a signed-in Mac never appears on the dashboard.
+    ///
+    /// Gated on its own switch, like the Windows client's: the window carries
+    /// the connection event ring and the whole protection state, which is more
+    /// than "this device is online" and more than any other Privacy row on the
+    /// Settings screen describes.
     private func updatePeriodicTelemetry() {
-        guard state == .ready, !systemSleeping, user != nil else {
+        guard state == .ready, !systemSleeping, user != nil,
+              Self.isPeriodicTelemetryEnabled else {
             periodicTelemetryTask?.cancel()
             periodicTelemetryTask = nil
             return
@@ -995,6 +1039,9 @@ final class AccountSession {
     }
 
     private func uploadPeriodicTelemetryWindow() async {
+        // The switch can be turned off while this task is parked on its sleep,
+        // and the cancellation only lands at the next suspension point.
+        guard Self.isPeriodicTelemetryEnabled else { return }
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -1065,12 +1112,19 @@ final class AccountSession {
         }
     }
 
-    /// Sends whatever is unsent right now, for the Support page's button. Returns
-    /// nothing: the button reports that the run finished, because a segment can
-    /// legitimately be empty when the log has not advanced since the last sweep.
-    func uploadDiagnosticsLogNow() async {
+    /// Sends whatever is unsent right now, for the Support page's button, and
+    /// reports what the sweep actually did. The three outcomes are materially
+    /// different to the person waiting on them — a segment reached support, the
+    /// log had not advanced, or the POST was refused — and collapsing them into
+    /// "the run finished" left a failed upload indistinguishable from a sent one.
+    @discardableResult
+    func uploadDiagnosticsLogNow() async -> DiagnosticsLogUploader.SweepOutcome {
         updateDiagnosticsLogUploading()
-        await diagnosticsLogUploader?.sweep()
+        // `updateDiagnosticsLogUploading` only builds the uploader once the
+        // account, sleep and consent preconditions hold. A nil one is therefore
+        // a pipeline that cannot run, never an upload that found nothing.
+        guard let uploader = diagnosticsLogUploader else { return .disabled }
+        return await uploader.sweep()
     }
 
     private func updateAppRoutingResearchUploading() {
