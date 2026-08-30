@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tono_core::{
     EXIT_GROUP_NAME,
     config::{self, RuntimePorts, build_owned_runtime_with_ports, generate_controller_secret},
-    connection::{ConnectStage, ConnectionStatus},
+    connection::{ConnectStage, ConnectionStatus, ReconnectBackoff},
     node::ValidatedNode,
 };
 
@@ -256,6 +256,16 @@ const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(120);
 /// the periodic probe, the kill-switch leg, the DNS leg and the core-identity leg are all
 /// untouched, and a burst that follows a genuine break still fails the first probe.
 const NETWORK_EVENT_PROBE_COOLDOWN: Duration = Duration::from_secs(15);
+/// How long a recovered-in-place verdict stands before the same standing failure may fire the
+/// monitor again.
+///
+/// A leg that stays unhealthy while the tunnel keeps carrying traffic — a Service that never
+/// answers again, a wedged WFP — reaches [`HEALTH_FAILURE_THRESHOLD`] two ticks after every
+/// re-seed, and every firing costs a warn line, an audit record and a three-origin HTTPS proof.
+/// Unbounded that runs for the life of the session and rotates the audit file, erasing the record
+/// of the very failure it is reporting. Inside this window the last proof still stands; a core
+/// restart or a failed data-plane proof is fresh evidence and is never held back by it.
+const IN_PLACE_RECOVERY_COOLDOWN: Duration = Duration::from_secs(120);
 /// F2: consecutive failures before the tunnel is declared dead.
 ///
 /// H7 — the threshold's premise ("two consecutive failures ≈ 4 s of sustained failure") holds
@@ -407,6 +417,29 @@ pub fn monitor_requires_reconnect(
     event_probe_failed: bool,
 ) -> bool {
     health_invalid || (event_invalidated && (core_changed || event_probe_failed))
+}
+
+/// What one [`handle_network_change`] call did to the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkChangeOutcome {
+    /// The locked TUN still carried traffic, so the core was never stopped and this session —
+    /// generation, tasks and all — is the same one that was Connected before the event.
+    RecoveredInPlace,
+    /// The session was torn down, handed to a newer generation, or was never this caller's to
+    /// act on. Nothing connection-scoped survives it.
+    Handled,
+}
+
+/// Whether a connection-scoped loop keeps running after one [`handle_network_change`] call.
+///
+/// Only the recovered-in-place verdict leaves the loop's own session alive, and its callers
+/// used to treat every call as terminal. One such event — roughly four seconds of Service IPC
+/// unavailability while mihomo and WFP are untouched, which an SCM recovery restart or the
+/// updater's replace-runtime step produces — therefore ended the connection-phase health
+/// monitor for the rest of the session, and nothing restarts it before the next connect. With
+/// it went the 120 s exit probe, the one leg that notices a dead exit behind a live tunnel.
+pub const fn connection_loop_continues(outcome: NetworkChangeOutcome) -> bool {
+    matches!(outcome, NetworkChangeOutcome::RecoveredInPlace)
 }
 
 /// F2: while Connected, the barrier must be wanted, live, fully locked, and actually
@@ -1548,6 +1581,7 @@ async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle
         let mut wechat_interval = tokio::time::interval(WECHAT_PATH_REFRESH_INTERVAL);
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
+        let mut watching_wechat = true;
         let mut direct_interval = tokio::time::interval(DIRECT_SAMPLE_INTERVAL);
         direct_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut direct_seen: std::collections::HashSet<(String, u16, bool, String)> =
@@ -1564,14 +1598,20 @@ async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle
                         return;
                     }
                 }
-                _ = wechat_interval.tick() => {
+                _ = wechat_interval.tick(), if watching_wechat => {
                     if skip_first_wechat {
                         skip_first_wechat = false;
                         continue;
                     }
                     if signed_wechat_paths_require_reconnect(&task_state, generation).await {
-                        handle_network_change(&task_state, &task_app).await;
-                        return;
+                        if !connection_loop_continues(handle_network_change(&task_state, &task_app).await) {
+                            return;
+                        }
+                        // Recovered in place: no reconnect ran, so the applied path set cannot
+                        // change for the rest of this session and this leg would report the same
+                        // difference every two minutes. Retire the leg, not the task — the pin
+                        // refresh and the direct sampling keep running.
+                        watching_wechat = false;
                     }
                 }
             }
@@ -2270,8 +2310,10 @@ async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &AppHandle) 
 
     #[cfg(windows)]
     // An unprotected quit may have stopped the Service after the last release. Revive the
-    // registered Service before asking its owner-gated endpoint to remove protection.
-    service::tono_service_ready_or_repair()
+    // registered Service before asking its owner-gated endpoint to remove protection. This is
+    // the path that hands the machine its Internet back, so it always gets its prompt: a repair
+    // the user declined during a connect must not leave them hard-blocked with no way out.
+    service::tono_service_ready_or_repair_now()
         .await
         .map_err(|error| format!("kill switch release failed; protection stays on: {error}"))?;
 
@@ -2347,6 +2389,10 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
     let task_state = state.clone();
     let task_app = app.clone();
     inner.catalog_failover_tried.clear();
+    // A press is the evidence the ladder cannot have: someone is at the machine and may have
+    // just fixed what was wrong with it. Give the automatic retries their full budget back, so
+    // the bound that stops an unattended loop can never strand a repaired install.
+    inner.fsm.reset_reconnect_backoff();
     let handle =
         AsyncHandler::spawn(move || Box::pin(reconnect_loop(task_state, task_app, Duration::ZERO)) as BoxedTask);
     inner.tasks.reconnect = Some(handle);
@@ -2354,6 +2400,28 @@ pub async fn retry_reconnect_now(state: &Arc<TonoState>, app: &AppHandle) {
     // waiting for.
     inner.next_retry_at_ms = Some(commands::epoch_millis());
     state.audit().log(AuditEvent::ReconnectScheduled { delay_ms: 0 });
+}
+
+/// Say the ladder ended, at either of the two places it can end.
+///
+/// The ladder gave up, not the protection: WFP stays armed, the UI keeps showing Protected
+/// Offline with the last failure, and "Retry now" still runs (and hands the ladder its budget
+/// back). What stops is the unattended repetition of an attempt that has already failed the same
+/// way for the whole budget — including the elevated repair it can reach, which is what turned a
+/// broken install into an administrator prompt every thirty seconds for as long as the app was
+/// open. [`schedule_reconnect_locked`] hands out the first rung and [`reconnect_loop`] owns every
+/// one after it, so the unattended outage that actually spends the budget ends inside the loop:
+/// without this, support could not tell "gave up" from "crashed".
+fn note_reconnect_budget_exhausted(state: &Arc<TonoState>) {
+    logging!(
+        warn,
+        Type::Service,
+        "Tono: 自动重连已用尽 {:?} 的重试预算，保持 Protected Offline 等待用户操作",
+        ReconnectBackoff::BUDGET
+    );
+    state.audit().log(AuditEvent::ProtectedOffline {
+        reason: "reconnectBudgetExhausted",
+    });
 }
 
 /// Lock-held half of [`schedule_reconnect`]. Spawning and registering are one critical section:
@@ -2376,6 +2444,9 @@ fn schedule_reconnect_locked(inner: &mut TonoInner, state: &Arc<TonoState>, app:
         return;
     }
     let Some(delay) = inner.fsm.next_reconnect_delay() else {
+        if inner.fsm.reconnect_budget_exhausted() {
+            note_reconnect_budget_exhausted(state);
+        }
         return;
     };
     let task_state = state.clone();
@@ -2567,28 +2638,40 @@ async fn reconnect_loop(state: Arc<TonoState>, app: AppHandle, first_delay: Dura
                 // no error shown, no retry_attempt bump. It only earns the next delay, because
                 // ending the loop here would strand the machine blocked with nothing scheduled.
                 logging!(info, Type::Service, "Tono: 自动重连被暂态守卫拒绝，稍后重试: {reason}");
-                let next = {
+                let (next, spent) = {
                     let mut inner = state.lock().await;
-                    inner.fsm.next_reconnect_delay()
+                    let next = inner.fsm.next_reconnect_delay();
+                    (next, inner.fsm.reconnect_budget_exhausted())
                 };
                 match next {
                     Some(next_delay) => delay = next_delay,
-                    None => return,
+                    None => {
+                        if spent {
+                            note_reconnect_budget_exhausted(&state);
+                        }
+                        return;
+                    }
                 }
             }
             Attempt::Failed(err) => {
                 let err = fail_connect(&state, &app, err).await;
-                let next = {
+                let (next, spent) = {
                     let mut inner = state.lock().await;
-                    if inner.catalog_requires_choice {
+                    let next = if inner.catalog_requires_choice {
                         None
                     } else {
                         inner.fsm.next_reconnect_delay()
-                    }
+                    };
+                    (next, inner.fsm.reconnect_budget_exhausted())
                 };
                 match next {
                     Some(next_delay) => delay = next_delay,
-                    None => return,
+                    None => {
+                        if spent {
+                            note_reconnect_budget_exhausted(&state);
+                        }
+                        return;
+                    }
                 }
             }
         }
@@ -3034,6 +3117,9 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
     // `None` until the first event-driven proof, so the first network change after connect is
     // always probed rather than inheriting the connect-time verdict.
     let mut last_event_probe_ok: Option<std::time::Instant> = None;
+    // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
+    // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
+    let mut last_in_place_recovery: Option<std::time::Instant> = None;
     loop {
         interval.tick().await;
         {
@@ -3057,8 +3143,22 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
                     error: error.to_string(),
                 });
                 if legs.invalid() {
-                    handle_network_change(&state, &app).await;
-                    return;
+                    // A Service that never answers again reaches the threshold two ticks after
+                    // every re-seed; inside the cooldown the last data-plane proof still stands.
+                    if last_in_place_recovery.is_some_and(|at| at.elapsed() < IN_PLACE_RECOVERY_COOLDOWN) {
+                        legs = HealthLegs::default();
+                        continue;
+                    }
+                    if !connection_loop_continues(handle_network_change(&state, &app).await) {
+                        return;
+                    }
+                    // The TUN proof succeeded: the Service was merely unreachable — an SCM
+                    // recovery restart, or the updater replacing the runtime — while the tunnel
+                    // it had already locked kept carrying traffic. Re-seed the legs (a failed
+                    // poll observed nothing else, so a stale counter here would fire again on
+                    // the very next tick) and keep monitoring this same session.
+                    last_in_place_recovery = Some(std::time::Instant::now());
+                    legs = HealthLegs::default();
                 }
                 continue;
             }
@@ -3203,8 +3303,25 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
         if monitor_requires_reconnect(invalidate, core_changed, health_invalid, event_probe_failed) {
-            handle_network_change(&state, &app).await;
-            return;
+            // A core restart or a failed data-plane proof is fresh evidence and always acts. A
+            // standing health leg is not: inside the cooldown the last proof still stands, and
+            // without that a wedged WFP or an unhealthy protected DNS re-proves the data plane
+            // every two ticks for the whole session.
+            if health_invalid
+                && !core_changed
+                && !event_probe_failed
+                && last_in_place_recovery.is_some_and(|at| at.elapsed() < IN_PLACE_RECOVERY_COOLDOWN)
+            {
+                legs = HealthLegs::default();
+                continue;
+            }
+            if !connection_loop_continues(handle_network_change(&state, &app).await) {
+                return;
+            }
+            // Nothing was torn down, so this monitor still owns the live session. Re-seed the
+            // legs against the fresh TUN proof rather than leaving the counters that fired.
+            last_in_place_recovery = Some(std::time::Instant::now());
+            legs = HealthLegs::default();
         }
     }
 }
@@ -3212,7 +3329,11 @@ async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
 /// Network adapter change / sleep-wake / core restart / policy behavior
 /// change (§6, M4, Build 28): invalidate Connected first, keep WFP armed
 /// (restrict to bootstrap), rerun the full transaction.
-pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandle) {
+///
+/// The verdict is for the caller's own loop, not for the tunnel:
+/// [`NetworkChangeOutcome::RecoveredInPlace`] means nothing was torn down and the caller is
+/// still running inside the session it started in (see [`connection_loop_continues`]).
+pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandle) -> NetworkChangeOutcome {
     logging!(warn, Type::Service, "Tono: 检测到网络或核心变化，失效 Connected 并重连");
     // Captured under the same guard as the `is_connected` check, because that check is the
     // *entry* condition and everything below it runs across awaits. This helper is reached from
@@ -3233,7 +3354,7 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
         // started, and the exit guard then compares a value to itself.
         let status = inner.fsm.status();
         if !status.is_connected || status.is_disconnecting {
-            return;
+            return NetworkChangeOutcome::Handled;
         }
         inner.connect_generation
     };
@@ -3247,12 +3368,12 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
             Type::Service,
             "Tono: network change recovered in place; core was not restarted"
         );
-        return;
+        return NetworkChangeOutcome::RecoveredInPlace;
     }
     {
         let mut inner = state.lock().await;
         if inner.connect_generation != generation || inner.fsm.status().is_disconnecting {
-            return;
+            return NetworkChangeOutcome::Handled;
         }
         inner.fsm.tunnel_died();
         commands::emit_status(&app, &commands::status_of(&inner));
@@ -3282,7 +3403,7 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
                 Type::Service,
                 "Tono: 网络变化重连已被更新的连接代际取代，交由其所有者处理"
             );
-            return;
+            return NetworkChangeOutcome::Handled;
         }
     }
     match attempt(state, app).await {
@@ -3299,6 +3420,9 @@ pub(crate) async fn handle_network_change(state: &Arc<TonoState>, app: &AppHandl
         Attempt::Connected => seed_autostart_after_connect(),
         Attempt::GuardRejected(_) | Attempt::Stale => {}
     }
+    // Everything past the in-place proof stopped the core, so even a fresh `Attempt::Connected`
+    // is a new session with its own monitor and tasks: no caller's loop survives it.
+    NetworkChangeOutcome::Handled
 }
 
 /// §6.2 endpoint derivation: the selected node's public IPv4/port over TCP.
@@ -5901,14 +6025,17 @@ mod tests {
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
+        IN_PLACE_RECOVERY_COOLDOWN,
         LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL,
         POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
-        SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction, TRANSITION_IN_FLIGHT_REJECTION,
+        NetworkChangeOutcome, SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction,
+        TRANSITION_IN_FLIGHT_REJECTION,
         FAKE_IP_LOOKUP_TIMEOUT, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT,
         TUN_PROBE_STAGGER,
         VERIFY_LOCK_ATTEMPTS,
         WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan, classify_core_sample,
-        collect_ipv4_literals, controller_direct_graph_is_active, controller_error_detail, core_change_fires,
+        collect_ipv4_literals, connection_loop_continues, controller_direct_graph_is_active, controller_error_detail,
+        core_change_fires,
         dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
         health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
@@ -5988,6 +6115,42 @@ mod tests {
             legs.observe_service_failure();
         }
         assert!(legs.invalid());
+    }
+
+    /// A network change that recovered in place must leave the monitor running.
+    ///
+    /// Two failed Service status IPCs — about four seconds of an SCM recovery restart, or of the
+    /// updater replacing the runtime — invalidate Connected on the Service leg alone while
+    /// mihomo and WFP are untouched, so the TUN proof succeeds and nothing is torn down. The
+    /// call used to be terminal for the caller regardless, which ended the connected-lifetime
+    /// monitor for the rest of the session: no more kill-switch, protected-DNS or 120 s exit
+    /// probing, so a later dead exit would have shown Connected forever.
+    #[test]
+    fn a_recovered_in_place_network_change_keeps_the_monitor_alive() {
+        let mut legs = HealthLegs::default();
+        for _ in 0..HEALTH_FAILURE_THRESHOLD {
+            legs.observe_service_failure();
+        }
+        assert!(legs.invalid());
+        assert!(
+            connection_loop_continues(NetworkChangeOutcome::RecoveredInPlace),
+            "the session was never torn down, so its monitor still owns it"
+        );
+        // ...and the loop re-seeds against the fresh proof, or the same counters would fire
+        // again on the very next tick.
+        legs = HealthLegs::default();
+        assert!(!legs.invalid());
+        // A real teardown still ends the loop: the new session brings its own monitor.
+        assert!(!connection_loop_continues(NetworkChangeOutcome::Handled));
+        // A leg that never recovers reaches the threshold again two ticks after every re-seed,
+        // and each firing costs a three-origin HTTPS proof and an audit record. The cooldown is
+        // what keeps a permanently unreachable Service from re-proving the data plane for the
+        // whole session and rotating the audit file away.
+        assert!(
+            IN_PLACE_RECOVERY_COOLDOWN
+                > NETWORK_MONITOR_INTERVAL * (HEALTH_FAILURE_THRESHOLD + 1),
+            "the cooldown must outlast the threshold it is bounding"
+        );
     }
 
     #[test]

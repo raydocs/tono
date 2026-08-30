@@ -1162,22 +1162,107 @@ pub(crate) async fn tono_service_ready_or_repair() -> Result<()> {
     match tono_service_ready().await {
         Ok(()) => Ok(()),
         Err(error) => {
-            if repair_registered_stopped_service().await {
-                return tono_service_ready().await;
+            let cause = format!("{error:#}");
+            if !service_repair_is_worth_prompting(&cause) {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: 相同故障的提权修复刚刚失败过，本次直接返回原错误，不再弹出管理员提示: {cause}"
+                );
+                return Err(error);
             }
-            Err(error)
+            match repair_registered_stopped_service().await {
+                ServiceRepairAttempt::Skipped => Err(error),
+                ServiceRepairAttempt::Ran => {
+                    let recovered = tono_service_ready().await;
+                    record_service_repair(&cause, recovered.is_ok());
+                    recovered
+                }
+                ServiceRepairAttempt::Failed => {
+                    record_service_repair(&cause, false);
+                    Err(error)
+                }
+            }
         }
     }
 }
 
+/// The same readiness check for a path the user asked for: the Repair control, and the explicit
+/// release that gives a blocked machine its Internet back.
+///
+/// A person acting on the failure is evidence the record cannot hold — they may be standing at
+/// the machine ready to approve the prompt they declined a minute ago — so the backoff that
+/// stops the unattended repetition never applies here.
+pub(crate) async fn tono_service_ready_or_repair_now() -> Result<()> {
+    forget_failed_service_repair();
+    tono_service_ready_or_repair().await
+}
+
+/// Drop the record, so the next readiness failure is answered with a prompt again.
+fn forget_failed_service_repair() {
+    *LAST_FAILED_SERVICE_REPAIR.lock() = None;
+}
+
+/// What one attempt at the privileged install/repair entry achieved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServiceRepairAttempt {
+    /// Not attempted, and nothing was shown to the user: the Service is not registered, so an
+    /// install is a separate, user-authorised decision.
+    Skipped,
+    /// The privileged entry ran to completion; readiness is re-checked by the caller.
+    Ran,
+    /// The privileged entry itself failed — the elevation prompt was declined, the installer
+    /// returned an error, or the operation slot was busy.
+    Failed,
+}
+
+/// The last elevated repair that did not leave the Service Ready, and the readiness failure it
+/// was answering.
+static LAST_FAILED_SERVICE_REPAIR: Lazy<Mutex<Option<FailedServiceRepair>>> = Lazy::new(|| Mutex::new(None));
+
+struct FailedServiceRepair {
+    cause: String,
+    at: std::time::Instant,
+}
+
+/// How long a repair that did not fix the Service silences the next repair for the same failure.
+///
+/// Deliberately far longer than any connect or reconnect rung: the point is that a machine whose
+/// install the repair cannot fix is asked once, not once per attempt.
+const SERVICE_REPAIR_RETRY_BACKOFF: Duration = Duration::from_secs(60 * 60);
+
+/// Whether the prompting repair path is worth entering for this readiness failure.
+///
+/// The repair shows a UAC prompt, and the protected reconnect ladder re-enters the connect flow
+/// on every rung, so an install the repair cannot fix used to ask the user to approve an
+/// administrator prompt on every rung too. A repair that ran and left the Service exactly as
+/// unavailable as before is evidence about *that* failure: the identical one does not earn a
+/// second prompt until [`SERVICE_REPAIR_RETRY_BACKOFF`] has passed. Any other failure, and any
+/// failure at all once a repair has worked, is admitted immediately — a Service stopped by an
+/// unprotected quit still revives on the next connect with no user action.
+fn service_repair_is_worth_prompting(cause: &str) -> bool {
+    LAST_FAILED_SERVICE_REPAIR
+        .lock()
+        .as_ref()
+        .is_none_or(|last| last.cause != cause || last.at.elapsed() >= SERVICE_REPAIR_RETRY_BACKOFF)
+}
+
+/// Record what an attempted repair achieved. Success forgets everything: the next distinct
+/// outage starts from a clean slate.
+fn record_service_repair(cause: &str, recovered: bool) {
+    *LAST_FAILED_SERVICE_REPAIR.lock() = (!recovered).then(|| FailedServiceRepair {
+        cause: cause.to_owned(),
+        at: std::time::Instant::now(),
+    });
+}
+
 /// One attempt to revive a Service that is registered with the SCM but not answering, via the
-/// established privileged install/repair path. `false` means the caller stays on its original
-/// error path: the Service is not registered (install is a separate, user-authorised decision),
-/// or the repair itself failed (e.g. the elevation prompt was declined).
+/// established privileged install/repair path. Anything but [`ServiceRepairAttempt::Ran`] leaves
+/// the caller on its original error path.
 #[cfg(windows)]
-async fn repair_registered_stopped_service() -> bool {
+async fn repair_registered_stopped_service() -> ServiceRepairAttempt {
     if !trusted_service_evidence().unwrap_or(false) {
-        return false;
+        return ServiceRepairAttempt::Skipped;
     }
     logging!(
         info,
@@ -1188,21 +1273,21 @@ async fn repair_registered_stopped_service() -> bool {
         .handle_service_status(ServiceStatus::InstallRequired)
         .await
     {
-        Ok(()) => true,
+        Ok(()) => ServiceRepairAttempt::Ran,
         Err(error) => {
             logging!(
                 warn,
                 Type::Service,
                 "Tono: 停止状态服务的修复拉起失败: {error:#}"
             );
-            false
+            ServiceRepairAttempt::Failed
         }
     }
 }
 
 #[cfg(not(windows))]
-async fn repair_registered_stopped_service() -> bool {
-    false
+async fn repair_registered_stopped_service() -> ServiceRepairAttempt {
+    ServiceRepairAttempt::Skipped
 }
 
 /// Whether the installed Service has the complete Windows protection contract: WFP + DNS,
@@ -2266,10 +2351,12 @@ pub static SERVICE_MANAGER: ServiceManager = ServiceManager;
 #[allow(clippy::expect_used, clippy::panic, reason = "tests assert by panicking")]
 mod tests {
     use super::{
-        MARK_VERIFIED_ATTEMPTS, ServiceHealth, ServiceStatus, advanced_tono_generation, capture_generation_before,
-        claim_owner_recovery_generation, generate_service_session_token, macos_install_shell,
-        mark_service_unavailable_after_owner_loss, mark_verified_committed, owner_recovery_policy,
-        service_core_path_for, session_matches_status,
+        MARK_VERIFIED_ATTEMPTS, SERVICE_REPAIR_RETRY_BACKOFF, ServiceHealth, ServiceStatus,
+        advanced_tono_generation, capture_generation_before,
+        claim_owner_recovery_generation, forget_failed_service_repair, generate_service_session_token,
+        macos_install_shell, mark_service_unavailable_after_owner_loss, mark_verified_committed,
+        owner_recovery_policy, record_service_repair, service_core_path_for, service_repair_is_worth_prompting,
+        session_matches_status,
     };
     #[cfg(unix)]
     use super::{service_core_path_for_with_publisher, service_tool_path_for};
@@ -2283,6 +2370,7 @@ mod tests {
     use std::{
         path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
     };
 
     /// A Run State backed by a scripted environment, so these tests never touch the global.
@@ -2324,6 +2412,45 @@ mod tests {
         status.mode = KillSwitchStatusMode::Locked;
         status.tunnel_permit_rendered = false;
         assert!(!mark_verified_committed(&status));
+    }
+
+    /// The elevated repair asks once per failure, not once per reconnect rung.
+    ///
+    /// The protected reconnect ladder re-enters the connect flow — and with it this readiness
+    /// check — on every rung, so a repair that cannot fix the install used to raise an
+    /// administrator prompt every time. Recovery is untouched: an unrelated failure, and every
+    /// failure after a repair that worked, still earns its attempt immediately.
+    #[test]
+    #[allow(
+        clippy::assertions_on_constants,
+        reason = "this test pins the real-machine elevation-prompt contract"
+    )]
+    fn a_repair_that_did_not_help_is_not_repeated_for_the_same_failure() {
+        let cause = "Tono Service 不可用: NotInstalled";
+        let other = "Tono Service 不可用: NeedsReinstall";
+        assert!(service_repair_is_worth_prompting(cause));
+
+        record_service_repair(cause, false);
+        assert!(
+            !service_repair_is_worth_prompting(cause),
+            "the identical failure must not raise a second prompt"
+        );
+        assert!(
+            service_repair_is_worth_prompting(other),
+            "a different failure is a different question"
+        );
+        assert!(SERVICE_REPAIR_RETRY_BACKOFF >= Duration::from_secs(30 * 60));
+
+        // A repair that worked forgets everything, so the next outage is answered normally.
+        record_service_repair(cause, true);
+        assert!(service_repair_is_worth_prompting(cause));
+
+        // And a person asking — the Repair control, or the release that gives a blocked machine
+        // its Internet back — is never answered from the record. Suppressing the prompt there
+        // would leave a user who declined it once with no route out of a hard block.
+        record_service_repair(cause, false);
+        forget_failed_service_repair();
+        assert!(service_repair_is_worth_prompting(cause));
     }
 
     #[test]
