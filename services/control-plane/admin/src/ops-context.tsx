@@ -63,18 +63,22 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
   const fast = refreshMs;
   const minute = cadence(refreshMs, 60_000);
   const slow = cadence(refreshMs, 120_000);
-  const wantMetrics = page === 'traffic' || page === 'monitor';
+  // Page-scoped endpoints only poll where their data can render; the node
+  // drawer's 24h trend also lives on the failures page.
+  const wantMetrics = page === 'traffic' || page === 'monitor' || page === 'failures';
+  const wantFleet = page === 'monitor';
+  const wantDashboard = page === 'dashboard';
   const range = page === 'traffic' ? metricsRange : '24h';
 
-  const dashboard = useResource(operationsApi.dashboard, [], minute);
+  const dashboard = useResource(operationsApi.dashboard, [], wantDashboard ? minute : 0, wantDashboard);
   const live = useResource(operationsApi.live, [], fast);
   const profiles = useResource(operationsApi.nodeProfiles, [], slow);
   const activity = useResource(operationsApi.activity, [], fast);
   const catalog = useResource(operationsApi.exitCatalog, [], slow);
-  const fleet = useResource(operationsApi.fleetNodes, [], fast);
+  const fleet = useResource(operationsApi.fleetNodes, [], wantFleet ? fast : 0, wantFleet);
   const users = useResource(operationsApi.users, [], minute);
-  const audit = useResource(operationsApi.audit, [], slow);
-  const metrics = useKeyedResource(range, (next) => operationsApi.metrics(next), wantMetrics ? minute : 0, wantMetrics);
+  const audit = useResource(operationsApi.audit, [], wantDashboard ? slow : 0, wantDashboard);
+  const metrics = useKeyedResource(range, (next, signal) => operationsApi.metrics(next, undefined, signal), wantMetrics ? minute : 0, wantMetrics);
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
     const tick = () => setNowSec(Math.floor(Date.now() / 1000));
@@ -153,10 +157,10 @@ export function OpsDataProvider({ children }: { children: ReactNode }) {
     metrics.state, metrics.refreshedAt, metrics.stale, metrics.snapshotKey,
   ]);
 
-  const value: OpsWorld = {
+  const value = useMemo<OpsWorld>(() => ({
     dashboard, live, profiles, activity, catalog, fleet, users, audit, metrics,
     ...world,
-  };
+  }), [dashboard, live, profiles, activity, catalog, fleet, users, audit, metrics, world]);
 
   return <OpsContext.Provider value={value}>{children}</OpsContext.Provider>;
 }

@@ -547,7 +547,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 let host = metadata.host.isEmpty
                     ? metadata.destinationIP ?? "unknown"
                     : metadata.host
-                let processPath = Self.displayProcessField(metadata.processPath)
+                let processPath = Self.displayProcessPath(metadata.processPath)
                 let process: String = {
                     let named = Self.displayProcessField(metadata.process)
                     if named != "unknown" { return named }
@@ -1005,6 +1005,24 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     private static func displayProcessField(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "unknown" }
         return value
+    }
+
+    static let redactedHomePrefix = "/Users/<redacted>"
+
+    /// A process path under a home directory carries the account's short name
+    /// in `/Users/<name>/`, and this file is drained by the log upload. Replace
+    /// that one component where the path enters a record and keep the rest: the
+    /// bundle and the executable are what a `process_path` is read for. Paths
+    /// with no such component, `/Users/Shared` among them, are a location
+    /// rather than an account and stay as they are.
+    static func displayProcessPath(_ value: String?) -> String {
+        let path = displayProcessField(value)
+        let prefix = "/Users/"
+        guard path.hasPrefix(prefix) else { return path }
+        let remainder = path.dropFirst(prefix.count)
+        let owner = remainder.prefix(while: { $0 != "/" })
+        guard owner != "Shared" else { return path }
+        return redactedHomePrefix + String(remainder.dropFirst(owner.count))
     }
 
     private static func routeClassification(

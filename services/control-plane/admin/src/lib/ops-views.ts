@@ -10,6 +10,7 @@ import { customerPathVerdict, pickWorstActivity, type CustomerPathVerdict } from
 import { carrierLossSignals } from './carrier';
 import { machineSignals, mergedBilling, trafficRemaining, type BillingView } from './machine';
 import { catalogLag, type CatalogLag } from './revision';
+import { calendarDaysUntil } from './fields';
 import { measurementFresh } from './freshness';
 import { blockLabel, blockStatus } from './quality';
 import { msEpochToSec } from './time';
@@ -51,6 +52,8 @@ export type OpsNodeView = {
   routeKeywords: string[];
   pathSummary: { worstExitMs: number | null; worstTcpMs: number | null; samples: number } | null;
   billingState: 'known' | 'partial' | 'unavailable';
+  /** Whole days the renewal date is already past; null when not overdue or unfilled. */
+  renewOverdueDays: number | null;
   /** Composite presentation: mainland quality AND agent freshness. */
   dot: NodeDot;
 };
@@ -97,7 +100,28 @@ export function nodeAttentionLabel(node: OpsNodeView): string {
     return mainlandLabel(node);
   }
   if (hasBadCarrierLoss(node)) return '回程丢包';
+  if (node.renewOverdueDays != null) return `续费日已过 ${node.renewOverdueDays} 天`;
   return mainlandLabel(node);
+}
+
+/** One copy per occupancy state, shared by cards, drawer, and tables. */
+export function occupancyLabel(node: Pick<OpsNodeView, 'occupancy' | 'occupancyState'>): string {
+  if (node.occupancyState !== 'known') return '占用不可判断';
+  if (!node.occupancy) return '现在没人连这台';
+  return `${node.occupancy} 人在用`;
+}
+
+export function catalogLabel(node: Pick<OpsNodeView, 'catalogState'>): string {
+  if (node.catalogState === 'known-listed') return '在售';
+  if (node.catalogState === 'known-unlisted') return '不在目录';
+  return '目录未知';
+}
+
+export function agentLabel(node: Pick<OpsNodeView, 'agentState'>): string {
+  if (node.agentState === 'unavailable') return '探针源不可用';
+  if (node.agentState === 'unreported') return '没装探针';
+  if (node.agentState === 'stale') return '探针过期';
+  return '探针正常';
 }
 
 export function nodeRootCause(node: OpsNodeView): NodeRootCause {
@@ -305,6 +329,9 @@ export function assembleOpsNodes(input: {
       routeKeywords: quality?.routeKeywords.filter((keyword) => !['联通', '电信', '移动'].includes(keyword)) ?? [],
       pathSummary: occupancyState === 'known' ? (pathByNode.get(name) ?? { worstExitMs: null, worstTcpMs: null, samples: 0 }) : null,
       billingState,
+      renewOverdueDays: billing.renewsAt != null && calendarDaysUntil(billing.renewsAt, nowSec) < 0
+        ? -calendarDaysUntil(billing.renewsAt, nowSec)
+        : null,
       dot: 'unknown' as NodeDot,
     };
     node.dot = nodeDot(node);
@@ -331,7 +358,9 @@ export function nodeMatchesFocus(node: OpsNodeView, focus: string | null, nowSec
   if (focus === 'pressure') return cause === 'pressure';
   if (focus === 'loss') return hasBadCarrierLoss(node);
   if (focus === 'expiring') {
-    return Boolean(node.billing.renewsAt && node.billing.renewsAt - nowSec <= 7 * 86_400 && node.billing.renewsAt - nowSec >= 0);
+    // Overdue renewals stay in this focus; falling off the list at day 0 is
+    // exactly how an unpaid machine used to disappear from the console.
+    return Boolean(node.billing.renewsAt && node.billing.renewsAt - nowSec <= 7 * 86_400);
   }
   if (focus === 'unfilled-renew') return node.billing.renewsAt == null;
   if (focus === 'unknown') {
@@ -457,7 +486,7 @@ export function assembleOpsPeople(input: {
     const chores: string[] = [];
     if (live && user && !hasExitIdentity) chores.push('没凭证');
     if (live && user?.product?.incomplete) chores.push('没开 Claude');
-    if (live && user && !hasHome) chores.push('家宽');
+    if (live && user && !hasHome) chores.push('没家宽');
     return {
       userId,
       email: user?.email ?? latest?.email ?? userId,
@@ -521,6 +550,23 @@ function liveCustomer(person: OpsPersonView): boolean {
   return person.accountState === 'present' && person.user?.status === 'active';
 }
 
+/** One copy of the heartbeat ladder, shared by the list row and the drawer. */
+export function personTelemetryLabel(person: Pick<OpsPersonView, 'telemetryState' | 'online' | 'onlineDeviceCount'>): string {
+  if (person.telemetryState === 'loading') return '心跳加载中';
+  if (person.telemetryState === 'unavailable') return '心跳不可用';
+  if (person.telemetryState === 'unreported') return '未上报';
+  if (person.online) return `${person.onlineDeviceCount} 台在线`;
+  return '离线';
+}
+
+/** Account-source caveat; null once the customer record is actually present. */
+export function personAccountLabel(person: Pick<OpsPersonView, 'accountState'>): string | null {
+  if (person.accountState === 'loading') return '客户资料加载中';
+  if (person.accountState === 'unavailable') return '客户资料不可用';
+  if (person.accountState === 'absent') return '心跳身份未进入客户库';
+  return null;
+}
+
 export function personMatchesFocus(person: OpsPersonView, focus: string | null): boolean {
   if (!focus || focus === 'homes') return true;
   if (focus === 'quota') return liveCustomer(person) && (person.quotaWarn || person.quotaOver);
@@ -530,7 +576,10 @@ export function personMatchesFocus(person: OpsPersonView, focus: string | null):
   if (focus === 'home') return liveCustomer(person) && !person.hasHome;
   if (focus === 'online') return person.online;
   if (focus === 'path') return person.path.kind === 'incident';
-  if (focus === 'unmeasured') return person.online && person.path.kind === 'unmeasured';
+  if (focus === 'unmeasured') {
+    // No fresh sample at all — never measured, or every sample has expired.
+    return person.online && (person.path.kind === 'unmeasured' || person.path.kind === 'stale-sample');
+  }
   if (focus === 'catalog') return catalogBehindLive(person);
   if (focus === 'catalog-unreported') return person.catalogLag.state === 'unreported' && person.online;
   if (focus === 'credential') return liveCustomer(person) && !person.hasExitIdentity;

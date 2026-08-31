@@ -55,3 +55,41 @@ export function unixDate(text: string): Parsed {
   const seconds = Math.floor(ms / 1_000);
   return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 'invalid';
 }
+
+/**
+ * Renewal dates are calendar days on the operator's clock, but `new Date('2026-09-01')`
+ * parses as UTC midnight and `toISOString()` renders back in UTC — west of
+ * Greenwich the same stored second reads as the previous day. These two keep a
+ * `<input type="date">` round-trip in local time.
+ */
+
+/** Unix seconds → the yyyy-mm-dd a date box should show, in local time. */
+export function localDateInputValue(sec: number | null | undefined): string {
+  if (sec == null) return '';
+  const date = new Date(sec * 1_000);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** A date box → unix seconds at local midnight. Empty clears; anything unparseable refuses. */
+export function unixFromLocalDate(text: string): Parsed {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return 'invalid';
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return 'invalid';
+  const seconds = Math.floor(date.getTime() / 1_000);
+  return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : 'invalid';
+}
+
+/** Whole calendar days from today (local) to `sec`; negative when already past. */
+export function calendarDaysUntil(sec: number, nowSec: number): number {
+  const today = new Date(nowSec * 1_000);
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(sec * 1_000);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}

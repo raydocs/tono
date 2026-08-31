@@ -389,7 +389,10 @@ struct MultiExitPolicyTests {
             ],
             tcpEndpoints: [
                 .init(address: "49.51.67.253", port: 80, transport: "tcp"),
-            ]
+            ],
+            // Address endpoints are carried on a verified signature, so a
+            // fixture that exercises them has to declare one.
+            trusted: true
         )
         let validatedDirectPolicy = try ConfigPipeline.validatedManagedDirectPolicy(
             managedDirectPolicy,
@@ -1040,7 +1043,10 @@ struct MultiExitPolicyTests {
                     domainPins: [],
                     mediaEndpoints: [
                         .init(address: "43.146.27.17", port: 443, transport: "tcp"),
-                    ]
+                    ],
+                    // Signed, so the transport guard is what refuses this and
+                    // not the address gate ahead of it.
+                    trusted: true
                 )
             )
             throw TestFailure("managed media DIRECT accepted TCP")

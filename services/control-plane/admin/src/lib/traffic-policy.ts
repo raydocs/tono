@@ -121,8 +121,15 @@ export function clearWebDomains(policy: TrafficPolicyDoc): PolicyParse {
   return { ok: true, policy: next };
 }
 
-export function emptyDirectPolicy(): TrafficPolicyDoc {
-  return { version: 1, domains: [], mediaEndpoints: [] };
+/** Close every direct path: empty each list the version carries. Never upgrades/downgrades version. */
+export function clearAllDirect(policy: TrafficPolicyDoc): TrafficPolicyDoc {
+  const next = clone(policy);
+  next.domains = [];
+  next.mediaEndpoints = [];
+  if (next.version !== 1) next.webDomains = [];
+  if (next.version === 3 || next.version === 4) next.directSuffixes = [];
+  if (next.version === 4) next.tcpEndpoints = [];
+  return next;
 }
 
 export function hasWebDomains(policy: TrafficPolicyDoc): boolean {

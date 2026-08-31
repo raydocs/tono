@@ -470,6 +470,22 @@ nonisolated struct ConfigPipeline {
         "dingtalk.cn", "dingtalk.com", "dingtalk.net", "dingtalkapps.com",
         "dingtalkcloud.com", "dingding.xin", "ztna-dingtalk.com", "ddurl.to",
     ]
+
+    /// IPv4 prefixes, `a.b.c.d/len`, that an unsigned policy may pull out of
+    /// the tunnel as a media or TCP endpoint. The address-shaped counterpart of
+    /// the two suffix allowlists above, and it exists for the same reason: an
+    /// unsigned document has no established author, so what it may carve out is
+    /// what this build already agreed to.
+    ///
+    /// Empty, deliberately. A raw-IP endpoint is the one direct route with no
+    /// hostname to review, and the addresses these entries carry are the access
+    /// addresses a vendor's own HTTPDNS hands out — rotated per region, which is
+    /// why policy publishes them rather than a domain. A prefix compiled in here
+    /// would have to be re-released as often as the policy moves. Published
+    /// policy is signed, so this list costs production nothing; an unsigned
+    /// document asking for a raw-IP direct route is exactly what it refuses.
+    static let managedDirectIPv4Allowlist: [String] = []
+
     /// Domain families the reviewed WeChat bundle dials, resolved through China
     /// DoH on the interface-bound direct outbound.
     ///
@@ -2059,6 +2075,63 @@ nonisolated struct ConfigPipeline {
         return host
     }
 
+    /// The address endpoints — UDP media and reviewed TCP — carry the same
+    /// trust gate as the domain routes above, and for the same reason: an
+    /// endpoint is a destination leaving the tunnel over the user's own path,
+    /// and whether it is written as a name or as an address changes nothing
+    /// about that. `trusted` skips the allowlist and nothing else; the value
+    /// must still be a public IPv4 literal, and the caller's protected
+    /// addresses are excluded separately.
+    ///
+    /// `allowlist` is a parameter with the compiled-in list as its default so
+    /// prefix matching can be exercised while the shipped list is empty. Every
+    /// caller in the app uses the default; passing another list weakens nothing,
+    /// because a caller that could choose the list could equally pass `trusted`.
+    static func validatedManagedDirectAddress(
+        _ raw: String,
+        field: String,
+        trusted: Bool = false,
+        allowlist: [String] = Self.managedDirectIPv4Allowlist
+    ) throws -> String {
+        let address = try validatedPublicIPv4(raw, field: field)
+        if trusted { return address }
+        guard isManagedDirectAllowlistedIPv4(address, allowlist: allowlist) else {
+            throw TonoInjectionError.unsafeNode(field)
+        }
+        return address
+    }
+
+    /// Membership in `managedDirectIPv4Allowlist`. An entry that does not parse
+    /// as a prefix matches nothing rather than everything, so empty components
+    /// are kept: a leading, doubled or trailing slash is a typo in a list that
+    /// carves traffic out of the tunnel, and it is refused rather than read
+    /// through.
+    static func isManagedDirectAllowlistedIPv4(
+        _ address: String,
+        allowlist: [String] = Self.managedDirectIPv4Allowlist
+    ) -> Bool {
+        guard let candidate = ipv4Value(address) else { return false }
+        return allowlist.contains { entry in
+            let parts = entry.split(separator: "/", omittingEmptySubsequences: false)
+            guard parts.count == 2,
+                  let bits = Int(parts[1]), bits >= 1, bits <= 32,
+                  let network = ipv4Value(String(parts[0])) else {
+                return false
+            }
+            let mask: UInt32 = UInt32.max << (32 - bits)
+            return candidate & mask == network & mask
+        }
+    }
+
+    private static func ipv4Value(_ raw: String) -> UInt32? {
+        var address = in_addr()
+        guard inet_pton(AF_INET, raw, &address) == 1 else { return nil }
+        let bytes = withUnsafeBytes(of: address) { Array($0) }
+        guard bytes.count == 4 else { return nil }
+        return (UInt32(bytes[0]) << 24) | (UInt32(bytes[1]) << 16)
+            | (UInt32(bytes[2]) << 8) | UInt32(bytes[3])
+    }
+
     static func validatedManagedDirectPolicy(
         _ policy: ManagedDirectRuntimePolicy?,
         excluding protectedAddresses: Set<String> = []
@@ -2172,9 +2245,10 @@ nonisolated struct ConfigPipeline {
         }.sorted { $0.host < $1.host }
 
         let media = try policy.mediaEndpoints.map { endpoint in
-            let address = try validatedPublicIPv4(
+            let address = try validatedManagedDirectAddress(
                 endpoint.address,
-                field: "managed media address"
+                field: "managed media address",
+                trusted: policy.trusted
             )
             guard !permanentlyProtected.contains(address),
                   endpoint.transport == "udp",
@@ -2191,9 +2265,10 @@ nonisolated struct ConfigPipeline {
             ($0.port, $0.address) < ($1.port, $1.address)
         }
         let tcp = try policy.tcpEndpoints.map { endpoint in
-            let address = try validatedPublicIPv4(
+            let address = try validatedManagedDirectAddress(
                 endpoint.address,
-                field: "managed TCP address"
+                field: "managed TCP address",
+                trusted: policy.trusted
             )
             guard !permanentlyProtected.contains(address),
                   endpoint.transport == "tcp",

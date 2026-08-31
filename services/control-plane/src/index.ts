@@ -18,6 +18,7 @@ import {
 } from './oidc';
 import { AccessVerificationError, verifyAccessRequest } from './access';
 import {
+  isMetricField,
   queryAgentMetrics,
   queryHomeProbeHistory,
   recordAgentSamples,
@@ -403,7 +404,7 @@ function canonicalActionResult(value: unknown) {
     const s = value.snapshot as Row;
     const bools = ['connected', 'connecting', 'disconnecting', 'protectionBlocked', 'killSwitchArmed', 'utunPresent', 'protectedDNSConfigured'];
     const strings = ['appVersion', 'build', 'selectedExit', 'connectionStage'];
-    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory', 'lastCrashLabel']);
+    rejectUnexpectedKeys(s, [...bools, ...strings, 'reconnectAttempt', 'lastErrorCategory', 'lastCrashLabel', 'catalogRevision']);
     const snapshot: Row = {};
     for (const key of bools) {
       if (s[key] !== undefined && typeof s[key] !== 'boolean') throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
@@ -427,6 +428,14 @@ function canonicalActionResult(value: unknown) {
     if (s.reconnectAttempt !== undefined) {
       if (!Number.isSafeInteger(s.reconnectAttempt) || s.reconnectAttempt < 0 || s.reconnectAttempt > 1000) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid reconnectAttempt');
       snapshot.reconnectAttempt = s.reconnectAttempt;
+    }
+    // Which managed catalog the device is actually running. The telemetry
+    // window carries the same field under the same name and bounds; a snapshot
+    // result is that claim on demand, which is the whole point of asking one
+    // Mac for a snapshot rather than waiting for its next window.
+    if (s.catalogRevision !== undefined && s.catalogRevision !== null) {
+      if (!Number.isSafeInteger(s.catalogRevision) || s.catalogRevision < 0 || s.catalogRevision > 1_000_000_000_000) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid catalogRevision');
+      snapshot.catalogRevision = s.catalogRevision;
     }
     result.snapshot = snapshot;
   }
@@ -454,6 +463,13 @@ const error = (e: unknown) => {
 };
 
 async function body(req: Request, maxBytes = 1024 * 1024) {
+  // A cross-site form POST (enctype=text/plain) is a no-preflight simple
+  // request; requiring the JSON media type means every write that reaches a
+  // parse is either same-origin or has already survived a CORS preflight.
+  const mediaType = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (mediaType !== 'application/json') {
+    throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Expected content-type application/json');
+  }
   const declared = Number(req.headers.get('content-length') ?? '0');
   const declaredTooLarge = Number.isFinite(declared) && declared > maxBytes;
   try {
@@ -617,22 +633,23 @@ function managedCatalogYAML(value: unknown): string {
   ) {
     throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must be bounded Clash YAML with a proxies section');
   }
-  // Every identity in a published catalog must be the placeholder, never a
-  // literal. One catalog served verbatim to everyone is how every account came
-  // to share one exit identity, and why the exit can count bytes but not say
-  // whose. Refusing it here means that state cannot be re-published by accident:
-  // a real UUID in the document is rejected before it is ever encrypted.
-  for (const line of yaml.split(/\r?\n/)) {
-    const identity = /^\s*(?:-\s*)?uuid\s*:\s*(.+?)\s*$/.exec(line);
-    if (!identity) continue;
-    const value = identity[1].replace(/^['"]|['"]$/g, '');
-    if (value !== CLIENT_UUID_PLACEHOLDER) {
-      throw new ApiError(
-        400,
-        'INVALID_CATALOG',
-        `Catalog identities must be ${CLIENT_UUID_PLACEHOLDER}, so each account is served its own`,
-      );
-    }
+  // Validate one identity on every proxy block, not merely every `uuid:` line
+  // a line-oriented regex happens to see. `uuid: null`, a missing field, and a
+  // flow mapping all evaded the old loop; a placeholder in a comment could then
+  // make the publish tool's file-wide count look healthy while customers were
+  // served a node they could never authenticate to.
+  let items: Array<{ name: string; block: string }>;
+  try {
+    items = splitManagedCatalogProxies(yaml).items;
+  } catch {
+    throw new ApiError(400, 'INVALID_CATALOG', 'Catalog must contain a readable proxies list');
+  }
+  if (items.some(({ block }) => !catalogProxyUsesManagedIdentity(block))) {
+    throw new ApiError(
+      400,
+      'INVALID_CATALOG',
+      `Every catalog proxy must have exactly one uuid set to ${CLIENT_UUID_PLACEHOLDER}`,
+    );
   }
   return yaml;
 }
@@ -640,6 +657,13 @@ function managedCatalogYAML(value: unknown): string {
 /** Extract the Clash proxy `name` from one list-item block under `proxies:`. */
 function catalogProxyName(block: string): string | null {
   for (const line of block.split(/\r?\n/)) {
+    const flowMatch = line.match(
+      /[{,]\s*name\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|([^,}]+))/,
+    );
+    if (flowMatch) {
+      const raw = flowMatch[1] ?? flowMatch[2] ?? flowMatch[3] ?? '';
+      return raw.trim().replace(/\\(["'\\])/g, '$1');
+    }
     const match = line.match(
       // The plain-scalar branch must accept internal spaces ("Los Angeles · Mesa"):
       // the publish tooling validates names with a real YAML parser, and a name this
@@ -725,6 +749,25 @@ function splitManagedCatalogProxies(yaml: string): {
     items,
     suffix: lines.slice(listEnd).join('\n'),
   };
+}
+
+/** A proxy block has exactly one UUID key and it carries the account placeholder. */
+function catalogProxyUsesManagedIdentity(block: string): boolean {
+  const uuidKeys = [
+    ...block.matchAll(/^\s*(?:-\s*)?uuid\s*:/gm),
+    ...block.matchAll(/[{,]\s*uuid\s*:/g),
+  ];
+  if (uuidKeys.length !== 1) return false;
+
+  const placeholder = String.raw`(?:["']\{\{TONO_CLIENT_UUID\}\}["']|\{\{TONO_CLIENT_UUID\}\})`;
+  const blockValue = new RegExp(
+    String.raw`^\s*(?:-\s*)?uuid\s*:\s*${placeholder}\s*(?:#.*)?$`,
+    'm',
+  );
+  const flowValue = new RegExp(
+    String.raw`[{,]\s*uuid\s*:\s*${placeholder}\s*(?=[,}])`,
+  );
+  return blockValue.test(block) || flowValue.test(block);
 }
 
 /**
@@ -1454,6 +1497,36 @@ async function homeRoutingForUser(e: Env, userId: string) {
   return { routing, restricted, allowed };
 }
 
+// The routing document is per-account server state that the fleet-wide catalog
+// revision does not describe: a rebind, a default-proxy change or a credential
+// rotation can leave both `revision` and the served `sha256` exactly where they
+// were. Clients key catalog freshness on (revision, sha256), so a routing-only
+// rotation would otherwise be invisible and the client would keep dialing
+// retired credentials. `routingSha256` is the third component of that key — it
+// digests the served routing directives, and the empty document has a digest of
+// its own so an unbind moves the field back rather than dropping it.
+async function routingSha256(routing: CatalogRouting | undefined) {
+  const socks5 = routing?.homeSocks5;
+  return sha256([
+    routing?.homeProxy ?? '',
+    routing?.defaultProxy ?? '',
+    socks5
+      ? [socks5.host, String(socks5.port), socks5.username, socks5.password].join('\n')
+      : '',
+  ].join('\n'));
+}
+
+/**
+ * The served exit catalog.
+ *
+ * - `revision` is fleet-wide and moves for every account at once.
+ * - `sha256` covers the served proxies YAML, which is per account: the same
+ *   revision legitimately yields different digests for two users, because the
+ *   client identity is substituted and restricted home exits are filtered out.
+ * - `routingSha256` covers the sibling routing document and is present only on
+ *   the per-account view (the ops/admin plaintext catalog carries no routing).
+ *   It moves on its own when routing rotates under an unchanged revision.
+ */
 async function publicManagedCatalog(
   e: Env,
   options?: { userId?: string; filterHomeExits?: boolean },
@@ -1491,8 +1564,9 @@ async function publicManagedCatalog(
     served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
   }
   let routing: CatalogRouting | undefined;
-  if (options?.filterHomeExits && options.userId) {
-    const home = await homeRoutingForUser(e, options.userId);
+  const routedUserId = options?.filterHomeExits ? options.userId : undefined;
+  if (routedUserId) {
+    const home = await homeRoutingForUser(e, routedUserId);
     routing = home.routing;
     if (home.restricted.size > 0) {
       served = filterCatalogYamlForUser(served, home.restricted, home.allowed);
@@ -1503,6 +1577,7 @@ async function publicManagedCatalog(
     yaml: served,
     sha256: served === yaml ? digest : await sha256(served),
     updatedAt,
+    ...(routedUserId ? { routingSha256: await routingSha256(routing) } : {}),
     ...(routing ? { routing } : {}),
   };
 }
@@ -1929,13 +2004,19 @@ async function sharedAdministrativeResource(
     ).all<Row>();
     const exits = q.results.map(publicHomeExit);
     try {
+      // The lifetime ratio hides a line that died last week behind months of
+      // green history, so a seven-day window travels alongside it — counted in
+      // the same pass rather than a second scan.
+      const weekAgo = now() - 7 * 86_400;
       const stats = await e.DB.prepare(
         `SELECT home_exit_id,
                 SUM(CASE WHEN status = 'alive' THEN 1 ELSE 0 END) AS alive,
-                COUNT(*) AS total
+                COUNT(*) AS total,
+                SUM(CASE WHEN probed_at >= ? AND status = 'alive' THEN 1 ELSE 0 END) AS alive_7d,
+                SUM(CASE WHEN probed_at >= ? THEN 1 ELSE 0 END) AS total_7d
          FROM operations_home_probe_samples
          GROUP BY home_exit_id`,
-      ).all<Row>();
+      ).bind(weekAgo, weekAgo).all<Row>();
       const byId = new Map(stats.results.map((row) => [String(row.home_exit_id), row]));
       return Response.json({
         homeExits: exits.map((exit) => {
@@ -1943,11 +2024,16 @@ async function sharedAdministrativeResource(
           if (!row) return exit;
           const alive = Number(row.alive);
           const total = Number(row.total);
+          const alive7d = Number(row.alive_7d);
+          const total7d = Number(row.total_7d);
           return {
             ...exit,
             probeAlive: alive,
             probeTotal: total,
             probeUptimeRatio: total > 0 ? alive / total : undefined,
+            probeAlive7d: alive7d,
+            probeTotal7d: total7d,
+            probeUptimeRatio7d: total7d > 0 ? alive7d / total7d : undefined,
           };
         }),
       });
@@ -2004,6 +2090,7 @@ async function sharedAdministrativeResource(
     }
     const row = await e.DB.prepare('SELECT * FROM home_exits WHERE id = ?').bind(homeId).first<Row>();
     await bumpCatalogRevision(e);
+    await writeOpsAudit(e, actorEmail, 'home.create', 'home_exit', homeId, displayName);
     return Response.json({ homeExit: publicHomeExit(row!) }, { status: 201 });
   }
   if (resource === 'home-exits/assign' && m === 'POST') {
@@ -2114,14 +2201,24 @@ async function sharedAdministrativeResource(
         failed.push({ message });
       }
     }
-    if (created.length > 0) await bumpCatalogRevision(e);
+    if (created.length > 0) {
+      await bumpCatalogRevision(e);
+      await writeOpsAudit(
+        e, actorEmail, 'home.import', 'home_exit', null,
+        `imported ${created.length} (skipped ${skipped.length}, failed ${failed.length})`,
+      );
+    }
     return Response.json({ created, skipped, failed }, { status: created.length > 0 ? 201 : 200 });
   }
   mt = resource.match(/^home-exits\/([^/]+)\/probes$/);
   if (mt && m === 'GET') {
     const existing = await e.DB.prepare('SELECT id FROM home_exits WHERE id = ?').bind(mt[1]).first<Row>();
     if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Home exit not found');
-    return Response.json({ probes: await queryHomeProbeHistory(e.DB, mt[1], now()) });
+    const range = new URL(req.url).searchParams.get('range');
+    if (range !== null && !['24h', '7d', '90d'].includes(range)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Unsupported probes range');
+    }
+    return Response.json({ probes: await queryHomeProbeHistory(e.DB, mt[1], now(), range) });
   }
   mt = resource.match(/^home-exits\/([^/]+)$/);
   if (mt && m === 'PATCH') {
@@ -2304,6 +2401,10 @@ async function sharedAdministrativeResource(
        WHERE user_home_bindings.user_id = ?`,
     ).bind(mt[1]).first<Row>();
     await bumpCatalogRevision(e);
+    await writeOpsAudit(
+      e, actorEmail, existing ? 'home.replace' : 'home.assign', 'user', mt[1],
+      existing ? `replaced home for ${user.email}` : `assigned home for ${user.email}`,
+    );
     return Response.json({ binding: publicHomeBinding(row!) }, { status: existing ? 200 : 201 });
   }
   if (mt && m === 'DELETE') {
@@ -2315,6 +2416,7 @@ async function sharedAdministrativeResource(
       if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
     } else {
       await bumpCatalogRevision(e);
+      await writeOpsAudit(e, actorEmail, 'home.unbind', 'user', mt[1], 'removed home binding');
     }
     return new Response(null, { status: 204 });
   }
@@ -2362,6 +2464,9 @@ async function sharedAdministrativeResource(
     const entry = await e.DB.prepare(
       'SELECT created_at FROM signup_allowlist WHERE email = ?',
     ).bind(address).first<Row>();
+    if (inserted.meta.changes === 1) {
+      await writeOpsAudit(e, actorEmail, 'allowlist.add', 'signup_allowlist', address, address);
+    }
     return Response.json(
       {
         email: address,
@@ -2515,6 +2620,7 @@ async function sharedAdministrativeResource(
       'INSERT INTO device_actions(id,user_id,device_id,action,status,created_at,expires_at) VALUES(?,?,?,?,\'pending\',?,?)',
     ).bind(commandId, device.user_id, device.id, action, t, t + ttl).run();
     const row = await e.DB.prepare('SELECT * FROM device_actions WHERE id = ?').bind(commandId).first<Row>();
+    await writeOpsAudit(e, actorEmail, 'device.action', 'device', deviceId, `queued ${action}`);
     return Response.json({ action: publicAction(row!) }, { status: 201 });
   }
   if (resource === 'device-actions' && m === 'GET') {
@@ -2541,6 +2647,7 @@ async function sharedAdministrativeResource(
     if (!d) throw new ApiError(404, 'NOT_FOUND', 'Device not found');
     await revokeDevice(e, d);
     await processRevocations(e);
+    await writeOpsAudit(e, actorEmail, 'device.revoke', 'device', mt[1], `revoked device of user ${String(d.user_id)}`);
     return new Response(null, { status: 204 });
   }
 
@@ -2769,11 +2876,65 @@ async function sharedAdministrativeResource(
   }
 
   if (resource === 'audit' && m === 'GET') {
+    // Plain newest-100 without params, exactly as before; the filters exist so
+    // an operator can follow one target or actor back past the first page
+    // instead of the log stopping at whatever happened most recently.
+    const params = new URL(req.url).searchParams;
+    const rawLimit = params.get('limit');
+    let limit = 100;
+    if (rawLimit !== null) {
+      limit = Number(rawLimit);
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid limit');
+      }
+    }
+    const rawBefore = params.get('before');
+    let before: number | null = null;
+    if (rawBefore !== null) {
+      before = Number(rawBefore);
+      if (!Number.isSafeInteger(before) || before <= 0) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid before');
+      }
+    }
+    // A second is not unique — a PATCH that resets usage and changes a field
+    // writes two rows in the same one — so paging on the timestamp alone drops
+    // whichever of them did not fit on the page. `beforeId` carries the rest of
+    // the cursor; `before` on its own still means what it always did.
+    const rawBeforeId = params.get('beforeId');
+    let beforeId: string | null = null;
+    if (rawBeforeId !== null) {
+      if (before === null || !/^.{1,100}$/.test(rawBeforeId)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid beforeId');
+      }
+      beforeId = rawBeforeId;
+    }
+    const targetId = params.get('targetId');
+    const actorEmail = params.get('actorEmail');
+    // The two equality filters are spliced in rather than guarded by a bound
+    // flag: one plan is compiled for every binding, and `? = 0 OR target_id = ?`
+    // can never reach an index on `target_id`, so following one customer back
+    // through the log would read all of it.
+    const filters = [
+      ...(targetId === null ? [] : ['AND target_id = ?']),
+      ...(actorEmail === null ? [] : ['AND actor_email = ?']),
+    ].join('\n         ');
     const q = await e.DB.prepare(
-      'SELECT * FROM ops_audit ORDER BY at DESC LIMIT 100',
-    ).all<Row>();
+      `SELECT * FROM ops_audit
+       WHERE (? = 0 OR at < ? OR (? = 1 AND at = ? AND id < ?))
+         ${filters}
+       ORDER BY at DESC, id DESC LIMIT ?`,
+    ).bind(...[
+      before === null ? 0 : 1, before ?? 0,
+      beforeId === null ? 0 : 1, before ?? 0, beforeId ?? '',
+      ...(targetId === null ? [] : [targetId]),
+      ...(actorEmail === null ? [] : [actorEmail]),
+      limit + 1,
+    ]).all<Row>();
+    const hasMore = q.results.length > limit;
+    const rows = hasMore ? q.results.slice(0, limit) : q.results;
+    const last = rows.length ? rows[rows.length - 1] : null;
     return Response.json({
-      entries: q.results.map((row) => ({
+      entries: rows.map((row) => ({
         id: String(row.id),
         at: Number(row.at),
         actorEmail: String(row.actor_email),
@@ -2782,6 +2943,9 @@ async function sharedAdministrativeResource(
         targetId: row.target_id == null ? null : String(row.target_id),
         summary: String(row.summary),
       })),
+      hasMore,
+      nextBefore: hasMore && last ? Number(last.at) : null,
+      nextBeforeId: hasMore && last ? String(last.id) : null,
     });
   }
 
@@ -2845,6 +3009,22 @@ async function managedCatalogTemplate(e: Env) {
   };
 }
 
+// Every status the fleet quality endpoints can emit: the collector's block
+// verdicts (ops-panel/collect.py classify_block) plus the ones synthesized in
+// fleetQualityStatus below. The console's label table is pinned to this list
+// by a drift test, so a new verdict cannot ship without an operator label.
+export const FLEET_QUALITY_STATUSES = [
+  'OK',
+  'LIKELY_BLOCKED',
+  'DEGRADED',
+  'EDGE_OK',
+  'EDGE_FAIL',
+  'DOWN',
+  'UNPROBED',
+  'CHECK_FAILED',
+  'UNKNOWN',
+] as const;
+
 function fleetQualityStatus(node: Row | undefined): { status: string; label: string } {
   if (!node) return { status: 'UNKNOWN', label: '未测' };
   const block = node.block && typeof node.block === 'object' && !Array.isArray(node.block)
@@ -2857,7 +3037,7 @@ function fleetQualityStatus(node: Row | undefined): { status: string; label: str
   return { status: 'OK', label: '大陆正常' };
 }
 
-async function operationsFleetNodes(e: Env) {
+async function operationsFleetNodes(e: Env, cache?: OpsRequestCache) {
   const [catalogResult, live, activity, profilesResult] = await Promise.all([
     managedCatalogTemplate(e).then(
       (catalog) => ({ state: 'ready' as const, catalog }),
@@ -2866,8 +3046,8 @@ async function operationsFleetNodes(e: Env) {
         message: error instanceof Error ? error.message : 'Managed catalog is unavailable',
       }),
     ),
-    operationsLive(e),
-    operationsActivity(e),
+    operationsLive(e, cache),
+    operationsActivity(e, cache),
     e.DB.prepare('SELECT * FROM ops_node_profiles ORDER BY catalog_name').all<Row>(),
   ]);
   let catalogNames: Set<string> | null = null;
@@ -2905,14 +3085,7 @@ async function operationsFleetNodes(e: Env) {
     const agentStatus = observedAt === null ? 'missing' : nowSec - observedAt > 15 * 60 ? 'stale' : 'online';
     const q = fleetQualityStatus(qualityNode ?? undefined);
     const affectedRows = activity.users.filter((user) => user.selectedServer === name);
-    const affectedByUser = new Map<string, Row>();
-    for (const user of affectedRows) {
-      const current = affectedByUser.get(String(user.userId));
-      if (!current || Number(user.lastSeenAt) > Number(current.lastSeenAt)) {
-        affectedByUser.set(String(user.userId), user);
-      }
-    }
-    const affectedUsers = [...affectedByUser.values()];
+    const affectedUsers = latestPerUser(affectedRows);
     const reasons: string[] = [];
     const listed = catalogNames?.has(name) ?? null;
     if (listed === true && q.status === 'DOWN') reasons.push('catalog_health_down');
@@ -3158,8 +3331,12 @@ export function retirementCatalogPlan(yaml: string, name: string): {
   };
 }
 
-async function operationsRetirePreview(e: Env, name: string) {
-  const [fleet, catalog] = await Promise.all([operationsFleetNodes(e), managedCatalogTemplate(e)]);
+async function operationsRetirePreview(e: Env, name: string, cache?: OpsRequestCache) {
+  const [fleet, catalog, selections] = await Promise.all([
+    operationsFleetNodes(e, cache),
+    managedCatalogTemplate(e),
+    operationsNodeSelections(e, name, cache),
+  ]);
   const node = fleet.nodes.find((candidate) => candidate.name === name);
   if (!node) throw new ApiError(404, 'NOT_FOUND', 'Fleet node not found');
   const catalogPlan = retirementCatalogPlan(catalog.yaml, name);
@@ -3174,7 +3351,7 @@ async function operationsRetirePreview(e: Env, name: string) {
     node,
     expectedRevision: catalog.revision,
     currentRevision: catalog.revision,
-    affectedUsers: node.affectedUsers,
+    affectedUsers: latestPerUser(selections),
     changes,
     warnings: catalogPlan.warnings,
     canRetire: catalogPlan.safe && changes.catalogEntryRemoved,
@@ -3195,7 +3372,7 @@ function fleetNodeName(raw: string): string {
   return name;
 }
 
-async function retireFleetNode(e: Env, actorEmail: string, name: string, requestBody: Row) {
+async function retireFleetNode(e: Env, actorEmail: string, name: string, requestBody: Row, cache?: OpsRequestCache) {
   rejectUnexpectedKeys(requestBody, ['expectedRevision', 'confirmation', 'reason']);
   if (!Number.isSafeInteger(requestBody.expectedRevision) || requestBody.expectedRevision < 0) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid expectedRevision');
@@ -3205,7 +3382,7 @@ async function retireFleetNode(e: Env, actorEmail: string, name: string, request
   }
   const reason = str(requestBody.reason, 'reason', 1, 500).trim();
   if (!reason) throw new ApiError(400, 'VALIDATION_ERROR', 'Retirement reason is required');
-  const preview = await operationsRetirePreview(e, name);
+  const preview = await operationsRetirePreview(e, name, cache);
   if (preview.currentRevision !== requestBody.expectedRevision) {
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
   }
@@ -3253,7 +3430,7 @@ async function retireFleetNode(e: Env, actorEmail: string, name: string, request
   if (!results[0].meta.changes) {
     throw new ApiError(409, 'CATALOG_CONFLICT', 'Managed catalog changed; preview retirement again');
   }
-  const refreshed = await operationsFleetNodes(e);
+  const refreshed = await operationsFleetNodes(e, cache);
   return {
     node: refreshed.nodes.find((candidate) => candidate.name === name) ?? { ...preview.node, catalogListed: false },
     previousRevision: preview.currentRevision,
@@ -3265,12 +3442,12 @@ async function retireFleetNode(e: Env, actorEmail: string, name: string, request
   };
 }
 
-async function operationsDashboard(e: Env) {
+async function operationsDashboard(e: Env, cache?: OpsRequestCache) {
   const week = now() + 7 * 86_400;
   const [users, devices, fleet, catalog, unusedHomes, unusedAccounts, bannedOpen, incomplete, renewing, usersWithoutHome] = await Promise.all([
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM users").first<Row>(),
     e.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) active FROM devices").first<Row>(),
-    operationsFleetNodes(e),
+    operationsFleetNodes(e, cache),
     e.DB.prepare('SELECT revision, updated_at FROM managed_exit_catalog WHERE singleton_id = 1').first<Row>(),
     e.DB.prepare(
       `SELECT COUNT(*) total FROM home_exits
@@ -3316,8 +3493,7 @@ async function operationsDashboard(e: Env) {
     users: counts(users),
     devices: counts(devices),
     // Compatibility keys now describe the authoritative fleet aggregate. The
-    // phase-1 operations_* tables remain queryable through their legacy GETs,
-    // but no longer drive dashboard truth.
+    // phase-1 operations_* tables keep their rows but no longer have readers.
     servers: fleetCounts,
     logicalNodes: fleetCounts,
     deployments: { total: 0, active: 0 },
@@ -3333,56 +3509,6 @@ async function operationsDashboard(e: Env) {
       usersWithoutHome: Number(usersWithoutHome?.total ?? 0),
     },
   };
-}
-
-async function operationsServers(e: Env) {
-  const rows = await e.DB.prepare(
-    `SELECT s.id, s.display_name, s.region_code, s.provider, s.status, s.created_at, s.updated_at,
-            d.release_version latest_release_version, d.status latest_deployment_status,
-            d.deployed_at latest_deployed_at
-     FROM operations_servers s
-     LEFT JOIN operations_deployments d ON d.id = (
-       SELECT latest.id FROM operations_deployments latest
-       WHERE latest.server_id = s.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
-     )
-     ORDER BY s.display_name, s.id`,
-  ).all<Row>();
-  return rows.results.map((row) => ({
-    id: String(row.id),
-    displayName: String(row.display_name),
-    regionCode: String(row.region_code),
-    provider: optionalText(row.provider),
-    status: String(row.status),
-    createdAt: Number(row.created_at),
-    updatedAt: Number(row.updated_at),
-    latestDeployment: row.latest_release_version === null || row.latest_release_version === undefined
-      ? null
-      : {
-        releaseVersion: String(row.latest_release_version),
-        status: String(row.latest_deployment_status),
-        deployedAt: optionalNumber(row.latest_deployed_at),
-      },
-  }));
-}
-
-async function operationsNodes(e: Env) {
-  const rows = await e.DB.prepare(
-    `SELECT n.id, n.server_id, n.display_name, n.region_code, n.status, n.created_at, n.updated_at,
-            s.display_name server_display_name
-     FROM operations_logical_nodes n
-     JOIN operations_servers s ON s.id = n.server_id
-     ORDER BY n.display_name, n.id`,
-  ).all<Row>();
-  return rows.results.map((row) => ({
-    id: String(row.id),
-    serverId: String(row.server_id),
-    serverDisplayName: String(row.server_display_name),
-    displayName: String(row.display_name),
-    regionCode: String(row.region_code),
-    status: String(row.status),
-    createdAt: Number(row.created_at),
-    updatedAt: Number(row.updated_at),
-  }));
 }
 
 // Live node telemetry for the admin monitor. The collector on the ops VPS
@@ -3427,7 +3553,12 @@ function liveBoundedText(value: unknown): string | null {
   return value.length > OPS_LIVE_TEXT_LIMIT ? value.slice(0, OPS_LIVE_TEXT_LIMIT) : value;
 }
 
-function liveQualityNode(raw: unknown): Row | null {
+// `includeText` keeps the multi-kilobyte securityCheck/backtrace bodies. The
+// stored snapshot keeps them (they are the drawer's source of truth), but the
+// list responses the console polls every fifteen seconds do not: at 64 nodes
+// that is megabytes per minute for text only ever read one node at a time,
+// through the fleet-nodes quality-text endpoint.
+function liveQualityNode(raw: unknown, includeText = true): Row | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const node = raw as Row;
   const name = optionalText(node.name);
@@ -3455,8 +3586,12 @@ function liveQualityNode(raw: unknown): Row | null {
       : null,
     riskSignals: liveRiskSignals(node.riskSignals ?? node.risk_signals),
     exposure: liveExposure(node.exposure),
-    securityCheck: liveBoundedText(node.securityCheck ?? node.security_check),
-    backtrace: liveBoundedText(node.backtrace),
+    ...(includeText
+      ? {
+          securityCheck: liveBoundedText(node.securityCheck ?? node.security_check),
+          backtrace: liveBoundedText(node.backtrace),
+        }
+      : {}),
   };
 }
 
@@ -3534,12 +3669,15 @@ function liveObservedAt(value: unknown, receivedAt?: number): number | null {
 function liveQualityReport(
   value: unknown,
   receivedAt?: number,
+  includeText = true,
 ): { updatedAt: number | null; updatedAtIso: string | null; cnAgentsConfigured: number | null; nodes: Row[] } | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const raw = value as Row;
   const sourceNodes = Array.isArray(raw.nodes) ? raw.nodes : null;
   if (!sourceNodes) return null;
-  const nodes = sourceNodes.slice(0, OPS_LIVE_MAX_NODES).map(liveQualityNode).filter((node): node is Row => node !== null);
+  const nodes = sourceNodes.slice(0, OPS_LIVE_MAX_NODES)
+    .map((node) => liveQualityNode(node, includeText))
+    .filter((node): node is Row => node !== null);
   const updatedAt = liveObservedAt(raw.updatedAt ?? raw.updated_at, receivedAt);
   return {
     updatedAt,
@@ -3710,7 +3848,7 @@ async function storeLiveSnapshot(e: Env, input: { quality?: ReturnType<typeof li
   return { qualityUpdatedAt, agentsUpdatedAt, updatedAt: t };
 }
 
-async function operationsLive(e: Env) {
+async function loadOperationsLive(e: Env) {
   const stored = await storedLiveSnapshot(e);
   const rawQualityReceivedAt = optionalNumber(stored?.quality_updated_at);
   const rawAgentsReceivedAt = optionalNumber(stored?.agents_updated_at);
@@ -3726,6 +3864,7 @@ async function operationsLive(e: Env) {
     ? liveQualityReport(
       JSON.parse(String(stored.quality_json)),
       qualityReceivedAt ?? undefined,
+      false,
     )
     : null;
   const agents = stored?.agents_json
@@ -3748,9 +3887,58 @@ async function operationsLive(e: Env) {
   };
 }
 
+// One ops request often wants the same snapshot several times over — the
+// dashboard builds the fleet, the fleet joins activity, activity joins the
+// quality report — and each used to re-read and re-parse the stored JSON.
+// A cache object created per request deduplicates the work; the promise is
+// stored so concurrent callers share one read instead of racing.
+type OpsRequestCache = {
+  live?: ReturnType<typeof loadOperationsLive>;
+  activity?: ReturnType<typeof loadOperationsActivity>;
+};
+
+function operationsLive(e: Env, cache?: OpsRequestCache) {
+  if (!cache) return loadOperationsLive(e);
+  return cache.live ??= loadOperationsLive(e);
+}
+
+/**
+ * One node of the stored quality snapshot, without parsing the rest of it.
+ *
+ * `json_each` walks the snapshot inside SQLite and only the matching node's
+ * JSON crosses into the Worker — this is how the per-user detail view and the
+ * quality-text drawer avoid materializing a 64-node report to read one entry.
+ */
+async function liveQualityNodeNamed(e: Env, name: string | null): Promise<Row | null> {
+  if (!name) return null;
+  let row: Row | null;
+  try {
+    row = await e.DB.prepare(
+      `SELECT entry.value AS node_json
+       FROM operations_live_snapshot, json_each(operations_live_snapshot.quality_json, '$.nodes') AS entry
+       WHERE singleton_id = 1 AND json_extract(entry.value, '$.name') = ?
+       LIMIT 1`,
+    ).bind(name).first<Row>();
+  } catch (error) {
+    if (String(error).includes('no such table')) return null;
+    throw error;
+  }
+  if (!row?.node_json) return null;
+  try {
+    return liveQualityNode(JSON.parse(String(row.node_json)));
+  } catch {
+    return null;
+  }
+}
+
 // Per-user liveness from periodic telemetry windows (≈20 min client cadence).
 // A user is "online" when their latest window is fresher than two cadences.
 const ACTIVITY_ONLINE_SECONDS = 40 * 60;
+// How far back the activity ranking looks. This is a liveness view, not
+// history: ranking all thirty retained days on every fifteen-second poll is
+// what made the endpoint a full-table window scan. A day keeps "seen this
+// morning" visible while letting the received_at index skip the rest.
+const ACTIVITY_SCAN_SECONDS = 24 * 3600;
 
 const NODE_HEALTH_LABELS: Record<string, string> = {
   ok: '大陆正常',
@@ -3817,9 +4005,82 @@ function qualityNodeByName(quality: { nodes: Row[] } | null, name: string | null
   return quality.nodes.find((node) => node.name === name) ?? null;
 }
 
-async function operationsActivity(e: Env) {
-  const live = await operationsLive(e);
+function activityUser(row: Row, quality: { nodes: Row[] } | null, nowSec: number) {
+  let payload: Row = {};
+  try {
+    payload = JSON.parse(String(row.payload_json));
+  } catch {
+    payload = {};
+  }
+  const lastSeenAt = Number(row.received_at);
+  const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
+  const health = nodeHealthFromQuality(qualityNodeByName(quality, selectedServer));
+  return {
+    userId: String(row.user_id),
+    deviceId: row.device_id === null || row.device_id === undefined ? null : String(row.device_id),
+    email: String(row.email),
+    lastSeenAt,
+    online: nowSec - lastSeenAt <= ACTIVITY_ONLINE_SECONDS,
+    clientVersion: String(row.client_version),
+    osVersion: String(row.os_version),
+    selectedServer,
+    uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
+    catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
+    ...telemetryPathFields(payload, lastSeenAt),
+    ...health,
+  };
+}
+
+/** One row per customer: the device that reported the node most recently. */
+function latestPerUser<T extends { userId: string; lastSeenAt: number }>(rows: T[]): T[] {
+  const byUser = new Map<string, T>();
+  for (const row of rows) {
+    const current = byUser.get(row.userId);
+    if (!current || row.lastSeenAt > current.lastSeenAt) byUser.set(row.userId, row);
+  }
+  return [...byUser.values()];
+}
+
+/**
+ * Everyone whose latest telemetry window names this node, over the whole
+ * telemetry retention rather than the activity view's one-day scan.
+ *
+ * Who loses an exit when it is retired is not a liveness question: a customer
+ * who has not opened their laptop this week has still selected it and still
+ * finds it gone. The day-bounded scan stays where it belongs — the online and
+ * active lists — and this pays for the full window only when an operator asks
+ * about one node.
+ */
+async function operationsNodeSelections(e: Env, name: string, cache?: OpsRequestCache) {
+  const live = await operationsLive(e, cache);
+  const nowSec = now();
+  // Rank ids only: those columns all live in the (user_id, device_id,
+  // received_at, id) index, so the whole retention is ranked without touching a
+  // row, and the payload is read and parsed once per device rather than once
+  // per window.
+  const rows = await e.DB.prepare(
+    `WITH ranked AS (
+       SELECT id, ROW_NUMBER() OVER (
+                PARTITION BY user_id, COALESCE(device_id, '')
+                ORDER BY received_at DESC, id DESC
+              ) AS rank
+       FROM telemetry_windows
+     )
+     SELECT t.id, t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
+            t.payload_json, u.email
+     FROM ranked
+     JOIN telemetry_windows t ON t.id = ranked.id
+     JOIN users u ON u.id = t.user_id
+     WHERE ranked.rank = 1 AND json_extract(t.payload_json, '$.selectedServer') = ?
+     ORDER BY t.received_at DESC, t.id DESC`,
+  ).bind(name).all<Row>();
+  return rows.results.map((row) => activityUser(row, live.quality, nowSec));
+}
+
+async function loadOperationsActivity(e: Env, cache?: OpsRequestCache) {
+  const live = await operationsLive(e, cache);
   const quality = live.quality;
+  const nowSec = now();
   const rows = await e.DB.prepare(
     `WITH ranked AS (
        SELECT t.id, t.user_id, t.device_id, t.received_at, t.client_version, t.os_version,
@@ -3830,38 +4091,14 @@ async function operationsActivity(e: Env) {
               ) AS rank
        FROM telemetry_windows t
        JOIN users u ON u.id = t.user_id
+       WHERE t.received_at >= ?
      )
      SELECT id, user_id, device_id, received_at, client_version, os_version, payload_json, email
      FROM ranked
      WHERE rank = 1
      ORDER BY received_at DESC, id DESC`,
-  ).all<Row>();
-  const nowSec = now();
-  const users = rows.results.map((row) => {
-    let payload: Row = {};
-    try {
-      payload = JSON.parse(String(row.payload_json));
-    } catch {
-      payload = {};
-    }
-    const lastSeenAt = Number(row.received_at);
-    const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
-    const health = nodeHealthFromQuality(qualityNodeByName(quality, selectedServer));
-    return {
-      userId: String(row.user_id),
-      deviceId: row.device_id === null || row.device_id === undefined ? null : String(row.device_id),
-      email: String(row.email),
-      lastSeenAt,
-      online: nowSec - lastSeenAt <= ACTIVITY_ONLINE_SECONDS,
-      clientVersion: String(row.client_version),
-      osVersion: String(row.os_version),
-      selectedServer,
-      uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
-      catalogRevision: typeof payload.catalogRevision === 'number' ? payload.catalogRevision : null,
-      ...telemetryPathFields(payload, lastSeenAt),
-      ...health,
-    };
-  });
+  ).bind(nowSec - ACTIVITY_SCAN_SECONDS).all<Row>();
+  const users = rows.results.map((row) => activityUser(row, quality, nowSec));
   const onlineRows = users.filter((user) => user.online);
   // Pre-0019 windows carry no device id; fall back to per-user counting there.
   const onlineDevices = new Set(onlineRows.map(
@@ -3875,111 +4112,102 @@ async function operationsActivity(e: Env) {
   };
 }
 
-async function operationsDeployments(e: Env) {
-  const rows = await e.DB.prepare(
-    `SELECT d.id, d.server_id, d.logical_node_id, d.environment, d.release_version, d.status,
-            d.deployed_at, d.created_at, s.display_name server_display_name,
-            n.display_name logical_node_display_name
-     FROM operations_deployments d
-     JOIN operations_servers s ON s.id = d.server_id
-     LEFT JOIN operations_logical_nodes n ON n.id = d.logical_node_id
-     ORDER BY d.created_at DESC, d.id DESC LIMIT 250`,
-  ).all<Row>();
-  return rows.results.map((row) => ({
-    id: String(row.id),
-    serverId: String(row.server_id),
-    serverDisplayName: String(row.server_display_name),
-    logicalNodeId: optionalText(row.logical_node_id),
-    logicalNodeDisplayName: optionalText(row.logical_node_display_name),
-    environment: String(row.environment),
-    releaseVersion: String(row.release_version),
-    status: String(row.status),
-    deployedAt: optionalNumber(row.deployed_at),
-    createdAt: Number(row.created_at),
-  }));
+function operationsActivity(e: Env, cache?: OpsRequestCache) {
+  if (!cache) return loadOperationsActivity(e);
+  return cache.activity ??= loadOperationsActivity(e, cache);
 }
 
-async function operationsUsers(e: Env) {
-  const rows = await e.DB.prepare(
-    `SELECT
-       users.*,
-       home_exits.id AS home_exit_id,
-       home_exits.proxy_name AS home_proxy_name,
-       home_exits.display_name AS home_display_name,
-       home_exits.egress_ipv4 AS home_egress_ipv4,
-       home_exits.kind AS home_kind,
-       home_exits.socks5_host AS home_socks5_host,
-       home_exits.socks5_port AS home_socks5_port,
-       home_exits.status AS home_status,
-       user_home_bindings.default_proxy_name AS home_default_proxy_name
-     FROM users
-     LEFT JOIN user_home_bindings ON user_home_bindings.user_id = users.id
-     LEFT JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-     ORDER BY users.created_at DESC
-     LIMIT 2000`,
-  ).all<Row>();
-  const userIds = rows.results.map((row) => String(row.id));
-  const productByUser = new Map<string, Row>();
-  const replaceByUser = new Map<string, number>();
-  if (userIds.length > 0) {
-    const placeholders = userIds.map(() => '?').join(',');
-    const assigned = await e.DB.prepare(
-      `SELECT product_accounts.*, users.id AS owner_id
-       FROM product_accounts
-       JOIN users ON users.id = product_accounts.user_id
-       WHERE product_accounts.status = 'assigned' AND product_accounts.user_id IN (${placeholders})`,
-    ).bind(...userIds).all<Row>();
-    for (const account of assigned.results) {
-      productByUser.set(String(account.user_id), account);
-    }
-    const replaced = await e.DB.prepare(
-      `SELECT user_id, COUNT(*) total FROM product_account_events
-       WHERE type = 'replaced' AND user_id IN (${placeholders})
-       GROUP BY user_id`,
-    ).bind(...userIds).all<Row>();
-    for (const row of replaced.results) {
-      replaceByUser.set(String(row.user_id), Number(row.total));
-    }
-  }
-  const exitByUser = new Set<string>();
-  if (userIds.length > 0) {
-    const placeholders = userIds.map(() => '?').join(',');
-    const issued = await e.DB.prepare(
-      `SELECT user_id FROM exit_credentials WHERE user_id IN (${placeholders})`,
-    ).bind(...userIds).all<Row>();
-    for (const row of issued.results) {
-      exitByUser.add(String(row.user_id));
-    }
-  }
-  return rows.results.map((row) => {
-    const account = productByUser.get(String(row.id));
-    return {
-      ...publicUser(row),
-      hasExitIdentity: exitByUser.has(String(row.id)),
-      homeBinding: row.home_exit_id
-        ? {
-          homeExitId: String(row.home_exit_id),
-          proxyName: String(row.home_proxy_name),
-          displayName: String(row.home_display_name),
-          egressIpv4: row.home_egress_ipv4 == null ? undefined : String(row.home_egress_ipv4),
-          kind: row.home_kind == null ? undefined : String(row.home_kind),
-          socks5Host: row.home_socks5_host == null ? undefined : String(row.home_socks5_host),
-          socks5Port: row.home_socks5_port == null ? undefined : Number(row.home_socks5_port),
-          defaultProxyName: row.home_default_proxy_name == null || row.home_default_proxy_name === ''
-            ? undefined
-            : String(row.home_default_proxy_name),
-          status: String(row.home_status),
-        }
-        : null,
-      product: {
-        accountRef: account ? String(account.account_ref) : null,
-        status: account ? String(account.status) : null,
-        openedAt: account && account.opened_at != null ? Number(account.opened_at) : null,
-        replaceCount: replaceByUser.get(String(row.id)) ?? 0,
-        incomplete: !account,
-      },
-    };
-  });
+const OPS_USERS_PAGE_LIMIT = 2000;
+
+/**
+ * The console's customer roster, one page per query.
+ *
+ * This used to fetch up to 2000 users and then expand three `IN (?,?,…)`
+ * lists with one placeholder per user; the joins now ride along in the same
+ * statement. `total`/`hasMore`/`nextCursor` exist because the old LIMIT 2000
+ * truncated silently — the 2001st customer simply did not appear anywhere.
+ */
+async function operationsUsers(
+  e: Env,
+  page?: { cursor?: { createdAt: number; id: string } | null; limit?: number | null },
+) {
+  const limit = Math.min(Math.max(page?.limit ?? OPS_USERS_PAGE_LIMIT, 1), OPS_USERS_PAGE_LIMIT);
+  const cursor = page?.cursor ?? null;
+  const [rows, totals] = await Promise.all([
+    e.DB.prepare(
+      `WITH page AS (
+         SELECT * FROM users
+         WHERE ? = 0 OR created_at < ? OR (created_at = ? AND id < ?)
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?
+       )
+       SELECT
+         page.*,
+         home_exits.id AS home_exit_id,
+         home_exits.proxy_name AS home_proxy_name,
+         home_exits.display_name AS home_display_name,
+         home_exits.egress_ipv4 AS home_egress_ipv4,
+         home_exits.kind AS home_kind,
+         home_exits.socks5_host AS home_socks5_host,
+         home_exits.socks5_port AS home_socks5_port,
+         home_exits.status AS home_status,
+         user_home_bindings.default_proxy_name AS home_default_proxy_name,
+         assigned.account_ref AS product_account_ref,
+         assigned.status AS product_status,
+         assigned.opened_at AS product_opened_at,
+         (SELECT COUNT(*) FROM product_account_events
+          WHERE type = 'replaced' AND user_id = page.id) AS replace_count,
+         EXISTS(SELECT 1 FROM exit_credentials WHERE user_id = page.id) AS has_exit_identity
+       FROM page
+       LEFT JOIN user_home_bindings ON user_home_bindings.user_id = page.id
+       LEFT JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+       LEFT JOIN product_accounts assigned
+         ON assigned.user_id = page.id AND assigned.status = 'assigned'
+       ORDER BY page.created_at DESC, page.id DESC`,
+    ).bind(
+      cursor ? 1 : 0,
+      cursor?.createdAt ?? 0,
+      cursor?.createdAt ?? 0,
+      cursor?.id ?? '',
+      limit + 1,
+    ).all<Row>(),
+    e.DB.prepare('SELECT COUNT(*) AS total FROM users').first<Row>(),
+  ]);
+  const hasMore = rows.results.length > limit;
+  const pageRows = hasMore ? rows.results.slice(0, limit) : rows.results;
+  const last = pageRows[pageRows.length - 1];
+  const users = pageRows.map((row) => ({
+    ...publicUser(row),
+    hasExitIdentity: Number(row.has_exit_identity) === 1,
+    homeBinding: row.home_exit_id
+      ? {
+        homeExitId: String(row.home_exit_id),
+        proxyName: String(row.home_proxy_name),
+        displayName: String(row.home_display_name),
+        egressIpv4: row.home_egress_ipv4 == null ? undefined : String(row.home_egress_ipv4),
+        kind: row.home_kind == null ? undefined : String(row.home_kind),
+        socks5Host: row.home_socks5_host == null ? undefined : String(row.home_socks5_host),
+        socks5Port: row.home_socks5_port == null ? undefined : Number(row.home_socks5_port),
+        defaultProxyName: row.home_default_proxy_name == null || row.home_default_proxy_name === ''
+          ? undefined
+          : String(row.home_default_proxy_name),
+        status: String(row.home_status),
+      }
+      : null,
+    product: {
+      accountRef: row.product_account_ref == null ? null : String(row.product_account_ref),
+      status: row.product_status == null ? null : String(row.product_status),
+      openedAt: row.product_opened_at == null ? null : Number(row.product_opened_at),
+      replaceCount: Number(row.replace_count ?? 0),
+      incomplete: row.product_account_ref == null,
+    },
+  }));
+  return {
+    users,
+    total: Number(totals?.total ?? 0),
+    hasMore,
+    nextCursor: hasMore && last ? `${Number(last.created_at)}:${String(last.id)}` : null,
+  };
 }
 
 async function operationsCatalogRevisions(e: Env) {
@@ -4500,6 +4728,7 @@ const TELEMETRY_BODY_MAX_BYTES = 72 * 1024;
 const TELEMETRY_PAYLOAD_MAX_BYTES = 64 * 1024;
 const TELEMETRY_MAX_EVENTS = 200;
 const TELEMETRY_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
+const OPS_AUDIT_RETENTION_SECONDS = 180 * 86_400;
 const TELEMETRY_MAX_REPORTED_AT_MS = DIAGNOSTICS_MAX_REPORTED_AT_MS;
 
 const telemetryWindowKeys = [
@@ -5660,6 +5889,15 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
     .run();
+  // The audit log had no retention at all — every operator action since
+  // migration 0023, forever. Half a year is the whole useful life of "who
+  // retired that node"; the LIMIT keeps the first sweep over an old backlog
+  // from being one giant delete.
+  await e.DB.prepare(
+    `DELETE FROM ops_audit WHERE id IN (
+       SELECT id FROM ops_audit WHERE at <= ? LIMIT 500
+     )`,
+  ).bind(t - OPS_AUDIT_RETENTION_SECONDS).run();
   try {
     await retainOperationsTimeseries(e.DB, t);
   } catch (x) {
@@ -6722,15 +6960,40 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       throw new ApiError(400, 'VALIDATION_ERROR', 'report, agents or homeProbes is required');
     }
     const receivedAt = now();
-    const quality = payload.report === undefined
+    let quality = payload.report === undefined
       ? undefined
       : liveQualityReport(payload.report, receivedAt);
     if (payload.report !== undefined && !quality) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid quality report');
     }
-    const agents = payload.agents === undefined ? undefined : liveAgents(payload.agents, receivedAt);
+    let agents = payload.agents === undefined ? undefined : liveAgents(payload.agents, receivedAt);
     if (payload.agents !== undefined && !agents) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid agent inventory');
+    }
+    // A collector that reaches Komari but gets an empty answer must not wipe
+    // the live view: storing "[]" with a fresh timestamp flips every node to
+    // "missing" with a current snapshot vouching for it. Keep the stored list
+    // (and its age) and tell the collector, the same way the node-clients
+    // roster refuses to apply an empty list. An empty list is still accepted
+    // when nothing is stored yet.
+    let reportIgnoredEmpty = false;
+    let agentsIgnoredEmpty = false;
+    if ((quality && quality.nodes.length === 0) || (agents && agents.length === 0)) {
+      const current = await storedLiveSnapshot(e);
+      if (quality && quality.nodes.length === 0 && current?.quality_json) {
+        const storedQuality = JSON.parse(String(current.quality_json)) as Row | null;
+        if (storedQuality && Array.isArray(storedQuality.nodes) && storedQuality.nodes.length > 0) {
+          quality = undefined;
+          reportIgnoredEmpty = true;
+        }
+      }
+      if (agents && agents.length === 0 && current?.agents_json) {
+        const storedAgents = JSON.parse(String(current.agents_json)) as unknown;
+        if (Array.isArray(storedAgents) && storedAgents.length > 0) {
+          agents = undefined;
+          agentsIgnoredEmpty = true;
+        }
+      }
     }
     let probesUpdated = 0;
     const acceptedProbes: Array<{ id: string; status: 'alive' | 'dead' }> = [];
@@ -6739,6 +7002,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid homeProbes');
       }
       const t = now();
+      const validated: Array<{ id: string; status: 'alive' | 'dead' }> = [];
       for (const raw of payload.homeProbes) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
           throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid homeProbes');
@@ -6749,14 +7013,19 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         if (status !== 'alive' && status !== 'dead') {
           throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid home probe status');
         }
-        const updated = await e.DB.prepare(
+        validated.push({ id: probeId, status });
+      }
+      if (validated.length) {
+        const results = await e.DB.batch(validated.map((probe) => e.DB.prepare(
           `UPDATE home_exits SET last_probed_at = ?, probe_status = ?, updated_at = updated_at
            WHERE id = ? AND kind = 'socks5'`,
-        ).bind(t, status, probeId).run();
-        if (updated.meta.changes) {
-          probesUpdated += 1;
-          acceptedProbes.push({ id: probeId, status });
-        }
+        ).bind(t, probe.status, probe.id)));
+        results.forEach((result, index) => {
+          if (result.meta.changes) {
+            probesUpdated += 1;
+            acceptedProbes.push(validated[index]);
+          }
+        });
       }
       if (acceptedProbes.length) {
         await recordHomeProbeSamples(e.DB, acceptedProbes, t);
@@ -6809,6 +7078,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       qualityNodes: quality?.nodes.length ?? null,
       agentCount: agents?.length ?? null,
       homeProbesUpdated: probesUpdated,
+      ...(reportIgnoredEmpty ? { reportIgnoredEmpty: true } : {}),
+      ...(agentsIgnoredEmpty ? { agentsIgnoredEmpty: true } : {}),
       ...stored,
     });
   }
@@ -6820,36 +7091,53 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     );
     if (shared) return shared;
 
+    const opsCache: OpsRequestCache = {};
+
     // --- Product ops reads (Cloudflare Access) ---
     if (m === 'GET') {
       if (p === '/api/v1/ops/dashboard') {
-        return Response.json({ dashboard: await operationsDashboard(e) });
+        return Response.json({ dashboard: await operationsDashboard(e, opsCache) });
       }
       if (p === '/api/v1/ops/system/version') {
         return Response.json({ system: { service: 'api', version: '0.0.1', buildSha: buildSha(e) } });
       }
       if (p === '/api/v1/ops/fleet-nodes') {
-        return Response.json(await operationsFleetNodes(e));
+        return Response.json(await operationsFleetNodes(e, opsCache));
       }
       mt = p.match(/^\/api\/v1\/ops\/fleet-nodes\/([^/]+)\/retire-preview$/);
       if (mt) {
-        const { nextYaml: _nextYaml, ...preview } = await operationsRetirePreview(e, fleetNodeName(mt[1]));
+        const { nextYaml: _nextYaml, ...preview } = await operationsRetirePreview(e, fleetNodeName(mt[1]), opsCache);
         return Response.json(preview);
       }
-      if (p === '/api/v1/ops/servers') {
-        return Response.json({ servers: await operationsServers(e) });
-      }
-      if (p === '/api/v1/ops/nodes') {
-        return Response.json({ nodes: await operationsNodes(e) });
-      }
-      if (p === '/api/v1/ops/deployments') {
-        return Response.json({ deployments: await operationsDeployments(e) });
+      mt = p.match(/^\/api\/v1\/ops\/fleet-nodes\/([^/]+)\/quality-text$/);
+      if (mt) {
+        const node = await liveQualityNodeNamed(e, fleetNodeName(mt[1]));
+        return Response.json({
+          securityCheck: liveBoundedText(node?.securityCheck),
+          backtrace: liveBoundedText(node?.backtrace),
+        });
       }
       if (p === '/api/v1/ops/catalog-revisions') {
         return Response.json({ revisions: await operationsCatalogRevisions(e) });
       }
       if (p === '/api/v1/ops/users') {
-        return Response.json({ users: await operationsUsers(e) });
+        const url = new URL(req.url);
+        const rawLimit = url.searchParams.get('limit');
+        let limit: number | null = null;
+        if (rawLimit !== null) {
+          limit = Number(rawLimit);
+          if (!Number.isSafeInteger(limit) || limit < 1 || limit > OPS_USERS_PAGE_LIMIT) {
+            throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid limit');
+          }
+        }
+        const rawCursor = url.searchParams.get('cursor');
+        let cursor: { createdAt: number; id: string } | null = null;
+        if (rawCursor !== null) {
+          const parsed = rawCursor.match(/^(\d{1,12}):(.{1,100})$/);
+          if (!parsed) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid cursor');
+          cursor = { createdAt: Number(parsed[1]), id: parsed[2] };
+        }
+        return Response.json(await operationsUsers(e, { cursor, limit }));
       }
       if (p === '/api/v1/ops/signup-allowlist') {
         const q = await e.DB.prepare(
@@ -6863,7 +7151,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         });
       }
       if (p === '/api/v1/ops/live') {
-        return Response.json({ live: await operationsLive(e) });
+        return Response.json({ live: await operationsLive(e, opsCache) });
       }
       if (p === '/api/v1/ops/metrics') {
         const url = new URL(req.url);
@@ -6871,11 +7159,20 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         if (range !== null && !['24h', '7d', '90d'].includes(range)) {
           throw new ApiError(400, 'VALIDATION_ERROR', 'Unsupported metrics range');
         }
+        const rawFields = url.searchParams.get('fields');
+        let fields: string[] | null = null;
+        if (rawFields !== null) {
+          fields = rawFields.split(',').map((field) => field.trim()).filter(Boolean);
+          if (fields.length === 0 || !fields.every(isMetricField)) {
+            throw new ApiError(400, 'VALIDATION_ERROR', 'Unsupported metrics field');
+          }
+        }
         return Response.json({
           metrics: await queryAgentMetrics(e.DB, {
             range,
             node: url.searchParams.get('node'),
             nowUnix: now(),
+            fields,
           }),
         });
       }
@@ -6891,7 +7188,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         });
       }
       if (p === '/api/v1/ops/activity') {
-        return Response.json({ activity: await operationsActivity(e) });
+        return Response.json({ activity: await operationsActivity(e, opsCache) });
       }
       mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)\/home-binding$/);
       if (mt) {
@@ -6949,7 +7246,6 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             payload = {};
           }
           const selectedServer = typeof payload.selectedServer === 'string' ? payload.selectedServer : null;
-          const live = await operationsLive(e);
           heartbeat = {
             lastSeenAt: Number(activity.received_at),
             clientVersion: String(activity.client_version),
@@ -6957,7 +7253,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             selectedServer,
             uiState: typeof payload.uiState === 'string' ? payload.uiState : null,
             ...telemetryPathFields(payload, Number(activity.received_at)),
-            ...nodeHealthFromQuality(qualityNodeByName(live.quality, selectedServer)),
+            ...nodeHealthFromQuality(await liveQualityNodeNamed(e, selectedServer)),
           };
         }
         return Response.json({
@@ -6987,12 +7283,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (mt) {
         const name = decodeURIComponent(mt[1]);
         if (!name || name.length > 200) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid node name');
-        const activity = await operationsActivity(e);
-        const affected = activity.users.filter((user) => user.selectedServer === name);
         return Response.json({
           node: name,
-          onlineWindowSeconds: activity.onlineWindowSeconds,
-          affected,
+          onlineWindowSeconds: ACTIVITY_ONLINE_SECONDS,
+          affected: await operationsNodeSelections(e, name, opsCache),
         });
       }
       throw new ApiError(404, 'NOT_FOUND', 'Route not found');
@@ -7001,13 +7295,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     mt = p.match(/^\/api\/v1\/ops\/fleet-nodes\/([^/]+)\/retire$/);
     if (mt && m === 'POST') {
       const b = await body(req, 8 * 1024);
-      return Response.json(await retireFleetNode(e, actor.email, fleetNodeName(mt[1]), b));
+      return Response.json(await retireFleetNode(e, actor.email, fleetNodeName(mt[1]), b, opsCache));
     }
 
     // --- Product ops writes (same Access boundary; no ADMIN_API_TOKEN in browser) ---
     if (p === '/api/v1/ops/signup-allowlist' && m === 'DELETE') {
       const b = await body(req, 4 * 1024);
-      await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(email(b.email)).run();
+      const address = email(b.email);
+      const deleted = await e.DB.prepare('DELETE FROM signup_allowlist WHERE email = ?').bind(address).run();
+      if (deleted.meta.changes) {
+        await writeOpsAudit(e, actor.email, 'allowlist.remove', 'signup_allowlist', address, address);
+      }
       return new Response(null, { status: 204 });
     }
     if (p === '/api/v1/ops/users/onboard' && m === 'POST') {
@@ -7193,6 +7491,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'User not found');
       if (resetUsage === true) {
         await writeOpsAudit(e, actor.email, 'user.usage-reset', 'user', mt[1], 'billing cycle reset');
+      }
+      const changedFields = [
+        status !== undefined ? 'status' : null,
+        expiresAt !== undefined ? 'expiresAt' : null,
+        b.notes !== undefined ? 'notes' : null,
+        b.contact !== undefined ? 'contact' : null,
+        b.plan !== undefined ? 'plan' : null,
+      ].filter((name): name is string => name !== null);
+      if (changedFields.length) {
+        await writeOpsAudit(e, actor.email, 'user.update', 'user', mt[1], `changed ${changedFields.join(', ')}`);
       }
       await enforceUser(e, mt[1]);
       return Response.json({ ok: true });
@@ -7657,6 +7965,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   // has SSH to all sixteen nodes and therefore what reads the per-user byte
   // counters; giving it the home agent's token instead would widen that one
   // rather than scope this.
+  //
+  // Every reporter keeps its own cumulative figure, named by `sourceId`, and an
+  // account's counter is the sum of them. Folding them with MAX() — which was
+  // right when one collector held the whole fleet's total — bills an account
+  // spread over three exits for the largest of the three.
   if ((p === '/api/v1/home/usage' || p === '/api/v1/ops-ingest/usage') && m === 'POST') {
     if (p === '/api/v1/ops-ingest/usage') {
       if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
@@ -7675,6 +7988,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const unique = new Map<string, {
       reportId: string;
       userId: string;
+      sourceId: string;
       totalBytes: number;
       observedAt: number;
     }>();
@@ -7685,6 +7999,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       const reportId = str(x.reportId, 'reportId', 1, 100);
       const reportUserId = str(x.userId, 'userId', 1, 100);
+      // A reporter that names itself gets a counter of its own. One that does
+      // not — an un-upgraded agent, or the collector — keeps the single legacy
+      // source it has always been accounted under.
+      const reportSourceId = x.sourceId === undefined || x.sourceId === null
+        ? ''
+        : str(x.sourceId, 'sourceId', 1, 64);
       if (
         !Number.isSafeInteger(x.totalBytes) ||
         x.totalBytes < 0 ||
@@ -7697,6 +8017,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const normalized = {
         reportId,
         userId: reportUserId,
+        sourceId: reportSourceId,
         totalBytes: x.totalBytes as number,
         observedAt: x.observedAt as number,
       };
@@ -7709,6 +8030,24 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     if (users.size > 100) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'A batch may contain at most 100 distinct users');
+    }
+
+    // The fold below consumes one observation per (account, source). Combining
+    // two rows with independent MAX(totalBytes) and MAX(observedAt) manufactures
+    // a pair that no reporter sent and can hide a real counter reset. Agents
+    // already queue at most one cumulative report per source/account, so reject
+    // ambiguous callers instead of guessing an order.
+    const sourceReports = new Set<string>();
+    for (const report of unique.values()) {
+      const key = JSON.stringify([report.userId, report.sourceId]);
+      if (sourceReports.has(key)) {
+        throw new ApiError(
+          400,
+          'VALIDATION_ERROR',
+          'A batch may contain at most one report per user and source',
+        );
+      }
+      sourceReports.add(key);
     }
 
     const encodedReports = JSON.stringify([...unique.values()]);
@@ -7733,45 +8072,116 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
            SELECT
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
+             json_extract(value, '$.sourceId') AS source_id,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          )
          INSERT OR IGNORE INTO usage_reports(
-           report_id, user_id, total_bytes, observed_at, created_at
+           report_id, user_id, source_id, total_bytes, observed_at, created_at
          )
-         SELECT report_id, user_id, total_bytes, observed_at, ?
+         SELECT report_id, user_id, source_id, total_bytes, observed_at, ?
          FROM input`,
+        ).bind(encodedReports, receivedAt),
+        // One cumulative figure per (account, source). Within a source the
+        // figure only ever rises, so the difference from the last one is what
+        // this source has newly carried; a figure *below* the last one is a node
+        // that was rebuilt and started counting again, and all of it is new. The
+        // legacy source keeps MAX instead: it is an aggregate over a changing
+        // set of nodes, so it falls when a node leaves the fleet, and reading
+        // that as a reset would bill the account for its history a second time.
+        e.DB.prepare(
+        `WITH input AS (
+           SELECT
+             json_extract(value, '$.reportId') AS report_id,
+             json_extract(value, '$.userId') AS user_id,
+             json_extract(value, '$.sourceId') AS source_id,
+             CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
+             CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
+           FROM json_each(?)
+         ),
+         accepted AS (
+           SELECT input.user_id AS user_id,
+                  input.source_id AS source_id,
+                  MAX(input.total_bytes) AS total_bytes,
+                  MAX(input.observed_at) AS observed_at
+           FROM input
+           JOIN usage_reports
+             ON usage_reports.report_id = input.report_id
+            AND usage_reports.user_id = input.user_id
+            AND usage_reports.source_id = input.source_id
+            AND usage_reports.total_bytes = input.total_bytes
+            AND usage_reports.observed_at = input.observed_at
+           GROUP BY input.user_id, input.source_id
+         )
+         INSERT INTO usage_report_sources(
+           user_id, source_id, last_total_bytes, accumulated_bytes, observed_at, updated_at
+         )
+         SELECT user_id, source_id, total_bytes, total_bytes, observed_at, ?
+         FROM accepted
+         WHERE true
+         ON CONFLICT(user_id, source_id) DO UPDATE SET
+           accumulated_bytes = CASE
+             WHEN usage_report_sources.source_id = ''
+               THEN MAX(usage_report_sources.accumulated_bytes, excluded.last_total_bytes)
+             WHEN excluded.last_total_bytes >= usage_report_sources.last_total_bytes
+               THEN usage_report_sources.accumulated_bytes
+                    + (excluded.last_total_bytes - usage_report_sources.last_total_bytes)
+             ELSE usage_report_sources.accumulated_bytes + excluded.last_total_bytes
+           END,
+           last_total_bytes = CASE
+             WHEN usage_report_sources.source_id = ''
+               THEN MAX(usage_report_sources.last_total_bytes, excluded.last_total_bytes)
+             ELSE excluded.last_total_bytes
+           END,
+           observed_at = MAX(usage_report_sources.observed_at, excluded.observed_at),
+           updated_at = excluded.updated_at
+         -- A figure that grew is taken whatever its timestamp says, because what
+         -- is taken from it is the difference and a repeat of it adds nothing. A
+         -- figure that fell is only a rebuilt node if it is the newest word from
+         -- that source; arriving at or before a higher one it is a stale batch,
+         -- and counting it as a reset would add its whole cumulative figure and
+         -- bill the account for its history a second time.
+         WHERE usage_report_sources.source_id = ''
+            OR excluded.last_total_bytes > usage_report_sources.last_total_bytes
+            OR excluded.observed_at > usage_report_sources.observed_at`,
         ).bind(encodedReports, receivedAt),
         e.DB.prepare(
         `WITH input AS (
            SELECT
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
+             json_extract(value, '$.sourceId') AS source_id,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          ),
          accepted AS (
-           SELECT input.user_id, MAX(input.total_bytes) AS total_bytes
+           SELECT DISTINCT input.user_id AS user_id
            FROM input
            JOIN usage_reports
              ON usage_reports.report_id = input.report_id
             AND usage_reports.user_id = input.user_id
+            AND usage_reports.source_id = input.source_id
             AND usage_reports.total_bytes = input.total_bytes
             AND usage_reports.observed_at = input.observed_at
-           GROUP BY input.user_id
          )
          UPDATE users
          SET usage_reported_bytes = MAX(
                usage_reported_bytes,
-               (SELECT accepted.total_bytes FROM accepted WHERE accepted.user_id = users.id)
+               COALESCE((
+                 SELECT SUM(accumulated_bytes) FROM usage_report_sources
+                  WHERE usage_report_sources.user_id = users.id
+               ), 0)
              ),
              usage_bytes = MAX(
                0,
                MAX(
                  usage_reported_bytes,
-                 (SELECT accepted.total_bytes FROM accepted WHERE accepted.user_id = users.id)
+                 COALESCE((
+                   SELECT SUM(accumulated_bytes) FROM usage_report_sources
+                    WHERE usage_report_sources.user_id = users.id
+                 ), 0)
                ) - usage_baseline_bytes
              ),
              updated_at = ?
@@ -7818,7 +8228,9 @@ export default {
       h.set(
         'content-security-policy',
         isOpsUi
-          ? "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'"
+          // style-src needs 'unsafe-inline': the console draws meter widths
+          // with React style attributes. Scripts stay 'self'-only.
+          ? "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'"
           : "default-src 'self'; base-uri 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; img-src 'none'; object-src 'none'; script-src 'self'; style-src 'self'",
       );
       h.set('permissions-policy', 'camera=(), geolocation=(), microphone=()');

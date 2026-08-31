@@ -153,6 +153,9 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
 
     var isExpired: Bool { Date() > expiresAt }
 
+    /// Recorded instead of the requested phase when a transition is refused.
+    static let illegalPhaseErrorCode = "TONO_JOURNAL_ILLEGAL_PHASE"
+
     static func allowedNext(_ from: UpdateHandoffPhase, _ to: UpdateHandoffPhase) -> Bool {
         if from == to { return true }
         switch (from, to) {
@@ -160,9 +163,16 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
              (.updatePrepared, .connectionQuiescing),
              (.connectionQuiescing, .cleanShutdownCompleted),
              (.cleanShutdownCompleted, .protectedHandoffRecorded),
+             // A Mac that was not protected when the install began has no
+             // protected handoff to record, so the install starts straight
+             // from the clean shutdown.
+             (.cleanShutdownCompleted, .installStarted),
              (.protectedHandoffRecorded, .installStarted),
              (.installStarted, .firstLaunchMigration),
              (.firstLaunchMigration, .protectionResuming),
+             // Nothing to resume on a Mac that was not protected: the first
+             // launch after the install verifies the new build directly.
+             (.firstLaunchMigration, .verified),
              (.protectionResuming, .verified),
              (.verified, .committed):
             return true
@@ -173,6 +183,20 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
         }
     }
 
+    func canAdvance(to phase: UpdateHandoffPhase) -> Bool {
+        Self.allowedNext(self.phase, phase)
+    }
+
+    /// True when the last advance was refused rather than recording a real
+    /// update failure.
+    var refusedIllegalTransition: Bool {
+        lastErrorCode == Self.illegalPhaseErrorCode
+    }
+
+    /// A refused transition records why it was refused and leaves the phase
+    /// where the update actually is. Rewriting the phase to `failed` here made
+    /// every later transition illegal too, so one out-of-order call poisoned
+    /// the rest of the handoff and persisted a state the update never reached.
     func advancing(to phase: UpdateHandoffPhase, errorCode: String? = nil, errorStage: String? = nil) -> UpdateHandoffJournal {
         var next = self
         if Self.allowedNext(self.phase, phase) {
@@ -180,8 +204,7 @@ nonisolated struct UpdateHandoffJournal: Codable, Equatable, Sendable {
             next.lastErrorCode = errorCode
             next.lastErrorStage = errorStage
         } else {
-            next.phase = .failed
-            next.lastErrorCode = errorCode ?? "TONO_JOURNAL_ILLEGAL_PHASE"
+            next.lastErrorCode = errorCode ?? Self.illegalPhaseErrorCode
             next.lastErrorStage = errorStage ?? "\(self.phase.rawValue)->\(phase.rawValue)"
         }
         next.updatedAt = Date()

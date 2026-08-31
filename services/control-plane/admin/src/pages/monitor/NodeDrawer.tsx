@@ -3,13 +3,21 @@ import {
   operationsApi,
   type FleetRetirePreviewDto,
   type MetricsDto,
+  type NodeQualityTextDto,
 } from '../../api';
 import { CarrierPing } from '../../carriers';
 import { Sparkline } from '../../charts';
-import { gibibytes, unixDate } from '../../lib/fields';
+import { gibibytes, localDateInputValue, unixFromLocalDate } from '../../lib/fields';
 import { formatBytes, formatDuration, timestamp } from '../../lib/format';
 import { createExclusiveGate } from '../../lib/exclusive';
-import { mainlandLabel, nodeAttentionLabel, type OpsNodeView } from '../../lib/ops-views';
+import {
+  agentLabel,
+  catalogLabel,
+  mainlandLabel,
+  nodeAttentionLabel,
+  occupancyLabel,
+  type OpsNodeView,
+} from '../../lib/ops-views';
 import { seriesRates } from '../../lib/traffic';
 import { usePrivacy } from '../../privacy';
 import { Banner, Drawer, DrawerSection, Field, FieldGrid, Note, Stat, StatGrid } from '../../ui';
@@ -19,23 +27,46 @@ const RISK_SIGNAL_LABELS: Record<string, string> = {
   malicious: '恶意', spam: '垃圾邮件', spamhaus: 'SPAMHAUS 名单',
 };
 
-function occupancyLine(node: OpsNodeView): string {
-  if (node.occupancyState !== 'known') return '占用不可判断';
-  if (!node.occupancy) return '现在没人连这台';
-  return `${node.occupancy} 人在用`;
-}
+/**
+ * The raw collector text is big and rarely read, so the list payloads no longer
+ * carry it; it is fetched only when this fold is actually opened.
+ */
+function QualityTextFold({ name }: { name: string }) {
+  const [text, setText] = useState<
+    | { state: 'idle' | 'loading' }
+    | { state: 'error'; message: string }
+    | { state: 'ready'; data: NodeQualityTextDto }
+  >({ state: 'idle' });
 
-function catalogLine(node: OpsNodeView): string {
-  if (node.catalogState === 'known-listed') return '在售';
-  if (node.catalogState === 'known-unlisted') return '不在目录';
-  return '目录未知';
-}
+  async function load() {
+    setText({ state: 'loading' });
+    try {
+      setText({ state: 'ready', data: await operationsApi.nodeQualityText(name) });
+    } catch (err) {
+      setText({ state: 'error', message: err instanceof Error ? err.message : '原文没加载上来' });
+    }
+  }
 
-function agentLine(node: OpsNodeView): string {
-  if (node.agentState === 'unavailable') return '探针源不可用';
-  if (node.agentState === 'unreported') return '没装探针';
-  if (node.agentState === 'stale') return '探针过期';
-  return '探针正常';
+  return (
+    <details
+      className="raw-fold"
+      onToggle={(event) => {
+        if (event.currentTarget.open && text.state !== 'ready' && text.state !== 'loading') void load();
+      }}
+    >
+      <summary>线路 / 黑名单原文</summary>
+      {text.state === 'ready' ? (
+        <>
+          <pre>{text.data.backtrace || '无'}</pre>
+          <pre>{text.data.securityCheck || '无'}</pre>
+        </>
+      ) : text.state === 'error' ? (
+        <Note>{text.message}。收起再展开会重试。</Note>
+      ) : (
+        <p className="muted">正在取原文…</p>
+      )}
+    </details>
+  );
 }
 
 function NodeTrends({ metrics, name }: { metrics: MetricsDto | null; name: string }) {
@@ -81,7 +112,7 @@ function BillingForm({
   const [url, setUrl] = useState(profile?.billingUrl ?? '');
   const [quota, setQuota] = useState(profile?.trafficQuotaBytes != null ? String(Math.round(profile.trafficQuotaBytes / (1024 ** 3))) : '');
   const [used, setUsed] = useState(profile?.trafficUsedBytes != null ? String(Math.round(profile.trafficUsedBytes / (1024 ** 3))) : '');
-  const [renew, setRenew] = useState(profile?.renewsAt ? new Date(profile.renewsAt * 1000).toISOString().slice(0, 10) : '');
+  const [renew, setRenew] = useState(profile?.renewsAt ? localDateInputValue(profile.renewsAt) : '');
   const [price, setPrice] = useState(profile?.price != null ? String(profile.price) : '');
   const [currency, setCurrency] = useState(profile?.currency ?? '');
   const [billingCycle, setBillingCycle] = useState(profile?.billingCycle != null ? String(profile.billingCycle) : '');
@@ -97,7 +128,7 @@ function BillingForm({
   async function save() {
     const trafficQuotaBytes = gibibytes(quota);
     const trafficUsedBytes = gibibytes(used);
-    const renewsAt = unixDate(renew);
+    const renewsAt = unixFromLocalDate(renew);
     const parsedPrice = price.trim() === '' ? null : Number(price);
     const parsedCycle = billingCycle.trim() === '' ? null : Number(billingCycle);
     const bad = [
@@ -370,7 +401,7 @@ export function NodeDrawer({
   const ip = quality?.publicIp || quality?.host || node.profile?.publicIp;
 
   return (
-    <Drawer open title={node.name} subtitle={`${mainlandLabel(node)} · ${catalogLine(node)} · ${occupancyLine(node)}`} onClose={onClose}>
+    <Drawer open title={node.name} subtitle={`${mainlandLabel(node)} · ${catalogLabel(node)} · ${occupancyLabel(node)}`} onClose={onClose}>
       <section className="drawer-section drawer-hero">
         <div className="drawer-hero-top">
           <span className={`nc-state nc-tone-${node.dot}`}>
@@ -380,9 +411,9 @@ export function NodeDrawer({
           <span className="drawer-hero-ip mono">{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</span>
         </div>
         <StatGrid columns={3}>
-          <Stat label="目录" value={catalogLine(node)} />
-          <Stat label="占用" value={occupancyLine(node)} tone={node.occupancyState === 'known' ? undefined : 'unknown'} />
-          <Stat label="探针" value={agentLine(node)} tone={node.agentState === 'reported' ? undefined : 'unknown'} />
+          <Stat label="目录" value={catalogLabel(node)} />
+          <Stat label="占用" value={occupancyLabel(node)} tone={node.occupancyState === 'known' ? undefined : 'unknown'} />
+          <Stat label="探针" value={agentLabel(node)} tone={node.agentState === 'reported' ? undefined : 'unknown'} />
         </StatGrid>
         {node.signals.length > 0 && (
           <div className="chip-list">
@@ -519,14 +550,10 @@ export function NodeDrawer({
             <p className="field-hint">查过 17 家名单，少数说有问题先不算。</p>
           </>
         )}
-        {!privacy.privacy && (quality?.backtrace || quality?.securityCheck) ? (
-          <details className="raw-fold">
-            <summary>线路 / 黑名单原文</summary>
-            <pre>{quality.backtrace || '无'}</pre>
-            <pre>{quality.securityCheck || '无'}</pre>
-          </details>
-        ) : privacy.privacy ? (
+        {privacy.privacy ? (
           <Note>隐私模式已隐藏原始 backtrace / securityCheck。</Note>
+        ) : node.qualityState === 'reported' ? (
+          <QualityTextFold name={node.name} />
         ) : null}
       </DrawerSection>
 

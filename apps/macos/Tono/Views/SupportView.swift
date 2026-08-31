@@ -7,10 +7,18 @@ struct SupportView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(SettingsKey.remoteDiagnosticsEnabled)
     private var remoteDiagnosticsEnabled = false
+    @AppStorage(
+        SettingsKey.networkLogUploadEnabled,
+        store: AppProfile.defaults
+    ) private var networkLogUploadEnabled = true
 
     @State private var probe: RuntimeProbe?
     @State private var isProbing = false
     @State private var isUploadingLog = false
+    /// What the last manual sweep did, once one has run on this page. The three
+    /// outcomes are not interchangeable to the person waiting on them, so the
+    /// button reports the one that happened rather than that a run finished.
+    @State private var logUploadOutcome: DiagnosticsLogUploader.SweepOutcome?
     @State private var copiedTarget: CopyTarget?
 
     private static let recoveryCommand =
@@ -149,6 +157,16 @@ struct SupportView: View {
             )
             supportDivider
             SupportRow(
+                label: String(localized: "Server catalog"),
+                value: catalogText(snapshot)
+            )
+            supportDivider
+            SupportRow(
+                label: String(localized: "Traffic policy"),
+                value: trafficPolicyText
+            )
+            supportDivider
+            SupportRow(
                 label: String(localized: "Support reference"),
                 value: accountSession?.device?.id ?? String(localized: "Not signed in"),
                 monospaced: true
@@ -270,34 +288,107 @@ struct SupportView: View {
             // The upload already runs on a timer; this exists for the support
             // conversation, where waiting two minutes for the tick is the
             // difference between diagnosing a live symptom and losing it.
-            HStack(spacing: 8) {
-                Text(String(localized: "Send the newest log segment to support now"))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Button(isUploadingLog
-                    ? String(localized: "Sending…")
-                    : String(localized: "Upload now")) {
-                    guard !isUploadingLog, let accountSession else { return }
-                    isUploadingLog = true
-                    Task {
-                        await accountSession.uploadDiagnosticsLogNow()
-                        isUploadingLog = false
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text(String(localized: "Send the newest log segment to support now"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button(isUploadingLog
+                        ? String(localized: "Sending…")
+                        : String(localized: "Upload now")) {
+                        guard !isUploadingLog, logUploadBlockedReason == nil,
+                              let accountSession else { return }
+                        isUploadingLog = true
+                        logUploadOutcome = nil
+                        Task {
+                            let outcome = await accountSession
+                                .uploadDiagnosticsLogNow()
+                            isUploadingLog = false
+                            logUploadOutcome = outcome
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .disabled(isUploadingLog || logUploadBlockedReason != nil)
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tint)
-                .disabled(isUploadingLog || accountSession == nil)
+
+                // Each of these preconditions makes the sweep return without
+                // sending anything, and the button cannot tell that apart from a
+                // send once it has finished. Naming the missing one beats
+                // spending the wait on "Sending…" and then reporting nothing.
+                if let blocked = logUploadBlockedReason {
+                    HStack(spacing: 8) {
+                        Text(blocked)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !networkLogUploadEnabled {
+                            Button(String(localized: "Open Settings")) {
+                                appState.selectedPage = .settings
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tint)
+                        }
+                    }
+                } else if let outcome = logUploadOutcome {
+                    Text(Self.logUploadOutcomeText(outcome))
+                        .font(.system(size: 11))
+                        .foregroundStyle(
+                            Self.logUploadOutcomeFailed(outcome)
+                                ? Color.orange
+                                : Color.secondary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
+    }
+
+    private static func logUploadOutcomeText(
+        _ outcome: DiagnosticsLogUploader.SweepOutcome
+    ) -> String {
+        switch outcome {
+        case .uploaded:
+            String(localized: "Sent. The newest log segment is with Tono support.")
+        case .idle:
+            String(localized: "Nothing to send — the log has not advanced since the last upload.")
+        case .disabled:
+            String(localized: "Nothing was sent: log upload is off in Settings › Privacy.")
+        case let .failed(reason):
+            String(localized: "Upload failed. \(reason)")
+        }
+    }
+
+    private static func logUploadOutcomeFailed(
+        _ outcome: DiagnosticsLogUploader.SweepOutcome
+    ) -> Bool {
+        switch outcome {
+        case .uploaded, .idle: false
+        case .disabled, .failed: true
+        }
+    }
+
+    /// Why the manual upload would send nothing right now, or nil when it can
+    /// run. These mirror the preconditions the session's own upload loop checks:
+    /// with any of them missing the sweep returns without touching the network.
+    private var logUploadBlockedReason: String? {
+        guard let accountSession, accountSession.user != nil, accountSession.isReady else {
+            return String(localized: "Sign in to send the log to support.")
+        }
+        guard networkLogUploadEnabled else {
+            return String(localized: "Log upload is off. Turn it on in Settings › Privacy.")
+        }
+        return nil
     }
 
     // MARK: - Diagnostics Report
 
     private func diagnosticsCard(report: String) -> some View {
         SupportCard(icon: "shield.lefthalf.filled", title: String(localized: "Redacted Diagnostics Report")) {
-            Text(String(localized: "This is exactly what Tono reports when support requests a diagnostic snapshot. It carries no hostnames, IP addresses, process names or account tokens. It is a separate, smaller report than the audit log above, which in this test build is uploaded in full."))
+            Text(String(localized: "This is what Tono reports when support requests a diagnostic snapshot, followed by the catalog and traffic-policy state the uploaded snapshot has no field for. It carries no hostnames, IP addresses, process names or account tokens. It is a separate, smaller report than the audit log above, which in this test build is uploaded in full."))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -528,8 +619,31 @@ struct SupportView: View {
         LocalTrafficAudit.shared.logFileURL.deletingLastPathComponent()
     }
 
+    private func catalogText(_ snapshot: TonoDiagnosticSnapshot) -> String {
+        let revision = snapshot.catalogRevision.map { "v\($0)" }
+            ?? String(localized: "No verified catalog installed")
+        guard let failure = accountSession?.catalogFailureMessage else {
+            return revision
+        }
+        return "\(revision) · \(failure)"
+    }
+
+    /// The managed traffic policy pins the WeChat direct route. A stale one
+    /// degrades that route quietly, and until now neither its revision nor the
+    /// reason its refresh failed appeared on any support surface.
+    private var trafficPolicyText: String {
+        guard let accountSession else { return String(localized: "Not signed in") }
+        let revision = accountSession.trafficPolicyRevision.map { "v\($0)" }
+            ?? String(localized: "Not refreshed since launch")
+        guard let failure = accountSession.trafficPolicyFailureMessage else {
+            return revision
+        }
+        return "\(revision) · \(failure)"
+    }
+
     /// The preview is the encoded payload of the same snapshot builder the
-    /// remote diagnostic action uploads, so the two can never disagree.
+    /// remote diagnostic action uploads, so the two can never disagree, plus
+    /// the supplemental lines below that the snapshot has no field for.
     private func report(for snapshot: TonoDiagnosticSnapshot) -> String {
         let encoder = TonoCoding.encoder()
         encoder.outputFormatting = [
@@ -539,7 +653,25 @@ struct SupportView: View {
               let text = String(data: data, encoding: .utf8) else {
             return String(localized: "Diagnostics report unavailable")
         }
-        return text
+        return ([text] + supplementalReportLines).joined(separator: "\n")
+    }
+
+    /// Catalog and traffic-policy state the uploaded snapshot has no field for.
+    /// Support asks for both whenever a route misbehaves, and the only copy of
+    /// either was a stored value nothing rendered or copied.
+    private var supplementalReportLines: [String] {
+        guard let accountSession else { return [] }
+        var lines = [
+            "trafficPolicyRevision: "
+                + (accountSession.trafficPolicyRevision.map { "\($0)" } ?? "none"),
+        ]
+        if let failure = accountSession.catalogFailureMessage {
+            lines.append("catalogFailure: \(failure)")
+        }
+        if let failure = accountSession.trafficPolicyFailureMessage {
+            lines.append("trafficPolicyFailure: \(failure)")
+        }
+        return lines
     }
 
     // MARK: - Actions

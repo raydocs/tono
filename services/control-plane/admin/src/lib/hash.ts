@@ -37,14 +37,6 @@ export function emptyHash(page: Page = 'dashboard'): OpsHash {
   return { page, focus: null, node: null, user: null, q: null, range: null };
 }
 
-function decode(value: string): string {
-  try {
-    return decodeURIComponent(value.replace(/\+/g, ' '));
-  } catch {
-    return value;
-  }
-}
-
 export function parseOpsHash(hash: string): OpsHash {
   const raw = hash.replace(/^#\/?/, '');
   const [path, query = ''] = raw.split('?');
@@ -53,9 +45,13 @@ export function parseOpsHash(hash: string): OpsHash {
   const page = aliased
     ?? (PAGE_IDS.includes(slug as Page) ? slug as Page : 'dashboard');
   const params = new URLSearchParams(query);
+  // `URLSearchParams` already decodes: it turns `+` back into a space and
+  // resolves the percent escapes. Decoding its output a second time would read
+  // an escaped plus as a space, and the customer search is written from
+  // keystrokes — an address with a plus in it would never match its owner.
   const pick = (key: string) => {
     const value = params.get(key);
-    return value == null || value === '' ? null : decode(value);
+    return value == null || value === '' ? null : value;
   };
   return {
     page,
@@ -85,20 +81,22 @@ export function hashWithoutDrawer(state: OpsHash): OpsHash {
 
 export function nextRouteForOpenUser(current: OpsHash, userId: string, extra: Partial<OpsHash> = {}): OpsHash {
   const page = extra.page ?? 'users';
-  const keepFocus = current.page === 'users' && page === 'users';
+  // Opening a drawer on the page the operator is already on keeps their
+  // filters; jumping to another page starts from that page's default view.
+  const keepFocus = current.page === page;
   return {
     page,
     focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),
     node: null,
     user: userId,
-    q: extra.q !== undefined ? extra.q : null,
+    q: extra.q !== undefined ? extra.q : (keepFocus ? current.q : null),
     range: null,
   };
 }
 
 export function nextRouteForOpenNode(current: OpsHash, name: string, extra: Partial<OpsHash> = {}): OpsHash {
   const page = extra.page ?? 'monitor';
-  const keepFocus = current.page === 'monitor' && page === 'monitor';
+  const keepFocus = current.page === page;
   return {
     page,
     focus: extra.focus !== undefined ? extra.focus : (keepFocus ? current.focus : null),

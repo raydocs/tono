@@ -21,7 +21,7 @@ export function CustomerList({
           key={person.userId}
           person={person}
           selected={selectedUserId === person.userId}
-          onOpen={() => onOpen(person.userId)}
+          onOpen={onOpen}
         />
       ))}
     </div>

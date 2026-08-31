@@ -19,6 +19,11 @@ the browser never stores or sends `ADMIN_API_TOKEN`. Token-authenticated
 by `ops-panel/collect.py` (`PUT /api/v1/ops-ingest/snapshot`).
 `quality.afk.ccwu.cc` / `ops.afk.ccwu.cc` 302 to the admin monitor.
 
+The collector runs on two timers: the 12h full SSH sweep (quality, block
+probes, report files) and `collect.py --agents-only` every 1-5 minutes, which
+only pushes the Komari nodes list as a partial `{"agents": ...}` snapshot so
+the timeseries tier and frontend rate math get frequent samples.
+
 `operations_servers` / `operations_logical_nodes` (migration `0016`) are unused
 read-only inventory. Real nodes live in the Clash catalog, Komari snapshot, and
 `home_exits`. The API host does not serve a website.

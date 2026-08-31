@@ -7,8 +7,10 @@ import {
   type OpsNodeView,
   type OpsPersonView,
 } from './ops-views';
+import { calendarDaysUntil } from './fields';
 import { HEARTBEAT_FRESH_SECONDS, measurementFresh } from './freshness';
 import { isLikelyBlocked } from './quality';
+import { AGENT_SNAPSHOT_STALE_SECONDS, QUALITY_SNAPSHOT_STALE_SECONDS } from './source-truth';
 import { msEpochToSec } from './time';
 
 export { HEARTBEAT_FRESH_SECONDS, measurementFresh };
@@ -26,6 +28,7 @@ export type IncidentKind =
   | 'customer-path-exit'
   | 'customer-path-tcp'
   | 'node-renew'
+  | 'node-expired'
   | 'quota'
   | 'expired'
   | 'catalog-lag'
@@ -50,6 +53,12 @@ export type OpsIncident = {
   measuredAtSec: number | null;
   measuredAt?: number | null;
   sourceState: IncidentSourceState;
+  /**
+   * How long measuredAtSec stays fresh for this incident's source. Quality
+   * scans run every twelve hours, so judging them by the 40-minute heartbeat
+   * window called every node incident stale. Unset means the heartbeat window.
+   */
+  staleAfterSec?: number;
   /** When set, this customer path issue is already represented by a node accident. */
   causedByNode?: string;
 };
@@ -70,6 +79,8 @@ export type CustomerPathVerdict =
   | { kind: 'offline' }
   | { kind: 'stale'; lastSeenAt: number }
   | { kind: 'unmeasured' }
+  /** Samples exist but every one of them fell out of the freshness window. */
+  | { kind: 'stale-sample' }
   | { kind: 'ok' }
   | { kind: 'incident'; severity: 'severe' | 'warn'; reason: string; measuredAt: number | null; metric: 'node' | 'exit' | 'tcp' };
 
@@ -108,7 +119,7 @@ export function customerPathVerdict(input: {
   }
   if (delays.length === 0) {
     const hadAny = input.exitDelayMs != null || input.tcpDelayMs != null;
-    return { kind: hadAny ? 'unmeasured' : 'unmeasured' };
+    return { kind: hadAny ? 'stale-sample' : 'unmeasured' };
   }
 
   const worst = delays.reduce((a, b) => (b.ms > a.ms ? b : a));
@@ -126,6 +137,7 @@ export function customerPathVerdict(input: {
 function pathRank(verdict: CustomerPathVerdict): number {
   if (verdict.kind === 'incident' && verdict.severity === 'severe') return 0;
   if (verdict.kind === 'incident' && verdict.severity === 'warn') return 1;
+  if (verdict.kind === 'stale-sample') return 2;
   if (verdict.kind === 'unmeasured') return 3;
   if (verdict.kind === 'ok') return 4;
   return 5;
@@ -220,6 +232,7 @@ export function incidentsFromWorld(input: {
         node: node.name,
         impactCount: impact,
         measuredAtSec: qualityMeasured,
+        staleAfterSec: QUALITY_SNAPSHOT_STALE_SECONDS,
         sourceState: 'ready',
       }));
     } else if (cause === 'offline' && affecting) {
@@ -236,6 +249,7 @@ export function incidentsFromWorld(input: {
         node: node.name,
         impactCount: impact,
         measuredAtSec: qualityMeasured,
+        staleAfterSec: QUALITY_SNAPSHOT_STALE_SECONDS,
         sourceState: 'ready',
       }));
     } else if (cause === 'offline') {
@@ -250,6 +264,7 @@ export function incidentsFromWorld(input: {
         node: node.name,
         impactCount: 0,
         measuredAtSec: qualityMeasured,
+        staleAfterSec: QUALITY_SNAPSHOT_STALE_SECONDS,
         sourceState: 'ready',
       }));
     }
@@ -283,12 +298,13 @@ export function incidentsFromWorld(input: {
         node: node.name,
         impactCount: impact,
         measuredAtSec: agentMeasured,
+        staleAfterSec: AGENT_SNAPSHOT_STALE_SECONDS,
         sourceState: 'ready',
       }));
     }
 
     if (node.billing.renewsAt) {
-      const days = (node.billing.renewsAt - input.nowSec) / 86_400;
+      const days = calendarDaysUntil(node.billing.renewsAt, input.nowSec);
       if (days >= 0 && days <= 7) {
         incidents.push(incident({
           id: `node-renew:${node.name}`,
@@ -296,7 +312,21 @@ export function incidentsFromWorld(input: {
           category: 'chore',
           severity: 'notice',
           title: node.name,
-          detail: `${Math.ceil(days)} 天后续费`,
+          detail: days === 0 ? '今天续费' : `${days} 天后续费`,
+          actionRoute: `#/monitor?focus=expiring&node=${encodeURIComponent(node.name)}`,
+          node: node.name,
+          impactCount: impact,
+          measuredAtSec: node.billing.renewsAt,
+          sourceState: 'ready',
+        }));
+      } else if (days < 0) {
+        incidents.push(incident({
+          id: `node-expired:${node.name}`,
+          kind: 'node-expired',
+          category: 'chore',
+          severity: 'warn',
+          title: node.name,
+          detail: `续费日已过 ${-days} 天`,
           actionRoute: `#/monitor?focus=expiring&node=${encodeURIComponent(node.name)}`,
           node: node.name,
           impactCount: impact,
@@ -510,10 +540,12 @@ export function dashboardKpis(input: {
     ? input.incidents.filter((item) => item.category === 'customer-path').length
     : null;
   const pathUnmeasured = input.activityAvailable
-    ? input.people.filter((person) => person.online && person.path.kind === 'unmeasured').length
+    ? input.people.filter((person) => (
+      person.online && (person.path.kind === 'unmeasured' || person.path.kind === 'stale-sample')
+    )).length
     : 0;
   const path = pathIncidents == null
-    ? { id: 'path' as const, label: '客户路径差', value: null, href: KPI_HREFS.path, alert: false }
+    ? { id: 'path' as const, label: '客户路径差', value: null, note: '心跳不可用', href: KPI_HREFS.path, alert: false }
     : pathIncidents > 0
       ? {
         id: 'path' as const,
@@ -540,7 +572,7 @@ export function dashboardKpis(input: {
     ? input.nodes.filter((node) => carrierLossNeedsAttention(node)).length
     : null;
   const loss = lossOccupied == null
-    ? { id: 'loss' as const, label: '高丢包', value: null, href: KPI_HREFS.loss, alert: false }
+    ? { id: 'loss' as const, label: '高丢包', value: null, note: '探针源不可用', href: KPI_HREFS.loss, alert: false }
     : {
       id: 'loss' as const,
       label: '高丢包',
@@ -569,13 +601,13 @@ export function dashboardKpis(input: {
     ? input.nodes.length - dated.length
     : 0;
   const expiring = !input.profilesAvailable
-    ? { id: 'expiring' as const, label: '7 天续费', value: null, href: KPI_HREFS.expiring, alert: false }
+    ? { id: 'expiring' as const, label: '7 天续费', value: null, note: '账单资料不可用', href: KPI_HREFS.expiring, alert: false }
     : dated.length === 0
       ? {
         id: 'unfilledRenew' as const,
         label: '7 天续费',
         value: null,
-        note: input.nodes.length ? `${input.nodes.length} 台未填` : undefined,
+        note: input.nodes.length ? `${input.nodes.length} 台未填` : '还没有节点',
         href: KPI_HREFS.unfilledRenew,
         alert: false,
       }
@@ -588,12 +620,12 @@ export function dashboardKpis(input: {
         alert: expiringCount > 0,
       };
   return [
-    { id: 'blocked', label: '被墙', value: blocked, href: KPI_HREFS.blocked, alert: (blocked ?? 0) > 0 },
-    { id: 'offline', label: '失联', value: offline, href: KPI_HREFS.offline, alert: (offline ?? 0) > 0 },
+    { id: 'blocked', label: '被墙', value: blocked, note: blocked == null ? '质量源不可用' : undefined, href: KPI_HREFS.blocked, alert: (blocked ?? 0) > 0 },
+    { id: 'offline', label: '失联', value: offline, note: offline == null ? '质量源不可用' : undefined, href: KPI_HREFS.offline, alert: (offline ?? 0) > 0 },
     loss,
     path,
-    { id: 'online', label: '在线客户', value: online, href: KPI_HREFS.online, alert: false },
-    { id: 'quota', label: '额度告急', value: quota, href: KPI_HREFS.quota, alert: (quota ?? 0) > 0 },
+    { id: 'online', label: '在线客户', value: online, note: online == null ? '心跳不可用' : undefined, href: KPI_HREFS.online, alert: false },
+    { id: 'quota', label: '额度告急', value: quota, note: quota == null ? '客户资料不可用' : undefined, href: KPI_HREFS.quota, alert: (quota ?? 0) > 0 },
     expiring,
   ];
 }

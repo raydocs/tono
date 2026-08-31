@@ -79,7 +79,7 @@ struct AddRuleSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     // Type + Policy
                     HStack(spacing: 14) {
-                        formField(label: "Type") {
+                        formField(label: "Type label") {
                             customPicker(selection: $selectedType, options: ruleTypes.map { ($0, $0) })
                         }
 

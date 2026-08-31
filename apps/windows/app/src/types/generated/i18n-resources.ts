@@ -1051,6 +1051,8 @@ export interface TranslationResources {
           serviceBusy: string
           serviceNotRunning: string
           serviceTooOld: string
+          tunDataPlaneBroken: string
+          tunIngressBroken: string
           wfpEngineWedged: string
         }
         errorSwitchServer: string

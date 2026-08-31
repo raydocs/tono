@@ -30,7 +30,12 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
         case .coreExitUnreachable:
             return "当前节点和核心均无法完成受保护验证。"
         case .networkEnvironmentOffline:
-            return "当前物理网络不可用。网络恢复后会自动继续保护。"
+            // Looked up rather than written in place: a physical-link
+            // observation is what produces this code, and it reaches the
+            // connection banner on a Mac running in either language.
+            return String(
+                localized: "This Mac has no network connection. Protection resumes automatically when the network returns."
+            )
         case .helperProtocolMismatch:
             return "网络助手协议不匹配，需要先完成助手修复。"
         case .updateRecoveryFailed:
@@ -160,6 +165,13 @@ nonisolated enum ProtectedConnectivity {
     /// self-congestion even when the node was fine.
     static let probeStaggerMs = 100
 
+    /// `networkOffline` has to come from a real physical-link observation —
+    /// `PhysicalNetworkReachability` on macOS. The primary-network-service
+    /// lookup cannot answer it, because it stays non-nil for a configured but
+    /// disconnected service, and the physical TCP and bypass probes must not:
+    /// those are leak detectors that a correctly armed session is supposed to
+    /// fail. Without a real signal an offline Mac lands on the failed/failed
+    /// pair below and is diagnosed as an unreachable exit.
     static func classifyPostLock(
         controller: ProbeCheck,
         tun: TUNCheck,

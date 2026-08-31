@@ -85,7 +85,7 @@ actor CoreControllerClient {
     }
 
     /// Raw data request for manual JSON parsing
-    func requestRawData(_ path: String) async throws -> Data {
+    private func requestRawData(_ path: String) async throws -> Data {
         var urlRequest = URLRequest(url: makeURL(path))
         urlRequest.httpMethod = "GET"
         if !secret.isEmpty {
@@ -148,7 +148,32 @@ actor CoreControllerClient {
         try await request("/configs")
     }
 
+    /// Keys that decide who may reach the controller, rather than how the core
+    /// routes. Mihomo applies a PATCH to the running instance, so any of these
+    /// would move or re-credential the control channel underneath the live
+    /// session. Where the controller listens and what authenticates against it
+    /// is settled once, at launch, by the root-owned runtime snapshot; the app
+    /// never has a second opinion about it, so the client does not carry the
+    /// ability to express one. The `external-ui` keys join them because
+    /// `external-ui-url` is a fetch-and-extract-to-disk run by a root-owned
+    /// core; nothing in this app sets any of the three, so refusing them costs
+    /// nothing even on the builds whose PATCH schema ignores them.
+    private static let controllerBindingKeys: Set<String> = [
+        "external-controller",
+        "external-controller-unix",
+        "external-controller-pipe",
+        "external-controller-cors",
+        "external-controller-tls",
+        "external-ui",
+        "external-ui-name",
+        "external-ui-url",
+        "secret",
+    ]
+
     func patchConfig(_ patch: [String: Any]) async throws {
+        guard !patch.keys.contains(where: { Self.controllerBindingKeys.contains($0) }) else {
+            throw CoreControllerError.requestFailed("PATCH /configs")
+        }
         let body = try JSONSerialization.data(withJSONObject: patch)
         try await requestVoid("/configs", method: "PATCH", body: body)
     }
@@ -298,8 +323,21 @@ actor CoreControllerClient {
 
     // MARK: - Reload Config
 
+    /// The only document a root-owned core may be told to load. The daemon
+    /// stages the user-owned runtime into its own directory — re-checking owner,
+    /// digest and the owned-runtime contract on the way in — and hands this exact
+    /// path back from `/core/sync`, which `HelperManager.syncCoreConfig` pins to
+    /// the same literal. Pinning it here keeps the load-an-arbitrary-file
+    /// primitive off this client's surface; it is not the boundary, since
+    /// anything holding `secret` can issue the raw PUT itself.
+    private static let rootOwnedRuntimeConfigPath =
+        "/var/run/tono-core/runtime/config.yaml"
+
     /// Tell mihomo to reload config from disk (PUT /configs?force=true)
     func reloadConfig(path: String) async throws {
+        guard path == Self.rootOwnedRuntimeConfigPath else {
+            throw CoreControllerError.requestFailed("PUT /configs?force=true")
+        }
         let body = try JSONEncoder().encode(["path": path])
         let maximumAttempts = 2
         for attempt in 1...maximumAttempts {

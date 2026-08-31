@@ -3,15 +3,46 @@ import { operationsApi, type HomeExitDto } from '../../api';
 import { tcpPort } from '../../lib/fields';
 import { timeAgo, timestamp } from '../../lib/format';
 import type { Live } from '../../hooks';
-import { Banner, Empty, Field, FieldGrid, Skeleton, Status, Unavailable } from '../../ui';
+import { useOpsRoute } from '../../lib/route';
+import { Banner, Empty, Field, FieldGrid, FilterChips, Skeleton, Status, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
 import { useAsk } from './ask';
 import { useMutation } from './mutate';
+
+const HOME_FILTERS = [
+  { id: '', label: '全部' },
+  { id: 'idle', label: '闲置' },
+  { id: 'bound', label: '已绑' },
+  { id: 'disabled', label: '停用' },
+  { id: 'probe-failed', label: '探测失败' },
+];
+
+function homeMatchesFilter(home: HomeExitDto, filter: string): boolean {
+  if (!filter) return true;
+  if (filter === 'idle') return home.status === 'active' && (home.bindCount ?? 0) === 0;
+  if (filter === 'bound') return (home.bindCount ?? 0) > 0;
+  if (filter === 'disabled') return home.status !== 'active';
+  if (filter === 'probe-failed') return home.probeStatus === 'dead';
+  return true;
+}
+
+function visibleHomes(rows: HomeExitDto[], filter: string, query: string): HomeExitDto[] {
+  const needle = query.trim().toLowerCase();
+  return rows.filter((home) => {
+    if (!homeMatchesFilter(home, filter)) return false;
+    if (!needle) return true;
+    return [home.displayName, home.proxyName, home.socks5Host, home.egressIpv4, home.notes, home.kind]
+      .filter(Boolean).join(' ').toLowerCase().includes(needle);
+  });
+}
 
 export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
   const privacy = usePrivacy();
   const ask = useAsk();
   const mutate = useMutation();
+  const { setRoute } = useOpsRoute();
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('');
   const [importText, setImportText] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [proxyName, setProxyName] = useState('');
@@ -156,17 +187,47 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
           <button type="button" className="btn btn-outline btn-sm" onClick={() => homes.reload()}>刷新</button>
         </div>
         <div className="card-body homes-list">
+          <div className="customer-toolbar">
+            <input
+              className="input compact search-input sensitive-value"
+              type="search"
+              aria-label="搜索家宽"
+              placeholder="搜索名称 / 主机 / 备注"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <FilterChips
+            value={filter}
+            options={HOME_FILTERS.map((item) => ({
+              ...item,
+              count: homes.state === 'ready'
+                ? homes.data.filter((home) => item.id === '' || homeMatchesFilter(home, item.id)).length
+                : undefined,
+            }))}
+            onChange={setFilter}
+          />
           {homes.state === 'loading' && <Skeleton />}
           {homes.state === 'error' && <Unavailable title="库存没加载上来" detail={homes.message} />}
           {homes.state === 'ready' && homes.data.length === 0 && <Empty title="库存是空的" />}
-          {homes.state === 'ready' && homes.data.map((home) => (
+          {homes.state === 'ready' && homes.data.length > 0 && visibleHomes(homes.data, filter, query).length === 0 && (
+            <Empty title="没有符合条件的线路" detail="换个筛选或清空搜索再看。" />
+          )}
+          {homes.state === 'ready' && visibleHomes(homes.data, filter, query).map((home) => (
             <article key={home.id} className="card home-card">
               <div className="home-card-top">
                 <strong>{home.displayName}</strong>
                 <Status value={home.status} />
-                <span className={`chip ${(home.bindCount ?? 0) > 0 ? 'chip-ok' : 'chip-unknown'}`}>
-                  {(home.bindCount ?? 0) > 0 ? `绑定 ${home.bindCount} 人` : '闲置'}
-                </span>
+                {(home.bindCount ?? 0) > 0 ? (
+                  <button
+                    type="button"
+                    className="chip chip-ok"
+                    title="在客户列表里搜这条线路绑着的人"
+                    onClick={() => setRoute({ page: 'users', focus: null, node: null, user: null, q: home.displayName, range: null })}
+                  >绑定 {home.bindCount} 人</button>
+                ) : (
+                  <span className="chip chip-unknown">闲置</span>
+                )}
               </div>
               <div className="home-card-meta">
                 <span className="mono">{home.kind === 'socks5' ? `${privacy.ip(home.socks5Host)}:${home.socks5Port}` : privacy.ip(home.egressIpv4)}</span>
@@ -185,21 +246,22 @@ export function HomesInventory({ homes }: { homes: Live<HomeExitDto[]> }) {
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      disabled={mutate.busy}
+                      disabled={mutate.busy || ask.busy}
                       onClick={() => void mutate.run(async () => { await operationsApi.updateHomeExit(home.id, { status: 'active' }); homes.reload(); }, '已启用')}
                     >启用</button>
                   ) : (
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      disabled={mutate.busy}
+                      disabled={mutate.busy || ask.busy}
                       onClick={() => void mutate.run(async () => { await operationsApi.updateHomeExit(home.id, { status: 'disabled' }); homes.reload(); }, '已停用')}
                     >停用</button>
                   )}
                 <button
                   type="button"
                   className="btn btn-outline btn-sm"
-                  disabled={mutate.busy}
+                  disabled={mutate.busy || ask.busy || (home.bindCount ?? 0) > 0}
+                  title={(home.bindCount ?? 0) > 0 ? `还有 ${home.bindCount} 人绑着这条线路，先解开再删` : undefined}
                   onClick={() => ask.prompt(
                     `删除家宽「${home.displayName}」？`,
                     '要先把绑着的客户都解开。确认后才会从库存去掉。',

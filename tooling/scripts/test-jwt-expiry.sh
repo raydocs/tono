@@ -19,10 +19,26 @@ repo, out = sys.argv[1], sys.argv[2]
 path = f"{repo}/apps/macos/Tono/Services/TonoAPIClient.swift"
 src = open(path, encoding="utf-8").read()
 marker = "    nonisolated static func expiry(ofJWT token: String) -> Date? {"
+
+
+def unlocatable(what):
+    # A rename or a reindentation moves the marker, and the extraction then has
+    # nothing to compile. Say so on stderr and stop non-zero, so the run reads as
+    # a failure rather than as coverage.
+    sys.stderr.write(
+        f"test-jwt-expiry: {what} in TonoAPIClient.swift; "
+        "the expiry parser moved and nothing was tested\n"
+    )
+    raise SystemExit(1)
+
+
 if marker not in src:
-    raise SystemExit("expiry(ofJWT:) not found in TonoAPIClient.swift")
+    unlocatable("expiry(ofJWT:) was not found")
 start = src.index(marker)
-end = src.index("\n    }\n", start) + len("\n    }\n")
+end = src.find("\n    }\n", start)
+if end < 0:
+    unlocatable("the end of expiry(ofJWT:) was not found")
+end += len("\n    }\n")
 open(f"{out}/shim.swift", "w", encoding="utf-8").write(
     "import Foundation\n\nenum TonoJWT {\n" + src[start:end] + "}\n"
 )

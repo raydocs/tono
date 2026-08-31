@@ -4,7 +4,15 @@ import { matchDevOps } from '../admin/src/dev/ops-fixture';
 import { catalogProxyNames } from '../admin/src/lib/catalog';
 import { formatBytes } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
-import { gibibytes, tcpPort, unixDate, unixDateTimeLocal } from '../admin/src/lib/fields';
+import {
+  calendarDaysUntil,
+  gibibytes,
+  localDateInputValue,
+  tcpPort,
+  unixDate,
+  unixDateTimeLocal,
+  unixFromLocalDate,
+} from '../admin/src/lib/fields';
 import { acceptIfCurrent, bindDetail } from '../admin/src/lib/bound-detail';
 import { compactHealthLine, dataHealthLines, sourceTruthHealthLines } from '../admin/src/lib/health';
 import { publishGate, catalogLag } from '../admin/src/lib/revision';
@@ -166,6 +174,33 @@ describe('a form box read as three answers', () => {
     expect(gibibytes('2')).toBe(2 * 1024 ** 3);
     expect(gibibytes('0')).toBe(0);
     expect(unixDate('2026-09-01')).toBe(Math.floor(Date.UTC(2026, 8, 1) / 1000));
+  });
+});
+
+describe('renewal dates on the operator clock', () => {
+  it('round-trips a date box through local midnight, not UTC', () => {
+    // `new Date('2026-09-01')` is UTC midnight; west of Greenwich that second
+    // renders back as 08-31 and every renewal date drifted a day.
+    const saved = unixFromLocalDate('2026-09-01');
+    expect(saved).toBe(Math.floor(new Date(2026, 8, 1).getTime() / 1000));
+    expect(localDateInputValue(saved as number)).toBe('2026-09-01');
+  });
+
+  it('treats an emptied box as clear and refuses garbage', () => {
+    expect(unixFromLocalDate('')).toBeNull();
+    expect(unixFromLocalDate('not-a-date')).toBe('invalid');
+    expect(unixFromLocalDate('2026-13-40')).toBe('invalid');
+    expect(localDateInputValue(null)).toBe('');
+  });
+
+  it('counts calendar days, so late evening is not already tomorrow', () => {
+    const renewal = new Date(2026, 8, 1).getTime() / 1000;
+    const eveningBefore = new Date(2026, 7, 31, 23, 30).getTime() / 1000;
+    const morningOf = new Date(2026, 8, 1, 9, 0).getTime() / 1000;
+    const nextDay = new Date(2026, 8, 2, 0, 30).getTime() / 1000;
+    expect(calendarDaysUntil(renewal, eveningBefore)).toBe(1);
+    expect(calendarDaysUntil(renewal, morningOf)).toBe(0);
+    expect(calendarDaysUntil(renewal, nextDay)).toBe(-1);
   });
 });
 
@@ -513,8 +548,6 @@ const qualityNode = (name: string, over: Partial<LiveQualityNodeDto> = {}): Live
   exposure: null,
   routeKeywords: [],
   block: { status: 'OK', label: '大陆正常', rule: null, mainland: null, asiaEdge: null, overseas: null },
-  securityCheck: null,
-  backtrace: null,
   ...over,
 });
 
@@ -557,6 +590,22 @@ describe('ops hash routing', () => {
       q: null,
       range: null,
     });
+  });
+
+  it('keeps a plus in the search where the operator typed it', () => {
+    const hash = formatOpsHash({
+      page: 'users',
+      focus: null,
+      node: null,
+      user: null,
+      q: 'bob+vpn@example.com',
+      range: null,
+    });
+    expect(parseOpsHash(hash).q).toBe('bob+vpn@example.com');
+    // A hand-written link that escapes the plus itself reads the same way.
+    expect(parseOpsHash('#/users?q=bob%2Bvpn%40example.com').q).toBe('bob+vpn@example.com');
+    // And a space, which the console writes as a plus, is still a space.
+    expect(parseOpsHash('#/monitor?node=Tokyo+%C2%B7+Fuji').node).toBe('Tokyo · Fuji');
   });
 
   it('maps old aliases and missing page to known pages', () => {
@@ -899,7 +948,7 @@ describe('screenshot privacy masks', () => {
 });
 
 import { createExclusiveGate } from '../admin/src/lib/exclusive';
-import { personMatchesFocus } from '../admin/src/lib/ops-views';
+import { personAccountLabel, personMatchesFocus, personTelemetryLabel } from '../admin/src/lib/ops-views';
 import { nextRouteForOpenUser, nextRouteForOpenNode } from '../admin/src/lib/hash';
 import { msEpochToSec } from '../admin/src/lib/time';
 import { emptyHash } from '../admin/src/lib/hash';
@@ -978,6 +1027,7 @@ describe('customer telemetry and path activity', () => {
     expect(personMatchesFocus(people[0], 'claude')).toBe(true);
     expect(people[0].catalogLag.state).toBe('behind');
     expect(people[0].chores).toContain('没开 Claude');
+    expect(people[0].chores).toContain('没家宽');
     expect(people[0].chores.some((chore) => chore.includes('目录落后'))).toBe(false);
     expect(people[0].accountState).toBe('present');
   });
@@ -1108,6 +1158,16 @@ describe('customer telemetry and path activity', () => {
     expect(tcpPort('443')).toBe(443);
   });
 
+  it('keeps failures filters when opening either drawer on the failures page', () => {
+    const fromFailures = { ...emptyHash('failures'), focus: 'customer-path' };
+    expect(nextRouteForOpenUser(fromFailures, 'u1', { page: 'failures' })).toEqual({
+      page: 'failures', focus: 'customer-path', node: null, user: 'u1', q: null, range: null,
+    });
+    expect(nextRouteForOpenNode(fromFailures, 'Tokyo · Fuji', { page: 'failures' })).toMatchObject({
+      page: 'failures', focus: 'customer-path', node: 'Tokyo · Fuji', user: null,
+    });
+  });
+
   it('does not carry a monitor focus into a user drawer', () => {
     const fromMonitor = { ...emptyHash('monitor'), focus: 'blocked', node: 'Tokyo · Fuji' };
     expect(nextRouteForOpenUser(fromMonitor, 'u1')).toEqual({
@@ -1170,7 +1230,7 @@ describe('confirm exclusive gate', () => {
 import { dashboardKpis, KPI_HREFS } from '../admin/src/lib/incidents';
 import { lineDiff } from '../admin/src/lib/textdiff';
 import { metricsForRange } from '../admin/src/lib/metrics-bind';
-import { aggregateFleetRates, coverageByBucket, fleetByteTransfer, latestValidRate, nodeRateSeries, rangeTransfer } from '../admin/src/lib/traffic';
+import { aggregateFleetRates, coverageByBucket, fleetByteTransfer, latestValidRate, rangeTransfer } from '../admin/src/lib/traffic';
 
 describe('dashboard KPI routes stay pinned', () => {
   it('does not drift off the hash contract', () => {
@@ -1308,12 +1368,12 @@ describe('dashboard KPI routes stay pinned', () => {
 
 describe('honest traffic aggregation', () => {
   it('does not treat missing nodes as zero and keeps reset gaps', () => {
-    const a = nodeRateSeries([
+    const a = seriesRates([
       { t: 0, netIn: 100, netOut: 10 },
       { t: 60, netIn: 160, netOut: 40 },
       { t: 120, netIn: 10, netOut: 50 },
     ], 60);
-    const b = nodeRateSeries([
+    const b = seriesRates([
       { t: 0, netIn: 200, netOut: 20 },
       { t: 60, netIn: 260, netOut: 50 },
     ], 60);
@@ -1344,7 +1404,7 @@ describe('honest traffic aggregation', () => {
 
   it('uses eligible node count as coverage denominator', () => {
     const series = {
-      only: nodeRateSeries([
+      only: seriesRates([
         { t: 0, netIn: 0, netOut: null },
         { t: 60, netIn: 60, netOut: null },
       ], 60),
@@ -1361,7 +1421,7 @@ describe('honest traffic aggregation', () => {
   });
 });
 
-import { clearWebDomains, parseTrafficPolicy } from '../admin/src/lib/traffic-policy';
+import { clearAllDirect, clearWebDomains, parseTrafficPolicy } from '../admin/src/lib/traffic-policy';
 
 describe('traffic policy web-direct shortcut', () => {
   const v2 = {
@@ -1418,6 +1478,35 @@ describe('traffic policy web-direct shortcut', () => {
     expect(parseTrafficPolicy({ version: 2, domains: [] }).ok).toBe(false);
     expect(parseTrafficPolicy({ version: 4, domains: [], mediaEndpoints: [], webDomains: [] }).ok).toBe(false);
   });
+
+  it('closes all direct by emptying every v4 list without downgrading the version', () => {
+    const frozen = JSON.parse(JSON.stringify(v4));
+    const result = clearAllDirect(v4);
+    expect(result).toEqual({
+      version: 4,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+      tcpEndpoints: [],
+    });
+    expect(v4).toEqual(frozen);
+    // The emptied document must still be a valid policy of the same version.
+    expect(parseTrafficPolicy(result)).toEqual({ ok: true, policy: result });
+  });
+
+  it('keeps each version its own shape when closing all direct', () => {
+    expect(clearAllDirect({ version: 1, domains: v2.domains, mediaEndpoints: v2.mediaEndpoints }))
+      .toEqual({ version: 1, domains: [], mediaEndpoints: [] });
+    expect(clearAllDirect(v2)).toEqual({ version: 2, domains: [], mediaEndpoints: [], webDomains: [] });
+    expect(clearAllDirect(v3)).toEqual({
+      version: 3,
+      domains: [],
+      mediaEndpoints: [],
+      webDomains: [],
+      directSuffixes: [],
+    });
+  });
 });
 
 describe('raw text diff', () => {
@@ -1470,22 +1559,26 @@ describe('path measurement freshness', () => {
     expect(verdict).toMatchObject({ kind: 'incident', severity: 'warn', metric: 'tcp' });
   });
 
-  it('reports unmeasured when both delay samples are stale', () => {
+  it('reports stale-sample, not unmeasured, when samples exist but expired', () => {
+    // A customer that used to report and stopped is a different triage case
+    // from one that never reported; 缺测不是故障 must not cover the first.
     expect(customerPathVerdict({
       lastSeenAt: now, online: true, nodeHealth: 'ok',
       exitDelayMs: 900, tcpDelayMs: 900,
       exitDelayAtMs: staleMs, tcpDelayAtMs: staleMs,
       nowSec: now,
-    }).kind).toBe('unmeasured');
+    }).kind).toBe('stale-sample');
   });
 
   it('does not let a far-future client clock keep a path sample fresh', () => {
-    expect(customerPathVerdict({
+    const verdict = customerPathVerdict({
       lastSeenAt: now, online: true, nodeHealth: 'ok',
       exitDelayMs: 900, tcpDelayMs: null,
       exitDelayAtMs: (now + 24 * 3600) * 1000,
       nowSec: now,
-    }).kind).toBe('unmeasured');
+    });
+    expect(verdict.kind).not.toBe('incident');
+    expect(verdict.kind).toBe('stale-sample');
   });
 
   it('marks old values as displayable history, not current path readings', () => {
@@ -1628,11 +1721,254 @@ describe('node root cause uniqueness', () => {
     expect(incidents.filter((item) => item.node === 'Sakura' && (item.severity === 'severe' || item.severity === 'warn'))).toHaveLength(1);
     expect(incidents[0].measuredAtSec).toBe(1_800_000_000);
   });
+
+  it('judges node incidents by the quality scan window, not the heartbeat window', () => {
+    // Quality scans arrive every twelve hours; a two-hour-old verdict is
+    // current for that source even though the 40-minute heartbeat window has
+    // long passed.
+    const nowSec = 1_800_000_000;
+    const nodes = assembleOpsNodes({
+      nowMs: nowSec * 1000,
+      catalogYaml: 'proxies:\n  - name: "Sakura"\n    type: vless\n',
+      qualityNodes: [qualityNode('Sakura', {
+        ok: false,
+        block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+      })],
+    });
+    const incidents = incidentsFromWorld({
+      nodes, people: [], catalogRevision: 1, nowSec, qualityUpdatedAtSec: nowSec - 2 * 3600,
+    });
+    const blocked = incidents.find((item) => item.kind === 'node-blocked')!;
+    expect(blocked.staleAfterSec).toBe(24 * 60 * 60);
+    expect(nowSec - (blocked.measuredAtSec ?? 0)).toBeGreaterThan(HEARTBEAT_FRESH_SECONDS);
+    expect(nowSec - (blocked.measuredAtSec ?? 0)).toBeLessThanOrEqual(blocked.staleAfterSec ?? 0);
+  });
+});
+
+describe('an overdue node renewal stays on the console', () => {
+  const nowSec = Math.floor(new Date(2026, 8, 10, 12, 0).getTime() / 1000);
+  const overdueAt = Math.floor(new Date(2026, 8, 1).getTime() / 1000);
+  const nodes = () => assembleOpsNodes({
+    nowMs: nowSec * 1000,
+    catalogYaml: 'proxies:\n  - name: "Late"\n    type: vless\n',
+    qualityNodes: [qualityNode('Late')],
+    profiles: [{
+      id: 'p-late', catalogName: 'Late',
+      price: null, currency: null, billingCycle: null,
+      trafficQuotaBytes: null, trafficUsedBytes: null,
+      trafficCycleStart: null, trafficCycleEnd: null,
+      cycleNetIn: null, cycleNetOut: null,
+      renewsAt: overdueAt,
+      status: 'active', createdAt: 1, updatedAt: 1,
+    } as NodeProfileDto],
+  });
+
+  it('emits a warn chore saying how many days late', () => {
+    const incidents = incidentsFromWorld({ nodes: nodes(), people: [], catalogRevision: 1, nowSec });
+    const chore = incidents.find((item) => item.kind === 'node-expired');
+    expect(chore).toMatchObject({ severity: 'warn', category: 'chore', node: 'Late' });
+    expect(chore?.detail).toBe('续费日已过 9 天');
+    expect(incidents.some((item) => item.kind === 'node-renew' && item.node === 'Late')).toBe(false);
+  });
+
+  it('keeps the machine in the expiring focus and on its pill', () => {
+    const late = nodes()[0];
+    expect(late.renewOverdueDays).toBe(9);
+    expect(nodeMatchesFocus(late, 'expiring', nowSec)).toBe(true);
+    expect(nodeAttentionLabel(late)).toBe('续费日已过 9 天');
+  });
 });
 
 describe('metrics range binding', () => {
   it('does not present a 24h snapshot as 90d', () => {
     expect(metricsForRange('90d', '24h', { from: 1 })).toBeNull();
     expect(metricsForRange('24h', '24h', { from: 1 })).toEqual({ from: 1 });
+  });
+});
+
+describe('one label ladder for account and heartbeat state', () => {
+  it('keeps drawer and list row reading the heartbeat the same way', () => {
+    expect(personTelemetryLabel({ telemetryState: 'loading', online: false, onlineDeviceCount: 0 })).toBe('心跳加载中');
+    expect(personTelemetryLabel({ telemetryState: 'unavailable', online: false, onlineDeviceCount: 0 })).toBe('心跳不可用');
+    expect(personTelemetryLabel({ telemetryState: 'unreported', online: false, onlineDeviceCount: 0 })).toBe('未上报');
+    expect(personTelemetryLabel({ telemetryState: 'reported', online: true, onlineDeviceCount: 2 })).toBe('2 台在线');
+    expect(personTelemetryLabel({ telemetryState: 'reported', online: false, onlineDeviceCount: 0 })).toBe('离线');
+  });
+
+  it('puts the account-source caveat ahead of any heartbeat reading', () => {
+    expect(personAccountLabel({ accountState: 'loading' })).toBe('客户资料加载中');
+    expect(personAccountLabel({ accountState: 'unavailable' })).toBe('客户资料不可用');
+    expect(personAccountLabel({ accountState: 'absent' })).toBe('心跳身份未进入客户库');
+    expect(personAccountLabel({ accountState: 'present' })).toBeNull();
+  });
+});
+
+describe('opening a customer drawer keeps the search', () => {
+  it('preserves q on the same page and drops it across pages', () => {
+    expect(nextRouteForOpenUser({ ...emptyHash('users'), focus: 'home', q: 'fuji' }, 'u1'))
+      .toMatchObject({ page: 'users', focus: 'home', user: 'u1', q: 'fuji' });
+    expect(nextRouteForOpenUser({ ...emptyHash('monitor'), q: 'fuji' }, 'u1').q).toBeNull();
+  });
+});
+
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import {
+  HEARTBEAT_FRESH_SECONDS as FRESH_WINDOW_SECONDS,
+  measurementFresh,
+} from '../admin/src/lib/freshness';
+import { blockLabel, blockLabels, blockStatus, isLikelyBlocked, probeRatio } from '../admin/src/lib/quality';
+import { useOpsRoute } from '../admin/src/lib/route';
+import { FLEET_QUALITY_STATUSES } from '../src/index';
+
+describe('measurement freshness windows', () => {
+  const nowSec = 100_000;
+
+  it('keeps a sample fresh through 40:00 and drops it at 40:01', () => {
+    expect(measurementFresh((nowSec - FRESH_WINDOW_SECONDS) * 1000, nowSec, nowSec)).toBe(true);
+    expect(measurementFresh((nowSec - FRESH_WINDOW_SECONDS - 1) * 1000, nowSec, nowSec)).toBe(false);
+  });
+
+  it('tolerates five minutes of forward clock skew and not a second more', () => {
+    expect(measurementFresh((nowSec + 5 * 60) * 1000, nowSec, nowSec)).toBe(true);
+    expect(measurementFresh((nowSec + 5 * 60 + 1) * 1000, nowSec, nowSec)).toBe(false);
+  });
+
+  it('inherits heartbeat freshness when the sample has no usable timestamp', () => {
+    expect(measurementFresh(null, nowSec - FRESH_WINDOW_SECONDS, nowSec)).toBe(true);
+    expect(measurementFresh(undefined, nowSec - FRESH_WINDOW_SECONDS - 1, nowSec)).toBe(false);
+    // A NaN timestamp is unusable, not stale forever and not fresh forever.
+    expect(measurementFresh(Number.NaN, nowSec, nowSec)).toBe(true);
+    expect(measurementFresh(Number.NaN, nowSec - FRESH_WINDOW_SECONDS - 1, nowSec)).toBe(false);
+  });
+});
+
+describe('quality block labels', () => {
+  it('reads the collector verdict and falls back to machine liveness', () => {
+    expect(blockStatus(qualityNode('n'))).toBe('OK');
+    expect(blockStatus(qualityNode('n', {
+      block: { status: 'DEGRADED', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('DEGRADED');
+    expect(blockStatus(qualityNode('n', { block: null, ok: true }))).toBe('OK');
+    expect(blockStatus(qualityNode('n', { block: null, ok: false }))).toBe('DOWN');
+    // An empty reported status is no verdict at all.
+    expect(blockStatus(qualityNode('n', {
+      ok: false,
+      block: { status: '', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('DOWN');
+  });
+
+  it('prefers the collector label, then the local table, then the raw status', () => {
+    expect(blockLabel(qualityNode('n'))).toBe('大陆正常');
+    expect(blockLabel(qualityNode('n', {
+      block: { status: 'DEGRADED', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('部分不通');
+    expect(blockLabel(qualityNode('n', {
+      block: { status: 'NEW_VERDICT', label: null, rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe('NEW_VERDICT');
+  });
+
+  it('only calls a node blocked on the exact verdict', () => {
+    expect(isLikelyBlocked(qualityNode('n', {
+      block: { status: 'LIKELY_BLOCKED', label: '疑似被墙', rule: null, mainland: null, asiaEdge: null, overseas: null },
+    }))).toBe(true);
+    expect(isLikelyBlocked(qualityNode('n', { block: null, ok: false }))).toBe(false);
+  });
+
+  it('renders probe tallies without inventing a denominator', () => {
+    expect(probeRatio(null)).toBe('—');
+    expect(probeRatio({ success: 2 })).toBe('—');
+    expect(probeRatio({ total: 3 })).toBe('0/3');
+    expect(probeRatio({ success: 2, total: 3 })).toBe('2/3');
+  });
+});
+
+describe('fleet quality status vocabulary', () => {
+  it('gives every status the server can emit a console label', () => {
+    for (const status of FLEET_QUALITY_STATUSES) {
+      expect(blockLabels[status], `missing label for ${status}`).toBeTruthy();
+    }
+  });
+
+  it('keeps console-only statuses a deliberate, known set', () => {
+    const serverStatuses: readonly string[] = FLEET_QUALITY_STATUSES;
+    const extras = Object.keys(blockLabels).filter((status) => !serverStatuses.includes(status));
+    expect(extras).toEqual(['PROBE_PARTIAL']);
+  });
+});
+
+describe('ops route hook', () => {
+  type WindowStub = {
+    location: { hash: string };
+    addEventListener(type: string, listener: () => void): void;
+    removeEventListener(type: string, listener: () => void): void;
+  };
+  const withWindow = <T,>(hash: string, run: () => T): T => {
+    const stub: WindowStub = {
+      location: { hash },
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    (globalThis as { window?: WindowStub }).window = stub;
+    try {
+      return run();
+    } finally {
+      delete (globalThis as { window?: WindowStub }).window;
+    }
+  };
+  const mount = () => {
+    let captured: ReturnType<typeof useOpsRoute> | null = null;
+    const Probe = () => {
+      captured = useOpsRoute();
+      return null;
+    };
+    renderToStaticMarkup(createElement(Probe));
+    return captured!;
+  };
+
+  it('reads the page, drawer, and search from the location hash', () => {
+    withWindow('#/users?q=fuji&user=u1', () => {
+      const { route, page } = mount();
+      expect(page).toBe('users');
+      expect(route).toMatchObject({ page: 'users', q: 'fuji', user: 'u1', node: null });
+    });
+  });
+
+  it('opens a node drawer by writing a hash that parses back to itself', () => {
+    withWindow('#/users?q=fuji', () => {
+      const { openNode } = mount();
+      openNode('Tokyo · Fuji');
+      expect(parseOpsHash(window.location.hash)).toMatchObject({
+        page: 'monitor',
+        node: 'Tokyo · Fuji',
+        user: null,
+        // Crossing pages starts from that page's default view.
+        q: null,
+      });
+    });
+  });
+
+  it('keeps the search when the drawer opens on the same page', () => {
+    withWindow('#/users?q=fuji', () => {
+      const { openUser } = mount();
+      openUser('u2');
+      expect(parseOpsHash(window.location.hash)).toMatchObject({
+        page: 'users',
+        user: 'u2',
+        q: 'fuji',
+      });
+    });
+  });
+
+  it('closes the drawer without losing the page', () => {
+    withWindow('#/monitor?node=Tokyo+%C2%B7+Fuji', () => {
+      const { closeDrawer } = mount();
+      closeDrawer();
+      expect(parseOpsHash(window.location.hash)).toMatchObject({
+        page: 'monitor',
+        node: null,
+        user: null,
+      });
+    });
   });
 });

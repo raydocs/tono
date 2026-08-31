@@ -1,19 +1,23 @@
-import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
+import { StrictMode, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { SESSION_EXPIRED_MESSAGE } from './api';
 import { REFRESH_CHOICES, RefreshProvider, pages, useRefresh } from './hooks';
-import { ControlPage } from './pages/ControlPage';
 import { Dashboard } from './pages/Dashboard';
-import { MonitorPage } from './pages/MonitorPage';
-import { UsersPage } from './pages/UsersPage';
-import { FailuresPage } from './pages/FailuresPage';
-import { TrafficPage } from './pages/TrafficPage';
-import { Icon, icons } from './ui';
+import { Icon, Skeleton, icons } from './ui';
 import { OpsBackground } from './Background';
 import { OpsDataProvider, useOpsWorld } from './ops-context';
 import { PrivacyProvider, usePrivacy } from './privacy';
 import { useOpsRoute } from './lib/route';
 import { compactHealthLine, dataHealthLines, sourceTruthHealthLines } from './lib/health';
 import './styles.css';
+
+// The default page stays in the entry chunk; everything else loads on first
+// visit so the console is interactive before five pages' code arrives.
+const ControlPage = lazy(() => import('./pages/ControlPage').then((m) => ({ default: m.ControlPage })));
+const MonitorPage = lazy(() => import('./pages/MonitorPage').then((m) => ({ default: m.MonitorPage })));
+const UsersPage = lazy(() => import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })));
+const FailuresPage = lazy(() => import('./pages/FailuresPage').then((m) => ({ default: m.FailuresPage })));
+const TrafficPage = lazy(() => import('./pages/TrafficPage').then((m) => ({ default: m.TrafficPage })));
 
 const PRIMARY: Array<'dashboard' | 'failures' | 'monitor' | 'users'> = [
   'dashboard', 'failures', 'monitor', 'users',
@@ -82,8 +86,12 @@ function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchIndex, setSearchIndex] = useState(0);
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('tono-ops-theme');
-    return saved === 'light' || saved === 'dark' ? saved : 'system';
+    try {
+      const saved = localStorage.getItem('tono-ops-theme');
+      return saved === 'light' || saved === 'dark' ? saved : 'system';
+    } catch {
+      return 'system';
+    }
   });
   const [showMore, setShowMore] = useState(false);
   useEffect(() => {
@@ -93,11 +101,20 @@ function App() {
       document.documentElement.dataset.theme = resolved;
       document.querySelector<HTMLMetaElement>('#color-scheme')?.setAttribute('content', resolved);
     };
-    localStorage.setItem('tono-ops-theme', theme);
+    try { localStorage.setItem('tono-ops-theme', theme); } catch { /* private mode */ }
     apply();
     media.addEventListener('change', apply);
     return () => media.removeEventListener('change', apply);
   }, [theme]);
+  // Switching pages keeps the old scroll position and leaves a screen-reader
+  // user parked in the sidebar; reset both, but not on the initial load.
+  const previousPage = useRef(page);
+  useEffect(() => {
+    if (previousPage.current === page) return;
+    previousPage.current = page;
+    window.scrollTo({ top: 0 });
+    document.getElementById('ops-main')?.focus({ preventScroll: true });
+  }, [page]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -158,6 +175,15 @@ function App() {
     world.profiles, world.catalog, world.fleet, world.audit,
     ...(page === 'traffic' || page === 'monitor' ? [world.metrics] : []),
   ].some((resource) => resource.refreshing);
+  // An expired Access session poisons every endpoint the same way; one banner
+  // with the one fix, instead of eight stale lines.
+  const sessionExpired = [
+    world.live, world.activity, world.users, world.dashboard,
+    world.profiles, world.catalog, world.fleet, world.audit, world.metrics,
+  ].some((resource) => (
+    (resource.state === 'error' && resource.message === SESSION_EXPIRED_MESSAGE)
+    || resource.stale === SESSION_EXPIRED_MESSAGE
+  ));
 
   function goHit(hit: (typeof hits)[number]) {
     setSearchOpen(false);
@@ -355,6 +381,12 @@ function App() {
         </header>
 
         <main className="content" id="ops-main" tabIndex={-1}>
+          {sessionExpired && (
+            <div className="banner banner-error session-expired" role="alert">
+              <span>登录已过期，页面上的数据不会再更新。重新登录后继续。</span>
+              <button type="button" className="btn btn-sm" onClick={() => window.location.reload()}>重新登录</button>
+            </div>
+          )}
           <div className="page-head">
             <h1>{selected.label}</h1>
             <p>
@@ -367,12 +399,14 @@ function App() {
             </p>
           </div>
 
-          {page === 'dashboard' && <Dashboard />}
-          {page === 'failures' && <FailuresPage />}
-          {page === 'monitor' && <MonitorPage />}
-          {page === 'users' && <UsersPage />}
-          {page === 'traffic' && <TrafficPage />}
-          {page === 'control' && <ControlPage />}
+          <Suspense fallback={<Skeleton label="正在加载页面" />}>
+            {page === 'dashboard' && <Dashboard />}
+            {page === 'failures' && <FailuresPage />}
+            {page === 'monitor' && <MonitorPage />}
+            {page === 'users' && <UsersPage />}
+            {page === 'traffic' && <TrafficPage />}
+            {page === 'control' && <ControlPage />}
+          </Suspense>
         </main>
       </div>
     </div>

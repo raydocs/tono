@@ -147,6 +147,10 @@ nonisolated final class ConfigStorage: @unchecked Sendable {
         return try? JSONDecoder().decode(ManagedExitCatalogCache.self, from: data)
     }
 
+    func removeManagedExitCatalog() {
+        try? fileManager.removeItem(at: managedExitCatalogPath)
+    }
+
     // MARK: - Managed traffic policy
 
     private var managedTrafficPolicyPath: URL {
@@ -214,6 +218,103 @@ nonisolated struct ManagedExitCatalogCache: Codable, Sendable, Equatable {
     let sha256: String
     let updatedAt: Int?
     let routing: TonoExitCatalogRouting?
+    /// The account this catalog was issued to. Decoded as optional so a cache
+    /// written by an earlier build loads instead of being discarded on a decode
+    /// failure — an unattributable cache is then refused by ownership, which is
+    /// a decision the caller can see rather than a silent absence.
+    let owner: String?
+
+    init(
+        revision: Int,
+        yaml: String,
+        sha256: String,
+        updatedAt: Int?,
+        routing: TonoExitCatalogRouting?,
+        owner: String? = nil
+    ) {
+        self.revision = revision
+        self.yaml = yaml
+        self.sha256 = sha256
+        self.updatedAt = updatedAt
+        self.routing = routing
+        self.owner = owner
+    }
+}
+
+/// Which account the managed exit catalog belongs to.
+///
+/// Catalog bodies are issued per account — the control plane writes each
+/// signed-in user's own client identity into the exits it publishes — while the
+/// revision is a fleet-wide counter, so a catalog left behind by a previous
+/// sign-in cannot be told apart from the current one by revision alone. Sign-in
+/// adopts an account and discards a catalog issued to a different one; sign-out
+/// discards the catalog outright, before the next account can reach it.
+@MainActor
+enum ManagedExitCatalogOwnership {
+    private enum Binding: Equatable {
+        /// Launch, before the stored session has been validated.
+        case unknown
+        case signedOut
+        case account(String)
+    }
+
+    private static var binding: Binding = .unknown
+    private static var installedAccount: String?
+    private static var hasInstalledCatalog = false
+    private static var discardInstalledCatalog: (@MainActor () -> Void)?
+
+    /// The account a freshly fetched catalog is recorded against.
+    static var currentAccount: String? {
+        if case let .account(userID) = binding { return userID }
+        return nil
+    }
+
+    /// Whether a catalog issued to `owner` may be installed. Before the stored
+    /// session is validated the cache is accepted so a fail-closed launch still
+    /// has usable exits offline; `adopt` reconciles it once the account is known.
+    static func accepts(_ owner: String?) -> Bool {
+        switch binding {
+        case .unknown: true
+        case .signedOut: false
+        case let .account(userID): owner == userID
+        }
+    }
+
+    static func recordInstalled(
+        owner: String?,
+        discard: @escaping @MainActor () -> Void
+    ) {
+        installedAccount = owner
+        hasInstalledCatalog = true
+        discardInstalledCatalog = discard
+    }
+
+    /// Binds the catalog to the signed-in account and discards one issued to a
+    /// different account — including a cache written before owners were
+    /// recorded, whose account cannot be established.
+    static func adopt(_ userID: String) {
+        binding = .account(userID)
+        guard hasInstalledCatalog, installedAccount != userID else { return }
+        discardInstalled()
+    }
+
+    /// Sign-out barrier: no exit issued to this account may reach the next one.
+    static func purge() {
+        binding = .signedOut
+        discardInstalled()
+    }
+
+    private static func discardInstalled() {
+        installedAccount = nil
+        hasInstalledCatalog = false
+        // Released with the catalog it describes: `purge` runs on every
+        // sign-out path, and a hook left behind would keep firing for an
+        // install that no longer exists.
+        let discard = discardInstalledCatalog
+        discardInstalledCatalog = nil
+        discard?()
+        ConfigStorage.shared.removeManagedExitCatalog()
+    }
 }
 
 nonisolated struct ManagedTrafficPolicyCache: Codable, Sendable, Equatable {

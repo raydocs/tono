@@ -70,7 +70,7 @@ export function OnboardDrawer({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OnboardResult | null>(null);
   const unusedHomes = homes.state === 'ready'
-    ? homes.data.filter((home) => home.status === 'active' && (home.bindCount ?? 0) === 0)
+    ? homes.data.filter((home) => home.status === 'active' && home.kind === 'socks5' && (home.bindCount ?? 0) === 0)
     : [];
   const pooledRows = pooled.state === 'ready' ? pooled.data : [];
 

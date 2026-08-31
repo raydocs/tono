@@ -53,3 +53,9 @@ artifacts/
 
 # Node — the workspaces keep their own; a stray root one is a tool artefact
 node_modules/
+
+# Local development environments
+.venv/
+
+# Amp orb runtime
+.amp/portals/*

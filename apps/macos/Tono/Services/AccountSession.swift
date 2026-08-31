@@ -1,6 +1,20 @@
 import Foundation
 import Observation
 
+extension SettingsKey {
+    /// Test-programme protection snapshot: the twenty-minute telemetry window
+    /// carrying UI state, selected exit, catalog revision, kill-switch and DNS
+    /// state, path latencies and the connection event ring.
+    ///
+    /// Deliberately not `remoteDiagnosticsEnabled`: that switch starts the
+    /// fifteen-second poll for the four fixed remote device actions, and a
+    /// consent to be remotely actionable is not a consent to a periodic upload
+    /// it never described. Mirrors the Windows client's
+    /// `periodic_telemetry_enabled`, down to reading a missing value as on.
+    nonisolated static let periodicTelemetryEnabled =
+        "periodicTelemetryEnabled"
+}
+
 @MainActor @Observable
 final class AccountSession {
     enum State: Equatable { case restoring, signedOut, authenticating, enrolling, ready, suspended, error(String) }
@@ -11,6 +25,17 @@ final class AccountSession {
     private(set) var devices: [TonoDevice] = []
     private(set) var authMethods: TonoAuthMethodsResponse?
     private(set) var emailChallenge: TonoEmailChallengeResponse?
+    /// Device management reports here instead of through `fail`: a failed
+    /// revoke is not an authentication or runtime failure, and must not take
+    /// the tunnel, the background tasks and the whole window with it.
+    private(set) var deviceActionError: String?
+    /// Why an authenticated account may not connect — expiry, data allowance or
+    /// an operator disabling it. Rendered by the suspended screen.
+    private(set) var entitlementDetail: String?
+    /// Whether the entitlement block interrupted a session that was already
+    /// running. Only that session can be resumed by a re-read of the account;
+    /// a block raised before the runtime came up still needs a full restore.
+    private var blockedWhileReady = false
     private var enrollmentAuthKey: String?
     private var enrollmentHostname: String?
     private let api: TonoAPIClient
@@ -32,6 +57,13 @@ final class AccountSession {
     private let exitNode: String
     private var runtimeMonitor: Task<Void, Never>?
     private var catalogSyncTask: Task<Void, Never>?
+    /// One catalog request owns fetch, validation, persistence, and runtime
+    /// application all the way to completion. Replacing only the final write
+    /// gate is insufficient: two account-specific bodies can legitimately have
+    /// the same fleet revision, so an older response arriving last would still
+    /// replace the newer routing and credentials.
+    private var catalogRefreshTask: (id: UInt64, task: Task<Bool, Never>)?
+    private var nextCatalogRefreshID: UInt64 = 0
     private var deviceRefreshTask: Task<Void, Never>?
     private var deviceActionTask: Task<Void, Never>?
     private var appRoutingResearchTask: Task<Void, Never>?
@@ -47,6 +79,7 @@ final class AccountSession {
     private var systemSleeping = false
     private var lastCatalogFailureMessage: String?
     private var lastTrafficPolicyFailureMessage: String?
+    private var lastTrafficPolicyRevision: Int?
     private var authMethodsLoading = false
     private var hasStartedRestore = false
     private var shouldResumeProtection = false
@@ -59,6 +92,22 @@ final class AccountSession {
     /// route; without this accessor the stored failure was write-only and
     /// invisible to every UI and diagnostic surface.
     var trafficPolicyFailureMessage: String? { lastTrafficPolicyFailureMessage }
+    /// Revision of the managed traffic policy this run last accepted, or nil
+    /// before the first successful refresh. Support needs it beside the catalog
+    /// revision to tell "the policy is old" from "the policy never arrived".
+    var trafficPolicyRevision: Int? { lastTrafficPolicyRevision }
+
+    /// Whether the twenty-minute protection snapshot may be uploaded.
+    ///
+    /// A missing value reads as on: the Windows client defaults the same wire
+    /// shape on for the test programme, and a Mac that never appears on the
+    /// dashboard cannot be supported. Turning it off in Settings › Privacy
+    /// stops the upload for good.
+    nonisolated static var isPeriodicTelemetryEnabled: Bool {
+        AppProfile.defaults.object(forKey: SettingsKey.periodicTelemetryEnabled) == nil
+            ? true
+            : AppProfile.defaults.bool(forKey: SettingsKey.periodicTelemetryEnabled)
+    }
 
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
@@ -159,6 +208,9 @@ final class AccountSession {
                 try await RuntimeCleanup.cleanupStaleRuntime()
             guard try keychain.string(for: .refreshToken) != nil else {
                 deactivateAppRoutingResearch()
+                // No account owns this launch, so the cache loaded from disk a
+                // moment ago may not stay installed or selectable.
+                ManagedExitCatalogOwnership.purge()
                 // Signed out: never leave a previous session's kill switch armed.
                 if !AppProfile.homeExitEnabled {
                     // A force-quit of an older Home-US build may have left its
@@ -189,8 +241,10 @@ final class AccountSession {
                 // then populate device-management UI in parallel with local
                 // runtime preparation instead of adding another round trip to
                 // the first-screen critical path.
-                user = try await api.me().user
-                guard user?.suspended != true else {
+                let restoredUser = try await api.me().user
+                user = restoredUser
+                ManagedExitCatalogOwnership.adopt(restoredUser.id)
+                guard restoredUser.suspended != true else {
                     pauseAppRoutingResearch()
                     state = .suspended
                     return
@@ -210,6 +264,7 @@ final class AccountSession {
             )
             user = restoredUser
             devices = restoredDevices
+            ManagedExitCatalogOwnership.adopt(restoredUser.id)
             guard user?.suspended != true else {
                 pauseAppRoutingResearch()
                 state = .suspended
@@ -250,10 +305,25 @@ final class AccountSession {
     }
 
     /// Re-runs the complete token/account validation after a transient launch
-    /// failure. Retrying only the sign-in-method request would leave an existing
-    /// refresh token stranded behind the login screen.
+    /// failure, or after the account state that blocked it has been settled.
+    /// Retrying only the sign-in-method request would leave an existing refresh
+    /// token stranded behind the login screen.
     func retryRestore() async {
-        guard case .error = state else { return }
+        switch state {
+        case .error: break
+        case .suspended:
+            // A block raised over a running session is an account fact, not a
+            // broken session. Re-read the account instead of re-running the
+            // launch sequence, whose first step stops the core this Mac is
+            // still protected by.
+            if blockedWhileReady {
+                await refreshAccount()
+                return
+            }
+        default: return
+        }
+        entitlementDetail = nil
+        blockedWhileReady = false
         hasStartedRestore = false
         await restore()
     }
@@ -349,6 +419,7 @@ final class AccountSession {
         // Purge before any suspension point so no pending aggregate can cross
         // into a later account even when server logout is slow or unavailable.
         deactivateAppRoutingResearch()
+        ManagedExitCatalogOwnership.purge()
         await stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
         await api.logout(); clearAccount(); state = .signedOut
     }
@@ -365,13 +436,42 @@ final class AccountSession {
 
     @discardableResult
     func refreshManagedCatalog(attempts: Int = 1) async -> Bool {
+        if let current = catalogRefreshTask {
+            return await current.task.value
+        }
+        nextCatalogRefreshID &+= 1
+        let id = nextCatalogRefreshID
+        let task = Task { [weak self] in
+            guard let self else { return false }
+            return await self.performManagedCatalogRefresh(attempts: attempts)
+        }
+        catalogRefreshTask = (id, task)
+        let succeeded = await task.value
+        // Cancellation cleanup owns a cancelled slot until it has awaited the
+        // worker. This prevents a stop/logout from admitting a second refresh
+        // while the first consumer is still suspended, and the ID prevents an
+        // older waiter from clearing a later task.
+        if catalogRefreshTask?.id == id, !task.isCancelled {
+            catalogRefreshTask = nil
+        }
+        return succeeded
+    }
+
+    private func performManagedCatalogRefresh(attempts: Int) async -> Bool {
         let boundedAttempts = min(max(attempts, 1), 3)
         for attempt in 0..<boundedAttempts {
+            guard !Task.isCancelled else { return false }
             do {
-                try await catalogConsumer(try await api.exitCatalog())
+                let catalog = try await api.exitCatalog()
+                try Task.checkCancellation()
+                try await catalogConsumer(catalog)
+                try Task.checkCancellation()
                 lastCatalogFailureMessage = nil
                 return true
+            } catch is CancellationError {
+                return false
             } catch {
+                guard !Task.isCancelled else { return false }
                 // Keep the last verified, mode-0600 cache. Catalog
                 // availability must never turn a temporary control-plane
                 // failure into a clearnet fallback or erase usable exits.
@@ -379,11 +479,24 @@ final class AccountSession {
                     (error as? LocalizedError)?.errorDescription
                     ?? error.localizedDescription
                 if attempt + 1 < boundedAttempts {
-                    try? await Task.sleep(for: .seconds(1))
+                    do {
+                        try await Task.sleep(for: .seconds(1))
+                    } catch {
+                        return false
+                    }
                 }
             }
         }
         return false
+    }
+
+    private func cancelManagedCatalogRefresh() async {
+        guard let current = catalogRefreshTask else { return }
+        current.task.cancel()
+        _ = await current.task.value
+        if catalogRefreshTask?.id == current.id {
+            catalogRefreshTask = nil
+        }
     }
 
     @discardableResult
@@ -391,8 +504,10 @@ final class AccountSession {
         let boundedAttempts = min(max(attempts, 1), 3)
         for attempt in 0..<boundedAttempts {
             do {
-                try await trafficPolicyConsumer(try await api.trafficPolicy())
+                let policy = try await api.trafficPolicy()
+                try await trafficPolicyConsumer(policy)
                 lastTrafficPolicyFailureMessage = nil
+                lastTrafficPolicyRevision = policy.revision
                 return true
             } catch {
                 // Direct routing is optional. A failed refresh keeps the last
@@ -410,10 +525,90 @@ final class AccountSession {
 
     func reloadDevices() async throws { devices = try await api.devices().devices }
 
+    func clearDeviceActionError() { deviceActionError = nil }
+
+    /// Device management never routes through `fail`. An unreachable or 5xx
+    /// control plane here is not an authentication or runtime failure, and
+    /// dropping the descriptor over one would take a protected Mac offline
+    /// behind an armed kill switch and replace the window with the gate.
     func revoke(_ target: TonoDevice) async {
-        guard target.id != device?.id && target.current != true else { state = .error(String(localized: "The current device cannot revoke itself.")); return }
-        do { try await api.revokeDevice(target.id); try await reloadDevices() }
-        catch { await fail(error) }
+        guard target.id != device?.id && target.current != true else {
+            deviceActionError = String(localized: "The current device cannot revoke itself.")
+            return
+        }
+        deviceActionError = nil
+        do {
+            try await api.revokeDevice(target.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            deviceActionError = (error as? LocalizedError)?.errorDescription
+                ?? String(localized: "Something went wrong. Please try again.")
+            return
+        }
+        // The device is revoked either way; only the refreshed inventory is
+        // missing, and the next panel appearance reloads it.
+        try? await reloadDevices()
+    }
+
+    /// Plan, expiry, quota and usage are read once at sign-in and then drift for
+    /// as long as this menu-bar client stays resident. Re-read on the catalog
+    /// cadence, when the account panel appears, and after a wake.
+    func refreshAccount() async {
+        guard user != nil else { return }
+        do {
+            let refreshed = try await api.me().user
+            // The account may have been cleared across the request.
+            guard user != nil else { return }
+            user = refreshed
+            if refreshed.suspended == true {
+                enterEntitlementBlock(detail: nil)
+            } else {
+                leaveEntitlementBlock()
+            }
+        } catch is CancellationError {
+            return
+        } catch let error as TonoAPIClient.APIError where Self.isEntitlementFailure(error) {
+            enterEntitlementBlock(detail: error.errorDescription)
+        } catch TonoAPIClient.APIError.unauthorized {
+            // The control plane still refuses this session after the client's
+            // own token renewal. Today it answers the same way for an expired
+            // plan, an exhausted allowance and a revoked session, so show what
+            // is actually known and leave signing out to the user rather than
+            // reporting an account problem as an expired sign-in.
+            enterEntitlementBlock(detail: nil)
+        } catch {
+            // Transient control-plane failure; the next cadence re-reads it.
+        }
+    }
+
+    private static func isEntitlementFailure(
+        _ error: TonoAPIClient.APIError
+    ) -> Bool {
+        if case .entitlementBlocked = error { return true }
+        return false
+    }
+
+    /// The credential is good and the account may not use it. The user is told
+    /// which — expiry, allowance or a disabled account — instead of being signed
+    /// out with a session-expired message, and protection is left exactly as it
+    /// is. A nil detail falls back to the screen's own general copy.
+    private func enterEntitlementBlock(detail: String?) {
+        entitlementDetail = detail
+        if state == .ready { blockedWhileReady = true }
+        pauseAppRoutingResearch()
+        state = .suspended
+    }
+
+    /// The control plane accepted this account again, so the block is lifted
+    /// and the running session it interrupted resumes where it paused —
+    /// including the synchronization loop, which stops outside `.ready`.
+    private func leaveEntitlementBlock() {
+        guard state == .suspended, blockedWhileReady else { return }
+        blockedWhileReady = false
+        entitlementDetail = nil
+        state = .ready
+        startCatalogSync()
     }
 
     /// Transfers the one-time enrollment material and immediately removes the
@@ -468,11 +663,17 @@ final class AccountSession {
 
     private func authenticate(_ operation: () async throws -> TonoAuthResponse) async {
         state = .authenticating
+        // A failed revoke from the device-limit list belongs to the attempt
+        // that raised it, not to the one starting here.
+        deviceActionError = nil
         do {
             let response = try await operation(); try await api.adopt(response)
             emailChallenge = nil
             user = response.user
             device = response.device
+            // Before any transport can select an exit, so nothing published for
+            // the previous account is reachable by this one.
+            ManagedExitCatalogOwnership.adopt(response.user.id)
             adoptEnrollment(response.enrollment)
             try await reloadDevices()
             if response.user.suspended == true {
@@ -511,6 +712,7 @@ final class AccountSession {
         runtimeMonitor = nil
         catalogSyncTask?.cancel()
         catalogSyncTask = nil
+        await cancelManagedCatalogRefresh()
         deviceRefreshTask?.cancel()
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
@@ -745,6 +947,7 @@ final class AccountSession {
                 async let catalog: Bool = refreshManagedCatalog()
                 async let policy: Bool = refreshManagedTrafficPolicy()
                 _ = await (catalog, policy)
+                await refreshAccount()
             }
         }
         updateRemoteDiagnosticsPolling()
@@ -786,7 +989,8 @@ final class AccountSession {
         updateDiagnosticsLogUploading()
         updatePeriodicTelemetry()
         // startCatalogSync resumes opted-in actions immediately, while its
-        // catalog request waits for the normal timer and cannot race wake protection.
+        // catalog request — and the account re-read that follows it — wait for
+        // the normal timer and cannot race wake protection.
     }
 
     private func updateRemoteDiagnosticsPolling() {
@@ -806,9 +1010,10 @@ final class AccountSession {
     /// Starts or stops the raw-log upload loop.
     ///
     /// Deliberately not gated on `remoteDiagnosticsEnabled`: that switch governs
-    /// the four fixed remote actions and the compact protection snapshot, and
-    /// borrowing it here would make one consent cover a pipeline it never
-    /// described. This has its own switch and its own Settings copy.
+    /// the four fixed remote device actions and nothing else, and borrowing it
+    /// here would make one consent cover a pipeline it never described. This has
+    /// its own switch and its own Settings copy, as does the periodic protection
+    /// snapshot below.
     private func updateDiagnosticsLogUploading() {
         let enabled = AppProfile.defaults
             .object(forKey: SettingsKey.networkLogUploadEnabled) == nil
@@ -850,10 +1055,20 @@ final class AccountSession {
         updateDiagnosticsLogUploading()
     }
 
+    func periodicTelemetrySettingChanged() {
+        updatePeriodicTelemetry()
+    }
+
     /// Ops "online" is derived from `POST telemetry/windows`. Windows already
     /// sends this; without it a signed-in Mac never appears on the dashboard.
+    ///
+    /// Gated on its own switch, like the Windows client's: the window carries
+    /// the connection event ring and the whole protection state, which is more
+    /// than "this device is online" and more than any other Privacy row on the
+    /// Settings screen describes.
     private func updatePeriodicTelemetry() {
-        guard state == .ready, !systemSleeping, user != nil else {
+        guard state == .ready, !systemSleeping, user != nil,
+              Self.isPeriodicTelemetryEnabled else {
             periodicTelemetryTask?.cancel()
             periodicTelemetryTask = nil
             return
@@ -874,6 +1089,9 @@ final class AccountSession {
     }
 
     private func uploadPeriodicTelemetryWindow() async {
+        // The switch can be turned off while this task is parked on its sleep,
+        // and the cancellation only lands at the next suspension point.
+        guard Self.isPeriodicTelemetryEnabled else { return }
         // A sleep cancels the timer and a wake starts a fresh one, so the task
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
@@ -944,12 +1162,19 @@ final class AccountSession {
         }
     }
 
-    /// Sends whatever is unsent right now, for the Support page's button. Returns
-    /// nothing: the button reports "queued", because a segment can legitimately
-    /// be empty when the log has not advanced since the last sweep.
-    func uploadDiagnosticsLogNow() async {
+    /// Sends whatever is unsent right now, for the Support page's button, and
+    /// reports what the sweep actually did. The three outcomes are materially
+    /// different to the person waiting on them — a segment reached support, the
+    /// log had not advanced, or the POST was refused — and collapsing them into
+    /// "the run finished" left a failed upload indistinguishable from a sent one.
+    @discardableResult
+    func uploadDiagnosticsLogNow() async -> DiagnosticsLogUploader.SweepOutcome {
         updateDiagnosticsLogUploading()
-        await diagnosticsLogUploader?.sweep()
+        // `updateDiagnosticsLogUploading` only builds the uploader once the
+        // account, sleep and consent preconditions hold. A nil one is therefore
+        // a pipeline that cannot run, never an upload that found nothing.
+        guard let uploader = diagnosticsLogUploader else { return .disabled }
+        return await uploader.sweep()
     }
 
     private func updateAppRoutingResearchUploading() {
@@ -1105,6 +1330,14 @@ final class AccountSession {
         // control-plane failure. In particular, do not turn URLSession -999
         // into a login error or tear down an otherwise protected route.
         guard !(error is CancellationError) else { return }
+        // Authenticated but not entitled. Signing out here would replace the
+        // real reason with "your session has expired", and the account is not
+        // lost, so nothing about the runtime is torn down.
+        if let apiError = error as? TonoAPIClient.APIError,
+           Self.isEntitlementFailure(apiError) {
+            enterEntitlementBlock(detail: apiError.errorDescription)
+            return
+        }
         let accountLost = signsOutOnUnauthorized
             && error as? TonoAPIClient.APIError == .unauthorized
         // Account loss purges synchronously before the first suspension point;
@@ -1112,6 +1345,7 @@ final class AccountSession {
         // aggregate available to a later session.
         if accountLost {
             deactivateAppRoutingResearch()
+            ManagedExitCatalogOwnership.purge()
             await abandonDiagnosticsLogUploader()
         } else {
             pauseAppRoutingResearch()
@@ -1120,6 +1354,7 @@ final class AccountSession {
         runtimeMonitor = nil
         catalogSyncTask?.cancel()
         catalogSyncTask = nil
+        await cancelManagedCatalogRefresh()
         deviceRefreshTask?.cancel()
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
@@ -1155,6 +1390,10 @@ final class AccountSession {
     }
 
     private func clearAccount() {
+        // Managed exits carry this account's own client identity, so they are
+        // dropped here rather than being left for the next account to connect
+        // with. Idempotent: the logout and account-loss paths already purged.
+        ManagedExitCatalogOwnership.purge()
         shouldResumeProtection = false
         user = nil
         device = nil
@@ -1163,5 +1402,8 @@ final class AccountSession {
         enrollmentAuthKey = nil
         enrollmentHostname = nil
         emailChallenge = nil
+        deviceActionError = nil
+        entitlementDetail = nil
+        blockedWhileReady = false
     }
 }

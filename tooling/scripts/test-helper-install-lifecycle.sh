@@ -188,6 +188,26 @@ refute() {
   if "$@" > /dev/null 2>&1; then check "$name" bad "expected a refusal"; else check "$name" ok; fi
 }
 
+# A name for the exact bundle this ran against. `release-macos.sh --publish`
+# computes the same digest over the app it is about to ship and refuses a token
+# that names a different one, so the conclusion travels with the bundle instead
+# of with whoever remembers running this — the two recipes must stay identical.
+#
+# Hashed from inside the bundle, so the same app answers the same wherever it was
+# copied to. Whole lines are sorted rather than the file list, because paths
+# inside a framework carry spaces and `sort -z` is not everywhere.
+bundle_token() {
+  local listing digest
+  listing=$( cd "$1" 2>/dev/null \
+             && LC_ALL=C /usr/bin/find . -type f -exec /usr/bin/shasum -a 256 {} + 2>/dev/null \
+             | LC_ALL=C /usr/bin/sort )
+  [[ -n $listing ]] || return 1
+  digest=$(print -r -- "$listing" | /usr/bin/shasum -a 256)
+  digest=${digest%% *}
+  [[ -n $digest ]] || return 1
+  print -r -- "install-lifecycle:${digest[1,16]}"
+}
+
 script=$backup/install.sh
 if [[ -n $prebuilt_script ]]; then
   [[ -s $prebuilt_script ]] || { print "the supplied script is empty or missing" >&2; exit 2 }
@@ -336,4 +356,11 @@ if (( ${#failures} > 0 )); then
   exit 1
 fi
 print "install lifecycle passed"
+# Printed only on a pass, and only for the bundle that was actually installed.
+token=$(bundle_token "$app") \
+  || { print "the lifecycle passed but $app could not be digested" >&2; exit 1 }
+print "  bundle token: $token"
+print "  the publish that ships this bundle wants it:"
+print "    tooling/scripts/release-macos.sh --version <x.y.z> --build <n> \\"
+print "      --publish --lifecycle-token $token"
 exit 0

@@ -4,14 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta id="color-scheme" name="color-scheme" content="light dark" />
-    <script>
-      (() => {
-        const saved = localStorage.getItem('tono-ops-theme') || 'system';
-        const dark = saved === 'dark' || (saved === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-        document.querySelector('#color-scheme').content = dark ? 'dark' : 'light';
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
     <title>Tono 后台</title>
   </head>
   <body>

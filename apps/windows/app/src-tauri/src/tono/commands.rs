@@ -394,7 +394,7 @@ pub async fn load_credentials(state: &Arc<TonoState>) {
 /// authorisation covers both.
 #[tauri::command]
 pub async fn tono_repair_service() -> Result<(), String> {
-    crate::core::service::tono_service_ready_or_repair()
+    crate::core::service::tono_service_ready_or_repair_now()
         .await
         .map_err(|error| super::connection::map_service_ready_error(&error))
 }
@@ -841,12 +841,37 @@ pub async fn tono_select_server(
         if action == connection::SelectAction::Noop {
             return Ok(());
         }
+        if action == connection::SelectAction::Switch {
+            if inner
+                .tasks
+                .switch
+                .as_ref()
+                .is_some_and(|task| !task.inner().is_finished())
+            {
+                // A hot switch mutates the selector and WFP across several
+                // awaits. Replacing its JoinHandle only detaches it; it does not
+                // cancel it, so two rapid choices could roll each other back and
+                // leave the UI, selector, and permitted endpoints disagreeing.
+                // Refuse before publishing or persisting the second choice. The
+                // first task remains the sole owner and the user can retry as
+                // soon as it settles.
+                return Err("a server switch is already in progress".to_string());
+            }
+            inner.tasks.switch.take();
+        }
         inner.selected_node = Some(name.clone());
         // A fresh user choice re-arms auto-reconnect (§3).
         inner.catalog_requires_choice = false;
         if action == connection::SelectAction::Reconnect {
             // The reconnect re-arms rather than releases (H-1 intent).
             inner.invalidate_connection(false);
+            // Picking a city is the same evidence "Retry now" carries: someone is at the
+            // machine and has just chosen a different exit. A spent ladder left
+            // `schedule_reconnect` below with no rung to hand out, so it logged and returned
+            // while this command still persisted the selection and reported success — the UI
+            // confirmed a switch nothing had attempted. The unattended `reconnect_loop` is
+            // bounded by the budget it consumes, not by this reset.
+            inner.fsm.reset_reconnect_backoff();
         }
         let generation = inner.connect_generation;
         if let Err(err) = crate::tono::state::save_selection(&inner.catalog_dir, &name) {
