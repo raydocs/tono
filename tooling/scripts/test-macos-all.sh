@@ -44,7 +44,7 @@ print "Tono macOS suite"
 
 run "xctest (app unit tests)" \
   xcodebuild test -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \
-    -destination 'platform=macOS,arch=arm64' -quiet
+    -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO -quiet
 
 run "subscription url policy" tooling/scripts/test-subscription-url-policy.sh
 run "helper peer authorization" tooling/scripts/test-helper-peer-authorization.sh

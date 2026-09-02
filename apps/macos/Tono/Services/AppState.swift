@@ -1723,13 +1723,14 @@ final class AppState {
                 }
                 let proxyEndpoints = try ConfigPipeline.dialEndpoints(for: selectedExit)
                     + self.claudeHomeDialEndpoints(excluding: selectedExit)
+                let activeDirectPolicy = committedDirectPolicy
                 // YAML generation only touches the app-support directory. Overlap
                 // it with helper install and the first PF arm — those go through
                 // the privileged actor and cannot run beside each other.
                 async let runtimeDigest = coreRuntime.writeRuntimeConfig(
                     overlay: overlay,
                     customNodes: runtimeNodes,
-                    directPolicy: committedDirectPolicy
+                    directPolicy: activeDirectPolicy
                 )
                 // Always arm before TUN comes up so a crash mid-connect cannot
                 // leak the real IP. The actor keeps this blocking PF/helper work
@@ -1779,12 +1780,12 @@ final class AppState {
                     // silently dropped; the endpoints are already validated
                     // and harmless before Mihomo exists (root-only pass).
                     sessionDirectEndpoints:
-                        committedDirectPolicy?.sessionEndpoints ?? [],
+                        activeDirectPolicy?.sessionEndpoints ?? [],
                     tailscaleBootstrapEnabled: usesHomeBootstrap,
                     allowSystemResolution: allowSystemResolution,
                     helperPrepared: true,
                     reviewedBundleDirect:
-                        committedDirectPolicy?.requiresAddressFreeDirectPermit == true
+                        activeDirectPolicy?.requiresAddressFreeDirectPermit == true
                 )
                 try Task.checkCancellation()
                 let digest = try await runtimeDigest
@@ -1795,7 +1796,7 @@ final class AppState {
                 async let started: Void = coreRuntime.start(
                     overlay: overlay,
                     customNodes: runtimeNodes,
-                    directPolicy: committedDirectPolicy,
+                    directPolicy: activeDirectPolicy,
                     helperPrepared: true,
                     precomputedDigest: digest
                 )
