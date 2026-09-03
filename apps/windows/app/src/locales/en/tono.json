@@ -405,6 +405,10 @@
     },
     "terminalEnv": {
       "title": "Claude Code / Terminal Environment Diagnostics",
+      "checking": "Checking…",
+      "checkingDesc": "Inspecting system and process proxy environment variables…",
+      "checkFailed": "Check Failed",
+      "checkFailedDesc": "Failed to inspect terminal environment variables. Please retry.",
       "ready": "Environment Ready",
       "conflictDetected": "Proxy Residue Detected",
       "readyDesc": "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.",

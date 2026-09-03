@@ -4915,11 +4915,19 @@ async function storeTelemetryWindow(
 ) {
   const receivedAt = now();
   const rowId = id();
-  await e.DB.prepare(
-    `INSERT INTO telemetry_windows(
-       id, user_id, device_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(rowId, uid, deviceId, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson).run();
+  const statements: D1PreparedStatement[] = [
+    e.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(rowId, uid, deviceId, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson),
+  ];
+  if (deviceId) {
+    statements.push(
+      e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(receivedAt, receivedAt, deviceId),
+    );
+  }
+  await e.DB.batch(statements);
   return { id: rowId, receivedAt };
 }
 
@@ -5317,8 +5325,11 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
   await expirePending(e, user);
   let d = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?').bind(user, installation).first<Row>();
   const enrollmentEnabled = tailscaleEnrollmentEnabled(e);
-  if (d && d.status === 'active') return d;
   const t = now();
+  if (d && d.status === 'active') {
+    await e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, d.id).run();
+    return { ...d, last_seen_at: t, updated_at: t };
+  }
   if (d && d.status === 'pending' && !enrollmentEnabled) {
     await e.DB.prepare(
       `UPDATE devices SET
@@ -6563,10 +6574,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     ) {
       throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
     }
-    const rotated = await e.DB.prepare(
-      'UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL',
-    ).bind(t, s.id).run();
-    if (!rotated.meta.changes) throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token was already used');
+    const rotated = await e.DB.batch([
+      e.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').bind(t, s.id),
+      e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, s.device_id),
+    ]);
+    if (!rotated[0].meta.changes) throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token was already used');
     return Response.json(await tokens(e, s.user_id, s.device_id, s.installation_id));
   }
 

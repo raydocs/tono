@@ -1377,6 +1377,10 @@ export interface TranslationResources {
           title: string
         }
         terminalEnv: {
+          checkFailed: string
+          checkFailedDesc: string
+          checking: string
+          checkingDesc: string
           clearAction: string
           clearing: string
           clearSuccess: string

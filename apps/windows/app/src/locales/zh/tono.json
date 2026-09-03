@@ -405,6 +405,10 @@
     },
     "terminalEnv": {
       "title": "Claude Code / 终端开发环境体检",
+      "checking": "正在检测…",
+      "checkingDesc": "正在排查系统与进程中的终端代理环境变量…",
+      "checkFailed": "检测失败",
+      "checkFailedDesc": "未能完成终端环境变量自检，请稍后重试。",
       "ready": "环境就绪",
       "conflictDetected": "发现代理残留",
       "readyDesc": "系统环境变量正常。终端流量直接由 Tono TUN 虚拟网卡透明接管，Claude Code、git、npm、pip 开箱即用，无需配置代理。",

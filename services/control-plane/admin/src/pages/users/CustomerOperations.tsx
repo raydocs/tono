@@ -143,7 +143,7 @@ export function CustomerOperations({
         fold
         open={opened('home')}
         aside={user.homeBinding
-          ? `${user.homeBinding.displayName} · ${privacy.ip(user.homeBinding.socks5Host || user.homeBinding.egressIpv4)}`
+          ? `${user.homeBinding.displayName} · ${privacy.ip(user.homeBinding.egressIpv4 || user.homeBinding.socks5Host)}`
           : '未绑定'}
       >
         {homes.state === 'loading' && <Skeleton label="家宽库存" />}

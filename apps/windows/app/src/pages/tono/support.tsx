@@ -139,6 +139,7 @@ const SupportPage = () => {
     data: terminalEnv,
     refetch: refetchTerminalEnv,
     isLoading: terminalEnvLoading,
+    error: terminalEnvError,
   } = useQuery({
     queryKey: terminalEnvQueryKey,
     queryFn: tonoCheckTerminalEnv,
@@ -410,25 +411,41 @@ const SupportPage = () => {
                 fontWeight: 600,
                 padding: '3px 8px',
                 borderRadius: 8,
-                background: terminalEnv?.hasConflict
-                  ? hex(TONO_COLORS.error, 0.12)
-                  : hex(TONO_COLORS.latencyGood, 0.12),
-                color: terminalEnv?.hasConflict
-                  ? TONO_COLORS.error
-                  : TONO_COLORS.latencyGood,
+                background: terminalEnvLoading
+                  ? hex(TONO_COLORS.gray, 0.12)
+                  : terminalEnvError || terminalEnv == null
+                    ? hex(TONO_COLORS.error, 0.12)
+                    : terminalEnv.hasConflict
+                      ? hex(TONO_COLORS.error, 0.12)
+                      : hex(TONO_COLORS.latencyGood, 0.12),
+                color: terminalEnvLoading
+                  ? TONO_COLORS.gray
+                  : terminalEnvError || terminalEnv == null
+                    ? TONO_COLORS.error
+                    : terminalEnv.hasConflict
+                      ? TONO_COLORS.error
+                      : TONO_COLORS.latencyGood,
               }}
             >
-              {terminalEnv?.hasConflict
-                ? t('tono.support.terminalEnv.conflictDetected')
-                : t('tono.support.terminalEnv.ready')}
+              {terminalEnvLoading
+                ? t('tono.support.terminalEnv.checking')
+                : terminalEnvError || terminalEnv == null
+                  ? t('tono.support.terminalEnv.checkFailed')
+                  : terminalEnv.hasConflict
+                    ? t('tono.support.terminalEnv.conflictDetected')
+                    : t('tono.support.terminalEnv.ready')}
             </span>
           </div>
           <p
             style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}
           >
-            {terminalEnv?.hasConflict
-              ? t('tono.support.terminalEnv.conflictDesc')
-              : t('tono.support.terminalEnv.readyDesc')}
+            {terminalEnvLoading
+              ? t('tono.support.terminalEnv.checkingDesc')
+              : terminalEnvError || terminalEnv == null
+                ? t('tono.support.terminalEnv.checkFailedDesc')
+                : terminalEnv.hasConflict
+                  ? t('tono.support.terminalEnv.conflictDesc')
+                  : t('tono.support.terminalEnv.readyDesc')}
           </p>
 
           {terminalEnv?.hasConflict && terminalEnv.entries.length > 0 && (

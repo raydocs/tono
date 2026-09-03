@@ -1918,10 +1918,35 @@ pub async fn tono_clear_terminal_proxy_env() -> Result<(), String> {
         {
             use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
             use winreg::RegKey;
-            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(env_key) = hkcu.open_subkey_with_flags("Environment", KEY_SET_VALUE) {
+            match hkcu.open_subkey_with_flags("Environment", KEY_SET_VALUE) {
+                Ok(env_key) => {
+                    for key in &proxy_keys {
+                        if let Err(e) = env_key.delete_value(key) {
+                            if e.kind() != std::io::ErrorKind::NotFound {
+                                log::warn!("Failed to delete registry env var {key}: {e}");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        return Err(format!("Failed to open HKCU\\Environment: {e}"));
+                    }
+                }
+            }
+
+            // Verify keys were removed from registry
+            if let Ok(env_key) = hkcu.open_subkey("Environment") {
+                let mut remaining = Vec::new();
                 for key in &proxy_keys {
-                    let _ = env_key.delete_value(key);
+                    if let Ok(val) = env_key.get_value::<String, _>(key) {
+                        if !val.trim().is_empty() {
+                            remaining.push((*key).to_string());
+                        }
+                    }
+                }
+                if !remaining.is_empty() {
+                    return Err(format!("Could not remove registry proxy variables: {}", remaining.join(", ")));
                 }
             }
 

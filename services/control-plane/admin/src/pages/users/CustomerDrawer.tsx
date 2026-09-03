@@ -99,7 +99,7 @@ export function CustomerDrawer({
           />
           <Stat
             label="专线出口 IP"
-            value={person.user?.homeBinding ? privacy.ip(person.user.homeBinding.socks5Host || person.user.homeBinding.egressIpv4) : '跟随云端节点'}
+            value={person.user?.homeBinding ? privacy.ip(person.user.homeBinding.egressIpv4 || person.user.homeBinding.socks5Host) : '跟随云端节点'}
             note={person.user?.homeBinding ? '免除 Anthropic 机房封锁' : '常规云端路由'}
           />
         </StatGrid>
