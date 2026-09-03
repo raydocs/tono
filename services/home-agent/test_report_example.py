@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import importlib.util
 import json
 import os
@@ -23,6 +24,7 @@ class ReporterTests(unittest.TestCase):
             "http://api.example.com",
             "https://user:password@api.example.com",
             "https://api.example.com:8443",
+            "https://api.example.com:not-a-port",
             "https://api.example.com/prefix",
         ):
             with self.subTest(invalid=invalid), mock.patch.dict(
@@ -74,6 +76,32 @@ class ReporterTests(unittest.TestCase):
             path.symlink_to(target)
             with self.assertRaises(OSError):
                 reporter.load_state(path)
+
+    def test_an_overlapping_main_run_is_refused_before_observing_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "private" / "state.json"
+            reporter.ensure_private_parent(path.parent)
+            lock_path = path.with_name(f"{path.name}.lock")
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                os.fchmod(descriptor, 0o600)
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                environment = {
+                    "TONO_API_BASE_URL": "https://api.example.com",
+                    "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                    "TONO_SOURCE_ID": "home-exit-one",
+                    "STATE_PATH": str(path),
+                }
+                with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                    reporter,
+                    "observe_totals",
+                    return_value=({}, 1_700_000_000),
+                ) as observe:
+                    with self.assertRaisesRegex(RuntimeError, "another home-agent run"):
+                        reporter.main()
+                observe.assert_not_called()
+            finally:
+                os.close(descriptor)
 
     def test_failed_delivery_is_replayed_with_the_exact_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

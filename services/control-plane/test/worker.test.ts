@@ -3760,6 +3760,25 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         expect(preview.status, `${field}/${host}`).toBe(400);
       }
     }
+
+    // A suffix rule also owns every child below it. Refuse ancestors of a
+    // protected suffix, not only exact protected hosts and their children.
+    for (const host of [
+      'googleapis.com',
+      'githubusercontent.com',
+      'npmjs.org',
+      'brew.sh',
+      'b-cdn.net',
+      'www.cloudflare.com',
+    ]) {
+      const attempt = {
+        ...unlistedPolicy,
+        webDomains: [],
+        directSuffixes: [{ host, ports: [443] }],
+      };
+      const preview = await admin('traffic-policy', { policy: attempt, dryRun: true }, 'PUT');
+      expect(preview.status, `directSuffixes/${host}`).toBe(400);
+    }
   });
 
   it('clears a stored signature when an unsigned policy replaces a signed one', async () => {

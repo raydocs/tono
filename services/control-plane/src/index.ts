@@ -1897,7 +1897,8 @@ function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy 
     // whoever holds the key; it does not remove it.
     if (typeof host !== 'string' || host.length > 253 ||
         !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host) ||
-        protectedSuffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`)) ||
+        protectedSuffixes.some((suffix) =>
+          host === suffix || host.endsWith(`.${suffix}`) || suffix.endsWith(`.${host}`)) ||
         seenSuffixes.has(host)) {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or duplicate direct suffix host');
     }

@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
+import threading
 import unittest
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +34,124 @@ spec.loader.exec_module(agent)
 
 def fresh_state() -> dict:
     return {"totals": {}, "counterBaseline": {}, "pendingReports": []}
+
+
+class ApiOrigin(unittest.TestCase):
+    def test_api_base_is_an_https_origin_without_credentials_or_custom_port(self) -> None:
+        for invalid in (
+            "http://api.example.com",
+            "https://user:password@api.example.com",
+            "https://api.example.com:8443",
+            "https://api.example.com:not-a-port",
+            "https://api.example.com/prefix",
+            "https://api.example.com?next=https://attacker.example",
+            "https://api.example.com#fragment",
+        ):
+            with self.subTest(invalid=invalid), patch.dict(
+                os.environ, {"TONO_API_BASE": invalid}, clear=False
+            ):
+                with self.assertRaisesRegex(agent.Refusal, "HTTPS origin"):
+                    agent.api_base()
+
+    def test_all_authenticated_requests_disable_redirects(self) -> None:
+        requests = []
+
+        class Response:
+            def __init__(self, body: bytes):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit: int) -> bytes:
+                return self.body
+
+        def respond(request, timeout=None):  # noqa: ARG001
+            requests.append(request)
+            if request.full_url.endswith("/exit-identities"):
+                return Response(json.dumps({
+                    "nodeId": "exit-one",
+                    "observedAt": 1,
+                    "identities": [],
+                }).encode("utf-8"))
+            return Response(b"{}")
+
+        with patch.object(
+            agent.urllib.request,
+            "urlopen",
+            side_effect=respond,
+        ) as redirect_following, patch.object(
+            agent.urllib.request,
+            "build_opener",
+        ) as build_opener:
+            build_opener.return_value.open.side_effect = respond
+            agent.fetch_roster("https://api.example.com", "node-token")
+            agent.acknowledge_roster("https://api.example.com", "node-token", 1)
+            agent.deliver("https://api.example.com", "node-token", [])
+
+        redirect_following.assert_not_called()
+        self.assertEqual(build_opener.call_count, 3)
+        self.assertTrue(all(
+            call.args and call.args[0].__name__ == "NoRedirect"
+            for call in build_opener.call_args_list
+        ))
+        self.assertTrue(all(
+            request.unredirected_hdrs.get("Authorization") == "Bearer node-token"
+            for request in requests
+        ))
+
+    def test_a_redirect_is_refused_without_contacting_its_destination(self) -> None:
+        contacted = []
+
+        class Destination(BaseHTTPRequestHandler):
+            def do_GET(self):
+                contacted.append(self.headers.get("Authorization"))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        destination = ThreadingHTTPServer(("127.0.0.1", 0), Destination)
+
+        class Redirect(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header(
+                    "Location",
+                    f"http://127.0.0.1:{destination.server_port}/stolen",
+                )
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+        threads = [
+            threading.Thread(target=server.serve_forever, daemon=True)
+            for server in (destination, redirect)
+        ]
+        try:
+            for thread in threads:
+                thread.start()
+            request = agent.urllib.request.Request(
+                f"http://127.0.0.1:{redirect.server_port}/roster"
+            )
+            request.add_unredirected_header("Authorization", "Bearer node-token")
+            with self.assertRaises(urllib.error.HTTPError) as failure:
+                agent.open_control_plane(request, timeout=2)
+            self.assertEqual(failure.exception.code, 302)
+            failure.exception.close()
+            self.assertEqual(contacted, [])
+        finally:
+            for server in (redirect, destination):
+                server.shutdown()
+                server.server_close()
+            for thread in threads:
+                thread.join(timeout=2)
 
 
 class LifetimeTotals(unittest.TestCase):
@@ -369,12 +490,8 @@ class RosterValidation(unittest.TestCase):
         def fake_urlopen(_request, timeout=None):  # noqa: ARG001
             yield io.BytesIO(encoded)
 
-        original = agent.urllib.request.urlopen
-        agent.urllib.request.urlopen = fake_urlopen
-        try:
+        with patch.object(agent, "open_control_plane", fake_urlopen):
             return agent.fetch_roster("https://example.invalid", "token")
-        finally:
-            agent.urllib.request.urlopen = original
 
 
 class RosterControlSignals(unittest.TestCase):
@@ -1023,17 +1140,20 @@ class Delivery(unittest.TestCase):
         from contextlib import contextmanager
 
         attempts = {"count": 0}
+        requests = []
 
         @contextmanager
         def fake_urlopen(_request, timeout=None):  # noqa: ARG001
             attempts["count"] += 1
+            requests.append(_request)
             if attempts["count"] < 3:
                 raise urllib.error.URLError("connection reset")
             yield io.BytesIO(b"{}")
 
-        with patch.object(agent.urllib.request, "urlopen", fake_urlopen):
+        with patch.object(agent, "open_control_plane", fake_urlopen):
             agent.deliver("https://example.invalid", "token", self.queue(1))
         self.assertEqual(attempts["count"], 3)
+        self.assertEqual(len({id(request) for request in requests}), 3)
 
     def test_a_failure_that_does_not_pass_is_given_up_on_and_stays_queued(self) -> None:
         attempts = {"count": 0}
@@ -1042,7 +1162,7 @@ class Delivery(unittest.TestCase):
             attempts["count"] += 1
             raise urllib.error.URLError("connection reset")
 
-        with patch.object(agent.urllib.request, "urlopen", fake_urlopen):
+        with patch.object(agent, "open_control_plane", fake_urlopen):
             with self.assertRaises(agent.Unreachable):
                 agent.deliver("https://example.invalid", "token", self.queue(1))
         self.assertEqual(attempts["count"], agent.DELIVERY_ATTEMPTS)
@@ -1053,7 +1173,7 @@ class Delivery(unittest.TestCase):
                 "https://example.invalid", 400, "Bad Request", {}, None
             )
 
-        with patch.object(agent.urllib.request, "urlopen", fake_urlopen):
+        with patch.object(agent, "open_control_plane", fake_urlopen):
             with self.assertRaises(agent.Rejection):
                 agent.deliver("https://example.invalid", "token", self.queue(1))
 
@@ -1068,7 +1188,7 @@ class Delivery(unittest.TestCase):
 
         state = fresh_state()
         state["pendingReports"] = self.queue(3)
-        with patch.object(agent.urllib.request, "urlopen", fake_urlopen):
+        with patch.object(agent, "open_control_plane", fake_urlopen):
             with self.assertRaises(agent.Refusal):
                 agent.deliver_queue("https://example.invalid", "token", self.path, state)
         self.assertEqual(len(state["pendingReports"]), 3)

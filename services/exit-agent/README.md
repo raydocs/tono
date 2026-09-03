@@ -13,6 +13,11 @@ billing state: a pending cumulative report may already have reached its old
 ledger, so rewriting or dropping it cannot be made exactly-once. The token is
 node-specific and must not be committed.
 
+`TONO_API_BASE` must be a bare HTTPS origin on port 443: no credentials, path,
+query, fragment, or custom port. Every authenticated request refuses redirects,
+so a control-plane redirect can neither receive the node token at another
+origin nor masquerade as a successful roster or usage operation.
+
 Upgrade an existing node in this order:
 
 1. Run the old reporter against the old control plane and confirm its
@@ -40,6 +45,10 @@ The roster cycle is ordered deliberately:
 A failed reconciliation is never acknowledged. A failed acknowledgement exits
 non-zero before this round changes the durable state, so the roster and any
 queued usage are retried on the next run.
+
+The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
+timer and an operator start overlap, the second run exits without observing or
+persisting counters; the next timer safely resumes from cumulative state.
 
 The ACK also requires a provable final inventory: either the live Xray client
 list or the agent's durable prior inventory must be available. If both are

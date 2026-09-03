@@ -2063,6 +2063,12 @@ nonisolated struct ConfigPipeline {
         }
     }
 
+    private static func directSuffixOverlapsProtected(_ host: String) -> Bool {
+        isProtectedFromDirect(host) || managedDirectProtectedSuffixes.contains {
+            $0.hasSuffix(".\(host)")
+        }
+    }
+
     /// `trusted` is set only after an Ed25519 signature over the policy document
     /// has verified against the compiled-in public key. It skips the allowlist
     /// and nothing else: hostname syntax and the protected suffixes above are
@@ -2112,7 +2118,7 @@ nonisolated struct ConfigPipeline {
         trusted: Bool = false
     ) throws -> String {
         let host = try normalizedHost(raw, field: "managed direct suffix")
-        guard !isProtectedFromDirect(host) else {
+        guard !directSuffixOverlapsProtected(host) else {
             throw TonoInjectionError.unsafeNode("managed direct suffix")
         }
         if trusted { return host }

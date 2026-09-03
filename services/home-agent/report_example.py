@@ -8,6 +8,9 @@ monotonic per-user lifetime totals.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import errno
+import fcntl
 import json
 import os
 import re
@@ -42,13 +45,19 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def api_base() -> str:
     raw = os.environ.get("TONO_API_BASE_URL", "https://api.tono.invalid").rstrip("/")
-    parsed = urllib.parse.urlsplit(raw)
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        port = parsed.port
+    except ValueError as error:
+        raise RuntimeError(
+            "TONO_API_BASE_URL must be an HTTPS origin on port 443"
+        ) from error
     if (
         parsed.scheme != "https"
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.port not in (None, 443)
+        or port not in (None, 443)
         or parsed.path not in ("", "/")
         or parsed.query
         or parsed.fragment
@@ -245,6 +254,32 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
             os.unlink(temporary_name)
         except FileNotFoundError:
             pass
+
+
+@contextmanager
+def agent_run_lock(path: Path):
+    """Hold one lock across state recovery, observation, and delivery."""
+    ensure_private_parent(path.parent)
+    lock_path = path.with_name(f"{path.name}.lock")
+    descriptor = os.open(
+        lock_path,
+        os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError("home-agent lock file is not service-owned regular file")
+        os.fchmod(descriptor, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK):
+                raise
+            raise RuntimeError("another home-agent run is still active") from error
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def read_bounded_json_response(
@@ -549,10 +584,9 @@ def deliver_pending(base: str, token: str, path: Path, state: dict[str, Any]) ->
     return delivered
 
 
-def main() -> None:
+def run_once(path: Path) -> None:
     base = api_base()
     token = home_agent_token()
-    path = state_path()
     state = load_state(path)
     source = source_id(state)
 
@@ -609,6 +643,12 @@ def main() -> None:
     save_state(path, state)
     delivered = deliver_pending(base, token, path, state)
     print(f"acknowledged {delivered} usage reports")
+
+
+def main() -> None:
+    path = state_path()
+    with agent_run_lock(path):
+        run_once(path)
 
 
 if __name__ == "__main__":

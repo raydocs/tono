@@ -251,6 +251,13 @@ fn is_protected_from_direct(host: &str) -> bool {
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
+fn direct_suffix_overlaps_protected(host: &str) -> bool {
+    is_protected_from_direct(host)
+        || PROTECTED_DIRECT_SUFFIXES
+            .iter()
+            .any(|protected| protected.ends_with(&format!(".{host}")))
+}
+
 /// Wire shape of `GET traffic-policy` (digest semantics identical to the
 /// exit catalog: SHA-256 of the JSON's UTF-8 bytes, base64url, no padding).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -500,7 +507,9 @@ pub fn validate_policy_with_trust(
 
     let mut direct_suffixes = Vec::new();
     for entry in policy_suffixes {
-        if !is_well_formed_direct_host(&entry.host) {
+        if !is_well_formed_direct_host(&entry.host)
+            || direct_suffix_overlaps_protected(&entry.host)
+        {
             continue;
         }
         if !trusted && !is_allowed_direct_suffix(&entry.host) {
@@ -970,7 +979,7 @@ mod tests {
 
     #[test]
     fn trusted_policy_cannot_direct_protected_assistant_hosts() {
-        let document = r#"{"version":3,"domains":[{"host":"api.claude.com","ports":[443]},{"host":"browser-intake-ap1-datadoghq.com","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"challenges.cloudflare.com","ports":[443]}],"directSuffixes":[{"host":"browser-intake-us5-datadoghq.com","ports":[443]}]}"#;
+        let document = r#"{"version":3,"domains":[{"host":"api.claude.com","ports":[443]},{"host":"browser-intake-ap1-datadoghq.com","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"challenges.cloudflare.com","ports":[443]}],"directSuffixes":[{"host":"browser-intake-us5-datadoghq.com","ports":[443]},{"host":"googleapis.com","ports":[443]},{"host":"githubusercontent.com","ports":[443]},{"host":"npmjs.org","ports":[443]},{"host":"brew.sh","ports":[443]},{"host":"b-cdn.net","ports":[443]},{"host":"www.cloudflare.com","ports":[443]}]}"#;
         let policy =
             validate_policy_with_trust(&response(1, document), &no_protected(), true).unwrap();
 

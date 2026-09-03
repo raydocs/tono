@@ -88,6 +88,18 @@ final class CoreRouteClassificationTests: XCTestCase {
                 host
             )
         }
+
+        // A direct suffix owns all of its children, so a protected child also
+        // makes every parent suffix unsafe even when the policy is signed.
+        for host in [
+            "googleapis.com", "githubusercontent.com", "npmjs.org", "brew.sh",
+            "b-cdn.net", "www.cloudflare.com",
+        ] {
+            XCTAssertThrowsError(
+                try ConfigPipeline.validatedManagedDirectSuffix(host, trusted: true),
+                host
+            )
+        }
     }
 
     func testApplicationSubfolderScanFindsWeChatOneLevelDown() throws {

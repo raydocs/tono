@@ -65,6 +65,11 @@ Rules:
 - Persist the complete pending batch before sending it. After a timeout or
   crash, retry that exact batch before generating any new report IDs.
 - Keep state in a service-owned `0700` directory and a `0600` regular file.
+- `TONO_API_BASE_URL` must be a bare HTTPS origin on port 443. Authenticated
+  inventory and usage requests never follow redirects.
+- Only one reporter may run against a state file at a time. The process lock
+  covers recovery, counter observation, persistence, and delivery; an
+  overlapping timer or operator run exits before reading counters.
 
 ## Deployment work remaining
 

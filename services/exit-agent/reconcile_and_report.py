@@ -46,16 +46,19 @@ working meter reporting zero.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import errno
 import fcntl
 import hashlib
 import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -103,6 +106,15 @@ class Unreachable(RuntimeError):
     """Delivery did not get through. The queue keeps it for the next run."""
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward a node bearer token to a redirected destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code, "redirects are disabled", headers, fp
+        )
+
+
 def env(name: str, *, required: bool = True) -> str:
     value = os.environ.get(name, "").strip()
     if not value and required:
@@ -111,10 +123,32 @@ def env(name: str, *, required: bool = True) -> str:
 
 
 def api_base() -> str:
-    base = env("TONO_API_BASE").rstrip("/")
-    if not base.startswith("https://"):
-        raise Refusal("TONO_API_BASE must be an https URL")
-    return base
+    raw = env("TONO_API_BASE").rstrip("/")
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        port = parsed.port
+    except ValueError as error:
+        raise Refusal("TONO_API_BASE must be an HTTPS origin on port 443") from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise Refusal("TONO_API_BASE must be an HTTPS origin on port 443")
+    return raw
+
+
+def open_control_plane(request: urllib.request.Request, timeout: int):
+    try:
+        return urllib.request.build_opener(NoRedirect).open(request, timeout=timeout)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
 
 
 def xray_binary() -> Path:
@@ -289,10 +323,11 @@ def require_commands(binary: Path) -> dict[str, str]:
 def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]], bool]:
     request = urllib.request.Request(
         f"{base}/api/v1/home/exit-identities",
-        headers={"authorization": f"Bearer {token}", **REQUEST_HEADERS},
+        headers=REQUEST_HEADERS,
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=20) as response:
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    with open_control_plane(request, timeout=20) as response:
         payload = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
     node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
@@ -339,16 +374,17 @@ def acknowledge_roster(base: str, token: str, observed_at: int) -> None:
         f"{base}/api/v1/home/roster-ack",
         data=body,
         headers={
-            "authorization": f"Bearer {token}",
             "content-type": "application/json",
             **REQUEST_HEADERS,
         },
         method="POST",
     )
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with open_control_plane(request, timeout=20) as response:
             response.read(MAX_RESPONSE_BYTES)
     except urllib.error.HTTPError as error:
+        error.close()
         raise Refusal(
             f"roster ack failed: control plane answered {error.code} {error.reason}"
         ) from error
@@ -407,16 +443,20 @@ def agent_run_lock(path: Path):
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(lock_path, flags, STATE_MODE)
-    handle = os.fdopen(descriptor, "r+")
     try:
-        os.fchmod(handle.fileno(), STATE_MODE)
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise Refusal("exit-agent lock file is not service-owned regular file")
+        os.fchmod(descriptor, STATE_MODE)
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK):
+                raise
             raise Refusal("another exit-agent run is still active") from error
         yield
     finally:
-        handle.close()
+        os.close(descriptor)
 
 
 def xray_start_marker(binary: Path, proc: Path = Path("/proc")) -> str | None:
@@ -698,22 +738,23 @@ def merge_reports(queued: list, fresh: list[dict]) -> list[dict]:
 def deliver(base: str, token: str, reports: list[dict]) -> None:
     """One request, retried while the failure could still be a passing one."""
     body = json.dumps({"reports": reports}).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base}/api/v1/home/usage",
-        data=body,
-        headers={
-            "authorization": f"Bearer {token}",
-            "content-type": "application/json",
-            **REQUEST_HEADERS,
-        },
-        method="POST",
-    )
     for attempt in range(1, DELIVERY_ATTEMPTS + 1):
+        request = urllib.request.Request(
+            f"{base}/api/v1/home/usage",
+            data=body,
+            headers={
+                "content-type": "application/json",
+                **REQUEST_HEADERS,
+            },
+            method="POST",
+        )
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with open_control_plane(request, timeout=30) as response:
                 response.read(MAX_RESPONSE_BYTES)
             return
         except urllib.error.HTTPError as error:
+            error.close()
             if error.code in REJECTED_STATUSES:
                 raise Rejection(f"{error.code} {error.reason}") from error
             if error.code not in RETRYABLE_STATUSES:
@@ -965,5 +1006,6 @@ if __name__ == "__main__":
         print(f"usage not delivered: {unreachable}", file=sys.stderr)
         raise SystemExit(1)
     except urllib.error.HTTPError as error:
+        error.close()
         print(f"control plane returned {error.code}: {error.reason}", file=sys.stderr)
         raise SystemExit(1)
