@@ -152,7 +152,7 @@ pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 37] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 40] = [
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -169,8 +169,11 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 37] = [
     "cf-assets.www.cloudflare.com",
     "cloudflareinsights.com",
     "browser-intake-datadoghq.com",
+    "browser-intake-us5-datadoghq.com",
+    "datadoghq.com",
     "statsigapi.net",
     "featuregates.org",
+    "growthbook.io",
     "stripe.network",
     "chatgpt.com",
     "openai.com",

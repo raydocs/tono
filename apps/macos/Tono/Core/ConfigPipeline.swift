@@ -252,8 +252,11 @@ nonisolated struct ConfigPipeline {
         "cloudflareinsights.com",
         // Claude Telemetry & Feature Gates
         "browser-intake-datadoghq.com",
+        "browser-intake-us5-datadoghq.com",
+        "datadoghq.com",
         "statsigapi.net",
         "featuregates.org",
+        "growthbook.io",
         // Stripe Fraud Telemetry (Radar)
         "stripe.network",
         // OpenAI, including Codex. `chat.com` and `ai.com` are OpenAI-owned
