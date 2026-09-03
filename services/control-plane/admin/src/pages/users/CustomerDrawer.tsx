@@ -91,6 +91,17 @@ export function CustomerDrawer({
             value={`${formatBytes(person.usageBytes)}${person.quotaBytes == null ? ' / 不限' : ` / ${formatBytes(person.quotaBytes)}`}`}
             tone={person.quotaRatio == null ? undefined : person.quotaRatio >= 1 ? 'severe' : person.quotaRatio >= 0.8 ? 'warn' : undefined}
           />
+          <Stat
+            label="Claude / AI 专线"
+            value={person.user?.homeBinding ? `${person.user.homeBinding.displayName}` : '基础专线 (数据中心)'}
+            note={person.user?.homeBinding ? '独立家庭宽带出口' : '与节点共享出口'}
+            tone={person.user?.homeBinding ? 'ok' : undefined}
+          />
+          <Stat
+            label="专线出口 IP"
+            value={person.user?.homeBinding ? privacy.ip(person.user.homeBinding.socks5Host || person.user.homeBinding.egressIpv4) : '跟随云端节点'}
+            note={person.user?.homeBinding ? '免除 Anthropic 机房封锁' : '常规云端路由'}
+          />
         </StatGrid>
         {person.user?.contact && <p className="field-hint">联系 {privacy.secret(person.user.contact)}</p>}
       </section>
