@@ -244,7 +244,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         claude_home_host: if status.is_connected {
             inner.routing.as_ref().and_then(|r| {
                 r.home_socks5.as_ref().map(|s| s.host.clone())
-                    .or_else(|| r.home_proxy.as_ref().map(|p| p.node.clone()))
+                    .or_else(|| r.home_proxy.clone())
             })
         } else {
             None
@@ -1845,7 +1845,7 @@ pub struct TerminalEnvReport {
 #[tauri::command]
 pub async fn tono_check_terminal_env() -> Result<TerminalEnvReport, String> {
     tokio::task::spawn_blocking(|| {
-        let mut entries = Vec::new();
+        let mut entries: Vec<ProxyEnvEntry> = Vec::new();
         let proxy_keys = [
             "HTTP_PROXY",
             "HTTPS_PROXY",
@@ -1949,7 +1949,9 @@ pub async fn tono_clear_terminal_proxy_env() -> Result<(), String> {
         }
 
         for key in &proxy_keys {
-            std::env::remove_var(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
         }
 
         Ok(())
