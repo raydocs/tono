@@ -5339,6 +5339,31 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
   if (d && d.status === 'pending') return d;
   const pendingTTL = envInt(e, 'PENDING_DEVICE_TTL_SECONDS', 1_800);
   const did = d?.id || id();
+
+  // If adding or reactivating this device would exceed device_limit,
+  // automatically evict the least-recently-active device(s) so users experience
+  // seamless device rotation (e.g. across 3-4 machines) without hitting DEVICE_LIMIT.
+  const userRow = await e.DB.prepare('SELECT device_limit FROM users WHERE id = ?').bind(user).first<Row>();
+  const limit = Math.max(1, Number(userRow?.device_limit ?? 2));
+  const otherActive = await e.DB.prepare(
+    `SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?`,
+  ).bind(user, did).first<{ c: number }>();
+  const currentActive = Number(otherActive?.c ?? 0);
+
+  if (currentActive >= limit) {
+    const toEvictCount = currentActive - limit + 1;
+    const candidates = await e.DB.prepare(
+      `SELECT * FROM devices
+       WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?
+       ORDER BY COALESCE(last_seen_at, created_at) ASC, created_at ASC
+       LIMIT ?`,
+    ).bind(user, did, toEvictCount).all<Row>();
+
+    for (const victim of candidates.results) {
+      await revokeDevice(e, victim);
+    }
+  }
+
   try {
     if (d) {
       if (enrollmentEnabled) {

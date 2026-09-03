@@ -3704,7 +3704,12 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect((await login('lifecycle-installation-one')).status).toBe(200);
     expect((await login('lifecycle-installation-two')).status).toBe(200);
-    expect((await login('lifecycle-installation-three')).status).toBe(409);
+    // LRU Auto-eviction: third device logs in seamlessly and evicts the oldest active device
+    expect((await login('lifecycle-installation-three')).status).toBe(200);
+    const activeCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status IN ('pending', 'active')"
+    ).bind(first.user.id).first<any>();
+    expect(activeCount.c).toBe(2);
     const count = await env.DB.prepare("SELECT count(*) n FROM devices WHERE installation_id='lifecycle-installation-one'").first<any>();
     expect(count.n).toBe(1);
   });
@@ -3734,12 +3739,56 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     for (const suffix of ['two', 'three', 'four', 'five']) {
       expect((await login(suffix)).status).toBe(200);
     }
-    expect((await login('six')).status).toBe(409);
+    // LRU Auto-eviction: sixth device logs in seamlessly and evicts the oldest active device
+    const sixth = await login('six');
+    expect(sixth.status).toBe(200);
 
     const stored = await env.DB.prepare(
       'SELECT device_limit FROM users WHERE id = ?',
     ).bind(account.user.id).first<any>();
     expect(stored.device_limit).toBe(5);
+
+    const activeDevices = await env.DB.prepare(
+      "SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status IN ('pending', 'active')"
+    ).bind(account.user.id).first<any>();
+    expect(activeDevices.c).toBe(5);
+  });
+
+  it('automatically rotates and evicts the least recently seen device when limit is reached', async () => {
+    const account = await createAccount('lru-rotation');
+    const login = (name: string, installationId: string) => emailSignIn({
+      email: account.email,
+      deviceName: name,
+      installationId,
+    });
+
+    // Login on device 2
+    const res2 = await login('Device 2', 'installation-two');
+    expect(res2.status).toBe(200);
+    const dev2 = await res2.json() as any;
+
+    // Login on device 3 (exceeds default limit of 2) -> automatically evicts device 1
+    const res3 = await login('Device 3', 'installation-three');
+    expect(res3.status).toBe(200);
+    const dev3 = await res3.json() as any;
+
+    // Device 1 should now be revoked
+    const dev1Status = await env.DB.prepare('SELECT status FROM devices WHERE id = ?')
+      .bind(account.device.id).first<any>();
+    expect(dev1Status.status).toBe('revoked');
+
+    // Trying to use Device 1's refresh token should now fail with 401
+    const refresh1 = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+    expect(refresh1.status).toBe(401);
+
+    // Device 2 and Device 3 should be active
+    const active = await env.DB.prepare(
+      "SELECT id, status FROM devices WHERE user_id = ? AND status IN ('pending', 'active')"
+    ).bind(account.user.id).all<any>();
+    expect(active.results.length).toBe(2);
+    const activeIds = active.results.map((r: any) => r.id);
+    expect(activeIds).toContain(dev2.device.id);
+    expect(activeIds).toContain(dev3.device.id);
   });
 
   it('confirm resolves via inventory with distinct IDs and stores management id', async () => {
