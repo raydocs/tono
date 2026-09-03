@@ -13,7 +13,7 @@ use thiserror::Error;
 use crate::catalog::CatalogHomeSocks5;
 use crate::node::{EXIT_GROUP_NAME, NodeRejection, ValidatedNode, validate_node_set};
 
-pub const MIXED_PORT: u16 = 7890;
+pub const MIXED_PORT: u16 = 28990;
 pub const EXTERNAL_CONTROLLER: &str = "127.0.0.1:9090";
 pub const TUN_DEVICE_NAME: &str = "Tono";
 pub const FAKE_IP_RANGE: &str = "198.18.0.1/16";
@@ -1088,7 +1088,7 @@ reality-opts:
     #[test]
     fn forces_top_level_control_values() {
         let value = parsed(&build());
-        assert_eq!(get(&value, &["mixed-port"]).as_i64(), Some(7890));
+        assert_eq!(get(&value, &["mixed-port"]).as_i64(), Some(28990));
         assert_eq!(get(&value, &["bind-address"]).as_str(), Some("127.0.0.1"));
         assert_eq!(get(&value, &["allow-lan"]).as_bool(), Some(false));
         assert_eq!(get(&value, &["ipv6"]).as_bool(), Some(false));
@@ -1340,7 +1340,7 @@ reality-opts:
         let value: Value = serde_yaml_ng::from_str(&redacted).unwrap();
         assert_eq!(get(&value, &["secret"]).as_str(), Some(""));
         // Everything else survives redaction.
-        assert_eq!(get(&value, &["mixed-port"]).as_i64(), Some(7890));
+        assert_eq!(get(&value, &["mixed-port"]).as_i64(), Some(28990));
     }
 
     #[test]

@@ -12,7 +12,7 @@ nonisolated struct ConfigPipeline {
     static let tonoTunInterface = "utun199"
 
     struct OverlayConfig: Sendable {
-        var mixedPort: Int = 7890
+        var mixedPort: Int = 28990
         var externalController: String = "127.0.0.1:9090"
         var secret: String = ""
         var mode: String = "rule"

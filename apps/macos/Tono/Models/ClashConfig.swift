@@ -3,9 +3,9 @@ import Foundation
 // MARK: - Clash Configuration
 
 nonisolated struct ClashConfig: Codable, Sendable {
-    var port: Int = 7890
-    var socksPort: Int = 7891
-    var mixedPort: Int = 7890
+    var port: Int = 28990
+    var socksPort: Int = 28991
+    var mixedPort: Int = 28990
     var allowLan: Bool = false
     var mode: String = "rule"
     var logLevel: String = "info"

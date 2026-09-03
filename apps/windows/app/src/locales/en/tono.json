@@ -201,7 +201,7 @@
       "protectedHttpsFailed": "The protected connection could not complete. If every server fails the same way, switching cities will not help — send diagnostics to support.",
       "coreUnpinned": "This copy of Tono is missing its integrity check. Install the latest Tono — reinstalling the same copy will not help.",
       "coreMismatch": "This copy of Tono does not match its core. Install the latest Tono.",
-      "dnsPortBusy": "Another app is using local DNS port 53. Close that app and try again.",
+      "dnsPortBusy": "Another proxy (e.g. Clash Verge, CFW) is running and occupying the network. Please exit it completely from the system tray and try again.",
       "protectionReleaseFailed": "Leak protection is still on, so this PC stays blocked. Try Restore normal internet again.",
       "encryptedDns": "Windows Encrypted DNS is still on. Open Settings below, turn it off, then reconnect.",
       "sendDiagnostics": "Send to support"

@@ -201,7 +201,7 @@
       "protectedHttpsFailed": "受保护的 HTTPS 失败。多个节点都这样时，换节点没用，请发诊断。",
       "coreUnpinned": "此安装缺少内核校验，请安装最新版。",
       "coreMismatch": "内核与安装不匹配，请安装最新版。",
-      "dnsPortBusy": "本机 53 端口被占用。关掉占用程序后再试。",
+      "dnsPortBusy": "检测到其他代理软件（如 Clash Verge、CFW 等）正在运行并占用了系统网络。请在系统托盘彻底退出其他代理后再连接。",
       "protectionReleaseFailed": "保护还没解除。请再点一次「恢复网络」。",
       "encryptedDns": "Windows 还开着「加密 DNS」。点下面打开设置，关掉后再连接。",
       "sendDiagnostics": "发给支持"
