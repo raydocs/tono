@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { operationsApi, type HomeExitDto, type ProductAccountDto, type UserDetailDto, type UserDto } from '../../api';
 import { useResource, type Live } from '../../hooks';
 import { acceptIfCurrent, bindDetail } from '../../lib/bound-detail';
-import { formatBytes, timestamp } from '../../lib/format';
+import { formatBytes, formatHomeEgress, timestamp } from '../../lib/format';
 import { personAccountLabel, personTelemetryLabel, type OpsPersonView } from '../../lib/ops-views';
 import { Banner, Status, Drawer, DrawerSection, Field, Note, Skeleton, Stat, StatGrid, Unavailable } from '../../ui';
 import { usePrivacy } from '../../privacy';
@@ -99,7 +99,7 @@ export function CustomerDrawer({
           />
           <Stat
             label="专线出口 IP"
-            value={person.user?.homeBinding ? privacy.ip(person.user.homeBinding.egressIpv4 || person.user.homeBinding.socks5Host) : '跟随云端节点'}
+            value={formatHomeEgress(person.user?.homeBinding) ? privacy.ip(formatHomeEgress(person.user?.homeBinding)!) : '跟随云端节点'}
             note={person.user?.homeBinding ? '免除 Anthropic 机房封锁' : '常规云端路由'}
           />
         </StatGrid>

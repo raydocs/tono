@@ -45,3 +45,14 @@ export function formatDuration(seconds: number | null | undefined) {
   if (hours > 0) return `${hours} 小时`;
   return `${Math.max(1, Math.floor(seconds / 60))} 分钟`;
 }
+
+/**
+ * Returns the customer-facing egress address for a home residential line.
+ * Prioritizes the true egress IPv4 over the intermediary SOCKS5 relay host.
+ */
+export function formatHomeEgress(
+  binding: { egressIpv4?: string | null; socks5Host?: string | null } | null | undefined,
+): string | null {
+  if (!binding) return null;
+  return binding.egressIpv4 || binding.socks5Host || null;
+}

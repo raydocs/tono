@@ -1860,18 +1860,30 @@ pub async fn tono_check_terminal_env() -> Result<TerminalEnvReport, String> {
             use winreg::enums::HKEY_CURRENT_USER;
             use winreg::RegKey;
             let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-            if let Ok(env_key) = hkcu.open_subkey("Environment") {
-                for key in &proxy_keys {
-                    if let Ok(val) = env_key.get_value::<String, _>(key) {
-                        let trimmed = val.trim();
-                        if !trimmed.is_empty() {
-                            entries.push(ProxyEnvEntry {
-                                key: (*key).to_string(),
-                                value: trimmed.to_string(),
-                                source: "Windows 环境变量 (User)".to_string(),
-                            });
+            match hkcu.open_subkey("Environment") {
+                Ok(env_key) => {
+                    for key in &proxy_keys {
+                        match env_key.get_value::<String, _>(key) {
+                            Ok(val) => {
+                                let trimmed = val.trim();
+                                if !trimmed.is_empty() {
+                                    entries.push(ProxyEnvEntry {
+                                        key: (*key).to_string(),
+                                        value: trimmed.to_string(),
+                                        source: "Windows 环境变量 (User)".to_string(),
+                                    });
+                                }
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => {
+                                return Err(format!("Failed to read registry env var {key}: {e}"));
+                            }
                         }
                     }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(format!("Failed to open HKCU\\Environment: {e}"));
                 }
             }
         }

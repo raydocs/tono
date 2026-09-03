@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { shouldUseDevFixtureResponse } from '../admin/src/api';
 import { matchDevOps } from '../admin/src/dev/ops-fixture';
 import { catalogProxyNames } from '../admin/src/lib/catalog';
-import { formatBytes } from '../admin/src/lib/format';
+import { formatBytes, formatHomeEgress } from '../admin/src/lib/format';
 import { machineSignals, mergedBilling, trafficRemaining } from '../admin/src/lib/machine';
 import {
   calendarDaysUntil,
@@ -1972,20 +1972,21 @@ describe('ops route hook', () => {
     });
   });
 
-  it('prioritizes real egressIpv4 over socks5Host for residential line exit display', () => {
-    const binding = {
-      displayName: 'Home US 01',
-      socks5Host: 'proxy.residential.tono.dev',
+  it('prioritizes real egressIpv4 over socks5Host for residential line exit display via formatHomeEgress', () => {
+    // When both egressIpv4 and socks5Host exist, real egressIpv4 MUST be preferred
+    expect(formatHomeEgress({
       egressIpv4: '198.51.100.42',
-    };
-    const displayedIp = binding.egressIpv4 || binding.socks5Host;
-    expect(displayedIp).toBe('198.51.100.42');
-
-    const fallbackBinding: { displayName: string; socks5Host: string; egressIpv4?: string } = {
-      displayName: 'Home US 02',
       socks5Host: 'proxy.residential.tono.dev',
-    };
-    const fallbackIp = fallbackBinding.egressIpv4 || fallbackBinding.socks5Host;
-    expect(fallbackIp).toBe('proxy.residential.tono.dev');
+    })).toBe('198.51.100.42');
+
+    // When egressIpv4 is null or missing, fallback to socks5Host
+    expect(formatHomeEgress({
+      egressIpv4: null,
+      socks5Host: 'proxy.residential.tono.dev',
+    })).toBe('proxy.residential.tono.dev');
+
+    // When binding is not provided, returns null
+    expect(formatHomeEgress(null)).toBeNull();
+    expect(formatHomeEgress(undefined)).toBeNull();
   });
 });

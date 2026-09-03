@@ -3,7 +3,7 @@ import { operationsApi, type HomeExitDto, type ProductAccountDto, type UserDetai
 import type { Live } from '../../hooks';
 import { catalogProxyNames } from '../../lib/catalog';
 import { unixDateTimeLocal } from '../../lib/fields';
-import { formatBytes, timestamp } from '../../lib/format';
+import { formatBytes, formatHomeEgress, timestamp } from '../../lib/format';
 import { usePrivacy } from '../../privacy';
 import { Banner, DrawerSection, Field, Note, Skeleton, Stat, StatGrid, Unavailable } from '../../ui';
 import { useAsk } from './ask';
@@ -143,7 +143,7 @@ export function CustomerOperations({
         fold
         open={opened('home')}
         aside={user.homeBinding
-          ? `${user.homeBinding.displayName} · ${privacy.ip(user.homeBinding.egressIpv4 || user.homeBinding.socks5Host)}`
+          ? `${user.homeBinding.displayName} · ${privacy.ip(formatHomeEgress(user.homeBinding) ?? '')}`
           : '未绑定'}
       >
         {homes.state === 'loading' && <Skeleton label="家宽库存" />}
