@@ -487,7 +487,8 @@ def installed_clients(binary: Path, commands: dict[str, str], address: str,
 
 def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
               roster: list[dict[str, str]], listed: set[str] | None,
-              recorded: set[str] | None) -> tuple[int, int, set[str] | None]:
+              recorded: set[str] | None,
+              retire_shared_legacy: bool = False) -> tuple[int, int, set[str] | None]:
     """Add the accounts the roster names, remove the ones it does not.
 
     `listed` is what the inbound actually holds and `recorded` is what this agent
@@ -531,10 +532,13 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
         print("this exit cannot say which clients it holds; removed nothing")
     else:
         for label in sorted(installed - set(wanted)):
-            # Only this agent's own namespace is a candidate. `shared-legacy` and
-            # hand-added entries belong to somebody else, and the counters that
-            # used to drive this listed both of them.
-            if not label.startswith(CLIENT_LABEL_PREFIX):
+            # Only this agent's own namespace is a candidate, except when explicitly
+            # retiring the shared-legacy client. Hand-added entries belong to somebody
+            # else and are never touched.
+            if label == LEGACY_CLIENT_EMAIL:
+                if not retire_shared_legacy:
+                    continue
+            elif not label.startswith(CLIENT_LABEL_PREFIX):
                 continue
             result = run_xray(binary, [
                 "api", commands["remove_user"], f"--server={address}",
@@ -576,6 +580,22 @@ def lifetime_totals(state: dict, counters: dict[str, int], *,
         baseline.setdefault(label, int(state["counterBaseline"].get(label, 0)))
     state["counterBaseline"] = baseline
     return totals
+
+
+def aggregate_user_totals(totals: dict[str, int]) -> dict[str, int]:
+    """Aggregate per-device/label lifetime totals into per-account lifetime totals.
+
+    An account may have multiple devices installed on this exit node (e.g. u:alice:dev1,
+    u:alice:dev2). Accounting is per-user, so all devices for the same user on this
+    source must sum together into a single monotonic lifetime total.
+    """
+    user_totals: dict[str, int] = {}
+    for label, total in totals.items():
+        user_id = attributed_user(label)
+        if user_id is None:
+            continue
+        user_totals[user_id] = user_totals.get(user_id, 0) + int(total)
+    return user_totals
 
 
 def merge_reports(queued: list, fresh: list[dict]) -> list[dict]:
@@ -678,6 +698,7 @@ def reconcile_and_read_stable(
     tag: str,
     roster: list[dict[str, str]],
     recorded: set[str] | None,
+    retire_shared_legacy: bool = False,
 ) -> tuple[int, int, set[str] | None, dict[str, int], str | None]:
     """Reconcile and read counters from one Xray process generation.
 
@@ -693,6 +714,7 @@ def reconcile_and_read_stable(
         listed = installed_clients(binary, commands, address, tag)
         added, removed, installed = reconcile(
             binary, commands, address, tag, roster, listed, recorded,
+            retire_shared_legacy=retire_shared_legacy,
         )
         counters = read_counters(binary, commands["stats_query"], address)
         marker_after = xray_start_marker(binary)
@@ -727,11 +749,13 @@ def run_once(path: Path) -> None:
         replayed, discarded = deliver_queue(base, token, path, state)
         print(f"replayed {replayed} queued report(s), dropped {discarded}")
 
+    retire_shared_legacy = env("TONO_RETIRE_SHARED_LEGACY", required=False) in ("1", "true", "yes")
     observed_at, roster = fetch_roster(base, token)
     remembered = state.get("installedClients")
     added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
         binary, commands, address, tag, roster,
         set(remembered) if isinstance(remembered, list) else None,
+        retire_shared_legacy=retire_shared_legacy,
     )
     if installed is not None:
         state["installedClients"] = sorted(installed)
@@ -749,15 +773,17 @@ def run_once(path: Path) -> None:
 
     totals = lifetime_totals(state, counters, restarted=restarted)
     timestamp = int(time.time())
+    current_user_totals = aggregate_user_totals(totals)
+    previous_user_totals = state.get("userTotals")
+    if not isinstance(previous_user_totals, dict):
+        previous_user_totals = aggregate_user_totals(state.get("totals", {}))
+
     reports: list[dict] = []
-    for label in sorted(totals):
-        user_id = attributed_user(label)
-        if user_id is None:
-            continue
-        total = totals[label]
-        previous = int(state["totals"].get(label, 0))
+    for user_id in sorted(current_user_totals):
+        total = current_user_totals[user_id]
+        previous = int(previous_user_totals.get(user_id, 0))
         if total < previous:
-            raise Refusal(f"total for {label} moved backwards, which is never correct")
+            raise Refusal(f"total for {user_id} moved backwards, which is never correct")
         if total > previous:
             reports.append({
                 "reportId": str(uuid.uuid4()),
@@ -767,6 +793,7 @@ def run_once(path: Path) -> None:
                 "observedAt": timestamp,
             })
     state["totals"] = {label: int(value) for label, value in totals.items()}
+    state["userTotals"] = {user_id: int(value) for user_id, value in current_user_totals.items()}
     # A marker that could not be read this round is forgotten rather than kept:
     # comparing a later reading against a stale one would call a restart that had
     # already been folded in a second time, and bill it twice.

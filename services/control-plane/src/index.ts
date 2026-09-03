@@ -5370,118 +5370,105 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
   // seamless device rotation (e.g. across 3-4 machines) without hitting DEVICE_LIMIT.
   const userRow = await e.DB.prepare('SELECT device_limit FROM users WHERE id = ?').bind(user).first<Row>();
   const limit = Math.max(1, Number(userRow?.device_limit ?? 2));
-  const otherActive = await e.DB.prepare(
-    `SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?`,
-  ).bind(user, did).first<{ c: number }>();
-  const currentActive = Number(otherActive?.c ?? 0);
 
-  if (currentActive >= limit) {
-    const toEvictCount = currentActive - limit + 1;
-    const candidates = await e.DB.prepare(
-      `SELECT * FROM devices
-       WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?
-       ORDER BY COALESCE(last_seen_at, created_at) ASC, created_at ASC
-       LIMIT ?`,
-    ).bind(user, did, toEvictCount).all<Row>();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const tNow = now();
+    const otherActive = await e.DB.prepare(
+      `SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?`,
+    ).bind(user, did).first<{ c: number }>();
+    const currentActive = Number(otherActive?.c ?? 0);
 
-    for (const victim of candidates.results) {
-      await revokeDevice(e, victim);
-    }
-  }
-
-  try {
-    if (d) {
-      if (enrollmentEnabled) {
-        await e.DB.prepare(
-          `UPDATE devices SET
-             name = ?,
-             status = 'pending',
-             pending_expires_at = ?,
-             updated_at = ?,
-             tailscale_node_id = NULL,
-             tailscale_stable_id = NULL,
-             tailscale_api_node_id = NULL,
-             tailscale_public_key = NULL,
-             tailscale_ips = NULL,
-             claim_token = NULL,
-             claim_expires_at = NULL,
-             claim_generation = claim_generation + 1,
-             enrollment_issued_at = NULL,
-             enrollment_hostname = NULL,
-             confirmed_at = NULL
-           WHERE id = ? AND status = 'revoked'`,
-        ).bind(name, t + pendingTTL, t, did).run();
-      } else {
-        await e.DB.prepare(
-          `UPDATE devices SET
-             name = ?,
-             status = 'active',
-             pending_expires_at = NULL,
-             updated_at = ?,
-             tailscale_node_id = NULL,
-             tailscale_stable_id = NULL,
-             tailscale_api_node_id = NULL,
-             tailscale_public_key = NULL,
-             tailscale_ips = NULL,
-             claim_token = NULL,
-             claim_expires_at = NULL,
-             claim_generation = claim_generation + 1,
-             enrollment_issued_at = NULL,
-             enrollment_hostname = NULL,
-             confirmed_at = ?,
-             last_seen_at = ?
-           WHERE id = ? AND status = 'revoked'`,
-        ).bind(name, t, t, t, did).run();
-      }
-    } else {
-      if (enrollmentEnabled) {
-        await e.DB.prepare(
-          "INSERT INTO devices(id, user_id, installation_id, name, status, pending_expires_at, created_at, updated_at) VALUES(?, ?, ?, ?, 'pending', ?, ?, ?)",
-        ).bind(did, user, installation, name, t + pendingTTL, t, t).run();
-      } else {
-        await e.DB.prepare(
-          `INSERT INTO devices(
-             id, user_id, installation_id, name, status,
-             pending_expires_at, confirmed_at, last_seen_at, created_at, updated_at
-           ) VALUES(?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?)`,
-        ).bind(did, user, installation, name, t, t, t, t).run();
-      }
-    }
-  } catch (x) {
-    if (String(x).includes('UNIQUE constraint failed: devices.user_id, devices.installation_id')) {
-      const existing = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?')
-        .bind(user, installation).first<Row>();
-      if (existing) {
-        await e.DB.prepare('UPDATE devices SET name = ?, last_seen_at = ?, updated_at = ? WHERE id = ?')
-          .bind(name, t, t, existing.id).run();
-        return { ...existing, name, last_seen_at: t, updated_at: t };
-      }
-    }
-    if (String(x).includes('DEVICE_LIMIT')) {
-      const victim = await e.DB.prepare(
+    if (currentActive >= limit) {
+      const toEvictCount = currentActive - limit + 1;
+      const candidates = await e.DB.prepare(
         `SELECT * FROM devices
          WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?
          ORDER BY COALESCE(last_seen_at, created_at) ASC, created_at ASC
-         LIMIT 1`,
-      ).bind(user, did).first<Row>();
-      if (victim) {
+         LIMIT ?`,
+      ).bind(user, did, toEvictCount).all<Row>();
+
+      for (const victim of candidates.results) {
         await revokeDevice(e, victim);
-        if (d) {
-          await e.DB.prepare("UPDATE devices SET name = ?, status = 'active', updated_at = ?, last_seen_at = ? WHERE id = ?")
-            .bind(name, t, t, did).run();
+      }
+    }
+
+    try {
+      if (d) {
+        if (enrollmentEnabled) {
+          await e.DB.prepare(
+            `UPDATE devices SET
+               name = ?,
+               status = 'pending',
+               pending_expires_at = ?,
+               updated_at = ?,
+               tailscale_node_id = NULL,
+               tailscale_stable_id = NULL,
+               tailscale_api_node_id = NULL,
+               tailscale_public_key = NULL,
+               tailscale_ips = NULL,
+               claim_token = NULL,
+               claim_expires_at = NULL,
+               claim_generation = claim_generation + 1,
+               enrollment_issued_at = NULL,
+               enrollment_hostname = NULL,
+               confirmed_at = NULL
+             WHERE id = ? AND status = 'revoked'`,
+          ).bind(name, tNow + pendingTTL, tNow, did).run();
         } else {
           await e.DB.prepare(
-            `INSERT INTO devices(id, user_id, installation_id, name, status, pending_expires_at, confirmed_at, last_seen_at, created_at, updated_at)
-             VALUES(?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?)`
-          ).bind(did, user, installation, name, t, t, t, t).run();
+            `UPDATE devices SET
+               name = ?,
+               status = 'active',
+               pending_expires_at = NULL,
+               updated_at = ?,
+               tailscale_node_id = NULL,
+               tailscale_stable_id = NULL,
+               tailscale_api_node_id = NULL,
+               tailscale_public_key = NULL,
+               tailscale_ips = NULL,
+               claim_token = NULL,
+               claim_expires_at = NULL,
+               claim_generation = claim_generation + 1,
+               enrollment_issued_at = NULL,
+               enrollment_hostname = NULL,
+               confirmed_at = ?,
+               last_seen_at = ?
+             WHERE id = ? AND status = 'revoked'`,
+          ).bind(name, tNow, tNow, tNow, did).run();
         }
-        return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(did).first<Row>())!;
+      } else {
+        if (enrollmentEnabled) {
+          await e.DB.prepare(
+            "INSERT INTO devices(id, user_id, installation_id, name, status, pending_expires_at, created_at, updated_at) VALUES(?, ?, ?, ?, 'pending', ?, ?, ?)",
+          ).bind(did, user, installation, name, tNow + pendingTTL, tNow, tNow).run();
+        } else {
+          await e.DB.prepare(
+            `INSERT INTO devices(
+               id, user_id, installation_id, name, status,
+               pending_expires_at, confirmed_at, last_seen_at, created_at, updated_at
+             ) VALUES(?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?)`,
+          ).bind(did, user, installation, name, tNow, tNow, tNow, tNow).run();
+        }
       }
-      throw new ApiError(409, 'DEVICE_LIMIT', 'This account has reached its device allowance');
+      return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(did).first<Row>())!;
+    } catch (x) {
+      if (String(x).includes('UNIQUE constraint failed: devices.user_id, devices.installation_id')) {
+        const existing = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?')
+          .bind(user, installation).first<Row>();
+        if (existing) {
+          await e.DB.prepare('UPDATE devices SET name = ?, last_seen_at = ?, updated_at = ? WHERE id = ?')
+            .bind(name, tNow, tNow, existing.id).run();
+          return { ...existing, name, last_seen_at: tNow, updated_at: tNow };
+        }
+      }
+      if (String(x).includes('DEVICE_LIMIT')) {
+        if (attempt < 2) continue;
+        throw new ApiError(409, 'DEVICE_LIMIT', 'This account has reached its device allowance');
+      }
+      throw x;
     }
-    throw x;
   }
-  return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(did).first<Row>())!;
+  throw new ApiError(409, 'DEVICE_LIMIT', 'This account has reached its device allowance');
 }
 
 // --- Tailscale ----------------------------------------------------------------
@@ -5965,19 +5952,22 @@ async function enforceAll(e: Env) {
     DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
   );
   const expiredLogs = await e.DB.prepare(
-    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 1000',
+    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 50',
   ).bind(t - logRetention).all<Row>();
   if (expiredLogs.results.length > 0) {
     const keys = expiredLogs.results.map((r) => String(r.r2_key));
     const ids = expiredLogs.results.map((r) => String(r.id));
     try {
       await e.DIAGNOSTICS_LOGS.delete(keys);
+      // Only delete index rows from D1 if R2 deletion succeeded.
+      // Retaining the rows on failure allows the next sweep to retry deletion,
+      // preventing unredacted logs from remaining orphaned in R2.
+      const placeholders = ids.map(() => '?').join(',');
+      await e.DB.prepare(`DELETE FROM diagnostics_log_objects WHERE id IN (${placeholders})`)
+        .bind(...ids).run();
     } catch (x) {
-      console.error('batch r2 deletion failed', x);
+      console.error('batch r2 deletion failed', x instanceof Error ? x.message : String(x));
     }
-    const placeholders = ids.map(() => '?').join(',');
-    await e.DB.prepare(`DELETE FROM diagnostics_log_objects WHERE id IN (${placeholders})`)
-      .bind(...ids).run();
   }
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
@@ -7038,7 +7028,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         WHERE u.status = 'active'
           AND (u.expires_at IS NULL OR u.expires_at > ?)
           AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
-          AND NOT EXISTS (SELECT 1 FROM device_exit_credentials WHERE user_id = u.id)
+          AND NOT EXISTS (SELECT 1 FROM devices WHERE devices.user_id = u.id)
         ORDER BY user_id`,
     ).bind(t, t).all<Row>();
     return Response.json({
@@ -7046,6 +7036,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       // roster: applying an empty list as if it were current would remove every
       // managed client from every node at once.
       observedAt: t,
+      retireSharedLegacy: true,
       clients: rows.results.map((row) => ({
         userId: String(row.user_id),
         deviceId: row.device_id ? String(row.device_id) : undefined,
@@ -8066,7 +8057,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         WHERE u.status = 'active'
           AND (u.expires_at IS NULL OR u.expires_at > ?)
           AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
-          AND NOT EXISTS (SELECT 1 FROM device_exit_credentials WHERE user_id = u.id)
+          AND NOT EXISTS (SELECT 1 FROM devices WHERE devices.user_id = u.id)
         ORDER BY user_id`,
     ).bind(t, t).all<Row>();
     return Response.json({
@@ -8074,6 +8065,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       // roster: applying an empty list as if it were current would disconnect
       // every account at once.
       observedAt: t,
+      retireSharedLegacy: true,
       identities: rows.results.map((row) => ({
         userId: String(row.user_id),
         deviceId: row.device_id ? String(row.device_id) : undefined,

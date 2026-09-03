@@ -6723,5 +6723,72 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(afterUUIDs).not.toContain(cred1.client_uuid);
       expect(afterUUIDs).toContain(cred2.client_uuid);
     });
+
+    it('revoking the only device drops all credentials from roster without reviving legacy UUID', async () => {
+      const getCat = await admin('exit-catalog', undefined, 'GET');
+      const curRev = getCat.status === 200 ? Number(((await getCat.json()) as any).revision) : 0;
+      const yaml = `proxies:
+  - name: Tono-Exit
+    type: vless
+    server: exit.example.com
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+      await admin('exit-catalog', { yaml, expectedRevision: curRev }, 'PUT');
+
+      const email = `solo-${Date.now()}@example.com`;
+      const devRes = await emailSignIn({
+        email,
+        deviceName: 'Solo Machine',
+        installationId: `inst-solo-${Date.now()}`,
+      });
+      expect(devRes.status).toBe(200);
+      const dev = await devRes.json() as any;
+
+      // Seed a legacy exit_credentials row to simulate an account that had a legacy UUID
+      const legacyUUID = '12345678-1234-4234-8234-1234567890ab';
+      await env.DB.prepare('INSERT OR REPLACE INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?, ?, ?)')
+        .bind(dev.user.id, legacyUUID, 1700000000).run();
+
+      // Fetch catalog to mint device_exit_credentials
+      const catRes = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${dev.accessToken}` },
+      });
+      expect(catRes.status).toBe(200);
+
+      const devCred = await env.DB.prepare('SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?').bind(dev.device.id).first<any>();
+      expect(devCred).toBeTruthy();
+
+      // The exit roster must contain the device UUID and NOT the legacy UUID
+      const roster1 = await (await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${HOME_TOKEN}` },
+      })).json() as any;
+      const uids1 = roster1.identities.filter((e: any) => e.userId === dev.user.id);
+      expect(uids1.map((e: any) => e.clientUUID)).toEqual([devCred.client_uuid]);
+
+      // Revoke the only device
+      const delRes = await api(`devices/${dev.device.id}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${dev.accessToken}` },
+      });
+      expect(delRes.status).toBe(204);
+
+      // Now query the roster again: it must return ZERO entries for this user!
+      // The legacy UUID must NOT revive!
+      const roster2 = await (await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${HOME_TOKEN}` },
+      })).json() as any;
+      const uids2 = roster2.identities.filter((e: any) => e.userId === dev.user.id);
+      expect(uids2).toEqual([]);
+
+      // Also check ops-ingest node-clients
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+      const roster3 = await (await api('ops-ingest/node-clients', {
+        headers: { authorization: 'Bearer collector-test-token-with-at-least-32-chars' },
+      })).json() as any;
+      const uids3 = roster3.clients.filter((e: any) => e.userId === dev.user.id);
+      expect(uids3).toEqual([]);
+    });
   });
 });

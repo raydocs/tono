@@ -828,6 +828,58 @@ class ApiHelpParsing(unittest.TestCase):
         self.assertIn("u:userA:dev2", wanted)
         self.assertIn("u:userB:dev3", wanted)
 
+    def test_multi_device_usage_is_summed_into_single_user_report(self) -> None:
+        totals = {
+            "u:userA:dev1": 300,
+            "u:userA:dev2": 700,
+            "u:userB:dev3": 500,
+        }
+        aggregated = agent.aggregate_user_totals(totals)
+        self.assertEqual(aggregated["userA"], 1000)
+        self.assertEqual(aggregated["userB"], 500)
+
+        reports = [
+            {"userId": "userA", "sourceId": "node1", "totalBytes": 1000, "reportId": "r1"},
+            {"userId": "userB", "sourceId": "node1", "totalBytes": 500, "reportId": "r2"},
+        ]
+        merged = agent.merge_reports([], reports)
+        self.assertEqual(len(merged), 2)
+        userA_rep = next(r for r in merged if r["userId"] == "userA")
+        self.assertEqual(userA_rep["totalBytes"], 1000)
+
+    def test_retire_shared_legacy_removes_shared_legacy_when_requested(self) -> None:
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        removed_labels: list[str] = []
+        def mock_run_xray(binary, args):
+            for arg in args:
+                if arg.startswith("--email="):
+                    removed_labels.append(arg.split("=", 1)[1])
+            return Result()
+
+        commands = {"add_user": "adu", "remove_user": "rmu", "stats_query": "stats"}
+        with patch.object(agent, "run_xray", side_effect=mock_run_xray):
+            agent.reconcile(
+                Path("/unused"), commands, "127.0.0.1:10085", "inbound",
+                [], {"shared-legacy", "u:old_user"}, None,
+                retire_shared_legacy=False,
+            )
+            self.assertIn("u:old_user", removed_labels)
+            self.assertNotIn("shared-legacy", removed_labels)
+
+            removed_labels.clear()
+
+            agent.reconcile(
+                Path("/unused"), commands, "127.0.0.1:10085", "inbound",
+                [], {"shared-legacy", "u:old_user"}, None,
+                retire_shared_legacy=True,
+            )
+            self.assertIn("u:old_user", removed_labels)
+            self.assertIn("shared-legacy", removed_labels)
+
 
 if __name__ == "__main__":
     unittest.main()

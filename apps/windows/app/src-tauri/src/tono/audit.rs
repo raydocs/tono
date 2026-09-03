@@ -456,12 +456,15 @@ struct SettingsFile {
     /// User can disable in Settings; missing/corrupt files read as enabled.
     #[serde(default = "default_true")]
     periodic_telemetry_enabled: bool,
-    /// Default ON during the test programme: uploads the audit log itself, which
-    /// unlike the timeline above carries hostnames, process names and routes. It
-    /// is a separate flag from `periodic_telemetry_enabled` on purpose — one
-    /// consent must not stand in for a materially larger disclosure.
+    /// Default OFF: uploads the audit log itself, which carries hostnames,
+    /// process names and routes. Kept off by default to protect user privacy
+    /// and eliminate continuous D1/R2 storage consumption.
     #[serde(default)]
     network_log_upload_enabled: bool,
+    /// Migration flag: ensures existing installations that previously inherited
+    /// default-on are transitioned to default-off unless explicitly re-enabled.
+    #[serde(default)]
+    network_log_default_v2: bool,
 }
 
 impl Default for SettingsFile {
@@ -470,15 +473,22 @@ impl Default for SettingsFile {
             audit_enabled: true,
             periodic_telemetry_enabled: true,
             network_log_upload_enabled: false,
+            network_log_default_v2: true,
         }
     }
 }
 
 fn load_settings(dir: &Path) -> SettingsFile {
-    std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
+    let mut settings = std::fs::read_to_string(dir.join(SETTINGS_FILE_NAME))
         .ok()
         .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if !settings.network_log_default_v2 {
+        settings.network_log_upload_enabled = false;
+        settings.network_log_default_v2 = true;
+        let _ = save_settings(dir, &settings);
+    }
+    settings
 }
 
 /// Default is ON (macOS parity): a missing or corrupt settings file reads

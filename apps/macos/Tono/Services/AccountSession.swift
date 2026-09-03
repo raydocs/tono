@@ -1015,10 +1015,7 @@ final class AccountSession {
     /// its own switch and its own Settings copy, as does the periodic protection
     /// snapshot below.
     private func updateDiagnosticsLogUploading() {
-        let enabled = AppProfile.defaults
-            .object(forKey: SettingsKey.networkLogUploadEnabled) == nil
-            ? false
-            : AppProfile.defaults.bool(forKey: SettingsKey.networkLogUploadEnabled)
+        let enabled = SettingsKey.isNetworkLogUploadEnabled()
         guard state == .ready, !systemSleeping, user != nil, enabled else {
             if let uploader = diagnosticsLogUploader {
                 Task { await uploader.stop() }

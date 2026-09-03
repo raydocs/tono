@@ -28,6 +28,17 @@ enum SettingsKey {
     /// for the other.
     nonisolated static let networkLogUploadEnabled =
         "networkLogUploadEnabled"
+    nonisolated static let networkLogDefaultV2Applied =
+        "networkLogDefaultV2Applied"
+
+    nonisolated static func isNetworkLogUploadEnabled() -> Bool {
+        if !AppProfile.defaults.bool(forKey: networkLogDefaultV2Applied) {
+            AppProfile.defaults.set(false, forKey: networkLogUploadEnabled)
+            AppProfile.defaults.set(true, forKey: networkLogDefaultV2Applied)
+            return false
+        }
+        return AppProfile.defaults.bool(forKey: networkLogUploadEnabled)
+    }
     /// Whether a crash from the previous run may be named in the diagnostic
     /// snapshot this client already sends every twenty minutes.
     ///
