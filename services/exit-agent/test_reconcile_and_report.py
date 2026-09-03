@@ -215,7 +215,7 @@ class RestartMarkerRound(unittest.TestCase):
         def fake_env(name: str, *, required: bool = True) -> str:
             values = {
                 "TONO_HOME_AGENT_TOKEN": "agent-token",
-                "TONO_EXIT_SOURCE_ID": "node-under-test",
+                "TONO_SOURCE_ID": "node-under-test",
             }
             value = values.get(name, "")
             if not value and required:
@@ -235,11 +235,16 @@ class RestartMarkerRound(unittest.TestCase):
              patch.object(agent, "inbound_tag", return_value="vless-in"), \
              patch.object(agent, "state_path", return_value=path), \
              patch.object(agent, "require_commands", return_value={"stats_query": "statsquery"}), \
-             patch.object(agent, "fetch_roster", return_value=(1_700_000_000, [])), \
+             patch.object(
+                 agent,
+                 "fetch_roster",
+                 return_value=("node-under-test", 1_700_000_000, [], False),
+             ), \
              patch.object(agent, "installed_clients", return_value={"u:alice"}), \
              patch.object(agent, "reconcile", return_value=(0, 0, {"u:alice"})), \
              patch.object(agent, "read_counters", side_effect=readings), \
              patch.object(agent, "xray_start_marker", side_effect=markers), \
+             patch.object(agent, "acknowledge_roster"), \
              patch.object(agent, "deliver_queue", side_effect=fake_deliver):
             for _ in range(round_count if round_count is not None else len(readings)):
                 agent.main()
@@ -289,6 +294,7 @@ class RosterValidation(unittest.TestCase):
         # Two accounts on one identity is the state this whole system exists to
         # end: their counters would merge and usage would be unattributable again.
         payload = {
+            "nodeId": "exit-node-a",
             "observedAt": 1,
             "identities": [
                 {"userId": "a", "clientUUID": "11111111-1111-4111-8111-111111111111"},
@@ -300,23 +306,55 @@ class RosterValidation(unittest.TestCase):
 
     def test_a_malformed_identity_is_refused(self) -> None:
         payload = {
+            "nodeId": "exit-node-a",
             "observedAt": 1,
             "identities": [{"userId": "a", "clientUUID": "not-a-uuid"}],
         }
         with self.assertRaises(agent.Refusal):
             self._parse(payload)
 
+    def test_a_present_but_invalid_device_id_is_not_downgraded_to_legacy(self) -> None:
+        payload = {
+            "nodeId": "exit-node-a",
+            "observedAt": 1,
+            "identities": [{
+                "userId": "a",
+                "deviceId": "",
+                "clientUUID": "11111111-1111-4111-8111-111111111111",
+            }],
+        }
+        with self.assertRaises(agent.Refusal):
+            self._parse(payload)
+
     def test_a_valid_roster_is_accepted(self) -> None:
         payload = {
+            "nodeId": "exit-node-a",
             "observedAt": 7,
             "identities": [
                 {"userId": "a", "clientUUID": "11111111-1111-4111-8111-111111111111"},
                 {"userId": "b", "clientUUID": "22222222-2222-4222-8222-222222222222"},
             ],
         }
-        observed_at, roster = self._parse(payload)
+        node_id, observed_at, roster, retire_shared_legacy = self._parse(payload)
+        self.assertEqual(node_id, "exit-node-a")
         self.assertEqual(observed_at, 7)
         self.assertEqual([entry["userId"] for entry in roster], ["a", "b"])
+        self.assertFalse(retire_shared_legacy)
+
+    def test_a_roster_without_an_authenticated_node_id_is_refused(self) -> None:
+        with self.assertRaises(agent.Refusal):
+            self._parse({"observedAt": 7, "identities": []})
+
+    def test_the_shared_legacy_retirement_signal_is_returned(self) -> None:
+        self.assertEqual(
+            self._parse({
+                "nodeId": "exit-node-a",
+                "observedAt": 7,
+                "retireSharedLegacy": True,
+                "identities": [],
+            }),
+            ("exit-node-a", 7, [], True),
+        )
 
     def _parse(self, payload: dict):
         # Exercises the validation without a network round trip by standing in for
@@ -339,6 +377,114 @@ class RosterValidation(unittest.TestCase):
             agent.urllib.request.urlopen = original
 
 
+class RosterControlSignals(unittest.TestCase):
+    def run_round(
+        self,
+        *,
+        server_retire: bool,
+        override: str | None = None,
+        ack_error: Exception | None = None,
+        reconcile_error: Exception | None = None,
+        inventory_known: bool = True,
+    ):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        environment = {
+            "TONO_HOME_AGENT_TOKEN": "node-token",
+            "TONO_SOURCE_ID": "exit-node-a",
+        }
+        if override is not None:
+            environment["TONO_RETIRE_SHARED_LEGACY"] = override
+
+        reconcile_result = (0, 0, set() if inventory_known else None, {}, None)
+        with patch.dict(agent.os.environ, environment, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "api_address", return_value="127.0.0.1:10085"), \
+             patch.object(agent, "inbound_tag", return_value="vless-in"), \
+             patch.object(agent, "require_commands", return_value={"stats_query": "statsquery"}), \
+             patch.object(
+                 agent,
+                 "fetch_roster",
+                 return_value=("exit-node-a", 1_700_000_000, [], server_retire),
+             ), \
+             patch.object(
+                 agent,
+                 "reconcile_and_read_stable",
+                 return_value=reconcile_result,
+                 side_effect=reconcile_error,
+             ) as reconcile, \
+             patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge:
+            if ack_error or reconcile_error or not inventory_known:
+                with self.assertRaises(agent.Refusal):
+                    agent.run_once(path)
+            else:
+                agent.run_once(path)
+        return path, reconcile, acknowledge
+
+    def test_an_unset_override_follows_the_server_retirement_signal(self) -> None:
+        _, reconcile, acknowledge = self.run_round(server_retire=True)
+        self.assertTrue(reconcile.call_args.kwargs["retire_shared_legacy"])
+        acknowledge.assert_called_once_with(
+            "https://control.example", "node-token", 1_700_000_000,
+        )
+
+    def test_an_explicit_false_override_blocks_server_retirement(self) -> None:
+        _, reconcile, _ = self.run_round(server_retire=True, override="false")
+        self.assertFalse(reconcile.call_args.kwargs["retire_shared_legacy"])
+
+    def test_an_ack_failure_does_not_persist_the_round(self) -> None:
+        path, _, _ = self.run_round(
+            server_retire=False,
+            ack_error=agent.Refusal("roster ack failed"),
+        )
+        self.assertFalse(path.exists())
+
+    def test_a_failed_reconcile_is_never_acknowledged(self) -> None:
+        _, _, acknowledge = self.run_round(
+            server_retire=False,
+            reconcile_error=agent.Refusal("xray reconcile failed"),
+        )
+        acknowledge.assert_not_called()
+
+    def test_an_unverifiable_live_client_inventory_is_never_acknowledged(self) -> None:
+        path, _, acknowledge = self.run_round(
+            server_retire=True,
+            inventory_known=False,
+        )
+
+        acknowledge.assert_not_called()
+        self.assertFalse(path.exists())
+
+    def test_a_token_bound_to_another_source_stops_before_reconciliation(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        state = {
+            **fresh_state(),
+            "sourceId": "exit-node-a",
+        }
+        path.write_text(json.dumps(state), encoding="utf-8")
+        with patch.dict(agent.os.environ, {
+                 "TONO_HOME_AGENT_TOKEN": "node-token",
+                 "TONO_SOURCE_ID": "exit-node-a",
+             }, clear=True), \
+             patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "xray_binary", return_value=Path("/unused/xray")), \
+             patch.object(agent, "require_commands", return_value={}), \
+             patch.object(
+                 agent,
+                 "fetch_roster",
+                 return_value=("exit-node-b", 1_700_000_000, [], False),
+             ), \
+             patch.object(agent, "reconcile_and_read_stable") as reconcile:
+            with self.assertRaises(agent.Refusal):
+                agent.run_once(path)
+        reconcile.assert_not_called()
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), state)
+
+
 class Labels(unittest.TestCase):
     def test_the_label_written_is_the_label_the_control_plane_issues(self) -> None:
         # The control plane hands out `u:<userId>` and the fleet audit counts
@@ -356,6 +502,16 @@ class Labels(unittest.TestCase):
 
 
 class SourceIdentity(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = patch.dict(agent.os.environ, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_source_can_be_the_control_plane_exit_node_id(self) -> None:
+        state = fresh_state()
+        with patch.dict(agent.os.environ, {"TONO_SOURCE_ID": "exit_node_123"}, clear=True):
+            self.assertEqual(agent.source_id(state), "exit_node_123")
+
     def test_the_source_is_the_machine_identity_and_does_not_change_per_run(self) -> None:
         # A source that changed per run would read on the server as a new exit
         # each time, and the same account would be counted once per run.
@@ -401,19 +557,28 @@ class SourceIdentity(unittest.TestCase):
             with self.assertRaises(agent.Refusal):
                 agent.source_id(fresh_state())
 
-    def test_a_changed_source_counts_from_here_rather_than_reporting_again(self) -> None:
-        # The server keeps one cumulative figure per source, so a rename is a new
-        # counter starting at zero. Re-anchoring the local totals is what stops
-        # the exit's whole history being billed a second time under the new name.
+    def test_a_changed_source_is_refused_without_mutating_billing_state(self) -> None:
+        # A rename cannot be made exactly-once: an old queued cumulative report
+        # may or may not already have reached the old ledger. Rewriting it under
+        # the new source can double-charge history; dropping it can lose usage.
+        # Provision the node with this durable source identity instead.
         state = fresh_state()
         state["sourceId"] = "old-node"
         state["totals"] = {"u:usr_1": 900}
         state["counterBaseline"] = {"u:usr_1": 900}
+        state["userTotals"] = {"usr_1": 900}
+        state["pendingReports"] = [{
+            "reportId": "pending-1",
+            "userId": "usr_1",
+            "sourceId": "old-node",
+            "totalBytes": 900,
+            "observedAt": 10,
+        }]
+        before = json.loads(json.dumps(state))
         with patch.object(agent, "machine_identity", return_value="new-node"):
-            self.assertEqual(agent.source_id(state), "new-node")
-        self.assertEqual(state["totals"], {"u:usr_1": 0})
-        # And what it measures from here is only what happens from here.
-        self.assertEqual(agent.lifetime_totals(state, {"u:usr_1": 950}), {"u:usr_1": 50})
+            with self.assertRaises(agent.Refusal):
+                agent.source_id(state)
+        self.assertEqual(state, before)
 
 
 class MultipleExits(unittest.TestCase):
@@ -437,6 +602,121 @@ class MultipleExits(unittest.TestCase):
         self.assertEqual({report["sourceId"] for report in reports}, {"exit-a", "exit-b"})
         self.assertEqual({report["userId"] for report in reports}, {"usr_1"})
         self.assertEqual(sum(report["totalBytes"] for report in reports), 1000)
+
+    def test_report_timestamps_follow_the_roster_clock_and_remain_strictly_monotonic(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        path.write_text(json.dumps(fresh_state()), encoding="utf-8")
+        delivered: list[dict] = []
+
+        def fake_deliver(base: str, token: str, queue_path: Path, state: dict):
+            delivered.extend(dict(report) for report in state["pendingReports"])
+            count = len(state["pendingReports"])
+            state["pendingReports"] = []
+            agent.save_state(queue_path, state)
+            return count, 0
+
+        stable_rounds = [
+            (0, 0, {"u:usr_1"}, {"u:usr_1": 10}, None),
+            (0, 0, {"u:usr_1"}, {"u:usr_1": 20}, None),
+        ]
+        with patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "env", return_value="node-token"), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "require_commands", return_value={}), \
+             patch.object(
+                 agent,
+                 "fetch_roster",
+                 return_value=("node-token", 500, [], False),
+             ), \
+             patch.object(agent, "reconcile_and_read_stable", side_effect=stable_rounds), \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "deliver_queue", side_effect=fake_deliver), \
+             patch.object(agent.time, "time", return_value=100):
+            agent.run_once(path)
+            agent.run_once(path)
+
+        self.assertEqual(
+            [report["observedAt"] for report in delivered],
+            [500, 501],
+            "the control-plane roster clock must survive a backwards local clock and same-second runs",
+        )
+        self.assertEqual([report.get("protocolVersion") for report in delivered], [2, 2])
+
+    def test_a_timestamp_beyond_the_server_window_keeps_usage_uncommitted(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        initial = {
+            **fresh_state(),
+            "sourceId": "node-under-test",
+            "lastReportObservedAt": 1_000,
+        }
+        path.write_text(json.dumps(initial), encoding="utf-8")
+
+        with patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "env", return_value="node-under-test"), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "require_commands", return_value={}), \
+             patch.object(
+                 agent,
+                 "fetch_roster",
+                 return_value=("node-under-test", 100, [], False),
+             ), \
+             patch.object(
+                 agent,
+                 "reconcile_and_read_stable",
+                 return_value=(0, 0, {"u:usr_1"}, {"u:usr_1": 10}, None),
+             ), \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "deliver_queue", return_value=(1, 0)) as deliver:
+            with self.assertRaises(agent.Refusal):
+                agent.run_once(path)
+
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), initial)
+        deliver.assert_not_called()
+
+    def test_a_queued_future_timestamp_is_not_dropped_on_replay(self) -> None:
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "state.json"
+        initial = {
+            **fresh_state(),
+            "sourceId": "node-under-test",
+            "lastReportObservedAt": 1_000,
+            "pendingReports": [{
+                "reportId": "future-1",
+                "userId": "usr_1",
+                "sourceId": "node-under-test",
+                "totalBytes": 10,
+                "observedAt": 1_000,
+            }],
+        }
+        path.write_text(json.dumps(initial), encoding="utf-8")
+
+        with patch.object(agent, "api_base", return_value="https://control.example"), \
+             patch.object(agent, "env", return_value="node-under-test"), \
+             patch.object(agent, "xray_binary", return_value=Path("/xray")), \
+             patch.object(agent, "require_commands", return_value={}), \
+             patch.object(
+                 agent,
+                 "fetch_roster",
+                 return_value=("node-under-test", 100, [], False),
+             ), \
+             patch.object(
+                 agent,
+                 "reconcile_and_read_stable",
+                 return_value=(0, 0, set(), {}, None),
+             ) as reconcile, \
+             patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "deliver_queue", return_value=(1, 0)) as deliver:
+            with self.assertRaises(agent.Refusal):
+                agent.run_once(path)
+
+        reconcile.assert_not_called()
+        deliver.assert_not_called()
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), initial)
 
     def test_a_queued_report_is_superseded_only_within_its_own_source(self) -> None:
         # Collapsing the queue across sources would drop one exit's figure in
@@ -494,7 +774,7 @@ class ReconcileSafety(unittest.TestCase):
     def test_a_verified_empty_roster_removes_only_managed_clients(self) -> None:
         added, removed, installed = self.reconcile([], {"u:usr_1", agent.LEGACY_CLIENT_EMAIL}, None)
         self.assertEqual((added, removed), (0, 1))
-        self.assertEqual(installed, set())
+        self.assertEqual(installed, {agent.LEGACY_CLIENT_EMAIL})
         self.assertEqual(len(self.calls), 1)
         self.assertIn("--email=u:usr_1", self.calls[0])
 
@@ -521,8 +801,18 @@ class ReconcileSafety(unittest.TestCase):
         )
         self.assertEqual(removed, 0)
         self.assertEqual(added, 1)
-        self.assertEqual(installed, {"u:usr_1"})
+        self.assertIsNone(installed)
         self.assertTrue(all("rmu" not in call for call in self.calls))
+
+    def test_dual_phase_remembers_shared_legacy_until_it_is_retired(self) -> None:
+        added, removed, installed = self.reconcile(
+            [{"userId": "usr_1", "clientUUID": "11111111-1111-4111-8111-111111111111"}],
+            {"u:usr_1", agent.LEGACY_CLIENT_EMAIL},
+            None,
+        )
+
+        self.assertEqual((added, removed), (0, 0))
+        self.assertEqual(installed, {"u:usr_1", agent.LEGACY_CLIENT_EMAIL})
 
     def test_an_account_still_on_the_roster_is_never_removed(self) -> None:
         added, removed, _ = self.reconcile(
@@ -532,6 +822,26 @@ class ReconcileSafety(unittest.TestCase):
         )
         self.assertEqual((added, removed), (0, 0))
         self.assertEqual(self.calls, [])
+
+    def test_a_rotated_device_credential_removes_the_old_generation_before_adding_the_new_one(self) -> None:
+        old_uuid = "11111111-1111-4111-8111-111111111111"
+        new_uuid = "22222222-2222-4222-8222-222222222222"
+        old_label = agent.client_label("usr_1", "device_1", old_uuid)
+        new_label = agent.client_label("usr_1", "device_1", new_uuid)
+
+        added, removed, installed = self.reconcile(
+            [{"userId": "usr_1", "deviceId": "device_1", "clientUUID": new_uuid}],
+            {old_label},
+            {old_label},
+        )
+
+        self.assertEqual((added, removed), (1, 1))
+        self.assertEqual(installed, {new_label})
+        self.assertIn(f"--email={old_label}", self.calls[0])
+        self.assertIn("rmu", self.calls[0])
+        self.assertIn(f"--email={new_label}", self.calls[1])
+        self.assertIn(f"--uuid={new_uuid}", self.calls[1])
+        self.assertIn("adu", self.calls[1])
 
     def test_only_this_agent_s_own_namespace_is_ever_removed(self) -> None:
         added, removed, _ = self.reconcile(
@@ -688,10 +998,15 @@ class Delivery(unittest.TestCase):
 
     def test_one_report_the_server_refuses_does_not_block_the_rest(self) -> None:
         # A permanent rejection used to wedge the meter: the same batch was
-        # offered every run and refused every run. The figure is cumulative, so
-        # the account's next report carries these bytes again.
+        # offered every run and refused every run. The figure is cumulative, but
+        # an idle account has no "next" growth: forget only its local reported
+        # watermark so the same cumulative total is regenerated next round.
         state = fresh_state()
         state["pendingReports"] = self.queue(4)
+        state["userTotals"] = {
+            report["userId"]: report["totalBytes"]
+            for report in state["pendingReports"]
+        }
 
         def responder(_base, _token, reports):
             if any(report["userId"] == "usr_2" for report in reports):
@@ -700,6 +1015,8 @@ class Delivery(unittest.TestCase):
         delivered, dropped = self.deliver_queue(state, responder)
         self.assertEqual((delivered, dropped), (3, 1))
         self.assertEqual(state["pendingReports"], [])
+        self.assertNotIn("usr_2", state["userTotals"])
+        self.assertEqual(state["userTotals"]["usr_1"], 11)
 
     def test_a_transient_failure_is_retried_rather_than_losing_the_round(self) -> None:
         import io
@@ -804,9 +1121,21 @@ class ApiHelpParsing(unittest.TestCase):
         self.assertNotIn("list_users", resolved)
 
     def test_device_scoped_client_labels_and_attributed_user(self) -> None:
-        label = agent.client_label("user123", "device456")
-        self.assertEqual(label, "u:user123:device456")
+        credential = "11111111-1111-4111-8111-111111111111"
+        label = agent.client_label("user123", "device456", credential)
+        self.assertEqual(
+            label,
+            "u:user123:device456:"
+            "bd7662a5eeb41614e720d477abfcb2272e19a8a70a93b7e3bc8560d44ad326e9",
+        )
+        self.assertNotIn(credential, label)
         self.assertEqual(agent.attributed_user(label), "user123")
+        self.assertNotEqual(
+            label,
+            agent.client_label(
+                "user123", "device456", "22222222-2222-4222-8222-222222222222"
+            ),
+        )
 
         # Legacy without device_id
         legacy_label = agent.client_label("user123")
@@ -820,19 +1149,32 @@ class ApiHelpParsing(unittest.TestCase):
             {"userId": "userB", "deviceId": "dev3", "clientUUID": "00000000-0000-0000-0000-000000000003"},
         ]
         wanted = {
-            agent.client_label(e["userId"], e.get("deviceId")): e["clientUUID"]
+            agent.client_label(e["userId"], e.get("deviceId"), e["clientUUID"]): e["clientUUID"]
             for e in roster
         }
         self.assertEqual(len(wanted), 3)
-        self.assertIn("u:userA:dev1", wanted)
-        self.assertIn("u:userA:dev2", wanted)
-        self.assertIn("u:userB:dev3", wanted)
+        self.assertEqual({agent.attributed_user(label) for label in wanted}, {"userA", "userB"})
+        self.assertTrue(
+            all(
+                not any(entry["clientUUID"] in label for label in wanted)
+                for entry in roster
+            )
+        )
 
     def test_multi_device_usage_is_summed_into_single_user_report(self) -> None:
+        device_a1 = agent.client_label(
+            "userA", "dev1", "00000000-0000-0000-0000-000000000001"
+        )
+        device_a2 = agent.client_label(
+            "userA", "dev2", "00000000-0000-0000-0000-000000000002"
+        )
+        device_b = agent.client_label(
+            "userB", "dev3", "00000000-0000-0000-0000-000000000003"
+        )
         totals = {
-            "u:userA:dev1": 300,
-            "u:userA:dev2": 700,
-            "u:userB:dev3": 500,
+            device_a1: 300,
+            device_a2: 700,
+            device_b: 500,
         }
         aggregated = agent.aggregate_user_totals(totals)
         self.assertEqual(aggregated["userA"], 1000)

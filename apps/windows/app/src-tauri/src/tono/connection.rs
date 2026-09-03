@@ -5000,7 +5000,7 @@ fn controller_direct_graph_is_active(
     }
 
     // The owned runtime has no user-supplied rules: two loopback exceptions, the
-    // exact home-process pins (names plus path fragments), one row per staged
+    // exact home pins (domains/IPs first, then process names/path fragments), one row per staged
     // AND selector, and a single final MATCH. Requiring the complete
     // cardinality/order rejects broad, missing, duplicated, or stale DIRECT
     // selectors. With home-broadband split routing the home block also carries
@@ -5034,26 +5034,6 @@ fn controller_direct_graph_is_active(
     // Home pins are TCP-scoped ANDs so assistant UDP falls through to the REJECT
     // row instead of matching a group that cannot carry it and leaking DIRECT.
     let mut index = 2;
-    for process in config::HOME_PROCESS_NAMES {
-        expect_rule(
-            rules.get(index),
-            index,
-            "AND",
-            &format!("((Network,tcp) && (ProcessName,{process}))"),
-            claude_target,
-        )?;
-        index += 1;
-    }
-    for regex in &home_path_regexes {
-        expect_rule(
-            rules.get(index),
-            index,
-            "AND",
-            &format!("((Network,tcp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
-            claude_target,
-        )?;
-        index += 1;
-    }
     if claude_home {
         for domain in config::CLAUDE_HOME_DOMAINS {
             expect_rule(
@@ -5075,6 +5055,26 @@ fn controller_direct_graph_is_active(
             )?;
             index += 1;
         }
+    }
+    for process in config::HOME_PROCESS_NAMES {
+        expect_rule(
+            rules.get(index),
+            index,
+            "AND",
+            &format!("((Network,tcp) && (ProcessName,{process}))"),
+            claude_target,
+        )?;
+        index += 1;
+    }
+    for regex in &home_path_regexes {
+        expect_rule(
+            rules.get(index),
+            index,
+            "AND",
+            &format!("((Network,tcp) && ({MIHOMO_PROCESS_PATH_REGEX_TYPE},{regex}))"),
+            claude_target,
+        )?;
+        index += 1;
     }
     for (offset, expected) in expected_direct_rules.iter().enumerate() {
         let rule_index = index + offset;
@@ -7669,20 +7669,6 @@ mod tests {
 
     fn home_controller_rules(proxy: &str, include_domains: bool) -> Vec<serde_json::Value> {
         let mut rules = Vec::new();
-        for process in tono_core::config::HOME_PROCESS_NAMES {
-            rules.push(serde_json::json!({
-                "type": "AND",
-                "payload": format!("((Network,tcp) && (ProcessName,{process}))"),
-                "proxy": proxy,
-            }));
-        }
-        for regex in tono_core::config::home_process_path_regexes() {
-            rules.push(serde_json::json!({
-                "type": "AND",
-                "payload": format!("((Network,tcp) && ({},{regex}))", super::MIHOMO_PROCESS_PATH_REGEX_TYPE),
-                "proxy": proxy,
-            }));
-        }
         if include_domains {
             for domain in tono_core::config::CLAUDE_HOME_DOMAINS {
                 rules.push(serde_json::json!({
@@ -7698,6 +7684,20 @@ mod tests {
                     "proxy": proxy,
                 }));
             }
+        }
+        for process in tono_core::config::HOME_PROCESS_NAMES {
+            rules.push(serde_json::json!({
+                "type": "AND",
+                "payload": format!("((Network,tcp) && (ProcessName,{process}))"),
+                "proxy": proxy,
+            }));
+        }
+        for regex in tono_core::config::home_process_path_regexes() {
+            rules.push(serde_json::json!({
+                "type": "AND",
+                "payload": format!("((Network,tcp) && ({},{regex}))", super::MIHOMO_PROCESS_PATH_REGEX_TYPE),
+                "proxy": proxy,
+            }));
         }
         rules
     }

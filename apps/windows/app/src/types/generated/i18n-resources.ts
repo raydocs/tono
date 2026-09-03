@@ -1383,12 +1383,14 @@ export interface TranslationResources {
           checkingDesc: string
           clearAction: string
           clearing: string
+          clearPartial: string
           clearSuccess: string
           conflictDesc: string
           conflictDetected: string
           ready: string
           readyDesc: string
           recheck: string
+          restartNotice: string
           title: string
         }
         title: string

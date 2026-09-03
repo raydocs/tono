@@ -266,7 +266,7 @@ const PrivacyCard = () => {
   })
 
   const handlePeriodicTelemetry = useLockFn(async (value: boolean) => {
-    const previous = periodicTelemetryEnabled ?? true
+    const previous = periodicTelemetryEnabled ?? false
     setCacheData(tonoPeriodicTelemetryEnabledQueryKey, value)
     try {
       await tonoSetPeriodicTelemetryEnabled(value)
@@ -277,7 +277,7 @@ const PrivacyCard = () => {
   })
 
   const handleNetworkLogUpload = useLockFn(async (value: boolean) => {
-    const previous = networkLogUploadEnabled ?? true
+    const previous = networkLogUploadEnabled ?? false
     setCacheData(tonoNetworkLogUploadEnabledQueryKey, value)
     try {
       await tonoSetNetworkLogUploadEnabled(value)
@@ -320,7 +320,7 @@ const PrivacyCard = () => {
         subtitle={t('settings.sections.tono.periodicTelemetry.description')}
       >
         <TonoToggle
-          checked={periodicTelemetryEnabled ?? true}
+          checked={periodicTelemetryEnabled ?? false}
           onChange={(value) => void handlePeriodicTelemetry(value)}
           label={t('settings.sections.tono.periodicTelemetry.label')}
         />
@@ -330,7 +330,7 @@ const PrivacyCard = () => {
         subtitle={t('settings.sections.tono.networkLogUpload.description')}
       >
         <TonoToggle
-          checked={networkLogUploadEnabled ?? true}
+          checked={networkLogUploadEnabled ?? false}
           onChange={(value) => void handleNetworkLogUpload(value)}
           label={t('settings.sections.tono.networkLogUpload.label')}
         />

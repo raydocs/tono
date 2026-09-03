@@ -1438,29 +1438,61 @@ const CLIENT_UUID_PLACEHOLDER = '{{TONO_CLIENT_UUID}}';
 /// tampered catalog every time.
 async function exitClientUUID(e: Env, userId: string, deviceId?: string | null): Promise<string> {
   if (deviceId) {
-    const existing = await e.DB.prepare(
-      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
-    ).bind(deviceId).first<Row>();
-    if (existing) return String(existing.client_uuid);
-    const minted = crypto.randomUUID();
     await e.DB.prepare(
-      'INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at) VALUES(?,?,?,?)',
-    ).bind(deviceId, userId, minted, now()).run();
+      `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+       SELECT id, user_id, ?, ? FROM devices
+       WHERE id = ? AND user_id = ? AND status IN ('pending', 'active')`,
+    ).bind(crypto.randomUUID(), now(), deviceId, userId).run();
     const row = await e.DB.prepare(
-      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
-    ).bind(deviceId).first<Row>();
-    if (row) return String(row.client_uuid);
+      `SELECT credentials.client_uuid, credentials.created_at
+       FROM device_exit_credentials credentials
+       JOIN devices ON devices.id = credentials.device_id
+       WHERE credentials.device_id = ? AND credentials.user_id = ?
+         AND devices.status IN ('pending', 'active')`,
+    ).bind(deviceId, userId).first<Row>();
+    if (!row) {
+      throw new ApiError(409, 'DEVICE_STATE_CHANGED', 'Device is no longer active');
+    }
+    const readiness = await e.DB.prepare(
+      `SELECT COUNT(*) AS active_nodes,
+              SUM(CASE WHEN last_roster_at <= ? THEN 1 ELSE 0 END) AS unready_nodes
+       FROM exit_nodes WHERE status = 'active'`,
+    ).bind(Number(row.created_at)).first<Row>();
+    if (Number(readiness?.active_nodes ?? 0) < 1 || Number(readiness?.unready_nodes ?? 0) > 0) {
+      // During the dual phase, keep existing and newly logging-in clients on
+      // the per-user credential until the device credential is confirmed on
+      // every exit. This makes the first deployment non-disruptive: exit nodes
+      // and their tokens can only be provisioned after these endpoints exist.
+      if (await exitCredentialRolloutPhase(e) === 'dual') {
+        return exitClientUUID(e, userId, null);
+      }
+      throw new ApiError(
+        503,
+        'EXIT_IDENTITY_PROPAGATING',
+        'Exit identity is waiting for every active node to acknowledge it',
+      );
+    }
+    return String(row.client_uuid);
+  }
+  if (await exitCredentialRolloutPhase(e) === 'device_only') {
+    throw new ApiError(
+      409,
+      'DEVICE_IDENTITY_REQUIRED',
+      'Device-only exit credentials are active for this deployment',
+    );
   }
   const existing = await e.DB.prepare(
     'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
   ).bind(userId).first<Row>();
   if (existing) return String(existing.client_uuid);
   const minted = crypto.randomUUID();
-  // A racing request may have inserted first; that row is as good as this one,
-  // so adopt it rather than failing a catalog fetch over it.
+  // Legacy issuance remains available only while the explicit rollout state is
+  // dual. It supports old operator workflows but is never used by an
+  // authenticated device catalog, which always supplies deviceId above.
   await e.DB.prepare(
-    'INSERT OR IGNORE INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?,?,?)',
-  ).bind(userId, minted, now()).run();
+    `INSERT OR IGNORE INTO exit_credentials(user_id, client_uuid, created_at)
+     SELECT id, ?, ? FROM users WHERE id = ?`,
+  ).bind(minted, now(), userId).run();
   const row = await e.DB.prepare(
     'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
   ).bind(userId).first<Row>();
@@ -1478,9 +1510,18 @@ type CatalogRouting = {
 
 async function homeRoutingForUser(e: Env, userId: string) {
   const homes = await e.DB.prepare(
-    "SELECT proxy_name FROM home_exits WHERE status = 'active' AND kind = 'catalog'",
-  ).all<Row>();
-  const restricted = new Set(homes.results.map((item) => String(item.proxy_name)));
+    'SELECT proxy_names_json FROM home_exit_catalog_names WHERE singleton_id = 1',
+  ).first<Row>();
+  let proxyNames: unknown = [];
+  try {
+    proxyNames = JSON.parse(String(homes?.proxy_names_json ?? '[]'));
+  } catch {
+    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Home exit catalog index is invalid');
+  }
+  if (!Array.isArray(proxyNames) || proxyNames.some((name) => typeof name !== 'string')) {
+    throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Home exit catalog index is invalid');
+  }
+  const restricted = new Set(proxyNames);
   const binding = await e.DB.prepare(
     `SELECT home_exits.proxy_name, home_exits.kind,
             home_exits.socks5_host, home_exits.socks5_port,
@@ -1760,7 +1801,22 @@ function canonicalTrafficPolicy(value: unknown, trusted = false): TrafficPolicy 
     'sse.com.cn', 'szse.cn', 'zoom.us', 'zoom.com', 'zoomgov.com', 'oray.com',
     'sunlogin.com', 'edu.cn', '163.com', 'netease.com', '126.net',
   ];
-  const protectedSuffixes = ['anthropic.com', 'claude.ai', 'tono.app', 'tono.com'];
+  const protectedSuffixes = [
+    'anthropic.com', 'claude.ai', 'claude.com', 'claude.app', 'claude.site',
+    'clau.de', 'anthropic.ai', 'claudestudio.com', 'claudemcpclient.com',
+    'claudemcpcontent.com', 'claudeusercontent.com',
+    'servd-anthropic-website.b-cdn.net', 'challenges.cloudflare.com',
+    'cf-assets.www.cloudflare.com', 'cloudflareinsights.com',
+    'browser-intake-datadoghq.com', 'browser-intake-us5-datadoghq.com',
+    'browser-intake-us3-datadoghq.com', 'browser-intake-ap1-datadoghq.com',
+    'browser-intake-ap2-datadoghq.com', 'browser-intake-datadoghq.eu',
+    'browser-intake-ddog-gov.com',
+    'datadoghq.com', 'statsig.com', 'statsigapi.net', 'featuregates.org',
+    'growthbook.io', 'stripe.network', 'storage.googleapis.com',
+    'registry.npmjs.org', 'raw.githubusercontent.com', 'formulae.brew.sh',
+    'sentry.io',
+    'tono.app', 'tono.com',
+  ];
   const seenHosts = new Set<string>();
   const canonicalDomains = (
     values: unknown[],
@@ -1982,6 +2038,95 @@ async function privileged(req: Request, expected: string) {
   }
 }
 
+type ExitNodeIdentity = { id: string; name: string };
+
+async function authenticateExitNode(
+  req: Request,
+  e: Env,
+  allowLegacyRead = false,
+): Promise<ExitNodeIdentity | null> {
+  const token = bearer(req);
+  const tokenHash = await sha256(token);
+  const node = await e.DB.prepare(
+    `SELECT id, name FROM exit_nodes
+     WHERE token_hash = ? AND status = 'active'`,
+  ).bind(tokenHash).first<Row>();
+  if (node) return { id: String(node.id), name: String(node.name) };
+  if (allowLegacyRead && await exitCredentialRolloutPhase(e) === 'dual') {
+    await privileged(req, e.HOME_AGENT_TOKEN);
+    return null;
+  }
+  throw new ApiError(401, 'UNAUTHORIZED', 'Invalid exit node token');
+}
+
+async function exitCredentialRolloutPhase(e: Env): Promise<'dual' | 'device_only'> {
+  const row = await e.DB.prepare(
+    'SELECT phase FROM exit_credential_rollout WHERE singleton_id = 1',
+  ).first<Row>();
+  return row?.phase === 'device_only' ? 'device_only' : 'dual';
+}
+
+async function backfillDeviceExitCredentials(e: Env, limit = 50) {
+  const pending = await e.DB.prepare(
+    `SELECT devices.id, devices.user_id
+     FROM devices
+     LEFT JOIN device_exit_credentials ON device_exit_credentials.device_id = devices.id
+     WHERE devices.status IN ('pending', 'active')
+       AND device_exit_credentials.device_id IS NULL
+     ORDER BY devices.created_at, devices.id
+     LIMIT ?`,
+  ).bind(limit).all<Row>();
+  if (pending.results.length === 0) return 0;
+  const results = await e.DB.batch(pending.results.map((device) => e.DB.prepare(
+    `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+     SELECT id, user_id, ?, ? FROM devices
+     WHERE id = ? AND user_id = ? AND status IN ('pending', 'active')`,
+  ).bind(crypto.randomUUID(), now(), device.id, device.user_id)));
+  return results.reduce((total, result) => total + Number(result.meta.changes ?? 0), 0);
+}
+
+async function exitCredentialRoster(e: Env, timestamp: number) {
+  await backfillDeviceExitCredentials(e);
+  const phase = await exitCredentialRolloutPhase(e);
+  const legacyUnion = phase === 'dual'
+    ? `UNION
+       SELECT credentials.user_id AS user_id, NULL AS device_id,
+              credentials.client_uuid AS client_uuid
+         FROM exit_credentials credentials
+         JOIN users ON users.id = credentials.user_id
+        WHERE users.status = 'active'
+          AND (users.expires_at IS NULL OR users.expires_at > ?)
+          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
+          AND (
+            NOT EXISTS (SELECT 1 FROM devices WHERE devices.user_id = users.id)
+            OR EXISTS (
+              SELECT 1 FROM devices
+              WHERE devices.user_id = users.id
+                AND devices.status IN ('pending', 'active')
+            )
+          )`
+    : '';
+  const rows = await e.DB.prepare(
+    `SELECT credentials.user_id AS user_id, credentials.device_id AS device_id,
+            credentials.client_uuid AS client_uuid
+       FROM device_exit_credentials credentials
+       JOIN devices ON devices.id = credentials.device_id
+       JOIN users ON users.id = devices.user_id
+      WHERE devices.status IN ('pending', 'active')
+        AND users.status = 'active'
+        AND (users.expires_at IS NULL OR users.expires_at > ?)
+        AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
+     ${legacyUnion}
+      ORDER BY user_id, device_id`,
+  ).bind(...(phase === 'dual' ? [timestamp, timestamp] : [timestamp])).all<Row>();
+  return { rows: rows.results, retireSharedLegacy: phase === 'device_only' };
+}
+
+async function exitCredentialLabel(userId: string, deviceId: string | null, clientUUID: string) {
+  if (!deviceId) return `u:${userId}`;
+  return `u:${userId}:${deviceId}:${await sha256Hex(clientUUID)}`;
+}
+
 /**
  * Resources served identically to both administrative front doors.
  *
@@ -2012,6 +2157,173 @@ async function sharedAdministrativeResource(
   actorEmail?: string,
 ): Promise<Response | null> {
   let mt: RegExpMatchArray | null;
+  if (resource === 'exit-nodes' && m === 'GET') {
+    const rows = await e.DB.prepare(
+      `SELECT id, name, status, last_roster_at, created_at, updated_at
+       FROM exit_nodes ORDER BY name, id`,
+    ).all<Row>();
+    return Response.json({
+      nodes: rows.results.map((row) => ({
+        id: String(row.id),
+        name: String(row.name),
+        status: String(row.status),
+        lastRosterAt: Number(row.last_roster_at),
+        createdAt: Number(row.created_at),
+        updatedAt: Number(row.updated_at),
+      })),
+    });
+  }
+  if (resource === 'exit-nodes' && m === 'POST') {
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['id', 'name']);
+    const nodeId = str(b.id, 'id', 1, 64);
+    if (!/^[a-zA-Z0-9._-]+$/.test(nodeId)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid exit node id');
+    }
+    const name = str(b.name, 'name', 1, 100).trim();
+    const token = randomToken();
+    const t = now();
+    try {
+      await e.DB.prepare(
+        `INSERT INTO exit_nodes(
+           id, name, token_hash, status, last_roster_at, created_at, updated_at
+         ) VALUES(?, ?, ?, 'active', 0, ?, ?)`,
+      ).bind(nodeId, name, await sha256(token), t, t).run();
+    } catch {
+      throw new ApiError(409, 'EXIT_NODE_CONFLICT', 'Exit node id or name already exists');
+    }
+    await writeOpsAudit(e, actorEmail, 'exit-node.create', 'exit_node', nodeId, name);
+    return Response.json({
+      node: { id: nodeId, name, status: 'active', lastRosterAt: 0, createdAt: t, updatedAt: t },
+      token,
+    }, { status: 201 });
+  }
+  mt = resource.match(/^exit-nodes\/([^/]+)\/token$/);
+  if (mt && m === 'POST') {
+    const token = randomToken();
+    const t = now();
+    const updated = await e.DB.prepare(
+      `UPDATE exit_nodes SET token_hash = ?, updated_at = ? WHERE id = ?`,
+    ).bind(await sha256(token), t, mt[1]).run();
+    if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Exit node not found');
+    await writeOpsAudit(e, actorEmail, 'exit-node.rotate-token', 'exit_node', mt[1], 'rotated token');
+    return Response.json({ id: mt[1], token, updatedAt: t });
+  }
+  mt = resource.match(/^exit-nodes\/([^/]+)$/);
+  if (mt && m === 'PATCH') {
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['status']);
+    const status = str(b.status, 'status', 1, 20);
+    if (!['active', 'disabled'].includes(status)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid exit node status');
+    }
+    const t = now();
+    const updated = await e.DB.prepare(
+      `UPDATE exit_nodes
+       SET last_roster_at = CASE
+             WHEN status = 'disabled' AND ? = 'active' THEN 0
+             ELSE last_roster_at
+           END,
+           status = ?,
+           updated_at = ?
+       WHERE id = ?`,
+    ).bind(status, status, t, mt[1]).run();
+    if (!updated.meta.changes) throw new ApiError(404, 'NOT_FOUND', 'Exit node not found');
+    await writeOpsAudit(e, actorEmail, 'exit-node.update', 'exit_node', mt[1], `status ${status}`);
+    return Response.json({ id: mt[1], status, updatedAt: t });
+  }
+  if (resource === 'exit-credential-rollout' && m === 'GET') {
+    const [rollout, coverage, activeNodes] = await e.DB.batch([
+      e.DB.prepare('SELECT phase, updated_at FROM exit_credential_rollout WHERE singleton_id = 1'),
+      e.DB.prepare(
+        `SELECT
+           SUM(CASE WHEN credentials.device_id IS NULL THEN 1 ELSE 0 END) AS missing,
+           COALESCE(MAX(credentials.created_at), 0) AS latest_credential_at
+         FROM devices
+         LEFT JOIN device_exit_credentials credentials ON credentials.device_id = devices.id
+         WHERE devices.status IN ('pending', 'active')`,
+      ),
+      e.DB.prepare(
+        `SELECT COUNT(*) AS count, COALESCE(MIN(last_roster_at), 0) AS oldest_ack
+         FROM exit_nodes WHERE status = 'active'`,
+      ),
+    ]);
+    const state = rollout.results[0] as Row | undefined;
+    const covered = coverage.results[0] as Row | undefined;
+    const nodes = activeNodes.results[0] as Row | undefined;
+    return Response.json({
+      phase: state?.phase === 'device_only' ? 'device_only' : 'dual',
+      updatedAt: Number(state?.updated_at ?? 0),
+      missingDeviceCredentials: Number(covered?.missing ?? 0),
+      latestCredentialAt: Number(covered?.latest_credential_at ?? 0),
+      activeNodes: Number(nodes?.count ?? 0),
+      oldestRosterAck: Number(nodes?.oldest_ack ?? 0),
+    });
+  }
+  if (resource === 'exit-credential-rollout' && m === 'POST') {
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['phase']);
+    if (b.phase !== 'device_only') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Rollout may only advance to device_only');
+    }
+    await backfillDeviceExitCredentials(e, 50);
+    const catalog = await publicManagedCatalog(e);
+    if (!catalog.yaml.includes(CLIENT_UUID_PLACEHOLDER)) {
+      throw new ApiError(409, 'ROLLOUT_NOT_READY', 'Publish the device credential catalog first');
+    }
+    const [coverage, activeNodes] = await e.DB.batch([
+      e.DB.prepare(
+        `SELECT
+           SUM(CASE WHEN credentials.device_id IS NULL THEN 1 ELSE 0 END) AS missing,
+           COALESCE(MAX(credentials.created_at), 0) AS latest_credential_at
+         FROM devices
+         LEFT JOIN device_exit_credentials credentials ON credentials.device_id = devices.id
+         WHERE devices.status IN ('pending', 'active')`,
+      ),
+      e.DB.prepare(
+        `SELECT COUNT(*) AS count, COALESCE(MIN(last_roster_at), 0) AS oldest_ack
+         FROM exit_nodes WHERE status = 'active'`,
+      ),
+    ]);
+    const covered = coverage.results[0] as Row | undefined;
+    const nodes = activeNodes.results[0] as Row | undefined;
+    const latestCredentialAt = Number(covered?.latest_credential_at ?? 0);
+    if (Number(covered?.missing ?? 0) > 0) {
+      throw new ApiError(409, 'ROLLOUT_NOT_READY', 'Active devices still lack exit credentials');
+    }
+    if (Number(nodes?.count ?? 0) < 1 || Number(nodes?.oldest_ack ?? 0) <= latestCredentialAt) {
+      throw new ApiError(409, 'ROLLOUT_NOT_READY', 'Every active exit must acknowledge the current roster');
+    }
+    const t = now();
+    let updated: D1Result;
+    try {
+      updated = await e.DB.prepare(
+        `UPDATE exit_credential_rollout
+         SET phase = 'device_only', updated_at = ?
+         WHERE singleton_id = 1 AND phase = 'dual'
+           AND EXISTS (
+             SELECT 1 FROM managed_exit_catalog
+             WHERE singleton_id = 1 AND revision = ?
+           )`,
+      ).bind(t, catalog.revision).run();
+    } catch (error) {
+      if (String(error).includes('EXIT_CREDENTIAL_ROLLOUT_NOT_READY')) {
+        throw new ApiError(409, 'ROLLOUT_NOT_READY', 'Device or exit roster readiness changed; retry the rollout check');
+      }
+      throw error;
+    }
+    if (!updated.meta.changes) {
+      const state = await e.DB.prepare(
+        'SELECT phase, updated_at FROM exit_credential_rollout WHERE singleton_id = 1',
+      ).first<Row>();
+      if (state?.phase === 'device_only') {
+        return Response.json({ phase: 'device_only', updatedAt: Number(state.updated_at) });
+      }
+      throw new ApiError(409, 'ROLLOUT_NOT_READY', 'Managed catalog changed; retry the rollout check');
+    }
+    await writeOpsAudit(e, actorEmail, 'exit-credential.device-only', 'exit_credential_rollout', '1', 'retired shared legacy');
+    return Response.json({ phase: 'device_only', updatedAt: t });
+  }
   if (resource === 'home-exits' && m === 'GET') {
     const q = await e.DB.prepare(
       `SELECT home_exits.*,
@@ -5229,11 +5541,25 @@ async function tokens(e: Env, user: string, device: string, installation: string
   const refresh = randomToken();
   const t = now();
   const sid = id();
-  const accessTTL = envInt(e, 'ACCESS_TOKEN_TTL_SECONDS', 900);
+  // Every API request re-checks the session, user and device rows in auth(), so
+  // revocation does not depend on JWT expiry. A one-day access token avoids
+  // rotating three D1 rows every fifteen minutes on every idle client.
+  const accessTTL = envInt(e, 'ACCESS_TOKEN_TTL_SECONDS', 86_400);
   const refreshTTL = envInt(e, 'REFRESH_TOKEN_TTL_SECONDS', 2_592_000);
-  await e.DB.prepare(
-    'INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id) VALUES(?, ?, ?, ?, ?, ?)',
-  ).bind(sid, user, await sha256(refresh), t + refreshTTL, t, device).run();
+  try {
+    await e.DB.prepare(
+      'INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id) VALUES(?, ?, ?, ?, ?, ?)',
+    ).bind(sid, user, await sha256(refresh), t + refreshTTL, t, device).run();
+  } catch (x) {
+    if (String(x).includes('SESSION_DEVICE_INELIGIBLE')) {
+      throw new ApiError(
+        409,
+        'DEVICE_AUTHORIZATION_CHANGED',
+        'Device authorization changed during sign-in; start sign-in again',
+      );
+    }
+    throw x;
+  }
   return {
     accessToken: await jwtSign(
       { sub: user, sid, did: device, iid: installation, iat: t, exp: t + accessTTL },
@@ -5330,6 +5656,14 @@ async function expirePending(e: Env, user: string) {
              WHERE id = ? AND status = 'revoked' AND claim_generation = ?
            )`,
       ).bind(t, d.id, d.id, d.claim_generation),
+      e.DB.prepare(
+        `DELETE FROM device_exit_credentials
+         WHERE device_id = ?
+           AND EXISTS (
+             SELECT 1 FROM devices
+             WHERE id = ? AND status = 'revoked' AND claim_generation = ?
+           )`,
+      ).bind(d.id, d.id, d.claim_generation),
     );
     await e.DB.batch(statements);
   }
@@ -5339,131 +5673,237 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
   await expirePending(e, user);
   let d = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?').bind(user, installation).first<Row>();
   const enrollmentEnabled = tailscaleEnrollmentEnabled(e);
-  const t = now();
-  if (d && d.status === 'active') {
-    await e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(t, t, d.id).run();
-    return { ...d, last_seen_at: t, updated_at: t };
-  }
-  if (d && d.status === 'pending' && !enrollmentEnabled) {
-    await e.DB.prepare(
-      `UPDATE devices SET
-         name = ?,
-         status = 'active',
-         pending_expires_at = NULL,
-         claim_token = NULL,
-         claim_expires_at = NULL,
-         enrollment_issued_at = NULL,
-         enrollment_hostname = NULL,
-         confirmed_at = ?,
-         last_seen_at = ?,
-         updated_at = ?
-       WHERE id = ? AND status = 'pending'`,
-    ).bind(name, t, t, t, d.id).run();
-    return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(d.id).first<Row>())!;
-  }
-  if (d && d.status === 'pending') return d;
   const pendingTTL = envInt(e, 'PENDING_DEVICE_TTL_SECONDS', 1_800);
-  const did = d?.id || id();
+  let did = d?.id || id();
 
-  // If adding or reactivating this device would exceed device_limit,
-  // automatically evict the least-recently-active device(s) so users experience
-  // seamless device rotation (e.g. across 3-4 machines) without hitting DEVICE_LIMIT.
-  const userRow = await e.DB.prepare('SELECT device_limit FROM users WHERE id = ?').bind(user).first<Row>();
-  const limit = Math.max(1, Number(userRow?.device_limit ?? 2));
-
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const tNow = now();
-    const otherActive = await e.DB.prepare(
-      `SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?`,
-    ).bind(user, did).first<{ c: number }>();
-    const currentActive = Number(otherActive?.c ?? 0);
 
-    if (currentActive >= limit) {
-      const toEvictCount = currentActive - limit + 1;
-      const candidates = await e.DB.prepare(
-        `SELECT * FROM devices
-         WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?
-         ORDER BY COALESCE(last_seen_at, created_at) ASC, created_at ASC
-         LIMIT ?`,
-      ).bind(user, did, toEvictCount).all<Row>();
-
-      for (const victim of candidates.results) {
-        await revokeDevice(e, victim);
+    if (d?.status === 'active') {
+      const touched = await e.DB.prepare(
+        `UPDATE devices SET name = ?, last_seen_at = ?, updated_at = ?
+         WHERE id = ? AND user_id = ? AND installation_id = ? AND status = 'active'`,
+      ).bind(name, tNow, tNow, d.id, user, installation).run();
+      if (touched.meta.changes) {
+        await e.DB.prepare(
+          `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+           SELECT id, user_id, ?, ? FROM devices
+           WHERE id = ? AND user_id = ? AND status = 'active'`,
+        ).bind(crypto.randomUUID(), tNow, d.id, user).run();
+        return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(d.id).first<Row>())!;
       }
+      d = await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(d.id).first<Row>();
+      continue;
     }
 
-    try {
-      if (d) {
-        if (enrollmentEnabled) {
-          await e.DB.prepare(
-            `UPDATE devices SET
-               name = ?,
-               status = 'pending',
-               pending_expires_at = ?,
-               updated_at = ?,
-               tailscale_node_id = NULL,
-               tailscale_stable_id = NULL,
-               tailscale_api_node_id = NULL,
-               tailscale_public_key = NULL,
-               tailscale_ips = NULL,
-               claim_token = NULL,
-               claim_expires_at = NULL,
-               claim_generation = claim_generation + 1,
-               enrollment_issued_at = NULL,
-               enrollment_hostname = NULL,
-               confirmed_at = NULL
-             WHERE id = ? AND status = 'revoked'`,
-          ).bind(name, tNow + pendingTTL, tNow, did).run();
-        } else {
-          await e.DB.prepare(
-            `UPDATE devices SET
-               name = ?,
-               status = 'active',
-               pending_expires_at = NULL,
-               updated_at = ?,
-               tailscale_node_id = NULL,
-               tailscale_stable_id = NULL,
-               tailscale_api_node_id = NULL,
-               tailscale_public_key = NULL,
-               tailscale_ips = NULL,
-               claim_token = NULL,
-               claim_expires_at = NULL,
-               claim_generation = claim_generation + 1,
-               enrollment_issued_at = NULL,
-               enrollment_hostname = NULL,
-               confirmed_at = ?,
-               last_seen_at = ?
-             WHERE id = ? AND status = 'revoked'`,
-          ).bind(name, tNow, tNow, tNow, did).run();
-        }
-      } else {
-        if (enrollmentEnabled) {
-          await e.DB.prepare(
-            "INSERT INTO devices(id, user_id, installation_id, name, status, pending_expires_at, created_at, updated_at) VALUES(?, ?, ?, ?, 'pending', ?, ?, ?)",
-          ).bind(did, user, installation, name, tNow + pendingTTL, tNow, tNow).run();
-        } else {
-          await e.DB.prepare(
-            `INSERT INTO devices(
-               id, user_id, installation_id, name, status,
-               pending_expires_at, confirmed_at, last_seen_at, created_at, updated_at
-             ) VALUES(?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?)`,
-          ).bind(did, user, installation, name, tNow, tNow, tNow, tNow).run();
-        }
+    if (d?.status === 'pending') {
+      if (enrollmentEnabled) {
+        await e.DB.prepare(
+          `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+           SELECT id, user_id, ?, ? FROM devices
+           WHERE id = ? AND user_id = ? AND status = 'pending'`,
+        ).bind(crypto.randomUUID(), tNow, d.id, user).run();
+        return d;
       }
+      const activated = await e.DB.prepare(
+        `UPDATE devices SET
+           name = ?,
+           status = 'active',
+           pending_expires_at = NULL,
+           claim_token = NULL,
+           claim_expires_at = NULL,
+           enrollment_issued_at = NULL,
+           enrollment_hostname = NULL,
+           confirmed_at = ?,
+           last_seen_at = ?,
+           updated_at = ?
+         WHERE id = ? AND user_id = ? AND installation_id = ? AND status = 'pending'`,
+      ).bind(name, tNow, tNow, tNow, d.id, user, installation).run();
+      if (activated.meta.changes) {
+        await e.DB.prepare(
+          `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+           SELECT id, user_id, ?, ? FROM devices
+           WHERE id = ? AND user_id = ? AND status = 'active'`,
+        ).bind(crypto.randomUUID(), tNow, d.id, user).run();
+        return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(d.id).first<Row>())!;
+      }
+      d = await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(d.id).first<Row>();
+      continue;
+    }
+
+    // D1 batch statements are one SQLite transaction. Select the current LRU
+    // victim(s), revoke them, occupy the slot and mint the replacement identity
+    // inside that single boundary. A competing invocation either observes the
+    // committed result or has its whole batch rolled back on UNIQUE/DEVICE_LIMIT;
+    // it can no longer commit an eviction before discovering that another
+    // request already inserted the same installation.
+    const rotationId = id();
+    const statements: D1PreparedStatement[] = [
+      e.DB.prepare(
+        `INSERT INTO device_rotation_victims(rotation_id, device_id)
+         SELECT ?, candidate.id
+         FROM devices candidate
+         WHERE candidate.user_id = ?
+           AND candidate.status IN ('pending', 'active')
+           AND candidate.id != ?
+         ORDER BY COALESCE(candidate.last_seen_at, candidate.created_at) ASC,
+                  candidate.created_at ASC,
+                  candidate.rowid ASC
+         LIMIT MAX(0,
+           (SELECT COUNT(*) FROM devices live
+            WHERE live.user_id = ? AND live.status IN ('pending', 'active') AND live.id != ?)
+           - COALESCE((SELECT device_limit FROM users WHERE id = ?), 2) + 1
+         )`,
+      ).bind(rotationId, user, did, user, did, user),
+      e.DB.prepare(
+        `INSERT INTO revocation_jobs(
+           id, device_id, tailscale_node_id, created_at, ownership_generation, reason
+         )
+         SELECT ? || ':' || devices.id,
+                devices.id, devices.tailscale_node_id, ?, devices.claim_generation,
+                'device_rotated'
+         FROM devices
+         JOIN device_rotation_victims victims ON victims.device_id = devices.id
+         WHERE victims.rotation_id = ? AND devices.tailscale_node_id IS NOT NULL
+         ON CONFLICT(tailscale_node_id) DO UPDATE SET
+           completed_at = NULL,
+           last_error = NULL,
+           device_id = excluded.device_id,
+           created_at = excluded.created_at,
+           ownership_generation = excluded.ownership_generation,
+           reason = excluded.reason`,
+      ).bind(rotationId, tNow, rotationId),
+      e.DB.prepare(
+        `UPDATE devices SET
+           status = 'revoked',
+           claim_token = NULL,
+           claim_expires_at = NULL,
+           updated_at = ?
+         WHERE id IN (
+           SELECT device_id FROM device_rotation_victims WHERE rotation_id = ?
+         ) AND status IN ('pending', 'active')`,
+      ).bind(tNow, rotationId),
+      e.DB.prepare(
+        `UPDATE sessions SET revoked_at = ?
+         WHERE revoked_at IS NULL AND device_id IN (
+           SELECT device_id FROM device_rotation_victims WHERE rotation_id = ?
+         )`,
+      ).bind(tNow, rotationId),
+      e.DB.prepare(
+        `DELETE FROM device_exit_credentials
+         WHERE device_id IN (
+           SELECT victims.device_id
+           FROM device_rotation_victims victims
+           JOIN devices ON devices.id = victims.device_id
+           WHERE victims.rotation_id = ? AND devices.status = 'revoked'
+         )`,
+      ).bind(rotationId),
+    ];
+
+    if (d) {
+      statements.push(enrollmentEnabled
+        ? e.DB.prepare(
+          `UPDATE devices SET
+             name = ?,
+             status = 'pending',
+             pending_expires_at = ?,
+             updated_at = ?,
+             tailscale_node_id = NULL,
+             tailscale_stable_id = NULL,
+             tailscale_api_node_id = NULL,
+             tailscale_public_key = NULL,
+             tailscale_ips = NULL,
+             claim_token = NULL,
+             claim_expires_at = NULL,
+             claim_generation = claim_generation + 1,
+             enrollment_issued_at = NULL,
+             enrollment_hostname = NULL,
+             confirmed_at = NULL
+           WHERE id = ? AND user_id = ? AND installation_id = ? AND status = 'revoked'`,
+        ).bind(name, tNow + pendingTTL, tNow, did, user, installation)
+        : e.DB.prepare(
+          `UPDATE devices SET
+             name = ?,
+             status = 'active',
+             pending_expires_at = NULL,
+             updated_at = ?,
+             tailscale_node_id = NULL,
+             tailscale_stable_id = NULL,
+             tailscale_api_node_id = NULL,
+             tailscale_public_key = NULL,
+             tailscale_ips = NULL,
+             claim_token = NULL,
+             claim_expires_at = NULL,
+             claim_generation = claim_generation + 1,
+             enrollment_issued_at = NULL,
+             enrollment_hostname = NULL,
+             confirmed_at = ?,
+             last_seen_at = ?
+           WHERE id = ? AND user_id = ? AND installation_id = ? AND status = 'revoked'`,
+        ).bind(name, tNow, tNow, tNow, did, user, installation));
+    } else {
+      statements.push(enrollmentEnabled
+        ? e.DB.prepare(
+          `INSERT INTO devices(
+             id, user_id, installation_id, name, status,
+             pending_expires_at, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, 'pending', ?, ?, ?)`,
+        ).bind(did, user, installation, name, tNow + pendingTTL, tNow, tNow)
+        : e.DB.prepare(
+          `INSERT INTO devices(
+             id, user_id, installation_id, name, status,
+             pending_expires_at, confirmed_at, last_seen_at, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?)`,
+        ).bind(did, user, installation, name, tNow, tNow, tNow, tNow));
+    }
+    statements.push(
+      e.DB.prepare(
+        `INSERT INTO device_rotation_guards(rotation_id, valid)
+         VALUES(?, CASE WHEN EXISTS(
+           SELECT 1 FROM devices
+           WHERE id = ? AND user_id = ? AND installation_id = ?
+             AND status IN ('pending', 'active')
+         ) THEN 1 ELSE 0 END)`,
+      ).bind(rotationId, did, user, installation),
+      e.DB.prepare(
+        `INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+         SELECT id, user_id, ?, ? FROM devices
+         WHERE id = ? AND user_id = ? AND status IN ('pending', 'active')`,
+      ).bind(crypto.randomUUID(), tNow, did, user),
+      e.DB.prepare('DELETE FROM device_rotation_guards WHERE rotation_id = ?').bind(rotationId),
+      e.DB.prepare('DELETE FROM device_rotation_victims WHERE rotation_id = ?').bind(rotationId),
+    );
+
+    try {
+      await e.DB.batch(statements);
       return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(did).first<Row>())!;
     } catch (x) {
       if (String(x).includes('UNIQUE constraint failed: devices.user_id, devices.installation_id')) {
         const existing = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?')
           .bind(user, installation).first<Row>();
-        if (existing) {
-          await e.DB.prepare('UPDATE devices SET name = ?, last_seen_at = ?, updated_at = ? WHERE id = ?')
-            .bind(name, tNow, tNow, existing.id).run();
-          return { ...existing, name, last_seen_at: tNow, updated_at: tNow };
+        if (existing && ['pending', 'active'].includes(String(existing.status))) {
+          const updated = await e.DB.prepare(
+            `UPDATE devices SET name = ?, last_seen_at = ?, updated_at = ?
+             WHERE id = ? AND status IN ('pending', 'active')`,
+          ).bind(name, tNow, tNow, existing.id).run();
+          if (updated.meta.changes) {
+            return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(existing.id).first<Row>())!;
+          }
+        } else if (existing) {
+          d = existing;
+          did = String(existing.id);
+          continue;
         }
       }
-      if (String(x).includes('DEVICE_LIMIT')) {
-        if (attempt < 2) continue;
-        throw new ApiError(409, 'DEVICE_LIMIT', 'This account has reached its device allowance');
+      if (
+        String(x).includes('DEVICE_LIMIT') ||
+        String(x).includes('device_rotation_guards.valid')
+      ) {
+        d = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?')
+          .bind(user, installation).first<Row>();
+        if (d) did = String(d.id);
+        if (attempt < 3) continue;
+        throw new ApiError(409, 'DEVICE_LIMIT', 'Concurrent device rotation did not settle');
       }
       throw x;
     }
@@ -5703,7 +6143,14 @@ async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false) {
            WHERE devices.id = ? AND devices.status = 'revoked'
          )`,
     ).bind(t, d.id, d.id),
-    e.DB.prepare('DELETE FROM device_exit_credentials WHERE device_id = ?').bind(d.id),
+    e.DB.prepare(
+      `DELETE FROM device_exit_credentials
+       WHERE device_id = ?
+         AND EXISTS (
+           SELECT 1 FROM devices
+           WHERE devices.id = ? AND devices.status = 'revoked'
+         )`,
+    ).bind(d.id, d.id),
   ]);
 }
 
@@ -5929,16 +6376,22 @@ async function enforceAll(e: Env) {
     `DELETE FROM auth_challenges
      WHERE expires_at <= ? OR (consumed_at IS NOT NULL AND consumed_at <= ?)`,
   ).bind(t - 86_400, t - 86_400).run();
-  // Expired and revoked sessions are never read again; purge them in bounded
-  // batches so the table does not grow without bound and degrade token refresh queries.
+  // Keep each retention branch indexable. The old OR made SQLite scan the whole
+  // sessions table every five minutes even though both predicates had indexes.
   await e.DB.prepare(
     `DELETE FROM sessions WHERE id IN (
        SELECT id FROM sessions
-       WHERE (revoked_at IS NOT NULL AND revoked_at <= ?)
-          OR (expires_at <= ?)
+       WHERE revoked_at IS NOT NULL AND revoked_at <= ?
        LIMIT 500
      )`,
-  ).bind(t - 86_400, t).run();
+  ).bind(t - 86_400).run();
+  await e.DB.prepare(
+    `DELETE FROM sessions WHERE id IN (
+       SELECT id FROM sessions
+       WHERE revoked_at IS NULL AND expires_at <= ?
+       LIMIT 500
+     )`,
+  ).bind(t).run();
   // Diagnostics uploads are troubleshooting artifacts, not account records.
   await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
     .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
@@ -5972,6 +6425,18 @@ async function enforceAll(e: Env) {
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
     .run();
+  // Individual report ids are bounded retry evidence, not the billing ledger.
+  // usage_report_sources retains the monotonic per-node totals, so deleting old
+  // ids cannot lower or double-count usage; a stale replay is ignored by that
+  // source's total/observed_at guards.
+  await e.DB.prepare(
+    `DELETE FROM usage_reports WHERE report_id IN (
+       SELECT report_id FROM usage_reports
+       WHERE created_at <= ?
+       ORDER BY created_at
+       LIMIT 500
+     )`,
+  ).bind(t - 14 * 86_400).run();
   // The audit log had no retention at all — every operator action since
   // migration 0023, forever. Half a year is the whole useful life of "who
   // retired that node"; the LIMIT keeps the first sweep over an old backlog
@@ -6984,67 +7449,26 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     await privileged(req, e.OPS_COLLECTOR_TOKEN);
     const t = now();
-
-    // Identities are otherwise minted lazily, on a catalog fetch, and only when
-    // the catalog carries the placeholder. The published catalog is still the
-    // legacy one with a literal shared UUID, so that branch has never run and
-    // `exit_credentials` is empty — which deadlocks the cutover: the nodes need
-    // the credentials before the catalog can carry the placeholder, and the
-    // credentials were only created by serving that catalog.
-    //
-    // So the roster mints what is missing. `exitClientUUID` is unchanged and
-    // still adopts whatever row exists, so an account that fetches a catalog
-    // later is served the same identity this created.
-    const pending = await e.DB.prepare(
-      `SELECT users.id AS id
-         FROM users
-         LEFT JOIN exit_credentials ON exit_credentials.user_id = users.id
-        WHERE exit_credentials.user_id IS NULL
-          AND users.status = 'active'
-          AND (users.expires_at IS NULL OR users.expires_at > ?)
-          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
-        ORDER BY users.id
-        LIMIT 500`,
-    ).bind(t).all<Row>();
-    if (pending.results.length) {
-      await e.DB.batch(pending.results.map((row) => e.DB.prepare(
-        'INSERT OR IGNORE INTO exit_credentials(user_id, client_uuid, created_at) VALUES(?,?,?)',
-      ).bind(String(row.id), crypto.randomUUID(), t)));
-    }
-
-    const rows = await e.DB.prepare(
-      `SELECT c.user_id AS user_id, c.device_id AS device_id, c.client_uuid AS client_uuid
-         FROM device_exit_credentials c
-         JOIN devices d ON d.id = c.device_id
-         JOIN users u ON u.id = d.user_id
-        WHERE d.status IN ('pending', 'active')
-          AND u.status = 'active'
-          AND (u.expires_at IS NULL OR u.expires_at > ?)
-          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
-       UNION
-       SELECT e.user_id AS user_id, NULL AS device_id, e.client_uuid AS client_uuid
-         FROM exit_credentials e
-         JOIN users u ON u.id = e.user_id
-        WHERE u.status = 'active'
-          AND (u.expires_at IS NULL OR u.expires_at > ?)
-          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
-          AND NOT EXISTS (SELECT 1 FROM devices WHERE devices.user_id = u.id)
-        ORDER BY user_id`,
-    ).bind(t, t).all<Row>();
+    const roster = await exitCredentialRoster(e, t);
     return Response.json({
       // Echoed so a reconciling agent can tell a stale response from an empty
       // roster: applying an empty list as if it were current would remove every
       // managed client from every node at once.
       observedAt: t,
-      retireSharedLegacy: true,
-      clients: rows.results.map((row) => ({
-        userId: String(row.user_id),
-        deviceId: row.device_id ? String(row.device_id) : undefined,
-        clientUUID: String(row.client_uuid),
-        // The label per-user traffic accounting is keyed by. Namespaced so a
-        // reconciler can tell the clients it owns from `shared-legacy` and the
-        // hand-added entries it must never touch.
-        email: row.device_id ? `u:${String(row.user_id)}:${String(row.device_id)}` : `u:${String(row.user_id)}`,
+      retireSharedLegacy: roster.retireSharedLegacy,
+      clients: await Promise.all(roster.rows.map(async (row) => {
+        const userId = String(row.user_id);
+        const deviceId = row.device_id ? String(row.device_id) : null;
+        const clientUUID = String(row.client_uuid);
+        return {
+          userId,
+          deviceId: deviceId ?? undefined,
+          clientUUID,
+          // Credential generation is part of the metric label, so replacing a
+          // device UUID cannot leave the old UUID installed under the same
+          // label. Hash it rather than exposing an access credential in stats.
+          email: await exitCredentialLabel(userId, deviceId, clientUUID),
+        };
       })),
     });
   }
@@ -7994,21 +8418,25 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   }
 
   if (p === '/api/v1/home/inventory' && m === 'GET') {
-    await privileged(req, e.HOME_AGENT_TOKEN);
+    const node = await authenticateExitNode(req, e, true);
+    const t = now();
     const rows = await e.DB.prepare(
       `SELECT
          devices.tailscale_stable_id,
          devices.tailscale_public_key,
          devices.user_id,
          devices.status,
-         users.usage_bytes
+         users.usage_bytes,
+         COALESCE(source.last_total_bytes, 0) AS source_usage_bytes
        FROM devices
        JOIN users ON users.id = devices.user_id
+       LEFT JOIN usage_report_sources source
+         ON source.user_id = devices.user_id AND source.source_id = ?
        WHERE devices.tailscale_stable_id IS NOT NULL
          AND devices.tailscale_public_key IS NOT NULL
        ORDER BY devices.tailscale_stable_id, devices.created_at
        LIMIT 2001`,
-    ).all<Row>();
+    ).bind(node?.id ?? '').all<Row>();
     if (rows.results.length > 2_000) {
       throw new ApiError(
         503,
@@ -8017,6 +8445,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       );
     }
     return Response.json({
+      nodeId: node?.id,
+      observedAt: t,
       devices: rows.results.map((row) => ({
         stableNodeId: String(row.tailscale_stable_id),
         // This key was matched against server-side inventory during confirm.
@@ -8026,6 +8456,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         userId: String(row.user_id),
         status: String(row.status),
         usageBytes: Number(row.usage_bytes),
+        // A reporter's cumulative counter is scoped to its authenticated
+        // source. Seeding each node from the account-wide SUM makes every
+        // additional exit re-report the other exits' history and overbill the
+        // account. Keep usageBytes for old read-only dual-phase consumers, but
+        // new reporters must recover from this source-local watermark.
+        sourceUsageBytes: Number(row.source_usage_bytes),
       })),
     });
   }
@@ -8039,39 +8475,46 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   // and removal is what stops traffic. Enforcement that only stops counting does
   // not stop anything.
   if (p === '/api/v1/home/exit-identities' && m === 'GET') {
-    await privileged(req, e.HOME_AGENT_TOKEN);
+    const node = await authenticateExitNode(req, e, true);
     const t = now();
-    const rows = await e.DB.prepare(
-      `SELECT c.user_id AS user_id, c.device_id AS device_id, c.client_uuid AS client_uuid
-         FROM device_exit_credentials c
-         JOIN devices d ON d.id = c.device_id
-         JOIN users u ON u.id = d.user_id
-        WHERE d.status IN ('pending', 'active')
-          AND u.status = 'active'
-          AND (u.expires_at IS NULL OR u.expires_at > ?)
-          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
-       UNION
-       SELECT e.user_id AS user_id, NULL AS device_id, e.client_uuid AS client_uuid
-         FROM exit_credentials e
-         JOIN users u ON u.id = e.user_id
-        WHERE u.status = 'active'
-          AND (u.expires_at IS NULL OR u.expires_at > ?)
-          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
-          AND NOT EXISTS (SELECT 1 FROM devices WHERE devices.user_id = u.id)
-        ORDER BY user_id`,
-    ).bind(t, t).all<Row>();
+    const roster = await exitCredentialRoster(e, t);
     return Response.json({
+      // New agents verify this before touching Xray or billing state. Existing
+      // node source IDs are accounting identities and cannot be renamed without
+      // an exactly-once ledger migration. Legacy dual-phase readers receive no
+      // nodeId and old agents safely ignore this additive field.
+      nodeId: node?.id,
       // Echoed so a reconciling agent can tell a stale response from an empty
       // roster: applying an empty list as if it were current would disconnect
       // every account at once.
       observedAt: t,
-      retireSharedLegacy: true,
-      identities: rows.results.map((row) => ({
+      retireSharedLegacy: roster.retireSharedLegacy,
+      identities: roster.rows.map((row) => ({
         userId: String(row.user_id),
         deviceId: row.device_id ? String(row.device_id) : undefined,
         clientUUID: String(row.client_uuid),
       })),
     });
+  }
+
+  if (p === '/api/v1/home/roster-ack' && m === 'POST') {
+    const node = await authenticateExitNode(req, e);
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['observedAt']);
+    const t = now();
+    if (
+      !Number.isSafeInteger(b.observedAt) ||
+      b.observedAt < 0 ||
+      b.observedAt > t + 300
+    ) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid roster observedAt');
+    }
+    await e.DB.prepare(
+      `UPDATE exit_nodes
+       SET last_roster_at = MAX(last_roster_at, ?), updated_at = ?
+       WHERE id = ? AND status = 'active'`,
+    ).bind(b.observedAt, t, node!.id).run();
+    return Response.json({ nodeId: node!.id, observedAt: b.observedAt });
   }
 
   // Same handler for the home agent and the collector. The collector is what
@@ -8084,13 +8527,14 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   // right when one collector held the whole fleet's total — bills an account
   // spread over three exits for the largest of the three.
   if ((p === '/api/v1/home/usage' || p === '/api/v1/ops-ingest/usage') && m === 'POST') {
+    let authenticatedSourceId = '';
     if (p === '/api/v1/ops-ingest/usage') {
       if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
         throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
       }
       await privileged(req, e.OPS_COLLECTOR_TOKEN);
     } else {
-      await privileged(req, e.HOME_AGENT_TOKEN);
+      authenticatedSourceId = (await authenticateExitNode(req, e))!.id;
     }
     const b = await body(req, 512 * 1024);
     const reports = b.reports;
@@ -8102,6 +8546,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       reportId: string;
       userId: string;
       sourceId: string;
+      protocolVersion: number;
       totalBytes: number;
       observedAt: number;
     }>();
@@ -8112,13 +8557,25 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       }
       const reportId = str(x.reportId, 'reportId', 1, 100);
       const reportUserId = str(x.userId, 'userId', 1, 100);
-      // A reporter that names itself gets a counter of its own. One that does
-      // not — an un-upgraded agent, or the collector — keeps the single legacy
-      // source it has always been accounted under.
-      const reportSourceId = x.sourceId === undefined || x.sourceId === null
-        ? ''
+      const submittedSourceId = x.sourceId === undefined || x.sourceId === null
+        ? null
         : str(x.sourceId, 'sourceId', 1, 64);
+      if (p === '/api/v1/home/usage' && submittedSourceId !== null && submittedSourceId !== authenticatedSourceId) {
+        throw new ApiError(403, 'SOURCE_ID_MISMATCH', 'Usage source does not match the authenticated exit node');
+      }
+      if (p === '/api/v1/ops-ingest/usage' && submittedSourceId !== null) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Collector usage may not name an exit source');
+      }
+      // The trusted source is the authenticated exit-node record. The legacy
+      // collector remains in the empty-string MAX bucket and cannot impersonate
+      // a per-node SUM counter.
+      const reportSourceId = authenticatedSourceId;
+      const reportProtocolVersion = x.protocolVersion === undefined || x.protocolVersion === null
+        ? 1
+        : x.protocolVersion;
       if (
+        !Number.isSafeInteger(reportProtocolVersion) ||
+        (reportProtocolVersion !== 1 && reportProtocolVersion !== 2) ||
         !Number.isSafeInteger(x.totalBytes) ||
         x.totalBytes < 0 ||
         !Number.isSafeInteger(x.observedAt) ||
@@ -8131,6 +8588,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         reportId,
         userId: reportUserId,
         sourceId: reportSourceId,
+        protocolVersion: reportProtocolVersion as number,
         totalBytes: x.totalBytes as number,
         observedAt: x.observedAt as number,
       };
@@ -8186,15 +8644,22 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
              json_extract(value, '$.sourceId') AS source_id,
+             CAST(json_extract(value, '$.protocolVersion') AS INTEGER) AS protocol_version,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          )
          INSERT OR IGNORE INTO usage_reports(
-           report_id, user_id, source_id, total_bytes, observed_at, created_at
+           report_id, user_id, source_id, protocol_version, total_bytes, observed_at, created_at
          )
-         SELECT report_id, user_id, source_id, total_bytes, observed_at, ?
-         FROM input`,
+         SELECT report_id, user_id, source_id, protocol_version, total_bytes, observed_at, ?
+         FROM input
+         -- Protocol v2 is durably idempotent on the strictly increasing
+         -- (user, authenticated source, observed_at) watermark below. Storing
+         -- and later deleting a second row for every report multiplies the D1
+         -- write volume without adding replay protection. Retain immutable IDs
+         -- only for legacy v1 senders whose wall clocks are not monotonic.
+         WHERE protocol_version = 1`,
         ).bind(encodedReports, receivedAt),
         // One cumulative figure per (account, source). Within a source the
         // figure only ever rises, so the difference from the last one is what
@@ -8209,28 +8674,41 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
              json_extract(value, '$.sourceId') AS source_id,
+             CAST(json_extract(value, '$.protocolVersion') AS INTEGER) AS protocol_version,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          ),
          accepted AS (
-           SELECT input.user_id AS user_id,
-                  input.source_id AS source_id,
-                  MAX(input.total_bytes) AS total_bytes,
-                  MAX(input.observed_at) AS observed_at
+           SELECT input.user_id,
+                  input.source_id,
+                  input.protocol_version,
+                  input.total_bytes,
+                  input.observed_at
+           FROM input
+           WHERE input.protocol_version = 2
+           UNION ALL
+           SELECT input.user_id,
+                  input.source_id,
+                  input.protocol_version,
+                  input.total_bytes,
+                  input.observed_at
            FROM input
            JOIN usage_reports
              ON usage_reports.report_id = input.report_id
             AND usage_reports.user_id = input.user_id
             AND usage_reports.source_id = input.source_id
+            AND usage_reports.protocol_version = input.protocol_version
             AND usage_reports.total_bytes = input.total_bytes
             AND usage_reports.observed_at = input.observed_at
-           GROUP BY input.user_id, input.source_id
+           WHERE input.protocol_version = 1
          )
          INSERT INTO usage_report_sources(
-           user_id, source_id, last_total_bytes, accumulated_bytes, observed_at, updated_at
+           user_id, source_id, protocol_version,
+           last_total_bytes, accumulated_bytes, observed_at, updated_at
          )
-         SELECT user_id, source_id, total_bytes, total_bytes, observed_at, ?
+         SELECT user_id, source_id, protocol_version,
+                total_bytes, total_bytes, observed_at, ?
          FROM accepted
          WHERE true
          ON CONFLICT(user_id, source_id) DO UPDATE SET
@@ -8247,17 +8725,35 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
                THEN MAX(usage_report_sources.last_total_bytes, excluded.last_total_bytes)
              ELSE excluded.last_total_bytes
            END,
-           observed_at = MAX(usage_report_sources.observed_at, excluded.observed_at),
+           observed_at = CASE
+             WHEN usage_report_sources.source_id = ''
+               THEN MAX(usage_report_sources.observed_at, excluded.observed_at)
+             WHEN excluded.protocol_version > usage_report_sources.protocol_version
+               THEN excluded.observed_at
+             ELSE MAX(usage_report_sources.observed_at, excluded.observed_at)
+           END,
+           protocol_version = MAX(
+             usage_report_sources.protocol_version,
+             excluded.protocol_version
+           ),
            updated_at = excluded.updated_at
-         -- A figure that grew is taken whatever its timestamp says, because what
-         -- is taken from it is the difference and a repeat of it adds nothing. A
-         -- figure that fell is only a rebuilt node if it is the newest word from
-         -- that source; arriving at or before a higher one it is a stale batch,
-         -- and counting it as a reset would add its whole cumulative figure and
-         -- bill the account for its history a second time.
+         -- v1 used a node wall clock, so accept a higher cumulative value even
+         -- when that clock stepped backwards. The first v2 row replaces that
+         -- watermark with the server-roster clock. Thereafter only a strictly
+         -- newer v2 observation can move this source: report IDs are pruned, and
+         -- accepting an old high-water row after a reset would rebill history.
          WHERE usage_report_sources.source_id = ''
-            OR excluded.last_total_bytes > usage_report_sources.last_total_bytes
-            OR excluded.observed_at > usage_report_sources.observed_at`,
+            OR excluded.protocol_version > usage_report_sources.protocol_version
+            OR (
+              excluded.protocol_version = usage_report_sources.protocol_version
+              AND (
+                excluded.observed_at > usage_report_sources.observed_at
+                OR (
+                  excluded.protocol_version = 1
+                  AND excluded.last_total_bytes > usage_report_sources.last_total_bytes
+                )
+              )
+            )`,
         ).bind(encodedReports, receivedAt),
         e.DB.prepare(
         `WITH input AS (
@@ -8265,19 +8761,29 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
              json_extract(value, '$.reportId') AS report_id,
              json_extract(value, '$.userId') AS user_id,
              json_extract(value, '$.sourceId') AS source_id,
+             CAST(json_extract(value, '$.protocolVersion') AS INTEGER) AS protocol_version,
              CAST(json_extract(value, '$.totalBytes') AS INTEGER) AS total_bytes,
              CAST(json_extract(value, '$.observedAt') AS INTEGER) AS observed_at
            FROM json_each(?)
          ),
-         accepted AS (
-           SELECT DISTINCT input.user_id AS user_id
+         accepted_reports AS (
+           SELECT input.user_id
+           FROM input
+           WHERE input.protocol_version = 2
+           UNION ALL
+           SELECT input.user_id
            FROM input
            JOIN usage_reports
              ON usage_reports.report_id = input.report_id
             AND usage_reports.user_id = input.user_id
             AND usage_reports.source_id = input.source_id
+            AND usage_reports.protocol_version = input.protocol_version
             AND usage_reports.total_bytes = input.total_bytes
             AND usage_reports.observed_at = input.observed_at
+           WHERE input.protocol_version = 1
+         ),
+         accepted AS (
+           SELECT DISTINCT user_id FROM accepted_reports
          )
          UPDATE users
          SET usage_reported_bytes = MAX(
@@ -8298,7 +8804,23 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
                ) - usage_baseline_bytes
              ),
              updated_at = ?
-         WHERE id IN (SELECT user_id FROM accepted)`,
+         WHERE id IN (SELECT user_id FROM accepted)
+           AND (
+             usage_reported_bytes < COALESCE((
+               SELECT SUM(accumulated_bytes) FROM usage_report_sources
+                WHERE usage_report_sources.user_id = users.id
+             ), 0)
+             OR usage_bytes != MAX(
+               0,
+               MAX(
+                 usage_reported_bytes,
+                 COALESCE((
+                   SELECT SUM(accumulated_bytes) FROM usage_report_sources
+                    WHERE usage_report_sources.user_id = users.id
+                 ), 0)
+               ) - usage_baseline_bytes
+             )
+           )`,
         ).bind(encodedReports, receivedAt),
       ]);
     } catch (x) {

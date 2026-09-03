@@ -7,21 +7,29 @@
 never going to arrive, because every account presented the same VLESS identity at
 the exit. The exit could count bytes; it could not say whose.
 
-The control plane now issues one identity per account. The remaining half is a
-meter on each exit that reads per-identity counters and reports them.
+The control plane now issues one identity per device. The remaining half is a
+meter on each exit that reads per-identity counters, aggregates sibling devices
+back to the owning account, and reports one monotonic total per account and exit.
 
 ## What the control plane now does
 
-`GET /api/v1/exit-catalog` substitutes the requesting account's identity into the
+`GET /api/v1/exit-catalog` substitutes the requesting device's identity into the
 published catalog:
 
 - The published document carries `uuid: {{TONO_CLIENT_UUID}}`. Uploading a
   literal UUID is rejected with `INVALID_CATALOG`, so a shared credential cannot
   be re-published by accident.
-- Each account's identity is minted on first fetch and stored in
-  `exit_credentials`, one row per user, unique across users, deleted with the
-  user. Stable across fetches, because the client persists the catalog digest and
-  compares it — a fresh identity per request would read as tampering every time.
+- Each device's identity is stored in `device_exit_credentials`, unique across
+  devices and deleted in the same transaction that revokes or LRU-evicts that
+  device. It is stable across fetches because the client persists the catalog
+  digest and compares it — a fresh identity per request would read as tampering
+  every time.
+- Migration starts in `dual`: exits receive both device identities and the
+  legacy per-user identity, and catalogs may continue serving the legacy value
+  until every active exit has acknowledged the current roster. An operator may
+  advance to `device_only` only after that readiness gate passes. Only then is
+  revoking one device an absolute data-plane cutoff; do not describe `dual` as
+  providing that guarantee.
 - The digest is recomputed over what was served, not over the template.
 
 A catalog published before this change carries literals and is still served
@@ -31,11 +39,13 @@ offline the moment it deploys. Re-publish with the placeholder to drain it.
 ## The agent
 
 `services/exit-agent/reconcile_and_report.py` does both jobs on one timer. It
-pulls, so an exit needs no inbound path and the control plane holds no per-exit
-credential — and a Worker could not reach a private management API anyway.
+pulls, so an exit needs no inbound path and a Worker does not need access to its
+private management API. Each exit uses a revocable node-specific bearer token;
+the control plane stores only its SHA-256 hash.
 
     TONO_API_BASE=https://api.afk.ccwu.cc \
-    TONO_HOME_AGENT_TOKEN=… \
+    TONO_HOME_AGENT_TOKEN=<node-specific-token> \
+    TONO_SOURCE_ID=<existing-durable-source-id> \
     TONO_XRAY_BINARY=/opt/tono-xray/current/xray \
     TONO_XRAY_API_ADDRESS=127.0.0.1:10085 \
     TONO_XRAY_INBOUND_TAG=tono-vless \
@@ -46,17 +56,27 @@ It asks the binary which `api` subcommands it has rather than assuming: the name
 differ between versions, and a wrong guess fails by doing nothing, which is
 indistinguishable from a working meter reporting zero. When it cannot find what it
 needs it prints what the binary does offer and exits non-zero. `inbounduser` is
-the exception: it is looked up and lived without, because it is what makes a
-removal safe rather than what makes the agent work.
+the exception: a node with a durable prior inventory can temporarily reconcile
+from that record, but a fresh node without either source refuses to ACK. Additions
+alone cannot prove an old generation or `shared-legacy` credential was removed.
 
-`TONO_EXIT_SOURCE_ID` overrides the name this exit reports under. It is otherwise
-`<hostname>-<machine-id>`, and kept in the state file. The hostname leads because
-these nodes come from cloned images and a clone carries the source image's
-`/etc/machine-id`: two exits presenting one name read each other's lower figures
-as counter resets, and the account's total runs away. Set the override on any node
-whose hostname and machine-id are both shared with another. Identities longer
-than the API's 64-character limit keep a readable hostname prefix plus a digest
-of the complete value; truncating from the right would discard the machine-id.
+`TONO_SOURCE_ID` is an immutable accounting identity. On an existing node, first
+flush its old `pendingReports`, stop the reporter timer, back up its state file,
+and read the persisted `sourceId`. Provision the control-plane exit node with
+that exact value, then configure the node-specific token and the same
+`TONO_SOURCE_ID`. The roster echoes the token-bound `nodeId`; the agent compares
+all three before changing Xray or billing state. Never rename this value or
+delete the state file during rollout: an old cumulative report may already have
+reached the old ledger, so moving it can either bill history twice or discard
+unconfirmed usage. Use `services/exit-agent/exit-agent.env.example` as the
+deployment template.
+
+The current agent sends `protocolVersion: 2` and derives `observedAt` from the
+authenticated roster clock rather than the node wall clock. The control plane
+accepts a final queued v1 cumulative increase during upgrade, uses the first v2
+report to replace the old time watermark, and never lets v1 move that source
+again. After this cutover, a report replayed after ID retention is stale by the
+durable per-source v2 watermark and cannot be billed again.
 
 `test_reconcile_and_report.py` covers the arithmetic, because an error there costs
 money in both directions and looks plausible either way. Each case was checked to
@@ -81,9 +101,11 @@ usage has never been recorded.
 
     sudo ./enable-tono-exit-metering.sh
 
-It is additive and idempotent. The credential every current client holds is kept,
-so the fleet keeps working while accounts migrate to their own; a node that is
-already metered is detected and left alone without a restart.
+It is additive and idempotent. The initial shared credential is kept during the
+`dual` rollout so the fleet keeps working while devices migrate. The reconciler
+removes `shared-legacy` only after the control plane sends
+`retireSharedLegacy: true` in `device_only`; a node that is already metered is
+detected and left alone without a restart.
 
 **One disconnection per exit, once.** Adding the management interface needs a
 restart, because the interface it would otherwise be added through does not exist
@@ -105,15 +127,22 @@ address — that interface can issue identities.
 ### 2. Accept the issued identities
 
 Each exit's inbound needs a client list rather than a single client, with the
-account's identity as the client id and something stable as its label — the label
-is what its statistics are keyed by, so it is the only thing that makes a counter
+device's identity as the client id and a stable device label — the label is what
+its statistics are keyed by, so it is the only thing that makes a counter
 attributable.
 
-The label is `u:<userId>`. The control plane issues that form, the fleet audit
-counts it, and the agent writes it: three names for one thing is how a node ends
-up holding a duplicate of every account, and how usage lands under a label nobody
-else is looking for. The namespace also says whose a client is — `shared-legacy`
-and anything added by hand are outside it and are never removed.
+Device labels are `u:<userId>:<deviceId>:<credentialDigest>`; including a SHA-256
+generation digest prevents a newly issued UUID for the same device from being
+mistaken for the still-installed old UUID without putting the credential itself
+in a metric label. A legacy per-user row in `dual` remains
+`u:<userId>`. The agent recognizes both, sums every device, generation, and
+legacy counter for the same user into one report, and reconciles the exact labels
+derived from the control-plane roster. It removes an obsolete generation before
+adding its replacement so Xray cannot reject the new binding as a duplicate and
+then leave the device offline. The namespace also says whose a client is.
+Hand-added entries are outside it and are never removed; `shared-legacy` is
+removed only when the rollout signal (or an explicit
+`TONO_RETIRE_SHARED_LEGACY=true` override) permits it.
 
 Removal runs off what the inbound holds (`xray api inbounduser`), or failing that
 off the labels the agent recorded installing. Never off the counters: a counter is
@@ -141,12 +170,23 @@ does not stop traffic; withdrawing the identity does.
 The agent implements this; the contract below is what it obeys, and it is the same
 one `report_example.py` already obeys — there is deliberately only one:
 
-- `POST /api/v1/home/usage` with `HOME_AGENT_TOKEN`.
-- Reports are `{reportId, userId, sourceId, totalBytes, observedAt}`, batched, at
-  most 500 per request and 100 distinct users.
+- `POST /api/v1/home/usage` with the node-specific token in
+  `TONO_HOME_AGENT_TOKEN`. The same token reads the roster and acknowledges a
+  successful reconciliation at `POST /api/v1/home/roster-ack`.
+- Reports are
+  `{reportId, userId, sourceId, protocolVersion: 2, totalBytes, observedAt}`,
+  batched, at most 500 per request and 100 distinct users. `observedAt` comes
+  from an authenticated control-plane response and advances monotonically in
+  durable agent state, never from the node's wall clock.
 - `totalBytes` is a **monotonic lifetime total per user and per source**, not a
-  delta. Rows are immutable and idempotent by `reportId`, so a replayed batch is
-  safe.
+  delta. Protocol-v2 replays are idempotent by the authenticated source's
+  durable monotonic `observedAt` watermark, so they are safe without inserting
+  and later deleting a D1 row per report. Legacy v1 keeps immutable report-ID
+  rows during migration.
+- `/home/inventory` returns the authenticated node's source-local cumulative
+  watermark separately from account-wide usage. A reporter must recover from
+  that source-local value; using the account-wide SUM as every node's baseline
+  duplicates history and overbills multi-exit accounts.
 - `sourceId` names the reporter. The server keeps one cumulative figure per
   (user, source) and **adds them up**: with one meter per exit, folding them with
   MAX would bill an account for its largest exit rather than for what it used —

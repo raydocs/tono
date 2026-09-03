@@ -152,7 +152,7 @@ pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 40] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 50] = [
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -170,11 +170,24 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 40] = [
     "cloudflareinsights.com",
     "browser-intake-datadoghq.com",
     "browser-intake-us5-datadoghq.com",
+    "browser-intake-us3-datadoghq.com",
+    "browser-intake-ap1-datadoghq.com",
+    "browser-intake-ap2-datadoghq.com",
+    "browser-intake-datadoghq.eu",
+    "browser-intake-ddog-gov.com",
     "datadoghq.com",
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
     "stripe.network",
+    // Claude Code install/update dependencies and Claude Desktop essential
+    // telemetry. Keep these exact suffixes rather than routing node.exe: npm
+    // and bun host unrelated Node workloads under the same process name.
+    "storage.googleapis.com",
+    "registry.npmjs.org",
+    "raw.githubusercontent.com",
+    "formulae.brew.sh",
+    "sentry.io",
     "chatgpt.com",
     "openai.com",
     "chat.com",
@@ -897,18 +910,10 @@ fn runtime_value(
         // ruleless DIRECT dial, leaking Claude's UDP to the physical egress.
         // With TCP scope, Claude UDP falls through to REJECT and the app
         // retries over TCP, through the tunnel.
-        for process in HOME_PROCESS_NAMES {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{CLAUDE_HOME_GROUP_NAME}"
-            ));
-        }
-        for regex in home_process_path_regexes() {
-            rules.push(format!(
-                "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{CLAUDE_HOME_GROUP_NAME}"
-            ));
-        }
         // No PROCESS-NAME here: a Chrome tab to ChatGPT / Claude / Grok /
         // Perplexity / Gemini takes the same residential hop as the apps.
+        // Domain identity comes first so npm/bun Claude Code is covered by
+        // its real hosts without capturing every node.exe connection.
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -919,6 +924,16 @@ fn runtime_value(
         for cidr in CLAUDE_HOME_IPV4_CIDRS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for process in HOME_PROCESS_NAMES {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(PROCESS-NAME,{process})),{CLAUDE_HOME_GROUP_NAME}"
+            ));
+        }
+        for regex in home_process_path_regexes() {
+            rules.push(format!(
+                "AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,{regex})),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
     } else if let Some(plan) = direct {
@@ -1480,7 +1495,6 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
-        rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -1491,6 +1505,7 @@ reality-opts:
                 "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
+        rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
         rules.push("AND,((NETWORK,UDP)),REJECT".to_string());
         rules.push("MATCH,Tono-Exit".to_string());
         rules
@@ -1501,7 +1516,6 @@ reality-opts:
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve".to_string(),
             "IP-CIDR6,::1/128,DIRECT,no-resolve".to_string(),
         ];
-        rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
         for domain in CLAUDE_HOME_DOMAINS {
             rules.push(format!(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
@@ -1512,6 +1526,7 @@ reality-opts:
                 "AND,((NETWORK,TCP),(IP-CIDR,{cidr},no-resolve)),{CLAUDE_HOME_GROUP_NAME}"
             ));
         }
+        rules.extend(expected_home_process_rules(CLAUDE_HOME_GROUP_NAME));
         rules.extend(expected_wechat_direct_rules());
         rules.push("AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,www.bilibili.com),(IP-CIDR,9.0.0.30/32,no-resolve)),Tono-China-Web-Direct".to_string());
         // This fixture has no signed native-app path regex, so its suffix rows are
@@ -1932,6 +1947,16 @@ reality-opts:
             "gemini.google.com",
             "bard.google.com",
             "generativelanguage.googleapis.com",
+            "storage.googleapis.com",
+            "registry.npmjs.org",
+            "raw.githubusercontent.com",
+            "formulae.brew.sh",
+            "sentry.io",
+            "browser-intake-us3-datadoghq.com",
+            "browser-intake-ap1-datadoghq.com",
+            "browser-intake-ap2-datadoghq.com",
+            "browser-intake-datadoghq.eu",
+            "browser-intake-ddog-gov.com",
         ] {
             assert!(
                 CLAUDE_HOME_DOMAINS.contains(&required),
@@ -1965,10 +1990,49 @@ reality-opts:
             !yaml.contains("2607:6bc0"),
             "IPv6 home CIDRs must not ship while the runtime is ipv6: false"
         );
+
+        let value = parsed(&runtime);
+        let rules: Vec<&str> = value[string("rules")]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        for domain in [
+            "storage.googleapis.com",
+            "registry.npmjs.org",
+            "raw.githubusercontent.com",
+            "formulae.brew.sh",
+            "sentry.io",
+            "browser-intake-us3-datadoghq.com",
+            "browser-intake-ap1-datadoghq.com",
+            "browser-intake-ap2-datadoghq.com",
+            "browser-intake-datadoghq.eu",
+            "browser-intake-ddog-gov.com",
+        ] {
+            let domain_rule = format!(
+                "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,{domain})),{CLAUDE_HOME_GROUP_NAME}"
+            );
+            let domain_index = rules.iter().position(|rule| *rule == domain_rule).unwrap();
+            let process_index = rules
+                .iter()
+                .position(|rule| rule.contains("PROCESS-NAME,Claude.exe"))
+                .unwrap();
+            assert!(
+                domain_index < process_index,
+                "{domain} must be decided by hostname before process fallback rules"
+            );
+        }
     }
 
     #[test]
     fn claude_home_covers_desktop_helpers_and_versioned_code_launcher() {
+        for shared_runtime in ["node", "node.exe"] {
+            assert!(
+                !HOME_PROCESS_NAMES.contains(&shared_runtime),
+                "{shared_runtime} would route every npm/bun workload over the residential hop"
+            );
+        }
         for process in [
             "Claude.exe",
             "claude.exe",

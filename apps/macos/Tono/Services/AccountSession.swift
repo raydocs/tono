@@ -10,9 +10,11 @@ extension SettingsKey {
     /// fifteen-second poll for the four fixed remote device actions, and a
     /// consent to be remotely actionable is not a consent to a periodic upload
     /// it never described. Mirrors the Windows client's
-    /// `periodic_telemetry_enabled`, down to reading a missing value as on.
+    /// `periodic_telemetry_enabled`, including the v2 default-off migration.
     nonisolated static let periodicTelemetryEnabled =
         "periodicTelemetryEnabled"
+    nonisolated static let periodicTelemetryDefaultV2Applied =
+        "periodicTelemetryDefaultV2Applied"
 }
 
 @MainActor @Observable
@@ -99,14 +101,25 @@ final class AccountSession {
 
     /// Whether the twenty-minute protection snapshot may be uploaded.
     ///
-    /// A missing value reads as on: the Windows client defaults the same wire
-    /// shape on for the test programme, and a Mac that never appears on the
-    /// dashboard cannot be supported. Turning it off in Settings › Privacy
-    /// stops the upload for good.
+    /// New installations default off. The marker resets the former default-on
+    /// value exactly once; once marked, a later explicit opt-in stays on.
     nonisolated static var isPeriodicTelemetryEnabled: Bool {
-        AppProfile.defaults.object(forKey: SettingsKey.periodicTelemetryEnabled) == nil
-            ? true
-            : AppProfile.defaults.bool(forKey: SettingsKey.periodicTelemetryEnabled)
+        if !AppProfile.defaults.bool(
+            forKey: SettingsKey.periodicTelemetryDefaultV2Applied
+        ) {
+            AppProfile.defaults.set(
+                false,
+                forKey: SettingsKey.periodicTelemetryEnabled
+            )
+            AppProfile.defaults.set(
+                true,
+                forKey: SettingsKey.periodicTelemetryDefaultV2Applied
+            )
+            return false
+        }
+        return AppProfile.defaults.bool(
+            forKey: SettingsKey.periodicTelemetryEnabled
+        )
     }
 
     init(api: TonoAPIClient = TonoAPIClient(), keychain: KeychainStore = KeychainStore(), sidecar: TonoSidecarService,
@@ -168,6 +181,10 @@ final class AccountSession {
          pathLatencyConsumer: @escaping @MainActor () -> TonoPathLatency = {
              TonoPathLatency()
          }) {
+        // Apply the one-shot default-off migration before Settings can present
+        // or change the AppStorage value. A later user opt-in then sees the v2
+        // marker and is never reset on a subsequent callback or launch.
+        _ = Self.isPeriodicTelemetryEnabled
         self.api = api; self.keychain = keychain; self.sidecar = sidecar
         self.exitNode = exitNode
         self.descriptorConsumer = descriptorConsumer

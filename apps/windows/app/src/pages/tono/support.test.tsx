@@ -121,6 +121,7 @@ beforeEach(() => {
     hasConflict: false,
     entries: [],
     claudeCodeReady: true,
+    canAutoClear: false,
   })
   clearTerminalProxyEnvMock.mockReset().mockResolvedValue(undefined)
 })
@@ -212,7 +213,9 @@ describe('support terminal environment diagnostic card', () => {
     ).toBeDefined()
     expect(await screen.findByText('Environment Ready')).toBeDefined()
     expect(
-      screen.queryByRole('button', { name: 'Clear Residual Proxy Variables' }),
+      screen.queryByRole('button', {
+        name: 'Clear Safe User Environment Variables',
+      }),
     ).toBeNull()
   })
 
@@ -224,9 +227,12 @@ describe('support terminal environment diagnostic card', () => {
           key: 'HTTP_PROXY',
           value: 'http://127.0.0.1:7890',
           source: 'Process',
+          guidance: 'Clear the inherited process variable.',
+          autoClearable: true,
         },
       ],
       claudeCodeReady: false,
+      canAutoClear: true,
     })
     renderPage()
 
@@ -234,7 +240,7 @@ describe('support terminal environment diagnostic card', () => {
     expect(screen.getByText('HTTP_PROXY=http://127.0.0.1:7890')).toBeDefined()
 
     const clearBtn = screen.getByRole('button', {
-      name: 'Clear Residual Proxy Variables',
+      name: 'Clear Safe User Environment Variables',
     })
     fireEvent.click(clearBtn)
 
@@ -242,8 +248,46 @@ describe('support terminal environment diagnostic card', () => {
       expect(clearTerminalProxyEnvMock).toHaveBeenCalledTimes(1),
     )
     expect(noticeSuccess).toHaveBeenCalledWith(
-      'Successfully cleared residual proxy environment variables',
+      'Successfully cleared safe user proxy environment variables',
     )
+  })
+
+  it('shows source-specific manual guidance and restart requirements without unsafe cleanup', async () => {
+    checkTerminalEnvMock.mockResolvedValueOnce({
+      hasConflict: true,
+      entries: [
+        {
+          key: 'https_proxy',
+          value: 'http://127.0.0.1:7890',
+          source:
+            'VS Code workspace settings: C:\\work\\.vscode\\settings.json',
+          guidance:
+            'Remove the key from terminal.integrated.env.windows and restart VS Code.',
+          autoClearable: false,
+        },
+      ],
+      claudeCodeReady: false,
+      canAutoClear: false,
+    })
+    renderPage()
+
+    expect(await screen.findByText('Proxy Residue Detected')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Remove the key from terminal.integrated.env.windows and restart VS Code.',
+      ),
+    ).toBeDefined()
+    expect(
+      screen.getByText(
+        'After fixing every source, fully restart Tono, VS Code, open terminals, WSL sessions, and any running Claude Code supervisor or parent process.',
+      ),
+    ).toBeDefined()
+    expect(
+      screen.queryByRole('button', {
+        name: 'Clear Safe User Environment Variables',
+      }),
+    ).toBeNull()
+    expect(screen.queryByText('Environment Ready')).toBeNull()
   })
 
   it('renders checking state while query is pending', () => {
@@ -254,7 +298,9 @@ describe('support terminal environment diagnostic card', () => {
   })
 
   it('renders check failed state when query rejects rather than falsely showing ready', async () => {
-    checkTerminalEnvMock.mockRejectedValueOnce(new Error('Registry access denied'))
+    checkTerminalEnvMock.mockRejectedValueOnce(
+      new Error('Registry access denied'),
+    )
     renderPage()
     expect(await screen.findByText('Check Failed')).toBeDefined()
     expect(screen.queryByText('Environment Ready')).toBeNull()

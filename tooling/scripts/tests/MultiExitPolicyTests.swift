@@ -282,6 +282,16 @@ struct MultiExitPolicyTests {
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudemcpclient.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudemcpcontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,claudeusercontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,storage.googleapis.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,registry.npmjs.org)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,raw.githubusercontent.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,formulae.brew.sh)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,sentry.io)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,browser-intake-us3-datadoghq.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,browser-intake-ap1-datadoghq.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,browser-intake-ap2-datadoghq.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,browser-intake-datadoghq.eu)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,browser-intake-ddog-gov.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(IP-CIDR,160.79.104.0/21,no-resolve)),\(ConfigPipeline.claudeHomeGroupName)",
         ]
         guard claudeHomeRequired.allSatisfy(claudeHomeRuntime.contains),
@@ -336,12 +346,25 @@ struct MultiExitPolicyTests {
         guard !claudeSocks5Runtime.contains("2607:6bc0") else {
             throw TestFailure("IPv6 home CIDRs must not ship while the runtime is ipv6: false")
         }
-        for shared in ["gstatic.com", "auth0.com", "stripe.com", "sentry.io", "statsig.com", "googleapis.com", "x.com"] {
+        for shared in ["gstatic.com", "auth0.com", "stripe.com", "statsig.com", "googleapis.com", "x.com"] {
             guard !claudeSocks5Runtime.contains(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(shared))),\(ConfigPipeline.claudeHomeGroupName)"
             ) else {
                 throw TestFailure("shared infrastructure \(shared) must not be pinned to the residential hop")
             }
+        }
+        guard !ConfigPipeline.assistantHomeProcessNames.contains("node"),
+              !ConfigPipeline.assistantHomeProcessNames.contains("node.exe") else {
+            throw TestFailure("shared node runtimes must rely on Claude hostnames, not a process-wide home rule")
+        }
+        let firstClaudeDomainRule =
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,storage.googleapis.com)),\(ConfigPipeline.claudeHomeGroupName)"
+        let firstSharedProcessRule =
+            "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),\(ConfigPipeline.claudeHomeGroupName)"
+        guard let domainRange = claudeSocks5Runtime.range(of: firstClaudeDomainRule),
+              let processRange = claudeSocks5Runtime.range(of: firstSharedProcessRule),
+              domainRange.lowerBound < processRange.lowerBound else {
+            throw TestFailure("Claude install hostnames must take priority over process fallback rules")
         }
 
         // The residential hop is an egress-identity requirement, not an
@@ -1380,8 +1403,13 @@ struct MultiExitPolicyTests {
         // What a signature must never buy. If this ever passes, one leaked key
         // exposes this product's own control plane and its users' assistant
         // traffic — strictly worse than the allowlist trust replaces.
-        for host in ["api.anthropic.com", "anthropic.com", "claude.ai", "www.claude.ai",
-                     "tono.app", "api.tono.app", "tono.com"] {
+        for host in [
+            "api.anthropic.com", "anthropic.com", "claude.ai", "www.claude.ai",
+            "claude.com", "cdn.claudeusercontent.com",
+            "challenges.cloudflare.com", "events.statsig.com",
+            "browser-intake-us5.datadoghq.com", "sentry.io",
+            "tono.app", "api.tono.app", "tono.com",
+        ] {
             for (name, validate) in [
                 ("exact WeChat domain", ConfigPipeline.validatedManagedDirectDomain),
                 ("web domain", ConfigPipeline.validatedWebDirectDomain),

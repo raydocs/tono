@@ -13,6 +13,7 @@ struct SupportView: View {
     ) private var networkLogUploadEnabled = false
 
     @State private var probe: RuntimeProbe?
+    @State private var terminalEnvReport: TerminalProxyReport?
     @State private var isProbing = false
     @State private var isUploadingLog = false
     /// What the last manual sweep did, once one has run on this page. The three
@@ -204,15 +205,12 @@ struct SupportView: View {
     }
 
     private var terminalEnvCard: some View {
-        let env = ProcessInfo.processInfo.environment
-        let proxyKeys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]
-        var conflicts: [String] = []
-        for key in proxyKeys {
-            if let val = env[key], !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                conflicts.append("\(key)=\(val)")
-            }
-        }
-        let hasConflict = !conflicts.isEmpty
+        let issues = terminalEnvReport?.issues ?? []
+        let errors = terminalEnvReport?.errors ?? []
+        let hasConflict = !issues.isEmpty
+        let isIncomplete = terminalEnvReport.map { !$0.isComplete } ?? true
+        let statusColor: Color = isIncomplete ? .orange
+            : hasConflict ? .red : Color(hex: "2ECC71")
 
         return SupportCard(
             icon: "terminal",
@@ -220,7 +218,11 @@ struct SupportView: View {
         ) {
             HStack {
                 Text(
-                    hasConflict
+                    terminalEnvReport == nil
+                        ? String(localized: "Checking terminal proxy sources…")
+                        : isIncomplete
+                        ? String(localized: "Some terminal proxy sources could not be inspected. Tono will not report the environment as ready until the scan completes.")
+                        : hasConflict
                         ? String(localized: "Residual HTTP_PROXY environment variables detected. This often causes terminal tools (like Claude Code CLI) to fail with connection refused.")
                         : String(localized: "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.")
                 )
@@ -231,34 +233,71 @@ struct SupportView: View {
                 Spacer()
 
                 Text(
-                    hasConflict
+                    terminalEnvReport == nil
+                        ? String(localized: "Checking…")
+                        : isIncomplete
+                        ? String(localized: "Scan Incomplete")
+                        : hasConflict
                         ? String(localized: "Proxy Residue Detected")
                         : String(localized: "Environment Ready")
                 )
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(hasConflict ? Color.red : Color(hex: "2ECC71"))
+                .foregroundStyle(statusColor)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
-                    (hasConflict ? Color.red : Color(hex: "2ECC71")).opacity(0.12),
+                    statusColor.opacity(0.12),
                     in: RoundedRectangle(cornerRadius: 6)
                 )
             }
 
             if hasConflict {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(conflicts, id: \.self) { conflict in
-                        Text(conflict)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(issues) { issue in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(issue.key)=\(issue.value)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.red)
+                                .textSelection(.enabled)
+                            Text(issue.source)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                            Text(issue.guidance)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .padding(8)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
 
-                Text(String(localized: "Fix suggestion: Run 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY' in terminal, or check for leftover proxy configurations in ~/.zshrc."))
+                Text(String(localized: "Clear uppercase and lowercase proxy variables in a new shell: unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                Text(String(localized: "After fixing every listed source, fully restart Tono, open terminals, VS Code, and Claude Code together with any supervisor or parent process that launched it."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if !errors.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "Inspection errors"))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                    ForEach(errors, id: \.self) { error in
+                        Text(error)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(8)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
             }
         }
     }
@@ -752,6 +791,9 @@ struct SupportView: View {
         isProbing = true
         defer { isProbing = false }
         let core = await PrivilegedRuntimeCoordinator.shared.coreStatus()
+        terminalEnvReport = await Task.detached {
+            TerminalProxyDiagnostics.scan()
+        }.value
         // Helper probes talk to the privileged socket with blocking timeouts;
         // never resolve them on the UI actor.
         let helper = await Task.detached {

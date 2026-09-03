@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +32,7 @@ MAX_TAILSCALE_STATUS_BYTES = 4 * 1024 * 1024
 DEFAULT_STATE = "/Library/Application Support/Tono/HomeAgent/state.json"
 DEFAULT_TAILSCALE_CLI = "/usr/local/bin/tailscale"
 DEFAULT_TOKEN_FILE = "/Library/Application Support/Tono/HomeAgent/token"
+SOURCE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -61,6 +62,22 @@ def state_path() -> Path:
     if not value.is_absolute():
         raise RuntimeError("STATE_PATH must be absolute")
     return value
+
+
+def source_id(state: dict[str, Any]) -> str:
+    source = os.environ.get("TONO_SOURCE_ID", "").strip()
+    if not SOURCE_ID_PATTERN.fullmatch(source):
+        raise RuntimeError("TONO_SOURCE_ID must identify a provisioned exit node")
+    recorded = state.get("sourceId")
+    if isinstance(recorded, str) and recorded and recorded != source:
+        raise RuntimeError(
+            f"TONO_SOURCE_ID {source!r} does not match durable source {recorded!r}"
+        )
+    for report in state["pendingReports"]:
+        if report.get("sourceId") != source:
+            raise RuntimeError("a queued usage report does not match the durable source id")
+    state["sourceId"] = source
+    return source
 
 
 def home_agent_token() -> str:
@@ -110,11 +127,22 @@ def validate_state(value: Any) -> dict[str, Any]:
     totals = value.get("totals", {})
     pending = value.get("pendingReports", [])
     peer_counters = value.get("peerCounters", {})
+    source = value.get("sourceId")
+    last_report_observed_at = value.get("lastReportObservedAt")
     if (
         not isinstance(totals, dict)
         or not isinstance(pending, list)
         or not isinstance(peer_counters, dict)
         or len(peer_counters) > MAX_INVENTORY_DEVICES
+        or (source is not None and not isinstance(source, str))
+        or (isinstance(source, str) and not SOURCE_ID_PATTERN.fullmatch(source))
+        or (
+            last_report_observed_at is not None
+            and (
+                type(last_report_observed_at) is not int
+                or not 0 <= last_report_observed_at <= MAX_SAFE_INTEGER
+            )
+        )
     ):
         raise RuntimeError("invalid state schema")
     for user_id, total in totals.items():
@@ -133,6 +161,8 @@ def validate_state(value: Any) -> dict[str, Any]:
             or not 1 <= len(report["reportId"]) <= 100
             or not isinstance(report.get("userId"), str)
             or not 1 <= len(report["userId"]) <= 100
+            or report.get("sourceId") != source
+            or report.get("protocolVersion") != 2
             or type(report.get("totalBytes")) is not int
             or not 0 <= report["totalBytes"] <= MAX_SAFE_INTEGER
             or type(report.get("observedAt")) is not int
@@ -153,11 +183,16 @@ def validate_state(value: Any) -> dict[str, Any]:
             or not 0 <= counter["lastRawBytes"] <= MAX_SAFE_INTEGER
         ):
             raise RuntimeError("invalid persisted peer counter")
-    return {
+    normalized = {
         "totals": totals,
         "pendingReports": pending,
         "peerCounters": peer_counters,
     }
+    if source is not None:
+        normalized["sourceId"] = source
+    if last_report_observed_at is not None:
+        normalized["lastReportObservedAt"] = last_report_observed_at
+    return normalized
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -238,7 +273,11 @@ def normalized_public_key(value: Any) -> str | None:
     return normalized
 
 
-def fetch_inventory(base: str, token: str) -> tuple[dict[str, str], dict[str, int]]:
+def fetch_inventory(
+    base: str,
+    token: str,
+    expected_source: str,
+) -> tuple[dict[str, str], dict[str, int], int]:
     request = urllib.request.Request(
         f"{base}/api/v1/home/inventory",
         method="GET",
@@ -254,14 +293,25 @@ def fetch_inventory(base: str, token: str) -> tuple[dict[str, str], dict[str, in
             MAX_INVENTORY_RESPONSE_BYTES,
         )
     devices = decoded.get("devices") if isinstance(decoded, dict) else None
-    if not isinstance(devices, list) or len(devices) > MAX_INVENTORY_DEVICES:
+    node_id = decoded.get("nodeId") if isinstance(decoded, dict) else None
+    observed_at = decoded.get("observedAt") if isinstance(decoded, dict) else None
+    if node_id != expected_source:
+        raise RuntimeError(
+            f"authenticated exit node {node_id!r} does not match durable source {expected_source!r}"
+        )
+    if (
+        type(observed_at) is not int
+        or not 0 <= observed_at <= MAX_SAFE_INTEGER
+        or not isinstance(devices, list)
+        or len(devices) > MAX_INVENTORY_DEVICES
+    ):
         raise RuntimeError("control-plane inventory is invalid")
 
     # Confirm verifies this public key against Tailscale's server inventory.
     # Stable ID remains audit metadata, but older Device API responses may not
     # expose it, so it cannot be the authorization root for usage attribution.
     mapping: dict[str, str] = {}
-    server_totals: dict[str, int] = {}
+    source_totals: dict[str, int] = {}
     for device in devices:
         if not isinstance(device, dict):
             raise RuntimeError("control-plane inventory is invalid")
@@ -269,7 +319,7 @@ def fetch_inventory(base: str, token: str) -> tuple[dict[str, str], dict[str, in
         public_key = normalized_public_key(device.get("publicKey"))
         user_id = device.get("userId")
         status_value = device.get("status")
-        usage_bytes = device.get("usageBytes")
+        source_usage_bytes = device.get("sourceUsageBytes")
         if (
             not isinstance(stable_id, str)
             or not 1 <= len(stable_id) <= 200
@@ -277,16 +327,18 @@ def fetch_inventory(base: str, token: str) -> tuple[dict[str, str], dict[str, in
             or not isinstance(user_id, str)
             or not 1 <= len(user_id) <= 100
             or status_value not in ("pending", "active", "revoked")
-            or type(usage_bytes) is not int
-            or not 0 <= usage_bytes <= MAX_SAFE_INTEGER
+            or type(source_usage_bytes) is not int
+            or not 0 <= source_usage_bytes <= MAX_SAFE_INTEGER
         ):
             raise RuntimeError("control-plane inventory is invalid")
         previous_user = mapping.get(public_key)
         if previous_user is not None and previous_user != user_id:
             raise RuntimeError("a verified public key maps to multiple users")
         mapping[public_key] = user_id
-        server_totals[user_id] = max(server_totals.get(user_id, 0), usage_bytes)
-    return mapping, server_totals
+        source_totals[user_id] = max(
+            source_totals.get(user_id, 0), source_usage_bytes
+        )
+    return mapping, source_totals, observed_at
 
 
 def parse_tailscale_status(value: Any) -> dict[str, tuple[str, int]]:
@@ -371,15 +423,29 @@ def read_tailscale_peer_counters() -> dict[str, tuple[str, int]]:
 def attribute_peer_counters(
     state: dict[str, Any],
     mapping: dict[str, str],
-    server_totals: dict[str, int],
+    source_totals: dict[str, int],
     raw_counters: dict[str, tuple[str, int]],
 ) -> dict[str, int]:
-    observed = {
-        user_id: max(total, server_totals.get(user_id, 0))
+    local_totals = {
+        user_id: int(total)
         for user_id, total in state["totals"].items()
     }
-    for user_id, total in server_totals.items():
+    observed = {
+        user_id: max(total, source_totals.get(user_id, 0))
+        for user_id, total in local_totals.items()
+    }
+    for user_id, total in source_totals.items():
         observed[user_id] = max(observed.get(user_id, 0), total)
+
+    # A server watermark ahead of local state is recovery evidence: this source
+    # already reported usage that the local peer baselines can no longer prove.
+    # The current raw counters may contain all of that history, so charging any
+    # part of them now can bill it twice. Establish fresh raw baselines in this
+    # round; the next round can safely add only measured deltas.
+    recovering_users = {
+        user_id for user_id, total in source_totals.items()
+        if total > local_totals.get(user_id, 0)
+    }
 
     persisted = state["peerCounters"]
     for stable_id, (public_key, raw_total) in raw_counters.items():
@@ -390,7 +456,9 @@ def attribute_peer_counters(
         if previous is not None and previous["userId"] != user_id:
             raise RuntimeError("a persisted stable node ID changed users")
         last_raw = int(previous["lastRawBytes"]) if previous is not None else 0
-        delta = raw_total - last_raw if raw_total >= last_raw else raw_total
+        delta = 0 if user_id in recovering_users else (
+            raw_total - last_raw if raw_total >= last_raw else raw_total
+        )
         next_total = observed.get(user_id, 0) + delta
         if next_total > MAX_SAFE_INTEGER:
             raise RuntimeError("attributed user counter exceeds the safe integer range")
@@ -406,14 +474,18 @@ def observe_totals(
     state: dict[str, Any],
     base: str,
     token: str,
-) -> dict[str, int]:
-    mapping, server_totals = fetch_inventory(base, token)
+    source: str,
+) -> tuple[dict[str, int], int]:
+    mapping, source_totals, observed_at = fetch_inventory(base, token, source)
     raw_counters = read_tailscale_peer_counters()
-    return attribute_peer_counters(
-        state,
-        mapping,
-        server_totals,
-        raw_counters,
+    return (
+        attribute_peer_counters(
+            state,
+            mapping,
+            source_totals,
+            raw_counters,
+        ),
+        observed_at,
     )
 
 
@@ -482,6 +554,7 @@ def main() -> None:
     token = home_agent_token()
     path = state_path()
     state = load_state(path)
+    source = source_id(state)
 
     # A crash after server acceptance but before local acknowledgement leaves
     # this exact immutable batch on disk. Replaying it is safe and required.
@@ -490,10 +563,15 @@ def main() -> None:
         print(f"replayed and acknowledged {delivered} pending usage reports")
         return
 
-    observed = observe_totals(state, base, token)
+    observed, server_observed_at = observe_totals(state, base, token, source)
     if not isinstance(observed, dict):
         raise RuntimeError("counter source must return a dictionary")
-    timestamp = int(time.time())
+    timestamp = max(
+        server_observed_at,
+        int(state.get("lastReportObservedAt", -1)) + 1,
+    )
+    if timestamp > server_observed_at + 300:
+        raise RuntimeError("usage report clock is more than five minutes ahead of the server")
     reports: list[dict[str, Any]] = []
     observed_items = list(observed.items())
     for user_id, total in observed_items:
@@ -513,6 +591,8 @@ def main() -> None:
                 {
                     "reportId": str(uuid.uuid4()),
                     "userId": user_id,
+                    "sourceId": source,
+                    "protocolVersion": 2,
                     "totalBytes": total,
                     "observedAt": timestamp,
                 }
@@ -525,6 +605,7 @@ def main() -> None:
         return
 
     state["pendingReports"] = reports
+    state["lastReportObservedAt"] = timestamp
     save_state(path, state)
     delivered = deliver_pending(base, token, path, state)
     print(f"acknowledged {delivered} usage reports")

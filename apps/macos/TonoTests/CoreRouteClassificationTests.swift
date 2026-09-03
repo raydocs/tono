@@ -56,6 +56,40 @@ final class CoreRouteClassificationTests: XCTestCase {
         }
     }
 
+    func testSignatureDoesNotRelaxProtectedAssistantHosts() {
+        for host in [
+            "api.anthropic.com", "claude.ai", "claude.com", "claude.app",
+            "claude.site", "clau.de", "anthropic.ai", "claudestudio.com",
+            "claudemcpclient.com", "claudemcpcontent.com",
+            "downloads.claudeusercontent.com", "servd-anthropic-website.b-cdn.net",
+            "challenges.cloudflare.com", "cf-assets.www.cloudflare.com",
+            "cloudflareinsights.com", "browser-intake-datadoghq.com",
+            "browser-intake-us5-datadoghq.com",
+            "browser-intake-us3-datadoghq.com",
+            "browser-intake-ap1-datadoghq.com",
+            "browser-intake-ap2-datadoghq.com",
+            "browser-intake-datadoghq.eu", "browser-intake-ddog-gov.com",
+            "api.datadoghq.com",
+            "api.statsig.com", "api.statsigapi.net", "featuregates.org",
+            "growthbook.io", "stripe.network", "storage.googleapis.com",
+            "registry.npmjs.org", "raw.githubusercontent.com", "formulae.brew.sh",
+            "o123.ingest.sentry.io", "tono.app", "tono.com",
+        ] {
+            XCTAssertThrowsError(
+                try ConfigPipeline.validatedManagedDirectDomain(host, trusted: true),
+                host
+            )
+            XCTAssertThrowsError(
+                try ConfigPipeline.validatedWebDirectDomain(host, trusted: true),
+                host
+            )
+            XCTAssertThrowsError(
+                try ConfigPipeline.validatedManagedDirectSuffix(host, trusted: true),
+                host
+            )
+        }
+    }
+
     func testApplicationSubfolderScanFindsWeChatOneLevelDown() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("tono-wechat-scan-\(UUID().uuidString)", isDirectory: true)

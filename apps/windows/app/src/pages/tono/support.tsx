@@ -149,9 +149,18 @@ const SupportPage = () => {
   const handleClearTerminalEnv = useLockFn(async () => {
     setClearingEnv(true)
     try {
+      const hasManualSources = terminalEnv?.entries.some(
+        (entry) => !entry.autoClearable,
+      )
       await tonoClearTerminalProxyEnv()
       await refetchTerminalEnv()
-      showNotice.success(t('tono.support.terminalEnv.clearSuccess'))
+      showNotice.success(
+        t(
+          hasManualSources
+            ? 'tono.support.terminalEnv.clearPartial'
+            : 'tono.support.terminalEnv.clearSuccess',
+        ),
+      )
     } catch (err) {
       showNotice.error(formatTonoActionError(err, t))
     } finally {
@@ -464,24 +473,47 @@ const SupportPage = () => {
                 <div
                   key={`${entry.key}-${entry.source}`}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
+                    display: 'grid',
+                    gap: 3,
                     fontSize: 11,
-                    fontFamily: TONO_MONO_STACK,
                   }}
                 >
-                  <span style={{ fontWeight: 600, color: TONO_COLORS.error }}>
-                    {entry.key}={entry.value}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      fontFamily: TONO_MONO_STACK,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: TONO_COLORS.error }}>
+                      {entry.key}={entry.value}
+                    </span>
+                    <span style={{ color: text.tertiary }}>{entry.source}</span>
+                  </div>
+                  <span style={{ color: text.secondary }}>
+                    {entry.guidance}
                   </span>
-                  <span style={{ color: text.tertiary }}>{entry.source}</span>
                 </div>
               ))}
             </div>
           )}
 
+          {terminalEnv?.hasConflict && (
+            <p
+              style={{
+                margin: '0 0 12px',
+                fontSize: 11,
+                color: text.secondary,
+              }}
+            >
+              {t('tono.support.terminalEnv.restartNotice')}
+            </p>
+          )}
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {terminalEnv?.hasConflict && (
+            {terminalEnv?.hasConflict && terminalEnv.canAutoClear && (
               <button
                 type="button"
                 className="tono-button"

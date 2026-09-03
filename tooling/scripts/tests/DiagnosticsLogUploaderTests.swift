@@ -13,7 +13,12 @@ final class LocalTrafficAudit {
     static let maximumBackups = 2
     let logFileURL = URL(fileURLWithPath: "/tmp/does-not-exist/traffic-audit.jsonl")
 }
-enum SettingsKey { static let networkLogUploadEnabled = "networkLogUploadEnabled" }
+enum SettingsKey {
+    static let networkLogUploadEnabled = "networkLogUploadEnabled"
+    static func isNetworkLogUploadEnabled() -> Bool {
+        AppProfile.defaults.bool(forKey: networkLogUploadEnabled)
+    }
+}
 enum AppProfile { static let defaults = UserDefaults.standard }
 
 

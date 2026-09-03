@@ -4,10 +4,10 @@ set -uo pipefail
 # bash, not zsh: this runs on the Ubuntu CI runners too, and those do not ship
 # zsh. A check that cannot execute where it is wired in is not a check.
 
-# The active policy signing contract spans the control plane, publisher and
-# macOS client. Windows 0.0.29 deliberately remains on policy schemas v1-v3 and
-# its compiled allowlists; signature support must be reviewed on release/windows
-# before Windows is added to this cross-implementation gate.
+# The active signing-key contract spans the control plane, publisher and macOS
+# client. Windows still shares the protected-host invariant even where a release
+# consumes only its compiled allowlists, so the host-set check covers all three
+# implementations below.
 #
 # Drift here is silent and total. If the public key differs, every signed policy
 # reads as untrustworthy, and because an untrustworthy document is refused whole,
@@ -29,9 +29,10 @@ ok() { printf '  ok: %s\n' "$1"; checks=$((checks + 1)); }
 worker="$repo_root/services/control-plane/src/crypto.ts"
 wrangler="$repo_root/services/control-plane/wrangler.jsonc"
 swift="$repo_root/apps/macos/Tono/Core/ManagedTrafficPolicySignature.swift"
+windows_policy="$repo_root/apps/windows/crates/tono-core/src/policy.rs"
 publisher="$repo_root/tooling/scripts/publish-traffic-policy.mjs"
 
-for file in "$worker" "$wrangler" "$swift" "$publisher"; do
+for file in "$worker" "$wrangler" "$swift" "$windows_policy" "$publisher"; do
   [[ -f $file ]] || fail "missing $(basename -- "$file"); the contract cannot be checked"
 done
 
@@ -117,12 +118,17 @@ protected_swift=$(extract "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift"
 protected_worker=$(extract "$repo_root/services/control-plane/src/index.ts" \
   'const protectedSuffixes = \[(.*?)\]') \
   || fail "the control plane's protected list could not be read"
+protected_windows=$(extract "$windows_policy" \
+  'const PROTECTED_DIRECT_SUFFIXES: &\[&str\] = &\[(.*?)\];') \
+  || fail "the Windows protected list could not be read"
 
-expected_protected="anthropic.com claude.ai tono.app tono.com"
+expected_protected="anthropic.ai anthropic.com browser-intake-ap1-datadoghq.com browser-intake-ap2-datadoghq.com browser-intake-datadoghq.com browser-intake-datadoghq.eu browser-intake-ddog-gov.com browser-intake-us3-datadoghq.com browser-intake-us5-datadoghq.com cf-assets.www.cloudflare.com challenges.cloudflare.com clau.de claude.ai claude.app claude.com claude.site claudemcpclient.com claudemcpcontent.com claudestudio.com claudeusercontent.com cloudflareinsights.com datadoghq.com featuregates.org formulae.brew.sh growthbook.io raw.githubusercontent.com registry.npmjs.org sentry.io servd-anthropic-website.b-cdn.net statsig.com statsigapi.net storage.googleapis.com stripe.network tono.app tono.com"
 [[ "$protected_worker" == "$expected_protected" ]] \
   || fail "the control plane protects [$protected_worker], the contract is [$expected_protected]"
 [[ "$protected_swift" == "$expected_protected" ]] \
   || fail "macOS protects [$protected_swift], the control plane protects [$protected_worker]"
-ok "the control plane and macOS protect exactly [$expected_protected] from any signed policy"
+[[ "$protected_windows" == "$expected_protected" ]] \
+  || fail "Windows protects [$protected_windows], the control plane protects [$protected_worker]"
+ok "the control plane, macOS and Windows protect exactly [$expected_protected] from any signed policy"
 
 printf 'policy signing contract: %s/4 checks passed\n' "$checks"

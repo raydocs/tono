@@ -452,10 +452,14 @@ fn default_true() -> bool {
 struct SettingsFile {
     #[serde(default = "default_true")]
     audit_enabled: bool,
-    /// Default ON while testing: short diagnostic timelines to Cloudflare.
-    /// User can disable in Settings; missing/corrupt files read as enabled.
-    #[serde(default = "default_true")]
+    /// Default OFF: short diagnostic timelines still create durable D1 rows
+    /// and therefore require an explicit opt-in.
+    #[serde(default)]
     periodic_telemetry_enabled: bool,
+    /// One-shot migration from the former default-on policy. New defaults set
+    /// this immediately; an old settings file lacks it and is reset once.
+    #[serde(default)]
+    periodic_telemetry_default_v2: bool,
     /// Default OFF: uploads the audit log itself, which carries hostnames,
     /// process names and routes. Kept off by default to protect user privacy
     /// and eliminate continuous D1/R2 storage consumption.
@@ -471,7 +475,8 @@ impl Default for SettingsFile {
     fn default() -> Self {
         Self {
             audit_enabled: true,
-            periodic_telemetry_enabled: true,
+            periodic_telemetry_enabled: false,
+            periodic_telemetry_default_v2: true,
             network_log_upload_enabled: false,
             network_log_default_v2: true,
         }
@@ -483,9 +488,18 @@ fn load_settings(dir: &Path) -> SettingsFile {
         .ok()
         .and_then(|body| serde_json::from_str::<SettingsFile>(&body).ok())
         .unwrap_or_default();
+    let mut migrated = false;
     if !settings.network_log_default_v2 {
         settings.network_log_upload_enabled = false;
         settings.network_log_default_v2 = true;
+        migrated = true;
+    }
+    if !settings.periodic_telemetry_default_v2 {
+        settings.periodic_telemetry_enabled = false;
+        settings.periodic_telemetry_default_v2 = true;
+        migrated = true;
+    }
+    if migrated {
         let _ = save_settings(dir, &settings);
     }
     settings
@@ -497,7 +511,7 @@ pub fn audit_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).audit_enabled
 }
 
-/// Default ON for testing telemetry windows.
+/// Default OFF; legacy default-on settings are reset exactly once by v2.
 pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).periodic_telemetry_enabled
 }
@@ -591,7 +605,7 @@ impl Audit {
             sender: parking_lot::Mutex::new(Some(sender)),
             writer: parking_lot::Mutex::new(None),
             enabled: AtomicBool::new(enabled),
-            periodic_telemetry_enabled: AtomicBool::new(true),
+            periodic_telemetry_enabled: AtomicBool::new(false),
             closed: AtomicBool::new(false),
             self_heal: false,
             dropped: AtomicU64::new(0),
@@ -682,7 +696,7 @@ impl Audit {
         Ok(())
     }
 
-    /// Toggle cloud periodic telemetry (default ON while testing).
+    /// Toggle cloud periodic telemetry (explicit opt-in, default OFF).
     pub fn set_periodic_telemetry_enabled(&self, enabled: bool) -> Result<(), String> {
         if self.periodic_telemetry_enabled() == enabled {
             return Ok(());
@@ -737,7 +751,8 @@ impl Audit {
 #[cfg(test)]
 mod tests {
     use super::{
-        Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings, redact,
+        Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
+        periodic_telemetry_enabled_from_settings, redact, save_periodic_telemetry_enabled,
     };
     use std::path::{Path, PathBuf};
 
@@ -1030,5 +1045,38 @@ mod tests {
         )
         .unwrap();
         assert!(!audit_enabled_from_settings(dir.path()));
+    }
+
+    #[test]
+    fn periodic_telemetry_defaults_off_and_migrates_legacy_true_once() {
+        let fresh = TempDir::new("periodic-fresh");
+        assert!(
+            !periodic_telemetry_enabled_from_settings(fresh.path()),
+            "a new installation must not opt into periodic D1 writes"
+        );
+
+        let legacy = TempDir::new("periodic-legacy");
+        std::fs::write(
+            legacy.path().join(super::SETTINGS_FILE_NAME),
+            r#"{"audit_enabled":true,"periodic_telemetry_enabled":true,"network_log_default_v2":true}"#,
+        )
+        .unwrap();
+        assert!(
+            !periodic_telemetry_enabled_from_settings(legacy.path()),
+            "the v2 migration must reset a legacy default-on installation"
+        );
+        let migrated: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(legacy.path().join(super::SETTINGS_FILE_NAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(migrated["periodic_telemetry_enabled"], false);
+        assert_eq!(migrated["periodic_telemetry_default_v2"], true);
+
+        save_periodic_telemetry_enabled(legacy.path(), true).unwrap();
+        assert!(periodic_telemetry_enabled_from_settings(legacy.path()));
+        assert!(
+            periodic_telemetry_enabled_from_settings(legacy.path()),
+            "a post-migration explicit opt-in must survive every later load"
+        );
     }
 }

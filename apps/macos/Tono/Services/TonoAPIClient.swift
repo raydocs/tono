@@ -82,10 +82,9 @@ actor TonoAPIClient {
     /// existing 401 path. Reading it locally is what avoids adding a field to
     /// the token response and waiting for every client to ship it.
     private var accessTokenExpiry: Date?
-    /// Renew this far ahead of expiry. The access TTL is 15 minutes, and from a
-    /// connection inside China the 401-then-refresh pair costs two extra round
-    /// trips at up to seven seconds each — measured on a customer's log, where
-    /// it recurred every fifteen minutes exactly.
+    /// Renew this far ahead of expiry. The production access TTL is one day;
+    /// claims are only a client refresh clock because the server still checks
+    /// session, user and device state in D1 on every protected request.
     private static let accessTokenRenewalWindow: TimeInterval = 60
     /// A rotated refresh token whose keychain write failed. The server has
     /// already invalidated the previous token, so this value must stay usable

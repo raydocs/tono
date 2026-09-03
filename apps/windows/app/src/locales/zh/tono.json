@@ -412,10 +412,12 @@
       "ready": "环境就绪",
       "conflictDetected": "发现代理残留",
       "readyDesc": "系统环境变量正常。终端流量直接由 Tono TUN 虚拟网卡透明接管，Claude Code、git、npm、pip 开箱即用，无需配置代理。",
-      "conflictDesc": "检测到系统环境变量中存在残留的 HTTP_PROXY 代理配置。这可能导致终端软件报错（如 ECONNREFUSED），建议立即清理。",
-      "clearAction": "一键清理残留代理变量",
+      "conflictDesc": "在进程或持久终端来源中检测到代理变量，可能导致终端软件报错（如 ECONNREFUSED）；请按每个来源的提示处理。",
+      "clearAction": "清理安全的用户环境变量",
       "clearing": "正在清理…",
-      "clearSuccess": "已成功清除环境变量中的残留代理",
+      "clearSuccess": "已成功清除可安全移除的用户代理环境变量",
+      "clearPartial": "已清理可安全移除的用户环境变量；其余来源需按提示手动处理",
+      "restartNotice": "修复全部来源后，请彻底重启 Tono、VS Code、已打开的终端、WSL 会话，以及仍在运行的 Claude Code supervisor 或父进程。",
       "recheck": "重新检查"
     },
     "webrtc": {

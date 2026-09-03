@@ -895,6 +895,8 @@ export const translationKeys = [
   'tono.support.terminalEnv.clearAction',
   'tono.support.terminalEnv.clearing',
   'tono.support.terminalEnv.clearSuccess',
+  'tono.support.terminalEnv.clearPartial',
+  'tono.support.terminalEnv.restartNotice',
   'tono.support.terminalEnv.recheck',
   'tono.support.webrtc.title',
   'tono.support.webrtc.description',

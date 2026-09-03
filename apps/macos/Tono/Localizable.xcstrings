@@ -283,16 +283,6 @@
         }
       }
     },
-    "About every 20 minutes, share protection status, the selected server and recent connection events with Tono support": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "大约每 20 分钟，向 Tono 支持团队分享保护状态、所选节点和最近的连接事件"
-          }
-        }
-      }
-    },
     "Active": {
       "extractionState": "manual",
       "localizations": {
@@ -2894,6 +2884,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "离线"
+          }
+        }
+      }
+    },
+    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件"
           }
         }
       }
@@ -6217,18 +6217,242 @@
         }
       }
     },
-    "Fix suggestion: Run 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY' in terminal, or check for leftover proxy configurations in ~/.zshrc.": {
+    "Checking terminal proxy sources…": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fix suggestion: Run 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY' in terminal, or check for leftover proxy configurations in ~/.zshrc."
-          }
-        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "修复建议：在终端运行 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY，或检查 ~/.zshrc 中是否残留了旧代理端口。"
+            "value": "正在检查终端代理来源…"
+          }
+        }
+      }
+    },
+    "Some terminal proxy sources could not be inspected. Tono will not report the environment as ready until the scan completes.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分终端代理来源无法检查。扫描完整完成前，Tono 不会将环境报告为就绪。"
+          }
+        }
+      }
+    },
+    "Scan Incomplete": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "扫描不完整"
+          }
+        }
+      }
+    },
+    "Clear uppercase and lowercase proxy variables in a new shell: unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在新 shell 中清除大写和小写代理变量：unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy"
+          }
+        }
+      }
+    },
+    "After fixing every listed source, fully restart Tono, open terminals, VS Code, and Claude Code together with any supervisor or parent process that launched it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "修复所有列出的来源后，请彻底重启 Tono、已打开的终端、VS Code、Claude Code，以及启动它的 supervisor 或父进程。"
+          }
+        }
+      }
+    },
+    "Inspection errors": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查错误"
+          }
+        }
+      }
+    },
+    "Current Tono GUI process": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前 Tono GUI 进程"
+          }
+        }
+      }
+    },
+    "Current launchctl GUI environment": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前 launchctl GUI 环境"
+          }
+        }
+      }
+    },
+    "Remove the inherited variable from its parent source. Include lowercase proxy names when unsetting it.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从父级来源移除继承变量；清除时也要包含小写代理变量名。"
+          }
+        }
+      }
+    },
+    "Run launchctl unsetenv for this exact proxy key, then fully restart Tono, VS Code, every terminal, Claude Code, and its supervisor.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "对这个代理变量执行 launchctl unsetenv，然后彻底重启 Tono、VS Code、所有终端、Claude Code 及其后台管理进程。"
+          }
+        }
+      }
+    },
+    "Remove only this proxy assignment; preserve all unrelated profile content. Then restart the terminal and Claude supervisor.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只移除此代理赋值，保留 profile 中所有无关内容，然后重启终端和 Claude supervisor。"
+          }
+        }
+      }
+    },
+    "Shell profile": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shell profile"
+          }
+        }
+      }
+    },
+    "PowerShell Core profile": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PowerShell Core profile"
+          }
+        }
+      }
+    },
+    "Claude managed settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 托管设置"
+          }
+        }
+      }
+    },
+    "Claude managed preferences": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 托管偏好设置"
+          }
+        }
+      }
+    },
+    "Claude settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 设置"
+          }
+        }
+      }
+    },
+    "Claude project settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 项目设置"
+          }
+        }
+      }
+    },
+    "Remove the proxy key from the managed Claude settings source, then fully restart Claude Code and its supervisor.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从 Claude 托管设置来源中移除代理键，然后彻底重启 Claude Code 及其 supervisor。"
+          }
+        }
+      }
+    },
+    "Remove the proxy key from the env object, then fully restart Claude Code and its supervisor.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从 env 对象中移除代理键，然后彻底重启 Claude Code 及其 supervisor。"
+          }
+        }
+      }
+    },
+    "Remove the proxy key from the project env object, then fully restart Claude Code and its supervisor.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从项目 env 对象中移除代理键，然后彻底重启 Claude Code 及其 supervisor。"
+          }
+        }
+      }
+    },
+    "Remove the proxy key from terminal.integrated.env.osx, then fully restart VS Code and every integrated terminal.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从 terminal.integrated.env.osx 中移除代理键，然后彻底重启 VS Code 和每个集成终端。"
+          }
+        }
+      }
+    },
+    "VS Code user settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 用户设置"
+          }
+        }
+      }
+    },
+    "VS Code profile settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 配置文件设置"
+          }
+        }
+      }
+    },
+    "VS Code workspace settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VS Code 工作区设置"
           }
         }
       }

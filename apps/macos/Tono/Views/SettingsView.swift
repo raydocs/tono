@@ -34,7 +34,7 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.periodicTelemetryEnabled,
         store: AppProfile.defaults
-    ) private var periodicTelemetryEnabled = true
+    ) private var periodicTelemetryEnabled = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
 
     private let languages = InterfaceLanguagePreference.options
@@ -194,7 +194,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Protection snapshot",
-                subtitle: "About every 20 minutes, share protection status, the selected server and recent connection events with Tono support",
+                subtitle: "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support",
                 isOn: $periodicTelemetryEnabled
             )
             .onChange(of: periodicTelemetryEnabled) { _, _ in

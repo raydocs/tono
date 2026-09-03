@@ -225,9 +225,11 @@ nonisolated struct ConfigPipeline {
     /// Grok, and `google.com` / `googleapis.com` / `gstatic.com` at large.
     /// Gemini is pinned by its product hostnames so Search, YouTube, and
     /// Tono's own home-group probe stay off the residential hop.
-    /// Only first-party provider domains belong here. Shared infrastructure the
-    /// public AI rule lists bundle in — auth0, stripe, sentry, statsig, datadog,
-    /// segment, cloudflare.net, googleapis.com, gstatic.com — is used by
+    /// Only first-party provider domains belong here, plus the exact install,
+    /// update and telemetry hosts in Anthropic's published network requirements.
+    /// Shared infrastructure the public AI rule lists bundle in — auth0,
+    /// stripe.com, statsig.com, segment, cloudflare.net, googleapis.com at
+    /// large, and gstatic.com — is used by
     /// thousands of unrelated apps, so routing it here would push ordinary
     /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
     /// it is this group's own liveness probe, and sending the probe through the
@@ -253,12 +255,25 @@ nonisolated struct ConfigPipeline {
         // Claude Telemetry & Feature Gates
         "browser-intake-datadoghq.com",
         "browser-intake-us5-datadoghq.com",
+        "browser-intake-us3-datadoghq.com",
+        "browser-intake-ap1-datadoghq.com",
+        "browser-intake-ap2-datadoghq.com",
+        "browser-intake-datadoghq.eu",
+        "browser-intake-ddog-gov.com",
         "datadoghq.com",
         "statsigapi.net",
         "featuregates.org",
         "growthbook.io",
         // Stripe Fraud Telemetry (Radar)
         "stripe.network",
+        // Claude Code install/update dependencies and Claude Desktop essential
+        // telemetry. Exact suffixes avoid sending every node process, Google
+        // API or GitHub request over the residential hop.
+        "storage.googleapis.com",
+        "registry.npmjs.org",
+        "raw.githubusercontent.com",
+        "formulae.brew.sh",
+        "sentry.io",
         // OpenAI, including Codex. `chat.com` and `ai.com` are OpenAI-owned
         // entry points that redirect into ChatGPT.
         "chatgpt.com",
@@ -1580,18 +1595,6 @@ nonisolated struct ConfigPipeline {
         // PF session allowlist.
         let hasResidentialHop = claudeHome != nil || claudeHomeSocks5 != nil
         let assistantTarget = hasResidentialHop ? claudeHomeGroupName : exitGroupName
-        for process in Self.assistantHomeProcessNames {
-            yaml += "  - AND,((NETWORK,TCP),(PROCESS-NAME,\(process))),\(assistantTarget)\n"
-        }
-        for pathRegex in Self.assistantHomeProcessPathRegexes {
-            // Commas and parentheses would break out of the AND payload.
-            precondition(
-                !pathRegex.contains(",") && !pathRegex.contains("(")
-                    && !pathRegex.contains(")"),
-                "assistant process path regex unsafe for rule emission"
-            )
-            yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(pathRegex))),\(assistantTarget)\n"
-        }
         // Domain rules exist only to divert assistant traffic onto the
         // residential hop. Without that hop they would be pure noise — MATCH
         // already sends these to the protected exit — and emitting them anyway
@@ -1604,6 +1607,21 @@ nonisolated struct ConfigPipeline {
             for cidr in Self.assistantHomeIPv4Cidrs {
                 yaml += "  - AND,((NETWORK,TCP),(IP-CIDR,\(cidr),no-resolve)),\(assistantTarget)\n"
             }
+        }
+        // Process rules are a fallback after hostname identity. In particular,
+        // npm and bun run Claude Code as node/node.exe; a process-wide Node rule
+        // would capture unrelated development traffic.
+        for process in Self.assistantHomeProcessNames {
+            yaml += "  - AND,((NETWORK,TCP),(PROCESS-NAME,\(process))),\(assistantTarget)\n"
+        }
+        for pathRegex in Self.assistantHomeProcessPathRegexes {
+            // Commas and parentheses would break out of the AND payload.
+            precondition(
+                !pathRegex.contains(",") && !pathRegex.contains("(")
+                    && !pathRegex.contains(")"),
+                "assistant process path regex unsafe for rule emission"
+            )
+            yaml += "  - AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,\(pathRegex))),\(assistantTarget)\n"
         }
         if transport != nil {
             yaml += "  - PROCESS-NAME,tailscaled,DIRECT\n"
@@ -2022,7 +2040,21 @@ nonisolated struct ConfigPipeline {
     /// a signature could relax an allowlist these were enforced only implicitly,
     /// by never appearing on one; a trusted path needs them stated.
     static let managedDirectProtectedSuffixes = [
-        "anthropic.com", "claude.ai", "tono.app", "tono.com",
+        "anthropic.com", "claude.ai", "claude.com", "claude.app",
+        "claude.site", "clau.de", "anthropic.ai", "claudestudio.com",
+        "claudemcpclient.com", "claudemcpcontent.com", "claudeusercontent.com",
+        "servd-anthropic-website.b-cdn.net", "challenges.cloudflare.com",
+        "cf-assets.www.cloudflare.com", "cloudflareinsights.com",
+        "browser-intake-datadoghq.com", "browser-intake-us5-datadoghq.com",
+        "browser-intake-us3-datadoghq.com",
+        "browser-intake-ap1-datadoghq.com",
+        "browser-intake-ap2-datadoghq.com",
+        "browser-intake-datadoghq.eu", "browser-intake-ddog-gov.com",
+        "datadoghq.com", "statsig.com", "statsigapi.net", "featuregates.org",
+        "growthbook.io", "stripe.network", "storage.googleapis.com",
+        "registry.npmjs.org", "raw.githubusercontent.com", "formulae.brew.sh",
+        "sentry.io",
+        "tono.app", "tono.com",
     ]
 
     private static func isProtectedFromDirect(_ host: String) -> Bool {

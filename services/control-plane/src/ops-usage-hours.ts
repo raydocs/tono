@@ -36,7 +36,7 @@ export async function snapshotUserUsageHours(db: D1Database, nowUnix: number): P
     await db.prepare(
       `INSERT INTO operations_user_usage_hours (user_id, hour_at, usage_bytes)
        SELECT id, ?, usage_bytes FROM users WHERE status = 'active'
-       ON CONFLICT(user_id, hour_at) DO UPDATE SET usage_bytes = excluded.usage_bytes`,
+       ON CONFLICT(user_id, hour_at) DO NOTHING`,
     ).bind(hourAt).run();
     await db.prepare(
       'DELETE FROM operations_user_usage_hours WHERE hour_at < ?',

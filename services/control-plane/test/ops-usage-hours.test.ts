@@ -22,7 +22,7 @@ describe('customer usage hour deltas', () => {
 });
 
 describe('customer usage hour snapshots', () => {
-  it('overwrites the open hour and only deltas closed adjacent hours', async () => {
+  it('writes one boundary snapshot per hour and only deltas closed adjacent hours', async () => {
     const hour = hourFloor(1_800_003_600);
     await db().prepare(
       `INSERT INTO users (id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
@@ -37,7 +37,10 @@ describe('customer usage hour snapshots', () => {
     const open = await db().prepare(
       'SELECT usage_bytes FROM operations_user_usage_hours WHERE user_id = ? AND hour_at = ?',
     ).bind('u-hour', hour).first<{ usage_bytes: number }>();
-    expect(Number(open?.usage_bytes)).toBe(180);
+    // The five-minute cron may call this twelve times in an hour. Rewriting all
+    // active users on every call consumed 288k D1 row writes/day at 1,000 users;
+    // the first sample is the hour boundary and later calls must be no-ops.
+    expect(Number(open?.usage_bytes)).toBe(100);
 
     const queried = await queryUserUsageHours(db(), hour + 3600 + 30, 24);
     const user = queried.users.find((row) => row.userId === 'u-hour');

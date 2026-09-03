@@ -19,8 +19,8 @@ Contract notes that are easy to get wrong:
     it covers this exit alone. Every report names its `sourceId`, and the server
     keeps one cumulative figure per (account, source) and *adds* them: an account
     spread over three exits is the sum of three counters rather than the largest
-    of them. That holds only while the source name is stable across runs, so it
-    is taken from the machine's own identity and then kept on disk.
+    of them. `TONO_SOURCE_ID` must name the same exit node the control plane
+    provisioned; the machine identity is only the fallback when it is unset.
   * xray's counters reset when it restarts, so lifetime totals live here, on disk,
     and restarts contribute deltas. Without that, every restart would silently
     forgive whatever an account had used. The restart itself is read off the node
@@ -79,9 +79,9 @@ STATE_MODE = 0o600
 # Label written by enable-tono-exit-metering.sh for the credential every
 # current client still holds. Removing it would drop the fleet.
 LEGACY_CLIENT_EMAIL = "shared-legacy"
-# The control plane hands out `u:<userId>` as the client label and the fleet
-# audit counts labels in that form. Writing anything else makes the three
-# disagree about what an exit holds.
+# Managed labels use this prefix. Legacy clients are `u:<userId>`; device
+# credentials append device ID and credential UUID so a rotated UUID cannot be
+# mistaken for the still-installed previous generation.
 CLIENT_LABEL_PREFIX = "u:"
 SOURCE_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,64}")
 REQUEST_HEADERS = {
@@ -164,15 +164,15 @@ def source_id(state: dict) -> str:
     The server keeps one cumulative figure per (account, source), so two exits
     must never present the same name — their counters would read as each other's
     resets — and one exit must present the same name every run, or its usage
-    starts again from zero under a second name. So it comes from the machine's
-    own identity rather than being generated per run.
+    starts again from zero under a second name. Production sets the control
+    plane's exit node ID; the machine identity is the stable legacy fallback.
 
-    A name that does change is treated as a move rather than as history to
-    re-report: the figures already sent stay where they are and this exit counts
-    from here, because sending its lifetime total again under a new name would
-    bill the account for the same bytes twice.
+    A persisted name cannot change automatically. A queued cumulative report may
+    or may not already have reached the old ledger; rewriting it can double bill
+    history, while dropping it can lose usage. Existing nodes must therefore be
+    provisioned under the source identity already recorded in this state file.
     """
-    configured = env("TONO_EXIT_SOURCE_ID", required=False) or machine_identity()
+    configured = env("TONO_SOURCE_ID", required=False) or machine_identity()
     normalized = re.sub(r"[^A-Za-z0-9._-]", "-", configured).strip("-")
     # Preserve both halves of a long default identity. Left-truncating at 64
     # characters can discard the machine-id entirely, so two exits with the same
@@ -185,20 +185,29 @@ def source_id(state: dict) -> str:
     source = normalized
     if not SOURCE_ID_PATTERN.fullmatch(source):
         raise Refusal(
-            "this exit has no stable identity to report under; set TONO_EXIT_SOURCE_ID"
+            "this exit has no stable identity to report under; set TONO_SOURCE_ID"
         )
     recorded = state.get("sourceId")
     if isinstance(recorded, str) and recorded and recorded != source:
-        state["totals"] = {label: 0 for label in state["totals"]}
-        print(f"source id changed from {recorded} to {source}; counting from here")
+        raise Refusal(
+            f"TONO_SOURCE_ID {source!r} does not match durable source {recorded!r}; "
+            "provision the exit node with the durable source id"
+        )
+    for report in state["pendingReports"]:
+        if not isinstance(report, dict) or report.get("sourceId") != source:
+            raise Refusal("a queued usage report does not match the durable source id")
     state["sourceId"] = source
     return source
 
 
-def client_label(user_id: str, device_id: str | None = None) -> str:
-    """The label an account's client is installed under, and counted under."""
+def client_label(user_id: str, device_id: str | None = None,
+                 client_uuid: str | None = None) -> str:
+    """The credential-generation label a client is installed and counted under."""
     if device_id:
-        return f"{CLIENT_LABEL_PREFIX}{user_id}:{device_id}"
+        if not client_uuid:
+            raise Refusal("a device-scoped client label requires its credential UUID")
+        generation = hashlib.sha256(client_uuid.encode("ascii")).hexdigest()
+        return f"{CLIENT_LABEL_PREFIX}{user_id}:{device_id}:{generation}"
     return f"{CLIENT_LABEL_PREFIX}{user_id}"
 
 
@@ -207,7 +216,8 @@ def attributed_user(label: str) -> str | None:
 
     `shared-legacy` and anything added by hand carry traffic that belongs to no
     single account; reporting it against one would bill the wrong customer.
-    Supports device-scoped labels: `u:<user_id>:<device_id>`.
+    Supports device-scoped credential-generation labels:
+    `u:<user_id>:<device_id>:<credential_digest>`.
     """
     if not label.startswith(CLIENT_LABEL_PREFIX):
         return None
@@ -276,7 +286,7 @@ def require_commands(binary: Path) -> dict[str, str]:
     return resolved
 
 
-def fetch_roster(base: str, token: str) -> tuple[int, list[dict[str, str]]]:
+def fetch_roster(base: str, token: str) -> tuple[str, int, list[dict[str, str]], bool]:
     request = urllib.request.Request(
         f"{base}/api/v1/home/exit-identities",
         headers={"authorization": f"Bearer {token}", **REQUEST_HEADERS},
@@ -284,10 +294,20 @@ def fetch_roster(base: str, token: str) -> tuple[int, list[dict[str, str]]]:
     )
     with urllib.request.urlopen(request, timeout=20) as response:
         payload = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
+    node_id = payload.get("nodeId")
     observed_at = payload.get("observedAt")
     identities = payload.get("identities")
-    if not isinstance(observed_at, int) or not isinstance(identities, list):
+    if not isinstance(node_id, str) or not SOURCE_ID_PATTERN.fullmatch(node_id):
+        raise Refusal("roster response has no valid authenticated nodeId")
+    if (
+        not isinstance(observed_at, int)
+        or isinstance(observed_at, bool)
+        or not isinstance(identities, list)
+    ):
         raise Refusal("roster response is not the documented shape")
+    retire_shared_legacy = payload.get("retireSharedLegacy", False)
+    if not isinstance(retire_shared_legacy, bool):
+        raise Refusal("roster response has an invalid retireSharedLegacy signal")
     roster: list[dict[str, str]] = []
     for entry in identities:
         if not isinstance(entry, dict):
@@ -302,11 +322,38 @@ def fetch_roster(base: str, token: str) -> tuple[int, list[dict[str, str]]]:
             raise Refusal("roster entry has an invalid clientUUID")
         device_id = entry.get("deviceId")
         if device_id is not None and (not isinstance(device_id, str) or not 1 <= len(device_id) <= 100):
-            device_id = None
+            # Presence means this is a device-scoped credential. Treating a bad
+            # value as absent silently downgrades it to the legacy u:<user>
+            # label, where two devices can overwrite each other and the wrong
+            # identity can remain installed.
+            raise Refusal("roster entry has an invalid deviceId")
         roster.append({"userId": user_id, "clientUUID": client_uuid, "deviceId": device_id})
     if len({entry["clientUUID"] for entry in roster}) != len(roster):
         raise Refusal("roster repeats an identity, which would merge two accounts' counters")
-    return observed_at, roster
+    return node_id, observed_at, roster, retire_shared_legacy
+
+
+def acknowledge_roster(base: str, token: str, observed_at: int) -> None:
+    body = json.dumps({"observedAt": observed_at}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/api/v1/home/roster-ack",
+        data=body,
+        headers={
+            "authorization": f"Bearer {token}",
+            "content-type": "application/json",
+            **REQUEST_HEADERS,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            response.read(MAX_RESPONSE_BYTES)
+    except urllib.error.HTTPError as error:
+        raise Refusal(
+            f"roster ack failed: control plane answered {error.code} {error.reason}"
+        ) from error
+    except (urllib.error.URLError, OSError) as error:
+        raise Refusal(f"roster ack failed: {error}") from error
 
 
 def load_state(path: Path) -> dict:
@@ -319,9 +366,17 @@ def load_state(path: Path) -> dict:
             raise Refusal(f"state file is corrupt: {key}")
     # Absent on a state file written before this agent recorded them, which is
     # not corruption — it is the case that has to remove nothing.
-    for key, kind in (("installedClients", list), ("sourceId", str), ("startMarker", str)):
+    for key, kind in (("installedClients", list), ("sourceId", str), ("startMarker", str),
+                      ("lastReportObservedAt", int)):
         if key in state and not isinstance(state[key], kind):
             raise Refusal(f"state file is corrupt: {key}")
+    last_report_at = state.get("lastReportObservedAt")
+    if (
+        isinstance(last_report_at, bool)
+        or isinstance(last_report_at, int)
+        and not 0 <= last_report_at <= MAX_SAFE_INTEGER
+    ):
+        raise Refusal("state file is corrupt: lastReportObservedAt")
     return state
 
 
@@ -502,7 +557,10 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     this agent recorded installing, and never off counters. When neither is
     known, nothing is removed.
     """
-    wanted = {client_label(entry["userId"], entry.get("deviceId")): entry["clientUUID"] for entry in roster}
+    wanted = {
+        client_label(entry["userId"], entry.get("deviceId"), entry["clientUUID"]): entry["clientUUID"]
+        for entry in roster
+    }
     # A verified empty roster is the enforcement result after the final active
     # account expires, is disabled, or reaches quota. It must remove this
     # agent's `u:` clients or those accounts keep connecting forever. When both
@@ -511,22 +569,11 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     # namespace in either case.
     if not wanted and listed is None and recorded is None:
         return 0, 0, None
-    added = 0
-    for label, client_uuid in sorted(wanted.items()):
-        if listed is not None and label in listed:
-            continue
-        result = run_xray(binary, [
-            "api", commands["add_user"], f"--server={address}",
-            f"--tag={tag}", f"--email={label}", f"--uuid={client_uuid}",
-        ])
-        # Already-present is success, not failure: two agents on one timer, or a
-        # retry after a lost response, must not turn into an error loop. It is
-        # not an addition either, or every round would report the whole roster.
-        if result.returncode != 0 and "already exists" not in (result.stderr or "").lower():
-            raise Refusal(f"adding {label} failed: {result.stderr.strip() or result.returncode}")
-        if result.returncode == 0:
-            added += 1
     installed = listed if listed is not None else recorded
+    known_installed = None if installed is None else {
+        label for label in installed
+        if label == LEGACY_CLIENT_EMAIL or label.startswith(CLIENT_LABEL_PREFIX)
+    }
     removed = 0
     if installed is None:
         print("this exit cannot say which clients it holds; removed nothing")
@@ -546,8 +593,32 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
             ])
             if result.returncode != 0 and "not found" not in (result.stderr or "").lower():
                 raise Refusal(f"removing {label} failed: {result.stderr.strip() or result.returncode}")
+            if known_installed is not None:
+                known_installed.discard(label)
             removed += 1
-    return added, removed, set(wanted)
+    # Remove an obsolete credential generation before adding its replacement.
+    # Xray rejects the same UUID while it is still attached to the old email;
+    # adding first and removing second can therefore leave the device offline
+    # for a full poll cycle. The UUID suffix also gives the new generation a new
+    # counter key, so an old baseline cannot hide its first bytes of traffic.
+    added = 0
+    for label, client_uuid in sorted(wanted.items()):
+        if listed is not None and label in listed:
+            continue
+        result = run_xray(binary, [
+            "api", commands["add_user"], f"--server={address}",
+            f"--tag={tag}", f"--email={label}", f"--uuid={client_uuid}",
+        ])
+        # Already-present is success, not failure: two agents on one timer, or a
+        # retry after a lost response, must not turn into an error loop. It is
+        # not an addition either, or every round would report the whole roster.
+        if result.returncode != 0 and "already exists" not in (result.stderr or "").lower():
+            raise Refusal(f"adding {label} failed: {result.stderr.strip() or result.returncode}")
+        if result.returncode == 0:
+            added += 1
+        if known_installed is not None:
+            known_installed.add(label)
+    return added, removed, known_installed
 
 
 def lifetime_totals(state: dict, counters: dict[str, int], *,
@@ -585,9 +656,9 @@ def lifetime_totals(state: dict, counters: dict[str, int], *,
 def aggregate_user_totals(totals: dict[str, int]) -> dict[str, int]:
     """Aggregate per-device/label lifetime totals into per-account lifetime totals.
 
-    An account may have multiple devices installed on this exit node (e.g. u:alice:dev1,
-    u:alice:dev2). Accounting is per-user, so all devices for the same user on this
-    source must sum together into a single monotonic lifetime total.
+    An account may have multiple device and credential-generation labels on this
+    exit node. Accounting is per-user, so they must all sum into one monotonic
+    lifetime total for this source.
     """
     user_totals: dict[str, int] = {}
     for label, total in totals.items():
@@ -667,8 +738,8 @@ def deliver_queue(base: str, token: str, path: Path, state: dict) -> tuple[int, 
 
     A batch refused outright is halved until the single report being objected to
     is isolated, and that one is dropped rather than left to block every account
-    behind it. Nothing is lost by dropping it: the figure is cumulative, so this
-    account's next report carries those bytes again.
+    behind it. Its local reported watermark is rolled back so the cumulative
+    figure is regenerated next round even if that account has since gone idle.
     """
     delivered = 0
     dropped = 0
@@ -682,6 +753,15 @@ def deliver_queue(base: str, token: str, path: Path, state: dict) -> tuple[int, 
                 size = len(batch) // 2
                 continue
             print(f"dropping a report the control plane refused ({rejection})", file=sys.stderr)
+            rejected = batch[0]
+            reported_totals = state.get("userTotals")
+            if (
+                isinstance(reported_totals, dict)
+                and isinstance(rejected.get("userId"), str)
+                and isinstance(rejected.get("totalBytes"), int)
+                and reported_totals.get(rejected["userId"]) == rejected["totalBytes"]
+            ):
+                reported_totals.pop(rejected["userId"], None)
             dropped += 1
         else:
             delivered += len(batch)
@@ -740,23 +820,61 @@ def run_once(path: Path) -> None:
     source = source_id(state)
     commands = require_commands(binary)
 
-    # A batch the server accepted but that was never acknowledged here goes out
-    # before anything else: the figure is cumulative per source, so re-sending it
-    # counts nothing twice, and losing the acknowledgement must not lose usage.
-    if state["pendingReports"]:
-        state["pendingReports"] = merge_reports(state["pendingReports"], [])
-        save_state(path, state)
-        replayed, discarded = deliver_queue(base, token, path, state)
-        print(f"replayed {replayed} queued report(s), dropped {discarded}")
-
-    retire_shared_legacy = env("TONO_RETIRE_SHARED_LEGACY", required=False) in ("1", "true", "yes")
-    observed_at, roster = fetch_roster(base, token)
+    retire_override = env("TONO_RETIRE_SHARED_LEGACY", required=False)
+    node_id, observed_at, roster, server_retire_shared_legacy = fetch_roster(base, token)
+    if node_id != source:
+        raise Refusal(
+            f"authenticated exit node {node_id!r} does not match durable source {source!r}"
+        )
+    for report in state["pendingReports"]:
+        pending_at = report.get("observedAt")
+        if (
+            not isinstance(pending_at, int)
+            or isinstance(pending_at, bool)
+            or not 0 <= pending_at <= MAX_SAFE_INTEGER
+        ):
+            raise Refusal("a queued usage report has an invalid observedAt")
+        if pending_at > observed_at + 300:
+            # A 400 is normally isolated and dropped so one bad account cannot
+            # wedge the queue. This report is locally known to be outside the
+            # server window, though, so retain it until the server clock catches
+            # up instead of silently losing the last growth for an idle account.
+            raise Refusal("queued usage is more than five minutes ahead of the roster clock")
+    # An explicit environment value wins in both directions so an operator can
+    # stop an automatic retirement. An unset value follows the control plane.
+    retire_shared_legacy = (
+        server_retire_shared_legacy
+        if not retire_override
+        else retire_override in ("1", "true", "yes")
+    )
     remembered = state.get("installedClients")
     added, removed, installed, counters, settled_marker = reconcile_and_read_stable(
         binary, commands, address, tag, roster,
         set(remembered) if isinstance(remembered, list) else None,
         retire_shared_legacy=retire_shared_legacy,
     )
+    if installed is None:
+        # Additions can be attempted safely without a live listing, but they do
+        # not prove that an old credential generation or shared-legacy client
+        # is absent. Never turn that partial result into rollout readiness.
+        raise Refusal(
+            "the live client inventory is unavailable and no durable inventory can prove complete reconciliation"
+        )
+    # Only a complete reconciliation is readiness evidence. Do this before any
+    # state save so a failed acknowledgement leaves the durable state intact and
+    # the whole roster can be retried next round.
+    acknowledge_roster(base, token, observed_at)
+
+    # A batch the server accepted but that was never acknowledged here goes out
+    # before newly measured usage: the figure is cumulative per source, so
+    # re-sending it counts nothing twice, and losing the acknowledgement must not
+    # lose usage.
+    if state["pendingReports"]:
+        state["pendingReports"] = merge_reports(state["pendingReports"], [])
+        save_state(path, state)
+        replayed, discarded = deliver_queue(base, token, path, state)
+        print(f"replayed {replayed} queued report(s), dropped {discarded}")
+
     if installed is not None:
         state["installedClients"] = sorted(installed)
     recorded_marker = state.get("startMarker")
@@ -772,13 +890,19 @@ def run_once(path: Path) -> None:
     )
 
     totals = lifetime_totals(state, counters, restarted=restarted)
-    timestamp = int(time.time())
     current_user_totals = aggregate_user_totals(totals)
     previous_user_totals = state.get("userTotals")
     if not isinstance(previous_user_totals, dict):
         previous_user_totals = aggregate_user_totals(state.get("totals", {}))
 
     reports: list[dict] = []
+    timestamp = max(observed_at, int(state.get("lastReportObservedAt", -1)) + 1)
+    if timestamp > observed_at + 300:
+        # The server rejects observations more than five minutes beyond its own
+        # clock. Keep the old baseline durable so the bytes are measured again
+        # after server time catches up, rather than queueing a report that a 400
+        # response would discard before any later traffic arrives.
+        raise Refusal("usage report clock is more than five minutes ahead of the roster clock")
     for user_id in sorted(current_user_totals):
         total = current_user_totals[user_id]
         previous = int(previous_user_totals.get(user_id, 0))
@@ -789,11 +913,22 @@ def run_once(path: Path) -> None:
                 "reportId": str(uuid.uuid4()),
                 "userId": user_id,
                 "sourceId": source,
+                # v2 observedAt is a server-roster-derived monotonic sequence.
+                # The control plane accepts one final wall-clock v1 transition,
+                # then rejects delayed v1 growth and retained-report replays.
+                "protocolVersion": 2,
                 "totalBytes": total,
                 "observedAt": timestamp,
             })
     state["totals"] = {label: int(value) for label, value in totals.items()}
     state["userTotals"] = {user_id: int(value) for user_id, value in current_user_totals.items()}
+    if reports:
+        # Usage retention eventually removes report-id rows. A timestamp that
+        # always moves forward lets the control plane distinguish a genuinely
+        # new high-water mark from an old ID replayed after a counter reset.
+        # Anchor it to the server-issued roster time so a bad node clock cannot
+        # stall billing or manufacture a future observation.
+        state["lastReportObservedAt"] = timestamp
     # A marker that could not be read this round is forgotten rather than kept:
     # comparing a later reading against a stale one would call a restart that had
     # already been folded in a second time, and bill it twice.

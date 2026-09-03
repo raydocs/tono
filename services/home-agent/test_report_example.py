@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import stat
 import tempfile
@@ -80,10 +81,13 @@ class ReporterTests(unittest.TestCase):
             environment = {
                 "TONO_API_BASE_URL": "https://api.example.com",
                 "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
                 "STATE_PATH": str(path),
             }
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
-                reporter, "observe_totals", return_value={"user-one": 100}
+                reporter,
+                "observe_totals",
+                return_value=({"user-one": 100}, 1_700_000_000),
             ), mock.patch.object(
                 reporter, "post_reports", side_effect=TimeoutError("simulated timeout")
             ):
@@ -93,6 +97,9 @@ class ReporterTests(unittest.TestCase):
             pending_state = reporter.load_state(path)
             self.assertEqual(len(pending_state["pendingReports"]), 1)
             original = pending_state["pendingReports"][0].copy()
+            self.assertEqual(original["sourceId"], "home-exit-one")
+            self.assertEqual(original["protocolVersion"], 2)
+            self.assertEqual(original["observedAt"], 1_700_000_000)
 
             delivered: list[dict] = []
 
@@ -116,12 +123,18 @@ class ReporterTests(unittest.TestCase):
                 {
                     "reportId": f"report-{index}",
                     "userId": f"user-{index}",
+                    "sourceId": "home-exit-one",
+                    "protocolVersion": 2,
                     "totalBytes": index + 1,
                     "observedAt": 1_700_000_000,
                 }
                 for index in range(101)
             ]
-            state = {"totals": {}, "pendingReports": reports.copy()}
+            state = {
+                "sourceId": "home-exit-one",
+                "totals": {},
+                "pendingReports": reports.copy(),
+            }
             reporter.save_state(path, state)
             batches: list[list[dict]] = []
 
@@ -171,6 +184,36 @@ class ReporterTests(unittest.TestCase):
         )
         # stable-one advanced by 25; stable-two reset and contributed its new 10.
         self.assertEqual(second, {"user-one": 1_185})
+
+    def test_server_source_baseline_does_not_rebill_raw_counters_after_state_loss(self) -> None:
+        state = {
+            "totals": {},
+            "pendingReports": [],
+            "peerCounters": {},
+        }
+        mapping = {"public-one": "user-one"}
+
+        recovered = reporter.attribute_peer_counters(
+            state,
+            mapping,
+            {"user-one": 125},
+            {"stable-one": ("public-one", 1_000)},
+        )
+
+        # The server has already accepted 125 bytes from this source. With the
+        # local peer baseline gone, the current raw 1,000 may include all of
+        # those bytes and cannot safely be charged again.
+        self.assertEqual(recovered, {"user-one": 125})
+        self.assertEqual(state["peerCounters"]["stable-one"]["lastRawBytes"], 1_000)
+
+        state["totals"] = recovered
+        advanced = reporter.attribute_peer_counters(
+            state,
+            mapping,
+            {"user-one": 125},
+            {"stable-one": ("public-one", 1_025)},
+        )
+        self.assertEqual(advanced, {"user-one": 150})
 
     def test_stable_id_cannot_move_between_users(self) -> None:
         state = {
@@ -222,24 +265,112 @@ class ReporterTests(unittest.TestCase):
             environment = {
                 "TONO_API_BASE_URL": "https://api.example.com",
                 "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
                 "STATE_PATH": str(path),
             }
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
-                reporter, "observe_totals", return_value={"valid-user": 1, 7: 2}
+                reporter,
+                "observe_totals",
+                return_value=({"valid-user": 1, 7: 2}, 1_700_000_000),
             ):
                 with self.assertRaisesRegex(RuntimeError, "counter source returned invalid data"):
                     reporter.main()
+
+    def test_source_identity_cannot_change_after_it_is_persisted(self) -> None:
+        state = {
+            "sourceId": "home-exit-one",
+            "totals": {},
+            "pendingReports": [],
+            "peerCounters": {},
+        }
+        with mock.patch.dict(
+            os.environ,
+            {"TONO_SOURCE_ID": "home-exit-two"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "durable source"):
+                reporter.source_id(state)
+
+    def test_inventory_node_identity_must_match_the_configured_source(self) -> None:
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit: int) -> bytes:
+                return json.dumps({
+                    "nodeId": "different-exit",
+                    "observedAt": 1_700_000_000,
+                    "devices": [],
+                }).encode("utf-8")
+
+        opener = mock.Mock()
+        opener.open.return_value = Response()
+        with mock.patch.object(reporter.urllib.request, "build_opener", return_value=opener):
+            with self.assertRaisesRegex(RuntimeError, "authenticated exit node"):
+                reporter.fetch_inventory(
+                    "https://api.example.com",
+                    "test-home-agent-token-with-32-characters",
+                    "home-exit-one",
+                )
+
+    def test_inventory_uses_node_source_total_not_account_aggregate(self) -> None:
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit: int) -> bytes:
+                return json.dumps({
+                    "nodeId": "home-exit-two",
+                    "observedAt": 1_700_000_000,
+                    "devices": [{
+                        "stableNodeId": "stable-one",
+                        "publicKey": "nodekey:public-one",
+                        "userId": "user-one",
+                        "status": "active",
+                        "usageBytes": 9_000,
+                        "sourceUsageBytes": 125,
+                    }],
+                }).encode("utf-8")
+
+        opener = mock.Mock()
+        opener.open.return_value = Response()
+        with mock.patch.object(reporter.urllib.request, "build_opener", return_value=opener):
+            mapping, source_totals, observed_at = reporter.fetch_inventory(
+                "https://api.example.com",
+                "test-home-agent-token-with-32-characters",
+                "home-exit-two",
+            )
+
+        self.assertEqual(mapping, {"public-one": "user-one"})
+        self.assertEqual(source_totals, {"user-one": 125})
+        self.assertEqual(observed_at, 1_700_000_000)
 
     def test_duplicate_pending_report_ids_are_rejected(self) -> None:
         report = {
             "reportId": "same-report",
             "userId": "user-one",
+            "sourceId": "home-exit-one",
+            "protocolVersion": 2,
             "totalBytes": 42,
             "observedAt": 1_700_000_000,
         }
         with self.assertRaisesRegex(RuntimeError, "duplicate pending report ID"):
             reporter.validate_state(
-                {"totals": {}, "pendingReports": [report, report.copy()]}
+                {
+                    "sourceId": "home-exit-one",
+                    "totals": {},
+                    "pendingReports": [report, report.copy()],
+                }
             )
 
 

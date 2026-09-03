@@ -5,12 +5,20 @@ import {
   waitOnExecutionContext,
 } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { jwtSign } from '../src/crypto';
+import { jwtSign, sha256 } from '../src/crypto';
 import worker, { parseBytesRange, retirementCatalogPlan, type Env } from '../src/index';
 import adminWorker from '../src/admin-worker';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
 const HOME_TOKEN = 'home-test-token-with-at-least-32-characters';
+const EXIT_NODE_TOKENS = {
+  'exit-default': 'exit-default-token-with-at-least-32-characters',
+  'exit-a': 'exit-a-token-with-at-least-32-characters-000',
+  'exit-b': 'exit-b-token-with-at-least-32-characters-000',
+  'exit-c': 'exit-c-token-with-at-least-32-characters-000',
+  'exit-r': 'exit-r-token-with-at-least-32-characters-000',
+  'exit-t': 'exit-t-token-with-at-least-32-characters-000',
+} as const;
 const JWT_TEST_SECRET = 'test-jwt-secret-with-at-least-32-characters';
 
 const api = async (path: string, init: RequestInit = {}) => {
@@ -369,6 +377,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   beforeEach(async () => {
     (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'true';
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
     (env as unknown as Env).ACCESS_TEAM_DOMAIN = ACCESS_TEAM_DOMAIN;
     (env as unknown as Env).ACCESS_AUD = ACCESS_AUDIENCE;
     (env as unknown as Env).ACCESS_ADMIN_EMAILS = ACCESS_ADMIN_EMAIL;
@@ -384,6 +393,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     resetMockInventory();
     // Rate-limit counters persist in D1 across tests; reset so limits stay isolated
     await env.DB.prepare('DELETE FROM rate_limits').run();
+    const timestamp = Math.floor(Date.now() / 1000);
+    await env.DB.batch(await Promise.all(Object.entries(EXIT_NODE_TOKENS).map(async ([nodeId, token]) => (
+      env.DB.prepare(
+        `INSERT INTO exit_nodes(
+           id, name, token_hash, status, last_roster_at, created_at, updated_at
+         ) VALUES(?, ?, ?, 'active', ?, ?, ?)`,
+      ).bind(nodeId, `Test ${nodeId}`, await sha256(token), timestamp + 3600, timestamp, timestamp)
+    ))));
   });
 
   it('sets defensive response headers and rejects an empty bearer token', async () => {
@@ -1119,7 +1136,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(forwarded).toHaveLength(3);
   });
 
-  it('serves the node roster to the collector, and never an empty list by accident', async () => {
+  it('serves a stable node roster without minting new legacy user credentials', async () => {
     const unconfigured = await api('ops-ingest/node-clients', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
     });
@@ -1127,14 +1144,25 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
 
-    // Seeded here rather than relying on another test having made one: what is
-    // being checked is that an entitled account with no credential yet gets one.
+    // A user with no registered device must not make this compatibility route
+    // mint another legacy identity during the device-credential cutover.
     const seeded = Math.floor(Date.now() / 1000);
     await (env as unknown as Env).DB.prepare(
       `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
                                    usage_bytes, created_at, updated_at)
        VALUES('usr_roster', 'roster@example.com', 'h', 's', 'active', 0, ?, ?)`,
     ).bind(seeded, seeded).run();
+    await (env as unknown as Env).DB.batch([
+      (env as unknown as Env).DB.prepare(
+        `INSERT INTO devices(
+           id, user_id, installation_id, name, status, created_at, updated_at
+         ) VALUES('dev_roster', 'usr_roster', 'install_roster', 'Roster device', 'active', ?, ?)`,
+      ).bind(seeded, seeded),
+      (env as unknown as Env).DB.prepare(
+        `INSERT INTO device_exit_credentials(device_id, user_id, client_uuid, created_at)
+         VALUES('dev_roster', 'usr_roster', '11111111-1111-4111-8111-111111111111', ?)`,
+      ).bind(seeded),
+    ]);
 
     const wrongToken = await api('ops-ingest/node-clients', {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
@@ -1151,23 +1179,240 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // client from every node.
     expect(roster.observedAt).toBeGreaterThan(0);
     expect(Array.isArray(roster.clients)).toBe(true);
-    // Identities are otherwise minted only when a catalog carrying the
-    // placeholder is fetched, and the published catalog is still the legacy
-    // one — so without minting here the roster is empty forever and the
-    // cutover cannot start.
     expect(roster.clients.some((c: { userId: string }) => c.userId === 'usr_roster')).toBe(true);
-    // Minting is idempotent: a second call must not hand the same account a
-    // different identity, or every node would be reconciled to a UUID the
-    // customer does not present.
+    expect(await env.DB.prepare(
+      'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    ).bind('usr_roster').first()).toBeNull();
+    // Reconciliation is deterministic: a second read cannot change the roster.
     const again = await api('ops-ingest/node-clients', {
       headers: { authorization: 'Bearer collector-test-token-with-at-least-32-chars' },
     });
     expect(await again.json()).toMatchObject({ clients: roster.clients });
     for (const client of roster.clients) {
-      expect(client.email).toBe(`u:${client.userId}`);
+      const generation = Array.from(new Uint8Array(await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(client.clientUUID),
+      ))).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      expect(client.email).toBe(
+        client.deviceId
+          ? `u:${client.userId}:${client.deviceId}:${generation}`
+          : `u:${client.userId}`,
+      );
+      expect(client.email).not.toContain(client.clientUUID);
       expect(client.clientUUID).toMatch(/^[0-9a-f-]{36}$/);
     }
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('keeps shared legacy retirement disabled until the device credential rollout is ready', async () => {
+    const homeRoster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    expect(homeRoster.status).toBe(200);
+    expect((await homeRoster.json() as any).retireSharedLegacy).toBe(false);
+
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    try {
+      const collectorRoster = await api('ops-ingest/node-clients', {
+        headers: { authorization: 'Bearer collector-test-token-with-at-least-32-chars' },
+      });
+      expect(collectorRoster.status).toBe(200);
+      expect((await collectorRoster.json() as any).retireSharedLegacy).toBe(false);
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
+  });
+
+  it('keeps catalogs usable on the legacy user credential while exit nodes are being provisioned', async () => {
+    await env.DB.prepare('DELETE FROM exit_nodes').run();
+    const account = await createAccount('dual-rollout-fallback');
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const catalog = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(catalog.status).toBe(200);
+    const servedUUID = /uuid: ([0-9a-f-]{36})/.exec((await catalog.json() as any).yaml)?.[1];
+    const legacy = await env.DB.prepare(
+      'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
+    ).bind(account.user.id).first<any>();
+    const device = await env.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(servedUUID).toBe(legacy.client_uuid);
+    expect(device.client_uuid).not.toBe(legacy.client_uuid);
+
+    const roster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    });
+    const identities = (await roster.json() as any).identities
+      .filter((entry: any) => entry.userId === account.user.id)
+      .map((entry: any) => entry.clientUUID);
+    expect(identities).toEqual(expect.arrayContaining([legacy.client_uuid, device.client_uuid]));
+  });
+
+  it('provisions and rotates a node token that is bound to its usage source', async () => {
+    const created = await admin('exit-nodes', { id: 'exit-new', name: 'New Exit' });
+    expect(created.status).toBe(201);
+    const firstToken = String((await created.json() as any).token);
+    expect(firstToken.length).toBeGreaterThanOrEqual(32);
+    const firstRoster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${firstToken}` },
+    });
+    expect(firstRoster.status).toBe(200);
+    expect((await firstRoster.json() as any).nodeId).toBe('exit-new');
+
+    const mismatch = await api('home/usage', json({ reports: [{
+      reportId: 'wrong-source',
+      userId: 'not-reached',
+      sourceId: 'exit-default',
+      totalBytes: 1,
+      observedAt: Math.floor(Date.now() / 1000),
+    }] }, firstToken));
+    expect(mismatch.status).toBe(403);
+    expect((await mismatch.json() as any).error.code).toBe('SOURCE_ID_MISMATCH');
+
+    const rotated = await admin('exit-nodes/exit-new/token', {});
+    expect(rotated.status).toBe(200);
+    const secondToken = String((await rotated.json() as any).token);
+    expect(secondToken).not.toBe(firstToken);
+    expect((await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${firstToken}` },
+    })).status).toBe(401);
+    expect((await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${secondToken}` },
+    })).status).toBe(200);
+  });
+
+  it('acknowledges a reconciled roster only with a provisioned node token', async () => {
+    const token = EXIT_NODE_TOKENS['exit-default'];
+    const roster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const observedAt = Number((await roster.json() as any).observedAt);
+    await env.DB.prepare(
+      "UPDATE exit_nodes SET last_roster_at = 0 WHERE id = 'exit-default'",
+    ).run();
+    const ack = await api('home/roster-ack', json({ observedAt }, token));
+    expect(ack.status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT last_roster_at FROM exit_nodes WHERE id = 'exit-default'",
+    ).first<any>()).toMatchObject({ last_roster_at: observedAt });
+    expect((await api('home/roster-ack', json({ observedAt }, HOME_TOKEN))).status).toBe(401);
+  });
+
+  it('requires a fresh roster acknowledgement when a disabled exit node is re-enabled', async () => {
+    const token = EXIT_NODE_TOKENS['exit-default'];
+    const roster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const observedAt = Number((await roster.json() as any).observedAt);
+    expect((await api('home/roster-ack', json({ observedAt }, token))).status).toBe(200);
+    const acknowledgedAt = Number((await env.DB.prepare(
+      "SELECT last_roster_at FROM exit_nodes WHERE id = 'exit-default'",
+    ).first<any>())?.last_roster_at);
+
+    // An idempotent active PATCH must not throw away a valid acknowledgement.
+    expect((await admin('exit-nodes/exit-default', { status: 'active' }, 'PATCH')).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT last_roster_at FROM exit_nodes WHERE id = 'exit-default'",
+    ).first<any>()).toMatchObject({ last_roster_at: acknowledgedAt });
+
+    expect((await admin('exit-nodes/exit-default', { status: 'disabled' }, 'PATCH')).status).toBe(200);
+    expect((await admin('exit-nodes/exit-default', { status: 'active' }, 'PATCH')).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT last_roster_at FROM exit_nodes WHERE id = 'exit-default'",
+    ).first<any>()).toMatchObject({ last_roster_at: 0 });
+  });
+
+  it('enforces device-only rollout readiness at the database boundary', async () => {
+    await env.DB.prepare(
+      "UPDATE exit_nodes SET last_roster_at = 0 WHERE id = 'exit-default'",
+    ).run();
+    await expect(env.DB.prepare(
+      "UPDATE exit_credential_rollout SET phase = 'device_only' WHERE singleton_id = 1",
+    ).run()).rejects.toThrow('EXIT_CREDENTIAL_ROLLOUT_NOT_READY');
+    expect(await env.DB.prepare(
+      'SELECT phase FROM exit_credential_rollout WHERE singleton_id = 1',
+    ).first<any>()).toMatchObject({ phase: 'dual' });
+  });
+
+  it('does not treat a same-second roster acknowledgement as covering a new credential', async () => {
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+    expect((await admin('exit-credential-rollout', { phase: 'device_only' })).status).toBe(200);
+
+    const account = await createAccount('same-second-roster');
+    const credential = await env.DB.prepare(
+      'SELECT created_at FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    const createdAt = Number(credential.created_at);
+    await env.DB.prepare(
+      'UPDATE exit_nodes SET last_roster_at = ?',
+    ).bind(createdAt).run();
+
+    const ambiguous = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(ambiguous.status).toBe(503);
+    expect((await ambiguous.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+
+    await env.DB.prepare(
+      'UPDATE exit_nodes SET last_roster_at = ?',
+    ).bind(createdAt + 1).run();
+    expect((await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    })).status).toBe(200);
+  });
+
+  it('retires shared legacy only after credentials, catalog and node acknowledgements are ready', async () => {
+    const account = await createAccount('credential-rollout');
+    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const advanced = await admin('exit-credential-rollout', { phase: 'device_only' });
+    expect(advanced.status).toBe(200);
+    const roster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect((await roster.json() as any).retireSharedLegacy).toBe(true);
+    expect((await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${HOME_TOKEN}` },
+    })).status).toBe(401);
+
+    // Adding an unacknowledged node after cutover must hold new catalog
+    // credentials until that node has actually reconciled the roster.
+    const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
+    const lateToken = String((await late.json() as any).token);
+    const blocked = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    });
+    expect(blocked.status).toBe(503);
+    expect((await blocked.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+
+    const lateRoster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${lateToken}` },
+    });
+    const observedAt = Number((await lateRoster.json() as any).observedAt);
+    expect((await api('home/roster-ack', json({ observedAt }, lateToken))).status).toBe(200);
+    expect((await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    })).status).toBe(503);
+
+    // Seconds are the persisted wire precision. An acknowledgement tied with a
+    // credential's creation cannot prove whether it was fetched before or after
+    // that credential; the next poll gives the ordering a strict boundary.
+    const delay = Math.max(0, (observedAt + 1) * 1_000 - Date.now() + 10);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const settledRoster = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${lateToken}` },
+    });
+    const settledAt = Number((await settledRoster.json() as any).observedAt);
+    expect((await api('home/roster-ack', json({ observedAt: settledAt }, lateToken))).status).toBe(200);
+    expect((await api('exit-catalog', {
+      headers: { authorization: `Bearer ${account.accessToken}` },
+    })).status).toBe(200);
   });
 
   it('accepts usage from the collector under its own token, on the same rules', async () => {
@@ -1229,8 +1474,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).bind(seeded, seeded).run();
     const report = (reportId: string, sourceId: string, totalBytes: number, at = seeded) =>
       api('home/usage', json({
-        reports: [{ reportId, userId: 'usr_sources', sourceId, totalBytes, observedAt: at }],
-      }, HOME_TOKEN));
+        reports: [{
+          reportId,
+          userId: 'usr_sources',
+          sourceId,
+          protocolVersion: 2,
+          totalBytes,
+          observedAt: at,
+        }],
+      }, EXIT_NODE_TOKENS[sourceId as keyof typeof EXIT_NODE_TOKENS]));
     const counted = async () => {
       const row = await (env as unknown as Env).DB.prepare(
         'SELECT usage_bytes FROM users WHERE id = ?',
@@ -1244,6 +1496,9 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await report('src-b-1', 'exit-b', 500)).status).toBe(200);
     expect((await report('src-c-1', 'exit-c', 200)).status).toBe(200);
     expect(await counted()).toBe(1_000);
+    expect(await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM usage_reports WHERE user_id = 'usr_sources'",
+    ).first<any>()).toMatchObject({ count: 0 });
 
     // A source's figure is cumulative, so a later one replaces its own
     // predecessor rather than adding to it.
@@ -1259,15 +1514,17 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await report('src-a-3', 'exit-a', 400, seeded + 30)).status).toBe(200);
     expect(await counted()).toBe(1_150);
 
-    // Growth is taken whatever the timestamp says: a clock that steps backwards
-    // between rounds must not stop an exit being counted, and the difference is
-    // what is taken from it either way.
+    // A higher but older row is stale. Accepting it becomes unsafe once old
+    // idempotency rows are pruned: after a later counter reset, replaying this
+    // row would look like fresh growth and bill history twice. The exit agent
+    // uses a server-anchored monotonic timestamp for legitimate growth.
     expect((await report('src-a-4', 'exit-a', 500, seeded + 30)).status).toBe(200);
-    expect(await counted()).toBe(1_200);
+    expect(await counted()).toBe(1_150);
 
-    // The same report id under a different source is a conflict, not a silent
-    // keep of whichever row reached the table first.
-    expect((await report('src-a-2', 'exit-b', 450, seeded + 60)).status).toBe(409);
+    // Protocol-v2 idempotency is scoped by the authenticated source's monotonic
+    // clock, not a D1 row per report. A random report ID collision on another
+    // node therefore cannot suppress that node's legitimate growth.
+    expect((await report('src-a-2', 'exit-b', 550, seeded + 60)).status).toBe(200);
     expect(await counted()).toBe(1_200);
 
     const ambiguousBatch = await api('home/usage', json({
@@ -1281,7 +1538,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
           totalBytes: 100, observedAt: seeded + 120,
         },
       ],
-    }, HOME_TOKEN));
+    }, EXIT_NODE_TOKENS['exit-a']));
     expect(ambiguousBatch.status).toBe(400);
     expect((await ambiguousBatch.json() as any).error.code).toBe('VALIDATION_ERROR');
     expect(await counted()).toBe(1_200);
@@ -1291,8 +1548,31 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         reportId: 'src-long', userId: 'usr_sources', sourceId: 'x'.repeat(65),
         totalBytes: 1, observedAt: seeded,
       }],
-    }, HOME_TOKEN));
+    }, EXIT_NODE_TOKENS['exit-a']));
     expect(oversized.status).toBe(400);
+  });
+
+  it('does not let the shared roster token forge usage for an arbitrary source', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_shared_token', 'shared-token@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const response = await api('home/usage', json({
+      reports: [{
+        reportId: 'shared-token-forgery',
+        userId: 'usr_shared_token',
+        sourceId: 'some-other-exit',
+        totalBytes: 9_999_999,
+        observedAt: seeded,
+      }],
+    }, HOME_TOKEN));
+    expect(response.status).toBe(401);
+    const stored = await env.DB.prepare(
+      'SELECT usage_bytes FROM users WHERE id = ?',
+    ).bind('usr_shared_token').first<any>();
+    expect(Number(stored?.usage_bytes)).toBe(0);
   });
 
   it('carries a rebuilt exit forward, and leaves a reporter that names none on MAX', async () => {
@@ -1302,13 +1582,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
                                    usage_bytes, created_at, updated_at)
        VALUES('usr_rebuilt', 'rebuilt@example.com', 'h', 's', 'active', 0, ?, ?)`,
     ).bind(seeded, seeded).run();
-    const report = (reportId: string, totalBytes: number, at: number, sourceId?: string) =>
-      api('home/usage', json({
-        reports: [{
-          reportId, userId: 'usr_rebuilt', totalBytes, observedAt: at,
-          ...(sourceId === undefined ? {} : { sourceId }),
-        }],
-      }, HOME_TOKEN));
+    const report = (reportId: string, totalBytes: number, at: number, sourceId?: string) => {
+      const reports = [{
+        reportId, userId: 'usr_rebuilt', totalBytes, observedAt: at,
+        ...(sourceId === undefined ? {} : { sourceId, protocolVersion: 2 }),
+      }];
+      return sourceId === undefined
+        ? api('ops-ingest/usage', json(
+          { reports },
+          'collector-test-token-with-at-least-32-chars',
+        ))
+        : api('home/usage', json(
+          { reports },
+          EXIT_NODE_TOKENS[sourceId as keyof typeof EXIT_NODE_TOKENS],
+        ));
+    };
     const counted = async () => {
       const row = await (env as unknown as Env).DB.prepare(
         'SELECT usage_bytes FROM users WHERE id = ?',
@@ -1329,12 +1617,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // been upgraded. Its figure is an aggregate over a changing set of nodes, so
     // a fall means a node left the fleet rather than a counter reset: it keeps
     // the MAX contract it was written against, beside the exit's own counter.
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
     expect((await report('rb-3', 400, seeded + 60)).status).toBe(200);
     expect(await counted()).toBe(1_420);
     expect((await report('rb-4', 250, seeded + 120)).status).toBe(200);
     expect(await counted()).toBe(1_420);
     expect((await report('rb-5', 600, seeded + 120)).status).toBe(200);
     expect(await counted()).toBe(1_620);
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
   it('does not read a fallen figure sharing a timestamp as a rebuilt exit', async () => {
@@ -1347,9 +1637,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const report = (reportId: string, totalBytes: number, at: number) =>
       api('home/usage', json({
         reports: [{
-          reportId, userId: 'usr_tied', sourceId: 'exit-t', totalBytes, observedAt: at,
+          reportId,
+          userId: 'usr_tied',
+          sourceId: 'exit-t',
+          protocolVersion: 2,
+          totalBytes,
+          observedAt: at,
         }],
-      }, HOME_TOKEN));
+      }, EXIT_NODE_TOKENS['exit-t']));
     const counted = async () => {
       const row = await (env as unknown as Env).DB.prepare(
         'SELECT usage_bytes FROM users WHERE id = ?',
@@ -1360,17 +1655,95 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await report('tie-1', 900, seeded)).status).toBe(200);
     expect(await counted()).toBe(900);
 
-    // The agent stamps one timestamp per run and holds no lock, so a timer
-    // firing beside a manual run can land two reports in the same second with
-    // the higher one first. The lower one is a reading from that same second,
-    // not a rebuild: carrying it forward would bill the whole cumulative figure
-    // a second time.
+    // A duplicate process or malformed sender can race two observations with
+    // one timestamp. The lower one is not proof of a rebuild: carrying it
+    // forward would bill the whole cumulative figure a second time.
     expect((await report('tie-2', 400, seeded)).status).toBe(200);
     expect(await counted()).toBe(900);
 
     // A rebuilt node's counter is always later than the figure it replaces.
     expect((await report('tie-3', 120, seeded + 60)).status).toBe(200);
     expect(await counted()).toBe(1_020);
+  });
+
+  it('does not rebill a retained report after its idempotency row is pruned', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, status,
+                         usage_bytes, created_at, updated_at)
+       VALUES('usr-pruned-replay', 'pruned-replay@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const send = (reportId: string, totalBytes: number, observedAt: number) =>
+      api('home/usage', json({ reports: [{
+        reportId,
+        userId: 'usr-pruned-replay',
+        sourceId: 'exit-r',
+        protocolVersion: 2,
+        totalBytes,
+        observedAt,
+      }] }, EXIT_NODE_TOKENS['exit-r']));
+    const counted = async () => Number((await env.DB.prepare(
+      'SELECT usage_bytes FROM users WHERE id = ?',
+    ).bind('usr-pruned-replay').first<any>())?.usage_bytes);
+
+    expect((await send('pruned-old', 900, seeded)).status).toBe(200);
+    expect((await send('pruned-reset', 120, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+
+    // Retention removes old report IDs but deliberately keeps the cumulative
+    // source ledger. Replaying the old high-water row after a counter reset must
+    // not look like 780 new bytes merely because its ID can be inserted again.
+    await env.DB.prepare(
+      "DELETE FROM usage_reports WHERE report_id = 'pruned-old'",
+    ).run();
+    expect((await send('pruned-old', 900, seeded)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+  });
+
+  it('settles legacy clock skew once and rejects legacy growth after protocol v2', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO users(id,email,password_hash,password_salt,status,usage_bytes,created_at,updated_at)
+       VALUES('usr_usage_v2','usage-v2@example.com','h','s','active',0,?,?)`,
+    ).bind(seeded, seeded).run();
+    const token = EXIT_NODE_TOKENS['exit-default'];
+    const send = (
+      reportId: string,
+      totalBytes: number,
+      observedAt: number,
+      protocolVersion?: number,
+    ) => api('home/usage', json({ reports: [{
+      reportId,
+      userId: 'usr_usage_v2',
+      sourceId: 'exit-default',
+      ...(protocolVersion === undefined ? {} : { protocolVersion }),
+      totalBytes,
+      observedAt,
+    }] }, token));
+    const counted = async () => Number((await env.DB.prepare(
+      "SELECT usage_reported_bytes FROM users WHERE id = 'usr_usage_v2'",
+    ).first<any>())?.usage_reported_bytes ?? -1);
+
+    expect((await send('legacy-first', 900, seeded + 100)).status).toBe(200);
+    // Old agents used their wall clock. A legitimate cumulative increase from
+    // one whose clock stepped backwards must settle before the v2 cutover.
+    expect((await send('legacy-skewed', 1_000, seeded + 50)).status).toBe(200);
+    expect(await counted()).toBe(1_000);
+
+    // First v2 report replaces the wall-clock watermark with its roster-derived
+    // monotonic clock, even when the previous wall clock was further ahead.
+    expect((await send('v2-cutover', 1_020, seeded + 60, 2)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+
+    // Delayed v1 evidence cannot move a source after v2 cutover, even if its ID
+    // happens to match the v2 report (v2 does not spend a D1 row per report ID).
+    expect((await send('v2-cutover', 1_020, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+
+    // Delayed/replayed v1 evidence can never move a source after that cutover.
+    expect((await send('legacy-after-v2', 5_000, seeded + 200)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+    expect((await send('invalid-protocol', 5_001, seeded + 201, 3)).status).toBe(400);
   });
 
   it('lets a billing cycle be reset without the next report undoing it', async () => {
@@ -3345,7 +3718,42 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // ever passes, one stolen key exposes this control plane and Claude traffic
     // — strictly worse than the allowlist the signature replaces.
     for (const field of ['domains', 'webDomains', 'directSuffixes'] as const) {
-      for (const host of ['api.anthropic.com', 'claude.ai', 'api.afk.ccwu.cc'.replace('api.afk.ccwu.cc', 'tono.app')]) {
+      for (const host of [
+        'api.anthropic.com',
+        'claude.ai',
+        'claude.com',
+        'claude.app',
+        'claude.site',
+        'clau.de',
+        'anthropic.ai',
+        'claudestudio.com',
+        'claudemcpclient.com',
+        'claudemcpcontent.com',
+        'downloads.claudeusercontent.com',
+        'servd-anthropic-website.b-cdn.net',
+        'challenges.cloudflare.com',
+        'cf-assets.www.cloudflare.com',
+        'cloudflareinsights.com',
+        'browser-intake-datadoghq.com',
+        'browser-intake-us5-datadoghq.com',
+        'browser-intake-us3-datadoghq.com',
+        'browser-intake-ap1-datadoghq.com',
+        'browser-intake-ap2-datadoghq.com',
+        'browser-intake-datadoghq.eu',
+        'browser-intake-ddog-gov.com',
+        'o123.ingest.sentry.io',
+        'api.statsig.com',
+        'api.statsigapi.net',
+        'featuregates.org',
+        'growthbook.io',
+        'stripe.network',
+        'storage.googleapis.com',
+        'registry.npmjs.org',
+        'raw.githubusercontent.com',
+        'formulae.brew.sh',
+        'api.datadoghq.com',
+        'tono.app',
+      ]) {
         const attempt = { ...unlistedPolicy, webDomains: [], [field]: [{ host, ports: [443] }] };
         // Even the dry run, which canonicalises as trusted, must refuse.
         const preview = await admin('traffic-policy', { policy: attempt, dryRun: true }, 'PUT');
@@ -3791,6 +4199,86 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(activeIds).toContain(dev3.device.id);
   });
 
+  it('rejects a session inserted after its device was revoked', async () => {
+    const account = await createAccount('late-session');
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE devices SET status = 'revoked', updated_at = unixepoch() WHERE id = ?",
+      ).bind(account.device.id),
+      env.DB.prepare(
+        'UPDATE sessions SET revoked_at = unixepoch() WHERE device_id = ? AND revoked_at IS NULL',
+      ).bind(account.device.id),
+    ]);
+
+    await expect(env.DB.prepare(
+      `INSERT INTO sessions(id, user_id, refresh_hash, expires_at, created_at, device_id)
+       VALUES(?, ?, ?, unixepoch() + 3600, unixepoch(), ?)`,
+    ).bind(
+      crypto.randomUUID(),
+      account.user.id,
+      `late-session-${crypto.randomUUID()}`,
+      account.device.id,
+    ).run()).rejects.toThrow('SESSION_DEVICE_INELIGIBLE');
+  });
+
+  it('returns a state-change conflict when session authorization changes during sign-in', async () => {
+    (env as unknown as Env).TAILSCALE_ENROLLMENT_ENABLED = 'false';
+    const account = await createAccount('session-state-race');
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_session_authorization
+       BEFORE INSERT ON sessions
+       WHEN NEW.device_id = '${account.device.id}'
+       BEGIN
+         SELECT RAISE(ABORT, 'SESSION_DEVICE_INELIGIBLE');
+       END`,
+    ).run();
+
+    const response = await emailSignIn({
+      email: account.email,
+      deviceName: 'Racing Mac',
+      installationId: 'session-state-race-installation-one',
+    });
+    const responseBody = await response.json() as any;
+    expect(response.status, JSON.stringify(responseBody)).toBe(409);
+    expect(responseBody.error.code).toBe('DEVICE_AUTHORIZATION_CHANGED');
+  });
+
+  it('atomically evicts every excess device after a device-limit contraction', async () => {
+    const account = await createAccount('lru-limit-contraction');
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 5 }, 'PATCH')).status).toBe(200);
+    for (const suffix of ['two', 'three', 'four', 'five']) {
+      expect((await emailSignIn({
+        email: account.email,
+        deviceName: `Device ${suffix}`,
+        installationId: `lru-limit-contraction-${suffix}`,
+      })).status).toBe(200);
+    }
+    const live = await env.DB.prepare(
+      "SELECT id FROM devices WHERE user_id = ? AND status IN ('pending', 'active') ORDER BY rowid",
+    ).bind(account.user.id).all<any>();
+    for (const [index, device] of live.results.entries()) {
+      await env.DB.prepare(
+        'UPDATE devices SET tailscale_node_id = ? WHERE id = ?',
+      ).bind(`node-limit-contraction-${index}`, device.id).run();
+    }
+    expect((await admin(`users/${account.user.id}`, { deviceLimit: 1 }, 'PATCH')).status).toBe(200);
+
+    const replacement = await emailSignIn({
+      email: account.email,
+      deviceName: 'Replacement',
+      installationId: 'lru-limit-contraction-replacement',
+    });
+    expect(replacement.status).toBe(200);
+    const states = await env.DB.prepare(
+      'SELECT status, COUNT(*) AS count FROM devices WHERE user_id = ? GROUP BY status',
+    ).bind(account.user.id).all<any>();
+    expect(Object.fromEntries(states.results.map((row: any) => [row.status, row.count])))
+      .toEqual({ pending: 1, revoked: 5 });
+    expect((await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM revocation_jobs WHERE reason = 'device_rotated'",
+    ).first<any>()).count).toBe(5);
+  });
+
   it('confirm resolves via inventory with distinct IDs and stores management id', async () => {
     const account = await createAccount('three-id');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -4151,6 +4639,27 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(retry.status).toBe(200);
   });
 
+  it('removes an expired pending device credential in the revocation transaction', async () => {
+    const account = await createAccount('expire-device-credential');
+    expect(await env.DB.prepare(
+      'SELECT device_id FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first()).not.toBeNull();
+    await env.DB.prepare(
+      'UPDATE devices SET pending_expires_at = ? WHERE id = ?',
+    ).bind(Math.floor(Date.now() / 1000) - 1, account.device.id).run();
+
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+
+    expect(await env.DB.prepare(
+      'SELECT device_id FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(account.device.id).first()).toBeNull();
+    expect(await env.DB.prepare(
+      'SELECT status FROM devices WHERE id = ?',
+    ).bind(account.device.id).first<any>()).toMatchObject({ status: 'revoked' });
+  });
+
   it('processes durable revocations before retention housekeeping can fail', async () => {
     const account = await createAccount('revocation-before-retention');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -4386,9 +4895,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const usage = await api('home/usage', json({ reports: [{
       reportId: `report-${sequence}`,
       userId: account.user.id,
+      sourceId: 'exit-default',
       totalBytes: 100,
       observedAt: Math.floor(Date.now() / 1000),
-    }] }, HOME_TOKEN));
+    }] }, EXIT_NODE_TOKENS['exit-default']));
     expect(usage.status).toBe(200);
     expect((await api('me', { headers: { authorization: `Bearer ${account.accessToken}` } })).status).toBe(401);
     const device = await env.DB.prepare('SELECT status FROM devices WHERE id=?').bind(account.device.id).first<any>();
@@ -4438,22 +4948,70 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const unauthorized = await api('home/inventory');
     expect(unauthorized.status).toBe(401);
 
+    const nodeResponse = await api('home/inventory', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    expect(nodeResponse.status).toBe(200);
+    expect(await nodeResponse.json()).toMatchObject({
+      nodeId: 'exit-default',
+      observedAt: expect.any(Number),
+    });
+
+    // The shared token remains read-only during dual rollout for old inventory
+    // consumers, but deliberately has no node identity suitable for metering.
     const response = await api('home/inventory', {
       headers: { authorization: `Bearer ${HOME_TOKEN}` },
     });
     expect(response.status).toBe(200);
     const payload = await response.json() as any;
+    expect(payload.nodeId).toBeUndefined();
     expect(payload.devices).toEqual([{
       stableNodeId: STABLE_ID,
       publicKey: PUBLIC_KEY.replace(/^nodekey:/, ''),
       userId: account.user.id,
       status: 'active',
       usageBytes: 0,
+      sourceUsageBytes: 0,
     }]);
     expect(JSON.stringify(payload)).not.toContain(account.email);
     expect(JSON.stringify(payload)).not.toContain(account.device.installationId);
     expect(JSON.stringify(payload)).not.toContain(MGMT_ID);
     expect(JSON.stringify(payload)).not.toContain(API_NODE_ID);
+  });
+
+  it('returns a node-local usage baseline instead of seeding every exit from the account total', async () => {
+    const account = await createAccount('home-inventory-source-total');
+    resetMockInventory(account.device.id, account.enrollment.hostname);
+    expect((await confirm(account)).status).toBe(200);
+    const observedAt = Math.floor(Date.now() / 1000);
+    expect((await api('home/usage', json({ reports: [{
+      reportId: `source-seed-${sequence}`,
+      userId: account.user.id,
+      sourceId: 'exit-default',
+      protocolVersion: 2,
+      totalBytes: 125,
+      observedAt,
+    }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+
+    const created = await admin('exit-nodes', { id: 'exit-second', name: 'Second Exit' });
+    expect(created.status).toBe(201);
+    const secondToken = String((await created.json() as any).token);
+
+    const firstInventory = await api('home/inventory', {
+      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+    });
+    const firstDevice = (await firstInventory.json() as any).devices.find(
+      (device: any) => device.userId === account.user.id,
+    );
+    expect(firstDevice).toMatchObject({ usageBytes: 125, sourceUsageBytes: 125 });
+
+    const secondInventory = await api('home/inventory', {
+      headers: { authorization: `Bearer ${secondToken}` },
+    });
+    const secondDevice = (await secondInventory.json() as any).devices.find(
+      (device: any) => device.userId === account.user.id,
+    );
+    expect(secondDevice).toMatchObject({ usageBytes: 125, sourceUsageBytes: 0 });
   });
 
   it('treats reportId as an immutable idempotency key', async () => {
@@ -4463,16 +5021,21 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const original = {
       reportId,
       userId: account.user.id,
+      sourceId: 'exit-default',
       totalBytes: 25,
       observedAt,
     };
-    expect((await api('home/usage', json({ reports: [original] }, HOME_TOKEN))).status).toBe(200);
-    expect((await api('home/usage', json({ reports: [original] }, HOME_TOKEN))).status).toBe(200);
+    expect((await api('home/usage', json({ reports: [original] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    await env.DB.prepare('UPDATE users SET updated_at = 1 WHERE id = ?')
+      .bind(account.user.id).run();
+    expect((await api('home/usage', json({ reports: [original] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    expect(await env.DB.prepare('SELECT updated_at FROM users WHERE id = ?')
+      .bind(account.user.id).first<any>()).toMatchObject({ updated_at: 1 });
 
     const conflict = await api('home/usage', json({ reports: [{
       ...original,
       totalBytes: 50,
-    }] }, HOME_TOKEN));
+    }] }, EXIT_NODE_TOKENS['exit-default']));
     expect(conflict.status).toBe(409);
     expect((await conflict.json() as any).error.code).toBe('USAGE_REPORT_CONFLICT');
 
@@ -4485,7 +5048,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('rejects non-object usage report entries as validation errors', async () => {
-    const response = await api('home/usage', json({ reports: [null] }, HOME_TOKEN));
+    const response = await api('home/usage', json({ reports: [null] }, EXIT_NODE_TOKENS['exit-default']));
     expect(response.status).toBe(400);
     expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
   });
@@ -6642,6 +7205,49 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(statusA.status).toBe('active');
       expect(statusB.status).toBe('revoked');
     });
+
+    it('serializes concurrent logins for the same new installation without double eviction', async () => {
+      const account = await createAccount('lru-same-install-race');
+      const second = await emailSignIn({
+        email: account.email,
+        deviceName: 'Second Mac',
+        installationId: 'lru-same-install-race-two',
+      });
+      expect(second.status).toBe(200);
+
+      const before = await env.DB.prepare(
+        "SELECT COUNT(*) AS c FROM devices WHERE user_id = ? AND status = 'revoked'",
+      ).bind(account.user.id).first<any>();
+      const login = () => emailSignIn({
+        email: account.email,
+        deviceName: 'Racing Mac',
+        installationId: 'lru-same-install-race-three',
+      });
+      const responses = await Promise.all([login(), login(), login(), login()]);
+      const outcomes = await Promise.all(responses.map(async (response) => ({
+        status: response.status,
+        body: await response.clone().json(),
+      })));
+      expect(outcomes.some((outcome) => outcome.status === 200), JSON.stringify(outcomes)).toBe(true);
+      expect(
+        outcomes.every((outcome) => outcome.status === 200 || outcome.status === 429),
+        JSON.stringify(outcomes),
+      ).toBe(true);
+
+      const rows = await env.DB.prepare(
+        `SELECT installation_id, status FROM devices
+         WHERE user_id = ? ORDER BY installation_id`,
+      ).bind(account.user.id).all<any>();
+      expect(rows.results.filter((row: any) => (
+        row.installation_id === 'lru-same-install-race-three'
+      ))).toHaveLength(1);
+      expect(rows.results.filter((row: any) => (
+        row.status === 'pending' || row.status === 'active'
+      ))).toHaveLength(2);
+      expect(rows.results.filter((row: any) => row.status === 'revoked')).toHaveLength(
+        Number(before?.c ?? 0) + 1,
+      );
+    });
   });
 
   describe('Device-scoped exit credentials and instant revocation on exit roster', () => {
@@ -6760,12 +7366,15 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       const devCred = await env.DB.prepare('SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?').bind(dev.device.id).first<any>();
       expect(devCred).toBeTruthy();
 
-      // The exit roster must contain the device UUID and NOT the legacy UUID
+      // Dual rollout keeps the legacy UUID only while at least one device is
+      // live, so already-issued catalogs keep working during node provisioning.
       const roster1 = await (await api('home/exit-identities', {
         headers: { authorization: `Bearer ${HOME_TOKEN}` },
       })).json() as any;
       const uids1 = roster1.identities.filter((e: any) => e.userId === dev.user.id);
-      expect(uids1.map((e: any) => e.clientUUID)).toEqual([devCred.client_uuid]);
+      expect(uids1.map((e: any) => e.clientUUID)).toEqual(
+        expect.arrayContaining([devCred.client_uuid, legacyUUID]),
+      );
 
       // Revoke the only device
       const delRes = await api(`devices/${dev.device.id}`, {

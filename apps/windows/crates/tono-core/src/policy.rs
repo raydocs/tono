@@ -204,8 +204,49 @@ pub fn is_permanently_protected(address: Ipv4Addr) -> bool {
     address == Ipv4Addr::new(1, 1, 1, 1) || address == Ipv4Addr::new(8, 8, 8, 8)
 }
 
+/// Claude's first-party, login/challenge, telemetry and update hosts must never
+/// be moved to the physical interface, even by an otherwise trusted policy.
+/// Keep this in parity with the control-plane and macOS protected lists.
+const PROTECTED_DIRECT_SUFFIXES: &[&str] = &[
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claude.app",
+    "claude.site",
+    "clau.de",
+    "anthropic.ai",
+    "claudestudio.com",
+    "claudemcpclient.com",
+    "claudemcpcontent.com",
+    "claudeusercontent.com",
+    "servd-anthropic-website.b-cdn.net",
+    "challenges.cloudflare.com",
+    "cf-assets.www.cloudflare.com",
+    "cloudflareinsights.com",
+    "browser-intake-datadoghq.com",
+    "browser-intake-us5-datadoghq.com",
+    "browser-intake-us3-datadoghq.com",
+    "browser-intake-ap1-datadoghq.com",
+    "browser-intake-ap2-datadoghq.com",
+    "browser-intake-datadoghq.eu",
+    "browser-intake-ddog-gov.com",
+    "datadoghq.com",
+    "statsig.com",
+    "statsigapi.net",
+    "featuregates.org",
+    "growthbook.io",
+    "stripe.network",
+    "storage.googleapis.com",
+    "registry.npmjs.org",
+    "raw.githubusercontent.com",
+    "formulae.brew.sh",
+    "sentry.io",
+    "tono.app",
+    "tono.com",
+];
+
 fn is_protected_from_direct(host: &str) -> bool {
-    ["anthropic.com", "claude.ai", "tono.app", "tono.com"]
+    PROTECTED_DIRECT_SUFFIXES
         .iter()
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
@@ -288,9 +329,9 @@ pub fn is_allowed_direct_domain(host: &str) -> bool {
         .any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}")))
 }
 
-/// Shared web-family host hygiene: strict DNS label shape plus the
+/// Shared direct-route host hygiene: strict DNS label shape plus the
 /// protected-suffix rejection. Does not consult any allowlist.
-fn is_well_formed_web_host(host: &str) -> bool {
+fn is_well_formed_direct_host(host: &str) -> bool {
     if host.is_empty()
         || host.len() > 253
         || host != host.trim()
@@ -314,13 +355,7 @@ fn is_well_formed_web_host(host: &str) -> bool {
     {
         return false;
     }
-    if matches!(
-        host,
-        "anthropic.com" | "claude.ai" | "tono.app" | "tono.com"
-    ) || ["anthropic.com", "claude.ai", "tono.app", "tono.com"]
-        .iter()
-        .any(|s| host.ends_with(&format!(".{s}")))
-    {
+    if is_protected_from_direct(host) {
         return false;
     }
     true
@@ -328,7 +363,7 @@ fn is_well_formed_web_host(host: &str) -> bool {
 
 /// Exact-web hosts use a separate, deliberately narrow suffix allowlist.
 pub fn is_allowed_web_domain(host: &str) -> bool {
-    if !is_well_formed_web_host(host) {
+    if !is_well_formed_direct_host(host) {
         return false;
     }
     host == "ykimg.alicdn.com"
@@ -340,7 +375,7 @@ pub fn is_allowed_web_domain(host: &str) -> bool {
 /// Suffix-level direct entries carry the suffix value itself: exact
 /// allowlist table membership, never a host under one of the suffixes.
 pub fn is_allowed_direct_suffix(suffix: &str) -> bool {
-    is_well_formed_web_host(suffix) && ALLOWED_WEB_DOMAIN_SUFFIXES.contains(&suffix)
+    is_well_formed_direct_host(suffix) && ALLOWED_WEB_DOMAIN_SUFFIXES.contains(&suffix)
 }
 
 fn sorted_unique_ports(ports: &[u16], allowed: [u16; 2]) -> Option<Vec<u16>> {
@@ -424,10 +459,7 @@ pub fn validate_policy_with_trust(
     for entry in policy_domains {
         let normalized = entry.host.trim().to_lowercase();
         let normalized = normalized.strip_suffix('.').unwrap_or(&normalized);
-        if normalized != entry.host {
-            continue;
-        }
-        if is_protected_from_direct(&entry.host) {
+        if normalized != entry.host || !is_well_formed_direct_host(&entry.host) {
             continue;
         }
         if !trusted && !is_allowed_direct_domain(&entry.host) {
@@ -448,16 +480,13 @@ pub fn validate_policy_with_trust(
 
     let mut web_domains = Vec::new();
     for entry in policy_web {
-        if is_protected_from_direct(&entry.host) {
+        if !is_well_formed_direct_host(&entry.host) {
             continue;
         }
         if !trusted && !is_allowed_web_domain(&entry.host) {
             continue;
         }
-        if !trusted && entry.ports != [443] {
-            continue;
-        }
-        if trusted && sorted_unique_ports(&entry.ports, [80, 443]).is_none() {
+        if entry.ports != [443] {
             continue;
         }
         if domains.iter().any(|domain| domain.host == entry.host)
@@ -471,7 +500,7 @@ pub fn validate_policy_with_trust(
 
     let mut direct_suffixes = Vec::new();
     for entry in policy_suffixes {
-        if is_protected_from_direct(&entry.host) {
+        if !is_well_formed_direct_host(&entry.host) {
             continue;
         }
         if !trusted && !is_allowed_direct_suffix(&entry.host) {
@@ -912,6 +941,12 @@ mod tests {
             "www.baidu.com",
             "anthropic.com",
             "x.claude.ai",
+            "claude.com",
+            "cdn.claudeusercontent.com",
+            "challenges.cloudflare.com",
+            "events.statsig.com",
+            "browser-intake-us5.datadoghq.com",
+            "sentry.io",
             "Baidu.com",
             "baidu.com.",
         ] {
@@ -934,12 +969,49 @@ mod tests {
     }
 
     #[test]
+    fn trusted_policy_cannot_direct_protected_assistant_hosts() {
+        let document = r#"{"version":3,"domains":[{"host":"api.claude.com","ports":[443]},{"host":"browser-intake-ap1-datadoghq.com","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"challenges.cloudflare.com","ports":[443]}],"directSuffixes":[{"host":"browser-intake-us5-datadoghq.com","ports":[443]}]}"#;
+        let policy =
+            validate_policy_with_trust(&response(1, document), &no_protected(), true).unwrap();
+
+        assert!(policy.domains.is_empty());
+        assert!(policy.web_domains.is_empty());
+        assert!(policy.direct_suffixes.is_empty());
+    }
+
+    #[test]
+    fn trusted_policy_still_rejects_malformed_hosts() {
+        let document = r#"{"version":3,"domains":[{"host":"evil_domain.example","ports":[443]}],"mediaEndpoints":[],"webDomains":[{"host":"evil web.example","ports":[443]}],"directSuffixes":[{"host":"evil),DIRECT.example","ports":[443]}]}"#;
+        let policy =
+            validate_policy_with_trust(&response(1, document), &no_protected(), true).unwrap();
+
+        assert!(policy.domains.is_empty());
+        assert!(policy.web_domains.is_empty());
+        assert!(policy.direct_suffixes.is_empty());
+    }
+
+    #[test]
+    fn trusted_policy_still_requires_https_for_web_direct() {
+        let document = r#"{"version":2,"domains":[],"mediaEndpoints":[],"webDomains":[{"host":"example.com","ports":[80]}]}"#;
+        let policy =
+            validate_policy_with_trust(&response(1, document), &no_protected(), true).unwrap();
+
+        assert!(policy.web_domains.is_empty());
+    }
+
+    #[test]
     fn web_boundaries_fail_closed() {
         for host in [
             "Claude.ai",
             "claude.ai",
             "x.claude.ai",
             "anthropic.com",
+            "claude.com",
+            "cdn.claudeusercontent.com",
+            "challenges.cloudflare.com",
+            "events.statsig.com",
+            "browser-intake-us5.datadoghq.com",
+            "sentry.io",
             "tono.app",
             "evilbilibili.com",
         ] {

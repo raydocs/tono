@@ -56,6 +56,7 @@ run "reload preserves connections" tooling/scripts/test-reload-preserves-connect
 run "app traffic ledger" tooling/scripts/test-app-traffic-ledger.sh
 run "diagnostics log upload cursor" tooling/scripts/test-diagnostics-log-upload.sh
 run "access token expiry parsing" tooling/scripts/test-jwt-expiry.sh
+run "terminal proxy diagnostics" tooling/scripts/test-terminal-proxy-diagnostics.sh
 run "appcast publisher" node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
 
 # Root-only. These cover the two faults that shipped, so a skip is reported

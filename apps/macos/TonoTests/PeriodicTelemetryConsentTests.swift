@@ -15,24 +15,35 @@ final class PeriodicTelemetryConsentTests: XCTestCase {
 
     override func tearDown() {
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
         super.tearDown()
     }
 
-    func testTheSnapshotIsOnUntilSomeoneTurnsItOff() {
+    func testTheSnapshotDefaultsOff() {
         defaults.removeObject(forKey: SettingsKey.periodicTelemetryEnabled)
-        XCTAssertTrue(
-            AccountSession.isPeriodicTelemetryEnabled,
-            "an unset key must read as on, matching the Windows client's default"
-        )
-
-        defaults.set(false, forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
         XCTAssertFalse(
             AccountSession.isPeriodicTelemetryEnabled,
-            "turning the Settings row off must stop the upload"
+            "an unset key must not opt a new installation into periodic uploads"
         )
+        XCTAssertTrue(defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV2Applied))
+    }
+
+    func testLegacyTrueIsResetOnceAndALaterExplicitOptInSurvives() {
+        defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
+        defaults.removeObject(forKey: SettingsKey.periodicTelemetryDefaultV2Applied)
+        XCTAssertFalse(
+            AccountSession.isPeriodicTelemetryEnabled,
+            "the v2 migration must reset the former default-on value"
+        )
+        XCTAssertTrue(defaults.bool(forKey: SettingsKey.periodicTelemetryDefaultV2Applied))
 
         defaults.set(true, forKey: SettingsKey.periodicTelemetryEnabled)
         XCTAssertTrue(AccountSession.isPeriodicTelemetryEnabled)
+        XCTAssertTrue(
+            AccountSession.isPeriodicTelemetryEnabled,
+            "the migration marker must preserve a later user opt-in"
+        )
     }
 
     func testTheSnapshotDoesNotRideOnAnotherConsent() {

@@ -5980,24 +5980,48 @@ final class AppState {
                     reason: "tun_failed_after_reload",
                     generation: Int(generation)
                 )
-                if let base {
-                    try? await coreRuntime.rewriteConfig(
-                        overlay: ConfigPipeline.OverlayConfig(
-                            mixedPort: config.mixedPort,
-                            externalController: config.externalController,
-                            secret: config.secret,
-                            mode: "rule",
-                            logLevel: "warning",
-                            allowLan: false,
-                            tunEnabled: true,
-                            selectedNodeName: selectedExitNode()?.name
-                                ?? ConfigPipeline.homeNodeName,
-                            tonoTransport: tonoTransport
-                        ),
-                        customNodes: importedExitNodes,
-                        directPolicy: base
+                // Roll back the same three copies the forward transaction
+                // changed. Rewriting only the user-owned file left the helper's
+                // root snapshot and the live core on the failed policy. Keep
+                // the home-routing directives too: omitting them silently
+                // changed Claude's egress identity during rollback.
+                let rollbackDigest = try await coreRuntime.writeRuntimeConfig(
+                    overlay: ConfigPipeline.OverlayConfig(
+                        mixedPort: config.mixedPort,
+                        externalController: config.externalController,
+                        secret: config.secret,
+                        mode: "rule",
+                        logLevel: "warning",
+                        allowLan: false,
+                        tunEnabled: true,
+                        selectedNodeName: selectedExitNode()?.name
+                            ?? ConfigPipeline.homeNodeName,
+                        tonoTransport: tonoTransport,
+                        claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+                        defaultNodeName: managedCatalogRouting?.defaultProxy,
+                        claudeHomeSocks5: managedCatalogRouting?.homeSocks5
+                    ),
+                    customNodes: importedExitNodes,
+                    directPolicy: base
+                )
+                let rollbackPath = try await PrivilegedRuntimeCoordinator.shared
+                    .syncCoreConfig(
+                        configDirectory: coreRuntime.configDirectory.path,
+                        configSHA256: rollbackDigest
                     )
-                }
+                try await api.reloadConfig(path: rollbackPath)
+                loadedRuntimeConfigDigest = rollbackDigest
+                try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
+                    apiHosts: [],
+                    tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
+                    proxyEndpoints: currentProxyEndpoints(),
+                    sessionDirectEndpoints: base?.sessionEndpoints ?? [],
+                    tailscaleBootstrapEnabled:
+                        AppProfile.homeExitEnabled && tonoTransport != nil,
+                    helperPrepared: true,
+                    reviewedBundleDirect:
+                        base?.requiresAddressFreeDirectPermit == true
+                )
                 return
             }
             activeDirectPolicy = resolved

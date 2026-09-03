@@ -412,10 +412,12 @@
       "ready": "Environment Ready",
       "conflictDetected": "Proxy Residue Detected",
       "readyDesc": "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.",
-      "conflictDesc": "Residual HTTP_PROXY environment variables detected. This often causes terminal tools to fail with ECONNREFUSED. It is recommended to clear them.",
-      "clearAction": "Clear Residual Proxy Variables",
+      "conflictDesc": "Proxy variables were detected in a process or persistent terminal source. They can cause terminal tools to fail with ECONNREFUSED; follow each source-specific instruction.",
+      "clearAction": "Clear Safe User Environment Variables",
       "clearing": "Clearing…",
-      "clearSuccess": "Successfully cleared residual proxy environment variables",
+      "clearSuccess": "Successfully cleared safe user proxy environment variables",
+      "clearPartial": "Cleared safe user environment variables; manually fix the remaining sources",
+      "restartNotice": "After fixing every source, fully restart Tono, VS Code, open terminals, WSL sessions, and any running Claude Code supervisor or parent process.",
       "recheck": "Recheck"
     },
     "webrtc": {

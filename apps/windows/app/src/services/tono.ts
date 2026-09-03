@@ -632,12 +632,15 @@ export interface ProxyEnvEntry {
   key: string
   value: string
   source: string
+  guidance: string
+  autoClearable: boolean
 }
 
 export interface TerminalEnvReport {
   hasConflict: boolean
   entries: ProxyEnvEntry[]
   claudeCodeReady: boolean
+  canAutoClear: boolean
 }
 
 export const tonoCheckTerminalEnv = async (): Promise<TerminalEnvReport> => {
