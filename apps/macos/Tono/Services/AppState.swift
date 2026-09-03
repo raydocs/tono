@@ -787,6 +787,12 @@ final class AppState {
     /// Read-only view of the cloud-assigned residential line, for display.
     /// The assistant lanes (Claude, ChatGPT, Grok) egress through it.
     var residentialHomeHost: String? { managedCatalogRouting?.homeSocks5?.host }
+
+    /// Whether Claude / assistant traffic is dynamically routed via residential upstream.
+    var isClaudeHomeActive: Bool {
+        guard isConnected else { return false }
+        return managedCatalogRouting?.homeSocks5 != nil || managedCatalogRouting?.homeProxy != nil
+    }
     private var managedCatalogReloadPending = false
     private var managedTrafficPolicy = TonoTrafficPolicy(
         version: 1,

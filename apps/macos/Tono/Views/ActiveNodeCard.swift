@@ -7,8 +7,12 @@ struct ActiveNodeCard: View {
     var groupName: String?
     var latency: Int = 0
     var eyebrow: LocalizedStringKey = "ACTIVE SERVER"
+    var isConnected: Bool = false
+    var isClaudeHomeActive: Bool = false
+    var claudeHomeHost: String? = nil
     var onSwitch: (() -> Void)?
     @State private var isSwitchHovered = false
+    @State private var showsRulesPopover = false
 
     private var cleanName: String {
         ProxyNode.displayName(for: ConfigParser.extractFlag(from: nodeName).cleanName)
@@ -106,7 +110,79 @@ struct ActiveNodeCard: View {
             }
             .glassEffect(in: RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.bottom, isConnected ? 8 : 12)
+
+            if isConnected {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor)
+                        .frame(width: 8, height: 8)
+                        .shadow(
+                            color: (isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor).opacity(0.5),
+                            radius: 3
+                        )
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(
+                            isClaudeHomeActive
+                                ? String(localized: "Claude / AI Residential Route: Active")
+                                : String(localized: "Standard Cloud Protection (Data Center)")
+                        )
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+
+                        Text(
+                            isClaudeHomeActive
+                                ? String(localized: "Claude web, API, Claude Code, and verification use dedicated residential exit")
+                                : String(localized: "All traffic routed through selected cloud node")
+                        )
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        showsRulesPopover.toggle()
+                    } label: {
+                        Text(String(localized: "View Rules"))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showsRulesPopover) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(String(localized: "Claude / AI Residential Protection Scope"))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary)
+
+                            Text(String(localized: "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required."))
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(3)
+                        }
+                        .padding(16)
+                        .frame(width: 320)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    (isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor)
+                        .opacity(colorScheme == .dark ? 0.12 : 0.08),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(
+                            (isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor)
+                                .opacity(colorScheme == .dark ? 0.22 : 0.18),
+                            lineWidth: 1
+                        )
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
         }
         .frame(width: 480)
         .background(

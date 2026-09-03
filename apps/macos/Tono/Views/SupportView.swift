@@ -57,6 +57,7 @@ struct SupportView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     summaryCard(snapshot)
                     webrtcCard
+                    terminalEnvCard
                     if !appState.lastConnectionStageDurations.isEmpty {
                         connectTimingCard
                     }
@@ -199,6 +200,66 @@ struct SupportView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+        }
+    }
+
+    private var terminalEnvCard: some View {
+        let env = ProcessInfo.processInfo.environment
+        let proxyKeys = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]
+        var conflicts: [String] = []
+        for key in proxyKeys {
+            if let val = env[key], !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                conflicts.append("\(key)=\(val)")
+            }
+        }
+        let hasConflict = !conflicts.isEmpty
+
+        return SupportCard(
+            icon: "terminal",
+            title: String(localized: "Claude Code / Terminal Environment Diagnostics")
+        ) {
+            HStack {
+                Text(
+                    hasConflict
+                        ? String(localized: "Residual HTTP_PROXY environment variables detected. This often causes terminal tools (like Claude Code CLI) to fail with connection refused.")
+                        : String(localized: "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.")
+                )
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                Spacer()
+
+                Text(
+                    hasConflict
+                        ? String(localized: "Proxy Residue Detected")
+                        : String(localized: "Environment Ready")
+                )
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hasConflict ? Color.red : Color(hex: "2ECC71"))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    (hasConflict ? Color.red : Color(hex: "2ECC71")).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+            }
+
+            if hasConflict {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(conflicts, id: \.self) { conflict in
+                        Text(conflict)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.red)
+                    }
+                }
+                .padding(8)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+
+                Text(String(localized: "Fix suggestion: Run 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY' in terminal, or check for leftover proxy configurations in ~/.zshrc."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

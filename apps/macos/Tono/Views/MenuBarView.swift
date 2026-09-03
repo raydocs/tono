@@ -70,12 +70,22 @@ struct MenuBarView: View {
     }
 
     private var currentNode: some View {
-        Text(nodeLabel)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
+        HStack(spacing: 6) {
+            Text(nodeLabel)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if appState.isClaudeHomeActive {
+                Circle()
+                    .fill(Color(hex: "2ECC71"))
+                    .frame(width: 5, height: 5)
+                Text("Claude AI")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(hex: "2ECC71"))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 10)
     }
 
     private var nodeLabel: String {

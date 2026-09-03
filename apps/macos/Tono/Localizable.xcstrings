@@ -6024,6 +6024,214 @@
           }
         }
       }
+    },
+    "Claude / AI Residential Route: Active": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude / AI Residential Route: Active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude / AI 住宅专线：已就绪"
+          }
+        }
+      }
+    },
+    "Standard Cloud Protection (Data Center)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standard Cloud Protection (Data Center)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基础专线保护（数据中心）"
+          }
+        }
+      }
+    },
+    "Claude web, API, Claude Code, and verification use dedicated residential exit": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude web, API, Claude Code, and verification use dedicated residential exit"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude 网页、API、Claude Code 及人机验证走独立家庭宽带"
+          }
+        }
+      }
+    },
+    "All traffic routed through selected cloud node": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All traffic routed through selected cloud node"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部流量走所选云端节点"
+          }
+        }
+      }
+    },
+    "View Rules": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Rules"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查看规则"
+          }
+        }
+      }
+    },
+    "Claude / AI Residential Protection Scope": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude / AI Residential Protection Scope"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude / AI 住宅专线保护范围"
+          }
+        }
+      }
+    },
+    "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以下流量通过纯 TUN 虚拟网卡透明接管，并通过高信用家庭宽带跳点转发，免除数据中心 IP 风控：\n\n• Anthropic 核心服务：*.anthropic.com, *.claude.ai\n• 人机安全验证：challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• 遥测与灰度：*.datadoghq.com, *.statsigapi.net, *.stripe.network\n• 本地应用进程：Claude Code、Claude Desktop\n\n终端零代理配置，开箱即用。"
+          }
+        }
+      }
+    },
+    "Claude Code / Terminal Environment Diagnostics": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code / Terminal Environment Diagnostics"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code / 终端开发环境体检"
+          }
+        }
+      }
+    },
+    "Proxy Residue Detected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proxy Residue Detected"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发现代理残留"
+          }
+        }
+      }
+    },
+    "Environment Ready": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Environment Ready"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "环境就绪"
+          }
+        }
+      }
+    },
+    "Residual HTTP_PROXY environment variables detected. This often causes terminal tools (like Claude Code CLI) to fail with connection refused.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Residual HTTP_PROXY environment variables detected. This often causes terminal tools (like Claude Code CLI) to fail with connection refused."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检测到系统或进程中存在残留代理配置。这可能导致终端软件（如 Claude Code CLI）报错并拒绝连接。"
+          }
+        }
+      }
+    },
+    "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "终端环境正常。流量直接由 Tono TUN 虚拟网卡透明接管，Claude Code、git、npm、pip 开箱即用，无需配置代理。"
+          }
+        }
+      }
+    },
+    "Fix suggestion: Run 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY' in terminal, or check for leftover proxy configurations in ~/.zshrc.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fix suggestion: Run 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY' in terminal, or check for leftover proxy configurations in ~/.zshrc."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "修复建议：在终端运行 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY，或检查 ~/.zshrc 中是否残留了旧代理端口。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

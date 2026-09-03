@@ -57,6 +57,9 @@ struct DashboardView: View {
                             groupName: appState.isConnected ? appState.proxyService.activeGroupName : String(localized: "Ready to connect"),
                             latency: nodeLatency,
                             eyebrow: appState.isConnected ? "ACTIVE SERVER" : "SELECTED SERVER",
+                            isConnected: appState.isConnected,
+                            isClaudeHomeActive: appState.isClaudeHomeActive,
+                            claudeHomeHost: appState.residentialHomeHost,
                             onSwitch: { appState.selectedPage = .proxies }
                         )
                             .glassEffectID("card", in: dashboardNS)
