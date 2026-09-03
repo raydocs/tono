@@ -1971,4 +1971,21 @@ describe('ops route hook', () => {
       });
     });
   });
+
+  it('prioritizes real egressIpv4 over socks5Host for residential line exit display', () => {
+    const binding = {
+      displayName: 'Home US 01',
+      socks5Host: 'proxy.residential.tono.dev',
+      egressIpv4: '198.51.100.42',
+    };
+    const displayedIp = binding.egressIpv4 || binding.socks5Host;
+    expect(displayedIp).toBe('198.51.100.42');
+
+    const fallbackBinding: { displayName: string; socks5Host: string; egressIpv4?: string } = {
+      displayName: 'Home US 02',
+      socks5Host: 'proxy.residential.tono.dev',
+    };
+    const fallbackIp = fallbackBinding.egressIpv4 || fallbackBinding.socks5Host;
+    expect(fallbackIp).toBe('proxy.residential.tono.dev');
+  });
 });

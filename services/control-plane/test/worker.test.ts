@@ -6558,4 +6558,89 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     expect((await operations(`incidents/node/${encodeURIComponent('x'.repeat(201))}`)).status).toBe(400);
   });
+
+  describe('True LRU device eviction and last_seen_at updates', () => {
+    it('updates last_seen_at upon active device re-login, auth refresh, and telemetry', async () => {
+      const account = await createAccount('lru-test');
+      resetMockInventory(account.device.id, account.enrollment.hostname);
+      const conf = await confirm(account);
+      expect(conf.status).toBe(200);
+      const devId = account.device.id;
+
+      // 1. Initial confirmed_at and last_seen_at are populated
+      const initialDev = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
+      expect(Number(initialDev.last_seen_at)).toBeGreaterThan(0);
+
+      // Backdate last_seen_at to simulate time passing
+      const backdatedTime = Number(initialDev.last_seen_at) - 1000;
+      await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
+
+      // 2. Active device re-login updates last_seen_at
+      const reLogin = await emailSignIn({
+        email: account.email,
+        deviceName: 'Primary Mac',
+        installationId: 'lru-test-installation-one',
+      });
+      expect(reLogin.status).toBe(200);
+      const afterReLogin = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
+      expect(Number(afterReLogin.last_seen_at)).toBeGreaterThan(backdatedTime);
+
+      // Backdate again
+      await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
+
+      // 3. Telemetry update
+      const telRes = await api('telemetry/windows', json(telemetryWindowPayload({
+        selectedServer: 'Test Node',
+      }), account.accessToken));
+      expect(telRes.status).toBe(201);
+      const afterTel = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
+      expect(Number(afterTel.last_seen_at)).toBeGreaterThan(backdatedTime);
+
+      // Backdate again
+      await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
+
+      // 4. Auth refresh update
+      const refreshRes = await api('auth/refresh', json({ refreshToken: account.refreshToken }));
+      expect(refreshRes.status).toBe(200);
+      const afterRefresh = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
+      expect(Number(afterRefresh.last_seen_at)).toBeGreaterThan(backdatedTime);
+    });
+
+    it('evicts the least recently seen device rather than oldest created device', async () => {
+      const account = await createAccount('lru-evict-order');
+      const devA = account.device.id;
+
+      const login = (name: string, installationId: string) => emailSignIn({
+        email: account.email,
+        deviceName: name,
+        installationId,
+      });
+
+      // Login on device 2
+      const res2 = await login('Device 2', 'installation-order-two');
+      expect(res2.status).toBe(200);
+      const acc2 = await res2.json() as any;
+      const devB = acc2.device.id;
+
+      // Ensure user has deviceLimit = 2
+      await env.DB.prepare('UPDATE users SET device_limit = 2 WHERE id = ?').bind(account.user.id).run();
+
+      // Device A was created earlier than Device B.
+      // But Device A was used very recently, while Device B is stale.
+      const nowSec = Math.floor(Date.now() / 1000);
+      await env.DB.prepare("UPDATE devices SET status = 'active', last_seen_at = ? WHERE id = ?").bind(nowSec + 100, devA).run();
+      await env.DB.prepare("UPDATE devices SET status = 'active', last_seen_at = ? WHERE id = ?").bind(nowSec - 1000, devB).run();
+
+      // Login on device 3 (exceeds limit 2)
+      const res3 = await login('Device 3', 'installation-order-three');
+      expect(res3.status).toBe(200);
+
+      // Check statuses: Device B (least recently active) must be revoked, Device A remains active!
+      const statusA = await env.DB.prepare('SELECT status FROM devices WHERE id = ?').bind(devA).first<any>();
+      const statusB = await env.DB.prepare('SELECT status FROM devices WHERE id = ?').bind(devB).first<any>();
+
+      expect(statusA.status).toBe('active');
+      expect(statusB.status).toBe('revoked');
+    });
+  });
 });

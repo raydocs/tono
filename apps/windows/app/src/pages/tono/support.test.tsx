@@ -245,4 +245,18 @@ describe('support terminal environment diagnostic card', () => {
       'Successfully cleared residual proxy environment variables',
     )
   })
+
+  it('renders checking state while query is pending', () => {
+    checkTerminalEnvMock.mockReturnValueOnce(new Promise(() => {}))
+    renderPage()
+    expect(screen.getByText('Checking…')).toBeDefined()
+    expect(screen.queryByText('Environment Ready')).toBeNull()
+  })
+
+  it('renders check failed state when query rejects rather than falsely showing ready', async () => {
+    checkTerminalEnvMock.mockRejectedValueOnce(new Error('Registry access denied'))
+    renderPage()
+    expect(await screen.findByText('Check Failed')).toBeDefined()
+    expect(screen.queryByText('Environment Ready')).toBeNull()
+  })
 })

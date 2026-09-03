@@ -1918,12 +1918,13 @@ pub async fn tono_clear_terminal_proxy_env() -> Result<(), String> {
         {
             use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
             use winreg::RegKey;
+            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
             match hkcu.open_subkey_with_flags("Environment", KEY_SET_VALUE) {
                 Ok(env_key) => {
                     for key in &proxy_keys {
                         if let Err(e) = env_key.delete_value(key) {
                             if e.kind() != std::io::ErrorKind::NotFound {
-                                log::warn!("Failed to delete registry env var {key}: {e}");
+                                return Err(format!("Failed to delete registry env var {key}: {e}"));
                             }
                         }
                     }
@@ -1936,17 +1937,24 @@ pub async fn tono_clear_terminal_proxy_env() -> Result<(), String> {
             }
 
             // Verify keys were removed from registry
-            if let Ok(env_key) = hkcu.open_subkey("Environment") {
-                let mut remaining = Vec::new();
-                for key in &proxy_keys {
-                    if let Ok(val) = env_key.get_value::<String, _>(key) {
-                        if !val.trim().is_empty() {
-                            remaining.push((*key).to_string());
+            match hkcu.open_subkey("Environment") {
+                Ok(env_key) => {
+                    let mut remaining = Vec::new();
+                    for key in &proxy_keys {
+                        if let Ok(val) = env_key.get_value::<String, _>(key) {
+                            if !val.trim().is_empty() {
+                                remaining.push((*key).to_string());
+                            }
                         }
                     }
+                    if !remaining.is_empty() {
+                        return Err(format!("Could not remove registry proxy variables: {}", remaining.join(", ")));
+                    }
                 }
-                if !remaining.is_empty() {
-                    return Err(format!("Could not remove registry proxy variables: {}", remaining.join(", ")));
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        return Err(format!("Failed to verify HKCU\\Environment: {e}"));
+                    }
                 }
             }
 
