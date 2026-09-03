@@ -460,7 +460,7 @@ struct SettingsFile {
     /// unlike the timeline above carries hostnames, process names and routes. It
     /// is a separate flag from `periodic_telemetry_enabled` on purpose — one
     /// consent must not stand in for a materially larger disclosure.
-    #[serde(default = "default_true")]
+    #[serde(default)]
     network_log_upload_enabled: bool,
 }
 
@@ -469,7 +469,7 @@ impl Default for SettingsFile {
         Self {
             audit_enabled: true,
             periodic_telemetry_enabled: true,
-            network_log_upload_enabled: true,
+            network_log_upload_enabled: false,
         }
     }
 }
@@ -492,8 +492,8 @@ pub fn periodic_telemetry_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).periodic_telemetry_enabled
 }
 
-/// Default ON during the test programme; see the field's own note for why this
-/// is not folded into the telemetry flag.
+/// Default OFF: network log upload is off by default to avoid streaming
+/// telemetry to D1/R2 continuously; uploaded on demand for diagnostics.
 pub fn network_log_upload_enabled_from_settings(dir: &Path) -> bool {
     load_settings(dir).network_log_upload_enabled
 }

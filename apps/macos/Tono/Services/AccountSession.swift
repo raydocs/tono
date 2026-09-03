@@ -1017,7 +1017,7 @@ final class AccountSession {
     private func updateDiagnosticsLogUploading() {
         let enabled = AppProfile.defaults
             .object(forKey: SettingsKey.networkLogUploadEnabled) == nil
-            ? true
+            ? false
             : AppProfile.defaults.bool(forKey: SettingsKey.networkLogUploadEnabled)
         guard state == .ready, !systemSleeping, user != nil, enabled else {
             if let uploader = diagnosticsLogUploader {

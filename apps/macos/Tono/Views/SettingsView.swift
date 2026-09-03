@@ -30,7 +30,7 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
-    ) private var networkLogUploadEnabled = true
+    ) private var networkLogUploadEnabled = false
     @AppStorage(
         SettingsKey.periodicTelemetryEnabled,
         store: AppProfile.defaults

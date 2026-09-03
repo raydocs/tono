@@ -803,6 +803,31 @@ class ApiHelpParsing(unittest.TestCase):
             resolved = agent.require_commands(Path("/unused"))
         self.assertNotIn("list_users", resolved)
 
+    def test_device_scoped_client_labels_and_attributed_user(self) -> None:
+        label = agent.client_label("user123", "device456")
+        self.assertEqual(label, "u:user123:device456")
+        self.assertEqual(agent.attributed_user(label), "user123")
+
+        # Legacy without device_id
+        legacy_label = agent.client_label("user123")
+        self.assertEqual(legacy_label, "u:user123")
+        self.assertEqual(agent.attributed_user(legacy_label), "user123")
+
+    def test_reconcile_supports_multiple_devices_for_same_user(self) -> None:
+        roster = [
+            {"userId": "userA", "deviceId": "dev1", "clientUUID": "00000000-0000-0000-0000-000000000001"},
+            {"userId": "userA", "deviceId": "dev2", "clientUUID": "00000000-0000-0000-0000-000000000002"},
+            {"userId": "userB", "deviceId": "dev3", "clientUUID": "00000000-0000-0000-0000-000000000003"},
+        ]
+        wanted = {
+            agent.client_label(e["userId"], e.get("deviceId")): e["clientUUID"]
+            for e in roster
+        }
+        self.assertEqual(len(wanted), 3)
+        self.assertIn("u:userA:dev1", wanted)
+        self.assertIn("u:userA:dev2", wanted)
+        self.assertIn("u:userB:dev3", wanted)
+
 
 if __name__ == "__main__":
     unittest.main()

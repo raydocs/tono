@@ -77,7 +77,7 @@ actor DiagnosticsLogUploader {
         osVersion: String = DiagnosticsLogUploader.compactOperatingSystemVersion(),
         isEnabled: @escaping @Sendable () -> Bool = {
             AppProfile.defaults.object(forKey: SettingsKey.networkLogUploadEnabled) == nil
-                ? true
+                ? false
                 : AppProfile.defaults.bool(forKey: SettingsKey.networkLogUploadEnabled)
         },
         upload: @escaping @Sendable (Data, String, Int, Int, String, String) async throws -> Void

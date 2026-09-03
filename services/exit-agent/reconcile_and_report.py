@@ -195,8 +195,10 @@ def source_id(state: dict) -> str:
     return source
 
 
-def client_label(user_id: str) -> str:
+def client_label(user_id: str, device_id: str | None = None) -> str:
     """The label an account's client is installed under, and counted under."""
+    if device_id:
+        return f"{CLIENT_LABEL_PREFIX}{user_id}:{device_id}"
     return f"{CLIENT_LABEL_PREFIX}{user_id}"
 
 
@@ -205,10 +207,12 @@ def attributed_user(label: str) -> str | None:
 
     `shared-legacy` and anything added by hand carry traffic that belongs to no
     single account; reporting it against one would bill the wrong customer.
+    Supports device-scoped labels: `u:<user_id>:<device_id>`.
     """
     if not label.startswith(CLIENT_LABEL_PREFIX):
         return None
-    return label[len(CLIENT_LABEL_PREFIX):] or None
+    raw = label[len(CLIENT_LABEL_PREFIX):]
+    return raw.split(":")[0] or None
 
 
 def run_xray(binary: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
@@ -296,7 +300,10 @@ def fetch_roster(base: str, token: str) -> tuple[int, list[dict[str, str]]]:
             r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", client_uuid
         ):
             raise Refusal("roster entry has an invalid clientUUID")
-        roster.append({"userId": user_id, "clientUUID": client_uuid})
+        device_id = entry.get("deviceId")
+        if device_id is not None and (not isinstance(device_id, str) or not 1 <= len(device_id) <= 100):
+            device_id = None
+        roster.append({"userId": user_id, "clientUUID": client_uuid, "deviceId": device_id})
     if len({entry["clientUUID"] for entry in roster}) != len(roster):
         raise Refusal("roster repeats an identity, which would merge two accounts' counters")
     return observed_at, roster
@@ -494,7 +501,7 @@ def reconcile(binary: Path, commands: dict[str, str], address: str, tag: str,
     this agent recorded installing, and never off counters. When neither is
     known, nothing is removed.
     """
-    wanted = {client_label(entry["userId"]): entry["clientUUID"] for entry in roster}
+    wanted = {client_label(entry["userId"], entry.get("deviceId")): entry["clientUUID"] for entry in roster}
     # A verified empty roster is the enforcement result after the final active
     # account expires, is disabled, or reaches quota. It must remove this
     # agent's `u:` clients or those accounts keep connecting forever. When both

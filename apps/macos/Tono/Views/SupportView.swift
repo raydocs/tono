@@ -10,7 +10,7 @@ struct SupportView: View {
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
-    ) private var networkLogUploadEnabled = true
+    ) private var networkLogUploadEnabled = false
 
     @State private var probe: RuntimeProbe?
     @State private var isProbing = false

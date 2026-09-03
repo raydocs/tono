@@ -1436,7 +1436,21 @@ const CLIENT_UUID_PLACEHOLDER = '{{TONO_CLIENT_UUID}}';
 /// Stable across fetches on purpose: the client persists the catalog digest and
 /// compares it, so an identity that changed per request would look like a
 /// tampered catalog every time.
-async function exitClientUUID(e: Env, userId: string): Promise<string> {
+async function exitClientUUID(e: Env, userId: string, deviceId?: string | null): Promise<string> {
+  if (deviceId) {
+    const existing = await e.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(deviceId).first<Row>();
+    if (existing) return String(existing.client_uuid);
+    const minted = crypto.randomUUID();
+    await e.DB.prepare(
+      'INSERT OR IGNORE INTO device_exit_credentials(device_id, user_id, client_uuid, created_at) VALUES(?,?,?,?)',
+    ).bind(deviceId, userId, minted, now()).run();
+    const row = await e.DB.prepare(
+      'SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?',
+    ).bind(deviceId).first<Row>();
+    if (row) return String(row.client_uuid);
+  }
   const existing = await e.DB.prepare(
     'SELECT client_uuid FROM exit_credentials WHERE user_id = ?',
   ).bind(userId).first<Row>();
@@ -1532,7 +1546,7 @@ async function routingSha256(routing: CatalogRouting | undefined) {
  */
 async function publicManagedCatalog(
   e: Env,
-  options?: { userId?: string; filterHomeExits?: boolean },
+  options?: { userId?: string; deviceId?: string | null; filterHomeExits?: boolean },
 ) {
   const row = await e.DB.prepare(
     'SELECT revision, ciphertext, nonce, content_sha256, updated_at FROM managed_exit_catalog WHERE singleton_id = 1',
@@ -1563,7 +1577,7 @@ async function publicManagedCatalog(
   // receive a stable per-account identity, so recompute the digest after
   // substitution and any per-user home-exit filtering.
   if (options?.userId && served.includes(CLIENT_UUID_PLACEHOLDER)) {
-    const issued = await exitClientUUID(e, options.userId);
+    const issued = await exitClientUUID(e, options.userId, options.deviceId);
     served = served.split(CLIENT_UUID_PLACEHOLDER).join(issued);
   }
   let routing: CatalogRouting | undefined;
@@ -5434,7 +5448,35 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
       }
     }
   } catch (x) {
+    if (String(x).includes('UNIQUE constraint failed: devices.user_id, devices.installation_id')) {
+      const existing = await e.DB.prepare('SELECT * FROM devices WHERE user_id = ? AND installation_id = ?')
+        .bind(user, installation).first<Row>();
+      if (existing) {
+        await e.DB.prepare('UPDATE devices SET name = ?, last_seen_at = ?, updated_at = ? WHERE id = ?')
+          .bind(name, t, t, existing.id).run();
+        return { ...existing, name, last_seen_at: t, updated_at: t };
+      }
+    }
     if (String(x).includes('DEVICE_LIMIT')) {
+      const victim = await e.DB.prepare(
+        `SELECT * FROM devices
+         WHERE user_id = ? AND status IN ('pending', 'active') AND id != ?
+         ORDER BY COALESCE(last_seen_at, created_at) ASC, created_at ASC
+         LIMIT 1`,
+      ).bind(user, did).first<Row>();
+      if (victim) {
+        await revokeDevice(e, victim);
+        if (d) {
+          await e.DB.prepare("UPDATE devices SET name = ?, status = 'active', updated_at = ?, last_seen_at = ? WHERE id = ?")
+            .bind(name, t, t, did).run();
+        } else {
+          await e.DB.prepare(
+            `INSERT INTO devices(id, user_id, installation_id, name, status, pending_expires_at, confirmed_at, last_seen_at, created_at, updated_at)
+             VALUES(?, ?, ?, ?, 'active', NULL, ?, ?, ?, ?)`
+          ).bind(did, user, installation, name, t, t, t, t).run();
+        }
+        return (await e.DB.prepare('SELECT * FROM devices WHERE id = ?').bind(did).first<Row>())!;
+      }
       throw new ApiError(409, 'DEVICE_LIMIT', 'This account has reached its device allowance');
     }
     throw x;
@@ -5674,6 +5716,7 @@ async function revokeDevice(e: Env, d: Row, requireIneligibleUser = false) {
            WHERE devices.id = ? AND devices.status = 'revoked'
          )`,
     ).bind(t, d.id, d.id),
+    e.DB.prepare('DELETE FROM device_exit_credentials WHERE device_id = ?').bind(d.id),
   ]);
 }
 
@@ -5922,18 +5965,19 @@ async function enforceAll(e: Env) {
     DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS,
   );
   const expiredLogs = await e.DB.prepare(
-    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 500',
+    'SELECT id, r2_key FROM diagnostics_log_objects WHERE received_at <= ? LIMIT 1000',
   ).bind(t - logRetention).all<Row>();
-  for (const row of expiredLogs.results) {
+  if (expiredLogs.results.length > 0) {
+    const keys = expiredLogs.results.map((r) => String(r.r2_key));
+    const ids = expiredLogs.results.map((r) => String(r.id));
     try {
-      await e.DIAGNOSTICS_LOGS.delete(String(row.r2_key));
-      await e.DB.prepare('DELETE FROM diagnostics_log_objects WHERE id = ?')
-        .bind(String(row.id)).run();
+      await e.DIAGNOSTICS_LOGS.delete(keys);
     } catch (x) {
-      // Keep the row so the next sweep retries this object rather than leaving
-      // it in the bucket with no index entry to find it by.
-      console.error('log retention failed', row.id, x instanceof Error ? x.message : String(x));
+      console.error('batch r2 deletion failed', x);
     }
+    const placeholders = ids.map(() => '?').join(',');
+    await e.DB.prepare(`DELETE FROM diagnostics_log_objects WHERE id IN (${placeholders})`)
+      .bind(...ids).run();
   }
   await e.DB.prepare('DELETE FROM telemetry_windows WHERE received_at <= ?')
     .bind(t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT_SECONDS))
@@ -6611,7 +6655,11 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/exit-catalog' && m === 'GET') {
     const a = await auth(req, e);
-    return Response.json(await publicManagedCatalog(e, { userId: a.userId, filterHomeExits: true }));
+    return Response.json(await publicManagedCatalog(e, {
+      userId: a.userId,
+      deviceId: a.deviceId,
+      filterHomeExits: true,
+    }));
   }
 
   if (p === '/api/v1/traffic-policy' && m === 'GET') {
@@ -6975,14 +7023,24 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
 
     const rows = await e.DB.prepare(
-      `SELECT exit_credentials.user_id AS user_id, exit_credentials.client_uuid AS client_uuid
-         FROM exit_credentials
-         JOIN users ON users.id = exit_credentials.user_id
-        WHERE users.status = 'active'
-          AND (users.expires_at IS NULL OR users.expires_at > ?)
-          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
-        ORDER BY exit_credentials.user_id`,
-    ).bind(t).all<Row>();
+      `SELECT c.user_id AS user_id, c.device_id AS device_id, c.client_uuid AS client_uuid
+         FROM device_exit_credentials c
+         JOIN devices d ON d.id = c.device_id
+         JOIN users u ON u.id = d.user_id
+        WHERE d.status IN ('pending', 'active')
+          AND u.status = 'active'
+          AND (u.expires_at IS NULL OR u.expires_at > ?)
+          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
+       UNION
+       SELECT e.user_id AS user_id, NULL AS device_id, e.client_uuid AS client_uuid
+         FROM exit_credentials e
+         JOIN users u ON u.id = e.user_id
+        WHERE u.status = 'active'
+          AND (u.expires_at IS NULL OR u.expires_at > ?)
+          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
+          AND NOT EXISTS (SELECT 1 FROM device_exit_credentials WHERE user_id = u.id)
+        ORDER BY user_id`,
+    ).bind(t, t).all<Row>();
     return Response.json({
       // Echoed so a reconciling agent can tell a stale response from an empty
       // roster: applying an empty list as if it were current would remove every
@@ -6990,11 +7048,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       observedAt: t,
       clients: rows.results.map((row) => ({
         userId: String(row.user_id),
+        deviceId: row.device_id ? String(row.device_id) : undefined,
         clientUUID: String(row.client_uuid),
         // The label per-user traffic accounting is keyed by. Namespaced so a
         // reconciler can tell the clients it owns from `shared-legacy` and the
         // hand-added entries it must never touch.
-        email: `u:${String(row.user_id)}`,
+        email: row.device_id ? `u:${String(row.user_id)}:${String(row.device_id)}` : `u:${String(row.user_id)}`,
       })),
     });
   }
@@ -7992,14 +8051,24 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     await privileged(req, e.HOME_AGENT_TOKEN);
     const t = now();
     const rows = await e.DB.prepare(
-      `SELECT exit_credentials.user_id AS user_id, exit_credentials.client_uuid AS client_uuid
-         FROM exit_credentials
-         JOIN users ON users.id = exit_credentials.user_id
-        WHERE users.status = 'active'
-          AND (users.expires_at IS NULL OR users.expires_at > ?)
-          AND (users.quota_bytes IS NULL OR users.usage_bytes < users.quota_bytes)
-        ORDER BY exit_credentials.user_id`,
-    ).bind(t).all<Row>();
+      `SELECT c.user_id AS user_id, c.device_id AS device_id, c.client_uuid AS client_uuid
+         FROM device_exit_credentials c
+         JOIN devices d ON d.id = c.device_id
+         JOIN users u ON u.id = d.user_id
+        WHERE d.status IN ('pending', 'active')
+          AND u.status = 'active'
+          AND (u.expires_at IS NULL OR u.expires_at > ?)
+          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
+       UNION
+       SELECT e.user_id AS user_id, NULL AS device_id, e.client_uuid AS client_uuid
+         FROM exit_credentials e
+         JOIN users u ON u.id = e.user_id
+        WHERE u.status = 'active'
+          AND (u.expires_at IS NULL OR u.expires_at > ?)
+          AND (u.quota_bytes IS NULL OR u.usage_bytes < u.quota_bytes)
+          AND NOT EXISTS (SELECT 1 FROM device_exit_credentials WHERE user_id = u.id)
+        ORDER BY user_id`,
+    ).bind(t, t).all<Row>();
     return Response.json({
       // Echoed so a reconciling agent can tell a stale response from an empty
       // roster: applying an empty list as if it were current would disconnect
@@ -8007,6 +8076,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       observedAt: t,
       identities: rows.results.map((row) => ({
         userId: String(row.user_id),
+        deviceId: row.device_id ? String(row.device_id) : undefined,
         clientUUID: String(row.client_uuid),
       })),
     });

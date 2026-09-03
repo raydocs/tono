@@ -6643,4 +6643,85 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       expect(statusB.status).toBe('revoked');
     });
   });
+
+  describe('Device-scoped exit credentials and instant revocation on exit roster', () => {
+    it('mints distinct exit credentials per device and drops revoked device immediately from exit roster', async () => {
+      const getCat = await admin('exit-catalog', undefined, 'GET');
+      const curRev = getCat.status === 200 ? Number(((await getCat.json()) as any).revision) : 0;
+      const yaml = `proxies:
+  - name: Tono-Exit
+    type: vless
+    server: exit.example.com
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+      await admin('exit-catalog', { yaml, expectedRevision: curRev }, 'PUT');
+      const email = `dual-${Date.now()}@example.com`;
+
+      const res1 = await emailSignIn({
+        email,
+        deviceName: 'Phone',
+        installationId: `inst-phone-${Date.now()}`,
+      });
+      expect(res1.status).toBe(200);
+      const dev1 = await res1.json() as any;
+
+      const res2 = await emailSignIn({
+        email,
+        deviceName: 'Laptop',
+        installationId: `inst-laptop-${Date.now()}`,
+      });
+      expect(res2.status).toBe(200);
+      const dev2 = await res2.json() as any;
+
+      // Both devices fetch their exit catalog
+      const cat1Res = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${dev1.accessToken}` },
+      });
+      expect(cat1Res.status).toBe(200);
+
+      const cat2Res = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${dev2.accessToken}` },
+      });
+      expect(cat2Res.status).toBe(200);
+
+      // Extract client UUID from device_exit_credentials
+      const cred1 = await env.DB.prepare('SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?').bind(dev1.device.id).first<any>();
+      const cred2 = await env.DB.prepare('SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?').bind(dev2.device.id).first<any>();
+
+      expect(cred1).toBeTruthy();
+      expect(cred2).toBeTruthy();
+      expect(cred1.client_uuid).not.toBe(cred2.client_uuid);
+
+      // The exit roster must contain BOTH device credentials
+      const rosterBefore = await (await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${HOME_TOKEN}` },
+      })).json() as any;
+
+      const beforeUUIDs = rosterBefore.identities.map((e: any) => e.clientUUID);
+      expect(beforeUUIDs).toContain(cred1.client_uuid);
+      expect(beforeUUIDs).toContain(cred2.client_uuid);
+
+      // Now revoke Device 1 (e.g. user deletes Phone from Laptop)
+      const delRes = await api(`devices/${dev1.device.id}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${dev2.accessToken}` },
+      });
+      expect(delRes.status).toBe(204);
+
+      // Device 1's credential must be deleted from device_exit_credentials
+      const cred1After = await env.DB.prepare('SELECT client_uuid FROM device_exit_credentials WHERE device_id = ?').bind(dev1.device.id).first<any>();
+      expect(cred1After).toBeNull();
+
+      // The exit roster must IMMEDIATELY drop Device 1, while keeping Device 2!
+      const rosterAfter = await (await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${HOME_TOKEN}` },
+      })).json() as any;
+
+      const afterUUIDs = rosterAfter.identities.map((e: any) => e.clientUUID);
+      expect(afterUUIDs).not.toContain(cred1.client_uuid);
+      expect(afterUUIDs).toContain(cred2.client_uuid);
+    });
+  });
 });
