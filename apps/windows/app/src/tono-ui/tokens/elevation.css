@@ -1,23 +1,42 @@
 /* Tono shadows. Every card shadow is a tight, far-offset, heavily negative-spread
    drop plus a 1px inner top highlight — the "lit glass edge". */
-:root{
-  --tono-shadow-card:0 20px 48px -32px rgba(0,0,0,0.75),inset 0 1px 0 rgba(255,255,255,0.04);
-  --tono-shadow-pill:0 22px 48px -32px rgba(0,0,0,0.9),inset 0 1px 0 rgba(255,255,255,0.05);
-  --tono-shadow-pill-connected:0 18px 42px -28px rgba(46,213,115,0.72),inset 0 1px 0 rgba(255,255,255,0.06);
-  --tono-shadow-node-card:0 10px 24px -22px rgba(16,24,48,0.9);
-  --tono-shadow-node-card-selected:0 18px 34px -22px rgba(75,110,255,0.82);
-  --tono-shadow-node-card-hover:0 12px 28px -22px rgba(30,45,90,0.6);
-  --tono-shadow-nav-active:inset 0 0 0 0.5px rgba(255,255,255,0.22),0 8px 16px -10px rgba(0,0,0,0.45);
-  --tono-shadow-toast:0 16px 36px -20px rgba(0,0,0,0.8);
-  --tono-shadow-flyout:0 28px 64px -24px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.10);
-  --tono-shadow-dialog:0 12px 40px rgba(0,0,0,0.35);
-  --tono-focus-ring:0 0 0 2px rgba(75,110,255,0.9);
+:root {
+  --tono-shadow-card:
+    0 20px 48px -32px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --tono-shadow-pill:
+    0 22px 48px -32px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --tono-shadow-pill-connected:
+    0 18px 42px -28px rgba(46, 213, 115, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --tono-shadow-node-card: 0 10px 24px -22px rgba(16, 24, 48, 0.9);
+  --tono-shadow-node-card-selected: 0 18px 34px -22px rgba(75, 110, 255, 0.82);
+  --tono-shadow-node-card-hover: 0 12px 28px -22px rgba(30, 45, 90, 0.6);
+  --tono-shadow-nav-active:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.22),
+    0 8px 16px -10px rgba(0, 0, 0, 0.45);
+  --tono-shadow-toast: 0 16px 36px -20px rgba(0, 0, 0, 0.8);
+  --tono-shadow-flyout:
+    0 28px 64px -24px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --tono-shadow-dialog: 0 12px 40px rgba(0, 0, 0, 0.35);
+  --tono-focus-ring: 0 0 0 2px rgba(75, 110, 255, 0.9);
 }
-[data-tono-theme="light"],:root[data-tono-theme="light"]{
-  --tono-shadow-card:0 20px 48px -32px rgba(55,72,110,0.3),inset 0 1px 0 rgba(255,255,255,0.5);
-  --tono-shadow-pill:0 22px 48px -32px rgba(55,72,110,0.38),inset 0 1px 0 rgba(255,255,255,0.65);
-  --tono-shadow-node-card:0 10px 24px -22px rgba(16,24,48,0.28);
-  --tono-shadow-nav-active:inset 0 0 0 0.5px rgba(255,255,255,0.9),0 8px 16px -10px rgba(0,0,0,0.18);
-  --tono-shadow-toast:0 16px 36px -20px rgba(55,72,110,0.4);
-  --tono-shadow-flyout:0 28px 64px -24px rgba(40,54,88,0.42),inset 0 1px 0 rgba(255,255,255,0.75);
+[data-tono-theme="light"],
+:root[data-tono-theme="light"] {
+  --tono-shadow-card:
+    0 20px 48px -32px rgba(55, 72, 110, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --tono-shadow-pill:
+    0 22px 48px -32px rgba(55, 72, 110, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  --tono-shadow-node-card: 0 10px 24px -22px rgba(16, 24, 48, 0.28);
+  --tono-shadow-nav-active:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.9),
+    0 8px 16px -10px rgba(0, 0, 0, 0.18);
+  --tono-shadow-toast: 0 16px 36px -20px rgba(55, 72, 110, 0.4);
+  --tono-shadow-flyout:
+    0 28px 64px -24px rgba(40, 54, 88, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }

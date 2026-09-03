@@ -20,7 +20,10 @@ const TEST_SIGNATURE = Buffer.from(TEST_SIGNATURE_TEXT).toString('base64')
 
 test('keeps the updater plugin startup-safe without a release config overlay', async () => {
   const baseConfig = JSON.parse(
-    await readFile(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'),
+    await readFile(
+      new URL('../src-tauri/tauri.conf.json', import.meta.url),
+      'utf8',
+    ),
   )
   const updater = baseConfig.plugins?.updater
 

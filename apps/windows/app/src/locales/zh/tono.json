@@ -170,6 +170,13 @@
     "taglineConnected": "流量已保护；断线不会漏 IP。",
     "directOn": "微信等国内软件直连；Claude / ChatGPT / Cursor 走家里宽带；其余走隧道。",
     "directSkipped": "国内直连未开，微信也走隧道。Claude / ChatGPT / Cursor 仍走家里宽带。",
+    "claudeHomeActive": "Claude / AI 住宅专线：已就绪",
+    "claudeHomeStandard": "基础专线保护（数据中心）",
+    "claudeHomeHint": "Claude 网页、API、Claude Code 及人机验证均走独立家庭宽带",
+    "claudeStandardHint": "全部流量走所选云端节点",
+    "viewProtectedRules": "查看规则",
+    "rulesTitle": "Claude / AI 住宅专线保护范围",
+    "rulesDescription": "以下流量通过纯 TUN 虚拟网卡透明接管，并通过高信用家庭宽带跳点转发，免除数据中心 IP 风控：\n\n• Anthropic 核心服务：*.anthropic.com, *.claude.ai\n• 人机安全验证：challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• 遥测与灰度：*.datadoghq.com, *.statsigapi.net, *.stripe.network\n• 本地应用进程：Claude Code、Claude Desktop\n\n终端零代理配置，开箱即用。",
     "secureDnsHint": "网页打不开：关掉浏览器「使用安全 DNS」。",
     "encryptedDnsHint": "网页打不开：设置 → 网络和 Internet → DNS，关掉「加密 DNS」，再连接。",
     "checklist": {
@@ -395,6 +402,17 @@
     "diagnostics": {
       "title": "诊断报告",
       "description": "复制当前脱敏报告，或明确确认上传后获取客服 reference code。预览和上传使用同一个后端报告生成器。"
+    },
+    "terminalEnv": {
+      "title": "Claude Code / 终端开发环境体检",
+      "ready": "环境就绪",
+      "conflictDetected": "发现代理残留",
+      "readyDesc": "系统环境变量正常。终端流量直接由 Tono TUN 虚拟网卡透明接管，Claude Code、git、npm、pip 开箱即用，无需配置代理。",
+      "conflictDesc": "检测到系统环境变量中存在残留的 HTTP_PROXY 代理配置。这可能导致终端软件报错（如 ECONNREFUSED），建议立即清理。",
+      "clearAction": "一键清理残留代理变量",
+      "clearing": "正在清理…",
+      "clearSuccess": "已成功清除环境变量中的残留代理",
+      "recheck": "重新检查"
     },
     "webrtc": {
       "title": "WebRTC 泄漏检测",

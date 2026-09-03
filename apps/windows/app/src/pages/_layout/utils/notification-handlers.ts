@@ -115,7 +115,8 @@ export const handleNoticeMessage = (
     // whole app. The Rust side emits these two on every retry and on final failure precisely
     // so the user is told something; without an entry here they reached `console.warn` and
     // the user watched an unexplained spinner instead.
-    tono_state_init_failed: () => showNotice.info('tono.startup.stateInitRetrying'),
+    tono_state_init_failed: () =>
+      showNotice.info('tono.startup.stateInitRetrying'),
     tono_state_init_failed_permanently: () =>
       showNotice.error('tono.startup.stateInitFailed', { error: msg }),
   }

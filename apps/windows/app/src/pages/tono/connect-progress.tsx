@@ -22,9 +22,9 @@ import {
 } from '@/services/tono'
 import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
-import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 /**

@@ -29,7 +29,13 @@ type ActivityView = 'apps' | 'connections'
 
 const MAX_ACTIVITY_CONNECTIONS = 2_000
 const EMPTY_CONNECTIONS: IConnectionsItem[] = []
-const FILTERS: ActivityFilter[] = ['all', 'proxied', 'home', 'direct', 'rejected']
+const FILTERS: ActivityFilter[] = [
+  'all',
+  'proxied',
+  'home',
+  'direct',
+  'rejected',
+]
 const ACTIVITY_GRID_COLUMNS =
   'minmax(120px, 1.1fr) minmax(150px, 1.4fr) 90px 88px minmax(110px, 1fr) 34px'
 

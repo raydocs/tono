@@ -4,20 +4,14 @@ import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const developmentServiceDirectoryEnvironment =
-  'TONO_DEV_SERVICE_DIR'
-const developmentServiceInstallerEnvironment =
-  'TONO_DEV_SERVICE_INSTALLER'
+export const developmentServiceDirectoryEnvironment = 'TONO_DEV_SERVICE_DIR'
+const developmentServiceInstallerEnvironment = 'TONO_DEV_SERVICE_INSTALLER'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const appRoot = resolve(scriptDirectory, '..')
 const serviceRepository = resolve(appRoot, '..', 'service')
 const serviceManifest = join(serviceRepository, 'Cargo.toml')
-const developmentReceipt = join(
-  appRoot,
-  'target',
-  'development-service.json',
-)
+const developmentReceipt = join(appRoot, 'target', 'development-service.json')
 
 function executable(name, platform) {
   return join(
@@ -153,9 +147,7 @@ export async function ensureDevelopmentService({
   )
   const installer = join(
     serviceDirectory,
-    platform === 'win32'
-      ? 'tono-service-install.exe'
-      : 'tono-service-install',
+    platform === 'win32' ? 'tono-service-install.exe' : 'tono-service-install',
   )
   const driver = join(
     serviceDirectory,

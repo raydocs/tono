@@ -170,6 +170,13 @@
     "taglineConnected": "Traffic is protected. A drop will not leak your IP.",
     "directOn": "WeChat and other China apps go direct. Claude, ChatGPT, and Cursor use home broadband. Everything else uses the tunnel.",
     "directSkipped": "China-direct is off. WeChat uses the tunnel. Claude, ChatGPT, and Cursor still use home broadband.",
+    "claudeHomeActive": "Claude / AI Residential Route: Active",
+    "claudeHomeStandard": "Standard Cloud Protection (Data Center)",
+    "claudeHomeHint": "Claude web, API, Claude Code, and verification use dedicated residential exit",
+    "claudeStandardHint": "All traffic routed through selected cloud node",
+    "viewProtectedRules": "View Rules",
+    "rulesTitle": "Claude / AI Residential Protection Scope",
+    "rulesDescription": "The following traffic is transparently captured via TUN virtual adapter and forwarded through high-reputation residential broadband exits to prevent IP flagging:\n\n• Anthropic Core Services: *.anthropic.com, *.claude.ai\n• Cloudflare Turnstile Verification: challenges.cloudflare.com, cf-assets.www.cloudflare.com\n• Telemetry & Feature Flags: *.datadoghq.com, *.statsigapi.net, *.stripe.network\n• Local Developer Apps: Claude Code CLI, Claude Desktop\n\nZero terminal configuration required.",
     "secureDnsHint": "Pages failing? Turn off Secure DNS in the browser.",
     "encryptedDnsHint": "Pages failing? Settings → Network & internet → DNS: turn Encrypted DNS off, then reconnect.",
     "checklist": {
@@ -395,6 +402,17 @@
     "diagnostics": {
       "title": "Diagnostics report",
       "description": "Copy the current redacted report, or explicitly confirm an upload to receive a support reference code. Preview and upload use the same backend report builder."
+    },
+    "terminalEnv": {
+      "title": "Claude Code / Terminal Environment Diagnostics",
+      "ready": "Environment Ready",
+      "conflictDetected": "Proxy Residue Detected",
+      "readyDesc": "System environment variables are clean. Terminal traffic is transparently routed via Tono TUN virtual adapter. Claude Code, git, npm, and pip work out-of-the-box without manual proxy configuration.",
+      "conflictDesc": "Residual HTTP_PROXY environment variables detected. This often causes terminal tools to fail with ECONNREFUSED. It is recommended to clear them.",
+      "clearAction": "Clear Residual Proxy Variables",
+      "clearing": "Clearing…",
+      "clearSuccess": "Successfully cleared residual proxy environment variables",
+      "recheck": "Recheck"
     },
     "webrtc": {
       "title": "WebRTC leak check",

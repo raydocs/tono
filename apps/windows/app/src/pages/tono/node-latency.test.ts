@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import { TONO_COLORS } from '@/tono-ui/theme'
 
-import { formatLatencySeconds, latencyColor, latencyLabelKey } from './node-latency'
+import {
+  formatLatencySeconds,
+  latencyColor,
+  latencyLabelKey,
+} from './node-latency'
 
 describe('formatLatencySeconds', () => {
   it('speaks page-open time in seconds, not a debug millisecond stamp', () => {

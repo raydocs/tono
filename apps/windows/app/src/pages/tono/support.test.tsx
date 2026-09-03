@@ -21,12 +21,16 @@ const {
   diagnosticsReportMock,
   uploadDiagnosticsMock,
   auditLogPathMock,
+  checkTerminalEnvMock,
+  clearTerminalProxyEnvMock,
   noticeSuccess,
   noticeError,
 } = vi.hoisted(() => ({
   diagnosticsReportMock: vi.fn(),
   uploadDiagnosticsMock: vi.fn(),
   auditLogPathMock: vi.fn(),
+  checkTerminalEnvMock: vi.fn(),
+  clearTerminalProxyEnvMock: vi.fn(),
   noticeSuccess: vi.fn(),
   noticeError: vi.fn(),
 }))
@@ -36,6 +40,8 @@ vi.mock('@/services/tono', async (importOriginal) => ({
   tonoDiagnosticsReport: diagnosticsReportMock,
   tonoUploadDiagnostics: uploadDiagnosticsMock,
   tonoAuditLogPath: auditLogPathMock,
+  tonoCheckTerminalEnv: checkTerminalEnvMock,
+  tonoClearTerminalProxyEnv: clearTerminalProxyEnvMock,
 }))
 
 vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
@@ -111,6 +117,12 @@ beforeEach(() => {
   })
   noticeSuccess.mockReset()
   noticeError.mockReset()
+  checkTerminalEnvMock.mockReset().mockResolvedValue({
+    hasConflict: false,
+    entries: [],
+    claudeCodeReady: true,
+  })
+  clearTerminalProxyEnvMock.mockReset().mockResolvedValue(undefined)
 })
 
 afterEach(() => cleanup())
@@ -189,5 +201,48 @@ describe('Tono Support page', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(uploadDiagnosticsMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('support terminal environment diagnostic card', () => {
+  it('renders ready badge when environment has no proxy conflict', async () => {
+    renderPage()
+    expect(
+      await screen.findByText('Claude Code / Terminal Environment Diagnostics'),
+    ).toBeDefined()
+    expect(await screen.findByText('Environment Ready')).toBeDefined()
+    expect(
+      screen.queryByRole('button', { name: 'Clear Residual Proxy Variables' }),
+    ).toBeNull()
+  })
+
+  it('renders conflict warning and clears proxy variables on button click', async () => {
+    checkTerminalEnvMock.mockResolvedValueOnce({
+      hasConflict: true,
+      entries: [
+        {
+          key: 'HTTP_PROXY',
+          value: 'http://127.0.0.1:7890',
+          source: 'Process',
+        },
+      ],
+      claudeCodeReady: false,
+    })
+    renderPage()
+
+    expect(await screen.findByText('Proxy Residue Detected')).toBeDefined()
+    expect(screen.getByText('HTTP_PROXY=http://127.0.0.1:7890')).toBeDefined()
+
+    const clearBtn = screen.getByRole('button', {
+      name: 'Clear Residual Proxy Variables',
+    })
+    fireEvent.click(clearBtn)
+
+    await waitFor(() =>
+      expect(clearTerminalProxyEnvMock).toHaveBeenCalledTimes(1),
+    )
+    expect(noticeSuccess).toHaveBeenCalledWith(
+      'Successfully cleared residual proxy environment variables',
+    )
   })
 })

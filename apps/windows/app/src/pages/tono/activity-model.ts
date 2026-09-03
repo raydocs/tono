@@ -72,7 +72,10 @@ const fileStem = (value: string) =>
     .toLowerCase()
 
 /** Native WeChat product processes, not WeCom / WeChat Work. */
-export const isWeChatActivityProcess = (process?: string, processPath?: string) => {
+export const isWeChatActivityProcess = (
+  process?: string,
+  processPath?: string,
+) => {
   const stem = fileStem(process || processPath || '')
   if (!stem) return false
   if (
@@ -220,7 +223,9 @@ export interface ActivityAppRow {
   searchText: string
 }
 
-export const aggregateActivityApps = (rows: ActivityRow[]): ActivityAppRow[] => {
+export const aggregateActivityApps = (
+  rows: ActivityRow[],
+): ActivityAppRow[] => {
   const byProcess = new Map<string, ActivityAppRow>()
   for (const row of rows) {
     const current = byProcess.get(row.process) ?? {

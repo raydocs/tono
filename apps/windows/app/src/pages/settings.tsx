@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next'
 
 import type { DialogRef } from '@/components/base'
 import { UpdateViewer } from '@/components/setting/mods/update-viewer'
-import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { useI18n } from '@/hooks/use-i18n'
 import { useTonoPreferences } from '@/hooks/use-tono-preferences'
 import { useUpdate } from '@/hooks/use-update'
@@ -22,13 +21,10 @@ import {
   tonoSetNetworkLogUploadEnabled,
   formatTonoActionError,
 } from '@/services/tono'
+import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
-import {
-  TONO_COLORS,
-  TONO_MONO_STACK,
-  tonoText,
-} from '@/tono-ui/theme'
+import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { TonoToggle } from '@/tono-ui/TonoToggle'

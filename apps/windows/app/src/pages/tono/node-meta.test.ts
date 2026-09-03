@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { nodeCityParts, nodeCityTitleKey, nodeCode, nodeRegion } from './node-meta'
+import {
+  nodeCityParts,
+  nodeCityTitleKey,
+  nodeCode,
+  nodeRegion,
+} from './node-meta'
 
 describe('nodeRegion', () => {
   it('matches US and JP as whole tokens like the verified-catalog sorter', () => {

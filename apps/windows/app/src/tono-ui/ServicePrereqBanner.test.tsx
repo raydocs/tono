@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -62,7 +68,9 @@ describe('ServicePrereqBanner', () => {
       bfeRunning: true,
     })
     render(<ServicePrereqBanner />)
-    await waitFor(() => expect(screen.getByText('tono.servicePrereq.generic')).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByText('tono.servicePrereq.generic')).toBeDefined(),
+    )
   })
 
   it('stays quiet when the service is not installed, which is a different flow', async () => {
@@ -91,7 +99,9 @@ describe('ServicePrereqBanner', () => {
     render(<ServicePrereqBanner />)
     await waitFor(() => expect(screen.getByRole('alert')).toBeDefined())
 
-    fireEvent.click(screen.getByRole('button', { name: 'tono.servicePrereq.repair' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: 'tono.servicePrereq.repair' }),
+    )
     await waitFor(() => expect(mocks.repair).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
@@ -106,7 +116,11 @@ describe('ServicePrereqBanner', () => {
     render(<ServicePrereqBanner />)
     await waitFor(() => expect(screen.getByRole('alert')).toBeDefined())
 
-    fireEvent.click(screen.getByRole('button', { name: 'tono.servicePrereq.repair' }))
-    await waitFor(() => expect(screen.getByText('elevation declined')).toBeDefined())
+    fireEvent.click(
+      screen.getByRole('button', { name: 'tono.servicePrereq.repair' }),
+    )
+    await waitFor(() =>
+      expect(screen.getByText('elevation declined')).toBeDefined(),
+    )
   })
 })

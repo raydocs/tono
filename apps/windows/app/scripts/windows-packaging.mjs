@@ -817,7 +817,8 @@ export function validatePayloadEntries(entries) {
   }
   const unexpectedMihomo = bases.filter(
     (base) =>
-      /^(verge-mihomo|tono-core)/i.test(base) && !/^tono-core\.exe\.next$/i.test(base),
+      /^(verge-mihomo|tono-core)/i.test(base) &&
+      !/^tono-core\.exe\.next$/i.test(base),
   )
   if (unexpectedMihomo.length) {
     return `installer payload must not contain a live, repair, or alternate stable Mihomo basename: ${[...new Set(unexpectedMihomo)].join(', ')}`

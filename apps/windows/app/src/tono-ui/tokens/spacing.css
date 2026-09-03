@@ -1,35 +1,35 @@
 /* Tono spacing — the shell's real measurements, not a synthetic 4/8 grid.
    Page padding is 28/32, cards sit on 10–18px gutters. */
-:root{
-  --tono-space-1:2px;
-  --tono-space-2:4px;
-  --tono-space-3:6px;
-  --tono-space-4:8px;
-  --tono-space-5:10px;
-  --tono-space-6:12px;
-  --tono-space-7:14px;
-  --tono-space-8:16px;
-  --tono-space-9:18px;
-  --tono-space-10:20px;
-  --tono-space-11:24px;
-  --tono-space-12:28px;
-  --tono-space-13:32px;
+:root {
+  --tono-space-1: 2px;
+  --tono-space-2: 4px;
+  --tono-space-3: 6px;
+  --tono-space-4: 8px;
+  --tono-space-5: 10px;
+  --tono-space-6: 12px;
+  --tono-space-7: 14px;
+  --tono-space-8: 16px;
+  --tono-space-9: 18px;
+  --tono-space-10: 20px;
+  --tono-space-11: 24px;
+  --tono-space-12: 28px;
+  --tono-space-13: 32px;
 
-  --tono-page-padding:28px 32px 28px; /* @kind spacing */
-  --tono-page-padding-compact:24px 20px 24px; /* @kind spacing */   /* <=760px */
-  --tono-sidebar-width:220px;
-  --tono-sidebar-width-compact:188px;           /* <=760px */
-  --tono-titlebar-height:32px;
-  --tono-card-gap:18px;
-  --tono-grid-gap:12px;
-  --tono-stat-grid-max:720px;
-  --tono-server-card-min:240px;
-  --tono-nav-item-height:42px;
-  --tono-control-height:36px;
-  --tono-pill-width:340px;
-  --tono-pill-min-height:96px;
-  --tono-node-card-min-height:126px;
-  --tono-dialog-width:340px;
-  --tono-login-card-width:470px;
-  --tono-active-card-width:520px;
+  --tono-page-padding: 28px 32px 28px; /* @kind spacing */
+  --tono-page-padding-compact: 24px 20px 24px; /* @kind spacing */ /* <=760px */
+  --tono-sidebar-width: 220px;
+  --tono-sidebar-width-compact: 188px; /* <=760px */
+  --tono-titlebar-height: 32px;
+  --tono-card-gap: 18px;
+  --tono-grid-gap: 12px;
+  --tono-stat-grid-max: 720px;
+  --tono-server-card-min: 240px;
+  --tono-nav-item-height: 42px;
+  --tono-control-height: 36px;
+  --tono-pill-width: 340px;
+  --tono-pill-min-height: 96px;
+  --tono-node-card-min-height: 126px;
+  --tono-dialog-width: 340px;
+  --tono-login-card-width: 470px;
+  --tono-active-card-width: 520px;
 }

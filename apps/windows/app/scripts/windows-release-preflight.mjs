@@ -290,7 +290,9 @@ const assertNsisCoreIntegrityPins = (sevenZip, installer, entries) => {
   if (!pinFile) {
     fail('NSIS payload has no resources/core-sha256.txt')
   }
-  const shippedPin = Buffer.from(readNsisEntry(sevenZip, installer, pinFile.name))
+  const shippedPin = Buffer.from(
+    readNsisEntry(sevenZip, installer, pinFile.name),
+  )
     .toString('utf8')
     .trim()
     .toLowerCase()

@@ -1,5 +1,4 @@
-const TAURI_STYLE_NONCE_SOURCE =
-  'style[data-tauri-csp-nonce-source][nonce]'
+const TAURI_STYLE_NONCE_SOURCE = 'style[data-tauri-csp-nonce-source][nonce]'
 
 /**
  * Return the nonce Tauri placed on the marked bundled style element.

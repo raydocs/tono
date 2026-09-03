@@ -13,13 +13,13 @@ import {
   tonoSignInVerify,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { SupportContact } from '@/tono-ui/SupportContact'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
   TONO_PAGE_LAYOUT,
   tonoText,
 } from '@/tono-ui/theme'
-import { SupportContact } from '@/tono-ui/SupportContact'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 
 const RESEND_COUNTDOWN = 60
@@ -136,7 +136,14 @@ const LoginPage = () => {
     if (!/^\d{6}$/.test(code) || autoSubmittedCode === code) return
     setAutoSubmittedCode(code)
     void handleVerify()
-  }, [autoSubmittedCode, code, codeSent, handleVerify, internetBlocked, verifying])
+  }, [
+    autoSubmittedCode,
+    code,
+    codeSent,
+    handleVerify,
+    internetBlocked,
+    verifying,
+  ])
 
   const handleRetryRestore = useLockFn(async () => {
     setRetrying(true)
@@ -380,147 +387,155 @@ const LoginPage = () => {
         </div>
 
         <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (!codeSent) void handleSendCode()
-              else void handleVerify()
-            }}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              width: '100%',
-            }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: text.secondary }}>
-                {t('tono.login.emailLabel')}
-              </span>
-              <input
-                className="tono-input"
-                ref={emailInputRef}
-                style={inputStyle}
-                type="email"
-                autoComplete="email"
-                placeholder={t('tono.login.emailPlaceholder')}
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!codeSent) void handleSendCode()
+            else void handleVerify()
+          }}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            width: '100%',
+          }}
+        >
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span
+              style={{ fontSize: 12, fontWeight: 600, color: text.secondary }}
+            >
+              {t('tono.login.emailLabel')}
+            </span>
+            <input
+              className="tono-input"
+              ref={emailInputRef}
+              style={inputStyle}
+              type="email"
+              autoComplete="email"
+              placeholder={t('tono.login.emailPlaceholder')}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              disabled={
+                sending ||
+                verifying ||
+                restoringInternet ||
+                internetBlocked ||
+                codeSent
+              }
+            />
+          </label>
+
+          {!codeSent ? (
+            <button
+              type="submit"
+              className="tono-button"
+              style={primaryButtonStyle}
+              disabled={sending || restoringInternet || internetBlocked}
+            >
+              {sending ? t('tono.login.sending') : t('tono.login.sendCode')}
+            </button>
+          ) : (
+            <>
+              <label
+                style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: text.secondary,
+                  }}
+                >
+                  {t('tono.login.codeLabel')}
+                </span>
+                <input
+                  className="tono-input"
+                  style={{
+                    ...inputStyle,
+                    textAlign: 'center',
+                    letterSpacing: 10,
+                    fontSize: 22,
+                    fontWeight: 650,
+                  }}
+                  ref={codeInputRef}
+                  placeholder={t('tono.login.codePlaceholder')}
+                  value={code}
+                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  onChange={(event) =>
+                    setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
+                  }
+                  disabled={
+                    sending || verifying || restoringInternet || internetBlocked
+                  }
+                />
+              </label>
+              <button
+                type="submit"
+                className="tono-button"
+                style={primaryButtonStyle}
                 disabled={
                   sending ||
                   verifying ||
                   restoringInternet ||
                   internetBlocked ||
-                  codeSent
+                  !/^\d{6}$/.test(code)
                 }
-              />
-            </label>
-
-            {!codeSent ? (
-              <>
-                <button
-                  type="submit"
-                  className="tono-button"
-                  style={primaryButtonStyle}
-                  disabled={sending || restoringInternet || internetBlocked}
-                >
-                  {sending ? t('tono.login.sending') : t('tono.login.sendCode')}
-                </button>
-              </>
-            ) : (
-              <>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: text.secondary }}>
-                    {t('tono.login.codeLabel')}
-                  </span>
-                  <input
-                    className="tono-input"
-                    style={{
-                      ...inputStyle,
-                      textAlign: 'center',
-                      letterSpacing: 10,
-                      fontSize: 22,
-                      fontWeight: 650,
-                    }}
-                    ref={codeInputRef}
-                    placeholder={t('tono.login.codePlaceholder')}
-                    value={code}
-                    maxLength={6}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    onChange={(event) =>
-                      setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-                    }
-                    disabled={
-                      sending || verifying || restoringInternet || internetBlocked
-                    }
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className="tono-button"
-                  style={primaryButtonStyle}
-                  disabled={
-                    sending ||
-                    verifying ||
-                    restoringInternet ||
-                    internetBlocked ||
-                    !/^\d{6}$/.test(code)
-                  }
-                >
-                  {verifying ? t('tono.login.verifying') : t('tono.login.verify')}
-                </button>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    fontSize: 12,
-                  }}
-                >
-                  <span style={{ color: text.tertiary }}>
-                    {t('tono.login.validity')}
-                  </span>
-                  <button
-                    type="button"
-                    className="tono-link"
-                    style={{
-                      fontSize: 12,
-                      color: countdown > 0 ? text.tertiary : TONO_COLORS.accent,
-                      cursor: countdown > 0 ? 'default' : 'pointer',
-                      flexShrink: 0,
-                    }}
-                    onClick={countdown > 0 ? undefined : handleSendCode}
-                    disabled={
-                      sending ||
-                      restoringInternet ||
-                      internetBlocked ||
-                      countdown > 0
-                    }
-                  >
-                    {countdown > 0
-                      ? t('tono.login.resendIn', { seconds: countdown })
-                      : t('tono.login.sendNewCode')}
-                  </button>
-                </div>
+              >
+                {verifying ? t('tono.login.verifying') : t('tono.login.verify')}
+              </button>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ color: text.tertiary }}>
+                  {t('tono.login.validity')}
+                </span>
                 <button
                   type="button"
                   className="tono-link"
                   style={{
                     fontSize: 12,
-                    color: text.secondary,
-                    alignSelf: 'center',
+                    color: countdown > 0 ? text.tertiary : TONO_COLORS.accent,
+                    cursor: countdown > 0 ? 'default' : 'pointer',
+                    flexShrink: 0,
                   }}
-                  onClick={resetToStart}
+                  onClick={countdown > 0 ? undefined : handleSendCode}
                   disabled={
-                    sending || verifying || restoringInternet || internetBlocked
+                    sending ||
+                    restoringInternet ||
+                    internetBlocked ||
+                    countdown > 0
                   }
                 >
-                  {t('tono.login.changeEmail')}
+                  {countdown > 0
+                    ? t('tono.login.resendIn', { seconds: countdown })
+                    : t('tono.login.sendNewCode')}
                 </button>
-              </>
-            )}
-          </form>
+              </div>
+              <button
+                type="button"
+                className="tono-link"
+                style={{
+                  fontSize: 12,
+                  color: text.secondary,
+                  alignSelf: 'center',
+                }}
+                onClick={resetToStart}
+                disabled={
+                  sending || verifying || restoringInternet || internetBlocked
+                }
+              >
+                {t('tono.login.changeEmail')}
+              </button>
+            </>
+          )}
+        </form>
 
         {error && (
           <p

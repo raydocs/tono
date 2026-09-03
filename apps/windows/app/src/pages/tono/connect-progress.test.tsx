@@ -289,7 +289,9 @@ describe('ConnectProgressCard', () => {
     fireEvent.click(screen.getByText(/Technical details/))
     const errorBlock = await screen.findByTestId('tono-progress-error')
     expect(errorBlock.textContent).toContain('dns probe failed: exit refused')
-    expect(screen.getByText(/Failed at Securing and verifying DNS/)).toBeDefined()
+    expect(
+      screen.getByText(/Failed at Securing and verifying DNS/),
+    ).toBeDefined()
     expect(screen.getByTestId('tono-step-securingDNS').dataset.state).toBe(
       'failed',
     )

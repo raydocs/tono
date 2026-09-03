@@ -32,10 +32,14 @@ export const latencyLabelKey = (
   | 'tono.nodes.exitLatencySlow'
   | 'tono.nodes.cachedLatency' => {
   if (kind === 'tcp') {
-    return delay >= TCP_SLOW_MS ? 'tono.nodes.tcpLatencySlow' : 'tono.nodes.tcpLatency'
+    return delay >= TCP_SLOW_MS
+      ? 'tono.nodes.tcpLatencySlow'
+      : 'tono.nodes.tcpLatency'
   }
   if (kind === 'exit') {
-    return delay >= EXIT_SLOW_MS ? 'tono.nodes.exitLatencySlow' : 'tono.nodes.exitLatency'
+    return delay >= EXIT_SLOW_MS
+      ? 'tono.nodes.exitLatencySlow'
+      : 'tono.nodes.exitLatency'
   }
   return 'tono.nodes.cachedLatency'
 }

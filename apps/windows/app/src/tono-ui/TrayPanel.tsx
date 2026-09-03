@@ -28,9 +28,9 @@ import {
   tonoServers,
   type TonoUiState,
 } from '@/services/tono'
+import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
-import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import parseTraffic from '@/utils/parse-traffic'
 
 const STATUS_LABEL: Record<TonoUiState, string> = {
@@ -221,7 +221,10 @@ export const TrayPanel = () => {
                   color: latencyColor(latency, 'cached'),
                 }}
               >
-                {t(latencyLabelKey('cached', latency), latencyLabelVars(latency))}
+                {t(
+                  latencyLabelKey('cached', latency),
+                  latencyLabelVars(latency),
+                )}
               </span>
             )}
             <TonoIcon name="chevronDown" size={11} />
@@ -263,7 +266,9 @@ export const TrayPanel = () => {
                 >
                   {label}
                 </span>
-                <span style={{ flexShrink: 0, fontSize: 10, color: text.tertiary }}>
+                <span
+                  style={{ flexShrink: 0, fontSize: 10, color: text.tertiary }}
+                >
                   {nodeCode(server.name) ?? ''}
                 </span>
               </button>
@@ -280,6 +285,29 @@ export const TrayPanel = () => {
           <span style={{ color: TONO_COLORS.connected }}>
             ↓ {down} {downUnit}/s
           </span>
+          {status?.claudeHomeActive && (
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 650,
+                color: TONO_COLORS.latencyGood,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+              title={t('tono.dashboard.claudeHomeActive')}
+            >
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: TONO_COLORS.latencyGood,
+                }}
+              />
+              Claude AI
+            </span>
+          )}
         </div>
       )}
 
@@ -308,10 +336,7 @@ export const TrayPanel = () => {
         }}
       >
         {!busy && (
-          <TonoIcon
-            name={action === 'retry' ? 'refresh' : 'power'}
-            size={14}
-          />
+          <TonoIcon name={action === 'retry' ? 'refresh' : 'power'} size={14} />
         )}
         {action
           ? t(ACTION_LABEL[action])

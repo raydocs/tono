@@ -69,9 +69,7 @@ describe('ConnectPill five states', () => {
     const { onConnect, onDisconnect } = renderPill('connected')
 
     expect(screen.getByText('tono.pill.title.connected')).toBeDefined()
-    expect(
-      screen.getByText('tono.pill.subtitle.tapToDisconnect'),
-    ).toBeDefined()
+    expect(screen.getByText('tono.pill.subtitle.tapToDisconnect')).toBeDefined()
     expect((pillButton() as HTMLButtonElement).disabled).toBe(false)
 
     fireEvent.click(pillButton())
@@ -82,9 +80,7 @@ describe('ConnectPill five states', () => {
   it('protectedOffline: title, tap-to-restore subtitle, click disconnects', () => {
     const { onConnect, onDisconnect } = renderPill('protectedOffline')
 
-    expect(
-      screen.getByText('tono.pill.title.protectedOffline'),
-    ).toBeDefined()
+    expect(screen.getByText('tono.pill.title.protectedOffline')).toBeDefined()
     expect(screen.getByText('tono.pill.subtitle.tapToRestore')).toBeDefined()
     expect((pillButton() as HTMLButtonElement).disabled).toBe(false)
 
@@ -97,9 +93,7 @@ describe('ConnectPill five states', () => {
     const { onConnect, onDisconnect } = renderPill('disconnecting')
 
     expect(screen.getByText('tono.pill.title.disconnecting')).toBeDefined()
-    expect(
-      screen.getByText('tono.pill.subtitle.restoringAccess'),
-    ).toBeDefined()
+    expect(screen.getByText('tono.pill.subtitle.restoringAccess')).toBeDefined()
     expect((pillButton() as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.click(pillButton())

@@ -191,10 +191,7 @@ export const createSharedSubscriptionEntry = (
       // A broken socket must not be allowed to suppress its own reconnect.
     } finally {
       if (!entry.closed) {
-        entry.reconnectTimer = setTimeout(
-          entry.connectWs,
-          nextReconnectDelay(),
-        )
+        entry.reconnectTimer = setTimeout(entry.connectWs, nextReconnectDelay())
       }
     }
   }

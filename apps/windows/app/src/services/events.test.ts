@@ -74,10 +74,7 @@ describe('subscribeTonoEvents', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const onSubscribed = vi.fn()
 
-    subscribeTonoEvents(
-      { 'verge://run-state-changed': () => {} },
-      onSubscribed,
-    )
+    subscribeTonoEvents({ 'verge://run-state-changed': () => {} }, onSubscribed)
 
     await vi.waitFor(() => expect(onSubscribed).toHaveBeenCalledTimes(1))
   })

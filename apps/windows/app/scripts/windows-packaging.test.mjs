@@ -43,11 +43,17 @@ const windowsServiceInstallerSource = readFileSync(
   'utf8',
 )
 const windowsReleaseShSource = readFileSync(
-  new URL('../../../../tooling/scripts/build-windows-release.sh', import.meta.url),
+  new URL(
+    '../../../../tooling/scripts/build-windows-release.sh',
+    import.meta.url,
+  ),
   'utf8',
 )
 const windowsReleasePs1Source = readFileSync(
-  new URL('../../../../tooling/scripts/build-windows-release.ps1', import.meta.url),
+  new URL(
+    '../../../../tooling/scripts/build-windows-release.ps1',
+    import.meta.url,
+  ),
   'utf8',
 )
 const canonicalGuiLaunchLine =
@@ -582,22 +588,10 @@ test('Windows release stops when a native preflight command fails', () => {
 })
 
 test('local Windows release scripts write core-sha256.txt from the hashed sidecar', () => {
-  assert.match(
-    windowsReleaseShSource,
-    /core-sha256\.txt/,
-  )
-  assert.match(
-    windowsReleaseShSource,
-    /TONO_CORE_SHA256=/,
-  )
-  assert.match(
-    windowsReleasePs1Source,
-    /core-sha256\.txt/,
-  )
-  assert.match(
-    windowsReleasePs1Source,
-    /\$env:TONO_CORE_SHA256 = \$coreSha256/,
-  )
+  assert.match(windowsReleaseShSource, /core-sha256\.txt/)
+  assert.match(windowsReleaseShSource, /TONO_CORE_SHA256=/)
+  assert.match(windowsReleasePs1Source, /core-sha256\.txt/)
+  assert.match(windowsReleasePs1Source, /\$env:TONO_CORE_SHA256 = \$coreSha256/)
 })
 
 test('packaging rejects a Service that lacks the exact packaged Core pin', () => {

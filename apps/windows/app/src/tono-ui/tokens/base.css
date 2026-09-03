@@ -1,14 +1,58 @@
 /* Minimal shell resets and the shared component classes the Tono clients ship
    (apps/windows/app/src/tono-ui/tono.css). Structural properties are duplicated
    inline in the real product on purpose; kept as classes here for authoring. */
-*{box-sizing:border-box}
-body{margin:0;font-family:var(--tono-font-sans);color:var(--tono-text-primary);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-a{color:var(--tono-link-on-dark);text-decoration:none}
-a:hover{color:var(--tono-accent)}
-[data-tono-theme="light"] a{color:var(--tono-link-on-light)}
-.tono-glass{background:var(--tono-surface-card);border:1px solid var(--tono-surface-card-border);border-radius:var(--tono-radius-card-lg);box-shadow:var(--tono-shadow-card);backdrop-filter:var(--tono-glass-blur);-webkit-backdrop-filter:var(--tono-glass-blur)}
-.tono-page-title{font-size:var(--tono-size-page-title);font-weight:var(--tono-weight-title);line-height:var(--tono-leading-title);letter-spacing:var(--tono-tracking-page-title);margin:0}
-.tono-page-subtitle{margin:6px 0 0;font-size:var(--tono-size-nav);line-height:var(--tono-leading-body);font-weight:var(--tono-weight-medium);color:var(--tono-text-secondary)}
-.tono-mono{font-family:var(--tono-font-mono);font-variant-numeric:tabular-nums}
-.tono-focusable:focus-visible{outline:2px solid rgba(75,110,255,0.9);outline-offset:2px}
-@media (prefers-reduced-motion:reduce){:root{--tono-glass-blur:none /* @kind other */}}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: var(--tono-font-sans);
+  color: var(--tono-text-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a {
+  color: var(--tono-link-on-dark);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--tono-accent);
+}
+[data-tono-theme="light"] a {
+  color: var(--tono-link-on-light);
+}
+.tono-glass {
+  background: var(--tono-surface-card);
+  border: 1px solid var(--tono-surface-card-border);
+  border-radius: var(--tono-radius-card-lg);
+  box-shadow: var(--tono-shadow-card);
+  backdrop-filter: var(--tono-glass-blur);
+  -webkit-backdrop-filter: var(--tono-glass-blur);
+}
+.tono-page-title {
+  font-size: var(--tono-size-page-title);
+  font-weight: var(--tono-weight-title);
+  line-height: var(--tono-leading-title);
+  letter-spacing: var(--tono-tracking-page-title);
+  margin: 0;
+}
+.tono-page-subtitle {
+  margin: 6px 0 0;
+  font-size: var(--tono-size-nav);
+  line-height: var(--tono-leading-body);
+  font-weight: var(--tono-weight-medium);
+  color: var(--tono-text-secondary);
+}
+.tono-mono {
+  font-family: var(--tono-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tono-focusable:focus-visible {
+  outline: 2px solid rgba(75, 110, 255, 0.9);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --tono-glass-blur: none; /* @kind other */
+  }
+}

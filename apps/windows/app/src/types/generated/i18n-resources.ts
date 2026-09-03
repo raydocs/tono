@@ -1028,6 +1028,10 @@ export interface TranslationResources {
           leakTest: string
           title: string
         }
+        claudeHomeActive: string
+        claudeHomeHint: string
+        claudeHomeStandard: string
+        claudeStandardHint: string
         connect: string
         connected: string
         connecting: string
@@ -1091,6 +1095,8 @@ export interface TranslationResources {
         pickServer: string
         protectedOffline: string
         protectedOfflineDescription: string
+        rulesDescription: string
+        rulesTitle: string
         secureDnsHint: string
         server: string
         status: {
@@ -1104,6 +1110,7 @@ export interface TranslationResources {
         taglineConnected: string
         taglineIdle: string
         title: string
+        viewProtectedRules: string
         whatFailed: string
       }
       login: {
@@ -1118,6 +1125,7 @@ export interface TranslationResources {
         errors: {
           deviceLimit: string
           rateLimited: string
+          serverError: string
           sessionExpired: string
           unreachable: string
         }
@@ -1366,6 +1374,17 @@ export interface TranslationResources {
           node: string
           protection: string
           service: string
+          title: string
+        }
+        terminalEnv: {
+          clearAction: string
+          clearing: string
+          clearSuccess: string
+          conflictDesc: string
+          conflictDetected: string
+          ready: string
+          readyDesc: string
+          recheck: string
           title: string
         }
         title: string

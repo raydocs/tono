@@ -118,7 +118,11 @@ export const ProtectedOfflineBanner = () => {
           type="button"
           className="tono-button"
           onClick={() => void retry()}
-          style={{ ...button, color: '#fff', background: TONO_COLORS.protectedOffline }}
+          style={{
+            ...button,
+            color: '#fff',
+            background: TONO_COLORS.protectedOffline,
+          }}
         >
           {t('tono.tray.retry')}
         </button>

@@ -197,7 +197,8 @@ export const ConnectPill = ({
         <span
           style={{
             fontSize: 'var(--tono-size-pill-title)',
-            fontWeight: 'var(--tono-weight-title)' as CSSProperties['fontWeight'],
+            fontWeight:
+              'var(--tono-weight-title)' as CSSProperties['fontWeight'],
             lineHeight: 'var(--tono-leading-title)',
             letterSpacing: 'var(--tono-tracking-pill-title)',
             color: spec.titleColored ? spec.color : text.primary,

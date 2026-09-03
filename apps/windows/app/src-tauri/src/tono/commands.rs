@@ -79,6 +79,10 @@ pub struct TonoStatus {
     pub tcp_delay_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tcp_delay_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_home_active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_home_host: Option<String>,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -232,6 +236,19 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         exit_delay_at_ms: inner.selected_exit_delay_at_ms(),
         tcp_delay_ms: inner.selected_tcp_delay_ms(),
         tcp_delay_at_ms: inner.selected_tcp_delay_at_ms(),
+        claude_home_active: if status.is_connected {
+            Some(inner.routing.as_ref().map_or(false, |r| r.home_socks5.is_some() || r.home_proxy.is_some()))
+        } else {
+            None
+        },
+        claude_home_host: if status.is_connected {
+            inner.routing.as_ref().and_then(|r| {
+                r.home_socks5.as_ref().map(|s| s.host.clone())
+                    .or_else(|| r.home_proxy.as_ref().map(|p| p.node.clone()))
+            })
+        } else {
+            None
+        },
     }
 }
 
@@ -1807,6 +1824,138 @@ pub async fn tono_prepare_update(
     crate::tono::update_handoff::save(&journal)
         .map_err(|error| format!("TONO_UPDATE_JOURNAL: {error}"))?;
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyEnvEntry {
+    pub key: String,
+    pub value: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalEnvReport {
+    pub has_conflict: bool,
+    pub entries: Vec<ProxyEnvEntry>,
+    pub claude_code_ready: bool,
+}
+
+#[tauri::command]
+pub async fn tono_check_terminal_env() -> Result<TerminalEnvReport, String> {
+    tokio::task::spawn_blocking(|| {
+        let mut entries = Vec::new();
+        let proxy_keys = [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ];
+
+        #[cfg(windows)]
+        {
+            use winreg::enums::HKEY_CURRENT_USER;
+            use winreg::RegKey;
+            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+            if let Ok(env_key) = hkcu.open_subkey("Environment") {
+                for key in &proxy_keys {
+                    if let Ok(val) = env_key.get_value::<String, _>(key) {
+                        let trimmed = val.trim();
+                        if !trimmed.is_empty() {
+                            entries.push(ProxyEnvEntry {
+                                key: (*key).to_string(),
+                                value: trimmed.to_string(),
+                                source: "Windows 环境变量 (User)".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        for key in &proxy_keys {
+            if let Ok(val) = std::env::var(key) {
+                let trimmed = val.trim();
+                if !trimmed.is_empty() && !entries.iter().any(|e| e.key.eq_ignore_ascii_case(key)) {
+                    entries.push(ProxyEnvEntry {
+                        key: (*key).to_string(),
+                        value: trimmed.to_string(),
+                        source: "当前进程环境".to_string(),
+                    });
+                }
+            }
+        }
+
+        let has_conflict = !entries.is_empty();
+        let claude_code_ready = !has_conflict;
+
+        Ok(TerminalEnvReport {
+            has_conflict,
+            entries,
+            claude_code_ready,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn tono_clear_terminal_proxy_env() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        let proxy_keys = [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ];
+
+        #[cfg(windows)]
+        {
+            use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+            use winreg::RegKey;
+            let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+            if let Ok(env_key) = hkcu.open_subkey_with_flags("Environment", KEY_SET_VALUE) {
+                for key in &proxy_keys {
+                    let _ = env_key.delete_value(key);
+                }
+            }
+
+            unsafe {
+                use std::os::windows::ffi::OsStrExt;
+                use windows::Win32::Foundation::{LPARAM, WPARAM};
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+                };
+                let param: Vec<u16> = std::ffi::OsStr::new("Environment")
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
+                let mut result = 0usize;
+                let _ = SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    WPARAM(0),
+                    LPARAM(param.as_ptr() as isize),
+                    SMTO_ABORTIFHUNG,
+                    1000,
+                    Some(&mut result),
+                );
+            }
+        }
+
+        for key in &proxy_keys {
+            std::env::remove_var(key);
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Explicit Quit/restart release (§6, L1): bump the generation, abort every task, then join the

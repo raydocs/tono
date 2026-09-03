@@ -20,9 +20,7 @@
       "resources/core-sha256.txt"
     ],
     "publisher": "Raydocs",
-    "externalBin": [
-      "sidecar/tono-core"
-    ],
+    "externalBin": ["sidecar/tono-core"],
     "copyright": "GNU General Public License v3.0",
     "category": "DeveloperTool",
     "shortDescription": "Tono",
@@ -40,10 +38,7 @@
   "identifier": "com.raydocs.tono",
   "app": {
     "security": {
-      "capabilities": [
-        "desktop-capability",
-        "migrated"
-      ],
+      "capabilities": ["desktop-capability", "migrated"],
       "assetProtocol": {
         "enable": false,
         "scope": {

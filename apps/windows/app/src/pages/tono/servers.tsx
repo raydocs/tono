@@ -262,12 +262,16 @@ const ServersPage = () => {
               style={{
                 padding: '8px 14px',
                 color: text.primary,
-                background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.62)',
+                background: dark
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(255,255,255,0.62)',
                 border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
               }}
             >
               <TonoTestIcon />
-              {testingAll ? t('tono.nodes.cancelTest') : t('tono.nodes.testAll')}
+              {testingAll
+                ? t('tono.nodes.cancelTest')
+                : t('tono.nodes.testAll')}
             </button>
             <button
               type="button"
@@ -282,7 +286,9 @@ const ServersPage = () => {
               style={{
                 padding: '8px 14px',
                 color: text.primary,
-                background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.62)',
+                background: dark
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(255,255,255,0.62)',
                 border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
               }}
             >
@@ -381,7 +387,9 @@ const ServersPage = () => {
               padding: '7px 12px',
               fontSize: 11,
               color: text.primary,
-              background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)',
+              background: dark
+                ? 'rgba(255,255,255,0.08)'
+                : 'rgba(255,255,255,0.55)',
             }}
           >
             {refreshing ? t('tono.nodes.refreshing') : t('tono.nodes.refresh')}
@@ -421,7 +429,9 @@ const ServersPage = () => {
             flex: 1,
             minWidth: 180,
             color: text.secondary,
-            background: dark ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.42)',
+            background: dark
+              ? 'rgba(255,255,255,0.07)'
+              : 'rgba(255,255,255,0.42)',
             border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
           }}
         >
@@ -445,7 +455,9 @@ const ServersPage = () => {
           role="group"
           aria-label={t('tono.nodes.regions.all')}
           style={{
-            background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.32)',
+            background: dark
+              ? 'rgba(255,255,255,0.06)'
+              : 'rgba(255,255,255,0.32)',
             border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(56,72,108,0.1)'}`,
           }}
         >
@@ -456,7 +468,8 @@ const ServersPage = () => {
             onClick={() => setRegionFilter(null)}
             style={{
               color: regionFilter === null ? '#fff' : text.secondary,
-              background: regionFilter === null ? TONO_COLORS.accent : 'transparent',
+              background:
+                regionFilter === null ? TONO_COLORS.accent : 'transparent',
             }}
           >
             {t('tono.nodes.regions.all')}
@@ -470,7 +483,8 @@ const ServersPage = () => {
               onClick={() => setRegionFilter(code)}
               style={{
                 color: regionFilter === code ? '#fff' : text.secondary,
-                background: regionFilter === code ? TONO_COLORS.accent : 'transparent',
+                background:
+                  regionFilter === code ? TONO_COLORS.accent : 'transparent',
               }}
             >
               {regionLabel(code)}
@@ -873,7 +887,11 @@ const ServersPage = () => {
                               background: TONO_COLORS.connected,
                             }}
                           >
-                            <TonoIcon name="check" size={12} strokeWidth={2.2} />
+                            <TonoIcon
+                              name="check"
+                              size={12}
+                              strokeWidth={2.2}
+                            />
                           </span>
                         ) : (
                           <span aria-hidden style={{ color: text.tertiary }}>

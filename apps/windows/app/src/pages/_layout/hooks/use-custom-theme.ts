@@ -248,9 +248,8 @@ export const useCustomTheme = () => {
       rootEle.setAttribute('data-css-injection-root', 'true')
     }
 
-    let styleElement = document.querySelector<HTMLStyleElement>(
-      'style#tono-theme',
-    )
+    let styleElement =
+      document.querySelector<HTMLStyleElement>('style#tono-theme')
     if (!styleElement) {
       styleElement = createTauriNoncedStyleElement()
       styleElement.id = 'tono-theme'

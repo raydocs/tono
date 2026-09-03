@@ -95,7 +95,14 @@ export const TonoAccountCard = () => {
 
   const renderDeviceRow = (device: TonoDevice) => (
     <div className="tono-row" key={device.id}>
-      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+      <span
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          minWidth: 0,
+        }}
+      >
         <span
           style={{
             fontSize: 13,
@@ -291,7 +298,8 @@ export const TonoConfirmDialog = ({
   const panelRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
-    const buttons = panelRef.current?.querySelectorAll<HTMLButtonElement>('button')
+    const buttons =
+      panelRef.current?.querySelectorAll<HTMLButtonElement>('button')
     buttons?.[buttons.length - 1]?.focus()
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCancel()
@@ -331,7 +339,12 @@ export const TonoConfirmDialog = ({
       >
         <div
           id="tono-confirm-title"
-          style={{ fontSize: 15, fontWeight: 600, color: text.primary, marginBottom: 8 }}
+          style={{
+            fontSize: 15,
+            fontWeight: 600,
+            color: text.primary,
+            marginBottom: 8,
+          }}
         >
           {title}
         </div>
@@ -361,7 +374,9 @@ export const TonoConfirmDialog = ({
               padding: '7px 14px',
               fontSize: 12,
               color: text.primary,
-              background: dark ? 'rgba(255,255,255,0.1)' : 'rgba(20,22,30,0.08)',
+              background: dark
+                ? 'rgba(255,255,255,0.1)'
+                : 'rgba(20,22,30,0.08)',
             }}
             onClick={onCancel}
           >

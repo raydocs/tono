@@ -178,6 +178,8 @@ mod app_init {
             tono::commands::tono_retry_now,
             tono::commands::tono_diagnostics_report,
             tono::commands::tono_upload_diagnostics,
+            tono::commands::tono_check_terminal_env,
+            tono::commands::tono_clear_terminal_proxy_env,
             crate::core::tray::flyout::tray_flyout_open_dashboard,
             crate::core::tray::flyout::tray_flyout_quit,
         ]

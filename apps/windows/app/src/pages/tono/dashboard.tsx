@@ -21,6 +21,7 @@ import {
 } from '@/services/tono'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { PageHeader } from '@/tono-ui/PageHeader'
 import {
   TONO_COLORS,
@@ -30,7 +31,6 @@ import {
   tonoText,
 } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
-import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
 import parseTraffic from '@/utils/parse-traffic'
 
@@ -41,7 +41,12 @@ import {
   latencyLabelVars,
   readNodeLatency,
 } from './node-latency'
-import { nodeCityParts, nodeCityTitleKey, nodeCode, nodeDisplayName } from './node-meta'
+import {
+  nodeCityParts,
+  nodeCityTitleKey,
+  nodeCode,
+  nodeDisplayName,
+} from './node-meta'
 
 const hex = (color: string, alpha: number) =>
   `${color}${Math.round(alpha * 255)
@@ -131,6 +136,8 @@ const ActiveNodeCard = ({
   exitLocation,
   exitDelayMs,
   tcpDelayMs,
+  claudeHomeActive,
+  claudeHomeHost: _claudeHomeHost,
 }: {
   serverName: string
   connected: boolean
@@ -138,11 +145,14 @@ const ActiveNodeCard = ({
   exitLocation?: string | null
   exitDelayMs?: number | null
   tcpDelayMs?: number | null
+  claudeHomeActive?: boolean | null
+  claudeHomeHost?: string | null
 }) => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const navigate = useNavigate()
+  const [showClaudeRules, setShowClaudeRules] = useState(false)
   const [latencyState, setLatencyState] = useState(() => ({
     name: serverName,
     latency: readNodeLatency(serverName),
@@ -291,11 +301,109 @@ const ActiveNodeCard = ({
             }}
           >
             {reading
-              ? t(latencyLabelKey(reading.kind, reading.ms), latencyLabelVars(reading.ms))
+              ? t(
+                  latencyLabelKey(reading.kind, reading.ms),
+                  latencyLabelVars(reading.ms),
+                )
               : '—'}
           </span>
         </div>
       </div>
+      {connected && (
+        <div style={{ padding: '0 10px 10px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '9px 12px',
+              borderRadius: 11,
+              background: claudeHomeActive
+                ? dark
+                  ? 'rgba(46, 204, 113, 0.12)'
+                  : 'rgba(39, 174, 96, 0.08)'
+                : dark
+                  ? 'rgba(64, 150, 255, 0.1)'
+                  : 'rgba(22, 119, 255, 0.06)',
+              border: `1px solid ${
+                claudeHomeActive
+                  ? hex(TONO_COLORS.latencyGood, 0.3)
+                  : hex(TONO_COLORS.accent, 0.2)
+              }`,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: claudeHomeActive
+                    ? TONO_COLORS.latencyGood
+                    : TONO_COLORS.accent,
+                  boxShadow: `0 0 8px ${
+                    claudeHomeActive
+                      ? TONO_COLORS.latencyGood
+                      : TONO_COLORS.accent
+                  }`,
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 650,
+                    color: text.primary,
+                  }}
+                >
+                  {claudeHomeActive
+                    ? t('tono.dashboard.claudeHomeActive')
+                    : t('tono.dashboard.claudeHomeStandard')}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: text.secondary,
+                    marginTop: 1,
+                  }}
+                >
+                  {claudeHomeActive
+                    ? t('tono.dashboard.claudeHomeHint')
+                    : t('tono.dashboard.claudeStandardHint')}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="tono-link"
+              onClick={() => setShowClaudeRules(true)}
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: dark ? '#A9B7FF' : '#3453D5',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '4px 6px',
+              }}
+            >
+              {t('tono.dashboard.viewProtectedRules')}
+            </button>
+          </div>
+        </div>
+      )}
+      {showClaudeRules && (
+        <TonoConfirmDialog
+          dark={dark}
+          title={t('tono.dashboard.rulesTitle')}
+          message={t('tono.dashboard.rulesDescription')}
+          confirmLabel={t('shared.actions.confirm')}
+          cancelLabel=""
+          onConfirm={() => setShowClaudeRules(false)}
+          onCancel={() => setShowClaudeRules(false)}
+        />
+      )}
     </GlassCard>
   )
 }
@@ -460,7 +568,10 @@ const DashboardPage = () => {
       if (cancelled) return
       refreshGetClashTraffic()
       attempt += 1
-      timer = window.setTimeout(tick, Math.min(4_000 * 2 ** (attempt - 1), 30_000))
+      timer = window.setTimeout(
+        tick,
+        Math.min(4_000 * 2 ** (attempt - 1), 30_000),
+      )
     }
     tick()
     return () => {
@@ -597,7 +708,12 @@ const DashboardPage = () => {
     // card jammed into the window's left edge.
     <div
       className="tono-page tono-dashboard"
-      style={{ ...TONO_PAGE_LAYOUT, height: '100%', minHeight: 0, paddingTop: 18 }}
+      style={{
+        ...TONO_PAGE_LAYOUT,
+        height: '100%',
+        minHeight: 0,
+        paddingTop: 18,
+      }}
     >
       <PageHeader
         title={t('tono.dashboard.title')}
@@ -687,7 +803,6 @@ const DashboardPage = () => {
           >
             {connectHint}
           </p>
-
         </div>
         {!connected && uiState === 'notConnected' && (
           <ConnectChecklist dark={dark} />
@@ -841,6 +956,8 @@ const DashboardPage = () => {
             exitLocation={status.exitLocation}
             exitDelayMs={status.exitDelayMs}
             tcpDelayMs={status.tcpDelayMs}
+            claudeHomeActive={status.claudeHomeActive}
+            claudeHomeHost={status.claudeHomeHost}
           />
         )}
         {!status?.selectedServer && !busy && (

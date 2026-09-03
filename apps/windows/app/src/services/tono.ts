@@ -105,6 +105,8 @@ export interface TonoStatus {
   /** TCP connect to the selected node's :443. */
   tcpDelayMs?: number | null
   tcpDelayAtMs?: number | null
+  claudeHomeActive?: boolean | null
+  claudeHomeHost?: string | null
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
@@ -202,7 +204,8 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
     key: 'tono.dashboard.errors.coreMismatch',
   },
   {
-    match: /DNS port 127\.0\.0\.1:53 is unavailable|Another DNS or proxy process/i,
+    match:
+      /DNS port 127\.0\.0\.1:53 is unavailable|Another DNS or proxy process/i,
     key: 'tono.dashboard.errors.dnsPortBusy',
   },
   {
@@ -256,9 +259,7 @@ export const formatTonoActionError = (
       raw.includes('CORE_EXIT_UNREACHABLE')) &&
     /tls handshake eof/i.test(raw)
   ) {
-    return t
-      ? t('tono.dashboard.errors.protectedHttpsFailed')
-      : raw
+    return t ? t('tono.dashboard.errors.protectedHttpsFailed') : raw
   }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
@@ -625,4 +626,24 @@ export const subscribeTonoStatus = (
       sharedListenerLive = false
     }
   }
+}
+
+export interface ProxyEnvEntry {
+  key: string
+  value: string
+  source: string
+}
+
+export interface TerminalEnvReport {
+  hasConflict: boolean
+  entries: ProxyEnvEntry[]
+  claudeCodeReady: boolean
+}
+
+export const tonoCheckTerminalEnv = async (): Promise<TerminalEnvReport> => {
+  return await invoke<TerminalEnvReport>('tono_check_terminal_env')
+}
+
+export const tonoClearTerminalProxyEnv = async (): Promise<void> => {
+  await invoke('tono_clear_terminal_proxy_env')
 }

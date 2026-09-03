@@ -16,7 +16,11 @@ export const resolveLanguage = (language?: string) => {
     return FALLBACK_LANGUAGE
   }
 
-  if (normalized === 'zh-tw' || normalized === 'zhtw' || normalized === 'zh-cn') {
+  if (
+    normalized === 'zh-tw' ||
+    normalized === 'zhtw' ||
+    normalized === 'zh-cn'
+  ) {
     return 'zh'
   }
 

@@ -16,14 +16,17 @@ const detectSystemTheme = (): 'light' | 'dark' => {
     : 'light'
 }
 
-const getThemeModeFromWindow = (): TonoPreferences['theme_mode'] | undefined => {
+const getThemeModeFromWindow = ():
+  | TonoPreferences['theme_mode']
+  | undefined => {
   if (typeof window === 'undefined') return undefined
-  const mode = (
-    window as typeof window & {
-      __TONO_INITIAL_THEME_MODE?: unknown
-      __VERGE_INITIAL_THEME_MODE?: unknown
-    }
-  ).__TONO_INITIAL_THEME_MODE ??
+  const mode =
+    (
+      window as typeof window & {
+        __TONO_INITIAL_THEME_MODE?: unknown
+        __VERGE_INITIAL_THEME_MODE?: unknown
+      }
+    ).__TONO_INITIAL_THEME_MODE ??
     (
       window as typeof window & {
         __VERGE_INITIAL_THEME_MODE?: unknown

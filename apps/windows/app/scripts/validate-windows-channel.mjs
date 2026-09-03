@@ -96,7 +96,10 @@ export async function validateWindowsChannel(
       )
     }
     const body = Buffer.from(await response.arrayBuffer())
-    if (typeof releaseAsset.size === 'number' && body.byteLength !== releaseAsset.size) {
+    if (
+      typeof releaseAsset.size === 'number' &&
+      body.byteLength !== releaseAsset.size
+    ) {
       throw new Error(
         `${platform} bucket object is ${body.byteLength} bytes but the release asset is ${releaseAsset.size}`,
       )

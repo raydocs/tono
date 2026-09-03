@@ -9,7 +9,9 @@ import {
 const SOURCE_SELECTOR = 'style[data-tauri-csp-nonce-source]'
 
 afterEach(() => {
-  document.querySelectorAll(SOURCE_SELECTOR).forEach((element) => element.remove())
+  document
+    .querySelectorAll(SOURCE_SELECTOR)
+    .forEach((element) => element.remove())
 })
 
 describe('Tauri style CSP nonce', () => {

@@ -286,3 +286,46 @@ describe('dashboard live traffic copy', () => {
     expect(screen.getByText('4.00 KB/s')).toBeDefined()
   })
 })
+
+describe('dashboard claude residential route badge', () => {
+  it('renders claude residential active badge when connected and home is active', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+      claudeHomeActive: true,
+    })
+    renderDashboard()
+
+    expect(
+      screen.getByText('Claude / AI Residential Route: Active'),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'View Rules' })).toBeDefined()
+  })
+
+  it('renders standard protection badge when connected and home is not active', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+      claudeHomeActive: false,
+    })
+    renderDashboard()
+
+    expect(
+      screen.getByText('Standard Cloud Protection (Data Center)'),
+    ).toBeDefined()
+  })
+
+  it('opens protected rules dialog when clicking view rules button', () => {
+    mocks.status = makeStatus({
+      uiState: 'connected',
+      selectedServer: 'US West 1',
+      claudeHomeActive: true,
+    })
+    renderDashboard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View Rules' }))
+    expect(
+      screen.getByText('Claude / AI Residential Protection Scope'),
+    ).toBeDefined()
+  })
+})

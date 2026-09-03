@@ -2,12 +2,11 @@ import { useLockFn } from 'ahooks'
 import { useTranslation } from 'react-i18next'
 
 import { useTonoStatus } from '@/hooks/use-tono'
-import { showNotice } from '@/services/notice-service'
-import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
-import { useThemeMode } from '@/services/states'
-import { version } from '@root/package.json'
-
 import { nodeCityTitleKey, nodeDisplayName } from '@/pages/tono/node-meta'
+import { showNotice } from '@/services/notice-service'
+import { useThemeMode } from '@/services/states'
+import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
+import { version } from '@root/package.json'
 
 export const buildSupportMessage = ({
   version: appVersion,
@@ -66,7 +65,14 @@ export const SupportContact = ({
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        alignItems: 'center',
+      }}
+    >
       <p
         style={{
           margin: 0,

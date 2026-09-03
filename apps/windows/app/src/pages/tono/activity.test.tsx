@@ -109,12 +109,10 @@ beforeEach(() => {
   closeConnectionMock.mockReset().mockResolvedValue(undefined)
   closeAllConnectionsMock.mockReset().mockResolvedValue(undefined)
   tonoStatusMock.uiState = 'connected'
-  useConnectionDataMock
-    .mockReset()
-    .mockReturnValue({
-      response: { data: connectionDataMock, live: true },
-      refreshGetClashConnection: vi.fn(),
-    })
+  useConnectionDataMock.mockReset().mockReturnValue({
+    response: { data: connectionDataMock, live: true },
+    refreshGetClashConnection: vi.fn(),
+  })
   connectionDataMock.activeConnections = [
     connection('proxy'),
     connection('direct', { chains: ['DIRECT'] }),
@@ -216,7 +214,9 @@ describe('Activity connection presentation', () => {
     ).toBe('home')
     expect(
       classifyActivityRoute(
-        connection('node', { chains: ['Home Residential', 'Tono-Claude-Home'] }),
+        connection('node', {
+          chains: ['Home Residential', 'Tono-Claude-Home'],
+        }),
       ),
     ).toBe('home')
   })
@@ -255,7 +255,8 @@ describe('Activity connection presentation', () => {
           metadata: {
             ...connection('cursor').metadata,
             process: 'Cursor.exe',
-            processPath: 'C:\\Users\\private-user\\AppData\\Local\\Programs\\cursor\\Cursor.exe',
+            processPath:
+              'C:\\Users\\private-user\\AppData\\Local\\Programs\\cursor\\Cursor.exe',
           },
         }),
       ).process,
@@ -289,8 +290,7 @@ describe('Activity connection presentation', () => {
           metadata: {
             ...connection('helper').metadata,
             process: 'WeChatAppEx.exe',
-            processPath:
-              'C:\\Program Files\\Tencent\\WeChat\\WeChatAppEx.exe',
+            processPath: 'C:\\Program Files\\Tencent\\WeChat\\WeChatAppEx.exe',
           },
         }),
       ),

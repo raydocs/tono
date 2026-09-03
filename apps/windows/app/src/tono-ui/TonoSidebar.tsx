@@ -103,7 +103,10 @@ export const TonoSidebar = () => {
         <span className="tono-brand-name" style={{ color: text.primary }}>
           Tono
         </span>
-        <span className="tono-sidebar__version" style={{ color: text.tertiary }}>
+        <span
+          className="tono-sidebar__version"
+          style={{ color: text.tertiary }}
+        >
           v{appVersion}
         </span>
       </div>

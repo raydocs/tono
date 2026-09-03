@@ -202,9 +202,9 @@ describe('connectErrorSuggestsServerSwitch', () => {
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
     )
     expect(connectErrorSuggestsServerSwitch(error)).toBe(false)
-    expect(
-      formatTonoActionError(error, (key) => `translated:${key}`),
-    ).toBe('translated:tono.dashboard.errors.protectedHttpsFailed')
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).toBe(
+      'translated:tono.dashboard.errors.protectedHttpsFailed',
+    )
   })
 
   it('maps kernel pin and DNS-port failures to user-facing keys', () => {
@@ -218,21 +218,23 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).toBe('translated:tono.dashboard.errors.coreUnpinned')
     expect(
       formatTonoActionError(
-        new Error(
-          'DNS port 127.0.0.1:53 is unavailable (TCP: os error 10048)',
-        ),
+        new Error('DNS port 127.0.0.1:53 is unavailable (TCP: os error 10048)'),
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.dnsPortBusy')
     expect(
       formatTonoActionError(
-        new Error('TONO_AUTH_DEVICE_LIMIT: this Tono account has reached its device allowance'),
+        new Error(
+          'TONO_AUTH_DEVICE_LIMIT: this Tono account has reached its device allowance',
+        ),
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.login.errors.deviceLimit')
     expect(
       formatTonoActionError(
-        new Error('kill switch release failed; protection stays on: owner mismatch'),
+        new Error(
+          'kill switch release failed; protection stays on: owner mismatch',
+        ),
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.protectionReleaseFailed')

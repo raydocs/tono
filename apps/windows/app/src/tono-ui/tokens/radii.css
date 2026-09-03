@@ -1,15 +1,15 @@
 /* Tono corner radii. Cards 16–24, controls 10–12, capsules 999. */
-:root{
-  --tono-radius-chip:999px;
-  --tono-radius-xs:7px;    /* .tono-link */
-  --tono-radius-sm:8px;
-  --tono-radius-md:10px;
-  --tono-radius-lg:12px;   /* inputs, nav items */
-  --tono-radius-button:12px;
-  --tono-radius-node-inner:13px;
-  --tono-radius-card-sm:16px;
-  --tono-radius-card:18px;  /* server cards, activity card */
-  --tono-radius-card-lg:24px; /* settings / login glass cards */
-  --tono-radius-pill:28px;  /* ConnectPill */
-  --tono-radius-badge-tile:0.28em; /* node badge = round(size*0.28) */
+:root {
+  --tono-radius-chip: 999px;
+  --tono-radius-xs: 7px; /* .tono-link */
+  --tono-radius-sm: 8px;
+  --tono-radius-md: 10px;
+  --tono-radius-lg: 12px; /* inputs, nav items */
+  --tono-radius-button: 12px;
+  --tono-radius-node-inner: 13px;
+  --tono-radius-card-sm: 16px;
+  --tono-radius-card: 18px; /* server cards, activity card */
+  --tono-radius-card-lg: 24px; /* settings / login glass cards */
+  --tono-radius-pill: 28px; /* ConnectPill */
+  --tono-radius-badge-tile: 0.28em; /* node badge = round(size*0.28) */
 }

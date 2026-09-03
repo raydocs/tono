@@ -1,3 +1,4 @@
+import { open as openUrl } from '@tauri-apps/plugin-shell'
 import { useLockFn } from 'ahooks'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -5,27 +6,33 @@ import { useTranslation } from 'react-i18next'
 import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
-import { open as openUrl } from '@tauri-apps/plugin-shell'
-
 import {
   formatTonoActionError,
   formatTonoDiagnostics,
   tonoAuditLogPath,
+  tonoCheckTerminalEnv,
+  tonoClearTerminalProxyEnv,
   tonoDiagnosticsReport,
   tonoUploadDiagnostics,
   type TonoDiagnosticsReport,
 } from '@/services/tono'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { PageHeader } from '@/tono-ui/PageHeader'
+import { SupportContact } from '@/tono-ui/SupportContact'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
-import { SupportContact } from '@/tono-ui/SupportContact'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 
 import { nodeCityTitleKey, nodeDisplayName } from './node-meta'
 
+const hex = (color: string, alpha: number) =>
+  `${color}${Math.round(alpha * 255)
+    .toString(16)
+    .padStart(2, '0')}`
+
 const diagnosticsQueryKey = ['tonoDiagnosticsReport'] as const
 const auditLogPathQueryKey = ['tonoAuditLogPath'] as const
+const terminalEnvQueryKey = ['tonoTerminalEnv'] as const
 
 type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
 
@@ -126,6 +133,29 @@ const SupportPage = () => {
     queryKey: auditLogPathQueryKey,
     queryFn: tonoAuditLogPath,
     retry: false,
+  })
+
+  const {
+    data: terminalEnv,
+    refetch: refetchTerminalEnv,
+    isLoading: terminalEnvLoading,
+  } = useQuery({
+    queryKey: terminalEnvQueryKey,
+    queryFn: tonoCheckTerminalEnv,
+  })
+
+  const [clearingEnv, setClearingEnv] = useState(false)
+  const handleClearTerminalEnv = useLockFn(async () => {
+    setClearingEnv(true)
+    try {
+      await tonoClearTerminalProxyEnv()
+      await refetchTerminalEnv()
+      showNotice.success(t('tono.support.terminalEnv.clearSuccess'))
+    } catch (err) {
+      showNotice.error(formatTonoActionError(err, t))
+    } finally {
+      setClearingEnv(false)
+    }
   })
 
   const handleCopyDetails = useLockFn(async () => {
@@ -289,7 +319,9 @@ const SupportPage = () => {
             value={lastError}
             monospace
           />
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+          <div
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}
+          >
             <button
               type="button"
               className="tono-button"
@@ -356,6 +388,108 @@ const SupportPage = () => {
             >
               <TonoIcon name="copy" size={15} />
               {t('tono.support.audit.copyPath')}
+            </button>
+          </div>
+        </GlassCard>
+
+        <GlassCard radius="var(--tono-radius-card)" padding={18}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 6,
+            }}
+          >
+            <h2 style={{ margin: 0, fontSize: 14, color: text.primary }}>
+              {t('tono.support.terminalEnv.title')}
+            </h2>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                padding: '3px 8px',
+                borderRadius: 8,
+                background: terminalEnv?.hasConflict
+                  ? hex(TONO_COLORS.error, 0.12)
+                  : hex(TONO_COLORS.latencyGood, 0.12),
+                color: terminalEnv?.hasConflict
+                  ? TONO_COLORS.error
+                  : TONO_COLORS.latencyGood,
+              }}
+            >
+              {terminalEnv?.hasConflict
+                ? t('tono.support.terminalEnv.conflictDetected')
+                : t('tono.support.terminalEnv.ready')}
+            </span>
+          </div>
+          <p
+            style={{ margin: '0 0 12px', fontSize: 12, color: text.secondary }}
+          >
+            {terminalEnv?.hasConflict
+              ? t('tono.support.terminalEnv.conflictDesc')
+              : t('tono.support.terminalEnv.readyDesc')}
+          </p>
+
+          {terminalEnv?.hasConflict && terminalEnv.entries.length > 0 && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '10px 12px',
+                borderRadius: 10,
+                background: secondaryBackground,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+              {terminalEnv.entries.map((entry) => (
+                <div
+                  key={`${entry.key}-${entry.source}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: 11,
+                    fontFamily: TONO_MONO_STACK,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, color: TONO_COLORS.error }}>
+                    {entry.key}={entry.value}
+                  </span>
+                  <span style={{ color: text.tertiary }}>{entry.source}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {terminalEnv?.hasConflict && (
+              <button
+                type="button"
+                className="tono-button"
+                disabled={clearingEnv}
+                onClick={handleClearTerminalEnv}
+                style={{
+                  ...buttonStyle,
+                  background: hex(TONO_COLORS.error, dark ? 0.16 : 0.1),
+                  color: dark ? '#FF8A84' : TONO_COLORS.error,
+                  borderColor: hex(TONO_COLORS.error, 0.3),
+                }}
+              >
+                {clearingEnv
+                  ? t('tono.support.terminalEnv.clearing')
+                  : t('tono.support.terminalEnv.clearAction')}
+              </button>
+            )}
+            <button
+              type="button"
+              className="tono-button"
+              disabled={terminalEnvLoading}
+              onClick={() => void refetchTerminalEnv()}
+              style={buttonStyle}
+            >
+              {t('tono.support.terminalEnv.recheck')}
             </button>
           </div>
         </GlassCard>
