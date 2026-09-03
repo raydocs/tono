@@ -240,10 +240,22 @@ nonisolated struct ConfigPipeline {
         "claude.app",
         "claude.site",
         "clau.de",
+        "anthropic.ai",
         "claudestudio.com",
         "claudemcpclient.com",
         "claudemcpcontent.com",
         "claudeusercontent.com",
+        "servd-anthropic-website.b-cdn.net",
+        // Cloudflare Turnstile & Bot Verification for Claude
+        "challenges.cloudflare.com",
+        "cf-assets.www.cloudflare.com",
+        "cloudflareinsights.com",
+        // Claude Telemetry & Feature Gates
+        "browser-intake-datadoghq.com",
+        "statsigapi.net",
+        "featuregates.org",
+        // Stripe Fraud Telemetry (Radar)
+        "stripe.network",
         // OpenAI, including Codex. `chat.com` and `ai.com` are OpenAI-owned
         // entry points that redirect into ChatGPT.
         "chatgpt.com",
