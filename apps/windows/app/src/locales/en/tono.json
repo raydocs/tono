@@ -126,7 +126,8 @@
       "unreachable": "Can't reach the sign-in server. Use a working network (hotspot, or another VPN) once.",
       "rateLimited": "Too many tries. Wait a few minutes.",
       "deviceLimit": "Device limit reached. Remove one from a signed-in device.",
-      "sessionExpired": "That code expired. Request a new one."
+      "sessionExpired": "That code expired. Request a new one.",
+      "serverError": "Sign-in service is temporarily busy or unavailable. Please try again later or contact support."
     }
   },
   "pill": {

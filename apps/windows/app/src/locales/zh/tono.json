@@ -126,7 +126,8 @@
       "unreachable": "连不上登录服务器。换可用网络（热点，或先开其他翻墙）登录一次即可。",
       "rateLimited": "尝试过多，请稍后再试。",
       "deviceLimit": "设备数已满。请先在已登录设备上移除一台。",
-      "sessionExpired": "验证码已过期，请重新获取。"
+      "sessionExpired": "验证码已过期，请重新获取。",
+      "serverError": "登录服务暂时繁忙或不可用，请稍后重试或联系客服。"
     }
   },
   "pill": {

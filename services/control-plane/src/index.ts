@@ -458,6 +458,9 @@ function publicAction(row: Row) {
 }
 
 const error = (e: unknown) => {
+  if (!(e instanceof ApiError)) {
+    console.error('Unhandled internal server error:', e);
+  }
   const x = e instanceof ApiError ? e : new ApiError(500, 'INTERNAL_ERROR', 'Internal server error');
   return Response.json({ error: { code: x.code, message: x.message } }, { status: x.status });
 };

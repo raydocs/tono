@@ -221,6 +221,10 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
     match: /reinstall Tono|install the latest Tono/i,
     key: 'tono.dashboard.errors.coreUnpinned',
   },
+  {
+    match: /server error 5\d\d|INTERNAL_ERROR|internal server error/i,
+    key: 'tono.login.errors.serverError',
+  },
 ]
 
 /**
