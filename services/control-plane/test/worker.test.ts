@@ -5727,6 +5727,36 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin(`diagnostics/reports/${referenceCode}`, undefined, 'GET')).status).toBe(404);
   });
 
+  it('scheduled cleanup purges expired and revoked sessions older than 24 hours while keeping active sessions', async () => {
+    const account = await createAccount('session-cleanup');
+    const now = Math.floor(Date.now() / 1000);
+
+    // Insert an expired session, an old revoked session, and a fresh revoked session
+    await env.DB.prepare(
+      `INSERT INTO sessions(id, user_id, refresh_hash, expires_at, revoked_at, created_at)
+       VALUES('sess-expired', ?, 'hash1', ?, NULL, ?),
+             ('sess-revoked-old', ?, 'hash2', ?, ?, ?),
+             ('sess-revoked-fresh', ?, 'hash3', ?, ?, ?)`,
+    ).bind(
+      account.user.id, now - 100, now - 500,
+      account.user.id, now + 1000, now - 90_000, now - 100_000,
+      account.user.id, now + 1000, now - 3600, now - 5000,
+    ).run();
+
+    const context = createExecutionContext();
+    await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+    await waitOnExecutionContext(context);
+
+    // Expired session and old revoked session should be purged
+    const expired = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind('sess-expired').first();
+    const revokedOld = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind('sess-revoked-old').first();
+    const revokedFresh = await env.DB.prepare('SELECT id FROM sessions WHERE id = ?').bind('sess-revoked-fresh').first();
+
+    expect(expired).toBeNull();
+    expect(revokedOld).toBeNull();
+    expect(revokedFresh).not.toBeNull();
+  });
+
   const telemetryWindowPayload = (overrides: Record<string, unknown> = {}) => {
     const nowMs = Date.now();
     const base = {

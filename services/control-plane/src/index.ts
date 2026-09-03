@@ -5860,6 +5860,16 @@ async function enforceAll(e: Env) {
     `DELETE FROM auth_challenges
      WHERE expires_at <= ? OR (consumed_at IS NOT NULL AND consumed_at <= ?)`,
   ).bind(t - 86_400, t - 86_400).run();
+  // Expired and revoked sessions are never read again; purge them in bounded
+  // batches so the table does not grow without bound and degrade token refresh queries.
+  await e.DB.prepare(
+    `DELETE FROM sessions WHERE id IN (
+       SELECT id FROM sessions
+       WHERE (revoked_at IS NOT NULL AND revoked_at <= ?)
+          OR (expires_at <= ?)
+       LIMIT 500
+     )`,
+  ).bind(t - 86_400, t).run();
   // Diagnostics uploads are troubleshooting artifacts, not account records.
   await e.DB.prepare('DELETE FROM diagnostics_reports WHERE received_at <= ?')
     .bind(t - envInt(e, 'DIAGNOSTICS_RETENTION_SECONDS', DIAGNOSTICS_RETENTION_DEFAULT_SECONDS))
@@ -7018,8 +7028,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       if (validated.length) {
         const results = await e.DB.batch(validated.map((probe) => e.DB.prepare(
           `UPDATE home_exits SET last_probed_at = ?, probe_status = ?, updated_at = updated_at
-           WHERE id = ? AND kind = 'socks5'`,
-        ).bind(t, probe.status, probe.id)));
+           WHERE id = ? AND kind = 'socks5'
+             AND (probe_status != ? OR last_probed_at IS NULL OR last_probed_at <= ?)`,
+        ).bind(t, probe.status, probe.id, probe.status, t - 300)));
         results.forEach((result, index) => {
           if (result.meta.changes) {
             probesUpdated += 1;
