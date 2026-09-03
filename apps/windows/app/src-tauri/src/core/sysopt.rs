@@ -87,7 +87,7 @@ impl Sysopt {
     }
 
     /// reset the sysproxy
-    pub(super) async fn reset_sysproxy(&self) -> Result<()> {
+    pub async fn reset_sysproxy(&self) -> Result<()> {
         if self
             .reset_sysproxy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)

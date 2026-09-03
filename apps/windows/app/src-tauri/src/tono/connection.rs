@@ -750,6 +750,11 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
     }
 
+    #[cfg(windows)]
+    {
+        let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
+    }
+
     match run_stages(state, app, &node, &nodes, routing.as_ref(), generation, started, &transaction).await {
         Ok(()) => Attempt::Connected,
         Err(StageFailure::Stale) => Attempt::Stale,
@@ -2350,6 +2355,11 @@ async fn run_explicit_release_sequence(state: &Arc<TonoState>, app: &AppHandle) 
             "kill switch release returned an armed state (wanted={}, live={})",
             status.wanted, status.live
         ));
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = crate::core::sysopt::Sysopt::global().reset_sysproxy().await;
     }
 
     let mut inner = state.lock().await;
