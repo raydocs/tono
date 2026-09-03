@@ -62,7 +62,7 @@ struct AddNodeSheet: View {
                             }
                         }
 
-                        formField(label: "Type") {
+                        formField(label: "Type label") {
                             Text("VLESS + TLS")
                                 .font(.system(size: 13, weight: .medium))
                                 .frame(maxWidth: .infinity, minHeight: 34)

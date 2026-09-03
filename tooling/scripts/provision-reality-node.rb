@@ -24,7 +24,10 @@ XRAY_ASSETS = {
     sha256: "4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c",
   },
 }.freeze
-DEFAULT_REALITY_TARGET = "www.cloudflare.com"
+# The Reality front is measured, not picked. Every consumer of that measurement
+# reads the same file, so re-measuring cannot leave one of them behind.
+REALITY_FRONTS = JSON.parse(File.read(File.expand_path("reality-fronts.json", __dir__))).freeze
+DEFAULT_REALITY_TARGET = REALITY_FRONTS.fetch("default")
 SSH_OPTIONS = [
   "-o", "BatchMode=yes",
   "-o", "StrictHostKeyChecking=yes",
@@ -57,6 +60,13 @@ def valid_hostname!(value, flag)
     hostname.match?(/\A[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\z/) &&
     hostname.include?(".")
   hostname
+end
+
+def measured_unusable_front?(hostname)
+  # The whole property failed the measurement, not one name under it.
+  REALITY_FRONTS.fetch("unusable").any? do |domain|
+    hostname == domain || hostname.end_with?(".#{domain}")
+  end
 end
 
 def valid_server!(value)
@@ -204,6 +214,7 @@ end
 options = {
   port: 443,
   target: DEFAULT_REALITY_TARGET,
+  allow_unusable_servername: false,
   apply: false,
 }
 parser = OptionParser.new do |flags|
@@ -218,6 +229,7 @@ parser = OptionParser.new do |flags|
   flags.on("--server HOST", "Public IPv4/DNS endpoint; defaults to ssh -G hostname") { |value| options[:server] = value }
   flags.on("--expected-exit-ipv4 IP", "Require the final proxied egress to equal this IPv4") { |value| options[:expected_exit_ipv4] = value }
   flags.on("--servername HOST", "Reality TLS target/servername (default: #{DEFAULT_REALITY_TARGET})") { |value| options[:target] = value }
+  flags.on("--allow-unusable-servername", "Install a front measured as unusable in the main market") { options[:allow_unusable_servername] = true }
   flags.on("--port PORT", Integer, "Reality TCP port (default: 443)") { |value| options[:port] = value }
   flags.on("--output PATH", "Private one-node YAML path (default: Tono Operations catalog.d)") { |value| options[:output] = value }
   flags.on("--apply", "Install, verify, and retain the node; publication remains a separate approval") { options[:apply] = true }
@@ -230,6 +242,14 @@ begin
   node_name = valid_node_name!(options[:name])
   fail!("--port must be between 1 and 65535.") unless (1..65_535).cover?(options[:port])
   target = valid_hostname!(options[:target], "--servername")
+  # The TLS 1.3 precheck below runs on the VPS and the data-plane test runs on
+  # this machine, so neither ever stands where the customer does: a front that
+  # cannot be reached from inside the main market passes both.
+  if measured_unusable_front?(target) && !options[:allow_unusable_servername]
+    fail!("#{target} was measured as unusable from inside the main market; #{DEFAULT_REALITY_TARGET} is " \
+          "what the fleet fronts. See tooling/scripts/reality-fronts.json, and pass " \
+          "--allow-unusable-servername to install it anyway.")
+  end
   server = options[:server] ? valid_server!(options[:server]) : resolved_ssh_hostname(ssh_target)
   expected_exit_ipv4 = if options[:expected_exit_ipv4]
     value = valid_server!(options[:expected_exit_ipv4])

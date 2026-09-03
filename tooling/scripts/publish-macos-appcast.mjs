@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, createPublicKey, verify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -19,6 +19,10 @@ export const DEFAULT_ENCLOSURE_PATH_PREFIX = '/download/'
 export const DEFAULT_RELEASE_LINK_HOST = 'github.com'
 export const ED_SIGNATURE_BYTES = 64
 export const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04])
+// The fixed SubjectPublicKeyInfo header for an Ed25519 key. SUPublicEDKey stores
+// the 32 raw bytes, which is what Sparkle verifies with; Node only builds a key
+// object from DER, so the header is prepended to the raw bytes.
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
 
 const MUTABLE_ALIAS = /(?:^|[^a-z0-9])(?:latest|current|stable|edge|nightly|rolling|main|master|head|dev|preview)(?:[^a-z0-9]|$)/i
 const PLACEHOLDER_SIGNATURE = /placeholder|changeme|change-me|todo|fixme|example|sample|unsigned|dummy|fake|xxxx|replace/i
@@ -365,6 +369,44 @@ export function readSparklePublicKey(plist) {
   return { encoded, raw }
 }
 
+// The one relationship that decides whether an installed client can take the
+// update: the signature has to be an Ed25519 signature over these exact bytes
+// under the public key this build embeds. Everything else about a signature —
+// its length, its encoding, that it is not a placeholder or a copy — is shape,
+// and a signature of the right shape made with the wrong key is indistinguishable
+// from a correct one until every client has already refused the update.
+export function verifyEnclosureSignature(publicKey, signature, bytes, options = {}) {
+  if (!Buffer.isBuffer(bytes)) {
+    refuse('enclosure contents were not read as bytes')
+  }
+  const raw = publicKey?.raw
+  if (!Buffer.isBuffer(raw) || raw.byteLength !== 32) {
+    refuse('the app SUPublicEDKey was not decoded into a 32-byte Ed25519 public key')
+  }
+  const decoded = decodeStrictBase64(String(signature ?? '').trim(), 'sparkle:edSignature')
+  if (decoded.byteLength !== ED_SIGNATURE_BYTES) {
+    refuse(
+      `sparkle:edSignature must decode to ${ED_SIGNATURE_BYTES} Ed25519 bytes, got ${decoded.byteLength}`,
+    )
+  }
+  const key = createPublicKey({
+    key: Buffer.concat([ED25519_SPKI_PREFIX, raw]),
+    format: 'der',
+    type: 'spki',
+  })
+  if (!verify(null, bytes, key, decoded)) {
+    const fileName = options.fileName ?? 'the enclosure'
+    refuse(
+      `sparkle:edSignature does not verify over ${fileName} under the app's SUPublicEDKey ${publicKey.encoded}; ` +
+        'the archive was signed with a Sparkle key other than the one this build embeds, or the archive ' +
+        'changed after it was signed. Every installed client would refuse this update, and the only way ' +
+        'out is another notarised build with a higher version. Re-sign this exact archive with the private ' +
+        'key that pairs with SUPublicEDKey.',
+    )
+  }
+  return true
+}
+
 export function validateEnclosureUrl(value, options = {}) {
   const raw = requireString(value, '--url')
   const version = requireString(options.version, 'version')
@@ -693,6 +735,9 @@ export function buildAppcastUpdate(input) {
       `enclosure URL file name does not match the archive being published: ${enclosureUrl} vs ${enclosure.fileName}`,
     )
   }
+  verifyEnclosureSignature(publicKey, edSignature, input.enclosureBytes, {
+    fileName: enclosure.fileName,
+  })
   const notes = validateReleaseNotes(input.notes)
   const pubDate = formatPubDate(input.pubDate)
   const formatting = detectFeedFormatting(input.feedXml)
@@ -826,6 +871,7 @@ async function main() {
   console.log(`sha256 ${result.enclosure.sha256}`)
   console.log(`url ${result.fields.enclosureUrl}`)
   console.log(`app SUPublicEDKey ${result.publicKey}`)
+  console.log('signature verified against that key over the enclosure bytes')
   if (options['dry-run'] || options['validate-only']) {
     console.log(`validated only; ${feedPath} was not modified`)
     return

@@ -296,7 +296,13 @@ struct LogsView: View {
                 systemImage: "checkmark.circle.fill"
             )
         } catch {
-            // Export stays silent on failure, matching the previous behavior.
+            // A read-only destination, a full disk or a sandbox refusal all
+            // land here, and a silent catch left the Export button looking
+            // like it had written a file that is not there.
+            ToastCenter.shared.show(
+                String(localized: "Log export failed. \(error.localizedDescription)"),
+                systemImage: "exclamationmark.triangle.fill"
+            )
         }
     }
 }

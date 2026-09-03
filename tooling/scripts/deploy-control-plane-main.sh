@@ -8,9 +8,13 @@ set -euo pipefail
 script_path=${0:A}
 repo_root=${script_path:h:h:h}
 control_plane="$repo_root/services/control-plane"
+migration_fence_active=0
 
 fail() {
   print -r -- "deploy-control-plane: $1" >&2
+  if (( migration_fence_active )); then
+    print -r -- "deploy-control-plane: rollup migration is applied but the v2 API Worker is not confirmed deployed; the database fence will reject old retention runs without deleting their source rows" >&2
+  fi
   exit 1
 }
 
@@ -55,8 +59,41 @@ cd "$control_plane"
 # exactly remote main — and that one is real.
 
 short_commit=${source_commit[1,12]}
-/usr/bin/env npx wrangler deploy --strict \
-  --tag "main-$short_commit" \
-  --message "source main@$source_commit"
 
-print -r -- "deployed control plane from main@$source_commit"
+# Schema first is safe because migration 0028 installs a database fence: the
+# pre-0028 Worker cannot enter either rollup UPSERT branch and therefore cannot
+# reach its separate source-row DELETE. A failed code deploy leaves retention
+# paused-by-rejection rather than silently corrupting hourly history.
+/usr/bin/env npx wrangler d1 migrations list tono-control-plane --remote \
+  --config wrangler.jsonc
+/usr/bin/env npx wrangler d1 migrations apply tono-control-plane --remote \
+  --config wrangler.jsonc \
+  || fail "D1 migrations failed; no Worker was deployed"
+migration_fence_active=1
+
+schema=$(/usr/bin/env npx wrangler d1 execute tono-control-plane --remote --json \
+  --config wrangler.jsonc \
+  --command "SELECT name FROM pragma_table_info('operations_agent_rollups') WHERE name IN ('rollup_writer_version','sample_counts_exact'); SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'operations_agent_rollups_require_writer_v2';") \
+  || fail "could not verify the post-migration rollup schema"
+[[ $schema == *rollup_writer_version* && $schema == *sample_counts_exact* && $schema == *operations_agent_rollups_require_writer_v2* ]] \
+  || fail "rollup writer fence or marker columns are missing after migrations"
+
+/usr/bin/env npx wrangler deploy --strict \
+  --var "BUILD_SHA:$source_commit" \
+  --tag "main-$short_commit" \
+  --message "source main@$source_commit" \
+  || fail "API Worker deploy failed"
+migration_fence_active=0
+
+# The version endpoint only declares alignment when both Workers report this
+# same full SHA. Deploying only the API left the Access-hosted console able to
+# serve an older UI against a newer contract while claiming "development" was
+# aligned with itself.
+/usr/bin/env npx wrangler deploy --strict \
+  --config wrangler.admin.jsonc \
+  --var "BUILD_SHA:$source_commit" \
+  --tag "main-$short_commit" \
+  --message "source main@$source_commit" \
+  || fail "admin Worker deploy failed after the API Worker was updated"
+
+print -r -- "deployed control plane and admin Worker from main@$source_commit"

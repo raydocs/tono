@@ -6,7 +6,7 @@ import {
 } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
-import worker, { parseBytesRange, type Env } from '../src/index';
+import worker, { parseBytesRange, retirementCatalogPlan, type Env } from '../src/index';
 import adminWorker from '../src/admin-worker';
 
 const ADMIN_TOKEN = 'admin-test-token-with-at-least-32-characters';
@@ -420,6 +420,33 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     }
   });
 
+  it('only reports API/admin builds aligned when both carry the same release SHA', async () => {
+    const version = async (apiBuildSha: string | undefined, adminBuildSha: string | undefined) => {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request('https://admin.afk.ccwu.cc/api/v1/ops/system/version'),
+        {
+          API: {
+            fetch: async () => Response.json({
+              system: { service: 'api', version: '0.0.1', buildSha: apiBuildSha ?? 'development' },
+            }),
+          } as unknown as Fetcher,
+          BUILD_SHA: adminBuildSha,
+        } as unknown as Parameters<typeof adminWorker.fetch>[1],
+        context,
+      );
+      await waitOnExecutionContext(context);
+      return response.json() as Promise<{ system: { aligned: boolean } }>;
+    };
+    const same = 'a'.repeat(40);
+    const other = 'b'.repeat(40);
+
+    expect((await version(undefined, undefined)).system.aligned).toBe(false);
+    expect((await version(same, undefined)).system.aligned).toBe(false);
+    expect((await version(same, other)).system.aligned).toBe(false);
+    expect((await version(same, same)).system.aligned).toBe(true);
+  });
+
   it('serves an isolated release archive on the release subdomain', async () => {
     const fetchRelease = async (path: string, init: RequestInit = {}) => {
       const context = createExecutionContext();
@@ -636,6 +663,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(live.agents).toBeNull();
     expect(live.qualityError).toBe('no quality snapshot');
     expect(live.agentsError).toBe('no agent snapshot');
+    expect(live.qualityReceivedAt).toBeNull();
+    expect(live.agentsReceivedAt).toBeNull();
     // The console showing "no snapshot" is the point: the previous code showed
     // a JSON parse error here, having fetched its own redirect.
     expect(absorbedHostFetches).toEqual([]);
@@ -740,14 +769,25 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       name: 'Stored Node',
       publicIp: '203.0.113.20',
       quality: 'poor',
-      securityCheck: 'IP quality body',
-      backtrace: '163 / 4837',
       block: {
         status: 'LIKELY_BLOCKED',
         asiaEdge: { success: 3, total: 3 },
       },
     });
     expect(live.quality.nodes[0].secret).toBeUndefined();
+    // The raw collector text bodies are stored but never shipped in the list
+    // payloads the console polls; the drawer fetches them per node instead.
+    expect(live.quality.nodes[0].securityCheck).toBeUndefined();
+    expect(live.quality.nodes[0].backtrace).toBeUndefined();
+    const qualityText = await operations('fleet-nodes/Stored%20Node/quality-text');
+    expect(qualityText.status).toBe(200);
+    expect(await qualityText.json()).toEqual({
+      securityCheck: 'IP quality body',
+      backtrace: '163 / 4837',
+    });
+    const unknownText = await operations('fleet-nodes/No%20Such%20Node/quality-text');
+    expect(unknownText.status).toBe(200);
+    expect(await unknownText.json()).toEqual({ securityCheck: null, backtrace: null });
     // The tally travels, so the console can say "1 of 3 databases" rather than
     // printing the word "attacker" as though it were settled.
     expect(live.quality.nodes[0].riskSignals).toEqual([
@@ -788,6 +828,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(JSON.stringify(live.agents)).not.toContain('203.0.113.20');
     expect(live.agentsError).toBeNull();
     expect(live.qualityError).toBeNull();
+    expect(live.agentsReceivedAt).toEqual(expect.any(Number));
+    expect(live.qualityReceivedAt).toEqual(expect.any(Number));
     expect(absorbedHostFetches).toEqual([]);
 
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
@@ -850,6 +892,69 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
+  it('rejects an unknown metrics range instead of silently serving 24 hours', async () => {
+    const response = await operations('metrics?range=24hours');
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'VALIDATION_ERROR', message: 'Unsupported metrics range' },
+    });
+  });
+
+  it('pins future collector clocks to receipt time in live state and metrics', async () => {
+    const collectorToken = 'collector-test-token-with-at-least-32-chars';
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = collectorToken;
+    const before = Math.floor(Date.now() / 1_000);
+    const futureMilliseconds = (before + 86_400) * 1_000;
+    try {
+      const ingested = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${collectorToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          report: {
+            updated_at: futureMilliseconds,
+            updated_at_iso: '2126-01-01T00:00:00Z',
+            nodes: [{ name: 'Future clock', ok: true }],
+          },
+          agents: {
+            data: [{ name: 'Future clock', cpu: 15, observed_at: futureMilliseconds }],
+          },
+        }),
+      });
+      expect(ingested.status).toBe(200);
+      const after = Math.floor(Date.now() / 1_000);
+
+      const response = await operations('live');
+      const { live } = await response.json() as any;
+      const agent = live.agents.find((row: any) => row.name === 'Future clock');
+      expect(agent.observedAt).toBeGreaterThanOrEqual(before);
+      expect(agent.observedAt).toBeLessThanOrEqual(after);
+      expect(live.agentsReceivedAt).toBeGreaterThanOrEqual(before);
+      expect(live.agentsReceivedAt).toBeLessThanOrEqual(after);
+      expect(live.quality.updatedAt).toBeGreaterThanOrEqual(before);
+      expect(live.quality.updatedAt).toBeLessThanOrEqual(after);
+      expect(live.qualityReceivedAt).toBeGreaterThanOrEqual(before);
+      expect(live.qualityReceivedAt).toBeLessThanOrEqual(after);
+      expect(live.quality.updatedAtIso)
+        .toBe(new Date(live.quality.updatedAt * 1_000).toISOString());
+
+      const sampleRow = await env.DB.prepare(
+        `SELECT observed_at FROM operations_agent_samples
+         WHERE node_name = 'Future clock'`,
+      ).first<any>();
+      expect(Number(sampleRow.observed_at)).toBe(Math.floor(agent.observedAt / 60) * 60);
+
+      const metrics = await operations('metrics?range=24h&node=Future%20clock');
+      const points = ((await metrics.json() as any).metrics.series['Future clock']) as any[];
+      expect(points).toHaveLength(1);
+      expect(points[0].t).toBe(Number(sampleRow.observed_at));
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
+  });
+
   it('does not let a collector that predates exposure look like a clean node', async () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
     const ingested = await api('ops-ingest/snapshot', {
@@ -870,6 +975,55 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(node.exposure).toBeNull();
     expect(node.riskSignals).toEqual([]);
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('keeps the stored live snapshot when a collector push parses to empty lists', async () => {
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const token = {
+      authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+      'content-type': 'application/json',
+    };
+    try {
+      // While nothing is stored yet an empty list is a legitimate answer.
+      const first = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({ report: { nodes: [] }, agents: [] }),
+      });
+      expect(first.status).toBe(200);
+      const firstBody = await first.json() as any;
+      expect(firstBody.reportIgnoredEmpty).toBeUndefined();
+      expect(firstBody.agentsIgnoredEmpty).toBeUndefined();
+
+      const seeded = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({
+          report: { nodes: [{ name: 'Kept Node', ok: true }] },
+          agents: { data: [{ name: 'Kept Node', cpu: 12 }] },
+        }),
+      });
+      expect(seeded.status).toBe(200);
+
+      // A Komari outage that answers with an empty list must not flip every
+      // node to "missing" under a fresh timestamp.
+      const emptied = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: token,
+        body: JSON.stringify({ report: { nodes: [] }, agents: [] }),
+      });
+      expect(emptied.status).toBe(200);
+      const emptiedBody = await emptied.json() as any;
+      expect(emptiedBody.reportIgnoredEmpty).toBe(true);
+      expect(emptiedBody.agentsIgnoredEmpty).toBe(true);
+
+      const response = await operations('live');
+      const { live } = await response.json() as any;
+      expect(live.quality.nodes.map((n: any) => n.name)).toContain('Kept Node');
+      expect(live.agents.map((a: any) => a.name)).toContain('Kept Node');
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
   });
 
   it('sends a path-style console link to the page it names instead of a 404', async () => {
@@ -900,6 +1054,69 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       await waitOnExecutionContext(context);
       expect(response.status).not.toBe(302);
     }
+  });
+
+  it('stops cross-site ops writes before the origin header is stripped for the API worker', async () => {
+    const forwarded: Request[] = [];
+    const adminEnv = {
+      API: {
+        fetch: async (request: Request) => {
+          forwarded.push(request);
+          return Response.json({ ok: true });
+        },
+      },
+    } as unknown as Parameters<typeof adminWorker.fetch>[1];
+    const attempt = async (method: string, headers: Record<string, string>) => {
+      const context = createExecutionContext();
+      const response = await adminWorker.fetch(
+        new Request('https://admin.afk.ccwu.cc/api/v1/ops/signup-allowlist', {
+          method,
+          headers,
+          ...(method === 'GET' ? {} : { body: '{"email":"csrf@example.com"}' }),
+        }),
+        adminEnv,
+        context,
+      );
+      await waitOnExecutionContext(context);
+      return response;
+    };
+
+    // The no-preflight vector: a cross-site form post carrying the Access
+    // cookie. Sends both the foreign Origin and sec-fetch-site: cross-site.
+    const formPost = await attempt('POST', {
+      origin: 'https://evil.example',
+      'sec-fetch-site': 'cross-site',
+      'content-type': 'text/plain',
+    });
+    expect(formPost.status).toBe(403);
+    expect((await formPost.json() as any).error.code).toBe('ORIGIN_NOT_ALLOWED');
+    expect(forwarded).toHaveLength(0);
+
+    // A write with no provenance at all is refused rather than assumed safe.
+    const anonymous = await attempt('DELETE', { 'content-type': 'application/json' });
+    expect(anonymous.status).toBe(403);
+    expect(forwarded).toHaveLength(0);
+
+    // The console's own writes carry sec-fetch-site: same-origin, or on older
+    // browsers only an Origin matching the admin host — both pass, and the
+    // Origin header is still stripped before the service binding.
+    const sameOrigin = await attempt('POST', {
+      'sec-fetch-site': 'same-origin',
+      'content-type': 'application/json',
+    });
+    expect(sameOrigin.status).toBe(200);
+    const ownOrigin = await attempt('POST', {
+      origin: 'https://admin.afk.ccwu.cc',
+      'content-type': 'application/json',
+    });
+    expect(ownOrigin.status).toBe(200);
+    expect(forwarded).toHaveLength(2);
+    expect(forwarded[1].headers.get('origin')).toBeNull();
+
+    // Reads are unaffected: a cross-site GET leaks no state and still forwards.
+    const read = await attempt('GET', { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' });
+    expect(read.status).toBe(200);
+    expect(forwarded).toHaveLength(3);
   });
 
   it('serves the node roster to the collector, and never an empty list by accident', async () => {
@@ -1001,6 +1218,159 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // Same reportId with different content is a conflict, not a silent write.
     expect((await send('usr_usage-1', 9_999)).status).toBe(409);
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('adds up the exits metering an account instead of billing the largest one', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_sources', 'sources@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const report = (reportId: string, sourceId: string, totalBytes: number, at = seeded) =>
+      api('home/usage', json({
+        reports: [{ reportId, userId: 'usr_sources', sourceId, totalBytes, observedAt: at }],
+      }, HOME_TOKEN));
+    const counted = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes FROM users WHERE id = ?',
+      ).bind('usr_sources').first<Record<string, unknown>>();
+      return Number(row!.usage_bytes);
+    };
+
+    // Each exit meters only what crossed it. Folded with MAX() this account was
+    // billed 500 of the 1000 it used, so it never reached a quota it had passed.
+    expect((await report('src-a-1', 'exit-a', 300)).status).toBe(200);
+    expect((await report('src-b-1', 'exit-b', 500)).status).toBe(200);
+    expect((await report('src-c-1', 'exit-c', 200)).status).toBe(200);
+    expect(await counted()).toBe(1_000);
+
+    // A source's figure is cumulative, so a later one replaces its own
+    // predecessor rather than adding to it.
+    expect((await report('src-a-2', 'exit-a', 450, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_150);
+
+    // Replaying is what an agent does when it loses an acknowledgement, and it
+    // must cost nothing.
+    expect((await report('src-a-2', 'exit-a', 450, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_150);
+
+    // A batch that arrives after a newer one is stale, not a rebuilt node.
+    expect((await report('src-a-3', 'exit-a', 400, seeded + 30)).status).toBe(200);
+    expect(await counted()).toBe(1_150);
+
+    // Growth is taken whatever the timestamp says: a clock that steps backwards
+    // between rounds must not stop an exit being counted, and the difference is
+    // what is taken from it either way.
+    expect((await report('src-a-4', 'exit-a', 500, seeded + 30)).status).toBe(200);
+    expect(await counted()).toBe(1_200);
+
+    // The same report id under a different source is a conflict, not a silent
+    // keep of whichever row reached the table first.
+    expect((await report('src-a-2', 'exit-b', 450, seeded + 60)).status).toBe(409);
+    expect(await counted()).toBe(1_200);
+
+    const ambiguousBatch = await api('home/usage', json({
+      reports: [
+        {
+          reportId: 'src-a-5', userId: 'usr_sources', sourceId: 'exit-a',
+          totalBytes: 550, observedAt: seeded + 90,
+        },
+        {
+          reportId: 'src-a-6', userId: 'usr_sources', sourceId: 'exit-a',
+          totalBytes: 100, observedAt: seeded + 120,
+        },
+      ],
+    }, HOME_TOKEN));
+    expect(ambiguousBatch.status).toBe(400);
+    expect((await ambiguousBatch.json() as any).error.code).toBe('VALIDATION_ERROR');
+    expect(await counted()).toBe(1_200);
+
+    const oversized = await api('home/usage', json({
+      reports: [{
+        reportId: 'src-long', userId: 'usr_sources', sourceId: 'x'.repeat(65),
+        totalBytes: 1, observedAt: seeded,
+      }],
+    }, HOME_TOKEN));
+    expect(oversized.status).toBe(400);
+  });
+
+  it('carries a rebuilt exit forward, and leaves a reporter that names none on MAX', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_rebuilt', 'rebuilt@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const report = (reportId: string, totalBytes: number, at: number, sourceId?: string) =>
+      api('home/usage', json({
+        reports: [{
+          reportId, userId: 'usr_rebuilt', totalBytes, observedAt: at,
+          ...(sourceId === undefined ? {} : { sourceId }),
+        }],
+      }, HOME_TOKEN));
+    const counted = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes FROM users WHERE id = ?',
+      ).bind('usr_rebuilt').first<Record<string, unknown>>();
+      return Number(row!.usage_bytes);
+    };
+
+    expect((await report('rb-1', 900, seeded, 'exit-r')).status).toBe(200);
+    expect(await counted()).toBe(900);
+
+    // The node was rebuilt and its counter starts again from zero. Under MAX the
+    // account was billed nothing at all until the new counter climbed past 900;
+    // taking the new figure as the total would forgive the 900 instead.
+    expect((await report('rb-2', 120, seeded + 60, 'exit-r')).status).toBe(200);
+    expect(await counted()).toBe(1_020);
+
+    // A report that names no source is the collector, or an agent that has not
+    // been upgraded. Its figure is an aggregate over a changing set of nodes, so
+    // a fall means a node left the fleet rather than a counter reset: it keeps
+    // the MAX contract it was written against, beside the exit's own counter.
+    expect((await report('rb-3', 400, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_420);
+    expect((await report('rb-4', 250, seeded + 120)).status).toBe(200);
+    expect(await counted()).toBe(1_420);
+    expect((await report('rb-5', 600, seeded + 120)).status).toBe(200);
+    expect(await counted()).toBe(1_620);
+  });
+
+  it('does not read a fallen figure sharing a timestamp as a rebuilt exit', async () => {
+    const seeded = Math.floor(Date.now() / 1000);
+    await (env as unknown as Env).DB.prepare(
+      `INSERT OR IGNORE INTO users(id, email, password_hash, password_salt, status,
+                                   usage_bytes, created_at, updated_at)
+       VALUES('usr_tied', 'tied@example.com', 'h', 's', 'active', 0, ?, ?)`,
+    ).bind(seeded, seeded).run();
+    const report = (reportId: string, totalBytes: number, at: number) =>
+      api('home/usage', json({
+        reports: [{
+          reportId, userId: 'usr_tied', sourceId: 'exit-t', totalBytes, observedAt: at,
+        }],
+      }, HOME_TOKEN));
+    const counted = async () => {
+      const row = await (env as unknown as Env).DB.prepare(
+        'SELECT usage_bytes FROM users WHERE id = ?',
+      ).bind('usr_tied').first<Record<string, unknown>>();
+      return Number(row!.usage_bytes);
+    };
+
+    expect((await report('tie-1', 900, seeded)).status).toBe(200);
+    expect(await counted()).toBe(900);
+
+    // The agent stamps one timestamp per run and holds no lock, so a timer
+    // firing beside a manual run can land two reports in the same second with
+    // the higher one first. The lower one is a reading from that same second,
+    // not a rebuild: carrying it forward would bill the whole cumulative figure
+    // a second time.
+    expect((await report('tie-2', 400, seeded)).status).toBe(200);
+    expect(await counted()).toBe(900);
+
+    // A rebuilt node's counter is always later than the figure it replaces.
+    expect((await report('tie-3', 120, seeded + 60)).status).toBe(200);
+    expect(await counted()).toBe(1_020);
   });
 
   it('lets a billing cycle be reset without the next report undoing it', async () => {
@@ -1255,12 +1625,135 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const users = await operations('users');
     expect(users.status).toBe(200);
-    const listed = (await users.json() as any).users.find((row: any) => row.id === account.user.id);
+    const usersBody = await users.json() as any;
+    const listed = usersBody.users.find((row: any) => row.id === account.user.id);
     expect(listed.homeBinding).toMatchObject({
       homeExitId: homeId,
       proxyName: 'Home Residential Ops',
       egressIpv4: '198.51.100.9',
     });
+    // The list no longer truncates silently: the caller is told how many
+    // customers exist and how to fetch the next page.
+    expect(usersBody.total).toBeGreaterThanOrEqual(usersBody.users.length);
+    expect(usersBody.hasMore).toBe(false);
+    expect(usersBody.nextCursor).toBeNull();
+
+    await createAccount('ops-family-second');
+    const firstPage = await operations('users?limit=1');
+    expect(firstPage.status).toBe(200);
+    const firstBody = await firstPage.json() as any;
+    expect(firstBody.users).toHaveLength(1);
+    expect(firstBody.hasMore).toBe(true);
+    expect(typeof firstBody.nextCursor).toBe('string');
+    const secondPage = await operations(`users?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor)}`);
+    expect(secondPage.status).toBe(200);
+    const secondBody = await secondPage.json() as any;
+    expect(secondBody.users).toHaveLength(1);
+    expect(secondBody.users[0].id).not.toBe(firstBody.users[0].id);
+
+    expect((await operations('users?limit=0')).status).toBe(400);
+    expect((await operations('users?cursor=broken')).status).toBe(400);
+  });
+
+  it('refuses a JSON body that does not declare the JSON media type', async () => {
+    // enctype=text/plain is the cross-site form post that never triggers a
+    // CORS preflight; requiring the media type makes such a write impossible.
+    const formShaped = await api('ops/signup-allowlist', {
+      method: 'POST',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'text/plain',
+      },
+      body: JSON.stringify({ email: 'csrf-target@example.com' }),
+    });
+    expect(formShaped.status).toBe(415);
+    expect((await formShaped.json() as any).error.code).toBe('UNSUPPORTED_MEDIA_TYPE');
+    const stillAbsent = await env.DB.prepare(
+      'SELECT 1 FROM signup_allowlist WHERE email = ?',
+    ).bind('csrf-target@example.com').first();
+    expect(stillAbsent).toBeNull();
+
+    // A charset suffix is still the JSON media type.
+    const withCharset = await api('ops/signup-allowlist', {
+      method: 'POST',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({ email: 'charset-ok@example.com' }),
+    });
+    expect(withCharset.status).toBe(201);
+  });
+
+  it('leaves an audit row for operator user edits and home bindings', async () => {
+    const account = await createAccount('audit-trail');
+    const accessHeaders = {
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    };
+    const patched = await api(`ops/users/${account.user.id}`, {
+      method: 'PATCH',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        notes: '审计备注',
+        expiresAt: Math.floor(Date.now() / 1_000) + 86_400,
+      }),
+    });
+    expect(patched.status).toBe(200);
+    const patchAudit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'user.update' AND target_id = ?",
+    ).bind(account.user.id).first<any>();
+    expect(patchAudit).toMatchObject({
+      actor_email: ACCESS_ADMIN_EMAIL,
+      target_type: 'user',
+      // The names of the fields that changed, not a bare "updated".
+      summary: 'changed expiresAt, notes',
+    });
+
+    const home = await api('ops/home-exits', {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        proxyName: 'Audit Home',
+        displayName: '审计家宽',
+        egressIpv4: '198.51.100.77',
+      }),
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id;
+    const bound = await api(`ops/users/${account.user.id}/home-binding`, {
+      method: 'PUT',
+      headers: accessHeaders,
+      body: JSON.stringify({ homeExitId: homeId }),
+    });
+    expect(bound.status).toBe(201);
+    const bindAudit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'home.assign' AND target_id = ?",
+    ).bind(account.user.id).first<any>();
+    expect(bindAudit).toMatchObject({
+      actor_email: ACCESS_ADMIN_EMAIL,
+      target_type: 'user',
+    });
+    expect(String(bindAudit.summary)).toContain(account.email);
+
+    // The log endpoint answers filtered questions instead of only "newest 100".
+    const filtered = await operations(`audit?targetId=${account.user.id}&limit=1`);
+    expect(filtered.status).toBe(200);
+    const filteredBody = await filtered.json() as any;
+    expect(filteredBody.entries).toHaveLength(1);
+    expect(filteredBody.entries[0].targetId).toBe(account.user.id);
+    expect(filteredBody.hasMore).toBe(true);
+    const older = await operations(
+      `audit?targetId=${account.user.id}&before=${filteredBody.nextBefore + 1}`,
+    );
+    const olderBody = await older.json() as any;
+    expect(olderBody.entries.length).toBeGreaterThanOrEqual(1);
+    for (const entry of olderBody.entries) {
+      expect(entry.targetId).toBe(account.user.id);
+      expect(entry.at).toBeLessThan(filteredBody.nextBefore + 1);
+    }
+    expect((await operations('audit?limit=0')).status).toBe(400);
+    expect((await operations('audit?before=-5')).status).toBe(400);
   });
 
   it('serves the shared administrative resources identically through both front doors', async () => {
@@ -1350,7 +1843,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     })).status).toBe(401);
   });
 
-  it('serves strict redacted operations DTOs through GET-only queries', async () => {
+  it('keeps the phase-1 operations tables out of the API surface', async () => {
     const timestamp = 1_700_000_000;
     await env.DB.batch([
       env.DB.prepare(
@@ -1380,45 +1873,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
     const dashboard = await operations('dashboard');
     expect(dashboard.status).toBe(200);
-    expect((await dashboard.json() as any).dashboard.servers).toEqual({ total: 1, active: 1 });
+    // Dashboard occupancy is the live fleet (catalog + quality + agents), not
+    // the unused operations_servers inventory seeded above.
+    expect((await dashboard.json() as any).dashboard.servers).toEqual({ total: 0, active: 0 });
 
-    const servers = await operations('servers');
-    expect(servers.status).toBe(200);
-    const serverPayload = await servers.json() as any;
-    expect(serverPayload.servers).toEqual([{
-      id: 'server-us-west',
-      displayName: 'US West',
-      regionCode: 'us-west',
-      provider: 'provider-a',
-      status: 'active',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      latestDeployment: {
-        releaseVersion: '2026.08.1', status: 'active', deployedAt: timestamp,
-      },
-    }]);
-
-    const nodes = await operations('nodes');
-    expect((await nodes.json() as any).nodes).toEqual([{
-      id: 'node-us-west-1',
-      serverId: 'server-us-west',
-      serverDisplayName: 'US West',
-      displayName: 'US West 1',
-      regionCode: 'us-west',
-      status: 'active',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }]);
-
-    const deployments = await operations('deployments');
-    const deploymentPayload = await deployments.json() as any;
-    expect(Object.keys(deploymentPayload.deployments[0]).sort()).toEqual([
-      'createdAt', 'deployedAt', 'environment', 'id', 'logicalNodeDisplayName', 'logicalNodeId',
-      'releaseVersion', 'serverDisplayName', 'serverId', 'status',
-    ]);
-    const serialized = JSON.stringify({ serverPayload, deploymentPayload });
-    for (const forbidden of ['uuid', 'endpoint', 'privateKey', 'ssh', 'token', 'authorization']) {
-      expect(serialized.toLowerCase()).not.toContain(forbidden.toLowerCase());
+    // The migration-0016 read endpoints are gone: nothing drove them (the
+    // dashboard hardcodes deployments) and the seeded rows above must stay
+    // unreachable rather than resurfacing as a forgotten API.
+    for (const retired of ['servers', 'nodes', 'deployments']) {
+      const response = await operations(retired);
+      expect(response.status).toBe(404);
     }
 
     const revisions = await operations('catalog-revisions');
@@ -1576,6 +2040,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 `;
     expect((await api('exit-catalog')).status).toBe(401);
 
+    const blindWrite = await admin('exit-catalog', { yaml }, 'PUT');
+    expect(blindWrite.status).toBe(400);
+    expect((await blindWrite.json() as any).error.code).toBe('VALIDATION_ERROR');
+
     const literalIdentity = await admin(
       'exit-catalog',
       { yaml: yaml.replace('{{TONO_CLIENT_UUID}}', '11111111-1111-4111-8111-111111111111'), expectedRevision: 0 },
@@ -1584,10 +2052,36 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(literalIdentity.status).toBe(400);
     expect((await literalIdentity.json() as any).error.code).toBe('INVALID_CATALOG');
 
+    for (const invalidYaml of [
+      yaml.replace('uuid: {{TONO_CLIENT_UUID}}', 'uuid: null'),
+      yaml.replace('    uuid: {{TONO_CLIENT_UUID}}\n', '    # {{TONO_CLIENT_UUID}}\n'),
+      'proxies:\n  - {name: Broken, type: vless, uuid: null} # {{TONO_CLIENT_UUID}}\n',
+    ]) {
+      const invalidIdentity = await admin(
+        'exit-catalog',
+        { yaml: invalidYaml, expectedRevision: 0 },
+        'PUT',
+      );
+      expect(invalidIdentity.status).toBe(400);
+      expect((await invalidIdentity.json() as any).error.code).toBe('INVALID_CATALOG');
+    }
+
     const created = await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT');
     expect(created.status).toBe(200);
     const createdBody = await created.json() as any;
     expect(createdBody.revision).toBe(1);
+
+    const publishAudit = await env.DB.prepare(
+      `SELECT actor_email, action, target_type, target_id, summary
+       FROM ops_audit WHERE action = 'catalog.publish'`,
+    ).first<any>();
+    expect(publishAudit).toMatchObject({
+      actor_email: 'token-admin',
+      action: 'catalog.publish',
+      target_type: 'managed_exit_catalog',
+      target_id: '1',
+    });
+    expect(String(publishAudit.summary)).toMatch(/^published r0 → r1 \([A-Za-z0-9_-]{16}\)$/);
 
     const stored = await env.DB.prepare(
       'SELECT revision, ciphertext, nonce, content_sha256 FROM managed_exit_catalog WHERE singleton_id = 1',
@@ -2150,6 +2644,147 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
   });
 
+  it('moves routingSha256 for a routing-only rotation that leaves revision and yaml untouched', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    // A socks5 home exit names no catalog node, so its rotations never touch
+    // the served proxies YAML — the routing document is the only thing moving.
+    const home = await admin('home-exits', {
+      proxyName: 'Home Socks Rotation',
+      displayName: '家宽轮换',
+      kind: 'socks5',
+      socks5Host: 'resi-gateway.example.com',
+      socks5Port: 11080,
+      socks5Username: 'resi-user',
+      socks5Password: 'resi-secret',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+
+    const owner = await createAccount('routing-digest-owner');
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(201);
+
+    const fetchOwner = async () => (await (await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    })).json()) as any;
+
+    const bound = await fetchOwner();
+    expect(bound.routingSha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // Refetching without a change is stable across all three components.
+    const refetched = await fetchOwner();
+    expect(refetched.revision).toBe(bound.revision);
+    expect(refetched.sha256).toBe(bound.sha256);
+    expect(refetched.routingSha256).toBe(bound.routingSha256);
+
+    // Rotate the upstream credential in place. The admin PATCH also advances
+    // the fleet revision as belt and braces; writing the row directly is the
+    // server state a client has to be able to detect on its own.
+    await env.DB.prepare('UPDATE home_exits SET socks5_password = ? WHERE id = ?')
+      .bind('resi-rotated', homeId).run();
+
+    const rotated = await fetchOwner();
+    expect(rotated.revision).toBe(bound.revision);
+    expect(rotated.sha256).toBe(bound.sha256);
+    expect(rotated.routingSha256).not.toBe(bound.routingSha256);
+    expect(rotated.routing.homeSocks5.password).toBe('resi-rotated');
+
+    // A default-proxy change is a routing-only change too.
+    await env.DB.prepare('UPDATE user_home_bindings SET default_proxy_name = ? WHERE user_id = ?')
+      .bind('Shared VPS JP', owner.user.id).run();
+    const defaulted = await fetchOwner();
+    expect(defaulted.revision).toBe(bound.revision);
+    expect(defaulted.sha256).toBe(bound.sha256);
+    expect(defaulted.routingSha256).not.toBe(rotated.routingSha256);
+
+    // Unbinding moves the digest rather than dropping the field, so a client
+    // that lost its routing sees the key move instead of going blind.
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    const unbound = await fetchOwner();
+    expect(unbound).not.toHaveProperty('routing');
+    expect(unbound.routingSha256).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(unbound.routingSha256).not.toBe(defaulted.routingSha256);
+
+    // The ops/admin plaintext catalogs carry no routing, so no routing digest.
+    expect((await (await operations('exit-catalog')).json() as any))
+      .not.toHaveProperty('routingSha256');
+    expect((await (await admin('exit-catalog', undefined, 'GET')).json() as any))
+      .not.toHaveProperty('routingSha256');
+
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
+  it('serves two accounts different yaml digests at one revision without calling it an error', async () => {
+    const yaml = `proxies:
+  - name: "Shared VPS JP"
+    type: vless
+    server: 1.1.1.1
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+  - name: "Home Residential Split"
+    type: vless
+    server: 8.8.8.8
+    port: 443
+    uuid: {{TONO_CLIENT_UUID}}
+    tls: true
+`;
+    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+
+    const home = await admin('home-exits', {
+      proxyName: 'Home Residential Split',
+      displayName: '家庭分流',
+    });
+    expect(home.status).toBe(201);
+    const homeId = ((await home.json()) as any).homeExit.id as string;
+
+    const owner = await createAccount('digest-split-owner');
+    const other = await createAccount('digest-split-other');
+    expect(
+      (await admin(`users/${owner.user.id}/home-binding`, { homeExitId: homeId }, 'PUT')).status,
+    ).toBe(201);
+
+    const fetchFor = async (accessToken: string) => {
+      const response = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as any;
+    };
+
+    const ownerBody = await fetchFor(owner.accessToken);
+    const otherBody = await fetchFor(other.accessToken);
+
+    // Same fleet revision, different bodies: the identity substitution and the
+    // home-exit filter are both per account. Different digests at one revision
+    // are the normal shape of this endpoint, not tampering.
+    expect(otherBody.revision).toBe(ownerBody.revision);
+    expect(otherBody.sha256).not.toBe(ownerBody.sha256);
+    expect(ownerBody.yaml).toContain('Home Residential Split');
+    expect(otherBody.yaml).not.toContain('Home Residential Split');
+    expect(otherBody.routingSha256).not.toBe(ownerBody.routingSha256);
+
+    // Each account's own digest is stable on a refetch at the same revision.
+    const ownerAgain = await fetchFor(owner.accessToken);
+    expect(ownerAgain.sha256).toBe(ownerBody.sha256);
+    expect(ownerAgain.routingSha256).toBe(ownerBody.routingSha256);
+    const otherAgain = await fetchFor(other.accessToken);
+    expect(otherAgain.sha256).toBe(otherBody.sha256);
+    expect(otherAgain.routingSha256).toBe(otherBody.routingSha256);
+
+    expect((await admin(`users/${owner.user.id}/home-binding`, undefined, 'DELETE')).status).toBe(204);
+    expect((await admin(`home-exits/${homeId}`, undefined, 'DELETE')).status).toBe(204);
+  });
+
   it('assigns a pasted home line to a user and imports unused stock', async () => {
     const accessHeaders = {
       'content-type': 'application/json',
@@ -2430,6 +3065,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
       version: 1,
     };
+    const blindWrite = await admin('traffic-policy', { policy }, 'PUT');
+    expect(blindWrite.status).toBe(400);
+    expect((await blindWrite.json() as any).error.code).toBe('VALIDATION_ERROR');
+
     const created = await admin('traffic-policy', { policy, expectedRevision: 0 }, 'PUT');
     expect(created.status).toBe(200);
     const createdBody = await created.json() as any;
@@ -2441,6 +3080,17 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       ],
       mediaEndpoints: [{ address: '43.146.27.17', ports: [443, 8000] }],
     });
+    const publishAudit = await env.DB.prepare(
+      `SELECT actor_email, action, target_type, target_id, summary
+       FROM ops_audit WHERE action = 'traffic-policy.publish'`,
+    ).first<any>();
+    expect(publishAudit).toMatchObject({
+      actor_email: 'token-admin',
+      action: 'traffic-policy.publish',
+      target_type: 'managed_traffic_policy',
+      target_id: '1',
+    });
+    expect(String(publishAudit.summary)).toMatch(/^published r0 → r1 \([A-Za-z0-9_-]{16}\)$/);
     const stored = await env.DB.prepare(
       'SELECT ciphertext, nonce, content_sha256 FROM managed_traffic_policy WHERE singleton_id = 1',
     ).first<any>();
@@ -2500,6 +3150,22 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     );
     expect(nativeUpdated.status).toBe(200);
     expect(JSON.parse((await nativeUpdated.json() as any).json)).toEqual({
+      version: 4,
+      domains: [
+        { host: 'res.wx.qq.com', ports: [443] },
+        { host: 'wx.qlogo.cn', ports: [80, 443] },
+      ],
+      mediaEndpoints: [{ address: '43.146.27.17', ports: [443, 8000] }],
+      webDomains: [
+        { host: 'www.bilibili.com', ports: [443] },
+        { host: 'ykimg.alicdn.com', ports: [443] },
+      ],
+      directSuffixes: [{ host: 'edu.cn', ports: [80, 443] }],
+      tcpEndpoints: [{ address: '49.51.67.253', ports: [80, 443] }],
+    });
+    const fetchedV4 = await admin('traffic-policy', undefined, 'GET');
+    expect(fetchedV4.status).toBe(200);
+    expect(JSON.parse((await fetchedV4.json() as { json: string }).json)).toEqual({
       version: 4,
       domains: [
         { host: 'res.wx.qq.com', ports: [443] },
@@ -3436,6 +4102,49 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(retry.status).toBe(200);
   });
 
+  it('processes durable revocations before retention housekeeping can fail', async () => {
+    const account = await createAccount('revocation-before-retention');
+    resetMockInventory(account.device.id, account.enrollment.hostname);
+    expect((await confirm(account)).status).toBe(200);
+
+    // Leave the outbox pending after the request path's immediate attempt.
+    failNextDelete = true;
+    const disabled = await admin(`users/${account.user.id}`, { status: 'disabled' }, 'PATCH');
+    expect(disabled.status).toBe(200);
+    const pending = await env.DB.prepare(
+      'SELECT id, completed_at FROM revocation_jobs WHERE device_id = ?',
+    ).bind(account.device.id).first<any>();
+    expect(pending).toBeTruthy();
+    expect(pending.completed_at).toBeNull();
+
+    // Force the first retention statement to abort. Security enforcement must
+    // already have retried the durable deletion when this failure surfaces.
+    await env.DB.prepare(
+      "INSERT INTO rate_limits(key, count, window_start) VALUES('force-retention-failure', 1, 0)",
+    ).run();
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_retention
+       BEFORE DELETE ON rate_limits
+       BEGIN
+         SELECT RAISE(ABORT, 'TEST_RETENTION_FAILURE');
+       END`,
+    ).run();
+    try {
+      const context = createExecutionContext();
+      await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+      await expect(waitOnExecutionContext(context)).rejects.toThrow(/TEST_RETENTION_FAILURE/);
+
+      const completed = await env.DB.prepare(
+        'SELECT completed_at, last_error FROM revocation_jobs WHERE id = ?',
+      ).bind(pending.id).first<any>();
+      expect(completed.completed_at).toBeTypeOf('number');
+      expect(completed.last_error).toBeNull();
+      expect(mockInventory.some((device) => device.id === MGMT_ID)).toBe(false);
+    } finally {
+      await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_retention').run();
+    }
+  });
+
   it('scheduled cleanup revokes superseded pending enrollment hostnames', async () => {
     const account = await createAccount('stale-enrollment');
     resetMockInventory(account.device.id, account.enrollment.hostname);
@@ -3730,6 +4439,36 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const response = await api('home/usage', json({ reports: [null] }, HOME_TOKEN));
     expect(response.status).toBe(400);
     expect((await response.json() as any).error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('stores the catalog revision a snapshot result reports and bounds it', async () => {
+    const owner = await createAccount('snapshot-catalog-owner');
+    const queued = await admin('device-actions', {
+      deviceId: owner.device.id, action: 'diagnostic_snapshot', ttlSeconds: 300,
+    });
+    expect(queued.status).toBe(201);
+    const command = (await queued.json() as any).action;
+    const poll = await api('device-actions', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect((await poll.json() as any).actions[0].id).toBe(command.id);
+
+    // Out of range is still refused, the same bounds the telemetry window uses.
+    expect((await api(`device-actions/${command.id}/result`, json({
+      outcome: 'succeeded', snapshot: { connected: true, catalogRevision: -1 },
+    }, owner.accessToken))).status).toBe(400);
+
+    // Every signed-in client with a catalog installed puts this field in the
+    // snapshot, and answering "which catalog is that Mac running" on demand is
+    // what the action is for, so the result has to land rather than 400.
+    const result = {
+      outcome: 'succeeded',
+      snapshot: { connected: true, catalogRevision: 41 },
+    };
+    expect((await api(`device-actions/${command.id}/result`, json(result, owner.accessToken))).status).toBe(200);
+    const stored = await env.DB.prepare('SELECT result_json FROM device_actions WHERE id = ?')
+      .bind(command.id).first<any>();
+    expect(JSON.parse(stored.result_json)).toEqual(result);
   });
 
   it('isolates allowlisted device actions and safely replays bounded canonical results', async () => {
@@ -5077,6 +5816,100 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(me.nodeHealth).toBe('unknown');
   });
 
+  it('caps future client path clocks at receipt time without rewriting forensic JSON', async () => {
+    const account = await createAccount('activity-future-clock');
+    const futureAtMs = Date.now() + 365 * 86_400_000;
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      exitDelayMs: 900,
+      tcpDelayMs: 500,
+      exitDelayAtMs: futureAtMs,
+      tcpDelayAtMs: futureAtMs,
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+    const created = await posted.json() as any;
+
+    const stored = await env.DB.prepare(
+      'SELECT payload_json FROM telemetry_windows WHERE id = ?',
+    ).bind(created.id).first<any>();
+    expect(JSON.parse(stored.payload_json).exitDelayAtMs).toBe(futureAtMs);
+
+    const activityResponse = await operations('activity');
+    const { activity } = await activityResponse.json() as any;
+    const me = activity.users.find((user: any) => user.userId === account.user.id);
+    expect(me.exitDelayAtMs).toBe(me.lastSeenAt * 1_000);
+    expect(me.tcpDelayAtMs).toBe(me.lastSeenAt * 1_000);
+
+    const detailResponse = await operations(`users/${account.user.id}/detail`);
+    const detail = await detailResponse.json() as any;
+    expect(detail.heartbeat.exitDelayAtMs).toBe(detail.heartbeat.lastSeenAt * 1_000);
+    expect(detail.heartbeat.tcpDelayAtMs).toBe(detail.heartbeat.lastSeenAt * 1_000);
+  });
+
+  it('returns one deterministic latest heartbeat per device without inflating user occupancy', async () => {
+    const account = await createAccount('activity-multi-device');
+    const secondLogin = await emailSignIn({
+      email: account.email,
+      deviceName: 'Second Mac',
+      installationId: 'activity-multi-device-installation-two',
+    });
+    expect(secondLogin.status).toBe(200);
+    const second = await secondLogin.json() as any;
+    const receivedAt = Math.floor(Date.now() / 1_000);
+    const windowStartMs = (receivedAt - 1_200) * 1_000;
+    const windowEndMs = receivedAt * 1_000;
+    const heartbeat = (
+      rowId: string,
+      deviceId: string,
+      at: number,
+      selectedServer: string,
+    ) => env.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+         client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, '0.0.90', 'macOS 26', ?)`,
+    ).bind(
+      rowId,
+      account.user.id,
+      deviceId,
+      at,
+      windowStartMs,
+      windowEndMs,
+      JSON.stringify(telemetryWindowPayload({ selectedServer }).window),
+    );
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+         VALUES('profile-shared-node', 'Shared Node', 'active', ?, ?)`,
+      ).bind(receivedAt, receivedAt),
+      heartbeat('activity-primary-old', account.device.id, receivedAt - 10, 'Old Node'),
+      // Same second, same device: highest id must win rather than returning both
+      // rows or whichever SQLite happened to encounter first.
+      heartbeat('activity-primary-a', account.device.id, receivedAt, 'Wrong Node'),
+      heartbeat('activity-primary-z', account.device.id, receivedAt, 'Shared Node'),
+      heartbeat('activity-secondary', second.device.id, receivedAt, 'Shared Node'),
+    ]);
+
+    const response = await operations('activity');
+    expect(response.status).toBe(200);
+    const { activity } = await response.json() as any;
+    const mine = activity.users.filter((row: any) => row.userId === account.user.id);
+    expect(mine).toHaveLength(2);
+    expect(activity.onlineUsers).toBe(1);
+    expect(activity.onlineDevices).toBe(2);
+    expect(mine.find((row: any) => row.deviceId === account.device.id)?.selectedServer)
+      .toBe('Shared Node');
+    expect(mine.find((row: any) => row.deviceId === second.device.id)?.selectedServer)
+      .toBe('Shared Node');
+
+    const fleet = await operations('fleet-nodes');
+    const shared = ((await fleet.json() as any).nodes as any[])
+      .find((node) => node.name === 'Shared Node');
+    expect(shared.occupancy).toBe(1);
+    expect(shared.affectedUsers).toHaveLength(1);
+    expect(shared.affectedUsers[0].userId).toBe(account.user.id);
+  });
+
   it('accepts split path delays on a telemetry window and joins node health for every customer', async () => {
     const account = await createAccount('path-status');
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
@@ -5144,5 +5977,506 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(onSakura.nodeHealthLabel).toBe('整机失联');
     expect(onSakura.exitDelayMs).toBe(775);
     expect(onSakura.tcpDelayMs).toBeNull();
+  });
+
+  it('retires a catalog node as text and keeps remaining UUID placeholders', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Fuji',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.catalogEntryRemoved).toBe(true);
+    expect(plan.changes.proxyGroupReferencesRemoved).toEqual(['Tono-Exit']);
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).toContain('{{TONO_CLIENT_UUID}}');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+    expect(plan.yaml).not.toContain('\n  uuid:\n');
+  });
+
+  it('refuses to dump a catalog whose retirement would empty Tono-Exit', () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(false);
+    expect(plan.yaml).toContain('Tokyo · Sakura');
+    expect(plan.warnings.some((warning) => warning.includes('清空代理组'))).toBe(true);
+  });
+
+  it('previews and retires a fleet node over HTTP, leaving an audit row', async () => {
+    const accessHeaders = async () => ({
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    });
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Fuji',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const putCatalog = await api('ops/exit-catalog', {
+      method: 'PUT',
+      headers: await accessHeaders(),
+      body: JSON.stringify({ yaml, expectedRevision: 0 }),
+    });
+    expect(putCatalog.status).toBe(200);
+    expect((await putCatalog.json() as any).revision).toBe(1);
+
+    const sakura = encodeURIComponent('Tokyo · Sakura');
+    expect((await operations('fleet-nodes/NoSuchNode/retire-preview')).status).toBe(404);
+
+    const previewResponse = await operations(`fleet-nodes/${sakura}/retire-preview`);
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as any;
+    expect(preview.node.name).toBe('Tokyo · Sakura');
+    expect(preview.node.catalogListed).toBe(true);
+    expect(preview.expectedRevision).toBe(1);
+    expect(preview.canRetire).toBe(true);
+    expect(preview.warnings).toEqual([]);
+    expect(preview.affectedUsers).toEqual([]);
+    expect(preview.changes).toEqual({
+      catalogEntryRemoved: true,
+      proxyGroupReferencesRemoved: ['Tono-Exit'],
+      profileMarkedRetired: true,
+    });
+    // The rewritten catalog is server state, never a preview payload.
+    expect(preview.nextYaml).toBeUndefined();
+
+    const retire = (value: unknown, headers?: Record<string, string>) =>
+      accessHeaders().then((base) => api(`ops/fleet-nodes/${sakura}/retire`, {
+        method: 'POST',
+        headers: { ...base, ...headers },
+        body: JSON.stringify(value),
+      }));
+
+    const formShaped = await retire(
+      { expectedRevision: 1, confirmation: 'Tokyo · Sakura', reason: '机房到期' },
+      { 'content-type': 'text/plain' },
+    );
+    expect(formShaped.status).toBe(415);
+
+    const unconfirmed = await retire({ expectedRevision: 1, confirmation: 'Tokyo', reason: '机房到期' });
+    expect(unconfirmed.status).toBe(400);
+    expect((await unconfirmed.json() as any).error.code).toBe('RETIRE_CONFIRMATION_REQUIRED');
+
+    const stale = await retire({ expectedRevision: 0, confirmation: 'Tokyo · Sakura', reason: '机房到期' });
+    expect(stale.status).toBe(409);
+    expect((await stale.json() as any).error.code).toBe('CATALOG_CONFLICT');
+    expect(await env.DB.prepare(
+      "SELECT id FROM ops_audit WHERE action = 'node.retire'",
+    ).first()).toBeNull();
+
+    const retired = await retire({ expectedRevision: 1, confirmation: 'Tokyo · Sakura', reason: '机房到期' });
+    expect(retired.status).toBe(200);
+    const outcome = await retired.json() as any;
+    expect(outcome.previousRevision).toBe(1);
+    expect(outcome.revision).toBe(2);
+    expect(outcome.node.catalogListed).toBe(false);
+    expect(outcome.node.profile.status).toBe('retired');
+
+    const audit = await env.DB.prepare(
+      "SELECT * FROM ops_audit WHERE action = 'node.retire'",
+    ).all<any>();
+    expect(audit.results).toHaveLength(1);
+    expect(audit.results[0].actor_email).toBe(ACCESS_ADMIN_EMAIL);
+    expect(audit.results[0].target_type).toBe('fleet_node');
+    expect(audit.results[0].target_id).toBe('Tokyo · Sakura');
+    expect(String(audit.results[0].summary)).toContain('机房到期');
+
+    const served = await api('ops/exit-catalog', {
+      method: 'GET',
+      headers: await accessHeaders(),
+    });
+    const servedBody = await served.json() as any;
+    expect(servedBody.revision).toBe(2);
+    expect(servedBody.yaml).not.toContain('Tokyo · Sakura');
+    expect(servedBody.yaml).toContain('Tokyo · Fuji');
+
+    // The node is out of the catalog but not out of sight: its retired profile
+    // keeps it on the fleet list, and a second retirement has nothing to do.
+    const again = await retire({ expectedRevision: 2, confirmation: 'Tokyo · Sakura', reason: '再来一次' });
+    expect(again.status).toBe(422);
+    expect((await again.json() as any).error.code).toBe('RETIRE_UNSAFE');
+  });
+
+  it('counts a customer offline for days among those a retirement would affect', async () => {
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      '      - Tokyo · Sakura',
+      '      - Tokyo · Fuji',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const putCatalog = await api('ops/exit-catalog', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+      },
+      body: JSON.stringify({ yaml, expectedRevision: 0 }),
+    });
+    expect(putCatalog.status).toBe(200);
+
+    const away = await createAccount('retire-away');
+    const moved = await createAccount('retire-moved');
+    const heartbeat = (
+      rowId: string,
+      account: { user: { id: string }; device: { id: string } },
+      at: number,
+      selectedServer: string,
+    ) => env.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+         client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, '0.0.90', 'macOS 26', ?)`,
+    ).bind(
+      rowId,
+      account.user.id,
+      account.device.id,
+      at,
+      (at - 1_200) * 1_000,
+      at * 1_000,
+      JSON.stringify(telemetryWindowPayload({ selectedServer }).window),
+    );
+
+    const nowSec = Math.floor(Date.now() / 1_000);
+    await env.DB.batch([
+      // Telemetry is retained for thirty days; the activity view ranks one.
+      heartbeat('retire-away-window', away, nowSec - 5 * 86_400, 'Tokyo · Sakura'),
+      // This customer had it selected once and has since moved off it.
+      heartbeat('retire-moved-old', moved, nowSec - 6 * 86_400, 'Tokyo · Sakura'),
+      heartbeat('retire-moved-new', moved, nowSec - 4 * 86_400, 'Tokyo · Fuji'),
+    ]);
+
+    const sakura = encodeURIComponent('Tokyo · Sakura');
+    const preview = await (await operations(`fleet-nodes/${sakura}/retire-preview`)).json() as any;
+    // Being asleep is not being unaffected: this exit is still their selection
+    // and they are still the ones who lose it.
+    expect(preview.affectedUsers).toHaveLength(1);
+    expect(preview.affectedUsers[0]).toMatchObject({
+      userId: away.user.id,
+      selectedServer: 'Tokyo · Sakura',
+      online: false,
+    });
+
+    const incidents = await (await operations(`incidents/node/${sakura}`)).json() as any;
+    expect(incidents.affected.map((row: any) => row.userId)).toEqual([away.user.id]);
+
+    // The activity endpoint is a liveness view and stays inside its day.
+    const { activity } = await (await operations('activity')).json() as any;
+    expect(activity.users.map((row: any) => row.userId)).toEqual([]);
+  });
+
+  it('keeps collector text bodies out of the fleet list but reachable per node', async () => {
+    expect((await api('ops/fleet-nodes', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    })).status).toBe(401);
+
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    try {
+      const ingested = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          report: {
+            nodes: [{
+              name: 'Fleet Text Node',
+              ok: true,
+              block: { status: 'OK', label: '正常' },
+              security_check: 'fleet security body',
+              backtrace: 'fleet backtrace body',
+            }],
+          },
+          agents: {
+            data: [{ name: 'Fleet Text Node', cpu: 12, observed_at: Math.floor(Date.now() / 1000) }],
+          },
+        }),
+      });
+      expect(ingested.status).toBe(200);
+
+      const response = await operations('fleet-nodes');
+      expect(response.status).toBe(200);
+      const fleet = await response.json() as any;
+      expect(fleet.sources).toMatchObject({
+        catalog: { state: 'ready' },
+        quality: { state: 'ready' },
+        agents: { state: 'ready' },
+      });
+      const node = fleet.nodes.find((row: any) => row.name === 'Fleet Text Node');
+      expect(node).toMatchObject({
+        catalogListed: false,
+        qualityStatus: 'OK',
+        qualityLabel: '正常',
+        agentStatus: 'online',
+      });
+      expect(node.quality.securityCheck).toBeUndefined();
+      expect(node.quality.backtrace).toBeUndefined();
+
+      const text = await operations(`fleet-nodes/${encodeURIComponent('Fleet Text Node')}/quality-text`);
+      expect(text.status).toBe(200);
+      expect(await text.json()).toEqual({
+        securityCheck: 'fleet security body',
+        backtrace: 'fleet backtrace body',
+      });
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
+  });
+
+  it('serves only the metrics fields a caller asks for and rejects unknown ones', async () => {
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    try {
+      const ingested = await api('ops-ingest/snapshot', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer collector-test-token-with-at-least-32-chars',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          agents: {
+            data: [{
+              name: 'Field Node',
+              cpu: 33,
+              mem_used: 512,
+              mem_total: 1024,
+              load_1: 0.5,
+              observed_at: Math.floor(Date.now() / 1000) - 60,
+            }],
+          },
+        }),
+      });
+      expect(ingested.status).toBe(200);
+
+      const thin = await operations('metrics?range=24h&node=Field%20Node&fields=cpu,memUsed');
+      expect(thin.status).toBe(200);
+      const { metrics } = await thin.json() as any;
+      const points = metrics.series['Field Node'] as any[];
+      expect(points.length).toBeGreaterThanOrEqual(1);
+      for (const point of points) {
+        expect(Object.keys(point).sort()).toEqual(['cpu', 'memUsed', 't']);
+      }
+      expect(points[0].cpu).toBe(33);
+      expect(points[0].memUsed).toBe(512);
+
+      for (const bad of ['fields=cpu,bogus', 'fields=', 'fields=%20']) {
+        const rejected = await operations(`metrics?range=24h&${bad}`);
+        expect(rejected.status).toBe(400);
+        expect((await rejected.json() as any).error.message).toBe('Unsupported metrics field');
+      }
+    } finally {
+      (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+    }
+  });
+
+  it('serves hourly usage deltas on the ops route and rejects unknown ranges', async () => {
+    expect((await api('ops/usage-hours', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    })).status).toBe(401);
+
+    const rejected = await operations('usage-hours?range=90days');
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json() as any).error.message).toBe('Unsupported usage-hours range');
+
+    await env.DB.prepare('DELETE FROM operations_user_usage_hours').run();
+    const hour = Math.floor(Date.now() / 1000 / 3600) * 3600;
+    for (const [at, bytes] of [[hour - 7200, 1000], [hour - 3600, 1600]] as const) {
+      await env.DB.prepare(
+        'INSERT INTO operations_user_usage_hours(user_id, hour_at, usage_bytes) VALUES(?, ?, ?)',
+      ).bind('usage-hours-route-user', at, bytes).run();
+    }
+
+    const response = await operations('usage-hours');
+    expect(response.status).toBe(200);
+    const { usageHours } = await response.json() as any;
+    expect(usageHours.resolutionSeconds).toBe(3600);
+    expect(usageHours.to - usageHours.from).toBe(24 * 3600);
+    expect(usageHours.users).toEqual([{
+      userId: 'usage-hours-route-user',
+      points: [
+        // The first hour has no predecessor: unmeasured, never zero.
+        { t: hour - 7200, bytes: null },
+        { t: hour - 3600, bytes: 600 },
+      ],
+    }]);
+    expect(usageHours.fleet).toEqual([
+      { t: hour - 7200, bytes: null },
+      { t: hour - 3600, bytes: 600 },
+    ]);
+
+    const week = await operations('usage-hours?range=7d');
+    expect(week.status).toBe(200);
+    const weekBody = await week.json() as any;
+    expect(weekBody.usageHours.to - weekBody.usageHours.from).toBe(7 * 24 * 3600);
+  });
+
+  it('pages and filters the ops audit log', async () => {
+    expect((await api('ops/audit', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    })).status).toBe(401);
+
+    const seed = (rowId: string, at: number, actor: string, action: string, targetId: string) =>
+      env.DB.prepare(
+        `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
+         VALUES(?, ?, ?, ?, 'user', ?, ?)`,
+      ).bind(rowId, at, actor, action, targetId, `${action} ${targetId}`).run();
+    await seed('aud-1', 1000, 'a@example.com', 'user.onboard', 'usr_a');
+    await seed('aud-2', 2000, 'b@example.com', 'user.update', 'usr_b');
+    await seed('aud-3', 3000, 'a@example.com', 'user.update', 'usr_a');
+    await seed('aud-4', 4000, 'a@example.com', 'user.close', 'usr_a');
+
+    const plain = await operations('audit');
+    expect(plain.status).toBe(200);
+    const plainBody = await plain.json() as any;
+    expect(plainBody.entries.map((entry: any) => entry.id)).toEqual(['aud-4', 'aud-3', 'aud-2', 'aud-1']);
+    expect(plainBody.entries[0]).toMatchObject({
+      at: 4000,
+      actorEmail: 'a@example.com',
+      action: 'user.close',
+      targetType: 'user',
+      targetId: 'usr_a',
+    });
+    expect(plainBody.hasMore).toBe(false);
+    expect(plainBody.nextBefore).toBeNull();
+
+    const firstPage = await operations('audit?limit=2');
+    const firstBody = await firstPage.json() as any;
+    expect(firstBody.entries.map((entry: any) => entry.id)).toEqual(['aud-4', 'aud-3']);
+    expect(firstBody.hasMore).toBe(true);
+    expect(firstBody.nextBefore).toBe(3000);
+
+    const secondPage = await operations(`audit?limit=2&before=${firstBody.nextBefore}`);
+    const secondBody = await secondPage.json() as any;
+    expect(secondBody.entries.map((entry: any) => entry.id)).toEqual(['aud-2', 'aud-1']);
+    expect(secondBody.hasMore).toBe(false);
+
+    const byTarget = await operations('audit?targetId=usr_b');
+    expect(((await byTarget.json() as any).entries as any[]).map((entry) => entry.id)).toEqual(['aud-2']);
+
+    const byActor = await operations(`audit?actorEmail=${encodeURIComponent('a@example.com')}`);
+    expect(((await byActor.json() as any).entries as any[]).map((entry) => entry.id))
+      .toEqual(['aud-4', 'aud-3', 'aud-1']);
+
+    for (const bad of ['limit=0', 'limit=501', 'limit=ten', 'before=0', 'before=soon']) {
+      expect((await operations(`audit?${bad}`)).status).toBe(400);
+    }
+  });
+
+  it('pages the audit log past rows written in the same second', async () => {
+    // A PATCH that both resets usage and changes a field writes two rows one
+    // after the other, and the log's clock has no room between them.
+    const seed = (rowId: string, at: number) =>
+      env.DB.prepare(
+        `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
+         VALUES(?, ?, 'a@example.com', 'user.update', 'user', 'usr_tie', ?)`,
+      ).bind(rowId, at, `update ${rowId}`).run();
+    await seed('aud-tie-a', 5000);
+    await seed('aud-tie-b', 5000);
+    await seed('aud-tie-older', 4000);
+
+    const walk = async () => {
+      const ids: string[] = [];
+      let cursor = '';
+      for (let page = 0; page < 10; page += 1) {
+        const body = await (await operations(`audit?limit=1${cursor}`)).json() as any;
+        ids.push(...body.entries.map((entry: any) => entry.id));
+        if (!body.hasMore) return ids;
+        cursor = `&before=${body.nextBefore}&beforeId=${encodeURIComponent(body.nextBeforeId)}`;
+      }
+      throw new Error('audit paging did not terminate');
+    };
+
+    // One row per page, so the boundary falls inside the pair. Neither of them
+    // may be skipped, and the newest-first order stays deterministic.
+    expect(await walk()).toEqual(['aud-tie-b', 'aud-tie-a', 'aud-tie-older']);
+
+    // The timestamp alone is still a valid cursor for a hand-written request.
+    const older = await (await operations('audit?before=5000')).json() as any;
+    expect(older.entries.map((entry: any) => entry.id)).toEqual(['aud-tie-older']);
+    expect((await operations('audit?beforeId=aud-tie-a')).status).toBe(400);
+  });
+
+  it('lists the customers currently on a node for incident triage', async () => {
+    expect((await api('ops/incidents/node/Some%20Node', {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    })).status).toBe(401);
+
+    const account = await createAccount('incident-node');
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      selectedServer: 'Incident · Node',
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+
+    const response = await operations(`incidents/node/${encodeURIComponent('Incident · Node')}`);
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.node).toBe('Incident · Node');
+    expect(body.onlineWindowSeconds).toBe(40 * 60);
+    expect(body.affected).toHaveLength(1);
+    expect(body.affected[0]).toMatchObject({
+      userId: account.user.id,
+      deviceId: account.device.id,
+      online: true,
+      selectedServer: 'Incident · Node',
+    });
+
+    const quiet = await operations('incidents/node/Quiet%20Node');
+    expect(((await quiet.json() as any).affected)).toEqual([]);
+
+    expect((await operations(`incidents/node/${encodeURIComponent('x'.repeat(201))}`)).status).toBe(400);
   });
 });

@@ -55,6 +55,28 @@ nonisolated final class ConnectionTelemetryBuffer: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// One classified connect or health failure, in the shape the uploader
+    /// already receives from the Windows client: kind `connectFail` carrying
+    /// the stage the attempt stopped at, the taxonomy code, and how long it
+    /// took. The code is what makes a failing machine classifiable at all, so
+    /// it travels with the event rather than being reconstructed from prose.
+    func recordConnectFailure(
+        stage: String,
+        code: ProtectedFailureCode,
+        elapsedMs: Int? = nil,
+        node: String? = nil,
+        generation: Int? = nil
+    ) {
+        record(
+            "connectFail",
+            stage: stage,
+            elapsedMs: elapsedMs,
+            node: node,
+            generation: generation,
+            code: code.rawValue
+        )
+    }
+
     func drain() -> (events: [TonoTelemetryEvent], dropped: Int) {
         lock.lock()
         let snapshot = events

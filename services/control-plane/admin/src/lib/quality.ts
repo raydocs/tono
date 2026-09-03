@@ -10,6 +10,7 @@ export const blockLabels: Record<string, string> = {
   UNPROBED: '大陆未测',
   PROBE_PARTIAL: '大陆未测',
   CHECK_FAILED: '探测失败',
+  UNKNOWN: '未测',
 };
 
 export function blockStatus(node: LiveQualityNodeDto) {

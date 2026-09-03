@@ -2,6 +2,7 @@ import SwiftUI
 import ServiceManagement
 import AppKit
 import Combine
+import Network
 import Sparkle
 import SystemConfiguration
 
@@ -84,6 +85,70 @@ private struct CheckForUpdatesView: View {
     }
 }
 
+/// The interface kinds that can carry this Mac's own traffic. A tunnel reports
+/// `.other` and is deliberately absent: the locked TUN is up on exactly the
+/// machines this has to answer for, so counting it would answer "is anything
+/// reachable" with "yes, through the thing being diagnosed".
+nonisolated enum PhysicalLinkKind: String, CaseIterable, Sendable {
+    case wifi
+    case wiredEthernet
+    case cellular
+
+    var interfaceType: NWInterface.InterfaceType {
+        switch self {
+        case .wifi:
+            .wifi
+        case .wiredEthernet:
+            .wiredEthernet
+        case .cellular:
+            .cellular
+        }
+    }
+}
+
+/// Physical link availability, published by the app's network monitor and read
+/// by the protected-connection classifier.
+///
+/// Deliberately not the primary-network-service lookup, which stays non-nil for
+/// a configured-but-disconnected service and so answers "offline" with "online"
+/// exactly when it matters. Deliberately not the physical TCP or bypass probes
+/// either: those are leak detectors, and a correctly armed session is supposed
+/// to fail them.
+///
+/// The answer is one-sided on purpose. Offline is reported only once every kind
+/// has been observed and none of them can carry a path; an unobserved monitor,
+/// or a Mac reaching the internet over an interface kind this does not
+/// enumerate, reads as "not known to be offline" and leaves the classifier's
+/// existing reasoning untouched.
+nonisolated final class PhysicalNetworkReachability: @unchecked Sendable {
+    static let shared = PhysicalNetworkReachability()
+
+    private let lock = NSLock()
+    private var satisfied: [PhysicalLinkKind: Bool] = [:]
+
+    var isPhysicallyOffline: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard satisfied.count == PhysicalLinkKind.allCases.count else { return false }
+        return satisfied.values.allSatisfy { !$0 }
+    }
+
+    func record(_ kind: PhysicalLinkKind, satisfied isSatisfied: Bool) {
+        lock.lock()
+        satisfied[kind] = isSatisfied
+        lock.unlock()
+    }
+
+    /// Discards every observation, so a stopped monitor's last verdict cannot
+    /// be read as a live one. Back to "not known to be offline" until the
+    /// monitors publish again.
+    func forgetObservations() {
+        lock.lock()
+        satisfied.removeAll()
+        lock.unlock()
+    }
+}
+
 /// Watches committed default-route and resolver changes without spawning
 /// `route`/`networksetup` on a timer. The callback is observation only: PF is
 /// already the synchronous fail-closed boundary for every transition.
@@ -91,12 +156,14 @@ nonisolated private final class SystemNetworkChangeMonitor: @unchecked Sendable 
     private let callback: @MainActor @Sendable () -> Void
     private let queue = DispatchQueue(label: "com.raydocs.tono.network-events")
     private var store: SCDynamicStore?
+    private var pathMonitors: [NWPathMonitor] = []
 
     init(callback: @escaping @MainActor @Sendable () -> Void) {
         self.callback = callback
     }
 
     func start() {
+        startPhysicalLinkMonitors()
         guard store == nil else { return }
         var context = SCDynamicStoreContext(
             version: 0,
@@ -144,7 +211,33 @@ nonisolated private final class SystemNetworkChangeMonitor: @unchecked Sendable 
         SCDynamicStoreSetDispatchQueue(dynamicStore, queue)
     }
 
+    /// One path monitor per physical interface kind. A kind-constrained path
+    /// stays satisfied while the tunnel owns the default route, and goes
+    /// unsatisfied when the link itself is gone — which is the distinction the
+    /// classifier needs and the only one this can honestly make.
+    ///
+    /// These publish and never call `callback`: the dynamic store already owns
+    /// the change notification, and `NWPathMonitor` delivers an update the
+    /// moment it starts, which at launch is not a network change.
+    private func startPhysicalLinkMonitors() {
+        guard pathMonitors.isEmpty else { return }
+        for kind in PhysicalLinkKind.allCases {
+            let monitor = NWPathMonitor(requiredInterfaceType: kind.interfaceType)
+            monitor.pathUpdateHandler = { path in
+                PhysicalNetworkReachability.shared.record(
+                    kind,
+                    satisfied: path.status == .satisfied
+                )
+            }
+            monitor.start(queue: queue)
+            pathMonitors.append(monitor)
+        }
+    }
+
     func stop() {
+        for monitor in pathMonitors { monitor.cancel() }
+        pathMonitors.removeAll()
+        PhysicalNetworkReachability.shared.forgetObservations()
         guard let store else { return }
         SCDynamicStoreSetDispatchQueue(store, nil)
         self.store = nil
@@ -168,11 +261,45 @@ enum RuntimeCleanup {
         AppProfile.defaults.removeObject(forKey: SettingsKey.lastTunEnabled)
     }
 
+    /// A post-update first launch carries the handoff journal, and this is the
+    /// step it describes: the recovery below is what resumes protection on the
+    /// new build, or fails to. On any other launch there is no journal and this
+    /// does nothing.
+    private static func recordUpdateHandoff(
+        _ phase: UpdateHandoffPhase,
+        errorCode: ProtectedFailureCode? = nil,
+        errorStage: String? = nil
+    ) {
+        guard let journal = UpdateHandoffStore.load() else { return }
+        try? UpdateHandoffStore.write(journal.advancing(
+            to: phase,
+            errorCode: errorCode?.rawValue,
+            errorStage: errorStage
+        ))
+    }
+
     /// Recover a previous process's network mutations transactionally before
     /// account restoration performs any request. If protection had been active,
     /// PF stays armed with only Tono's bounded control-plane recovery exception
     /// until a verified session reconnects or the user explicitly disarms it.
     static func cleanupStaleRuntime() async throws -> Bool {
+        do {
+            return try await recoverStaleRuntime()
+        } catch {
+            // Every throwing exit of the recovery is a launch that could not
+            // restore the previous runtime. After an update that is exactly
+            // where the recovery failed, so name it before the error surfaces
+            // as a generic start failure.
+            recordUpdateHandoff(
+                .failed,
+                errorCode: .updateRecoveryFailed,
+                errorStage: "cleanupStaleRuntime"
+            )
+            throw error
+        }
+    }
+
+    private static func recoverStaleRuntime() async throws -> Bool {
         await PrivilegedRuntimeCoordinator.shared.cleanupStaleSystemProxy()
         // A daemon that refuses this app's identity fails every status, arm,
         // stop, and DNS call below with Forbidden, and no retry of this launch
@@ -208,6 +335,7 @@ enum RuntimeCleanup {
         }
 
         if shouldResumeProtection {
+            recordUpdateHandoff(.protectionResuming)
             // Remove stale TUN/proxy exceptions and retain the persisted exact
             // control-plane HTTPS addresses before stopping the old core. A
             // failed reassert leaves the previous PF block live, so cleanup can
@@ -473,8 +601,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    static let managedCatalogImportMessage =
-        "External subscription links are disabled. Servers are synchronized from the authenticated Tono cloud catalog."
+    /// Computed, so the lookup happens where it is read: this is the one
+    /// `errorMessage` value the banner receives through a constant rather than
+    /// from a `String(localized:)` at the assignment, and a stored literal here
+    /// shipped Chinese users the English sentence.
+    static var managedCatalogImportMessage: String {
+        String(
+            localized: "External subscription links are disabled. Servers are synchronized from the authenticated Tono cloud catalog."
+        )
+    }
 
     private func writeDebug(_ msg: String) {
         // Subscription URLs commonly contain bearer tokens. Never persist URL-event
@@ -499,6 +634,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    /// Quit for a language change, which reopens Tono afterwards. Termination
+    /// cleanup stops the core, restores DNS and disarms PF over helper IPC and
+    /// can spend minutes on an administrator prompt, so a runtime that owns no
+    /// network state takes the immediate exit instead of that budget.
+    ///
+    /// The tests below are what decide that, not the launch phase: `didStartCore`
+    /// is also cleared by a clean release, so a switch made after a normal
+    /// connect-then-disconnect takes the fast path too. That is correct — the
+    /// release already stopped the core, restored DNS and disarmed PF — but it
+    /// means the fast path is a live one, not only the first-launch chooser's.
+    func terminateForRelaunch() {
+        let runtimeMayOwnNetwork = (appState?.isConnected ?? false)
+            || (appState?.isConnecting ?? false)
+            || KillSwitchService.isArmed
+            || AppProfile.defaults.object(forKey: SettingsKey.didStartCore) != nil
+        if !runtimeMayOwnNetwork {
+            runtimeStopped = true
+        }
+        NSApp.terminate(nil)
     }
 
     /// A main-queue dispatch source must not synchronously enter AppKit's

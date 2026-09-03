@@ -19,6 +19,7 @@ beforeAll(async () => {
 // based on execution order.
 beforeEach(async () => {
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_activation').run();
+  await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_retention').run();
   await env.DB.prepare('DELETE FROM ops_audit').run();
   await env.DB.prepare('DELETE FROM ops_node_profiles').run();
   await env.DB.prepare('DELETE FROM product_account_events').run();

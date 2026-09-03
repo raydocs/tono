@@ -6,7 +6,9 @@
   "scripts": {
     "admin:dev": "vite admin --base /ops/",
     "admin:build": "vite build admin --base /ops/ --outDir ../public/ops --emptyOutDir",
-    "admin:worker:deploy": "tsc -p admin/tsconfig.json --noEmit && npm run admin:build && wrangler deploy --config wrangler.admin.jsonc",
+    "admin:worker:deploy": "npm run deploy",
+    "preview:render-config": "node preview/render-config.mjs",
+    "preview:seed": "node preview/write-seed.mjs",
     "predev": "npm run admin:build",
     "dev": "wrangler dev",
     "deploy": "../../tooling/scripts/deploy-control-plane-main.sh",

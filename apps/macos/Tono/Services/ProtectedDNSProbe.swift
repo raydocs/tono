@@ -222,14 +222,32 @@ nonisolated enum ProtectedDNSProbe {
 }
 
 private final class ConnectionHolder: @unchecked Sendable {
-    var connection: NWConnection?
+    private let lock = NSLock()
+    private nonisolated(unsafe) var _connection: NWConnection?
+
+    nonisolated init() {}
+
+    nonisolated var connection: NWConnection? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _connection
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _connection = newValue
+        }
+    }
 }
 
 private final class OnceResume<Value>: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: Value?
+    private nonisolated(unsafe) var value: Value?
 
-    func take(_ next: Value) -> Bool {
+    nonisolated init() {}
+
+    nonisolated func take(_ next: Value) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard value == nil else { return false }

@@ -28,6 +28,17 @@ class Contracts(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    p=Path(d)/"i"; p.write_text(json.dumps({"nodes":{"n":{"host":"h","user":"u","port":22,"identityFile":"x","mode":"fresh","servicePort":443,"realityTarget":"t.invalid","configPath":"/etc/xray/config","serviceName":"xray","catalogName":"n","publicServer":"p.invalid"}}}))
    with self.assertRaises(P.ProvisionError): P.read_inventory(p,"n")
+ def test_inventory_rejects_a_front_measured_unusable_in_the_main_market(self):
+  # Nothing downstream can catch this one: the remote precheck runs on the VPS
+  # and the verification runs on this machine, so a front no customer can reach
+  # is consistent everywhere and the node reads as healthy while serving nobody.
+  node={"host":"h","user":"u","port":22,"identityFile":"x","mode":"fresh","servicePort":443,"realityTarget":"WWW.Cloudflare.com","configPath":"/etc/xray/config.json","serviceName":"xray.service","catalogName":"n","publicServer":"p.invalid"}
+  with tempfile.TemporaryDirectory() as d:
+   p=Path(d)/"i"; p.write_text(json.dumps({"nodes":{"n":node}}))
+   with self.assertRaises(P.ProvisionError): P.read_inventory(p,"n")
+   node["realityTarget"]=P.REALITY_FRONTS["default"]
+   p.write_text(json.dumps({"nodes":{"n":node}}))
+   self.assertEqual(P.REALITY_FRONTS["default"],P.read_inventory(p,"n")["realityTarget"])
  def test_framing_decoder(self):
   req={"op":"x","value":"quote' newline\n"}; framed=P.framed_helper(req,b"echo source\n")
   line=framed.splitlines()[0].decode(); enc=line.split("'",2)[1]

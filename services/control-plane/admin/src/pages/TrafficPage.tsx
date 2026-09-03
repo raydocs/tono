@@ -1,0 +1,236 @@
+import { useMemo } from 'react';
+import { operationsApi } from '../api';
+import { RateChart, Sparkline } from '../charts';
+import { useKeyedResource, useRefresh } from '../hooks';
+import { formatBytes, timestamp } from '../lib/format';
+import { parseTrafficRange } from '../lib/hash';
+import { metricsForRange } from '../lib/metrics-bind';
+import { useOpsRoute } from '../lib/route';
+import {
+  aggregateFleetRates,
+  coverageByBucket,
+  latestValidRate,
+  rangeTransfer,
+  seriesRates,
+} from '../lib/traffic';
+import { useOpsWorld } from '../ops-context';
+import { usePrivacy } from '../privacy';
+import { DataHealth, FilterChips, GlassCard, Skeleton, Unavailable } from '../ui';
+
+const RANGES = [
+  { id: '24h', label: '24 小时' },
+  { id: '7d', label: '7 天' },
+  { id: '90d', label: '90 天' },
+];
+
+export function TrafficPage() {
+  const world = useOpsWorld();
+  const privacy = usePrivacy();
+  const { refreshMs } = useRefresh();
+  const { route, setRoute, openNode, openUser } = useOpsRoute();
+  const range = parseTrafficRange(route.range);
+  const bound = metricsForRange(range, world.metrics.snapshotKey, world.metrics.state === 'ready' ? world.metrics.data : null);
+  const agentKnown = world.sources.agents.status === 'current' || world.sources.agents.status === 'stale';
+  const expected = agentKnown
+    ? world.nodes.filter((node) => node.agentState === 'reported' || node.agentState === 'stale').length
+    : null;
+  const { fleet, coverage, latest, transfer, top } = useMemo(() => {
+    const series = bound
+      ? Object.fromEntries(Object.entries(bound.series).map(([name, points]) => [name, seriesRates(points, bound.resolutionSeconds)]))
+      : {};
+    const aggregated = aggregateFleetRates(series, expected);
+    const perNode = Object.entries(series).map(([name, rates]) => {
+      const moved = rangeTransfer(rates);
+      const peakIn = rates.reduce((max, point) => Math.max(max, point.inBps ?? 0), 0);
+      const peakOut = rates.reduce((max, point) => Math.max(max, point.outBps ?? 0), 0);
+      const complete = rates.filter((point) => point.inBps != null || point.outBps != null).length;
+      return { name, moved, peakIn, peakOut, complete, total: rates.length };
+    });
+    // The fleet total is the sum of the same per-node deltas the rows show;
+    // a node with no legal delta stays null rather than counting as 0.
+    let inBytes = 0;
+    let outBytes = 0;
+    let inAny = false;
+    let outAny = false;
+    for (const row of perNode) {
+      if (row.moved.inBytes != null) { inBytes += row.moved.inBytes; inAny = true; }
+      if (row.moved.outBytes != null) { outBytes += row.moved.outBytes; outAny = true; }
+    }
+    return {
+      series,
+      fleet: aggregated,
+      coverage: coverageByBucket(aggregated),
+      latest: latestValidRate(aggregated),
+      transfer: { inBytes: inAny ? inBytes : null, outBytes: outAny ? outBytes : null },
+      top: [...perNode]
+        .sort((a, b) => (b.moved.inBytes ?? 0) + (b.moved.outBytes ?? 0) - ((a.moved.inBytes ?? 0) + (a.moved.outBytes ?? 0)))
+        .slice(0, 8),
+    };
+  }, [bound, expected]);
+  const nowSec = world.nowSec;
+  const stale = latest != null && nowSec - latest.t > (bound?.resolutionSeconds ?? 60) * 3;
+  const customers = [...world.people].filter((person) => person.user).sort((a, b) => b.usageBytes - a.usageBytes);
+  const usageHours = useKeyedResource(range, (key, signal) => operationsApi.usageHours(key, signal), refreshMs ? Math.max(refreshMs, 60_000) : 0);
+  const boundHours = metricsForRange(range, usageHours.snapshotKey, usageHours.state === 'ready' ? usageHours.data : null);
+  const hourSeries = boundHours ? boundHours.fleet : [];
+  const hourMeasured = hourSeries.filter((point) => point.bytes != null).length;
+
+  // "1/11" is only meaningful once it says what the two numbers count.
+  const coverageText = expected == null
+    ? '上报台数未知：探针源不可用，无法说明这条线代表几台机器。'
+    : expected === 0
+      ? '当前没有在上报的探针机器，这条线不代表任何机器。'
+      : `覆盖：${expected} 台在上报的机器里，任一时刻最多 ${coverage.inPresent} 台给出下行差分、${coverage.outPresent} 台给出上行差分。其余机器在这个区间没有可用的相邻累计点，不是 0。`;
+  const summary = latest
+    ? `${stale ? '最近有效采样' : '最近采样'} ${timestamp(latest.t)} · 下行 ${latest.inBps == null ? '缺口' : `${formatBytes(latest.inBps)}/s`} · 上行 ${latest.outBps == null ? '缺口' : `${formatBytes(latest.outBps)}/s`}`
+    : '没有有效速率采样。累计计数器不能写成当前速度。';
+
+  return (
+    <div className="stack">
+      <DataHealth sources={[
+        { label: '机器时序', resource: world.metrics },
+        { label: '客户用量', resource: world.users },
+      ]} />
+      <FilterChips
+        value={range}
+        options={RANGES}
+        onChange={(id) => setRoute((current) => ({ ...current, page: 'traffic', range: id, node: current.node }))}
+      />
+
+      <GlassCard>
+        <div className="card-header">
+          <div>
+            <h2>机器流量总览</h2>
+            <p>速率来自相邻累计点差分。区间字节按每台机器自己的合法 delta 相加。</p>
+          </div>
+        </div>
+        <div className="card-body">
+          {world.metrics.state === 'error' && world.metrics.snapshotKey !== range ? (
+            <Unavailable title="这个时间范围不可用" detail={world.metrics.state === 'error' ? world.metrics.message : undefined} />
+          ) : !bound ? (
+            <Skeleton label={`${range} 时序加载中，不会拿其他范围冒充`} />
+          ) : (
+            <RateChart
+              points={fleet}
+              summary={`${summary} · 区间下行 ${transfer.inBytes == null ? '—' : formatBytes(transfer.inBytes)} · 上行 ${transfer.outBytes == null ? '—' : formatBytes(transfer.outBytes)}`}
+              coverage={coverageText}
+              latestIn={latest?.inBps ?? null}
+              latestOut={latest?.outBps ?? null}
+              spanSeconds={range === '90d' ? 90 * 86400 : range === '7d' ? 7 * 86400 : 86400}
+            />
+          )}
+        </div>
+      </GlassCard>
+
+      <GlassCard>
+        <div className="card-header">
+          <div>
+            <h2>机器 Top</h2>
+            <p>按区间下行+上行合计排序</p>
+          </div>
+        </div>
+        <div className="card-body">
+          <div className="traffic-top">
+            {top.map((row) => (
+              <button type="button" className="traffic-row" key={row.name} onClick={() => openNode(row.name, { page: 'monitor' })}>
+                <span className="traffic-name">
+                  <strong title={row.name}>{row.name}</strong>
+                  <span>{row.total === 0 ? '没有差分点' : `${row.complete}/${row.total} 个桶有合法差分`}</span>
+                </span>
+                <span className="traffic-values">
+                  <span>↓ <b>{row.moved.inBytes == null ? '—' : formatBytes(row.moved.inBytes)}</b></span>
+                  <span>↑ <b>{row.moved.outBytes == null ? '—' : formatBytes(row.moved.outBytes)}</b></span>
+                  <span>峰值 ↓ {row.peakIn ? `${formatBytes(row.peakIn)}/s` : '—'}</span>
+                  <span>↑ {row.peakOut ? `${formatBytes(row.peakOut)}/s` : '—'}</span>
+                </span>
+              </button>
+            ))}
+            {top.length === 0 && <p className="muted">没有可排序的机器时序。</p>}
+          </div>
+        </div>
+      </GlassCard>
+
+      <GlassCard>
+        <div className="card-header">
+          <div>
+            <h2>客户本期累计</h2>
+            <p>绝对计数的本期用量。按小时的差分在下面，不会拿这个累计冒充趋势。</p>
+          </div>
+        </div>
+        <div className="card-body">
+          {world.users.state === 'error' && !world.users.refreshedAt ? (
+            <Unavailable title="客户用量不可用" detail={world.users.state === 'error' ? world.users.message : undefined} />
+          ) : world.users.state === 'loading' ? (
+            <Skeleton label="客户用量" />
+          ) : customers.length === 0 ? (
+            <p className="muted">还没有客户用量。</p>
+          ) : (
+            <div className="lb">
+              {customers.slice(0, 12).map((person) => {
+                const ratio = person.quotaRatio;
+                const tone = ratio == null ? '' : ratio >= 1 ? 'quota-bad' : ratio >= 0.8 ? 'quota-warn' : 'quota-ok';
+                const readingsId = `lb-usage-${person.userId}`;
+                return (
+                  <button
+                    type="button"
+                    className="lb-row lb-row-plain"
+                    key={person.userId}
+                    aria-label={`打开客户 ${privacy.email(person.email)} 详情`}
+                    aria-describedby={readingsId}
+                    onClick={() => openUser(person.userId)}
+                  >
+                    <span className="lb-email" title={privacy.email(person.email)}>{privacy.email(person.email)}</span>
+                    {ratio == null ? (
+                      <span className="muted">不限额</span>
+                    ) : (
+                      <div className={`quota-bar ${tone}`} aria-hidden>
+                        <span style={{ width: `${Math.max(2, Math.min(100, ratio * 100))}%` }} />
+                      </div>
+                    )}
+                    <span id={readingsId} className="lb-value mono">
+                      {formatBytes(person.usageBytes)}
+                      {person.quotaBytes == null ? ' / 不限' : ` / ${formatBytes(person.quotaBytes)}`}
+                      {ratio != null ? ` · ${Math.round(ratio * 100)}%` : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </GlassCard>
+
+      <GlassCard>
+        <div className="card-header">
+          <div>
+            <h2>客户小时用量</h2>
+            <p>相邻整点的本期用量之差。缺小时或账期重置都断开，不画成 0。</p>
+          </div>
+        </div>
+        <div className="card-body">
+          {usageHours.state === 'error' && usageHours.snapshotKey !== range ? (
+            <Unavailable title="客户小时用量不可用" detail={usageHours.state === 'error' ? usageHours.message : undefined} />
+          ) : !boundHours ? (
+            <Skeleton label={`${range} 客户小时用量加载中，不会拿其他范围冒充`} />
+          ) : hourMeasured === 0 ? (
+            <p className="muted">
+              已经按小时记账。相邻两个整点之间才画得出线，现在还没有满一小时的差分。
+            </p>
+          ) : (
+            <div>
+              <Sparkline values={hourSeries.map((point) => point.bytes)} label="客户小时用量" />
+              <p className="muted">
+                {hourMeasured} 个小时有合法差分
+                {hourSeries.length ? ` · 最近 ${timestamp(hourSeries[hourSeries.length - 1].t)}` : ''}
+                {(() => {
+                  const last = [...hourSeries].reverse().find((point) => point.bytes != null);
+                  return last?.bytes != null ? ` · ${formatBytes(last.bytes)}` : '';
+                })()}
+              </p>
+            </div>
+          )}
+        </div>
+      </GlassCard>
+    </div>
+  );
+}

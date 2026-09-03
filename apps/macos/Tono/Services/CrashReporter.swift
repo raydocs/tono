@@ -37,8 +37,8 @@ nonisolated struct CrashSummary: Codable, Sendable, Equatable {
     let build: String
     /// macOS `major.minor`.
     let osVersion: String
-    /// Number of recorded return addresses. Addresses themselves stay in the
-    /// on-disk audit log.
+    /// Number of return addresses the breadcrumb carried. The addresses
+    /// themselves are not retained past recovery.
     let frameCount: Int
 
     var localizedSummary: String {
@@ -264,9 +264,12 @@ nonisolated private func crashExceptionHandler(_ exception: NSException) {
 /// (mode 0600, same 0700 `Logs` directory). The next launch folds that line
 /// into `LocalTrafficAudit` so it appears in the app's own log surfaces, marks
 /// it reported so it surfaces exactly once, and keeps a compact summary for a
-/// Settings/Support surface. Nothing is ever uploaded from the crash path; the
-/// only value that can leave the device is a whitelisted crash label carried by
-/// the already consent-gated diagnostics snapshot.
+/// Settings/Support surface. That audit file is drained by the consent-gated
+/// log upload, so the recovered event carries a whitelisted label, bounded
+/// sanitized tokens and platform metadata only: the exception reason stays in
+/// the local summary, and the return addresses survive as a count. The only
+/// other crash value that can leave the device is the whitelisted label carried
+/// by the already consent-gated diagnostics snapshot.
 nonisolated final class CrashReporter: @unchecked Sendable {
     static let shared = CrashReporter()
 
@@ -509,12 +512,9 @@ nonisolated final class CrashReporter: @unchecked Sendable {
         if let name = summary.exceptionName {
             details["crash_exception"] = name
         }
-        if let detail = summary.exceptionDetail {
-            details["crash_exception_detail"] = detail
-        }
-        if let frames = fields["frames"], !frames.isEmpty {
-            details["crash_frames"] = String(frames.prefix(1_024))
-        }
+        // `crash_frame_count` stands in for the return addresses, and the
+        // exception reason stays in the local summary: this file is what the
+        // consent-gated log upload drains.
         LocalTrafficAudit.shared.recordEvent("app_crash_recovered", details: details)
     }
 
@@ -522,8 +522,8 @@ nonisolated final class CrashReporter: @unchecked Sendable {
 
     /// Adds the whitelisted crash label to the snapshot the user already opted
     /// into, and only for the session that recovered the breadcrumb. The crash
-    /// path itself never uploads, and this returns the snapshot untouched when
-    /// remote diagnostics are off.
+    /// path issues no network request of its own, and this returns the snapshot
+    /// untouched when remote diagnostics are off.
     ///
     /// The label rides in `connectionStage` rather than in a new field because
     /// the control plane rejects any unknown snapshot key outright, which would

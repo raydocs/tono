@@ -91,6 +91,28 @@ export function carrierRows(carriers: CarrierPingMapDto): CarrierRow[] {
  * merely slow. Returns null when nothing was probed — the caller shows nothing
  * rather than a reassuring dash.
  */
+export type CarrierLossSignal = {
+  label: string;
+  severity: number;
+  kind: 'carrier-loss';
+};
+
+/**
+ * Return-path loss on a probed carrier. Warn-band loss stays on the ping
+ * grid; only the bad band (≥10%) is a console signal. Callers must not map
+ * these onto 高负载 — they are a path problem, not CPU.
+ */
+export function carrierLossSignals(carriers: CarrierPingMapDto | null | undefined): CarrierLossSignal[] {
+  if (!carriers) return [];
+  return carrierRows(carriers)
+    .filter((row) => row.lossTone === 'bad' && row.lossPct != null)
+    .map((row) => ({
+      label: `${row.label}丢包 ${row.lossPct!.toFixed(1)}%`,
+      severity: 3,
+      kind: 'carrier-loss' as const,
+    }));
+}
+
 export function worstCarrier(carriers: CarrierPingMapDto): CarrierRow | null {
   const probed = carrierRows(carriers).filter((row) => row.probed);
   if (!probed.length) return null;

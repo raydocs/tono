@@ -45,12 +45,25 @@ credential — and a Worker could not reach a private management API anyway.
 It asks the binary which `api` subcommands it has rather than assuming: the names
 differ between versions, and a wrong guess fails by doing nothing, which is
 indistinguishable from a working meter reporting zero. When it cannot find what it
-needs it prints what the binary does offer and exits non-zero.
+needs it prints what the binary does offer and exits non-zero. `inbounduser` is
+the exception: it is looked up and lived without, because it is what makes a
+removal safe rather than what makes the agent work.
+
+`TONO_EXIT_SOURCE_ID` overrides the name this exit reports under. It is otherwise
+`<hostname>-<machine-id>`, and kept in the state file. The hostname leads because
+these nodes come from cloned images and a clone carries the source image's
+`/etc/machine-id`: two exits presenting one name read each other's lower figures
+as counter resets, and the account's total runs away. Set the override on any node
+whose hostname and machine-id are both shared with another. Identities longer
+than the API's 64-character limit keep a readable hostname prefix plus a digest
+of the complete value; truncating from the right would discard the machine-id.
 
 `test_reconcile_and_report.py` covers the arithmetic, because an error there costs
 money in both directions and looks plausible either way. Each case was checked to
 fail when the fold is broken: billing the reading instead of the delta charges
 twice, and treating a restart as a decrease forgives everything used before it.
+It also covers the labels and the delivery queue, where the cost is a disconnected
+customer rather than a wrong number.
 
 ## What the exits need
 
@@ -96,6 +109,25 @@ account's identity as the client id and something stable as its label — the la
 is what its statistics are keyed by, so it is the only thing that makes a counter
 attributable.
 
+The label is `u:<userId>`. The control plane issues that form, the fleet audit
+counts it, and the agent writes it: three names for one thing is how a node ends
+up holding a duplicate of every account, and how usage lands under a label nobody
+else is looking for. The namespace also says whose a client is — `shared-legacy`
+and anything added by hand are outside it and are never removed.
+
+Removal runs off what the inbound holds (`xray api inbounduser`), or failing that
+off the labels the agent recorded installing. Never off the counters: a counter is
+created on first connect and outlives the client, so it lists accounts that left
+and omits ones just added. Driving removal from it revokes live customers. When
+neither source is available the agent removes nothing and says so.
+
+Clients added over the management API do not reach `config.json`, so a restart
+drops all of them and the agent re-adds them on its next run. One consequence is
+worth knowing during the cutover: a node that already holds bare-`userId` clients
+from an earlier agent keeps them until it restarts, because they are outside the
+namespace. They carry no traffic once the prefixed client for the same identity is
+installed, and `xray api inbounduser` shows which nodes still have them.
+
 Provisioning is a push: when an identity is issued, add it; when a user is
 revoked or deleted, remove it. `xray` exposes this over its API
 (`HandlerService` AddUser/RemoveUser) so it does not require a restart, and
@@ -110,16 +142,47 @@ The agent implements this; the contract below is what it obeys, and it is the sa
 one `report_example.py` already obeys — there is deliberately only one:
 
 - `POST /api/v1/home/usage` with `HOME_AGENT_TOKEN`.
-- Reports are `{reportId, userId, totalBytes, observedAt}`, batched, at most 500
-  per request and 100 distinct users.
-- `totalBytes` is a **monotonic lifetime total per user**, not a delta. Rows are
-  immutable and idempotent by `reportId`, so a replayed batch is safe and a
-  counter that moves backwards is a bug to refuse rather than to smooth over.
+- Reports are `{reportId, userId, sourceId, totalBytes, observedAt}`, batched, at
+  most 500 per request and 100 distinct users.
+- `totalBytes` is a **monotonic lifetime total per user and per source**, not a
+  delta. Rows are immutable and idempotent by `reportId`, so a replayed batch is
+  safe.
+- `sourceId` names the reporter. The server keeps one cumulative figure per
+  (user, source) and **adds them up**: with one meter per exit, folding them with
+  MAX would bill an account for its largest exit rather than for what it used —
+  an account spread over three nodes was counted at roughly a third of it, so
+  enforcement never fired. It must therefore be stable for the life of the node;
+  a new name is a new counter starting at zero, and the old one keeps whatever it
+  had.
+- Within one source a figure that moves **backwards** is a rebuilt node, and its
+  accumulated total carries the pre-reset amount forward. Under MAX a rebuilt
+  node reported a no-op every cycle until its local counter caught up with the
+  fleet-wide figure, while the agent printed a successful report the whole time.
+- A report with no `sourceId` lands in a single legacy source and keeps MAX,
+  which is what the collector and any un-upgraded agent are already accounted
+  under. That is deliberate: the collector's figure is an aggregate over a
+  changing set of nodes, so it falls when a node leaves the fleet, and reading
+  that fall as a reset would bill the account for its history twice.
+
+**Do not run the collector and the per-exit agents against the same accounts.**
+Each is a source of its own, and the sum counts both — the collector's SSH sweep
+already includes the bytes the exit is now reporting for itself. Retire the
+collector's usage sweep as the agents are rolled out.
+
+**Accounts that were undercounted will now count.** Nothing about quotas or
+`enforceAll` changed, but the number it reads is no longer a fraction of what an
+account used, so it can begin acting on accounts it never acted on. Review
+`usage_bytes` against `quota_bytes` before rolling this out; `resetUsage` ends a
+cycle for an account that should not be caught by the correction.
 
 The important consequence: proxy statistics reset when the process restarts, so
 the meter must hold its own durable per-user totals and add deltas to them. The
 existing reporter already does this, including replaying a batch that was
-accepted but not acknowledged.
+accepted but not acknowledged. Delivery is queued: one request carries at most a
+hundred accounts, progress is recorded after each one, and a batch the server
+refuses outright is isolated and dropped rather than left to block every account
+behind it. Nothing is lost by that — the figure is cumulative, so the account's
+next report carries those bytes again.
 
 ## What is deliberately not metered
 

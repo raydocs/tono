@@ -3,18 +3,26 @@
 ## Operations console
 
 The only ops URL is `https://admin.afk.ccwu.cc/ops/`. Source is `admin/`, built
-to Worker assets `/ops/` by `npm run admin:build`. Four pages:
+to Worker assets `/ops/` by `npm run admin:build`. Six work areas share one
+view-model and hash-router layer:
 
-- **总览** — live nodes, online users, quota/expiry alerts
-- **用户与家宽** — signup allowlist, enable/disable, home-exit registry, bind
-- **节点质量** — Komari ingest / block verdicts
-- **目录与策略** — replace Clash catalog and traffic policy
+- **总览** — current incidents, problem nodes, online users, operational chores
+- **故障** — node incidents and fresh customer-path incidents
+- **服务器** — full node union, Komari metrics, carrier paths, billing and retire flow
+- **客户** — search, person drawers, onboarding and home-exit inventory
+- **流量** — counter-derived machine rates and honest customer cycle totals
+- **目录和规则** — raw-text diff, frozen revision and confirmed publication
 
 Product writes go through same-origin `/api/v1/ops/*` under Cloudflare Access —
 the browser never stores or sends `ADMIN_API_TOKEN`. Token-authenticated
 `/api/v1/admin/*` remains for CLI/automation. Node quality is ingested into D1
 by `ops-panel/collect.py` (`PUT /api/v1/ops-ingest/snapshot`).
 `quality.afk.ccwu.cc` / `ops.afk.ccwu.cc` 302 to the admin monitor.
+
+The collector runs on two timers: the 12h full SSH sweep (quality, block
+probes, report files) and `collect.py --agents-only` every 1-5 minutes, which
+only pushes the Komari nodes list as a partial `{"agents": ...}` snapshot so
+the timeseries tier and frontend rate math get frequent samples.
 
 `operations_servers` / `operations_logical_nodes` (migration `0016`) are unused
 read-only inventory. Real nodes live in the Clash catalog, Komari snapshot, and
@@ -70,6 +78,22 @@ npx wrangler secret put CATALOG_ENCRYPTION_KEY
 npx wrangler secret put RESEND_API_KEY
 npm run deploy
 ```
+
+日常的 `npm run deploy` 只允许从与 `origin/main` 完全一致的干净 `main`
+执行。它先跑检查和构建，再应用待处理 D1 migration，验证 rollup schema，
+最后以同一个 40 位 `BUILD_SHA` 依次部署 API 与 admin Worker。不要绕过脚本
+单独部署其中一个；`/api/v1/ops/system/version` 只有在两端都带同一个真实
+SHA 时才会报告 aligned。migration `0028` 的数据库 trigger 会在 schema→code
+切换窗口拒绝旧 rollup writer；拒绝发生在 UPSERT 之前，因此不会继续删除
+源采样。若 migration 后 API deploy 失败，先恢复 v2 Worker，不要删除 trigger。
+
+注意：`wrangler.jsonc` 的 Worker 名虽然仍含 `staging`，但它绑定的是
+`api.afk.ccwu.cc` / `releases.afk.ccwu.cc` 和共享的 `tono-control-plane` D1；
+`wrangler.admin.jsonc` 绑定 `admin.afk.ccwu.cc`。两份都不是一次性 preview
+配置。没有独立 D1、Worker、Access hostname 和无客户数据的资源组时，禁止
+拿这两份配置部署 feature branch 做预览。隔离 preview 的配置、合成数据和
+远程变更清单在 `preview/`。`0026`–`0028` 只允许打到该独立 D1；生产库要等
+`main` 上的统一部署脚本，不要从这条分支 apply。
 
 本地开发：复制 `.dev.vars.example` 为 `.dev.vars`（不可提交），创建本地数据库后运行 `npx wrangler d1 migrations apply tono-control-plane --local && npm run dev`。部署前修改 `ALLOWED_ORIGIN`、`TAILSCALE_TAILNET` 和 `EMAIL_FROM`。`DIRECT_SIGNUP_ALLOWLIST` 只作为初始管理员的兼容启动配置；日常添加精确邮箱应使用 `/api/v1/admin/signup-allowlist`，避免修改配置并重新部署 Worker。测试仍可用 `@example.com` 配置允许一个完整域，但管理员 API 只接受精确邮箱。`APPLE_CLIENT_ID`、`GOOGLE_CLIENT_ID` 是公开的 OAuth client ID，不是 secret；留空时对应按钮会从 `/auth/methods` 隐藏。建议对管理页面及 `/api/v1/admin/*` **额外配置 Cloudflare Access**；Worker 内的 `ADMIN_API_TOKEN` 仍为第二层鉴权。
 
@@ -168,6 +192,5 @@ npm run typecheck
 typecheck 通过。测试覆盖邮件验证码 hash/单次
 消费/并发/限流、OIDC 签名/audience/nonce/replay、Apple email linking，
 home inventory 最小披露、目录 AES-GCM 篡改检测/加密存储/并发 revision，
-以及原有 control-plane 状态机。仓库迁移必须按 `0001` 到 `0017` 顺序应用。
-当前 live staging D1 已应用 routing research 的 `0016`–`0017`，Worker
-和 Build 42 release assets 已部署；production 仍需独立受控发布。
+以及原有 control-plane 状态机。仓库迁移必须按文件名顺序从 `0001` 应用到
+当前最新版本（目前为 `0028`），不可挑选或重排。

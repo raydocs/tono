@@ -70,7 +70,7 @@ struct ProxiesView: View {
         .onChange(of: showingAddNode) { _, showing in
             if !showing { editingNode = nil }
         }
-        .onChange(of: appState.selectedNodeId) { oldValue, newValue in
+        .onChange(of: selectedNodeName) { oldValue, newValue in
             // Restore/initial catalog sync assigns the selection without a
             // user switch; only announce a real node-to-node change.
             guard oldValue != nil, let newValue, oldValue != newValue else { return }
@@ -113,6 +113,26 @@ struct ProxiesView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    /// The selection resolved to the exit's name.
+    ///
+    /// Catalog nodes carry an `id` generated fresh on every parse, so installing
+    /// a revision hands every server a new one while the selection — restored by
+    /// name onto the same server — has not moved. The name is what a real switch
+    /// changes, which is what the "Switched to" toast is announcing.
+    private var selectedNodeName: String? {
+        guard let selected = appState.selectedNodeId else { return nil }
+        if let node = appState.proxyRegions.flatMap(\.nodes)
+            .first(where: { $0.id == selected || $0.name == selected }) {
+            return node.name
+        }
+        // Everything that is not a catalog node — a proxy group, the home exit,
+        // a runtime-only node — is already stored under its own stable name and
+        // reaches `activeNodeName` unchanged. An id that matches neither is a
+        // selection left behind by a catalog that was dropped, not a switch.
+        guard appState.proxyService.activeNodeName == selected else { return nil }
+        return selected
     }
 
     /// Region chips are derived from the catalog itself: "All" plus every
@@ -886,53 +906,72 @@ struct ProxiesView: View {
     }
 
     private var catalogSummary: some View {
-        HStack(spacing: 12) {
-            Image(systemName: catalogStatusIcon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(catalogStatusColor)
-                .frame(width: 30, height: 30)
-                .background(catalogStatusColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Image(systemName: catalogStatusIcon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(catalogStatusColor)
+                    .frame(width: 30, height: 30)
+                    .background(catalogStatusColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(catalogStatusTitle)
-                    .font(.system(size: 12, weight: .semibold))
-                Text(catalogStatusDetail)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            if let catalogFeedback {
-                Text(catalogFeedback)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(catalogRefreshSucceeded ? Color.green : Color.orange)
-                    .lineLimit(1)
-                    .transition(.opacity)
-            }
-
-            Button {
-                refreshCatalog()
-            } label: {
-                HStack(spacing: 5) {
-                    if isRefreshingCatalog {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    Text(isRefreshingCatalog ? "Refreshing…" : "Refresh")
-                        .font(.system(size: 11, weight: .semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(catalogStatusTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(catalogStatusDetail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Capsule())
+
+                Spacer(minLength: 8)
+
+                if let catalogFeedback {
+                    Text(catalogFeedback)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(catalogRefreshSucceeded ? Color.green : Color.orange)
+                        .lineLimit(1)
+                        .transition(.opacity)
+                }
+
+                Button {
+                    refreshCatalog()
+                } label: {
+                    HStack(spacing: 5) {
+                        if isRefreshingCatalog {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        Text(isRefreshingCatalog ? "Refreshing…" : "Refresh")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule())
+                .disabled(isRefreshingCatalog || accountSession.state != .ready)
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.tint(.white.opacity(0.08)), in: Capsule())
-            .disabled(isRefreshingCatalog || accountSession.state != .ready)
+
+            // The amber shield and "last verified" title said only that a
+            // refresh had failed. The reason was stored and never read, so
+            // support had to ask for it, and the traffic policy — which pins
+            // the WeChat direct route — had no line here at all.
+            if let reason = accountSession.catalogFailureMessage {
+                catalogIssueRow(
+                    label: String(localized: "Server catalog refresh failed"),
+                    reason: reason
+                )
+            }
+            if let reason = accountSession.trafficPolicyFailureMessage {
+                catalogIssueRow(
+                    label: String(localized: "Traffic policy refresh failed"),
+                    reason: reason
+                )
+            }
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 10)
@@ -986,6 +1025,25 @@ struct ProxiesView: View {
                     .strokeBorder(.white.opacity(colorScheme == .dark ? 0.1 : 0.55), lineWidth: 0.5)
             )
 
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func catalogIssueRow(label: String, reason: String) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(reason)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 0)
         }
     }

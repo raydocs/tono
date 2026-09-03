@@ -213,10 +213,15 @@ struct ActivityView: View {
         }
     }
 
-    private var selectedExitLatency: Int? {
+    /// The runtime node behind the "Current exit" card, read as an object rather
+    /// than as a bare number. A timed-out probe keeps the previous latency on
+    /// purpose and records the failure on the node instead, so the number alone
+    /// cannot tell a healthy exit from an unreachable one — which is how this
+    /// card came to show a green figure for the same node the Nodes page was
+    /// already calling a timeout.
+    private var selectedExitNode: ProxyService.MihomoNode? {
         guard let name = appState.proxyService.activeNodeName else { return nil }
-        let ms = appState.proxyService.latency(forNodeNamed: name)
-        return ms > 0 ? ms : nil
+        return appState.proxyService.node(named: name)
     }
 
     var body: some View {
@@ -262,7 +267,15 @@ struct ActivityView: View {
                     title: "Current exit",
                     accessory: AnyView(latencyRefreshButton)
                 ) {
-                    if let ms = selectedExitLatency {
+                    // Same three states, same words and same colours as the node
+                    // badge on the Nodes page, so the two screens cannot report
+                    // different health for one measurement.
+                    let exitNode = selectedExitNode
+                    if exitNode?.lastTestFailed == true {
+                        Text("Timeout")
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
+                            .foregroundStyle(TonoStatus.error)
+                    } else if let ms = exitNode?.latency, ms > 0 {
                         Text(LatencyLevel.spokenTitle(for: ms, kind: .exit))
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
                             .foregroundStyle(
@@ -271,7 +284,7 @@ struct ActivityView: View {
                     } else {
                         Text("Not tested")
                             .font(.system(size: 26, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(TonoStatus.neutral)
                     }
                     // Every other surface localizes the city; this one printed
                     // the raw catalog name, so Activity said "Tokyo · Fuji"

@@ -54,6 +54,59 @@ function Panel({ title, rows, metric }: {
   );
 }
 
+/**
+ * The strip on a node card. Each row is one carrier: latency, return-path
+ * loss, then the last latency buckets as bars. Loss is a number because that
+ * is what now puts a machine in 需处理; the bars stay latency so a 240 ms
+ * reading can still be told from a spike. A bucket with no sample is drawn
+ * hatched, so a gap can never be mistaken for a good reading.
+ */
+export function CarrierMini({ carriers }: { carriers: CarrierPingMapDto }) {
+  const rows = carrierRows(carriers);
+  const probed = rows.filter((row) => row.probed);
+  if (probed.length === 0) {
+    return (
+      <div className="nc-carrier-mini">
+        <p className="carrier-note">三网没测。空着不代表通。</p>
+      </div>
+    );
+  }
+  const missing = rows.filter((row) => !row.probed);
+  return (
+    <div className="nc-carriers">
+      <div className="nc-carrier-mini">
+        {rows.map((row) => (
+          <div className="nc-carrier-mini-row" key={row.key} title={row.detail}>
+            <span className={`carrier-dot carrier-dot-${row.key}`} aria-hidden />
+            <span>{row.label}</span>
+            <span className={`mono carrier-${row.latencyTone}-text`}>{row.probed ? row.latencyText : '没测'}</span>
+            <span className={`mono carrier-${row.lossTone}-text`}>{row.probed ? row.lossText : '—'}</span>
+            {row.probed && row.history.length > 0
+              ? <Bars row={row} metric="latency" />
+              : <span className="carrier-bars carrier-bars-empty" title="这段时间没有采样" />}
+          </div>
+        ))}
+      </div>
+      {missing.length > 0 && (
+        <p className="carrier-note">{missing.map((row) => row.label).join('、')}没数据，不是 0</p>
+      )}
+    </div>
+  );
+}
+
+/** The colour key for the bars above. Shown once per page, not once per card. */
+export function CarrierLegend() {
+  return (
+    <p className="carrier-legend">
+      <span>色条 = 回国延迟 · 百分数 = 回程丢包</span>
+      <span><i className="carrier-good" />好</span>
+      <span><i className="carrier-warn" />偏高</span>
+      <span><i className="carrier-bad" />差</span>
+      <span><i className="carrier-unknown" />缺测（不是 0）</span>
+    </p>
+  );
+}
+
 export function CarrierPing({ carriers }: { carriers: CarrierPingMapDto }) {
   const rows = carrierRows(carriers);
   const probed = rows.filter((row) => row.probed);

@@ -66,7 +66,12 @@ nonisolated enum HelperProtocolVersion {
     ///   connect. Snapshot, Empty/DHCP restore, and the leftover-loopback
     ///   sweep are unchanged; `networksetup` remains the fallback if SC
     ///   refuses. Bumped because the daemon now talks to a different API.
-    static let current = "3.13.0"
+    /// - 3.13.0 → 3.13.1: an arm clears its remembered PF-rule baseline before
+    ///   committing the new ruleset. If PF enable, state disposal, or a later
+    ///   verification then fails, the next arm performs a conservative full
+    ///   state flush instead of comparing against a generation that never
+    ///   finished committing and potentially retaining a withdrawn permit.
+    static let current = "3.13.1"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

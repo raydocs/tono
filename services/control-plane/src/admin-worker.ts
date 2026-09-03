@@ -2,8 +2,8 @@ import controlPlane, { type Env } from './index';
 
 type AdminEnv = Pick<
   Env,
-  'DB' | 'ASSETS' | 'ALLOWED_ORIGIN' | 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'ACCESS_ADMIN_EMAILS'
->;
+  'DB' | 'ASSETS' | 'ALLOWED_ORIGIN' | 'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'ACCESS_ADMIN_EMAILS' | 'BUILD_SHA'
+> & { API: Fetcher };
 
 const ADMIN_MONITOR = 'https://admin.afk.ccwu.cc/ops/#/monitor';
 const ABSORBED_HOSTS = new Set(['quality.afk.ccwu.cc', 'ops.afk.ccwu.cc']);
@@ -26,6 +26,15 @@ function absorbed() {
     status: 302,
     headers: { ...closedHeaders, location: ADMIN_MONITOR },
   });
+}
+
+function adminBuildSha(env: AdminEnv) {
+  const value = env.BUILD_SHA?.trim() ?? '';
+  return /^[0-9a-f]{40}$/.test(value) ? value : 'development';
+}
+
+function isReleaseBuildSha(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
 }
 
 export default {
@@ -58,6 +67,58 @@ export default {
       });
     }
 
-    return controlPlane.fetch(request, env as Env, context);
+    if (url.pathname.startsWith('/api/v1/ops/')) {
+      // Stripping `origin` below also strips the API worker's cross-site
+      // check, so it has to be applied here first: a write must come from the
+      // console itself, not from a page on some other site carrying the
+      // operator's Access cookie.
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        const site = request.headers.get('sec-fetch-site');
+        const origin = request.headers.get('origin');
+        const sameOrigin = site === 'same-origin' || site === 'none' || origin === url.origin;
+        if (!sameOrigin) {
+          return Response.json(
+            { error: { code: 'ORIGIN_NOT_ALLOWED', message: 'Origin is not allowed' } },
+            { status: 403, headers: closedHeaders },
+          );
+        }
+      }
+      // This is no longer a browser cross-origin request after it enters the
+      // service binding. Forwarding the public admin Origin would make the API
+      // worker compare it with api.afk.ccwu.cc and reject every state-changing
+      // operation before Access authentication runs.
+      const headers = new Headers(request.headers);
+      headers.delete('origin');
+      const internalRequest = new Request(request, { headers });
+      const response = await env.API.fetch(internalRequest);
+      if (url.pathname === '/api/v1/ops/system/version' && response.ok) {
+        let payload: { system?: Record<string, unknown> };
+        try {
+          payload = await response.json() as { system?: Record<string, unknown> };
+        } catch {
+          return Response.json(
+            { error: { code: 'INTERNAL_ERROR', message: 'Version endpoint returned a non-JSON body' } },
+            { status: 502, headers: closedHeaders },
+          );
+        }
+        const api = payload.system ?? {};
+        const admin = { service: 'admin', version: '0.0.1', buildSha: adminBuildSha(env) };
+        const aligned = isReleaseBuildSha(api.buildSha)
+          && isReleaseBuildSha(admin.buildSha)
+          && api.buildSha === admin.buildSha;
+        return Response.json({
+          system: {
+            api,
+            admin,
+            // Two missing build bindings used to compare as
+            // "development === development" and falsely report a safe pairing.
+            aligned,
+          },
+        }, { headers: { 'cache-control': 'no-store' } });
+      }
+      return response;
+    }
+
+    return controlPlane.fetch(request, env as unknown as Env, context);
   },
 } satisfies ExportedHandler<AdminEnv>;

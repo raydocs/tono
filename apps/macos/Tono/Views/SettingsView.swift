@@ -31,6 +31,10 @@ struct SettingsView: View {
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
     ) private var networkLogUploadEnabled = true
+    @AppStorage(
+        SettingsKey.periodicTelemetryEnabled,
+        store: AppProfile.defaults
+    ) private var periodicTelemetryEnabled = true
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
 
     private let languages = InterfaceLanguagePreference.options
@@ -88,11 +92,13 @@ struct SettingsView: View {
             settingDivider
 
             SettingRow(label: "Language") {
-                settingsPicker(selection: $selectedLanguage, options: languages)
-                    .onChange(of: selectedLanguage) { _, language in
-                        InterfaceLanguagePreference.apply(language)
-                        InterfaceLanguagePreference.relaunch()
-                    }
+                settingsPicker(
+                    selection: Binding(
+                        get: { selectedLanguage },
+                        set: changeLanguage
+                    ),
+                    options: languages
+                )
             }
 
             settingDivider
@@ -187,8 +193,23 @@ struct SettingsView: View {
             settingDivider
 
             SettingToggleRow(
+                label: "Protection snapshot",
+                subtitle: "About every 20 minutes, share protection status, the selected server and recent connection events with Tono support",
+                isOn: $periodicTelemetryEnabled
+            )
+            .onChange(of: periodicTelemetryEnabled) { _, _ in
+                accountSession.periodicTelemetrySettingChanged()
+            }
+
+            settingDivider
+
+            // The subtitle names the remote actions rather than the protection
+            // status: this switch has never governed the periodic snapshot
+            // above, and describing it as sharing status told people the
+            // snapshot was off when it was uploading regardless.
+            SettingToggleRow(
                 label: "Remote diagnostics",
-                subtitle: "Share protection status with Tono support",
+                subtitle: "Let Tono support ask this Mac for a snapshot, refresh its server list or retry protection",
                 isOn: $remoteDiagnosticsEnabled
             )
             .onChange(of: remoteDiagnosticsEnabled) { _, enabled in
@@ -260,6 +281,37 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    /// Switching language quits and reopens Tono, which takes the tunnel down
+    /// and releases Kill Switch on the way out. Ask first while this Mac is
+    /// protected; the preference is written only once the user agrees, so a
+    /// declined switch leaves the picker on the language still in use.
+    ///
+    /// An armed Kill Switch counts as protected even with nothing connected:
+    /// that is the fail-closed state after a failed connect or a network
+    /// change, and the termination cleanup disarms PF on the way out just the
+    /// same. Asking only about a live tunnel would open that Mac to direct
+    /// traffic with no warning at all.
+    private func changeLanguage(_ language: String) {
+        guard language != selectedLanguage else { return }
+        if appState.isConnected || appState.isConnecting || KillSwitchService.isArmed {
+            guard confirmLanguageRestart() else { return }
+        }
+        InterfaceLanguagePreference.apply(language)
+        InterfaceLanguagePreference.relaunch()
+    }
+
+    private func confirmLanguageRestart() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(localized: "Change the language and reopen Tono?")
+        alert.informativeText = String(
+            localized: "Tono has to quit and reopen to change languages. This Mac is protected right now, so the connection is dropped and Kill Switch is released until you connect again."
+        )
+        alert.addButton(withTitle: String(localized: "Reopen Tono"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
 
     private func setLaunchAtStartup(_ enabled: Bool) {
         guard !isUpdatingLaunchAtStartup else { return }

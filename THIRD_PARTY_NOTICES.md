@@ -1,5 +1,15 @@
 # Third-party notices
 
+## Komari Glassmorphism three-network theme
+
+The Tono ops console adapts visual structure (node card information order,
+three-carrier latency/loss bars, glass surface tokens, static sky/globe
+backdrop) from [komari-theme-Glassmorphism-three-network](https://github.com/vlongx/komari-theme-Glassmorphism-three-network)
+(MIT License, derived from sanrokamlan-prog/komari-theme-Glassmorphism).
+Tono does not vendor the Vue app, does not copy `!important` theme CSS
+wholesale, and does not load the theme's RPC client. Tokens and layout were
+reimplemented in the React admin under `services/control-plane/admin`.
+
 ## Tailscale
 
 The optional Tono userspace sidecar is built from Tailscale, pinned by

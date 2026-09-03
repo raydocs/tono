@@ -20,32 +20,6 @@ export interface DashboardDto {
   };
 }
 
-export interface ServerDto {
-  id: string;
-  displayName: string;
-  regionCode: string;
-  provider: string | null;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-  latestDeployment: {
-    releaseVersion: string;
-    status: string;
-    deployedAt: number | null;
-  } | null;
-}
-
-export interface NodeDto {
-  id: string;
-  serverId: string;
-  serverDisplayName: string;
-  displayName: string;
-  regionCode: string;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface CatalogRevisionDto {
   revision: number;
   sha256: string;
@@ -128,6 +102,9 @@ export interface NodeProfileDto {
   publicIp?: string;
   provider?: string;
   billingUrl?: string;
+  price: number | null;
+  currency: string | null;
+  billingCycle: number | null;
   trafficQuotaBytes: number | null;
   trafficUsedBytes: number | null;
   trafficCycleStart: number | null;
@@ -325,6 +302,10 @@ export interface LiveQualityNodeDto {
     asiaEdge: LiveProbeDto | null;
     overseas: LiveProbeDto | null;
   } | null;
+}
+
+/** Raw collector text for one node, fetched on demand — too big for the list payloads. */
+export interface NodeQualityTextDto {
   securityCheck: string | null;
   backtrace: string | null;
 }
@@ -333,6 +314,9 @@ export interface LiveDto {
   fetchedAt: number;
   agents: LiveAgentDto[] | null;
   agentsError: string | null;
+  /** When the Worker last accepted an agent snapshot from the collector. This
+   * differs from fetchedAt, which only says when the browser read the Worker. */
+  agentsReceivedAt: number | null;
   quality: {
     updatedAt: number | null;
     updatedAtIso: string | null;
@@ -340,6 +324,69 @@ export interface LiveDto {
     nodes: LiveQualityNodeDto[] | null;
   } | null;
   qualityError: string | null;
+  /** When the Worker last accepted a quality snapshot from the collector. */
+  qualityReceivedAt: number | null;
+}
+
+export type FleetReason =
+  | 'catalog_health_down'
+  | 'catalog_likely_blocked'
+  | 'agent_missing'
+  | 'agent_stale'
+  | 'profile_retired_but_listed'
+  | string;
+
+export interface FleetNodeDto {
+  name: string;
+  catalogListed: boolean | null;
+  qualityStatus: string;
+  qualityLabel: string;
+  agentStatus: string;
+  agentObservedAt: number | null;
+  profile: NodeProfileDto | null;
+  agent: LiveAgentDto | null;
+  quality: LiveQualityNodeDto | null;
+  occupancy: number;
+  affectedUsers: ActivityUserDto[];
+  needsAttention: boolean;
+  reasons: FleetReason[];
+}
+
+export interface FleetRetireChangesDto {
+  catalogEntryRemoved: boolean;
+  proxyGroupReferencesRemoved: string[];
+  profileMarkedRetired: boolean;
+}
+
+export interface FleetRetirePreviewDto {
+  node: FleetNodeDto;
+  expectedRevision: number;
+  currentRevision: number;
+  affectedUsers: ActivityUserDto[];
+  changes: FleetRetireChangesDto;
+  warnings: string[];
+  canRetire: boolean;
+}
+
+export interface FleetRetireResultDto {
+  node: FleetNodeDto;
+  previousRevision: number;
+  revision: number;
+  sha256: string;
+  affectedUsers: ActivityUserDto[];
+  changes: FleetRetireChangesDto;
+  warnings: string[];
+}
+
+export interface FleetSourceDto {
+  state: string;
+  message?: string | null;
+  updatedAt?: number | null;
+}
+
+export interface FleetDto {
+  nodes: FleetNodeDto[];
+  sources: Record<string, FleetSourceDto> & { catalog?: FleetSourceDto };
 }
 
 export interface ActivityUserDto {
@@ -372,34 +419,111 @@ interface ErrorEnvelope {
   error?: { code?: string; message?: string };
 }
 
+/**
+ * The Cloudflare Access session ran out. This is not a data failure: every
+ * endpoint will now answer with a login page or a 401/403, so retrying and
+ * stale banners are both wrong — the only fix is reloading the page, which
+ * lets Access run its redirect dance again.
+ */
+export const SESSION_EXPIRED_MESSAGE = '登录已过期';
+
+export class SessionExpiredError extends Error {
+  constructor() {
+    super(SESSION_EXPIRED_MESSAGE);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/** The caller's signal plus our own timeout; either one cancels the fetch. */
+function requestSignal(external: AbortSignal | undefined): AbortSignal | undefined {
+  if (typeof AbortSignal === 'undefined' || typeof AbortSignal.timeout !== 'function') return external;
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  if (!external) return timeout;
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([external, timeout]) : external;
+}
+
+async function devFallback<T>(path: string, method: string, body?: string): Promise<T | undefined> {
+  if (!import.meta.env.DEV) return undefined;
+  const { matchDevOps } = await import('./dev/ops-fixture');
+  const href = (globalThis as unknown as { location?: { href?: string } }).location?.href;
+  const scenario = href ? new URL(href).searchParams.get('opsFixture') : null;
+  return matchDevOps(path, method, body, scenario) as T | undefined;
+}
+
+export function shouldUseDevFixtureResponse(status: number, contentType: string | null): boolean {
+  return status === 404 && !contentType?.toLowerCase().includes('application/json');
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api/v1/ops/${path}`, {
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      accept: 'application/json',
-      ...(init.body ? { 'content-type': 'application/json' } : {}),
-      ...(init.headers || {}),
-    },
-  });
+  const method = init.method ?? 'GET';
+  const requestBody = typeof init.body === 'string' ? init.body : undefined;
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/ops/${path}`, {
+      credentials: 'same-origin',
+      ...init,
+      signal: requestSignal(init.signal ?? undefined),
+      headers: {
+        accept: 'application/json',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    // A superseded request must stay a plain abort so callers can drop it
+    // silently, and a hung Worker becomes a stated timeout instead of a
+    // spinner that never releases the refresh button.
+    if (isAbortError(error)) throw error;
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error('请求超时，稍后会自动重试');
+    }
+    // A network-less `vite admin` can use the fixture. HTTP errors are handled
+    // below so a real API's 409/503 is never replaced with synthetic success.
+    const fake = await devFallback<T>(path, method, requestBody);
+    if (fake !== undefined) return fake;
+    throw error;
+  }
   if (response.status === 204) return undefined as T;
+  const contentType = response.headers.get('content-type');
+  if (response.status === 401 || response.status === 403) throw new SessionExpiredError();
   if (!response.ok) {
+    if (import.meta.env.DEV && shouldUseDevFixtureResponse(response.status, contentType)) {
+      const fake = await devFallback<T>(path, method, requestBody);
+      if (fake !== undefined) return fake;
+    }
     let message = `Request failed (${response.status})`;
     try {
       const envelope = await response.json() as ErrorEnvelope;
       message = envelope.error?.message || message;
     } catch {
-      // Keep status-only message for non-JSON Access or network responses.
+      // Keep status-only message for non-JSON Access or proxy responses.
     }
     throw new Error(message);
   }
-  if (response.status === 204 || response.headers.get('content-length') === '0') {
-    return undefined as T;
+  if (response.headers.get('content-length') === '0') return undefined as T;
+  if (!contentType?.toLowerCase().includes('application/json')) {
+    if (import.meta.env.DEV) {
+      // Some Vite history-fallback setups answer an unknown API path with the
+      // SPA HTML and status 200. Treat only that non-JSON success as a missing
+      // dev API.
+      const fake = await devFallback<T>(path, method, requestBody);
+      if (fake !== undefined) return fake;
+    } else {
+      // In production the only non-JSON 200 on this path is the Cloudflare
+      // Access login page swapped in for an expired session.
+      throw new SessionExpiredError();
+    }
   }
   return response.json() as Promise<T>;
 }
 
-const get = <T>(path: string) => request<T>(path, { method: 'GET' });
+const get = <T>(path: string, signal?: AbortSignal) => request<T>(path, { method: 'GET', signal });
 const post = <T>(path: string, body: unknown) => request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 const put = <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
 const patch = <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
@@ -480,21 +604,54 @@ export interface MetricsDto {
   series: Record<string, MetricPointDto[]>;
 }
 
+export interface UsageHourPointDto {
+  t: number;
+  bytes: number | null;
+}
+
+export interface UsageHoursDto {
+  from: number;
+  to: number;
+  resolutionSeconds: number;
+  fleet: UsageHourPointDto[];
+  users: Array<{ userId: string; points: UsageHourPointDto[] }>;
+}
+
 export const operationsApi = {
-  dashboard: async () => (await get<{ dashboard: DashboardDto }>('dashboard')).dashboard,
-  live: async () => (await get<{ live: LiveDto }>('live')).live,
-  metrics: async (range = '24h', node?: string) => {
+  dashboard: async (signal?: AbortSignal) => (await get<{ dashboard: DashboardDto }>('dashboard', signal)).dashboard,
+  live: async (signal?: AbortSignal) => (await get<{ live: LiveDto }>('live', signal)).live,
+  fleetNodes: async (signal?: AbortSignal) => get<FleetDto>('fleet-nodes', signal),
+  fleetRetirePreview: async (name: string) => get<FleetRetirePreviewDto>(
+    `fleet-nodes/${encodeURIComponent(name)}/retire-preview`,
+  ),
+  nodeQualityText: async (name: string, signal?: AbortSignal) => get<NodeQualityTextDto>(
+    `fleet-nodes/${encodeURIComponent(name)}/quality-text`,
+    signal,
+  ),
+  retireFleetNode: async (name: string, expectedRevision: number, confirmation: string, reason: string) => (
+    post<FleetRetireResultDto>(`fleet-nodes/${encodeURIComponent(name)}/retire`, {
+      expectedRevision,
+      confirmation,
+      reason,
+    })
+  ),
+  // `fields` narrows the payload to the named MetricPointDto members (e.g.
+  // ['netIn', 'netOut']); omitted means the full point, so existing callers
+  // keep their current shape.
+  metrics: async (range = '24h', node?: string, signal?: AbortSignal, fields?: string[]) => {
     const query = new URLSearchParams({ range });
     if (node) query.set('node', node);
-    return (await get<{ metrics: MetricsDto }>(`metrics?${query}`)).metrics;
+    if (fields?.length) query.set('fields', fields.join(','));
+    return (await get<{ metrics: MetricsDto }>(`metrics?${query}`, signal)).metrics;
   },
-  activity: async () => (await get<{ activity: ActivityDto }>('activity')).activity,
-  servers: async () => (await get<{ servers: ServerDto[] }>('servers')).servers,
-  nodes: async () => (await get<{ nodes: NodeDto[] }>('nodes')).nodes,
+  usageHours: async (range = '24h', signal?: AbortSignal) => (
+    await get<{ usageHours: UsageHoursDto }>(`usage-hours?range=${encodeURIComponent(range)}`, signal)
+  ).usageHours,
+  activity: async (signal?: AbortSignal) => (await get<{ activity: ActivityDto }>('activity', signal)).activity,
   catalogRevisions: async () => (
     await get<{ revisions: CatalogRevisionDto[] }>('catalog-revisions')
   ).revisions,
-  users: async () => (await get<{ users: UserDto[] }>('users')).users,
+  users: async (signal?: AbortSignal) => (await get<{ users: UserDto[] }>('users', signal)).users,
   userDetail: async (userId: string) => get<UserDetailDto>(`users/${userId}/detail`),
   signupAllowlist: async () => (await get<{ entries: AllowlistEntry[] }>('signup-allowlist')).entries,
   addSignupEmail: async (email: string) => post<{ email: string; createdAt: number; created: boolean }>(
@@ -548,7 +705,7 @@ export const operationsApi = {
   }>) => (await patch<{ homeExit: HomeExitDto }>(`home-exits/${id}`, input)).homeExit,
   deleteHomeExit: async (id: string) => del<void>(`home-exits/${id}`),
   homeBindings: async () => (await get<{ bindings: HomeBindingDto[] }>('home-bindings')).bindings,
-  exitCatalog: async () => get<ExitCatalogDto>('exit-catalog'),
+  exitCatalog: async (signal?: AbortSignal) => get<ExitCatalogDto>('exit-catalog', signal),
   bindUserHome: async (userId: string, input: {
     homeExitId?: string;
     proxyName?: string;
@@ -625,7 +782,7 @@ export const operationsApi = {
       `product-accounts/${id}/replace`,
       { accountRef, notes },
     )),
-  nodeProfiles: async () => (await get<{ profiles: NodeProfileDto[] }>('node-profiles')).profiles,
+  nodeProfiles: async (signal?: AbortSignal) => (await get<{ profiles: NodeProfileDto[] }>('node-profiles', signal)).profiles,
   createNodeProfile: async (input: NodeProfileInput & { catalogName: string }) =>
     (await post<{ profile: NodeProfileDto }>('node-profiles', input)).profile,
   updateNodeProfile: async (id: string, input: NodeProfileInput) =>
@@ -635,7 +792,7 @@ export const operationsApi = {
     onlineWindowSeconds: number;
     affected: ActivityUserDto[];
   }>(`incidents/node/${encodeURIComponent(name)}`),
-  audit: async () => (await get<{
+  audit: async (signal?: AbortSignal) => (await get<{
     entries: Array<{
       id: string;
       at: number;
@@ -645,5 +802,5 @@ export const operationsApi = {
       targetId: string | null;
       summary: string;
     }>;
-  }>('audit')).entries,
+  }>('audit', signal)).entries,
 };

@@ -423,9 +423,11 @@ nonisolated enum ProtectedConnectivityVerifier {
 
 private final class OnceResume<Value>: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: Value?
+    private nonisolated(unsafe) var value: Value?
 
-    func take(_ next: Value) -> Bool {
+    nonisolated init() {}
+
+    nonisolated func take(_ next: Value) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard value == nil else { return false }

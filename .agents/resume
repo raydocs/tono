@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Tono has no local backing services or per-thread authentication to repair.
+echo 'Tono orb resume complete; no wake-time repair is required.'

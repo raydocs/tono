@@ -1,369 +1,338 @@
-import { useMemo } from 'react';
-import { operationsApi, type ActivityDto, type DashboardDto, type LiveQualityNodeDto, type UserDto } from '../api';
-import { useRefresh, useResource } from '../hooks';
+import { useState } from 'react';
 import { formatBytes, timeAgo, timestamp } from '../lib/format';
-import { blockLabel, blockStatus, isLikelyBlocked } from '../lib/quality';
-import { DataHealth, StateBoundary, Status } from '../ui';
-import { catalogLag } from '../lib/revision';
-import { formatExitDelay, formatTcpDelay, nodeHealthLabel, nodeHealthTone } from '../lib/path-status';
+import { dashboardKpis } from '../lib/incidents';
+import { sortOpsNodes } from '../lib/ops-views';
+import { canDeclareHealthy } from '../lib/source-truth';
+import { useOpsRoute } from '../lib/route';
+import { NodeCard } from '../NodeCard';
+import { useOpsWorld } from '../ops-context';
+import { usePrivacy } from '../privacy';
+import { DataHealth, GlassCard, Skeleton, Unavailable } from '../ui';
+import { PersonRow } from './users/PersonRow';
 
-function UsageLeaderboard({ users }: { users: UserDto[] }) {
-  const top = useMemo(
-    () => [...users].sort((a, b) => b.usageBytes - a.usageBytes).slice(0, 5),
-    [users],
-  );
-  if (!top.some((user) => user.usageBytes > 0)) {
-    return <div className="state"><strong>还没有按客户统计的流量</strong><span>计量本身是通的。这里空着，多半是刚清过这期，或者客户还在用旧凭证，等他们下次拉目录就会换过来。</span></div>;
-  }
-  const max = top[0]?.usageBytes || 1;
-  return (
-    <div className="lb">
-      {top.map((user, index) => (
-        <div className="lb-row" key={user.id}>
-          <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
-          <span className="lb-email">{user.email}</span>
-          <div className="lb-track">
-            <div className="lb-fill" style={{ width: `${Math.max(2, (user.usageBytes / max) * 100)}%` }} />
-          </div>
-          <span className="lb-value mono">{formatBytes(user.usageBytes)}</span>
-        </div>
-      ))}
-    </div>
-  );
+function choreGroups(chores: ReturnType<typeof useOpsWorld>['chores']) {
+  const quota = chores.filter((item) => (
+    item.kind === 'quota'
+    || item.kind === 'expired'
+    || item.kind === 'catalog-lag'
+    || item.kind === 'catalog-unreported'
+    || item.kind === 'node-renew'
+    || item.kind === 'node-expired'
+  ));
+  const ops = chores.filter((item) => item.kind === 'home' || item.kind === 'claude');
+  return { quota, ops };
 }
 
 export function Dashboard() {
-  const { refreshMs } = useRefresh();
-  const resource = useResource(operationsApi.dashboard, [], refreshMs);
-  const live = useResource(operationsApi.live, [], refreshMs);
-  const usersRes = useResource(operationsApi.users, [], refreshMs);
-  const activityRes = useResource<ActivityDto>(operationsApi.activity, [], refreshMs);
-  const auditRes = useResource(operationsApi.audit, [], refreshMs);
-  return <StateBoundary resource={resource}>{(data: DashboardDto) => {
-    const liveData = live.state === 'ready' ? live.data : null;
-    const qualityNodes = liveData?.quality?.nodes ?? [];
-    const agents = liveData?.agents ?? [];
-    const agentNames = new Set(agents.map((agent) => agent.name));
-    const offline = qualityNodes.filter((node) => !node.ok);
-    const blocked = qualityNodes.filter(isLikelyBlocked);
-    const degraded = qualityNodes.filter((node) => node.quality && node.quality !== 'ok');
+  const world = useOpsWorld();
+  const { openNode, openUser } = useOpsRoute();
+  const privacy = usePrivacy();
+  const [auditExpanded, setAuditExpanded] = useState(false);
+  const qualityAvailable = world.sources.quality.status === 'current' || world.sources.quality.status === 'stale';
+  const activityAvailable = world.sources.activity.status === 'current' || world.sources.activity.status === 'stale';
+  const usersAvailable = world.sources.users.status === 'current' || world.sources.users.status === 'stale';
+  const kpis = dashboardKpis({
+    nodes: world.nodes,
+    people: world.people,
+    incidents: world.incidents,
+    qualityAvailable,
+    activityAvailable,
+    usersAvailable,
+    profilesAvailable: world.sources.profiles.status === 'current' || world.sources.profiles.status === 'stale',
+    agentsAvailable: world.sources.agents.status === 'current' || world.sources.agents.status === 'stale',
+    nowSec: world.nowSec,
+  });
+  const accidents = world.accidents;
+  // A customer-path accident names its node too, but that is not the machine's
+  // own problem; only node accidents take a machine out of the 问题节点 list.
+  const accidentNodes = new Set(
+    accidents.filter((item) => item.category === 'node').map((item) => item.node).filter((name): name is string => Boolean(name)),
+  );
+  const problemNodes = sortOpsNodes(world.nodes)
+    .filter((node) => (node.dot === 'bad' || node.dot === 'warn') && !accidentNodes.has(node.name))
+    .slice(0, 6);
+  const pathUnmeasured = world.people.filter((person) => (
+    person.online && (person.path.kind === 'unmeasured' || person.path.kind === 'stale-sample')
+  )).length;
+  const nodesUnmeasured = world.nodes.filter((node) => node.qualityState !== 'reported').length;
+  const onlinePeople = world.people.filter((person) => person.online).slice(0, 5);
+  const occupancy = [...world.nodes]
+    .filter((node) => node.occupancyState === 'known' && (node.occupancy ?? 0) > 0)
+    .sort((a, b) => (b.occupancy ?? 0) - (a.occupancy ?? 0))
+    .slice(0, 5);
+  const usageTop = [...world.people]
+    .filter((person) => person.user && person.usageBytes > 0)
+    .sort((a, b) => b.usageBytes - a.usageBytes)
+    .slice(0, 5);
+  const { quota, ops } = choreGroups(world.chores);
+  const claudeOps = ops.filter((item) => item.kind === 'claude');
+  const homeOps = ops.filter((item) => item.kind === 'home');
+  const catalogUnreported = quota.filter((item) => item.kind === 'catalog-unreported');
+  const quotaRest = quota.filter((item) => item.kind !== 'catalog-unreported');
+  const choreAllHref = catalogUnreported.length > 0
+    ? '#/users?focus=catalog-unreported'
+    : quotaRest.some((item) => item.kind === 'catalog-lag')
+      ? '#/users?focus=catalog'
+      : '#/users?focus=quota';
+  const inventory = world.dashboard.state === 'ready' ? world.dashboard.data.inventory : null;
+  const healthy = canDeclareHealthy([world.sources.quality, world.sources.agents, world.sources.activity, world.sources.catalog]);
+  const staleNote = [world.sources.quality, world.sources.agents, world.sources.activity, world.sources.catalog]
+    .some((source) => source.status === 'stale');
 
-    const nowSec = Math.floor(Date.now() / 1_000);
-    const activityUsers = activityRes.state === 'ready' ? activityRes.data.users : [];
-    const onlineUsers = activityUsers.filter((user) => user.online);
-
-    const occupancy = new Map<string, number>();
-    for (const user of onlineUsers) {
-      if (user.selectedServer) {
-        occupancy.set(user.selectedServer, (occupancy.get(user.selectedServer) ?? 0) + 1);
-      }
-    }
-    const occupancyRows = [...occupancy.entries()].sort((a, b) => b[1] - a[1]);
-    const occupancyMax = Math.max(1, ...occupancyRows.map(([, count]) => count));
-
-    const alerts: Array<{ tone: 'error' | 'warn'; text: string }> = [];
-    if (liveData) {
-      for (const node of offline) alerts.push({ tone: 'error', text: `${node.name} 大陆测不通` });
-      for (const node of blocked) {
-        alerts.push({ tone: 'error', text: `${node.name} 疑似被墙（${node.block?.label ?? '异常'}）` });
-      }
-      for (const node of degraded) alerts.push({ tone: 'warn', text: `${node.name} 出口质量有问题（${node.quality}）` });
-      const probeless = qualityNodes.filter((node) => !agentNames.has(node.name));
-      if (probeless.length > 0) {
-        alerts.push({ tone: 'warn', text: `${probeless.length} 台还没装探针：${probeless.map((node) => node.name).join('、')}` });
-      }
-    }
-    // Absence is not health. This card used to render whenever *either* source
-    // was ready while the checks below only ran for the source that had loaded,
-    // so a failed user call left a green "所有节点与用户状态正常" standing on
-    // node data alone — asserting exactly the half it had never seen. Quota and
-    // expiry lockouts are what this card exists to catch.
-    const unchecked: string[] = [];
-    if (live.state === 'error') {
-      alerts.push({ tone: 'warn', text: `节点数据没加载上来（${live.message}），被墙、测不通、质量问题这次没查` });
-    } else if (live.state !== 'ready') unchecked.push('节点');
-    if (usersRes.state === 'error') {
-      alerts.push({ tone: 'warn', text: `客户数据没加载上来（${usersRes.message}），配额和到期这次没查` });
-    } else if (usersRes.state !== 'ready') unchecked.push('客户');
-
-    if (usersRes.state === 'ready') {
-      for (const user of usersRes.data) {
-        if (user.status !== 'active') continue;
-        if (user.quotaBytes && user.usageBytes >= user.quotaBytes) {
-          alerts.push({
-            tone: 'error',
-            text: `${user.email} 流量超了（${formatBytes(user.usageBytes)} / ${formatBytes(user.quotaBytes)}）`,
-          });
-        } else if (user.quotaBytes && user.usageBytes / user.quotaBytes >= 0.8) {
-          alerts.push({
-            tone: 'warn',
-            text: `${user.email} 流量用了 ${Math.round((user.usageBytes / user.quotaBytes) * 100)}%`,
-          });
-        }
-        if (user.expiresAt) {
-          const days = (user.expiresAt - nowSec) / 86_400;
-          if (days < 0) alerts.push({ tone: 'error', text: `${user.email} 已经过期` });
-          else if (days <= 7) alerts.push({ tone: 'warn', text: `${user.email} ${Math.ceil(days)} 天后到期` });
-        }
-        if (user.product?.incomplete) {
-          alerts.push({ tone: 'warn', text: `${user.email} 还没开 Claude` });
-        }
-      }
-    }
-    const inventory = data.inventory;
-    if (inventory) {
-      if (inventory.usersWithoutHome > 0) {
-        alerts.push({
-          tone: 'warn',
-          text: `${inventory.usersWithoutHome} 个在用客户没绑家宽，Claude 会走机房 IP`,
-        });
-      }
-      if (inventory.unusedHomes === 0) alerts.push({ tone: 'warn', text: '家宽库存空了' });
-      if (inventory.unusedAccounts === 0) alerts.push({ tone: 'warn', text: 'Claude 号池空了' });
-      if (inventory.bannedUnreplaced > 0) {
-        alerts.push({ tone: 'error', text: `${inventory.bannedUnreplaced} 人封号了还没换` });
-      }
-      if (inventory.renewingSoon > 0) {
-        alerts.push({ tone: 'warn', text: `${inventory.renewingSoon} 台服务器 7 天内到期` });
-      }
-    }
-
-    const nodeState = (node: LiveQualityNodeDto) => {
-      const status = blockStatus(node);
-      if (status === 'LIKELY_BLOCKED') return { key: 'blocked', label: blockLabel(node) };
-      if (status === 'DOWN' || status === 'EDGE_FAIL' || !node.ok) return { key: 'down', label: blockLabel(node) };
-      if (node.quality && node.quality !== 'ok') return { key: 'warn', label: `质量 ${node.quality}` };
-      return { key: 'ok', label: blockLabel(node) };
-    };
-
-    return <>
+  return (
+    <div className="stack dash-page">
       <DataHealth sources={[
-        { label: '节点质量', resource: live },
-        { label: '客户', resource: usersRes },
-        { label: '谁在线', resource: activityRes },
-        { label: '操作记录', resource: auditRes },
-        { label: '总览', resource },
+        { label: '节点质量', resource: world.live },
+        { label: '客户', resource: world.users },
+        { label: '谁在线', resource: world.activity },
+        { label: '目录', resource: world.catalog },
       ]} />
-      <div className="metrics metrics-hero">
-        <article className={`metric${blocked.length ? ' metric-alert' : ''}`}>
-          <div className="metric-label"><span>被墙</span></div>
-          <div className="metric-value">{liveData ? blocked.length : '—'}</div>
-          <div className="metric-hint">{blocked.length ? blocked.map((n) => n.name).join('、') : '从大陆测的结果'}</div>
-        </article>
-        <article className="metric">
-          <div className="metric-label"><span>节点在线</span></div>
-          <div className="metric-value">
-            {liveData ? `${qualityNodes.length - offline.length}/${qualityNodes.length}` : '—'}
-          </div>
-          <div className="metric-hint">探针 {agents.length || '—'}</div>
-        </article>
-        <article className="metric">
-          <div className="metric-label"><span>在线客户</span></div>
-          <div className="metric-value">
-            {activityRes.state === 'ready' ? activityRes.data.onlineUsers : '—'}
-          </div>
-          <div className="metric-hint">
-            {activityRes.state === 'ready'
-              ? `${activityRes.data.onlineDevices} 台设备`
-              : '按心跳统计'}
-          </div>
-        </article>
-        <article className={`metric${inventory && inventory.incompleteUsers ? ' metric-warn' : ''}`}>
-          <div className="metric-label"><span>未开 Claude</span></div>
-          <div className="metric-value">{inventory ? inventory.incompleteUsers : '—'}</div>
-          <div className="metric-hint">要绑家宽，客户端不会自己选</div>
-        </article>
+
+      <div className="kpi-strip">
+        {kpis.map((kpi) => (
+          <a
+            key={kpi.id}
+            className={`kpi${kpi.alert ? ' kpi-alert' : ''}`}
+            href={kpi.href}
+            aria-label={`${kpi.label}：${kpi.value == null ? '不可判断' : kpi.value}${kpi.note ? `（${kpi.note}）` : ''}`}
+          >
+            <span className="kpi-label">{kpi.label}</span>
+            <strong className="kpi-value">{kpi.value == null ? '—' : kpi.value}</strong>
+            {kpi.note ? <small className="kpi-note">{kpi.note}</small> : null}
+          </a>
+        ))}
       </div>
 
-      {inventory && (
-        <div className="inventory-bar">
-          <a href="#/users" className={`inv-chip${inventory.usersWithoutHome ? ' inv-warn' : ''}`}>没绑家宽 {inventory.usersWithoutHome}</a>
-          <a href="#/users" className={`inv-chip${inventory.unusedHomes === 0 ? ' inv-warn' : ''}`}>闲置家宽 {inventory.unusedHomes}</a>
-          <a href="#/users" className={`inv-chip${inventory.unusedAccounts === 0 ? ' inv-warn' : ''}`}>闲置 Claude {inventory.unusedAccounts}</a>
-          <span className={`inv-chip${inventory.bannedUnreplaced ? ' inv-alert' : ''}`}>封号没换 {inventory.bannedUnreplaced}</span>
-          <a href="#/monitor" className={`inv-chip${inventory.renewingSoon ? ' inv-warn' : ''}`}>7 天内续费 {inventory.renewingSoon}</a>
-          {degraded.length > 0 && <span className="inv-chip inv-warn">质量异常 {degraded.length}</span>}
-        </div>
-      )}
-
-      {(liveData || usersRes.state === 'ready') && (
-        <section className={`card attention-card${alerts.length > 0 ? ' has-alerts' : ''}`}>
-          <div className="card-header">
-            <div>
-              <h2>需要关注</h2>
-              <p>被墙、测不通、质量、流量、到期</p>
-            </div>
+      {/* Incidents are the first focus; the operational chores sit directly
+          under them as the second tier, which is also what keeps the left
+          column from ending in a hole next to the taller node column. */}
+      <GlassCard className={`attention-card${accidents.length ? ' has-alerts' : ''}`}>
+        <div className="card-header">
+          <div>
+            <h2>机房 / 路径事故</h2>
+            <p>只看被墙、失联、探针、路径。Claude 和家宽在下面待办。</p>
           </div>
-          {alerts.length === 0 ? (
-            unchecked.length === 0
-              ? <div className="attention-ok">✓ 节点和客户都正常</div>
-              : <div className="attention-ok">{unchecked.join('和')}还在加载，还没查完</div>
-          ) : (
+          {accidents.length > 0 && <a className="btn btn-outline btn-sm" href="#/failures">全部事故</a>}
+        </div>
+        {accidents.length > 0 ? (
+          <>
+            {staleNote && <p className="muted dash-pad">正在看旧快照；采集或页面刷新已经落后。</p>}
+            {!healthy && <p className="muted dash-pad">还有来源不可判断，已知事故仍列在下面。</p>}
             <ul className="attention-list">
-              {alerts.map((alert, index) => (
-                <li key={index} className={`attention-${alert.tone}`}>
-                  <span className="attention-dot" aria-hidden />
-                  <span>{alert.text}</span>
+              {accidents.map((item) => (
+                <li key={item.id}>
+                  <a
+                    className={`incident-line attention-${item.severity === 'severe' ? 'error' : 'warn'}`}
+                    href={item.actionRoute}
+                  >
+                    <span className="attention-dot" aria-hidden />
+                    <span className="incident-line-body">
+                      <span className="incident-line-title">{item.userId ? privacy.email(item.title) : item.title}</span>
+                      <span className="incident-line-meta">{item.detail}</span>
+                    </span>
+                    {item.impactCount
+                      ? <span className="incident-line-impact">影响 {item.impactCount} 人</span>
+                      : <span className="incident-line-impact">无人在用</span>}
+                    <span className="incident-line-go" aria-hidden>→</span>
+                  </a>
                 </li>
               ))}
             </ul>
+          </>
+        ) : healthy && pathUnmeasured === 0 && nodesUnmeasured === 0 ? (
+          <div className="attention-ok">节点和客户路径正常</div>
+        ) : healthy ? (
+          <div className="attention-ok">
+            没有被墙或失联。
+            {nodesUnmeasured > 0 ? `${nodesUnmeasured} 台节点还没有质量采样，` : ''}
+            {pathUnmeasured > 0 ? `${pathUnmeasured} 个在线客户没有新鲜路径采样，` : ''}
+            不能写成全部正常。
+          </div>
+        ) : (
+          <Unavailable title="还有数据没查完" detail="不能在质量、探针、心跳或目录未 current 时写成正常。" />
+        )}
+      </GlassCard>
+
+      <div className="dash-command">
+        <GlassCard>
+          <div className="card-header">
+            <div>
+              <h2>问题节点</h2>
+              <p>事故没覆盖到的问题机器，最多 6 台</p>
+            </div>
+            <a className="btn btn-outline btn-sm" href="#/monitor?focus=needs">全部服务器</a>
+          </div>
+          {world.nodes.length === 0 && world.live.state === 'loading' ? (
+            <Skeleton label="节点" />
+          ) : problemNodes.length === 0 ? (
+            <p className="muted dash-pad">{accidents.length ? '事故已列在上面，没有额外的问题机器。' : '这一屏没有需要先看的机器。'}</p>
+          ) : (
+            <div className="node-grid node-grid-compact dash-pad">
+              {problemNodes.map((node) => (
+                <NodeCard key={node.name} node={node} density="compact" onOpen={openNode} />
+              ))}
+            </div>
           )}
-        </section>
-      )}
+        </GlassCard>
 
-      {live.state === 'ready' && qualityNodes.length > 0 && (
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <h2>节点状态</h2>
-              <p>更新于 {timestamp(liveData?.quality?.updatedAt)} · 点开看详情</p>
+        <div className="dash-col">
+          <GlassCard>
+            <div className="card-header">
+              <div>
+                <h2>运营待办</h2>
+                <p>额度、到期、目录落后或未上报</p>
+              </div>
+              <a className="btn btn-outline btn-sm" href={choreAllHref}>查看全部</a>
             </div>
-            <a className="btn btn-outline btn-sm" href="#/monitor">去服务器页</a>
-          </div>
-          <div className="card-body node-grid">
-            {qualityNodes.map((node) => {
-              const state = nodeState(node);
-              return (
-                <a className={`node-tile node-${state.key}`} key={node.name} href="#/monitor">
-                  <span className="node-dot" aria-hidden />
-                  <span className="node-tile-main">
-                    <strong>{node.name}</strong>
-                    <small>{state.label}{agentNames.has(node.name) ? '' : ' · 没装探针'}</small>
-                  </span>
-                </a>
-              );
-            })}
-          </div>
-        </section>
-      )}
+            <ul className="attention-list">
+              {catalogUnreported.length > 0 && (
+                <li>
+                  <a className="table-link" href="#/users?focus=catalog-unreported">{catalogUnreported.length} 个在线客户未上报目录版本</a>
+                </li>
+              )}
+              {quotaRest.slice(0, catalogUnreported.length > 0 ? 7 : 8).map((item) => (
+                <li key={item.id}>
+                  <a className="table-link" href={item.actionRoute}>{item.node ? item.title : privacy.email(item.title)} · {item.detail}</a>
+                </li>
+              ))}
+              {quota.length === 0 && (
+                <li className="muted">
+                  {world.sources.users.status === 'unavailable' ? '客户资料不可用，不能判断额度待办' : '没有额度或到期待办'}
+                </li>
+              )}
+            </ul>
+          </GlassCard>
 
-      {activityRes.state === 'ready' && activityRes.data.users.length > 0 && (
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <h2>谁在线</h2>
-              <p>大约 20 分钟报一次心跳</p>
+          <GlassCard>
+            <div className="card-header">
+              <div>
+                <h2>家宽 / Claude / 库存</h2>
+                <p>开通侧的待办和闲置资源</p>
+              </div>
+              <a className="btn btn-outline btn-sm" href="#/users?focus=home">查看全部</a>
             </div>
+            <ul className="attention-list">
+              {inventory && (
+                <>
+                  <li><a className="table-link" href="#/users?focus=homes">闲置家宽 {inventory.unusedHomes}</a></li>
+                  <li><a className="table-link" href="#/users?focus=claude">闲置 Claude {inventory.unusedAccounts}</a></li>
+                </>
+              )}
+              {claudeOps.length > 0 && (
+                <li><a className="table-link" href="#/users?focus=claude">{claudeOps.length} 人未开 Claude</a></li>
+              )}
+              {homeOps.length > 0 && (
+                <li><a className="table-link" href="#/users?focus=home">{homeOps.length} 人没绑家宽</a></li>
+              )}
+              {claudeOps.length === 0 && homeOps.length === 0 && !inventory && world.dashboard.state !== 'error' && (
+                <li className="muted">没有开通侧待办</li>
+              )}
+              {!inventory && world.dashboard.state === 'error' && <li className="muted">库存摘要不可用，客户待办仍在上面。</li>}
+            </ul>
+          </GlassCard>
+        </div>
+      </div>
+
+      <GlassCard>
+        <div className="card-header">
+          <div>
+            <h2>谁在线</h2>
+            <p>当前在线的客户，最多列出 5 人</p>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>客户</th><th>状态</th><th>在用节点</th><th>节点健康</th><th>出口</th><th>TCP</th><th>目录</th><th>客户端</th><th>上次心跳</th></tr>
-              </thead>
-              <tbody>{activityRes.data.users.map((user) => (
-                <tr key={user.userId}>
-                  <td><strong>{user.email}</strong></td>
-                  <td>
-                    {user.online
-                      ? <Status value="active" />
-                      : <span className="muted">离线</span>}
-                    {user.uiState ? <small className="muted">{user.uiState}</small> : null}
-                  </td>
-                  <td>{user.selectedServer ?? <span className="muted">—</span>}</td>
-                  <td>
-                    {user.selectedServer
-                      ? <span className={`chip chip-${nodeHealthTone(user.nodeHealth)}`}>{user.nodeHealthLabel || nodeHealthLabel(user.nodeHealth)}</span>
-                      : <span className="muted">—</span>}
-                  </td>
-                  <td className="mono" title="隧道里打 gstatic 的往返，不是 ping 节点">{formatExitDelay(user.exitDelayMs)}</td>
-                  <td className="mono" title="TCP 连节点 :443">{formatTcpDelay(user.tcpDelayMs)}</td>
-                  <td>{(() => {
-                    // Against the published revision, because the number alone
-                    // does not answer "did they pick up what I just published".
-                    const lag = catalogLag(user.catalogRevision, data.catalog.revision);
-                    if (lag.state === 'unreported') {
-                      return <span className="muted" title="这个版本不上报目录版本，不代表落后">未上报</span>;
-                    }
-                    if (lag.state === 'behind') {
-                      return <span className="chip chip-risk" title={`已发布 ${data.catalog.revision}`}>r{lag.revision} · 落后 {lag.by}</span>;
-                    }
-                    if (lag.state === 'ahead') {
-                      return <span className="chip chip-risk" title="比线上目录还新，目录可能回滚过">r{lag.revision} · 超前</span>;
-                    }
-                    return <span className="mono">r{lag.revision}</span>;
-                  })()}</td>
-                  <td className="muted">{user.clientVersion} · {user.osVersion}</td>
-                  <td className="muted">{timeAgo(user.lastSeenAt)}</td>
-                </tr>
-              ))}</tbody>
-            </table>
+          <a className="btn btn-outline btn-sm" href="#/users?focus=online">查看全部</a>
+        </div>
+        {!activityAvailable && world.activity.state !== 'ready' ? (
+          world.activity.state === 'error'
+            ? <Unavailable title="心跳不可用，不能写成 0 人在线" detail={world.activity.state === 'error' ? world.activity.message : undefined} />
+            : <Skeleton label="在线客户" />
+        ) : onlinePeople.length === 0 ? (
+          <p className="muted dash-pad">现在没有在线客户。</p>
+        ) : (
+          <div className="person-list dash-online">
+            {onlinePeople.map((person) => (
+              <PersonRow key={person.userId} person={person} onOpen={() => openUser(person.userId)} />
+            ))}
           </div>
-        </section>
-      )}
+        )}
+      </GlassCard>
 
       <div className="dash-split">
-        <section className="card">
+        <GlassCard>
           <div className="card-header">
             <div>
-              <h2>流量最多</h2>
-              <p>用量前 5 的客户</p>
+              <h2>节点占用</h2>
+              <p>当前在用人数前 5</p>
             </div>
-            <a className="btn btn-outline btn-sm" href="#/users">去客户页</a>
+            <a className="btn btn-outline btn-sm" href="#/monitor">查看全部</a>
           </div>
           <div className="card-body">
-            {usersRes.state === 'ready'
-              ? <UsageLeaderboard users={usersRes.data} />
-              : <div className="state"><span className="spinner" /></div>}
-          </div>
-        </section>
-
-        <section className="card">
-          <div className="card-header">
-            <div>
-              <h2>各节点人数</h2>
-              <p>现在连着哪台</p>
-            </div>
-            <a className="btn btn-outline btn-sm" href="#/monitor">去服务器页</a>
-          </div>
-          <div className="card-body">
-            {activityRes.state === 'ready' && (occupancyRows.length > 0 ? (
+            {!activityAvailable ? (
+              <p className="muted">占用不可判断</p>
+            ) : occupancy.length === 0 ? (
+              <p className="muted">现在没人在用机器</p>
+            ) : (
               <div className="lb">
-                {occupancyRows.map(([name, count]) => (
-                  <div className="lb-row lb-row-plain" key={name}>
-                    <span className="lb-email">{name}</span>
-                    <div className="lb-track">
-                      <div className="lb-fill" style={{ width: `${Math.max(2, (count / occupancyMax) * 100)}%` }} />
-                    </div>
-                    <span className="lb-value mono">{count} 人在用</span>
-                  </div>
+                {occupancy.map((node) => (
+                  <button type="button" className="lb-row lb-row-plain" key={node.name} onClick={() => openNode(node.name)}>
+                    <span className="lb-email" title={node.name}>{node.name}</span>
+                    <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(8, ((node.occupancy ?? 0) / (occupancy[0].occupancy || 1)) * 100)}%` }} /></div>
+                    <span className="lb-value mono">{node.occupancy} 人</span>
+                  </button>
                 ))}
               </div>
-            ) : <div className="state"><strong>现在没人在线</strong><span>有心跳后这里会显示人数。</span></div>)}
-            {activityRes.state !== 'ready' && <div className="state"><span className="spinner" /></div>}
+            )}
           </div>
-        </section>
-
-      </div>
-
-      {auditRes.state === 'ready' && auditRes.data.length > 0 && (
-        <section className="card">
+        </GlassCard>
+        <GlassCard>
           <div className="card-header">
             <div>
-              <h2>最近操作</h2>
-              <p>绑线路、开通、换号、改资料</p>
+              <h2>客户本期用量</h2>
+              <p>累计前 5</p>
             </div>
+            <a className="btn btn-outline btn-sm" href="#/traffic">查看全部</a>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>时间</th><th>谁</th><th>动作</th><th>摘要</th></tr></thead>
-              <tbody>
-                {auditRes.data.slice(0, 12).map((entry) => (
-                  <tr key={entry.id}>
-                    <td className="muted">{timestamp(entry.at)}</td>
-                    <td>{entry.actorEmail}</td>
-                    <td className="mono">{entry.action}</td>
-                    <td>{entry.summary}</td>
-                  </tr>
+          <div className="card-body">
+            {!usersAvailable ? (
+              <p className="muted">客户用量不可判断</p>
+            ) : !usageTop.some((person) => person.usageBytes > 0) ? (
+              <p className="muted">还没有按客户统计的流量</p>
+            ) : (
+              <div className="lb">
+                {usageTop.map((person, index) => (
+                  <button type="button" className="lb-row" key={person.userId} onClick={() => openUser(person.userId)}>
+                    <span className={`lb-rank${index < 3 ? ` lb-rank-${index + 1}` : ''}`}>{index + 1}</span>
+                    <span className="lb-email" title={privacy.email(person.email)}>{privacy.email(person.email)}</span>
+                    <div className="lb-track"><div className="lb-fill" style={{ width: `${Math.max(2, (person.usageBytes / (usageTop[0].usageBytes || 1)) * 100)}%` }} /></div>
+                    <span className="lb-value mono">{formatBytes(person.usageBytes)}</span>
+                  </button>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
-        </section>
-      )}
-
-      <div className="muted catalog-footnote">
-        目录版本 {data.catalog.revision} · 更新于 {timestamp(data.catalog.updatedAt)}
+        </GlassCard>
       </div>
-    </>;
-  }}</StateBoundary>;
+
+      {world.audit.state === 'ready' && world.audit.data.length > 0 && (
+        <details className="monitor-secondary">
+          <summary>最近操作</summary>
+          <ul className="attention-list">
+            {(auditExpanded ? world.audit.data : world.audit.data.slice(0, 8)).map((entry) => (
+              <li key={entry.id} title={timestamp(entry.at)}>
+                <span className="muted">{timeAgo(entry.at)}</span>
+                {' · '}
+                {privacy.email(entry.actorEmail)}
+                {' · '}
+                {privacy.privacy ? privacy.secret(entry.summary) : entry.summary}
+              </li>
+            ))}
+          </ul>
+          {!auditExpanded && world.audit.data.length > 8 && (
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setAuditExpanded(true)}>
+              查看更多（共 {world.audit.data.length} 条）
+            </button>
+          )}
+        </details>
+      )}
+    </div>
+  );
 }
