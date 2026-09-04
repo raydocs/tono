@@ -41,6 +41,10 @@ The roster cycle is ordered deliberately:
 3. POST the roster's `observedAt` to `/api/v1/home/roster-ack` with the same
    bearer token.
 4. Persist and deliver usage state.
+5. Only after counters were valid, state was saved, and any usage was delivered,
+   POST `{meteringProtocolVersion: 2, observedAt}` to
+   `/api/v1/home/metering-ack`. Idle rounds send this separate readiness ACK;
+   replaying an old pending queue alone does not prove readiness.
 
 A failed reconciliation is never acknowledged. A failed acknowledgement exits
 non-zero before this round changes the durable state, so the roster and any
@@ -50,7 +54,7 @@ The state lock covers the entire roster/reconcile/counter/delivery cycle. If a
 timer and an operator start overlap, the second run exits without observing or
 persisting counters; the next timer safely resumes from cumulative state.
 
-The ACK also requires a provable final inventory: either the live Xray client
+The roster ACK also requires a provable final inventory: either the live Xray client
 list or the agent's durable prior inventory must be available. If both are
 unknown, successful additions alone cannot prove that an old device generation
 or `shared-legacy` client was removed, so the agent exits without claiming

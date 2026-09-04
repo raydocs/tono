@@ -16,9 +16,7 @@ export function usageHourDeltas(
   const sorted = [...snapshots].sort((a, b) => a.hourAt - b.hourAt);
   return sorted.map((current, index) => {
     const previous = index > 0 ? sorted[index - 1] : undefined;
-    if (!previous || current.hourAt - previous.hourAt !== HOUR) {
-      return { t: current.hourAt, bytes: null };
-    }
+    if (!previous) return { t: current.hourAt, bytes: null };
     if (current.usageBytes < previous.usageBytes) {
       return { t: current.hourAt, bytes: null };
     }
@@ -35,7 +33,22 @@ export async function snapshotUserUsageHours(db: D1Database, nowUnix: number): P
   try {
     await db.prepare(
       `INSERT INTO operations_user_usage_hours (user_id, hour_at, usage_bytes)
-       SELECT id, ?, usage_bytes FROM users WHERE status = 'active'
+       SELECT users.id, ?, users.usage_bytes
+       FROM users
+       WHERE users.status = 'active'
+         AND (
+           NOT EXISTS (
+             SELECT 1 FROM operations_user_usage_hours history
+             WHERE history.user_id = users.id
+           )
+           OR users.usage_bytes != (
+             SELECT history.usage_bytes
+             FROM operations_user_usage_hours history
+             WHERE history.user_id = users.id
+             ORDER BY history.hour_at DESC
+             LIMIT 1
+           )
+         )
        ON CONFLICT(user_id, hour_at) DO NOTHING`,
     ).bind(hourAt).run();
     await db.prepare(
@@ -63,11 +76,22 @@ export async function queryUserUsageHours(
   let rows: { results?: Array<{ user_id: string; hour_at: number; usage_bytes: number }> };
   try {
     rows = await db.prepare(
-      `SELECT user_id, hour_at, usage_bytes
+      `WITH ranked_prior AS (
+         SELECT user_id, hour_at, usage_bytes,
+                ROW_NUMBER() OVER (
+                  PARTITION BY user_id ORDER BY hour_at DESC
+                ) AS position
+         FROM operations_user_usage_hours
+         WHERE hour_at < ?
+       )
+       SELECT user_id, hour_at, usage_bytes
+       FROM ranked_prior WHERE position = 1
+       UNION ALL
+       SELECT user_id, hour_at, usage_bytes
        FROM operations_user_usage_hours
        WHERE hour_at >= ? AND hour_at < ?
        ORDER BY user_id ASC, hour_at ASC`,
-    ).bind(from, closed).all<{ user_id: string; hour_at: number; usage_bytes: number }>();
+    ).bind(from, from, closed).all<{ user_id: string; hour_at: number; usage_bytes: number }>();
   } catch (error) {
     if (!missingTable(error)) throw error;
     return { from, to: closed, resolutionSeconds: HOUR, fleet: [], users: [] };
@@ -80,10 +104,30 @@ export async function queryUserUsageHours(
     byUser.set(row.user_id, list);
   }
 
-  const users = [...byUser.entries()].map(([userId, snapshots]) => ({
-    userId,
-    points: usageHourDeltas(snapshots),
-  }));
+  const users = [...byUser.entries()].map(([userId, snapshots]) => {
+    const sorted = snapshots.sort((a, b) => a.hourAt - b.hourAt);
+    const prior = sorted.filter((snapshot) => snapshot.hourAt < from).at(-1);
+    const changes = new Map(
+      sorted
+        .filter((snapshot) => snapshot.hourAt >= from && snapshot.hourAt < closed)
+        .map((snapshot) => [snapshot.hourAt, snapshot.usageBytes]),
+    );
+    let previous = prior?.usageBytes;
+    const points: UsageHourPoint[] = [];
+    for (let hourAt = from; hourAt < closed; hourAt += HOUR) {
+      const current = changes.get(hourAt);
+      if (current === undefined) {
+        if (previous !== undefined) points.push({ t: hourAt, bytes: 0 });
+        continue;
+      }
+      points.push({
+        t: hourAt,
+        bytes: previous === undefined || current < previous ? null : current - previous,
+      });
+      previous = current;
+    }
+    return { userId, points };
+  });
 
   const fleetByHour = new Map<number, number | null>();
   for (const user of users) {

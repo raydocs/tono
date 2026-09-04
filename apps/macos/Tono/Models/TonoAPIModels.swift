@@ -505,6 +505,9 @@ nonisolated struct TonoClaudeTrafficResearchSnapshot: Codable, Sendable {
     let observedConnectionCount: Int
     let identifiedProcessConnectionCount: Int
     let proxiedConnectionCount: Int
+    /// Official Claude/Anthropic connections whose live chain explicitly
+    /// contained the residential outbound. Kept separate from generic proxy.
+    let residentialConnectionCount: Int
     let directConnectionCount: Int
     let blockedConnectionCount: Int
     let directRouteAttemptCount: Int

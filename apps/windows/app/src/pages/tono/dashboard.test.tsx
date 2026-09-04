@@ -299,6 +299,9 @@ describe('dashboard claude residential route badge', () => {
     expect(
       screen.getByText('Claude / AI Residential Route: Active'),
     ).toBeDefined()
+    expect(
+      screen.getByText(/profile-level routing is unavailable/),
+    ).toBeDefined()
     expect(screen.getByRole('button', { name: 'View Rules' })).toBeDefined()
   })
 

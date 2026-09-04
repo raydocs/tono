@@ -720,6 +720,7 @@ export const translationKeys = [
   'tono.dashboard.errors.wfpEngineWedged',
   'tono.dashboard.errors.releaseReconciling',
   'tono.dashboard.errors.serviceTooOld',
+  'tono.dashboard.errors.browserDnsPreflight',
   'tono.dashboard.errors.nodeUnreachable',
   'tono.dashboard.errors.tunDataPlaneBroken',
   'tono.dashboard.errors.tunIngressBroken',

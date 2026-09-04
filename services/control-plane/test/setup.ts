@@ -21,6 +21,8 @@ beforeEach(async () => {
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_activation').run();
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_retention').run();
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_session_authorization').run();
+  await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_diagnostics_audit').run();
+  await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_metering_audit').run();
   await env.DB.prepare('DELETE FROM ops_audit').run();
   await env.DB.prepare('DELETE FROM ops_node_profiles').run();
   await env.DB.prepare('DELETE FROM product_account_events').run();
@@ -46,6 +48,17 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM exit_nodes').run();
   await env.DB.prepare(
     "UPDATE exit_credential_rollout SET phase = 'dual', updated_at = unixepoch() WHERE singleton_id = 1",
+  ).run();
+  await env.DB.prepare('DELETE FROM usage_metering_cutover_baselines').run();
+  await env.DB.prepare(
+    `UPDATE usage_metering_rollout
+     SET phase = 'dual', updated_at = unixepoch()
+     WHERE singleton_id = 1`,
+  ).run();
+  await env.DB.prepare(
+    `UPDATE usage_metering_rollout
+     SET legacy_last_seen_at = 0, updated_at = unixepoch()
+     WHERE singleton_id = 1`,
   ).run();
   await env.DB.prepare('DELETE FROM auth_challenges').run();
   await env.DB.prepare('DELETE FROM auth_identities').run();

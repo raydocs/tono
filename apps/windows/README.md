@@ -218,9 +218,36 @@ Generated locally for every connect, identical in spirit to
   socket is never recaptured by the tunnel)
 - DNS: fake-ip `198.18.0.1/16`, listen `127.0.0.1:53`, `dns-hijack:
   any:53`, IP-literal DoH upstreams pinned to the `Tono-Exit` group
-- Rules: loopback directs only, then `MATCH,Tono-Exit`. Nothing else.
+- Rules: loopback directs, optional catalog-validated Claude/Anthropic/Turnstile/update/telemetry
+  domain pins (plus Anthropic's first-party IPv4 range) to `Tono-Claude-Home`, then the existing
+  bounded signed-app/direct policy and final `MATCH,Tono-Exit`. There is no whole-browser or
+  generic `node.exe` route and no shared-CDN IP rule.
 - The service holds the only copy Mihomo reads; the UI-side file never
   contains the controller secret.
+
+### Residential Claude browser and route proof
+
+When the catalog configures a residential Claude hop, Connect first reads Chrome and Edge's
+browser-wide `Local State` Secure DNS preferences and the effective Windows managed policy
+(`HKLM` over `HKCU`, independently for mode and templates). `off`, or `automatic`/unset with no
+custom template, is clear. `secure`, any non-empty template under `automatic`/unset, an unknown
+value, or an incomplete/unreadable bounded scan stops the connect before Service/WFP setup. Tono
+never changes browser or enterprise policy. While connected, the same fail-closed scan repeats
+every minute; an unsafe or incomplete result restricts traffic at the next check and makes the reconnect
+preflight fail. This is periodic detection, not a zero-window guarantee after a settings change.
+Chrome and Edge routing applies to all profiles; profile-level routing is not
+available. After changing Secure DNS, fully restart the browser and reconnect Tono. Connections
+without a residential Claude hop continue to use ordinary Tono protection without this stricter
+browser guarantee.
+
+While a residential route is connected, the App samples only protected destinations from
+Mihomo's controller for this evidence stream. It records cumulative, mutually-exclusive
+`RESIDENTIAL` / `DIRECT` / `PROXIED` / `BLOCKED` / `UNKNOWN` counts and the latest enum-only
+destination category. A protected destination on DIRECT or ordinary `Tono-Exit` is emitted as an
+invariant violation. The per-session set is capped at 512 hashed, memory-only connection IDs; no
+host, IP, URL, browser profile, DoH template, process path, rule payload, or proxy name enters the
+event. Periodic telemetry keeps only the newest aggregate and expands it to at most six enum/count
+events. Raw network-log upload remains opt-in and default-off.
 
 ## Connect transaction (fail-closed ordering)
 

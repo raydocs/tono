@@ -10,8 +10,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent,
-    TelemetryWindowReport,
+    ApiError, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport,
 };
 
 use tono_logging::{Type, logging};
@@ -89,6 +88,7 @@ const INCLUDE_KINDS: &[&str] = &[
     "stage",
     "connectFail",
     "connectOk",
+    "protectedRouteEvidence",
     "disconnectBegin",
     "disconnectOk",
     "releaseFail",
@@ -111,11 +111,7 @@ const INCLUDE_KINDS: &[&str] = &[
 ];
 
 /// Start the periodic uploader for one authenticated session.
-pub(crate) async fn spawn_periodic_for_auth_generation(
-    state: &Arc<TonoState>,
-    _app: &AppHandle,
-    generation: u64,
-) {
+pub(crate) async fn spawn_periodic_for_auth_generation(state: &Arc<TonoState>, _app: &AppHandle, generation: u64) {
     let task_state = state.clone();
     let handle = AsyncHandler::spawn(move || async move {
         let mut consecutive_not_found = 0_u32;
@@ -128,8 +124,7 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
                 }
                 if matches!(
                     inner.account_state,
-                    crate::tono::state::AccountState::SignedOut
-                        | crate::tono::state::AccountState::Restoring
+                    crate::tono::state::AccountState::SignedOut | crate::tono::state::AccountState::Restoring
                 ) {
                     return;
                 }
@@ -169,8 +164,7 @@ pub(crate) async fn spawn_periodic_for_auth_generation(
                 .unwrap_or(0)
                 % 120_001) as i64
                 - 60_000;
-            let wait = PERIODIC_TELEMETRY_INTERVAL
-                .saturating_add(Duration::from_millis(jitter_ms.unsigned_abs()));
+            let wait = PERIODIC_TELEMETRY_INTERVAL.saturating_add(Duration::from_millis(jitter_ms.unsigned_abs()));
             tokio::time::sleep(wait).await;
         }
     });
@@ -211,16 +205,15 @@ async fn upload_once(state: &Arc<TonoState>, generation: u64) -> Result<(), ApiE
     let event_count = report.event_count;
     match client.upload_telemetry_window(&report).await {
         Ok(_receipt) => {
-            state.audit().log(AuditEvent::PeriodicTelemetryUploaded {
-                event_count,
-                bytes,
-            });
+            state
+                .audit()
+                .log(AuditEvent::PeriodicTelemetryUploaded { event_count, bytes });
             Ok(())
         }
         Err(err) => {
-            state.audit().log(AuditEvent::PeriodicTelemetryUploadFail {
-                error: err.to_string(),
-            });
+            state
+                .audit()
+                .log(AuditEvent::PeriodicTelemetryUploadFail { error: err.to_string() });
             Err(err)
         }
     }
@@ -230,17 +223,14 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
     let now_ms = epoch_ms();
     let start_ms = now_ms.saturating_sub(PERIODIC_TELEMETRY_LOOKBACK.as_millis() as i64);
     let log_path = state.audit().log_path().to_path_buf();
-    let (mut events, dropped) =
-        tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
-            .await
-            .map_err(|err| err.to_string())??;
+    let (mut events, dropped) = tokio::task::spawn_blocking(move || collect_events(&log_path, start_ms, now_ms))
+        .await
+        .map_err(|err| err.to_string())??;
 
     let app_version = env!("CARGO_PKG_VERSION").to_string();
-    let os_version = AsyncHandler::spawn_blocking(|| {
-        tauri_plugin_tono_sysinfo::os_long_version()
-    })
-    .await
-    .unwrap_or_else(|_| "Unknown".to_string());
+    let os_version = AsyncHandler::spawn_blocking(|| tauri_plugin_tono_sysinfo::os_long_version())
+        .await
+        .unwrap_or_else(|_| "Unknown".to_string());
 
     let (
         ui_state,
@@ -301,9 +291,7 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
             events_dropped: dropped,
             events: events.clone(),
         };
-        let size = serde_json::to_vec(&candidate)
-            .map(|v| v.len())
-            .unwrap_or(usize::MAX);
+        let size = serde_json::to_vec(&candidate).map(|v| v.len()).unwrap_or(usize::MAX);
         if size <= MAX_PAYLOAD_BYTES {
             return Ok(candidate);
         }
@@ -343,16 +331,13 @@ fn epoch_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn collect_events(
-    path: &Path,
-    start_ms: i64,
-    end_ms: i64,
-) -> Result<(Vec<TelemetryEvent>, u32), String> {
+fn collect_events(path: &Path, start_ms: i64, end_ms: i64) -> Result<(Vec<TelemetryEvent>, u32), String> {
     if !path.exists() {
         return Ok((Vec::new(), 0));
     }
     let body = std::fs::read_to_string(path).map_err(|err| err.to_string())?;
     let mut selected: Vec<TelemetryEvent> = Vec::new();
+    let mut latest_protected_route: Option<(Value, i64)> = None;
     let mut dropped = 0u32;
     for line in body.lines() {
         let line = line.trim();
@@ -379,11 +364,21 @@ fn collect_events(
             dropped = dropped.saturating_add(1);
             continue;
         }
+        // Each row is already a cumulative session aggregate. Keep only the newest one in this
+        // upload window, then expand its mutually-exclusive counters into a fixed maximum of six
+        // enum-only events. This prevents a long session from multiplying rows in telemetry.
+        if kind == "protectedRouteEvidence" {
+            latest_protected_route = Some((value, ts));
+            continue;
+        }
         if let Some(event) = map_event(&value, ts, kind) {
             selected.push(event);
         } else {
             dropped = dropped.saturating_add(1);
         }
+    }
+    if let Some((value, ts)) = latest_protected_route {
+        selected.extend(map_protected_route_events(&value, ts));
     }
     if selected.len() > MAX_EVENTS {
         let overflow = selected.len() - MAX_EVENTS;
@@ -423,9 +418,12 @@ fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
         to: str_field("to"),
         mode: str_field("mode"),
         reference: str_field("reference"),
+        outcome: str_field("outcome"),
+        code: str_field("code"),
         elapsed_ms: i64_field("elapsedMs"),
         delay_ms: i64_field("delayMs"),
         counter: i64_field("counter"),
+        generation: i64_field("generation"),
         restart_count: i64_field("restartCount"),
         old_pid: i64_field("oldPid"),
         new_pid: i64_field("newPid"),
@@ -444,6 +442,56 @@ fn map_event(value: &Value, ts: i64, kind: &str) -> Option<TelemetryEvent> {
     })
 }
 
+fn map_protected_route_events(value: &Value, ts: i64) -> Vec<TelemetryEvent> {
+    const ROUTES: [(&str, &str); 5] = [
+        ("RESIDENTIAL", "residentialConnectionCount"),
+        ("DIRECT", "directConnectionCount"),
+        ("PROXIED", "proxiedConnectionCount"),
+        ("BLOCKED", "blockedConnectionCount"),
+        ("UNKNOWN", "unknownConnectionCount"),
+    ];
+    const DESTINATIONS: [&str; 4] = ["ANTHROPIC", "TURNSTILE", "UPDATE", "TELEMETRY"];
+
+    // Protected-route evidence is a privacy boundary: do not clone arbitrary audit fields into
+    // the upload. Only the timestamp argument and numeric generation are allowed into the base;
+    // route enums and counters are populated below from fixed whitelists.
+    let base_value = serde_json::json!({ "generation": value.get("generation") });
+    let base = map_event(&base_value, ts, "protectedRouteAggregate").expect("map_event always constructs an event");
+    let mut events = Vec::with_capacity(6);
+    for (route, field) in ROUTES {
+        let Some(count) = value.get(field).and_then(Value::as_u64).filter(|count| *count > 0) else {
+            continue;
+        };
+        let mut event = base.clone();
+        event.kind = if matches!(route, "DIRECT" | "PROXIED") {
+            "protectedRouteInvariantViolation".to_owned()
+        } else {
+            "protectedRouteAggregate".to_owned()
+        };
+        event.outcome = Some(route.to_owned());
+        event.counter = Some(count.min(i64::MAX as u64) as i64);
+        events.push(event);
+    }
+
+    let latest_route = value
+        .get("latestRoute")
+        .and_then(Value::as_str)
+        .filter(|route| ROUTES.iter().any(|(allowed, _)| route == allowed));
+    let latest_destination = value
+        .get("latestDestination")
+        .and_then(Value::as_str)
+        .filter(|destination| DESTINATIONS.contains(destination));
+    if let (Some(route), Some(destination)) = (latest_route, latest_destination) {
+        let mut event = base;
+        event.kind = "protectedRouteLatest".to_owned();
+        event.outcome = Some(route.to_owned());
+        event.code = Some(destination.to_owned());
+        event.counter = None;
+        events.push(event);
+    }
+    events
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,11 +500,7 @@ mod tests {
     struct TempDir(std::path::PathBuf);
     impl TempDir {
         fn new(tag: &str) -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "tono-telemetry-{}-{}",
-                tag,
-                std::process::id()
-            ));
+            let path = std::env::temp_dir().join(format!("tono-telemetry-{}-{}", tag, std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).unwrap();
             Self(path)
@@ -527,18 +571,8 @@ mod tests {
         let path = dir.path().join("traffic-audit.jsonl");
         let mut file = std::fs::File::create(&path).unwrap();
         let now = epoch_ms();
-        writeln!(
-            file,
-            r#"{{"ts":{},"kind":"signInOk","email":"a@b.com"}}"#,
-            now - 1000
-        )
-        .unwrap();
-        writeln!(
-            file,
-            r#"{{"ts":{},"kind":"networkChange","counter":3}}"#,
-            now - 500
-        )
-        .unwrap();
+        writeln!(file, r#"{{"ts":{},"kind":"signInOk","email":"a@b.com"}}"#, now - 1000).unwrap();
+        writeln!(file, r#"{{"ts":{},"kind":"networkChange","counter":3}}"#, now - 500).unwrap();
         writeln!(
             file,
             r#"{{"ts":{},"kind":"connectOk","node":"US","elapsedMs":1200}}"#,
@@ -551,5 +585,56 @@ mod tests {
         assert!(events.iter().all(|e| e.kind != "signInOk"));
         assert_eq!(events[0].kind, "networkChange");
         assert_eq!(events[0].counter, Some(3));
+    }
+
+    #[test]
+    fn protected_route_upload_is_latest_bounded_and_enum_only() {
+        let dir = TempDir::new("protected-route");
+        let path = dir.path().join("traffic-audit.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let now = epoch_ms();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"protectedRouteEvidence","generation":7,"residentialConnectionCount":1,"directConnectionCount":0,"proxiedConnectionCount":0,"blockedConnectionCount":0,"unknownConnectionCount":0,"latestRoute":"RESIDENTIAL","latestDestination":"ANTHROPIC"}}"#,
+            now - 1000
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"protectedRouteEvidence","generation":7,"residentialConnectionCount":4,"directConnectionCount":2,"proxiedConnectionCount":1,"blockedConnectionCount":1,"unknownConnectionCount":1,"latestRoute":"PROXIED","latestDestination":"TURNSTILE","host":"private.example","path":"C:\\\\secret","node":"private-node","error":"private-error","probe":"private-probe"}}"#,
+            now - 100
+        )
+        .unwrap();
+
+        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        assert_eq!(events.len(), 6, "five aggregate buckets plus one latest enum");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == "protectedRouteInvariantViolation")
+                .count(),
+            2
+        );
+        assert!(events.iter().any(|event| {
+            event.kind == "protectedRouteAggregate"
+                && event.outcome.as_deref() == Some("RESIDENTIAL")
+                && event.counter == Some(4)
+        }));
+        let latest = events
+            .iter()
+            .find(|event| event.kind == "protectedRouteLatest")
+            .unwrap();
+        assert_eq!(latest.outcome.as_deref(), Some("PROXIED"));
+        assert_eq!(latest.code.as_deref(), Some("TURNSTILE"));
+        assert_eq!(latest.generation, Some(7));
+        assert!(events.iter().all(|event| event.node.is_none()));
+        assert!(events.iter().all(|event| event.error.is_none()));
+        assert!(events.iter().all(|event| event.probe.is_none()));
+        let json = serde_json::to_string(&events).unwrap();
+        assert!(!json.contains("private.example"));
+        assert!(!json.contains("secret"));
+        assert!(!json.contains("private-node"));
+        assert!(!json.contains("private-error"));
+        assert!(!json.contains("private-probe"));
     }
 }

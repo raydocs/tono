@@ -503,12 +503,20 @@ pub struct TelemetryEvent {
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// Enum-safe route outcome for aggregate protected-destination evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// Enum-safe destination category for latest protected-route evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delay_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counter: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

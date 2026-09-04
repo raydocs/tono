@@ -255,4 +255,15 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).toBe(true)
     expect(isEncryptedDnsFailure(new Error('node unreachable'))).toBe(false)
   })
+
+  it('maps strict browser DNS preflight without exposing backend detail', () => {
+    expect(
+      formatTonoActionError(
+        new Error(
+          'TONO_BROWSER_DNS_PREFLIGHT: Chrome: Secure DNS is set to Secure',
+        ),
+        (key) => `translated:${key}`,
+      ),
+    ).toBe('translated:tono.dashboard.errors.browserDnsPreflight')
+  })
 })

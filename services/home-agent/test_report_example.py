@@ -136,13 +136,159 @@ class ReporterTests(unittest.TestCase):
 
             with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
                 reporter, "observe_totals", side_effect=AssertionError("must replay first")
-            ), mock.patch.object(reporter, "post_reports", side_effect=accept):
+            ), mock.patch.object(reporter, "post_reports", side_effect=accept), mock.patch.object(
+                reporter, "acknowledge_metering", create=True
+            ) as metering_ack:
                 reporter.main()
 
             self.assertEqual(delivered, [original])
+            metering_ack.assert_not_called()
             acknowledged = reporter.load_state(path)
             self.assertEqual(acknowledged["pendingReports"], [])
             self.assertEqual(acknowledged["totals"], {"user-one": 100})
+
+    def test_idle_observation_is_durably_saved_before_metering_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state" / "state.json"
+            environment = {
+                "TONO_API_BASE_URL": "https://api.example.com",
+                "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
+                "STATE_PATH": str(path),
+            }
+
+            def verify_saved(_base: str, _token: str, observed_at: int) -> None:
+                self.assertEqual(observed_at, 1_700_000_000)
+                saved = reporter.load_state(path)
+                self.assertEqual(saved["peerCounters"]["stable-one"]["lastRawBytes"], 0)
+
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                reporter,
+                "observe_totals",
+                side_effect=lambda state, *_args: (
+                    state["peerCounters"].update({
+                        "stable-one": {"userId": "user-one", "lastRawBytes": 0}
+                    }) or {},
+                    1_700_000_000,
+                ),
+            ), mock.patch.object(reporter, "post_reports") as usage_post, mock.patch.object(
+                reporter, "acknowledge_metering", side_effect=verify_saved, create=True
+            ) as metering_ack:
+                reporter.main()
+
+            usage_post.assert_not_called()
+            metering_ack.assert_called_once_with(
+                "https://api.example.com",
+                "test-home-agent-token-with-32-characters",
+                1_700_000_000,
+            )
+
+    def test_state_save_failure_does_not_send_metering_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state" / "state.json"
+            environment = {
+                "TONO_API_BASE_URL": "https://api.example.com",
+                "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
+                "STATE_PATH": str(path),
+            }
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                reporter, "observe_totals", return_value=({}, 1_700_000_000)
+            ), mock.patch.object(
+                reporter, "save_state", side_effect=OSError("disk full")
+            ), mock.patch.object(
+                reporter, "acknowledge_metering", create=True
+            ) as metering_ack:
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    reporter.main()
+
+            metering_ack.assert_not_called()
+
+    def test_delivery_failure_does_not_send_metering_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state" / "state.json"
+            environment = {
+                "TONO_API_BASE_URL": "https://api.example.com",
+                "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
+                "STATE_PATH": str(path),
+            }
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                reporter, "observe_totals", return_value=({"user-one": 1}, 1_700_000_000)
+            ), mock.patch.object(
+                reporter, "post_reports", side_effect=TimeoutError("delivery failed")
+            ), mock.patch.object(
+                reporter, "acknowledge_metering", create=True
+            ) as metering_ack:
+                with self.assertRaisesRegex(TimeoutError, "delivery failed"):
+                    reporter.main()
+
+            metering_ack.assert_not_called()
+
+    def test_metering_ack_failure_preserves_delivered_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "state" / "state.json"
+            environment = {
+                "TONO_API_BASE_URL": "https://api.example.com",
+                "HOME_AGENT_TOKEN": "test-home-agent-token-with-32-characters",
+                "TONO_SOURCE_ID": "home-exit-one",
+                "STATE_PATH": str(path),
+            }
+            with mock.patch.dict(os.environ, environment, clear=False), mock.patch.object(
+                reporter, "observe_totals", return_value=({"user-one": 25}, 1_700_000_000)
+            ), mock.patch.object(reporter, "post_reports"), mock.patch.object(
+                reporter,
+                "acknowledge_metering",
+                side_effect=TimeoutError("ack failed"),
+                create=True,
+            ):
+                with self.assertRaisesRegex(TimeoutError, "ack failed"):
+                    reporter.main()
+
+            saved = reporter.load_state(path)
+            self.assertEqual(saved["totals"], {"user-one": 25})
+            self.assertEqual(saved["pendingReports"], [])
+
+    def test_metering_ack_uses_authenticated_separate_endpoint_contract(self) -> None:
+        class Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, _limit: int) -> bytes:
+                return json.dumps({
+                    "nodeId": "home-exit-one",
+                    "meteringProtocolVersion": 2,
+                    "observedAt": 1_700_000_000,
+                }).encode("utf-8")
+
+        opener = mock.Mock()
+        opener.open.return_value = Response()
+        with mock.patch.object(
+            reporter.urllib.request, "build_opener", return_value=opener
+        ) as build_opener:
+            reporter.acknowledge_metering(
+                "https://api.example.com",
+                "test-home-agent-token-with-32-characters",
+                1_700_000_000,
+            )
+
+        build_opener.assert_called_once_with(reporter.NoRedirect)
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.example.com/api/v1/home/metering-ack")
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(
+            json.loads(request.data),
+            {"meteringProtocolVersion": 2, "observedAt": 1_700_000_000},
+        )
+        self.assertEqual(
+            request.headers["Authorization"],
+            "Bearer test-home-agent-token-with-32-characters",
+        )
 
     def test_delivery_chunks_at_the_worker_distinct_user_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

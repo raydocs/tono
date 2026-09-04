@@ -2,6 +2,107 @@ import XCTest
 @testable import Tono
 
 final class ProtectedConnectivityTests: XCTestCase {
+    func testBrowserDoHModeMatrix() {
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: nil, templates: nil), .clear)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: nil, templates: "https://dns"), .blocking)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: "off", templates: "https://dns"), .clear)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: "automatic", templates: ""), .clear)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: "automatic", templates: "  "), .clear)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: "automatic", templates: "https://dns"), .blocking)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: "secure", templates: nil), .blocking)
+        XCTAssertEqual(BrowserDNSDiagnostics.classify(mode: "unexpected", templates: nil), .incomplete)
+    }
+
+    func testBrowserDoHManagedPrecedenceOverBrowserWideSetting() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let localState = root.appendingPathComponent("Local State")
+        try writeJSON(["dns_over_https": ["mode": "secure"]], to: localState)
+        var result = BrowserDNSDiagnostics.scanBrowser(
+            localState: localState, userPolicy: nil, machinePolicy: nil
+        )
+        XCTAssertEqual(result.outcome, .blocking)
+        XCTAssertEqual(result.preferenceStoreCount, 1)
+
+        let user = root.appendingPathComponent("user.plist")
+        let machine = root.appendingPathComponent("machine.plist")
+        try writePlist(["DnsOverHttpsMode": "secure"], to: user)
+        try writePlist(["DnsOverHttpsMode": "off"], to: machine)
+        result = BrowserDNSDiagnostics.scanBrowser(
+            localState: localState, userPolicy: user, machinePolicy: machine
+        )
+        XCTAssertEqual(result.outcome, .clear)
+        XCTAssertEqual(result.source, .machineManaged)
+
+        // Managed precedence is per key. A machine-wide mode must not hide a
+        // lower-precedence managed template when the machine did not set one.
+        try writePlist(["DnsOverHttpsMode": "automatic"], to: machine)
+        try writePlist(["DnsOverHttpsTemplates": "https://dns"], to: user)
+        result = BrowserDNSDiagnostics.scanBrowser(
+            localState: localState, userPolicy: user, machinePolicy: machine
+        )
+        XCTAssertEqual(result.outcome, .blocking)
+        XCTAssertEqual(result.source, .machineManaged)
+
+        // Likewise, a managed template alone cannot mask the browser-wide
+        // secure mode; only configured keys override local state.
+        try writePlist(["DnsOverHttpsTemplates": ""], to: machine)
+        try writePlist([String: String](), to: user)
+        result = BrowserDNSDiagnostics.scanBrowser(
+            localState: localState, userPolicy: user, machinePolicy: machine
+        )
+        XCTAssertEqual(result.outcome, .blocking)
+    }
+
+    func testBrowserDoHMalformedOversizedAndSymlinkFailClosed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let localState = root.appendingPathComponent("browser/Local State")
+        try FileManager.default.createDirectory(at: localState.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{".utf8).write(to: localState)
+        XCTAssertEqual(BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: nil).outcome, .incomplete)
+        try Data(repeating: 0x20, count: BrowserDNSDiagnostics.maximumFileBytes + 1).write(to: localState)
+        XCTAssertEqual(BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: nil).outcome, .incomplete)
+        try FileManager.default.removeItem(at: localState)
+        let target = root.appendingPathComponent("target")
+        try writeJSON(["dns_over_https": ["mode": "off"]], to: target)
+        try FileManager.default.createSymbolicLink(at: localState, withDestinationURL: target)
+        XCTAssertEqual(BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: nil).outcome, .incomplete)
+    }
+
+    func testBrowserDoHChecksEveryInstalledReleaseChannel() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let stable = root.appendingPathComponent("stable/Local State")
+        let beta = root.appendingPathComponent("beta/Local State")
+        try writeJSON(["dns_over_https": ["mode": "off"]], to: stable)
+        try writeJSON(["dns_over_https": ["mode": "secure"]], to: beta)
+
+        var result = BrowserDNSDiagnostics.scanBrowserChannels([
+            (stable, [], nil),
+            (beta, [], nil),
+        ])
+        XCTAssertEqual(result.outcome, .blocking)
+        XCTAssertEqual(result.preferenceStoreCount, 2)
+
+        try Data("{".utf8).write(to: beta)
+        result = BrowserDNSDiagnostics.scanBrowserChannels([
+            (stable, [], nil),
+            (beta, [], nil),
+        ])
+        XCTAssertEqual(result.outcome, .incomplete)
+    }
+
+    private func writeJSON(_ value: Any, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: value).write(to: url)
+    }
+
+    private func writePlist(_ value: Any, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0).write(to: url)
+    }
+
     func testControllerFailureAndRealTUNSuccessKeepsConnection() {
         let decision = ProtectedConnectivity.classifyPostLock(
             controller: .failed("delay probe answered 504"),

@@ -392,6 +392,30 @@ def acknowledge_roster(base: str, token: str, observed_at: int) -> None:
         raise Refusal(f"roster ack failed: {error}") from error
 
 
+def acknowledge_metering(base: str, token: str, observed_at: int) -> None:
+    body = json.dumps({
+        "meteringProtocolVersion": 2,
+        "observedAt": observed_at,
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/api/v1/home/metering-ack",
+        data=body,
+        headers={"content-type": "application/json", **REQUEST_HEADERS},
+        method="POST",
+    )
+    request.add_unredirected_header("Authorization", f"Bearer {token}")
+    try:
+        with open_control_plane(request, timeout=20) as response:
+            response.read(MAX_RESPONSE_BYTES)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise Refusal(
+            f"metering ack failed: control plane answered {error.code} {error.reason}"
+        ) from error
+    except (urllib.error.URLError, OSError) as error:
+        raise Refusal(f"metering ack failed: {error}") from error
+
+
 def load_state(path: Path) -> dict:
     if not path.exists():
         return {"totals": {}, "counterBaseline": {}, "pendingReports": []}
@@ -983,9 +1007,11 @@ def run_once(path: Path) -> None:
     # replaying is safe. The reverse — delivering first — loses usage silently.
     save_state(path, state)
     if not state["pendingReports"]:
+        acknowledge_metering(base, token, observed_at)
         print("no new usage to report")
         return
     delivered, dropped = deliver_queue(base, token, path, state)
+    acknowledge_metering(base, token, observed_at)
     print(f"reported usage for {delivered} accounts as {source}, dropped {dropped}")
 
 

@@ -139,6 +139,22 @@ pub enum AuditEvent {
         chain: String,
         rule: String,
     },
+    /// Cumulative, mutually-exclusive route evidence for protected Claude destinations in one
+    /// connected session. Unlike `DirectDial`, this deliberately contains no host, IP, URL,
+    /// process, path, profile, rule payload, proxy name, or browser template. The sampler is
+    /// capped in memory and emits at most one aggregate row per controller poll.
+    ProtectedRouteEvidence {
+        generation: u64,
+        residential_connection_count: u32,
+        direct_connection_count: u32,
+        proxied_connection_count: u32,
+        blocked_connection_count: u32,
+        unknown_connection_count: u32,
+        invariant_violation_count: u32,
+        latest_route: &'static str,
+        latest_destination: &'static str,
+        sampling_capped: bool,
+    },
     DisconnectBegin {
         cause: &'static str,
     },

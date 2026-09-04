@@ -83,6 +83,10 @@ const EXIT_PROBE_ADVISORY_BUDGET: Duration = Duration::from_secs(16);
 /// far tighter by `CONTROLLER_POLL_TIMEOUT`, and a cloud-policy `/dns/query` must not be able to
 /// spend an exit-probe-sized slice of the transaction.
 const CONTROLLER_HTTP_TIMEOUT: Duration = Duration::from_secs(6);
+/// Stable frontend mapping for the strict browser-owned DNS proof required by a residential
+/// Claude route. Detail after the prefix is deliberately limited to controlled enum text.
+#[cfg(windows)]
+const BROWSER_DNS_PREFLIGHT_PREFIX: &str = "TONO_BROWSER_DNS_PREFLIGHT";
 /// One attempt through the Windows DNS Client. The Windows path uses cancellable `DnsQueryEx`,
 /// so a slow adapter transition can consume this budget without leaving stale `getaddrinfo`
 /// workers behind; all bounded attempts remain available on high-latency machines.
@@ -739,6 +743,31 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
     state.audit().log(AuditEvent::ConnectBegin {
         node: node.name.clone(),
     });
+
+    // A residential Web guarantee requires Mihomo to see protected hostnames. Browser-owned DoH
+    // (and ECH layered on it) can hide that identity, so prove Chrome/Edge's effective managed +
+    // local configuration before starting the Service or changing WFP. Ordinary Tono protection
+    // intentionally remains available when the catalog has no residential Claude route.
+    #[cfg(windows)]
+    if routing
+        .as_ref()
+        .is_some_and(|routing| routing.home_socks5.is_some() || routing.home_proxy.is_some())
+    {
+        match transaction
+            .wait(
+                "browser Secure DNS preflight",
+                crate::tono::browser_dns::verify_residential_browser_dns(),
+            )
+            .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return Attempt::Failed(format!("{BROWSER_DNS_PREFLIGHT_PREFIX}: {error}"));
+            }
+            Err(failure) => return attempt_from_stage_failure(state, generation, failure).await,
+        }
+    }
+
     match transaction.wait("service readiness", ensure_service_ready()).await {
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
@@ -1350,7 +1379,12 @@ async fn run_stages(
     });
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);
-    spawn_control_plane_pin_refresh(state, app, generation).await;
+    let residential_target = if home_socks5.is_some() {
+        Some(config::HOME_SOCKS5_OUTBOUND_NAME.to_owned())
+    } else {
+        home_node.map(|home| home.name.clone())
+    };
+    spawn_control_plane_pin_refresh(state, app, generation, residential_target).await;
     spawn_optional_direct_after_connected(
         state,
         app,
@@ -1382,8 +1416,12 @@ const CONTROL_PLANE_PIN_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60
 /// WeChat path rediscovery. File identity (path/size/mtime) is cached, so a
 /// miss only re-runs WinVerifyTrust when an install actually changes.
 const WECHAT_PATH_REFRESH_INTERVAL: Duration = Duration::from_secs(2 * 60);
+/// Browser Secure DNS may be changed after Connect. Re-prove the browser-wide
+/// setting while a residential route is active so that Web traffic cannot
+/// silently lose hostname visibility until the next manual reconnect.
+const BROWSER_DNS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
-/// How often the DIRECT overlay's destinations are sampled while connected.
+/// How often the DIRECT overlay and protected residential routes are sampled while connected.
 ///
 /// A sample, not a trace: each distinct `(address, port, protocol)` is recorded once per
 /// session, so the cost is one controller read per minute and a handful of log lines on the
@@ -1396,6 +1434,9 @@ const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 /// set is wider than a prefix list would comfortably cover — so it is recorded once and
 /// sampling then stops for the session.
 const MAX_DIRECT_SAMPLES: usize = 512;
+/// Independent privacy/size cap for protected connection IDs observed in one session. IDs are
+/// hashed and retained in memory only; the audit event contains cumulative enum/count evidence.
+const MAX_PROTECTED_ROUTE_SAMPLES: usize = 512;
 
 /// The subset of `/connections` this sampler reads. Deliberately not the full shape: every
 /// field here is one the audit record needs, and anything the controller adds later is
@@ -1448,6 +1489,240 @@ struct DirectSample {
     process: String,
     chain: String,
     rule: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProtectedDestination {
+    Anthropic,
+    Turnstile,
+    Update,
+    Telemetry,
+}
+
+impl ProtectedDestination {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Anthropic => "ANTHROPIC",
+            Self::Turnstile => "TURNSTILE",
+            Self::Update => "UPDATE",
+            Self::Telemetry => "TELEMETRY",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProtectedRoute {
+    Residential,
+    Direct,
+    Proxied,
+    Blocked,
+    Unknown,
+}
+
+impl ProtectedRoute {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Residential => "RESIDENTIAL",
+            Self::Direct => "DIRECT",
+            Self::Proxied => "PROXIED",
+            Self::Blocked => "BLOCKED",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    fn violates_residential_route(self) -> bool {
+        matches!(self, Self::Direct | Self::Proxied)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ProtectedRouteAggregate {
+    residential: u32,
+    direct: u32,
+    proxied: u32,
+    blocked: u32,
+    unknown: u32,
+    latest: Option<(ProtectedRoute, ProtectedDestination)>,
+}
+
+impl ProtectedRouteAggregate {
+    fn observe(&mut self, route: ProtectedRoute, destination: ProtectedDestination) {
+        match route {
+            ProtectedRoute::Residential => self.residential = self.residential.saturating_add(1),
+            ProtectedRoute::Direct => self.direct = self.direct.saturating_add(1),
+            ProtectedRoute::Proxied => self.proxied = self.proxied.saturating_add(1),
+            ProtectedRoute::Blocked => self.blocked = self.blocked.saturating_add(1),
+            ProtectedRoute::Unknown => self.unknown = self.unknown.saturating_add(1),
+        }
+        self.latest = Some((route, destination));
+    }
+
+    fn invariant_violations(self) -> u32 {
+        self.direct.saturating_add(self.proxied)
+    }
+}
+
+const ANTHROPIC_DESTINATIONS: &[&str] = &[
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "claude.app",
+    "claude.site",
+    "clau.de",
+    "anthropic.ai",
+    "claudestudio.com",
+    "claudemcpclient.com",
+    "claudemcpcontent.com",
+    "claudeusercontent.com",
+    "servd-anthropic-website.b-cdn.net",
+];
+const TURNSTILE_DESTINATIONS: &[&str] = &[
+    "challenges.cloudflare.com",
+    "cf-assets.www.cloudflare.com",
+];
+const UPDATE_DESTINATIONS: &[&str] = &[
+    "storage.googleapis.com",
+    "registry.npmjs.org",
+    "raw.githubusercontent.com",
+    "formulae.brew.sh",
+];
+const TELEMETRY_DESTINATIONS: &[&str] = &[
+    "cloudflareinsights.com",
+    "browser-intake-datadoghq.com",
+    "browser-intake-us5-datadoghq.com",
+    "browser-intake-us3-datadoghq.com",
+    "browser-intake-ap1-datadoghq.com",
+    "browser-intake-ap2-datadoghq.com",
+    "browser-intake-datadoghq.eu",
+    "browser-intake-ddog-gov.com",
+    "datadoghq.com",
+    "statsigapi.net",
+    "featuregates.org",
+    "growthbook.io",
+    "stripe.network",
+    "sentry.io",
+];
+
+fn host_matches_suffix(host: &str, suffix: &str) -> bool {
+    host == suffix
+        || host
+            .strip_suffix(suffix)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+fn protected_destination(connection: &SampledConnection) -> Option<ProtectedDestination> {
+    let host = connection
+        .metadata
+        .host
+        .trim()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    for (category, suffixes) in [
+        (ProtectedDestination::Anthropic, ANTHROPIC_DESTINATIONS),
+        (ProtectedDestination::Turnstile, TURNSTILE_DESTINATIONS),
+        (ProtectedDestination::Update, UPDATE_DESTINATIONS),
+        (ProtectedDestination::Telemetry, TELEMETRY_DESTINATIONS),
+    ] {
+        if suffixes.iter().any(|suffix| host_matches_suffix(&host, suffix)) {
+            return Some(category);
+        }
+    }
+
+    let address = connection.metadata.destination_ip.trim();
+    config::CLAUDE_HOME_IPV4_CIDRS
+        .iter()
+        .any(|cidr| ipv4_in_cidr(address, cidr))
+        .then_some(ProtectedDestination::Anthropic)
+}
+
+fn ipv4_in_cidr(address: &str, cidr: &str) -> bool {
+    let Ok(address) = address.parse::<std::net::Ipv4Addr>() else {
+        return false;
+    };
+    let Some((network, prefix)) = cidr.split_once('/') else {
+        return false;
+    };
+    let (Ok(network), Ok(prefix)) = (network.parse::<std::net::Ipv4Addr>(), prefix.parse::<u32>()) else {
+        return false;
+    };
+    if prefix > 32 {
+        return false;
+    }
+    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+    u32::from(address) & mask == u32::from(network) & mask
+}
+
+/// Mihomo lists the terminal outbound first and selector groups after it. The terminal is the
+/// authority: a residential SOCKS hop can legitimately be followed by `Tono-Exit` because that
+/// is its dialer transport, while `Tono-Exit` as the terminal means protected traffic missed the
+/// residential route. Every outcome is mutually exclusive.
+fn classify_protected_route(connection: &SampledConnection, residential_target: &str) -> ProtectedRoute {
+    let blocked = |value: &str| {
+        matches!(
+            value.trim().to_ascii_uppercase().as_str(),
+            "REJECT" | "REJECT-DROP" | "DROP" | "BLOCK"
+        )
+    };
+    if connection.chains.iter().any(|hop| blocked(hop))
+        || blocked(&connection.rule)
+        || blocked(&connection.rule_payload)
+    {
+        return ProtectedRoute::Blocked;
+    }
+    let Some(terminal) = connection.chains.first().map(|hop| hop.trim()).filter(|hop| !hop.is_empty()) else {
+        return ProtectedRoute::Unknown;
+    };
+    if terminal == residential_target {
+        return ProtectedRoute::Residential;
+    }
+    if terminal.eq_ignore_ascii_case("DIRECT")
+        || terminal == config::DIRECT_GROUP_NAME
+        || terminal == config::WEB_DIRECT_GROUP_NAME
+    {
+        return ProtectedRoute::Direct;
+    }
+    ProtectedRoute::Proxied
+}
+
+fn protected_connection_key(connection: &SampledConnection) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    if connection.id.is_empty() {
+        connection.metadata.host.hash(&mut hasher);
+        connection.metadata.destination_ip.hash(&mut hasher);
+        connection.metadata.destination_port.hash(&mut hasher);
+        connection.metadata.network.hash(&mut hasher);
+        connection.metadata.process_path.hash(&mut hasher);
+        connection.chains.hash(&mut hasher);
+    } else {
+        connection.id.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn observe_protected_routes(
+    payload: &SampledConnections,
+    residential_target: &str,
+    seen: &mut std::collections::HashSet<u64>,
+    aggregate: &mut ProtectedRouteAggregate,
+) -> bool {
+    let mut changed = false;
+    for connection in &payload.connections {
+        if seen.len() >= MAX_PROTECTED_ROUTE_SAMPLES {
+            break;
+        }
+        let Some(destination) = protected_destination(connection) else {
+            continue;
+        };
+        if !seen.insert(protected_connection_key(connection)) {
+            continue;
+        }
+        let route = classify_protected_route(connection, residential_target);
+        aggregate.observe(route, destination);
+        changed = true;
+    }
+    changed
 }
 
 /// Which connections went out the physical interface, and which of those are new this session.
@@ -1519,17 +1794,22 @@ fn new_direct_samples(
     fresh
 }
 
-/// Read the controller once and record any DIRECT destination not seen this session.
+/// Read the controller once, record DIRECT diagnostics, and update protected-route evidence.
 ///
-/// Returns `false` when the caller should stop sampling — a superseded generation, or the cap
-/// reached. Every other failure is swallowed: this is instrumentation, and a controller that
-/// is briefly unreachable must never disturb a working tunnel.
-async fn sample_direct_dials_once(
+/// Returns `false` when the caller should stop sampling — a superseded generation, or every
+/// applicable cap reached. Every other failure is swallowed: this is instrumentation, and a
+/// controller that is briefly unreachable must never disturb a working tunnel.
+async fn sample_connections_once(
     state: &Arc<TonoState>,
     generation: u64,
-    seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
+    residential_target: Option<&str>,
+    direct_seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
+    protected_seen: &mut std::collections::HashSet<u64>,
+    protected_aggregate: &mut ProtectedRouteAggregate,
 ) -> bool {
-    if seen.len() >= MAX_DIRECT_SAMPLES {
+    let direct_active = direct_seen.len() < MAX_DIRECT_SAMPLES;
+    let protected_active = residential_target.is_some() && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES;
+    if !direct_active && !protected_active {
         return false;
     }
     let (secret, port) = {
@@ -1560,33 +1840,66 @@ async fn sample_direct_dials_once(
     let Ok(payload) = response.json::<SampledConnections>().await else {
         return true;
     };
-    for sample in new_direct_samples(&payload, seen) {
-        state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
-            address: sample.address,
-            host: sample.host,
-            port: sample.port,
-            protocol: if sample.udp { "udp" } else { "tcp" },
-            process: sample.process,
-            chain: sample.chain,
-            rule: sample.rule,
+
+    if direct_active {
+        for sample in new_direct_samples(&payload, direct_seen) {
+            state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
+                address: sample.address,
+                host: sample.host,
+                port: sample.port,
+                protocol: if sample.udp { "udp" } else { "tcp" },
+                process: sample.process,
+                chain: sample.chain,
+                rule: sample.rule,
+            });
+        }
+        if direct_seen.len() >= MAX_DIRECT_SAMPLES {
+            state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
+                address: String::new(),
+                host: String::new(),
+                port: 0,
+                protocol: "cap",
+                process: String::new(),
+                chain: String::new(),
+                rule: format!("direct destination sample cap {MAX_DIRECT_SAMPLES} reached"),
+            });
+        }
+    }
+
+    if let Some(residential_target) = residential_target
+        && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES
+        && observe_protected_routes(
+            &payload,
+            residential_target,
+            protected_seen,
+            protected_aggregate,
+        )
+        && let Some((latest_route, latest_destination)) = protected_aggregate.latest
+    {
+        state.audit().log(crate::tono::audit::AuditEvent::ProtectedRouteEvidence {
+            generation,
+            residential_connection_count: protected_aggregate.residential,
+            direct_connection_count: protected_aggregate.direct,
+            proxied_connection_count: protected_aggregate.proxied,
+            blocked_connection_count: protected_aggregate.blocked,
+            unknown_connection_count: protected_aggregate.unknown,
+            invariant_violation_count: protected_aggregate.invariant_violations(),
+            latest_route: latest_route.as_str(),
+            latest_destination: latest_destination.as_str(),
+            sampling_capped: protected_seen.len() >= MAX_PROTECTED_ROUTE_SAMPLES,
         });
     }
-    if seen.len() >= MAX_DIRECT_SAMPLES {
-        state.audit().log(crate::tono::audit::AuditEvent::DirectDial {
-            address: String::new(),
-            host: String::new(),
-            port: 0,
-            protocol: "cap",
-            process: String::new(),
-            chain: String::new(),
-            rule: format!("direct destination sample cap {MAX_DIRECT_SAMPLES} reached"),
-        });
-        return false;
-    }
-    true
+
+    direct_seen.len() < MAX_DIRECT_SAMPLES
+        || residential_target.is_some() && protected_seen.len() < MAX_PROTECTED_ROUTE_SAMPLES
 }
 
-async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+async fn spawn_control_plane_pin_refresh(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    generation: u64,
+    residential_target: Option<String>,
+) {
     let task_state = Arc::clone(state);
     let task_app = app.clone();
     let handle = AsyncHandler::spawn(move || async move {
@@ -1596,20 +1909,53 @@ async fn spawn_control_plane_pin_refresh(state: &Arc<TonoState>, app: &AppHandle
         wechat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut skip_first_wechat = true;
         let mut watching_wechat = true;
+        let mut browser_dns_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + BROWSER_DNS_RECHECK_INTERVAL,
+            BROWSER_DNS_RECHECK_INTERVAL,
+        );
+        browser_dns_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut direct_interval = tokio::time::interval(DIRECT_SAMPLE_INTERVAL);
         direct_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut direct_seen: std::collections::HashSet<(String, u16, bool, String)> =
             std::collections::HashSet::new();
-        let mut sampling_direct = true;
+        let mut protected_seen = std::collections::HashSet::new();
+        let mut protected_aggregate = ProtectedRouteAggregate::default();
+        let mut sampling_connections = true;
         loop {
             tokio::select! {
-                _ = direct_interval.tick(), if sampling_direct => {
-                    sampling_direct =
-                        sample_direct_dials_once(&task_state, generation, &mut direct_seen).await;
+                _ = direct_interval.tick(), if sampling_connections => {
+                    sampling_connections = sample_connections_once(
+                        &task_state,
+                        generation,
+                        residential_target.as_deref(),
+                        &mut direct_seen,
+                        &mut protected_seen,
+                        &mut protected_aggregate,
+                    ).await;
                 }
                 _ = pin_interval.tick() => {
                     if !refresh_control_plane_pins_once(&task_state, generation).await {
                         return;
+                    }
+                }
+                _ = browser_dns_interval.tick(), if residential_target.is_some() => {
+                    #[cfg(windows)]
+                    if let Err(error) = crate::tono::browser_dns::verify_residential_browser_dns().await {
+                        let redacted = audit::redact(&error);
+                        logging!(
+                            error,
+                            Type::Service,
+                            "Tono: browser Secure DNS changed during a residential session; restricting traffic and reconnecting: {redacted}"
+                        );
+                        task_state.audit().log(AuditEvent::HealthProbeFail {
+                            probe: "browserDns",
+                            error: redacted,
+                        });
+                        if !connection_loop_continues(
+                            handle_network_change_inner(&task_state, &task_app, false).await,
+                        ) {
+                            return;
+                        }
                     }
                 }
                 _ = wechat_interval.tick(), if watching_wechat => {
@@ -6094,7 +6440,9 @@ async fn write_redacted_copy(state: &Arc<TonoState>, redacted: &str) {
 mod tests {
     use super::{
         BFE_NOT_RUNNING_PREFIX, CATALOG_NOT_READY_REJECTION, CLOUD_POLICY_RESOLUTION_TIMEOUT, CONNECT_BUDGET_LEGS,
-        SampledConnections, classify_bfe_state, new_direct_samples, wechat_paths_changed,
+        ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections, classify_bfe_state,
+        classify_protected_route, new_direct_samples, observe_protected_routes, protected_destination,
+        wechat_paths_changed,
         CONNECT_TRANSACTION_TIMEOUT, CONTROLLER_READY_TIMEOUT, CORE_MISSING_SUSTAINED_SAMPLES,
         ControllerDirectRuleProof, CoreSample, EXIT_PROBE_ADVISORY_BUDGET, EXIT_PROBE_CLIENT_TIMEOUT,
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
@@ -8284,6 +8632,125 @@ mod tests {
         let samples = new_direct_samples(&payload, &mut seen);
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].chain, "Tono-China-Web-Direct");
+    }
+
+    #[test]
+    fn protected_route_classification_uses_terminal_chain_order() {
+        let cases = [
+            (
+                r#"{"connections":[{"chains":["Tono-Home-Residential","Tono-Claude-Home","Tono-Exit"]}]}"#,
+                "Tono-Home-Residential",
+                ProtectedRoute::Residential,
+            ),
+            (
+                r#"{"connections":[{"chains":["Home 01","Tono-Claude-Home"]}]}"#,
+                "Home 01",
+                ProtectedRoute::Residential,
+            ),
+            (
+                r#"{"connections":[{"chains":["US Reality 01","Tono-Exit","Tono-Claude-Home"]}]}"#,
+                "Home 01",
+                ProtectedRoute::Proxied,
+            ),
+            (
+                r#"{"connections":[{"chains":["DIRECT","Tono-Claude-Home"]}]}"#,
+                "Home 01",
+                ProtectedRoute::Direct,
+            ),
+            (
+                r#"{"connections":[{"chains":["Tono-China-Web-Direct","Tono-Claude-Home"]}]}"#,
+                "Home 01",
+                ProtectedRoute::Direct,
+            ),
+            (
+                r#"{"connections":[{"chains":["REJECT"],"rule":"AND"}]}"#,
+                "Home 01",
+                ProtectedRoute::Blocked,
+            ),
+            (
+                r#"{"connections":[{"chains":[]}]}"#,
+                "Home 01",
+                ProtectedRoute::Unknown,
+            ),
+        ];
+
+        for (payload, residential_target, expected) in cases {
+            let parsed = sampled(payload);
+            let observed = classify_protected_route(&parsed.connections[0], residential_target);
+            assert_eq!(observed, expected);
+        }
+        assert!(ProtectedRoute::Direct.violates_residential_route());
+        assert!(ProtectedRoute::Proxied.violates_residential_route());
+        assert!(!ProtectedRoute::Residential.violates_residential_route());
+    }
+
+    #[test]
+    fn protected_evidence_is_filtered_bounded_and_mutually_exclusive() {
+        let payload = sampled(
+            r#"{"connections":[
+              {"id":"residential","metadata":{"host":"api.claude.ai"},
+               "chains":["Tono-Home-Residential","Tono-Claude-Home","Tono-Exit"]},
+              {"id":"proxied","metadata":{"host":"challenges.cloudflare.com"},
+               "chains":["US Reality 01","Tono-Exit","Tono-Claude-Home"]},
+              {"id":"direct","metadata":{"host":"registry.npmjs.org"},
+               "chains":["DIRECT","Tono-Claude-Home"]},
+              {"id":"blocked","metadata":{"host":"browser-intake-datadoghq.com"},
+               "chains":["REJECT"],"rule":"REJECT"},
+              {"id":"unknown","metadata":{"destinationIP":"160.79.104.10"},"chains":[]},
+              {"id":"ignored","metadata":{"host":"openai.com"},"chains":["DIRECT"]}
+            ]}"#,
+        );
+        let mut seen = std::collections::HashSet::new();
+        let mut aggregate = ProtectedRouteAggregate::default();
+        assert!(observe_protected_routes(
+            &payload,
+            "Tono-Home-Residential",
+            &mut seen,
+            &mut aggregate,
+        ));
+        assert_eq!(seen.len(), 5, "non-protected destinations never enter the bounded set");
+        assert_eq!(aggregate.residential, 1);
+        assert_eq!(aggregate.proxied, 1);
+        assert_eq!(aggregate.direct, 1);
+        assert_eq!(aggregate.blocked, 1);
+        assert_eq!(aggregate.unknown, 1);
+        assert_eq!(aggregate.invariant_violations(), 2);
+        assert_eq!(aggregate.latest, Some((ProtectedRoute::Unknown, ProtectedDestination::Anthropic)));
+
+        assert!(!observe_protected_routes(
+            &payload,
+            "Tono-Home-Residential",
+            &mut seen,
+            &mut aggregate,
+        ));
+        assert_eq!(aggregate.residential, 1, "connection IDs are counted once per session");
+    }
+
+    #[test]
+    fn protected_destination_matching_respects_domain_boundaries() {
+        let protected = sampled(
+            r#"{"connections":[{"metadata":{"host":"API.CLAUDE.AI."}},{"metadata":{"host":"notclaude.ai"}}]}"#,
+        );
+        assert_eq!(protected_destination(&protected.connections[0]), Some(ProtectedDestination::Anthropic));
+        assert_eq!(protected_destination(&protected.connections[1]), None);
+    }
+
+    #[test]
+    fn protected_evidence_domains_are_all_in_the_residential_rule_set() {
+        for destination in [
+            super::ANTHROPIC_DESTINATIONS,
+            super::TURNSTILE_DESTINATIONS,
+            super::UPDATE_DESTINATIONS,
+            super::TELEMETRY_DESTINATIONS,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                tono_core::config::CLAUDE_HOME_DOMAINS.contains(destination),
+                "{destination} must not be sampled as protected unless the runtime routes it residential"
+            );
+        }
     }
 
     #[test]

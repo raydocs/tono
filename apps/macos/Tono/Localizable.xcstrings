@@ -6447,6 +6447,146 @@
         }
       }
     },
+    "All browser profiles share Tono's routing. Tono only reads these settings; it never changes browser preferences or routes an entire browser process.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有浏览器配置文件共用 Tono 的路由。Tono 只读取这些设置；它不会更改浏览器偏好设置，也不会按整个浏览器进程路由。"
+          }
+        }
+      }
+    },
+    "Blocking": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阻断"
+          }
+        }
+      }
+    },
+    "Browser Secure DNS": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览器安全 DNS"
+          }
+        }
+      }
+    },
+    "Checking Chrome and Microsoft Edge…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查 Chrome 和 Microsoft Edge…"
+          }
+        }
+      }
+    },
+    "Chrome": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chrome"
+          }
+        }
+      }
+    },
+    "Chrome and Microsoft Edge use Tono's protected system DNS.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chrome 和 Microsoft Edge 正在使用 Tono 受保护的系统 DNS。"
+          }
+        }
+      }
+    },
+    "Chrome or Microsoft Edge may bypass Tono's protected DNS. Turn off Secure DNS in Chrome and Edge for all profiles, fully restart the browsers, then reconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chrome 或 Microsoft Edge 可能绕过 Tono 的受保护 DNS。请在 Chrome 和 Edge 的所有配置文件中关闭安全 DNS，彻底重启浏览器，然后重新连接。"
+          }
+        }
+      }
+    },
+    "Microsoft Edge": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Microsoft Edge"
+          }
+        }
+      }
+    },
+    "Secure DNS can bypass Tono. Turn it off in Chrome and Edge for all profiles, fully restart the browsers, then reconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全 DNS 可能绕过 Tono。请在 Chrome 和 Edge 的所有配置文件中关闭它，彻底重启浏览器，然后重新连接。"
+          }
+        }
+      }
+    },
+    "The browser DNS scan was incomplete. Tono fails closed when a residential Claude route is configured.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览器 DNS 扫描未完成。配置 Claude 住宅线路时，Tono 会以故障关闭方式阻止连接。"
+          }
+        }
+      }
+    },
+    "browser-wide settings": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "浏览器全局设置"
+          }
+        }
+      }
+    },
+    "machine managed policy": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设备托管策略"
+          }
+        }
+      }
+    },
+    "not installed / no browser state": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安装 / 无浏览器状态"
+          }
+        }
+      }
+    },
+    "user managed policy": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用户托管策略"
+          }
+        }
+      }
+    },
     "VS Code workspace settings": {
       "localizations": {
         "zh-Hans": {

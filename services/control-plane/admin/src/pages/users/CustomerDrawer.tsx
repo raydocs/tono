@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { operationsApi, type HomeExitDto, type ProductAccountDto, type UserDetailDto, type UserDto } from '../../api';
+import { operationsApi, type HomeExitDto, type ProductAccountDto, type ProtectedRouteProofDto, type UserDetailDto, type UserDto } from '../../api';
 import { useResource, type Live } from '../../hooks';
 import { acceptIfCurrent, bindDetail } from '../../lib/bound-detail';
 import { formatBytes, formatHomeEgress, timestamp } from '../../lib/format';
@@ -187,6 +187,13 @@ function CustomerAccountBody({
 
       <ContactSection user={user} onChanged={onChanged} />
 
+      <ProtectedRouteProofSection
+        proof={bound?.protectedRouteProof ?? null}
+        loading={detailPending}
+        error={detail.state === 'error' ? detail.message : null}
+        onReload={detail.reload}
+      />
+
       <DrawerSection title="设备" fold aside={bound ? `${bound.devices.length} 台` : undefined}>
         <div ref={devicesMark} hidden />
         {detail.state === 'loading' || (detail.state === 'ready' && !bound) ? <Skeleton label="加载设备" /> : null}
@@ -249,6 +256,106 @@ function CustomerAccountBody({
         >{user.status === 'active' ? '注销账号' : '恢复账号'}</button>
       </DrawerSection>
     </>
+  );
+}
+
+export function ProtectedRouteProofSection({
+  proof,
+  loading = false,
+  error = null,
+  onReload,
+}: {
+  proof: ProtectedRouteProofDto | null;
+  loading?: boolean;
+  error?: string | null;
+  onReload?: () => void;
+}) {
+  const evidence = proof?.evidence ?? null;
+  const proofSource = proof?.source === 'periodic_telemetry'
+    ? 'Windows 周期遥测'
+    : proof?.source === 'device_action'
+      ? '设备按需快照'
+      : null;
+  const aside = proof?.completedAt
+    ? `${proofSource ? `${proofSource} · ` : ''}${timestamp(proof.completedAt)}`
+    : proofSource ?? undefined;
+  let status = null;
+  if (evidence?.verdict === 'confirmed') {
+    status = <Banner tone="ok" message="已观察到独立 RESIDENTIAL 路由，出口一致且物理旁路被阻断。" />;
+  } else if (evidence?.verdict === 'unsafe') {
+    status = <Banner tone="error" message="快照包含出口不一致、可达旁路或受保护流量直连证据。" />;
+  } else if (evidence) {
+    const reason = !evidence.residentialReported
+      ? '旧版快照没有独立 RESIDENTIAL 计数。'
+      : evidence.routes.observed === 0
+        ? '采样窗口没有观察到连接。'
+        : evidence.routes.residential === 0
+          ? '采样窗口没有观察到 RESIDENTIAL 连接。'
+          : '保护状态或固定探针尚未形成完整证据。';
+    status = <Banner message={`证据不完整：${reason}`} />;
+  }
+  return (
+    <DrawerSection title="受保护路由证据" aside={aside}>
+      {loading && <Skeleton label="加载受保护路由证据" />}
+      {error && <Unavailable title="受保护路由证据不可用" detail={error} />}
+      {!loading && !error && !proof && (
+        <Note>无证据：尚未收到这位客户的 Claude 流量快照。</Note>
+      )}
+      {!loading && !error && proof && !evidence && (
+        <Note>
+          {proof.status === 'pending' || proof.status === 'delivered'
+            ? '无新证据：最新快照仍在等待设备完成。'
+            : '证据不完整：最新快照没有返回可验证的聚合结果。'}
+        </Note>
+      )}
+      {evidence && (
+        <div className="stack">
+          {status}
+          <StatGrid>
+            <Stat
+              label="RESIDENTIAL"
+              value={evidence.residentialReported ? evidence.routes.residential : '未单列'}
+              note={`观察总数 ${evidence.routes.observed}`}
+              tone={evidence.routes.residential > 0 ? 'ok' : 'unknown'}
+            />
+            <Stat label="PROXIED（通用代理）" value={evidence.routes.proxied} />
+            <Stat
+              label="DIRECT"
+              value={evidence.routes.direct}
+              tone={evidence.protectedDirectConnectionCount > 0 ? 'severe' : undefined}
+              note={`受保护直连 ${evidence.protectedDirectConnectionCount}`}
+            />
+            <Stat label="BLOCKED" value={evidence.routes.blocked} />
+            <Stat
+              label="UNKNOWN"
+              value={evidence.routes.unknown}
+              tone={evidence.routes.unknown > 0 ? 'unknown' : undefined}
+            />
+          </StatGrid>
+          <StatGrid columns={3}>
+            <Stat
+              label="出口一致性"
+              value={evidence.exitIdentityConsistency}
+              tone={evidence.exitIdentityConsistency === 'MATCHED' ? 'ok' : evidence.exitIdentityConsistency === 'MISMATCHED' ? 'severe' : 'unknown'}
+            />
+            <Stat
+              label="物理旁路探针"
+              value={evidence.physicalBypassProbe}
+              tone={evidence.physicalBypassProbe === 'BLOCKED' ? 'ok' : evidence.physicalBypassProbe === 'REACHABLE' ? 'severe' : 'unknown'}
+            />
+            <Stat
+              label="保护层"
+              value={evidence.protectedDNSConfigured == null ? 'DNS 未上报' : evidence.connected && evidence.tunPresent && evidence.killSwitchArmed && evidence.protectedDNSConfigured ? '完整' : '不完整'}
+              note={`不安全观察 ${evidence.unsafeProtectionObservationCount}`}
+              tone={evidence.connected && evidence.tunPresent && evidence.killSwitchArmed && evidence.protectedDNSConfigured ? 'ok' : 'unknown'}
+            />
+          </StatGrid>
+        </div>
+      )}
+      {onReload && (
+        <button type="button" className="btn btn-outline btn-sm" onClick={onReload}>刷新证据</button>
+      )}
+    </DrawerSection>
   );
 }
 

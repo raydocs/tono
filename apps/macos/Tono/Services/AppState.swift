@@ -793,6 +793,9 @@ final class AppState {
         guard isConnected else { return false }
         return managedCatalogRouting?.homeSocks5 != nil || managedCatalogRouting?.homeProxy != nil
     }
+    var isClaudeHomeConfigured: Bool {
+        managedCatalogRouting?.homeSocks5 != nil || managedCatalogRouting?.homeProxy != nil
+    }
     private var managedCatalogReloadPending = false
     private var managedTrafficPolicy = TonoTrafficPolicy(
         version: 1,
@@ -1901,6 +1904,26 @@ final class AppState {
                     details: self.auditProtectionDetails()
                 )
                 try Task.checkCancellation()
+                // Chromium can bypass system fake-IP DNS without changing the
+                // macOS resolver. A residential Claude route therefore cannot
+                // be claimed until every supported browser profile is clear.
+                if self.isClaudeHomeConfigured {
+                    let browserDNS = await self.scanBrowserProtectedDNS()
+                    self.recordBrowserDNSPreflight(browserDNS)
+                    guard browserDNS.outcome == .clear else {
+                        self.lastClassifiedFailure = ProtectedConnectivity.failure(
+                            .protectedDnsNotReady,
+                            stage: "securingDNS",
+                            attempt: 3,
+                            generation: self.protectionOperationGeneration,
+                            detail: "browser Secure DNS scan \(browserDNS.outcome.rawValue)"
+                        )
+                        throw CoreControllerError.protectionFailed(
+                            self.browserProtectedDNSFailureMessage
+                        )
+                    }
+                }
+                try Task.checkCancellation()
                 // Controller /delay is advisory. Two in-place TUN rounds keep
                 // the core and PF live; only an exhausted real data plane can
                 // refuse Connected.
@@ -2696,6 +2719,30 @@ final class AppState {
 
                 guard self.isOwnedTonoMode else { continue }
                 if !self.config.tunEnabled { healthCycle += 1 }
+                // Browser preferences can change after connect. Recheck on the
+                // same one-minute cadence as protected system DNS so a newly
+                // enabled explicit DoH mode cannot leave a residential claim
+                // active for the rest of a long-running session.
+                if healthCycle.isMultiple(of: 6), self.isClaudeHomeConfigured {
+                    let observedGeneration = self.protectionOperationGeneration
+                    let browserDNS = await self.scanBrowserProtectedDNS()
+                    guard !Task.isCancelled, self.isConnected,
+                          self.protectionOperationGeneration == observedGeneration
+                    else { return }
+                    self.recordBrowserDNSPreflight(browserDNS)
+                    guard browserDNS.outcome == .clear else {
+                        self.lastClassifiedFailure = ProtectedConnectivity.failure(
+                            .protectedDnsNotReady,
+                            stage: "health",
+                            attempt: healthCycle,
+                            generation: observedGeneration,
+                            detail: "browser Secure DNS scan \(browserDNS.outcome.rawValue)"
+                        )
+                        self.disconnect(releaseKillSwitch: false)
+                        self.errorMessage = self.browserProtectedDNSFailureMessage
+                        return
+                    }
+                }
                 // A catalog held back for an in-flight stream has to be
                 // retried from somewhere, or the deferral becomes a discard.
                 if self.managedCatalogReloadPending {
@@ -6340,6 +6387,42 @@ final class AppState {
             try? await Task.sleep(for: .milliseconds(200))
         }
         return false
+    }
+
+    /// Chromium writes Preferences by replace/rename. One short retry keeps a
+    /// harmless in-flight atomic save from looking like a permanent scan gap;
+    /// a second incomplete result remains fail-closed.
+    private func scanBrowserProtectedDNS() async -> BrowserDNSDiagnostics.Report {
+        let first = await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+        guard first.outcome == .incomplete, !Task.isCancelled else { return first }
+        try? await Task.sleep(for: .milliseconds(150))
+        guard !Task.isCancelled else { return first }
+        return await Task.detached(priority: .userInitiated) {
+            BrowserDNSDiagnostics.scan()
+        }.value
+    }
+
+    private func recordBrowserDNSPreflight(_ report: BrowserDNSDiagnostics.Report) {
+        for (browser, result) in [
+            ("chrome", report.chrome), ("edge", report.edge),
+        ] {
+            ConnectionTelemetryBuffer.shared.record(
+                "browserDNSPreflight",
+                probe: browser,
+                mode: result.source.rawValue,
+                counter: result.preferenceStoreCount,
+                generation: Int(protectionOperationGeneration),
+                outcome: result.outcome.rawValue
+            )
+        }
+    }
+
+    private var browserProtectedDNSFailureMessage: String {
+        String(localized:
+            "Chrome or Microsoft Edge may bypass Tono's protected DNS. Turn off Secure DNS in Chrome and Edge for all profiles, fully restart the browsers, then reconnect."
+        )
     }
 
     /// Distinguish Encrypted DNS / Private Relay hijacks from a dead listener.

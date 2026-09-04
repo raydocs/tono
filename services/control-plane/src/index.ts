@@ -295,33 +295,43 @@ function canonicalClaudeTrafficResearch(value: unknown) {
     'unknownManagedDirectConnectionCount', 'otherManagedDirectConnectionCount',
     'protectedDirectConnectionCount',
   ];
+  const residentialCountKey = 'residentialConnectionCount';
   const booleanKeys = [
     'connectionLimitReached', 'connected', 'killSwitchArmed', 'tunPresent',
     'protectedDNSConfigured',
   ];
   const expectedKeys = [
-    'observedSince', 'droppedEndpointCount', ...countKeys, ...booleanKeys,
+    'observedSince', 'droppedEndpointCount', ...countKeys, residentialCountKey, ...booleanKeys,
     'exitIdentityConsistency', 'physicalBypassProbe', 'entries',
   ];
+  const requiredKeys = expectedKeys.filter((key) => key !== residentialCountKey);
+  const hasResidentialCount = Object.prototype.hasOwnProperty.call(
+    value && typeof value === 'object' ? value : {},
+    residentialCountKey,
+  );
   rejectUnexpectedKeys(value, expectedKeys);
-  if (!exactKeys(value, expectedKeys) ||
+  if (!exactKeys(value, hasResidentialCount ? expectedKeys : requiredKeys) ||
       !Number.isSafeInteger(value.observedSince) || value.observedSince < 0 || value.observedSince > now() + 300 ||
       !Number.isSafeInteger(value.droppedEndpointCount) || value.droppedEndpointCount < 0 || value.droppedEndpointCount > 64 ||
       !Array.isArray(value.entries) || value.entries.length > 10) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid Claude traffic research snapshot');
   }
-  for (const key of countKeys) {
+  for (const key of [...countKeys, ...(hasResidentialCount ? [residentialCountKey] : [])]) {
     if (!Number.isSafeInteger(value[key]) || value[key] < 0 || value[key] > 1_000_000) {
       throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
     }
   }
+  const residentialConnectionCount = hasResidentialCount
+    ? value.residentialConnectionCount as number
+    : 0;
   for (const key of booleanKeys) {
     if (typeof value[key] !== 'boolean') {
       throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
     }
   }
   if (value.identifiedProcessConnectionCount > value.observedConnectionCount ||
-      value.proxiedConnectionCount + value.directConnectionCount + value.blockedConnectionCount !== value.observedConnectionCount ||
+      residentialConnectionCount + value.proxiedConnectionCount +
+        value.directConnectionCount + value.blockedConnectionCount !== value.observedConnectionCount ||
       value.weChatConnectionCount > value.observedConnectionCount ||
       value.weChatManagedDirectConnectionCount + value.weChatProxiedConnectionCount + value.weChatBlockedConnectionCount !== value.weChatConnectionCount ||
       value.webManagedDirectConnectionCount + value.weChatManagedDirectConnectionCount + value.unknownManagedDirectConnectionCount + value.otherManagedDirectConnectionCount > value.directConnectionCount ||
@@ -336,6 +346,7 @@ function canonicalClaudeTrafficResearch(value: unknown) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid Claude leak probe verdict');
   }
   const seen = new Set<string>();
+  const retainedRouteCounts = new Map<string, number>();
   const entries = value.entries.map((raw: unknown) => {
     rejectUnexpectedKeys(raw, ['service', 'client', 'host', 'network', 'port', 'route', 'connections', 'upBytes', 'downBytes']);
     if (!exactKeys(raw, ['service', 'client', 'host', 'network', 'port', 'route', 'connections', 'upBytes', 'downBytes'])) {
@@ -345,7 +356,7 @@ function canonicalClaudeTrafficResearch(value: unknown) {
     const client = str(raw.client, 'client', 1, 20);
     const host = str(raw.host, 'host', 1, 100);
     const network = str(raw.network, 'network', 1, 3);
-    const route = str(raw.route, 'route', 1, 10);
+    const route = str(raw.route, 'route', 1, 11);
     const officialHost = service === 'claude'
       ? host === 'claude.ai' || host.endsWith('.claude.ai')
       : service === 'anthropic' && (host === 'anthropic.com' || host.endsWith('.anthropic.com'));
@@ -357,7 +368,8 @@ function canonicalClaudeTrafficResearch(value: unknown) {
     const attributedOther = service === 'other' && ['app', 'code'].includes(client);
     if ((!officialHost && !attributedOther) || !validHostname ||
         !['app', 'code', 'web', 'unknown'].includes(client) ||
-        !['TCP', 'UDP'].includes(network) || !['PROXIED', 'DIRECT', 'BLOCKED'].includes(route) ||
+        !['TCP', 'UDP'].includes(network) ||
+        !['RESIDENTIAL', 'PROXIED', 'DIRECT', 'BLOCKED'].includes(route) ||
         !Number.isSafeInteger(raw.port) || raw.port < 1 || raw.port > 65535 ||
         !Number.isSafeInteger(raw.connections) || raw.connections < 1 || raw.connections > 1_000_000 ||
         !Number.isSafeInteger(raw.upBytes) || raw.upBytes < 0 || raw.upBytes > 1_000_000_000_000_000 ||
@@ -367,6 +379,10 @@ function canonicalClaudeTrafficResearch(value: unknown) {
     const key = `${service}\n${client}\n${host}\n${network}\n${raw.port}\n${route}`;
     if (seen.has(key)) throw new ApiError(400, 'VALIDATION_ERROR', 'Duplicate Claude traffic research entry');
     seen.add(key);
+    retainedRouteCounts.set(
+      route,
+      (retainedRouteCounts.get(route) ?? 0) + raw.connections,
+    );
     return {
       service, client, host, network, port: raw.port, route,
       connections: raw.connections, upBytes: raw.upBytes, downBytes: raw.downBytes,
@@ -376,10 +392,23 @@ function canonicalClaudeTrafficResearch(value: unknown) {
     const right = `${b.service}\n${b.client}\n${b.host}\n${b.network}\n${String(b.port).padStart(5, '0')}\n${b.route}`;
     return left < right ? -1 : left > right ? 1 : 0;
   });
+  for (const [route, count] of retainedRouteCounts) {
+    const available = route === 'RESIDENTIAL'
+      ? residentialConnectionCount
+      : route === 'PROXIED'
+        ? value.proxiedConnectionCount
+        : route === 'DIRECT'
+          ? value.directConnectionCount
+          : value.blockedConnectionCount;
+    if (count > available) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Claude traffic entries exceed route totals');
+    }
+  }
   return {
     observedSince: value.observedSince,
     droppedEndpointCount: value.droppedEndpointCount,
     ...Object.fromEntries(countKeys.map((key) => [key, value[key]])),
+    ...(hasResidentialCount ? { residentialConnectionCount } : {}),
     ...Object.fromEntries(booleanKeys.map((key) => [key, value[key]])),
     exitIdentityConsistency,
     physicalBypassProbe,
@@ -454,6 +483,200 @@ function publicAction(row: Row) {
     deliveredAt: row.delivered_at === null ? null : Number(row.delivered_at),
     completedAt: row.completed_at === null ? null : Number(row.completed_at),
     result: row.result_json ? JSON.parse(row.result_json) : null,
+  };
+}
+
+function protectedRouteProofFromAction(row: Row | null | undefined) {
+  if (!row) return null;
+  let result: Row | null = null;
+  try {
+    const parsed = row.result_json ? JSON.parse(String(row.result_json)) : null;
+    result = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Row : null;
+  } catch {
+    result = null;
+  }
+  const research = result?.trafficResearch;
+  const evidence = research && typeof research === 'object' && !Array.isArray(research)
+    ? research as Row
+    : null;
+  if (!evidence) {
+    return {
+      source: 'device_action',
+      status: String(row.status),
+      createdAt: Number(row.created_at),
+      completedAt: row.completed_at === null ? null : Number(row.completed_at),
+      evidence: null,
+    };
+  }
+  const residentialReported = Object.prototype.hasOwnProperty.call(
+    evidence,
+    'residentialConnectionCount',
+  );
+  const routes = {
+    observed: Number(evidence.observedConnectionCount),
+    residential: residentialReported ? Number(evidence.residentialConnectionCount) : 0,
+    proxied: Number(evidence.proxiedConnectionCount),
+    direct: Number(evidence.directConnectionCount),
+    blocked: Number(evidence.blockedConnectionCount),
+    unknown: 0,
+  };
+  const unsafe =
+    evidence.exitIdentityConsistency === 'MISMATCHED' ||
+    evidence.physicalBypassProbe === 'REACHABLE' ||
+    Number(evidence.unsafeProtectionObservationCount) > 0 ||
+    Number(evidence.protectedDirectConnectionCount) > 0;
+  const confirmed =
+    !unsafe &&
+    residentialReported &&
+    routes.residential > 0 &&
+    evidence.connected === true &&
+    evidence.killSwitchArmed === true &&
+    evidence.tunPresent === true &&
+    evidence.protectedDNSConfigured === true &&
+    evidence.exitIdentityConsistency === 'MATCHED' &&
+    evidence.physicalBypassProbe === 'BLOCKED';
+  return {
+    source: 'device_action',
+    status: String(row.status),
+    createdAt: Number(row.created_at),
+    completedAt: row.completed_at === null ? null : Number(row.completed_at),
+    evidence: {
+      verdict: unsafe ? 'unsafe' : confirmed ? 'confirmed' : 'inconclusive',
+      observedSince: Number(evidence.observedSince),
+      residentialReported,
+      routes,
+      connected: evidence.connected === true,
+      killSwitchArmed: evidence.killSwitchArmed === true,
+      tunPresent: evidence.tunPresent === true,
+      protectedDNSConfigured: evidence.protectedDNSConfigured === true,
+      exitIdentityConsistency: String(evidence.exitIdentityConsistency),
+      physicalBypassProbe: String(evidence.physicalBypassProbe),
+      unsafeProtectionObservationCount: Number(evidence.unsafeProtectionObservationCount),
+      protectedDirectConnectionCount: Number(evidence.protectedDirectConnectionCount),
+    },
+  };
+}
+
+function protectedRouteProofFromTelemetry(row: Row | null | undefined) {
+  if (!row) return null;
+  let payload: Row | null = null;
+  try {
+    const parsed = row.payload_json ? JSON.parse(String(row.payload_json)) : null;
+    payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Row
+      : null;
+  } catch {
+    payload = null;
+  }
+  if (!payload || !Array.isArray(payload.events)) return null;
+
+  const acceptedRoutes = new Set(['RESIDENTIAL', 'PROXIED', 'DIRECT', 'BLOCKED', 'UNKNOWN']);
+  const routeEvents = payload.events.flatMap((raw: unknown) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const event = raw as Row;
+    if (!['protectedRouteAggregate', 'protectedRouteInvariantViolation'].includes(String(event.kind)) ||
+        !acceptedRoutes.has(String(event.outcome)) ||
+        !Number.isSafeInteger(event.generation) || Number(event.generation) < 0 ||
+        !Number.isSafeInteger(event.ts) || Number(event.ts) < 0 ||
+        !Number.isSafeInteger(event.counter) || Number(event.counter) <= 0 ||
+        Number(event.counter) > 1_000_000) {
+      return [];
+    }
+    return [{
+      route: String(event.outcome),
+      generation: Number(event.generation),
+      timestamp: Number(event.ts),
+      count: Number(event.counter),
+    }];
+  });
+  if (routeEvents.length === 0) return null;
+
+  // One Windows controller sample expands a cumulative session snapshot into
+  // at most five route events. If a telemetry window spans two sessions, use
+  // only the generation containing the newest event rather than mixing them.
+  const latest = routeEvents.reduce((left, right) =>
+    right.timestamp > left.timestamp ||
+    (right.timestamp === left.timestamp && right.generation > left.generation)
+      ? right
+      : left);
+  const counts = {
+    RESIDENTIAL: 0,
+    PROXIED: 0,
+    DIRECT: 0,
+    BLOCKED: 0,
+    UNKNOWN: 0,
+  };
+  for (const event of routeEvents) {
+    if (event.generation !== latest.generation) continue;
+    const route = event.route as keyof typeof counts;
+    counts[route] = Math.max(counts[route], event.count);
+  }
+  const observed = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  if (observed === 0) return null;
+  const unsafe = counts.DIRECT > 0 || counts.PROXIED > 0;
+  const receivedAt = Number(row.received_at);
+  const connected = payload.uiState === 'connected';
+  return {
+    source: 'periodic_telemetry',
+    status: 'observed',
+    createdAt: receivedAt,
+    completedAt: receivedAt,
+    evidence: {
+      // Windows periodic evidence proves the final Mihomo chain but does not
+      // run the two on-demand identity/bypass probes, so a clean residential
+      // observation remains explicitly inconclusive rather than "confirmed".
+      verdict: unsafe ? 'unsafe' : 'inconclusive',
+      observedSince: Math.floor(Math.min(...routeEvents
+        .filter((event) => event.generation === latest.generation)
+        .map((event) => event.timestamp)) / 1_000),
+      residentialReported: true,
+      routes: {
+        observed,
+        residential: counts.RESIDENTIAL,
+        proxied: counts.PROXIED,
+        direct: counts.DIRECT,
+        blocked: counts.BLOCKED,
+        unknown: counts.UNKNOWN,
+      },
+      connected,
+      killSwitchArmed: payload.killSwitchLive === true,
+      // Windows reaches Connected only after the real WinTUN data-plane gate.
+      tunPresent: connected,
+      protectedDNSConfigured: typeof payload.dnsEnabled === 'boolean' ? payload.dnsEnabled : null,
+      exitIdentityConsistency: 'INCONCLUSIVE',
+      physicalBypassProbe: 'INCONCLUSIVE',
+      unsafeProtectionObservationCount: 0,
+      protectedDirectConnectionCount: counts.DIRECT,
+    },
+  };
+}
+
+function freshestProtectedRouteProof(
+  action: Row | null | undefined,
+  telemetry: Row | null | undefined,
+) {
+  const actionProof = protectedRouteProofFromAction(action);
+  const telemetryProof = protectedRouteProofFromTelemetry(telemetry);
+  if (!actionProof?.evidence) return telemetryProof ?? actionProof;
+  if (!telemetryProof?.evidence) return actionProof;
+  const actionAt = actionProof.completedAt ?? actionProof.createdAt;
+  const telemetryAt = telemetryProof.completedAt ?? telemetryProof.createdAt;
+  return telemetryAt > actionAt ? telemetryProof : actionProof;
+}
+
+// The canonical action result retains a bounded endpoint sample for engineering
+// analysis. The routine ops UI needs only aggregate proof, so its listing never
+// receives endpoint hosts or any future raw entry fields by accident.
+function publicAdministrativeAction(row: Row) {
+  const action = publicAction(row);
+  if (row.action !== 'claude_traffic_snapshot' || !row.result_json) return action;
+  const proof = protectedRouteProofFromAction(row);
+  return {
+    ...action,
+    result: {
+      outcome: action.status,
+      protectedRouteProof: proof?.evidence ?? null,
+    },
   };
 }
 
@@ -1269,6 +1492,30 @@ function publicNodeProfile(row: Row) {
   };
 }
 
+function opsAuditStatement(
+  e: Env,
+  actorEmail: string | undefined,
+  action: string,
+  targetType: string,
+  targetId: string | null,
+  summary: string,
+  onlyIfPreviousStatementChanged = false,
+) {
+  return e.DB.prepare(
+    `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
+     SELECT ?, ?, ?, ?, ?, ?, ?
+     ${onlyIfPreviousStatementChanged ? 'WHERE changes() > 0' : ''}`,
+  ).bind(
+    id(),
+    now(),
+    (actorEmail || 'unknown').slice(0, 254),
+    action.slice(0, 80),
+    targetType.slice(0, 80),
+    targetId,
+    summary.slice(0, 500),
+  );
+}
+
 async function writeOpsAudit(
   e: Env,
   actorEmail: string | undefined,
@@ -1278,17 +1525,7 @@ async function writeOpsAudit(
   summary: string,
 ) {
   try {
-    await e.DB.prepare(
-      'INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary) VALUES(?, ?, ?, ?, ?, ?, ?)',
-    ).bind(
-      id(),
-      now(),
-      (actorEmail || 'unknown').slice(0, 254),
-      action.slice(0, 80),
-      targetType.slice(0, 80),
-      targetId,
-      summary.slice(0, 500),
-    ).run();
+    await opsAuditStatement(e, actorEmail, action, targetType, targetId, summary).run();
   } catch {
     // Audit must never fail the operator action; the table may be mid-migration.
   }
@@ -2067,6 +2304,97 @@ async function exitCredentialRolloutPhase(e: Env): Promise<'dual' | 'device_only
   return row?.phase === 'device_only' ? 'device_only' : 'dual';
 }
 
+const USAGE_METERING_LEGACY_QUIET_SECONDS = 30 * 60;
+const USAGE_METERING_NODE_READY_SECONDS = 15 * 60;
+
+async function usageMeteringStatus(e: Env) {
+  const timestamp = now();
+  const [rollout, legacySources, namedSources, activeNodes, baselines] = await e.DB.batch([
+    e.DB.prepare(
+      `SELECT phase, legacy_last_seen_at, updated_at
+       FROM usage_metering_rollout WHERE singleton_id = 1`,
+    ),
+    e.DB.prepare(
+      `SELECT COUNT(*) AS source_rows,
+              COUNT(DISTINCT user_id) AS users,
+              COALESCE(SUM(accumulated_bytes), 0) AS accumulated_bytes,
+              COALESCE(MAX(updated_at), 0) AS latest_update_at
+       FROM usage_report_sources WHERE source_id = ''`,
+    ),
+    e.DB.prepare(
+      `SELECT COUNT(*) AS source_rows,
+              COUNT(DISTINCT user_id) AS users,
+              COUNT(DISTINCT source_id) AS sources,
+              SUM(CASE WHEN protocol_version = 2 THEN 1 ELSE 0 END) AS v2_rows,
+              SUM(CASE WHEN protocol_version = 1 THEN 1 ELSE 0 END) AS v1_rows,
+              COALESCE(SUM(accumulated_bytes), 0) AS accumulated_bytes,
+              COALESCE(MAX(updated_at), 0) AS latest_update_at
+       FROM usage_report_sources WHERE source_id != ''`,
+    ),
+    e.DB.prepare(
+      `SELECT exit_nodes.id, exit_nodes.name,
+              exit_nodes.metering_protocol_version,
+              exit_nodes.metering_last_seen_at
+       FROM exit_nodes
+       WHERE exit_nodes.status = 'active'
+       ORDER BY exit_nodes.name, exit_nodes.id`,
+    ),
+    e.DB.prepare('SELECT COUNT(*) AS count FROM usage_metering_cutover_baselines'),
+  ]);
+  const state = rollout.results[0] as Row | undefined;
+  const legacy = legacySources.results[0] as Row | undefined;
+  const named = namedSources.results[0] as Row | undefined;
+  const nodes = activeNodes.results as Row[];
+  const phase = state?.phase === 'v2_required' ? 'v2_required' : 'dual';
+  const legacyLastSeenAt = Number(state?.legacy_last_seen_at ?? 0);
+  const blockers: string[] = [];
+  if (phase === 'dual') {
+    if (nodes.length === 0) blockers.push('no_active_exit_nodes');
+    if (nodes.some((node) =>
+      Number(node.metering_protocol_version) !== 2 ||
+      Number(node.metering_last_seen_at) <= timestamp - USAGE_METERING_NODE_READY_SECONDS
+    )) {
+      blockers.push('active_exit_without_v2_readiness');
+    }
+    if (legacyLastSeenAt > timestamp - USAGE_METERING_LEGACY_QUIET_SECONDS) {
+      blockers.push('legacy_collector_recently_active');
+    }
+  }
+  return {
+    phase,
+    updatedAt: Number(state?.updated_at ?? 0),
+    legacyLastSeenAt: legacyLastSeenAt || null,
+    legacyQuietSeconds: legacyLastSeenAt ? Math.max(0, timestamp - legacyLastSeenAt) : null,
+    requiredLegacyQuietSeconds: USAGE_METERING_LEGACY_QUIET_SECONDS,
+    legacy: {
+      sourceRows: Number(legacy?.source_rows ?? 0),
+      users: Number(legacy?.users ?? 0),
+      accumulatedBytes: Number(legacy?.accumulated_bytes ?? 0),
+      latestUpdateAt: Number(legacy?.latest_update_at ?? 0) || null,
+    },
+    named: {
+      sourceRows: Number(named?.source_rows ?? 0),
+      users: Number(named?.users ?? 0),
+      sources: Number(named?.sources ?? 0),
+      v1Rows: Number(named?.v1_rows ?? 0),
+      v2Rows: Number(named?.v2_rows ?? 0),
+      accumulatedBytes: Number(named?.accumulated_bytes ?? 0),
+      latestUpdateAt: Number(named?.latest_update_at ?? 0) || null,
+    },
+    activeNodes: nodes.map((node) => ({
+      id: String(node.id),
+      name: String(node.name),
+      v2Ready:
+        Number(node.metering_protocol_version) === 2 &&
+        Number(node.metering_last_seen_at) > timestamp - USAGE_METERING_NODE_READY_SECONDS,
+      lastV2At: Number(node.metering_last_seen_at) || null,
+    })),
+    cutoverBaselineUsers: Number((baselines.results[0] as Row | undefined)?.count ?? 0),
+    canRequireV2: phase === 'dual' && blockers.length === 0,
+    blockers,
+  };
+}
+
 async function backfillDeviceExitCredentials(e: Env, limit = 50) {
   const pending = await e.DB.prepare(
     `SELECT devices.id, devices.user_id
@@ -2158,6 +2486,171 @@ async function sharedAdministrativeResource(
   actorEmail?: string,
 ): Promise<Response | null> {
   let mt: RegExpMatchArray | null;
+  if (resource === 'usage-metering-rollout' && m === 'GET') {
+    return Response.json(await usageMeteringStatus(e));
+  }
+  if (resource === 'usage-metering-rollout' && m === 'POST') {
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['phase']);
+    if (b.phase !== 'v2_required') {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Rollout may only advance to v2_required');
+    }
+    const state = await usageMeteringStatus(e);
+    if (state.phase === 'v2_required') return Response.json(state);
+    if (!state.canRequireV2) {
+      throw new ApiError(
+        409,
+        'METERING_ROLLOUT_NOT_READY',
+        `Metering v2 is not ready: ${state.blockers.join(', ')}`,
+      );
+    }
+    const t = now();
+    let changed: D1Result;
+    try {
+      const results = await e.DB.batch([
+        e.DB.prepare(
+          `INSERT INTO usage_metering_cutover_baselines(
+             user_id, reported_bytes, named_bytes, cutover_at
+           )
+           SELECT users.id,
+                  users.usage_reported_bytes,
+                  COALESCE((
+                    SELECT SUM(accumulated_bytes)
+                    FROM usage_report_sources
+                    WHERE usage_report_sources.user_id = users.id
+                      AND usage_report_sources.source_id != ''
+                  ), 0),
+                  ?
+           FROM users
+           WHERE true
+           ON CONFLICT(user_id) DO NOTHING`,
+        ).bind(t),
+        e.DB.prepare(
+          `UPDATE usage_metering_rollout
+           SET phase = 'v2_required', updated_at = ?
+           WHERE singleton_id = 1 AND phase = 'dual'`,
+        ).bind(t),
+        opsAuditStatement(
+          e,
+          actorEmail,
+          'usage-metering.require-v2',
+          'usage_metering_rollout',
+          '1',
+          'legacy collector disabled; named protocol v2 required',
+          true,
+        ),
+      ]);
+      changed = results[1];
+    } catch (error) {
+      if (String(error).includes('USAGE_METERING_ROLLOUT_NOT_READY')) {
+        throw new ApiError(
+          409,
+          'METERING_ROLLOUT_NOT_READY',
+          'Metering readiness changed; inspect rollout state and retry',
+        );
+      }
+      throw error;
+    }
+    if (!changed.meta.changes) return Response.json(await usageMeteringStatus(e));
+    return Response.json(await usageMeteringStatus(e));
+  }
+  mt = resource.match(/^users\/([^/]+)\/devices\/([^/]+)\/diagnostics-logs$/);
+  if (mt && m === 'GET') {
+    const row = await e.DB.prepare(
+      `SELECT devices.id, access.expires_at, access.created_at, access.updated_at
+       FROM devices
+       LEFT JOIN diagnostics_log_access access ON access.device_id = devices.id
+       WHERE devices.user_id = ? AND devices.id = ?`,
+    ).bind(mt[1], mt[2]).first<Row>();
+    if (!row) throw new ApiError(404, 'NOT_FOUND', 'Device not found');
+    const expiresAt = row.expires_at == null ? null : Number(row.expires_at);
+    return Response.json({
+      diagnosticsLogs: {
+        userId: mt[1],
+        deviceId: mt[2],
+        enabled: expiresAt !== null && expiresAt > now(),
+        expiresAt,
+        createdAt: row.created_at == null ? null : Number(row.created_at),
+        updatedAt: row.updated_at == null ? null : Number(row.updated_at),
+      },
+    });
+  }
+  if (mt && m === 'PUT') {
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['expiresAt']);
+    const t = now();
+    if (
+      !Number.isSafeInteger(b.expiresAt) ||
+      b.expiresAt <= t ||
+      b.expiresAt > t + DIAGNOSTICS_LOG_ACCESS_MAX_SECONDS
+    ) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'expiresAt must be within the next 24 hours');
+    }
+    const device = await e.DB.prepare(
+      `SELECT devices.id, access.expires_at
+       FROM devices
+       LEFT JOIN diagnostics_log_access access ON access.device_id = devices.id
+       WHERE devices.user_id = ? AND devices.id = ?`,
+    ).bind(mt[1], mt[2]).first<Row>();
+    if (!device) throw new ApiError(404, 'NOT_FOUND', 'Device not found');
+    if (Number(device.expires_at) !== b.expiresAt) {
+      await e.DB.batch([
+        e.DB.prepare(
+          `INSERT INTO diagnostics_log_access(
+             device_id, user_id, expires_at, created_at, updated_at
+           ) VALUES(?, ?, ?, ?, ?)
+           ON CONFLICT(device_id) DO UPDATE SET
+             expires_at = excluded.expires_at,
+             updated_at = excluded.updated_at
+           WHERE diagnostics_log_access.expires_at != excluded.expires_at`,
+        ).bind(mt[2], mt[1], b.expiresAt, t, t),
+        opsAuditStatement(
+          e,
+          actorEmail,
+          'diagnostics-logs.enable',
+          'device',
+          mt[2],
+          `enabled raw logs for user ${mt[1]} until ${b.expiresAt}`,
+          true,
+        ),
+      ]);
+    }
+    return Response.json({
+      diagnosticsLogs: {
+        userId: mt[1], deviceId: mt[2], enabled: true, expiresAt: b.expiresAt,
+      },
+    });
+  }
+  if (mt && m === 'DELETE') {
+    const device = await e.DB.prepare(
+      `SELECT devices.id, access.device_id AS access_device_id
+       FROM devices
+       LEFT JOIN diagnostics_log_access access ON access.device_id = devices.id
+       WHERE devices.user_id = ? AND devices.id = ?`,
+    ).bind(mt[1], mt[2]).first<Row>();
+    if (!device) throw new ApiError(404, 'NOT_FOUND', 'Device not found');
+    if (device.access_device_id != null) {
+      await e.DB.batch([
+        e.DB.prepare(
+          'DELETE FROM diagnostics_log_access WHERE device_id = ? AND user_id = ?',
+        ).bind(mt[2], mt[1]),
+        opsAuditStatement(
+          e,
+          actorEmail,
+          'diagnostics-logs.disable',
+          'device',
+          mt[2],
+          `disabled raw logs for user ${mt[1]}`,
+          true,
+        ),
+      ]);
+    }
+    return Response.json({
+      diagnosticsLogs: {
+        userId: mt[1], deviceId: mt[2], enabled: false, expiresAt: null,
+      },
+    });
+  }
   if (resource === 'exit-nodes' && m === 'GET') {
     const rows = await e.DB.prepare(
       `SELECT id, name, status, last_roster_at, created_at, updated_at
@@ -2959,9 +3452,9 @@ async function sharedAdministrativeResource(
     const deviceId = new URL(req.url).searchParams.get('deviceId');
     if (deviceId !== null && (deviceId.length < 1 || deviceId.length > 200)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid deviceId');
     const q = deviceId
-      ? await e.DB.prepare('SELECT * FROM device_actions WHERE device_id = ? ORDER BY created_at DESC LIMIT 100').bind(deviceId).all<Row>()
-      : await e.DB.prepare('SELECT * FROM device_actions ORDER BY created_at DESC LIMIT 100').all<Row>();
-    return Response.json({ actions: q.results.map(publicAction) });
+      ? await e.DB.prepare('SELECT * FROM device_actions WHERE device_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 100').bind(deviceId).all<Row>()
+      : await e.DB.prepare('SELECT * FROM device_actions ORDER BY created_at DESC, rowid DESC LIMIT 100').all<Row>();
+    return Response.json({ actions: q.results.map(publicAdministrativeAction) });
   }
   if (resource === 'devices' && m === 'GET') {
     const q = await e.DB.prepare(
@@ -4711,6 +5204,10 @@ const DIAGNOSTICS_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
 // splits into more segments rather than having one truncated.
 const DIAGNOSTICS_LOG_MAX_BYTES = 2 * 1024 * 1024;
 const DIAGNOSTICS_LOG_RETENTION_DEFAULT_SECONDS = 14 * DIAGNOSTICS_DAY_SECONDS;
+// Support can enable one authenticated device for at most one day. Requiring an
+// absolute expiry makes repeated PUTs idempotent rather than silently extending
+// a troubleshooting session on every retry.
+const DIAGNOSTICS_LOG_ACCESS_MAX_SECONDS = DIAGNOSTICS_DAY_SECONDS;
 // Every component of an R2 key is either a fixed string or matched against
 // this, so a session identifier can never introduce a path segment.
 const DIAGNOSTICS_LOG_SESSION_PATTERN = /^[0-9A-Za-z-]{1,64}$/;
@@ -5242,19 +5739,18 @@ async function storeTelemetryWindow(
 ) {
   const receivedAt = now();
   const rowId = id();
-  const statements: D1PreparedStatement[] = [
-    e.DB.prepare(
-      `INSERT INTO telemetry_windows(
-         id, user_id, device_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(rowId, uid, deviceId, receivedAt, windowStartMs, windowEndMs, clientVersion, osVersion, payloadJson),
-  ];
-  if (deviceId) {
-    statements.push(
-      e.DB.prepare('UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE id = ?').bind(receivedAt, receivedAt, deviceId),
-    );
-  }
-  await e.DB.batch(statements);
+  // The immutable row is itself the device-attributed heartbeat used by the
+  // operations activity view. Rewriting devices.last_seen_at with the same
+  // receipt merely doubles every telemetry upload's D1 writes; login and token
+  // refresh continue to maintain that account/device lifecycle watermark.
+  await e.DB.prepare(
+    `INSERT INTO telemetry_windows(
+       id, user_id, device_id, received_at, window_start_ms, window_end_ms, client_version, os_version, payload_json
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    rowId, uid, deviceId, receivedAt, windowStartMs, windowEndMs,
+    clientVersion, osVersion, payloadJson,
+  ).run();
   return { id: rowId, receivedAt };
 }
 
@@ -5747,7 +6243,16 @@ async function ensureDevice(e: Env, user: string, name: string, installation: st
          WHERE candidate.user_id = ?
            AND candidate.status IN ('pending', 'active')
            AND candidate.id != ?
-         ORDER BY COALESCE(candidate.last_seen_at, candidate.created_at) ASC,
+         ORDER BY MAX(
+                    COALESCE(candidate.last_seen_at, candidate.created_at),
+                    COALESCE((
+                      SELECT received_at
+                      FROM telemetry_windows
+                      WHERE device_id = candidate.id
+                      ORDER BY received_at DESC
+                      LIMIT 1
+                    ), 0)
+                  ) ASC,
                   candidate.created_at ASC,
                   candidate.rowid ASC
          LIMIT MAX(0,
@@ -7196,6 +7701,23 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   // as received.
   if (p === '/api/v1/diagnostics/logs' && m === 'POST') {
     const a = await auth(req, e);
+    const receivedAt = now();
+    const access = await e.DB.prepare(
+      `SELECT 1 FROM diagnostics_log_access
+       WHERE user_id = ? AND device_id = ? AND expires_at > ?`,
+    ).bind(a.userId, a.deviceId, receivedAt).first<Row>();
+    if (!access) {
+      // Old clients advance their local cursor only after decoding the existing
+      // segment receipt. Preserve that successful shape while making the
+      // no-store decision before metadata validation, body reads, rate-limit
+      // counters, R2, or the D1 object index. The additive fields are ignored by
+      // shipped decoders and make the decision visible to newer tooling.
+      return Response.json({
+        segment: { id: 'not-stored', receivedAt },
+        stored: false,
+        reason: 'not_enabled',
+      });
+    }
     const meta = diagnosticsLogMetadata(req);
     const payload = await binaryBody(req, DIAGNOSTICS_LOG_MAX_BYTES);
     // Cheap shape check with real value: it catches a client that uploads plain
@@ -7214,7 +7736,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     // 200 on a replay, 201 on a new segment: the client advances its cursor on
     // either, but the distinction is what makes a cursor bug visible in logs.
     return Response.json(
-      { segment: { id: stored.id, receivedAt: stored.receivedAt } },
+      { segment: { id: stored.id, receivedAt: stored.receivedAt }, stored: true },
       { status: stored.duplicate ? 200 : 201 },
     );
   }
@@ -7763,6 +8285,27 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           `SELECT received_at, client_version, os_version, payload_json
            FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 1`,
         ).bind(mt[1]).first<Row>();
+        const protectedRouteTelemetry = await e.DB.prepare(
+          `SELECT received_at, payload_json
+           FROM telemetry_windows
+           WHERE user_id = ?
+             AND EXISTS (
+               SELECT 1
+               FROM json_each(telemetry_windows.payload_json, '$.events') event
+               WHERE json_extract(event.value, '$.kind') IN (
+                 'protectedRouteAggregate',
+                 'protectedRouteInvariantViolation'
+               )
+             )
+           ORDER BY received_at DESC
+           LIMIT 1`,
+        ).bind(mt[1]).first<Row>();
+        const protectedRouteAction = await e.DB.prepare(
+          `SELECT status, created_at, completed_at, result_json
+           FROM device_actions
+           WHERE user_id = ? AND action = 'claude_traffic_snapshot'
+           ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+        ).bind(mt[1]).first<Row>();
         let heartbeat: Row | null = null;
         if (activity) {
           let payload: Row = {};
@@ -7803,6 +8346,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             replaceCount: await replaceCountForUser(e, mt[1]),
           },
           heartbeat,
+          protectedRouteProof: freshestProtectedRouteProof(
+            protectedRouteAction,
+            protectedRouteTelemetry,
+          ),
         });
       }
       mt = p.match(/^\/api\/v1\/ops\/incidents\/node\/([^/]+)$/);
@@ -8501,7 +9048,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   if (p === '/api/v1/home/roster-ack' && m === 'POST') {
     const node = await authenticateExitNode(req, e);
     const b = await body(req, 4 * 1024);
-    rejectUnexpectedKeys(b, ['observedAt']);
+    rejectUnexpectedKeys(b, ['observedAt', 'meteringProtocolVersion']);
     const t = now();
     if (
       !Number.isSafeInteger(b.observedAt) ||
@@ -8518,22 +9065,55 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json({ nodeId: node!.id, observedAt: b.observedAt });
   }
 
+  if (p === '/api/v1/home/metering-ack' && m === 'POST') {
+    const node = await authenticateExitNode(req, e);
+    const b = await body(req, 4 * 1024);
+    rejectUnexpectedKeys(b, ['meteringProtocolVersion', 'observedAt']);
+    const t = now();
+    if (
+      b.meteringProtocolVersion !== 2 ||
+      !Number.isSafeInteger(b.observedAt) ||
+      b.observedAt > t ||
+      b.observedAt <= t - USAGE_METERING_NODE_READY_SECONDS
+    ) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid metering acknowledgement');
+    }
+    await e.DB.prepare(
+      `UPDATE exit_nodes
+       SET metering_protocol_version = 2,
+           metering_last_seen_at = ?
+       WHERE id = ? AND status = 'active'
+         AND metering_last_seen_at < ?`,
+    ).bind(b.observedAt, node!.id, b.observedAt).run();
+    return Response.json({
+      nodeId: node!.id,
+      meteringProtocolVersion: 2,
+      observedAt: b.observedAt,
+    });
+  }
+
   // Same handler for the home agent and the collector. The collector is what
   // has SSH to all sixteen nodes and therefore what reads the per-user byte
   // counters; giving it the home agent's token instead would widen that one
   // rather than scope this.
   //
-  // Every reporter keeps its own cumulative figure, named by `sourceId`, and an
-  // account's counter is the sum of them. Folding them with MAX() — which was
-  // right when one collector held the whole fleet's total — bills an account
-  // spread over three exits for the largest of the three.
+  // Named reporters are shadowed while a legacy source exists. The explicit
+  // v2 cutover snapshots the named sum already represented by the legacy
+  // authority, after which only named-source growth advances account usage.
   if ((p === '/api/v1/home/usage' || p === '/api/v1/ops-ingest/usage') && m === 'POST') {
     let authenticatedSourceId = '';
+    const metering = await e.DB.prepare(
+      'SELECT phase FROM usage_metering_rollout WHERE singleton_id = 1',
+    ).first<Row>();
+    const meteringPhase = metering?.phase === 'v2_required' ? 'v2_required' : 'dual';
     if (p === '/api/v1/ops-ingest/usage') {
       if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
         throw new ApiError(503, 'OPS_INGEST_UNCONFIGURED', 'Collector ingest is not configured');
       }
       await privileged(req, e.OPS_COLLECTOR_TOKEN);
+      if (meteringPhase === 'v2_required') {
+        throw new ApiError(409, 'METERING_V2_REQUIRED', 'Legacy collector metering is disabled');
+      }
     } else {
       authenticatedSourceId = (await authenticateExitNode(req, e))!.id;
     }
@@ -8561,8 +9141,13 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const submittedSourceId = x.sourceId === undefined || x.sourceId === null
         ? null
         : str(x.sourceId, 'sourceId', 1, 64);
-      if (p === '/api/v1/home/usage' && submittedSourceId !== null && submittedSourceId !== authenticatedSourceId) {
-        throw new ApiError(403, 'SOURCE_ID_MISMATCH', 'Usage source does not match the authenticated exit node');
+      if (p === '/api/v1/home/usage') {
+        if (submittedSourceId === null) {
+          throw new ApiError(400, 'SOURCE_ID_REQUIRED', 'Named usage must include its sourceId');
+        }
+        if (submittedSourceId !== authenticatedSourceId) {
+          throw new ApiError(403, 'SOURCE_ID_MISMATCH', 'Usage source does not match the authenticated exit node');
+        }
       }
       if (p === '/api/v1/ops-ingest/usage' && submittedSourceId !== null) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Collector usage may not name an exit source');
@@ -8574,6 +9159,16 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       const reportProtocolVersion = x.protocolVersion === undefined || x.protocolVersion === null
         ? 1
         : x.protocolVersion;
+      if (p === '/api/v1/ops-ingest/usage' && reportProtocolVersion !== 1) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Collector usage is legacy protocol v1');
+      }
+      if (
+        p === '/api/v1/home/usage' &&
+        meteringPhase === 'v2_required' &&
+        reportProtocolVersion !== 2
+      ) {
+        throw new ApiError(409, 'METERING_V2_REQUIRED', 'Named usage must use protocol v2');
+      }
       if (
         !Number.isSafeInteger(reportProtocolVersion) ||
         (reportProtocolVersion !== 1 && reportProtocolVersion !== 2) ||
@@ -8639,6 +9234,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
     try {
       await e.DB.batch([
+        ...(p === '/api/v1/ops-ingest/usage' ? [e.DB.prepare(
+          `UPDATE usage_metering_rollout
+           SET legacy_last_seen_at = ?
+           WHERE singleton_id = 1
+             AND (phase = 'v2_required' OR legacy_last_seen_at < ?)`,
+        ).bind(receivedAt, receivedAt - 60)] : []),
         e.DB.prepare(
         `WITH input AS (
            SELECT
@@ -8659,8 +9260,29 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          -- (user, authenticated source, observed_at) watermark below. Storing
          -- and later deleting a second row for every report multiplies the D1
          -- write volume without adding replay protection. Retain immutable IDs
-         -- only for legacy v1 senders whose wall clocks are not monotonic.
-         WHERE protocol_version = 1`,
+         -- only for legacy v1 senders whose wall clocks are not monotonic. A
+         -- fresh legacy ID carrying an unchanged/lower MAX counter is neither
+         -- replay evidence nor billing input, so it writes no row. Reusing an
+         -- existing ID is still attempted so the immutability trigger can
+         -- distinguish an exact replay from conflicting content.
+         WHERE protocol_version = 1
+           AND (
+             source_id != ''
+             OR EXISTS (
+               SELECT 1 FROM usage_reports
+               WHERE usage_reports.report_id = input.report_id
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM usage_report_sources
+               WHERE usage_report_sources.user_id = input.user_id
+                 AND usage_report_sources.source_id = input.source_id
+             )
+             OR total_bytes > COALESCE((
+               SELECT last_total_bytes FROM usage_report_sources
+               WHERE usage_report_sources.user_id = input.user_id
+                 AND usage_report_sources.source_id = input.source_id
+             ), -1)
+           )`,
         ).bind(encodedReports, receivedAt),
         // One cumulative figure per (account, source). Within a source the
         // figure only ever rises, so the difference from the last one is what
@@ -8743,7 +9365,10 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          -- watermark with the server-roster clock. Thereafter only a strictly
          -- newer v2 observation can move this source: report IDs are pruned, and
          -- accepting an old high-water row after a reset would rebill history.
-         WHERE usage_report_sources.source_id = ''
+         WHERE (
+              usage_report_sources.source_id = ''
+              AND excluded.last_total_bytes > usage_report_sources.last_total_bytes
+            )
             OR excluded.protocol_version > usage_report_sources.protocol_version
             OR (
               excluded.protocol_version = usage_report_sources.protocol_version
@@ -8785,40 +9410,72 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
          ),
          accepted AS (
            SELECT DISTINCT user_id FROM accepted_reports
+         ),
+         effective AS (
+           SELECT accepted.user_id,
+                  CASE rollout.phase
+                    WHEN 'dual' THEN CASE
+                      WHEN EXISTS (
+                        SELECT 1 FROM usage_report_sources legacy
+                        WHERE legacy.user_id = accepted.user_id
+                          AND legacy.source_id = ''
+                      ) THEN COALESCE((
+                        SELECT accumulated_bytes FROM usage_report_sources legacy
+                        WHERE legacy.user_id = accepted.user_id
+                          AND legacy.source_id = ''
+                      ), 0)
+                      ELSE COALESCE((
+                        SELECT SUM(accumulated_bytes) FROM usage_report_sources named
+                        WHERE named.user_id = accepted.user_id
+                          AND named.source_id != ''
+                      ), 0)
+                    END
+                    ELSE CASE
+                      WHEN baseline.user_id IS NOT NULL THEN
+                        baseline.reported_bytes + MAX(
+                          0,
+                          COALESCE((
+                            SELECT SUM(accumulated_bytes) FROM usage_report_sources named
+                            WHERE named.user_id = accepted.user_id
+                              AND named.source_id != ''
+                          ), 0) - baseline.named_bytes
+                        )
+                      ELSE COALESCE((
+                        SELECT SUM(accumulated_bytes) FROM usage_report_sources named
+                        WHERE named.user_id = accepted.user_id
+                          AND named.source_id != ''
+                      ), 0)
+                    END
+                  END AS total_bytes
+           FROM accepted
+           CROSS JOIN usage_metering_rollout rollout
+           LEFT JOIN usage_metering_cutover_baselines baseline
+             ON baseline.user_id = accepted.user_id
+           WHERE rollout.singleton_id = 1
          )
          UPDATE users
          SET usage_reported_bytes = MAX(
                usage_reported_bytes,
-               COALESCE((
-                 SELECT SUM(accumulated_bytes) FROM usage_report_sources
-                  WHERE usage_report_sources.user_id = users.id
-               ), 0)
+               COALESCE((SELECT total_bytes FROM effective WHERE user_id = users.id), 0)
              ),
              usage_bytes = MAX(
                0,
                MAX(
                  usage_reported_bytes,
-                 COALESCE((
-                   SELECT SUM(accumulated_bytes) FROM usage_report_sources
-                    WHERE usage_report_sources.user_id = users.id
-                 ), 0)
+                 COALESCE((SELECT total_bytes FROM effective WHERE user_id = users.id), 0)
                ) - usage_baseline_bytes
              ),
              updated_at = ?
-         WHERE id IN (SELECT user_id FROM accepted)
+         WHERE id IN (SELECT user_id FROM effective)
            AND (
-             usage_reported_bytes < COALESCE((
-               SELECT SUM(accumulated_bytes) FROM usage_report_sources
-                WHERE usage_report_sources.user_id = users.id
-             ), 0)
+             usage_reported_bytes < COALESCE(
+               (SELECT total_bytes FROM effective WHERE user_id = users.id), 0
+             )
              OR usage_bytes != MAX(
                0,
                MAX(
                  usage_reported_bytes,
-                 COALESCE((
-                   SELECT SUM(accumulated_bytes) FROM usage_report_sources
-                    WHERE usage_report_sources.user_id = users.id
-                 ), 0)
+                 COALESCE((SELECT total_bytes FROM effective WHERE user_id = users.id), 0)
                ) - usage_baseline_bytes
              )
            )`,
@@ -8827,6 +9484,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     } catch (x) {
       if (String(x).includes('USAGE_REPORT_CONFLICT')) {
         throw new ApiError(409, 'USAGE_REPORT_CONFLICT', 'reportId was already used with different content');
+      }
+      if (String(x).includes('USAGE_METERING_V2_REQUIRED')) {
+        throw new ApiError(409, 'METERING_V2_REQUIRED', 'Metering rollout now requires named protocol v2');
       }
       throw x;
     }

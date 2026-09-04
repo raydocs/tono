@@ -118,6 +118,36 @@ export interface NodeProfileDto {
   updatedAt: number;
 }
 
+export interface ProtectedRouteEvidenceDto {
+  verdict: 'confirmed' | 'inconclusive' | 'unsafe';
+  observedSince: number;
+  residentialReported: boolean;
+  routes: {
+    observed: number;
+    residential: number;
+    proxied: number;
+    direct: number;
+    blocked: number;
+    unknown: number;
+  };
+  connected: boolean;
+  killSwitchArmed: boolean;
+  tunPresent: boolean;
+  protectedDNSConfigured: boolean | null;
+  exitIdentityConsistency: 'MATCHED' | 'MISMATCHED' | 'INCONCLUSIVE';
+  physicalBypassProbe: 'BLOCKED' | 'REACHABLE' | 'INCONCLUSIVE';
+  unsafeProtectionObservationCount: number;
+  protectedDirectConnectionCount: number;
+}
+
+export interface ProtectedRouteProofDto {
+  source: 'device_action' | 'periodic_telemetry';
+  status: string;
+  createdAt: number;
+  completedAt: number | null;
+  evidence: ProtectedRouteEvidenceDto | null;
+}
+
 export interface UserDetailDto {
   devices: Array<{
     id: string;
@@ -151,6 +181,7 @@ export interface UserDetailDto {
     nodeHealth: string | null;
     nodeHealthLabel: string | null;
   } | null;
+  protectedRouteProof: ProtectedRouteProofDto | null;
 }
 
 export interface HomeExitDto {

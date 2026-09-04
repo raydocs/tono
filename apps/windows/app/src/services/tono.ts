@@ -157,6 +157,10 @@ const STABLE_ERROR_KEYS: Array<{ prefix: string; key: string }> = [
     key: 'tono.dashboard.errors.serviceTooOld',
   },
   {
+    prefix: 'TONO_BROWSER_DNS_PREFLIGHT',
+    key: 'tono.dashboard.errors.browserDnsPreflight',
+  },
+  {
     prefix: 'TONO_NODE_OR_CORE_UNREACHABLE',
     key: 'tono.dashboard.errors.nodeUnreachable',
   },

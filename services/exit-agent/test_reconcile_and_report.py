@@ -90,10 +90,11 @@ class ApiOrigin(unittest.TestCase):
             build_opener.return_value.open.side_effect = respond
             agent.fetch_roster("https://api.example.com", "node-token")
             agent.acknowledge_roster("https://api.example.com", "node-token", 1)
+            agent.acknowledge_metering("https://api.example.com", "node-token", 1)
             agent.deliver("https://api.example.com", "node-token", [])
 
         redirect_following.assert_not_called()
-        self.assertEqual(build_opener.call_count, 3)
+        self.assertEqual(build_opener.call_count, 4)
         self.assertTrue(all(
             call.args and call.args[0].__name__ == "NoRedirect"
             for call in build_opener.call_args_list
@@ -102,6 +103,10 @@ class ApiOrigin(unittest.TestCase):
             request.unredirected_hdrs.get("Authorization") == "Bearer node-token"
             for request in requests
         ))
+        self.assertEqual(
+            json.loads(requests[2].data.decode("utf-8"))["meteringProtocolVersion"],
+            2,
+        )
 
     def test_a_redirect_is_refused_without_contacting_its_destination(self) -> None:
         contacted = []
@@ -366,6 +371,7 @@ class RestartMarkerRound(unittest.TestCase):
              patch.object(agent, "read_counters", side_effect=readings), \
              patch.object(agent, "xray_start_marker", side_effect=markers), \
              patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
              patch.object(agent, "deliver_queue", side_effect=fake_deliver):
             for _ in range(round_count if round_count is not None else len(readings)):
                 agent.main()
@@ -532,7 +538,8 @@ class RosterControlSignals(unittest.TestCase):
                  return_value=reconcile_result,
                  side_effect=reconcile_error,
              ) as reconcile, \
-             patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge:
+             patch.object(agent, "acknowledge_roster", side_effect=ack_error) as acknowledge, \
+             patch.object(agent, "acknowledge_metering"):
             if ack_error or reconcile_error or not inventory_known:
                 with self.assertRaises(agent.Refusal):
                     agent.run_once(path)
@@ -749,6 +756,7 @@ class MultipleExits(unittest.TestCase):
              ), \
              patch.object(agent, "reconcile_and_read_stable", side_effect=stable_rounds), \
              patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
              patch.object(agent, "deliver_queue", side_effect=fake_deliver), \
              patch.object(agent.time, "time", return_value=100):
             agent.run_once(path)
@@ -787,6 +795,7 @@ class MultipleExits(unittest.TestCase):
                  return_value=(0, 0, {"u:usr_1"}, {"u:usr_1": 10}, None),
              ), \
              patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
              patch.object(agent, "deliver_queue", return_value=(1, 0)) as deliver:
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)
@@ -827,6 +836,7 @@ class MultipleExits(unittest.TestCase):
                  return_value=(0, 0, set(), {}, None),
              ) as reconcile, \
              patch.object(agent, "acknowledge_roster"), \
+             patch.object(agent, "acknowledge_metering"), \
              patch.object(agent, "deliver_queue", return_value=(1, 0)) as deliver:
             with self.assertRaises(agent.Refusal):
                 agent.run_once(path)

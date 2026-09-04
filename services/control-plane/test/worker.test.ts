@@ -1273,6 +1273,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(mismatch.status).toBe(403);
     expect((await mismatch.json() as any).error.code).toBe('SOURCE_ID_MISMATCH');
 
+    const omitted = await api('home/usage', json({ reports: [{
+      reportId: 'missing-source',
+      userId: 'not-reached',
+      protocolVersion: 2,
+      totalBytes: 1,
+      observedAt: Math.floor(Date.now() / 1000),
+    }] }, firstToken));
+    expect(omitted.status).toBe(400);
+    expect((await omitted.json() as any).error.code).toBe('SOURCE_ID_REQUIRED');
+
     const rotated = await admin('exit-nodes/exit-new/token', {});
     expect(rotated.status).toBe(200);
     const secondToken = String((await rotated.json() as any).token);
@@ -1300,6 +1310,61 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       "SELECT last_roster_at FROM exit_nodes WHERE id = 'exit-default'",
     ).first<any>()).toMatchObject({ last_roster_at: observedAt });
     expect((await api('home/roster-ack', json({ observedAt }, HOME_TOKEN))).status).toBe(401);
+  });
+
+  it('records metering readiness independently without renewing roster readiness', async () => {
+    const token = EXIT_NODE_TOKENS['exit-default'];
+    const inventory = await api('home/exit-identities', {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const observedAt = Number((await inventory.json() as any).observedAt);
+    await env.DB.prepare(
+      `UPDATE exit_nodes
+       SET last_roster_at = 17, metering_protocol_version = 1, metering_last_seen_at = 0
+       WHERE id = 'exit-default'`,
+    ).run();
+
+    const ack = await api('home/metering-ack', json({
+      meteringProtocolVersion: 2,
+      observedAt,
+    }, token));
+    expect(ack.status).toBe(200);
+    expect(await env.DB.prepare(
+      `SELECT last_roster_at, metering_protocol_version, metering_last_seen_at
+       FROM exit_nodes WHERE id = 'exit-default'`,
+    ).first()).toMatchObject({
+      last_roster_at: 17,
+      metering_protocol_version: 2,
+      metering_last_seen_at: observedAt,
+    });
+    expect((await api('home/metering-ack', json({
+      meteringProtocolVersion: 2, observedAt,
+    }, HOME_TOKEN))).status).toBe(401);
+  });
+
+  it('does not renew metering readiness from a replayed or stale observation', async () => {
+    const token = EXIT_NODE_TOKENS['exit-default'];
+    const observedAt = Math.floor(Date.now() / 1000);
+    const send = (value: number) => api('home/metering-ack', json({
+      meteringProtocolVersion: 2, observedAt: value,
+    }, token));
+    expect((await send(observedAt)).status).toBe(200);
+    await env.DB.prepare(
+      "UPDATE exit_nodes SET updated_at = 11 WHERE id = 'exit-default'",
+    ).run();
+    expect((await send(observedAt)).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT metering_last_seen_at, updated_at FROM exit_nodes WHERE id = 'exit-default'",
+    ).first()).toMatchObject({ metering_last_seen_at: observedAt, updated_at: 11 });
+    expect((await send(observedAt - 1)).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT metering_last_seen_at, updated_at FROM exit_nodes WHERE id = 'exit-default'",
+    ).first()).toMatchObject({ metering_last_seen_at: observedAt, updated_at: 11 });
+    expect((await send(observedAt - 901)).status).toBe(400);
+    expect((await send(observedAt + 1)).status).toBe(400);
+    expect((await api('home/metering-ack', json({
+      meteringProtocolVersion: 2, observedAt, extra: true,
+    }, token))).status).toBe(400);
   });
 
   it('requires a fresh roster acknowledgement when a disabled exit node is re-enabled', async () => {
@@ -1448,6 +1513,10 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       'SELECT usage_bytes FROM users WHERE id = ?',
     ).bind('usr_usage').first<Record<string, unknown>>();
     expect(Number(after!.usage_bytes)).toBe(5_000);
+    const sourceBeforeNoops = await env.DB.prepare(
+      `SELECT last_total_bytes, accumulated_bytes, observed_at, updated_at
+       FROM usage_report_sources WHERE user_id = ? AND source_id = ''`,
+    ).bind('usr_usage').first<any>();
 
     // `usage_bytes` is written with MAX(), so a replay cannot inflate it and a
     // lower figure cannot walk it back — the property the reporting agent has
@@ -1459,9 +1528,155 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       'SELECT usage_bytes FROM users WHERE id = ?',
     ).bind('usr_usage').first<Record<string, unknown>>();
     expect(Number(settled!.usage_bytes)).toBe(5_000);
+    expect(await env.DB.prepare(
+      `SELECT last_total_bytes, accumulated_bytes, observed_at, updated_at
+       FROM usage_report_sources WHERE user_id = ? AND source_id = ''`,
+    ).bind('usr_usage').first()).toEqual(sourceBeforeNoops);
+    // The fresh lower report ID is not durable evidence: legacy MAX can never
+    // consume it, so keeping it would add a D1 insert/index/delete cycle solely
+    // because the collector polled an unchanged account.
+    expect(await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM usage_reports WHERE user_id = 'usr_usage'",
+    ).first()).toMatchObject({ count: 1 });
 
     // Same reportId with different content is a conflict, not a silent write.
     expect((await send('usr_usage-1', 9_999)).status).toBe(409);
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('shadows named metering, exposes readiness, and only requires v2 after explicit cutover', async () => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO users(id,email,password_hash,password_salt,status,usage_bytes,created_at,updated_at)
+       VALUES('usr-meter-cutover','meter-cutover@example.com','h','s','active',0,?,?)`,
+    ).bind(timestamp, timestamp).run();
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    const legacy = (reportId: string, totalBytes: number) => api('ops-ingest/usage', json({
+      reports: [{ reportId, userId: 'usr-meter-cutover', totalBytes, observedAt: timestamp }],
+    }, 'collector-test-token-with-at-least-32-chars'));
+    const named = (
+      nodeId: keyof typeof EXIT_NODE_TOKENS,
+      reportId: string,
+      totalBytes: number,
+      protocolVersion = 2,
+      observedAt = timestamp,
+    ) => api('home/usage', json({ reports: [{
+      reportId,
+      userId: 'usr-meter-cutover',
+      sourceId: nodeId,
+      protocolVersion,
+      totalBytes,
+      observedAt,
+    }] }, EXIT_NODE_TOKENS[nodeId]));
+
+    expect((await legacy('meter-legacy-1', 1_000)).status).toBe(200);
+    expect((await named('exit-default', 'meter-shadow-1', 400)).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT usage_reported_bytes FROM users WHERE id = 'usr-meter-cutover'",
+    ).first()).toMatchObject({ usage_reported_bytes: 1_000 });
+
+    const blockedState = await admin('usage-metering-rollout', undefined, 'GET');
+    expect(blockedState.status).toBe(200);
+    expect(await blockedState.json()).toMatchObject({
+      phase: 'dual',
+      legacy: { sourceRows: 1, users: 1 },
+      named: { sourceRows: 1, sources: 1, v2Rows: 1 },
+      canRequireV2: false,
+      blockers: expect.arrayContaining([
+        'active_exit_without_v2_readiness',
+        'legacy_collector_recently_active',
+      ]),
+    });
+    expect((await admin(
+      'usage-metering-rollout', { phase: 'v2_required' }, 'POST',
+    )).status).toBe(409);
+
+    for (const nodeId of Object.keys(EXIT_NODE_TOKENS) as Array<keyof typeof EXIT_NODE_TOKENS>) {
+      const ack = await api('home/metering-ack', json({
+        meteringProtocolVersion: 2, observedAt: timestamp,
+      }, EXIT_NODE_TOKENS[nodeId]));
+      expect(ack.status).toBe(200);
+    }
+    expect(await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM usage_report_sources WHERE source_id != ''",
+    ).first()).toMatchObject({ count: 1 });
+    expect((await api('home/metering-ack', json({
+      meteringProtocolVersion: 3,
+      observedAt: timestamp,
+    }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(400);
+    // Replaying the same observation is idempotent and does not create usage.
+    expect((await api('home/metering-ack', json({
+      meteringProtocolVersion: 2,
+      observedAt: timestamp,
+    }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    await env.DB.prepare(
+      `UPDATE usage_metering_rollout
+       SET legacy_last_seen_at = ? WHERE singleton_id = 1`,
+    ).bind(timestamp - 1801).run();
+    await env.DB.prepare(
+      `UPDATE exit_nodes SET metering_last_seen_at = ? WHERE id = 'exit-default'`,
+    ).bind(timestamp - 901).run();
+    expect((await admin(
+      'usage-metering-rollout', { phase: 'v2_required' }, 'POST',
+    )).status).toBe(409);
+    await expect(env.DB.prepare(
+      "UPDATE usage_metering_rollout SET phase = 'v2_required' WHERE singleton_id = 1",
+    ).run()).rejects.toThrow('USAGE_METERING_ROLLOUT_NOT_READY');
+    expect((await api('home/metering-ack', json({
+      meteringProtocolVersion: 2,
+      observedAt: timestamp,
+    }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    const ready = await admin('usage-metering-rollout', undefined, 'GET');
+    expect(await ready.json()).toMatchObject({ canRequireV2: true, blockers: [] });
+
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_metering_audit
+       BEFORE INSERT ON ops_audit
+       WHEN NEW.action = 'usage-metering.require-v2'
+       BEGIN SELECT RAISE(ABORT, 'TEST_METERING_AUDIT_FAILURE'); END`,
+    ).run();
+    expect((await admin(
+      'usage-metering-rollout', { phase: 'v2_required' }, 'POST',
+    )).status).toBe(500);
+    expect(await env.DB.prepare(
+      'SELECT phase FROM usage_metering_rollout WHERE singleton_id = 1',
+    ).first()).toMatchObject({ phase: 'dual' });
+    expect(await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM usage_metering_cutover_baselines',
+    ).first()).toMatchObject({ count: 0 });
+    await env.DB.prepare('DROP TRIGGER test_fail_metering_audit').run();
+
+    const advanced = await admin(
+      'usage-metering-rollout', { phase: 'v2_required' }, 'POST',
+    );
+    expect(advanced.status).toBe(200);
+    expect(await advanced.json()).toMatchObject({
+      phase: 'v2_required', canRequireV2: false, cutoverBaselineUsers: 1,
+    });
+    expect(await env.DB.prepare(
+      "SELECT reported_bytes, named_bytes FROM usage_metering_cutover_baselines WHERE user_id = 'usr-meter-cutover'",
+    ).first()).toMatchObject({ reported_bytes: 1_000, named_bytes: 400 });
+
+    expect((await legacy('meter-legacy-after', 1_100)).status).toBe(409);
+    expect((await named('exit-default', 'meter-v1-after', 450, 1, timestamp + 10)).status).toBe(409);
+    expect((await named('exit-default', 'meter-v2-after', 450, 2, timestamp + 10)).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT usage_reported_bytes FROM users WHERE id = 'usr-meter-cutover'",
+    ).first()).toMatchObject({ usage_reported_bytes: 1_050 });
+
+    // Retrying the phase request is idempotent: it neither moves the baseline
+    // nor records a second operator transition.
+    expect((await admin(
+      'usage-metering-rollout', { phase: 'v2_required' }, 'POST',
+    )).status).toBe(200);
+    expect(await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ops_audit WHERE action = 'usage-metering.require-v2'",
+    ).first()).toMatchObject({ n: 1 });
+    await expect(env.DB.prepare(
+      `UPDATE usage_metering_rollout
+       SET legacy_last_seen_at = legacy_last_seen_at + 1
+       WHERE singleton_id = 1`,
+    ).run()).rejects.toThrow('USAGE_METERING_V2_REQUIRED');
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
@@ -1613,17 +1828,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect((await report('rb-2', 120, seeded + 60, 'exit-r')).status).toBe(200);
     expect(await counted()).toBe(1_020);
 
-    // A report that names no source is the collector, or an agent that has not
-    // been upgraded. Its figure is an aggregate over a changing set of nodes, so
-    // a fall means a node left the fleet rather than a counter reset: it keeps
-    // the MAX contract it was written against, beside the exit's own counter.
+    // The collector's aggregate overlaps the per-exit counter. In dual it stays
+    // authoritative while named sources are shadowed, rather than summing both
+    // and charging the same traffic twice.
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
     expect((await report('rb-3', 400, seeded + 60)).status).toBe(200);
-    expect(await counted()).toBe(1_420);
+    expect(await counted()).toBe(1_020);
     expect((await report('rb-4', 250, seeded + 120)).status).toBe(200);
-    expect(await counted()).toBe(1_420);
+    expect(await counted()).toBe(1_020);
     expect((await report('rb-5', 600, seeded + 120)).status).toBe(200);
-    expect(await counted()).toBe(1_620);
+    expect(await counted()).toBe(1_020);
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
@@ -5273,6 +5487,99 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(storedTraffic.status).toBe('succeeded');
     expect(JSON.parse(storedTraffic.result_json)).toEqual(trafficResult);
 
+    const residentialQueued = await admin('device-actions', {
+      deviceId: owner.device.id, action: 'claude_traffic_snapshot', ttlSeconds: 300,
+    });
+    const residentialCommand = (await residentialQueued.json() as any).action;
+    const residentialPoll = await api('device-actions', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect((await residentialPoll.json() as any).actions[0].id).toBe(residentialCommand.id);
+
+    // New clients split residential from the other mutually exclusive route
+    // buckets. Merely adding the field without taking it out of proxied would
+    // overstate the observed total and must be rejected.
+    expect((await api(`device-actions/${residentialCommand.id}/result`, json({
+      outcome: 'succeeded',
+      trafficResearch: {
+        ...trafficSummary,
+        residentialConnectionCount: 2,
+        entries: [],
+      },
+    }, owner.accessToken))).status).toBe(400);
+    // Retained endpoints are a bounded subset, but they can never claim more of
+    // one route than the top-level snapshot observed.
+    expect((await api(`device-actions/${residentialCommand.id}/result`, json({
+      outcome: 'succeeded',
+      trafficResearch: {
+        ...trafficSummary,
+        residentialConnectionCount: 1,
+        proxiedConnectionCount: 6,
+        entries: [{
+          service: 'claude', client: 'app', host: 'api.claude.ai',
+          network: 'TCP', port: 443, route: 'RESIDENTIAL', connections: 2,
+          upBytes: 10, downBytes: 20,
+        }],
+      },
+    }, owner.accessToken))).status).toBe(400);
+
+    const residentialResult = {
+      outcome: 'succeeded',
+      trafficResearch: {
+        ...trafficSummary,
+        residentialConnectionCount: 2,
+        proxiedConnectionCount: 5,
+        entries: [{
+          service: 'claude', client: 'app', host: 'api.claude.ai',
+          network: 'TCP', port: 443, route: 'RESIDENTIAL', connections: 2,
+          upBytes: 10, downBytes: 20,
+        }],
+      },
+    };
+    expect((await api(`device-actions/${residentialCommand.id}/result`, json(
+      residentialResult, owner.accessToken,
+    ))).status).toBe(200);
+    const storedResidential = await env.DB.prepare(
+      'SELECT result_json FROM device_actions WHERE id = ?',
+    ).bind(residentialCommand.id).first<any>();
+    expect(JSON.parse(storedResidential.result_json)).toEqual(residentialResult);
+
+    const detail = await operations(`users/${owner.user.id}/detail`);
+    expect(detail.status).toBe(200);
+    const visibleProof = (await detail.json() as any).protectedRouteProof;
+    expect(visibleProof).toMatchObject({
+      status: 'succeeded',
+      evidence: {
+        verdict: 'confirmed',
+        residentialReported: true,
+        routes: { observed: 8, residential: 2, proxied: 5, direct: 0, blocked: 1 },
+        exitIdentityConsistency: 'MATCHED',
+        physicalBypassProbe: 'BLOCKED',
+      },
+    });
+    const listedActions = await admin(
+      `device-actions?deviceId=${owner.device.id}`,
+      undefined,
+      'GET',
+    );
+    const visibleAction = (await listedActions.json() as any).actions.find(
+      (entry: any) => entry.id === residentialCommand.id,
+    );
+    expect(visibleAction.result).toEqual({
+      outcome: 'succeeded',
+      protectedRouteProof: visibleProof.evidence,
+    });
+    // Routine operator APIs expose aggregate proof only. Endpoint samples stay
+    // in the bounded canonical action record and never reach the ops browser.
+    for (const serialized of [JSON.stringify(visibleProof), JSON.stringify(visibleAction)]) {
+      expect(serialized).not.toContain('api.claude.ai');
+      expect(serialized).not.toContain('entries');
+      expect(serialized).not.toContain('host');
+      expect(serialized).not.toContain('process');
+      expect(serialized).not.toContain('profile');
+      expect(serialized.toLowerCase()).not.toContain('doh');
+    }
+
     const expiring = await admin('device-actions', {
       deviceId: owner.device.id, action: 'refresh_catalog', ttlSeconds: 1,
     });
@@ -6160,8 +6467,119 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     body: new Blob([payload]),
   });
 
+  const enableDiagnosticsLogs = async (account: any, expiresAt = Math.floor(Date.now() / 1000) + 3600) => {
+    const response = await admin(
+      `users/${account.user.id}/devices/${account.device.id}/diagnostics-logs`,
+      { expiresAt },
+      'PUT',
+    );
+    expect(response.status).toBe(200);
+    return expiresAt;
+  };
+
+  it('acknowledges disabled raw logs without parsing or writing the upload', async () => {
+    const account = await createAccount('log-disabled');
+    await env.DB.prepare('DELETE FROM rate_limits').run();
+    const response = await logUpload(
+      account.accessToken,
+      new TextEncoder().encode('not gzip and deliberately not parsed'),
+      { 'X-Tono-Log-Session': '../../not-validated' },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      segment: { id: 'not-stored', receivedAt: expect.any(Number) },
+      stored: false,
+      reason: 'not_enabled',
+    });
+    expect(await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM diagnostics_log_objects WHERE user_id = ?',
+    ).bind(account.user.id).first()).toMatchObject({ n: 0 });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM rate_limits').first())
+      .toMatchObject({ n: 0 });
+    expect((await (env as unknown as Env).DIAGNOSTICS_LOGS.list({
+      prefix: `logs/${account.user.id}/`,
+    })).objects).toHaveLength(0);
+  });
+
+  it('authorizes, expires, disables, and audits a bounded per-device raw-log window', async () => {
+    const account = await createAccount('log-access');
+    const path = `users/${account.user.id}/devices/${account.device.id}/diagnostics-logs`;
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+
+    expect((await api(`admin/${path}`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${account.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ expiresAt }),
+    })).status).toBe(401);
+    expect((await admin(
+      `users/not-the-owner/devices/${account.device.id}/diagnostics-logs`,
+      { expiresAt },
+      'PUT',
+    )).status).toBe(404);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM diagnostics_log_access').first())
+      .toMatchObject({ n: 0 });
+
+    const enabled = await api(`ops/${path}`, {
+      method: 'PUT',
+      headers: {
+        'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ expiresAt }),
+    });
+    expect(enabled.status).toBe(200);
+    expect(await enabled.json()).toMatchObject({
+      diagnosticsLogs: { enabled: true, expiresAt },
+    });
+    // Retrying the same absolute expiry is a no-op, not an extension or a
+    // second grant/audit event.
+    expect((await admin(path, { expiresAt }, 'PUT')).status).toBe(200);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM diagnostics_log_access').first())
+      .toMatchObject({ n: 1 });
+    expect(await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ops_audit WHERE action = 'diagnostics-logs.enable'",
+    ).first()).toMatchObject({ n: 1 });
+
+    await env.DB.prepare(
+      'UPDATE diagnostics_log_access SET expires_at = ? WHERE device_id = ?',
+    ).bind(Math.floor(Date.now() / 1000) - 1, account.device.id).run();
+    const expired = await logUpload(account.accessToken, await gzip('{"expired":true}\n'));
+    expect(expired.status).toBe(200);
+    expect(await expired.json()).toMatchObject({ stored: false, reason: 'not_enabled' });
+    expect((await admin(path, undefined, 'GET')).status).toBe(200);
+    const disabled = await admin(path, undefined, 'DELETE');
+    expect(disabled.status).toBe(200);
+    expect(await disabled.json()).toMatchObject({
+      diagnosticsLogs: { enabled: false, expiresAt: null },
+    });
+    expect(await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ops_audit WHERE action = 'diagnostics-logs.disable'",
+    ).first()).toMatchObject({ n: 1 });
+  });
+
+  it('rolls back a diagnostics-log grant if its required audit row cannot be written', async () => {
+    const account = await createAccount('log-audit-atomic');
+    const path = `users/${account.user.id}/devices/${account.device.id}/diagnostics-logs`;
+    await env.DB.prepare(
+      `CREATE TRIGGER test_fail_diagnostics_audit
+       BEFORE INSERT ON ops_audit
+       WHEN NEW.action = 'diagnostics-logs.enable'
+       BEGIN SELECT RAISE(ABORT, 'TEST_AUDIT_FAILURE'); END`,
+    ).run();
+    expect((await admin(path, {
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    }, 'PUT')).status).toBe(500);
+    expect(await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM diagnostics_log_access WHERE device_id = ?',
+    ).bind(account.device.id).first()).toMatchObject({ n: 0 });
+  });
+
   it('stores a raw log segment in R2 and indexes it in D1', async () => {
     const account = await createAccount('log-happy');
+    await enableDiagnosticsLogs(account);
     const body = await gzip('{"kind":"connection_opened"}\n{"kind":"mihomo_route"}\n');
     const response = await logUpload(account.accessToken, body);
     expect(response.status).toBe(201);
@@ -6185,6 +6603,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('answers a replayed segment from the index instead of storing it twice', async () => {
     const account = await createAccount('log-replay');
+    await enableDiagnosticsLogs(account);
     const first = await logUpload(account.accessToken, await gzip('{"a":1}\n'));
     expect(first.status).toBe(201);
     const firstId = ((await first.json()) as any).segment.id;
@@ -6213,6 +6632,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('refuses a log body that is not gzip', async () => {
     const account = await createAccount('log-plaintext');
+    await enableDiagnosticsLogs(account);
     const response = await logUpload(
       account.accessToken,
       new TextEncoder().encode('{"kind":"connection_opened"}\n'),
@@ -6227,6 +6647,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('refuses log metadata that could escape the derived object key', async () => {
     const account = await createAccount('log-key-escape');
+    await enableDiagnosticsLogs(account);
     const body = await gzip('{"a":1}\n');
     for (const session of ['../../etc/passwd', 'a/b', 'has space', '']) {
       const response = await logUpload(account.accessToken, body, {
@@ -6244,6 +6665,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('rejects an oversized log segment without storing a partial object', async () => {
     const account = await createAccount('log-oversize');
+    await enableDiagnosticsLogs(account);
     // Incompressible bytes, so the gzip stays above the 2 MiB cap.
     const noise = new Uint8Array(new ArrayBuffer(3 * 1024 * 1024));
     crypto.getRandomValues(noise.subarray(0, 65_536));
@@ -6262,6 +6684,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('serves a stored segment to admins and lists it per account', async () => {
     const account = await createAccount('log-admin');
+    await enableDiagnosticsLogs(account);
     const body = await gzip('{"kind":"connection_opened","host":"example.test"}\n');
     const { segment } = await (await logUpload(account.accessToken, body)).json() as any;
 
@@ -6284,6 +6707,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
   it('deletes the R2 payload when a log segment passes retention', async () => {
     const account = await createAccount('log-retention');
+    await enableDiagnosticsLogs(account);
     const { segment } = await (await logUpload(
       account.accessToken,
       await gzip('{"a":1}\n'),
@@ -6443,6 +6867,101 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     const listBody = await listed.json() as any;
     expect(listBody.windows.length).toBeGreaterThanOrEqual(1);
     expect(listBody.windows[0].userId).toBe(account.user.id);
+  });
+
+  it('projects Windows residential route telemetry into privacy-safe ops evidence', async () => {
+    const account = await createAccount('telemetry-residential-proof');
+    const nowMs = Date.now();
+    const events = [
+      {
+        ts: nowMs - 4_000,
+        kind: 'protectedRouteAggregate',
+        outcome: 'RESIDENTIAL',
+        counter: 7,
+        generation: 12,
+      },
+      {
+        ts: nowMs - 3_000,
+        kind: 'protectedRouteInvariantViolation',
+        outcome: 'PROXIED',
+        counter: 1,
+        generation: 12,
+      },
+      {
+        ts: nowMs - 2_000,
+        kind: 'protectedRouteAggregate',
+        outcome: 'BLOCKED',
+        counter: 1,
+        generation: 12,
+      },
+      {
+        ts: nowMs - 1_000,
+        kind: 'protectedRouteAggregate',
+        outcome: 'UNKNOWN',
+        counter: 1,
+        generation: 12,
+      },
+    ];
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      eventCount: events.length,
+      events,
+      dnsEnabled: undefined,
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+
+    const detail = await operations(`users/${account.user.id}/detail`);
+    expect(detail.status).toBe(200);
+    const proof = (await detail.json() as any).protectedRouteProof;
+    expect(proof).toMatchObject({
+      source: 'periodic_telemetry',
+      status: 'observed',
+      evidence: {
+        verdict: 'unsafe',
+        residentialReported: true,
+        routes: {
+          observed: 10,
+          residential: 7,
+          proxied: 1,
+          direct: 0,
+          blocked: 1,
+          unknown: 1,
+        },
+        connected: true,
+        killSwitchArmed: true,
+        tunPresent: true,
+        protectedDNSConfigured: null,
+        exitIdentityConsistency: 'INCONCLUSIVE',
+        physicalBypassProbe: 'INCONCLUSIVE',
+      },
+    });
+    const serialized = JSON.stringify(proof).toLowerCase();
+    for (const forbidden of ['host', 'destination', 'process', 'profile', 'template', 'rule', 'proxy']) {
+      expect(serialized).not.toContain(forbidden);
+    }
+
+    // Route evidence is cumulative but appears only when the protected sample
+    // changes. A newer ordinary heartbeat must not erase the last proof from
+    // the operator drawer.
+    const heartbeat = telemetryWindowPayload().window as any;
+    await env.DB.prepare(
+      `INSERT INTO telemetry_windows(
+         id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+         client_version, os_version, payload_json
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      crypto.randomUUID(), account.user.id, account.device.id,
+      Math.floor(Date.now() / 1000) + 1,
+      heartbeat.windowStartMs, heartbeat.windowEndMs,
+      heartbeat.appVersion, heartbeat.osVersion, JSON.stringify(heartbeat),
+    ).run();
+    const afterHeartbeat = await operations(`users/${account.user.id}/detail`);
+    expect((await afterHeartbeat.json() as any).protectedRouteProof).toMatchObject({
+      source: 'periodic_telemetry',
+      evidence: {
+        verdict: 'unsafe',
+        routes: { observed: 10, residential: 7, proxied: 1, blocked: 1, unknown: 1 },
+      },
+    });
   });
 
   it('reports per-user online activity with device attribution to Access admins', async () => {
@@ -7142,7 +7661,7 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   describe('True LRU device eviction and last_seen_at updates', () => {
-    it('updates last_seen_at upon active device re-login, auth refresh, and telemetry', async () => {
+    it('uses lifecycle requests for last_seen_at and telemetry rows for activity liveness', async () => {
       const account = await createAccount('lru-test');
       resetMockInventory(account.device.id, account.enrollment.hostname);
       const conf = await confirm(account);
@@ -7170,13 +7689,18 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       // Backdate again
       await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
 
-      // 3. Telemetry update
+      // 3. Telemetry is already an immutable, device-attributed heartbeat for
+      // the activity view. It must not duplicate that write into the device LRU
+      // watermark merely because another periodic window arrived.
       const telRes = await api('telemetry/windows', json(telemetryWindowPayload({
         selectedServer: 'Test Node',
       }), account.accessToken));
       expect(telRes.status).toBe(201);
       const afterTel = await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?').bind(devId).first<any>();
-      expect(Number(afterTel.last_seen_at)).toBeGreaterThan(backdatedTime);
+      expect(Number(afterTel.last_seen_at)).toBe(backdatedTime);
+      expect(await env.DB.prepare(
+        'SELECT COUNT(*) AS n FROM telemetry_windows WHERE device_id = ?',
+      ).bind(devId).first()).toMatchObject({ n: 1 });
 
       // Backdate again
       await env.DB.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').bind(backdatedTime, devId).run();
@@ -7223,6 +7747,39 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
 
       expect(statusA.status).toBe('active');
       expect(statusB.status).toBe('revoked');
+    });
+
+    it('uses the immutable telemetry heartbeat for LRU without rewriting the device row', async () => {
+      const account = await createAccount('lru-telemetry-order');
+      const devA = account.device.id;
+      const login = (name: string, installationId: string) => emailSignIn({
+        email: account.email,
+        deviceName: name,
+        installationId,
+      });
+      const second = await login('Device 2', 'installation-telemetry-two');
+      expect(second.status).toBe(200);
+      const devB = (await second.json() as any).device.id;
+      await env.DB.prepare('UPDATE users SET device_limit = 2 WHERE id = ?')
+        .bind(account.user.id).run();
+      const timestamp = Math.floor(Date.now() / 1000);
+      await env.DB.prepare("UPDATE devices SET status = 'active', last_seen_at = ? WHERE id = ?")
+        .bind(timestamp - 1_000, devA).run();
+      await env.DB.prepare("UPDATE devices SET status = 'active', last_seen_at = ? WHERE id = ?")
+        .bind(timestamp - 500, devB).run();
+
+      expect((await api('telemetry/windows', json(
+        telemetryWindowPayload(),
+        account.accessToken,
+      ))).status).toBe(201);
+      expect(await env.DB.prepare('SELECT last_seen_at FROM devices WHERE id = ?')
+        .bind(devA).first()).toMatchObject({ last_seen_at: timestamp - 1_000 });
+
+      expect((await login('Device 3', 'installation-telemetry-three')).status).toBe(200);
+      expect(await env.DB.prepare('SELECT status FROM devices WHERE id = ?')
+        .bind(devA).first()).toMatchObject({ status: 'active' });
+      expect(await env.DB.prepare('SELECT status FROM devices WHERE id = ?')
+        .bind(devB).first()).toMatchObject({ status: 'revoked' });
     });
 
     it('serializes concurrent logins for the same new installation without double eviction', async () => {

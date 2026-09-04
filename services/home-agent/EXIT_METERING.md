@@ -171,8 +171,10 @@ The agent implements this; the contract below is what it obeys, and it is the sa
 one `report_example.py` already obeys — there is deliberately only one:
 
 - `POST /api/v1/home/usage` with the node-specific token in
-  `TONO_HOME_AGENT_TOKEN`. The same token reads the roster and acknowledges a
-  successful reconciliation at `POST /api/v1/home/roster-ack`.
+  `TONO_HOME_AGENT_TOKEN`. The same token reads the roster, acknowledges a
+  successful reconciliation at `POST /api/v1/home/roster-ack`, and separately
+  acknowledges metering readiness at `POST /api/v1/home/metering-ack` with the
+  exact body `{meteringProtocolVersion: 2, observedAt}`.
 - Reports are
   `{reportId, userId, sourceId, protocolVersion: 2, totalBytes, observedAt}`,
   batched, at most 500 per request and 100 distinct users. `observedAt` comes
@@ -188,12 +190,15 @@ one `report_example.py` already obeys — there is deliberately only one:
   that source-local value; using the account-wide SUM as every node's baseline
   duplicates history and overbills multi-exit accounts.
 - `sourceId` names the reporter. The server keeps one cumulative figure per
-  (user, source) and **adds them up**: with one meter per exit, folding them with
-  MAX would bill an account for its largest exit rather than for what it used —
-  an account spread over three nodes was counted at roughly a third of it, so
-  enforcement never fired. It must therefore be stable for the life of the node;
-  a new name is a new counter starting at zero, and the old one keeps whatever it
-  had.
+  (user, source). During the metering `dual` phase, accounts that already have a
+  legacy empty source continue to bill from that source and named rows are
+  shadow state; accounts with no legacy row bill from the sum of named sources.
+  At the explicit `v2_required` cutover the control plane snapshots both the
+  current account authority and named sum, then adds only subsequent named
+  growth. This avoids counting the collector and per-exit view of the same bytes
+  twice. It also avoids folding named exits with MAX, which would bill only the
+  largest exit. A source ID must remain stable for the life of the node; a new
+  name is a new counter starting at zero.
 - Within one source a figure that moves **backwards** is a rebuilt node, and its
   accumulated total carries the pre-reset amount forward. Under MAX a rebuilt
   node reported a no-op every cycle until its local counter caught up with the
@@ -204,10 +209,73 @@ one `report_example.py` already obeys — there is deliberately only one:
   changing set of nodes, so it falls when a node leaves the fleet, and reading
   that fall as a reset would bill the account for its history twice.
 
-**Do not run the collector and the per-exit agents against the same accounts.**
-Each is a source of its own, and the sum counts both — the collector's SSH sweep
-already includes the bytes the exit is now reporting for itself. Retire the
-collector's usage sweep as the agents are rolled out.
+## Metering-v2 cutover
+
+Migration `0036` starts in `dual`; nothing activates cutover automatically. The
+legacy collector remains authoritative for every account with an empty source,
+while named agents build shadow watermarks. The administrative API is shared by
+the Access-authenticated ops surface and token-authenticated automation:
+
+```http
+GET  /api/v1/ops/usage-metering-rollout
+GET  /api/v1/admin/usage-metering-rollout
+POST /api/v1/ops/usage-metering-rollout
+POST /api/v1/admin/usage-metering-rollout
+Content-Type: application/json
+
+{"phase":"v2_required"}
+```
+
+The GET response separates legacy and named source/user/byte totals, lists every
+active exit and whether its agent acknowledged protocol v2 recently, reports the last legacy
+request, and includes `canRequireV2` plus machine-readable `blockers`. Advance in
+this order:
+
+**Rollout deferred:** publishing this code does not authorize starting new
+metering collection or advancing to `v2_required`. Keep the current collection
+and rollout state unchanged until a separate operational decision.
+
+**Known live-cutover accounting gap:** named growth observed after the final
+legacy report but before the cutover snapshot is absorbed into the baseline and
+is not billed. The mandatory 1,800-second legacy quiet period can therefore
+cause a permanent undercount while traffic continues. `canRequireV2` proves
+protocol readiness, not lossless coverage. Do not execute the sequence below as
+a lossless live migration: first establish a coordinated frozen traffic boundary,
+implement a continuous accounting handoff, or explicitly accept a one-time
+write-off. None of those operational actions is performed by shipping this code.
+
+1. Apply migration `0036`, deploy the matching Worker, and verify GET reports
+   `phase: "dual"`. Do not start named agents against an older Worker: the old
+   sum would count overlapping legacy and named totals twice.
+2. Start each node-specific agent without stopping the legacy collector. Wait
+   for every active exit to acknowledge metering protocol v2 in the last 15
+   minutes until each is `v2Ready: true`; the timestamp is the recent
+   authenticated inventory observation, not receipt time. Duplicate observations
+   do not renew readiness. An idle or empty exit sends the metering ACK after a
+   valid counter read and durable save, without fabricating a zero-byte report.
+   Compare named source IDs to the provisioned `exit_nodes.id` values and inspect
+   quota headroom; an omitted source is rejected as `SOURCE_ID_REQUIRED` and a
+   mismatch as `SOURCE_ID_MISMATCH`.
+3. Stop only the collector's usage submission. Keep its roster/quality jobs if
+   they are still needed. Wait until GET shows at least 1,800 seconds since
+   `legacyLastSeenAt`; this is two observed 15-minute production cadences. An
+   unchanged collector poll still refreshes this coarse liveness row, but no
+   longer rewrites every account watermark or stores a useless report ID.
+4. Require `canRequireV2: true` with no blockers. Save the GET response and a
+   per-user comparison of `users.usage_reported_bytes`, legacy totals, and named
+   totals for the change record.
+5. POST `{"phase":"v2_required"}` once. The transaction snapshots every user's
+   current authority and named sum before changing phase. Repeating the POST is
+   idempotent. Afterward the collector endpoint and named v1 reports return
+   `409 METERING_V2_REQUIRED`; named v2 growth remains monotonic and quota checks
+   remain immediate.
+
+There is deliberately no automatic rollback to `dual`: accepting the collector
+again after post-cutover named growth would combine two accounting epochs. If a
+node fails after cutover, repair or disable that named node rather than restarting
+legacy usage ingest. Database triggers repeat the readiness and protocol checks
+at the write boundary, so a concurrent final legacy batch is ordered wholly
+before the baseline or rejected wholly after it.
 
 **Accounts that were undercounted will now count.** Nothing about quotas or
 `enforceAll` changed, but the number it reads is no longer a fraction of what an

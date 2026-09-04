@@ -543,6 +543,32 @@ def post_reports(base: str, token: str, reports: list[dict[str, Any]]) -> None:
             raise RuntimeError("control plane returned an unexpected acknowledgement")
 
 
+def acknowledge_metering(base: str, token: str, observed_at: int) -> None:
+    body = json.dumps(
+        {"meteringProtocolVersion": 2, "observedAt": observed_at},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/api/v1/home/metering-ack",
+        data=body,
+        method="POST",
+        headers={
+            "authorization": f"Bearer {token}",
+            "content-type": "application/json",
+            "accept": "application/json",
+        },
+    )
+    opener = urllib.request.build_opener(NoRedirect)
+    with opener.open(request, timeout=20) as response:
+        decoded = read_bounded_json_response(response)
+    if (
+        not isinstance(decoded, dict)
+        or decoded.get("meteringProtocolVersion") != 2
+        or decoded.get("observedAt") != observed_at
+    ):
+        raise RuntimeError("control plane returned an unexpected metering acknowledgement")
+
+
 def next_pending_batch(state: dict[str, Any]) -> list[dict[str, Any]]:
     batch: list[dict[str, Any]] = []
     users: set[str] = set()
@@ -635,6 +661,7 @@ def run_once(path: Path) -> None:
     if not reports:
         # Persist new peer baselines even when every observed counter is zero.
         save_state(path, state)
+        acknowledge_metering(base, token, server_observed_at)
         print("no new usage to report")
         return
 
@@ -642,6 +669,7 @@ def run_once(path: Path) -> None:
     state["lastReportObservedAt"] = timestamp
     save_state(path, state)
     delivered = deliver_pending(base, token, path, state)
+    acknowledge_metering(base, token, server_observed_at)
     print(f"acknowledged {delivered} usage reports")
 
 

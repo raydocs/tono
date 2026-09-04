@@ -635,6 +635,26 @@ export function matchDevOps(
         replaceCount: 0,
       },
       heartbeat: null,
+      protectedRouteProof: id === 'u-fast' ? {
+        source: 'device_action',
+        status: 'succeeded',
+        createdAt: clock - 90,
+        completedAt: clock - 60,
+        evidence: {
+          verdict: 'confirmed',
+          observedSince: clock - 3600,
+          residentialReported: true,
+          routes: { observed: 18, residential: 12, proxied: 5, direct: 0, blocked: 1, unknown: 0 },
+          connected: true,
+          killSwitchArmed: true,
+          tunPresent: true,
+          protectedDNSConfigured: true,
+          exitIdentityConsistency: 'MATCHED',
+          physicalBypassProbe: 'BLOCKED',
+          unsafeProtectionObservationCount: 0,
+          protectedDirectConnectionCount: 0,
+        },
+      } : null,
     };
   }
   if (base === 'metrics') {

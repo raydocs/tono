@@ -1043,6 +1043,7 @@ export interface TranslationResources {
         errorRetry: string
         errors: {
           bfeNotRunning: string
+          browserDnsPreflight: string
           coreMismatch: string
           coreUnpinned: string
           dnsPortBusy: string

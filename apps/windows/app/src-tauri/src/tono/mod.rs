@@ -5,6 +5,7 @@
 
 pub mod audit;
 pub mod bootstrap;
+mod browser_dns;
 pub mod catalog_sync;
 pub mod commands;
 pub mod connection;

@@ -14,6 +14,7 @@ struct SupportView: View {
 
     @State private var probe: RuntimeProbe?
     @State private var terminalEnvReport: TerminalProxyReport?
+    @State private var browserDNSReport: BrowserDNSDiagnostics.Report?
     @State private var isProbing = false
     @State private var isUploadingLog = false
     /// What the last manual sweep did, once one has run on this page. The three
@@ -58,6 +59,7 @@ struct SupportView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     summaryCard(snapshot)
                     webrtcCard
+                    browserDNSCard
                     terminalEnvCard
                     if !appState.lastConnectionStageDurations.isEmpty {
                         connectTimingCard
@@ -300,6 +302,47 @@ struct SupportView: View {
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
             }
         }
+    }
+
+    private var browserDNSCard: some View {
+        let outcome = browserDNSReport?.outcome
+        return SupportCard(
+            icon: "network.badge.shield.half.filled",
+            title: String(localized: "Browser Secure DNS")
+        ) {
+            Text(outcome == nil
+                ? String(localized: "Checking Chrome and Microsoft Edge…")
+                : outcome == .clear
+                ? String(localized: "Chrome and Microsoft Edge use Tono's protected system DNS.")
+                : outcome == .blocking
+                ? String(localized: "Secure DNS can bypass Tono. Turn it off in Chrome and Edge for all profiles, fully restart the browsers, then reconnect.")
+                : String(localized: "The browser DNS scan was incomplete. Tono fails closed when a residential Claude route is configured."))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            if let report = browserDNSReport {
+                SupportRow(label: "Chrome", value: browserDNSDescription(report.chrome))
+                supportDivider
+                SupportRow(label: "Microsoft Edge", value: browserDNSDescription(report.edge))
+            }
+            Text(String(localized: "All browser profiles share Tono's routing. Tono only reads these settings; it never changes browser preferences or routes an entire browser process."))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func browserDNSDescription(_ result: BrowserDNSDiagnostics.BrowserResult) -> String {
+        let status = switch result.outcome {
+        case .clear: String(localized: "Clear")
+        case .blocking: String(localized: "Blocking")
+        case .incomplete: String(localized: "Scan Incomplete")
+        }
+        let source = switch result.source {
+        case .none: String(localized: "not installed / no browser state")
+        case .localState: String(localized: "browser-wide settings")
+        case .userManaged: String(localized: "user managed policy")
+        case .machineManaged: String(localized: "machine managed policy")
+        }
+        return "\(status) · \(source)"
     }
 
     // MARK: - Connect timing
@@ -793,6 +836,9 @@ struct SupportView: View {
         let core = await PrivilegedRuntimeCoordinator.shared.coreStatus()
         terminalEnvReport = await Task.detached {
             TerminalProxyDiagnostics.scan()
+        }.value
+        browserDNSReport = await Task.detached {
+            BrowserDNSDiagnostics.scan()
         }.value
         // Helper probes talk to the privileged socket with blocking timeouts;
         // never resolve them on the UI actor.

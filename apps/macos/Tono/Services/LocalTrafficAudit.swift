@@ -95,6 +95,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     private var researchDroppedKeys = Set<ClaudeTrafficResearchKey>()
     private var researchObservedConnectionCount = 0
     private var researchIdentifiedProcessConnectionCount = 0
+    private var researchResidentialConnectionCount = 0
     private var researchProxiedConnectionCount = 0
     private var researchDirectConnectionCount = 0
     private var researchBlockedConnectionCount = 0
@@ -198,6 +199,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             researchDroppedKeys.removeAll(keepingCapacity: true)
             researchObservedConnectionCount = 0
             researchIdentifiedProcessConnectionCount = 0
+            researchResidentialConnectionCount = 0
             researchProxiedConnectionCount = 0
             researchDirectConnectionCount = 0
             researchBlockedConnectionCount = 0
@@ -271,6 +273,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 identifiedProcessConnectionCount:
                     researchIdentifiedProcessConnectionCount,
                 proxiedConnectionCount: researchProxiedConnectionCount,
+                residentialConnectionCount: researchResidentialConnectionCount,
                 directConnectionCount: researchDirectConnectionCount,
                 blockedConnectionCount: researchBlockedConnectionCount,
                 directRouteAttemptCount: researchDirectRouteAttemptCount,
@@ -733,7 +736,20 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 Self.maximumResearchCount
             )
         }
+        if route == "PROXIED", Self.isProtectedClaudeConnection(connection) {
+            // A generic proxy protects privacy but violates the stronger
+            // residential-only Claude contract just as surely as DIRECT.
+            researchUnsafeProtectionObservationCount = min(
+                researchUnsafeProtectionObservationCount + 1,
+                Self.maximumResearchCount
+            )
+        }
         switch route {
+        case "RESIDENTIAL":
+            researchResidentialConnectionCount = min(
+                researchResidentialConnectionCount + 1,
+                Self.maximumResearchCount
+            )
         case "DIRECT":
             researchDirectConnectionCount = min(
                 researchDirectConnectionCount + 1,
@@ -802,12 +818,27 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         return suffixes.contains { host == $0 || host.hasSuffix(".\($0)") }
     }
 
-    private static func isOfficialClaudeHost(_ host: String) -> Bool {
+    private static func isClaudeResidentialHost(_ host: String) -> Bool {
         let suffixes = [
             "claude.ai", "claude.com", "anthropic.com",
+            "anthropic.ai",
             "claudeusercontent.com", "clau.de", "claude.app",
             "claude.site", "claudestudio.com",
             "claudemcpclient.com", "claudemcpcontent.com",
+            "servd-anthropic-website.b-cdn.net",
+            "challenges.cloudflare.com", "cf-assets.www.cloudflare.com",
+            "cloudflareinsights.com",
+            "browser-intake-datadoghq.com",
+            "browser-intake-us5-datadoghq.com",
+            "browser-intake-us3-datadoghq.com",
+            "browser-intake-ap1-datadoghq.com",
+            "browser-intake-ap2-datadoghq.com",
+            "browser-intake-datadoghq.eu",
+            "browser-intake-ddog-gov.com", "datadoghq.com",
+            "statsigapi.net", "featuregates.org", "growthbook.io",
+            "stripe.network", "storage.googleapis.com",
+            "registry.npmjs.org", "raw.githubusercontent.com",
+            "formulae.brew.sh", "sentry.io",
         ]
         return suffixes.contains { host == $0 || host.hasSuffix(".\($0)") }
     }
@@ -818,7 +849,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         let host = connection.metadata.host.lowercased().trimmingCharacters(
             in: CharacterSet(charactersIn: ".")
         )
-        if isOfficialClaudeHost(host) {
+        if isClaudeResidentialHost(host) {
             return true
         }
         let process = connection.metadata.process ?? ""

@@ -59,6 +59,36 @@ npm run typecheck
 npm test
 ```
 
+## Raw diagnostics-log troubleshooting gate
+
+Migration `0036` makes `POST /api/v1/diagnostics/logs` deny storage by default,
+including for already shipped clients whose local setting is still enabled. The
+request must still carry a valid access token. When no unexpired grant exists for
+that token's exact account/device pair, the Worker answers HTTP 200 with the
+existing client-decodable `segment` receipt plus `stored:false`; it does not parse
+metadata/body, consume a D1 rate-limit counter, write `diagnostics_log_objects`,
+or put an R2 object. Shipped clients therefore advance their bounded local cursor
+instead of retrying or retaining an ever-growing unsent tail.
+
+Support may enable one device for an absolute expiry no more than 24 hours away:
+
+```http
+GET    /api/v1/admin/users/<userId>/devices/<deviceId>/diagnostics-logs
+PUT    /api/v1/admin/users/<userId>/devices/<deviceId>/diagnostics-logs
+DELETE /api/v1/admin/users/<userId>/devices/<deviceId>/diagnostics-logs
+Content-Type: application/json
+
+{"expiresAt": 1788470400}
+```
+
+Replace `/admin/` with `/ops/` for the Cloudflare Access-authenticated surface.
+The account/device ownership is checked on every control request. Repeating the
+same absolute expiry is idempotent and does not extend the window. Enable/disable
+changes write `diagnostics-logs.enable` / `diagnostics-logs.disable` entries to
+`ops_audit`; expiry is evaluated on ingest without a cleanup write. Verify a
+troubleshooting change by GET, upload one controlled segment, confirm its D1/R2
+row, then DELETE the grant rather than waiting for expiry.
+
 完全独立的 Cloudflare Worker + Static Assets + D1 子项目。所有 API 位于 `/api/v1`，运维台位于 `/ops/`。没有 secret 会被发送到客户端或写入日志。
 
 ## 部署
@@ -109,8 +139,11 @@ SHA 时才会报告 aligned。migration `0028` 的数据库 trigger 会在 schem
 - access JWT 只提供 session 定位信息；每次鉴权都从 D1 重读 user/session/device/installation、账号期限和 quota。即使攻击者拿到签名能力并伪造 JWT 中的 device/install claim，也不能跨设备操作。
 - enrollment key 由 Worker 使用 Tailscale OAuth secret 服务端签发：10 分钟、preauthorized、non-reusable、ephemeral，初始只有**无联网 grant** 的 `tag:pending-tunnel-client`。每次签发还生成不可猜测的 `tono-<32 hex>` hostname；客户端将它传给 `tailscale up --hostname`，confirm 必须在服务端 inventory 中看到同一 hostname。同设备签发有 60 秒 D1 原子冷却；上游签发失败会释放该租约。
 - confirm 要求客户端的 stable ID、public key 和完整 IP 集合（可附 `nodeId`），并绑定上述服务端签发 hostname，只通过 tailnet inventory 解析。Worker 分开保存管理 `id`、API `nodeId`、stable ID 和 public key；以短租约 + ownership generation 抢占、在 promotion 前写 durable guard，并仅用管理 `id` 调 Tailscale tag/DELETE API。撤销先关闭 D1 session/device，再由持久 outbox 重试；Tailscale API 临时故障不会丢失删除任务。被禁用用户仍有 live device 或未完成 job 时不能重新启用。
-- `/home/inventory` 与 `/home/exit-identities` 在 `dual` 迁移期兼容共享 `HOME_AGENT_TOKEN`；`device_only` 后只接受在 `exit_nodes` 中 provision 的节点专属 token。`/home/usage` 与 `/home/roster-ack` 始终只接受节点专属 token，usage 的 `sourceId` 必须与 token 绑定的节点 ID 一致；node roster 与使用节点 token 的 inventory 会回传认证后的 `nodeId` 供 agent 在任何 Xray/账务副作用前核对。既有节点必须先清空旧 reporter 的 pending 队列并停止 timer，再以 agent state 中已持久化的 `sourceId` 原值创建 `exit_nodes.id`；禁止在升级时改成友好名称或删除 state，否则无法在“旧累计报告已入账但 ACK 丢失”和“报告尚未入账”之间保持 exactly-once。inventory 只返回 confirm 时已经过服务端 inventory 验证的 public key、stable node ID 审计字段、Tono user ID、device status 与已有 usage floor；响应不返回邮箱、installation ID 或 Tailscale 管理/API ID。usage v2 接收 `{reports:[{reportId,userId,sourceId,protocolVersion:2,totalBytes,observedAt}]}`，其中时间戳来自服务端时钟并在 agent state 中严格递增；首次 v2 前允许旧 v1 的更高累计值完成结转，首次 v2 后 v1 永久不能再推动该 source。v2 的 exactly-once 权威是 token 绑定的 `(user, source)` 单调时间水位，因此完全一致的重放不写 D1，跨节点随机 `reportId` 碰撞也不会互相抑制；v1 仍保留不可变 report-id 证据，不同内容重用返回 `409 USAGE_REPORT_CONFLICT`。每个节点保持单调累计值，同一用户的节点累计值求和。legacy collector 仍位于独立的空 source/MAX 兼容桶，迁移时不得与 per-exit agent 对同一流量双重上报。每批 1–500 条、最多 100 个不同用户。
-- **1,000 活跃用户 D1 写预算（正常稳态）**：假设每人每 5 分钟只有一个出口产生新增流量，usage v2 每月接收 `1,000 × 288 × 30 = 8.64M` 条 observation；每条增长最多更新一行 `usage_report_sources` 和一行 `users`，约 `17.28M` rows written。每小时 usage snapshot 的 table、主键和 hour index 写入及 90 天稳态删除约 `4.32M`/月；16 个出口每 5 分钟 roster ACK 更新 table 与 `(status,last_roster_at)` index 约 `0.276M`/月。已知主要固定负载合计约 `21.9M` rows written/月（约 `729k`/日），不含登录、运维、异常重试等突发量。它远超 Workers Free 的 `100k`/日写上限，因此 **Free 不能承载该规模**；Workers Paid 每月前 `50M` writes included，正常模型约有 `2.28×` 余量，超出后按量计费而不是触发 Free 式停写。
+- `/home/inventory` 与 `/home/exit-identities` 在 credential `dual` 迁移期兼容共享 `HOME_AGENT_TOKEN`；`device_only` 后只接受在 `exit_nodes` 中 provision 的节点专属 token。独立的 usage-metering rollout 也从 `dual` 开始：已有 legacy 空 source 的账号继续只以 legacy 为账务权威，named v2 先作为 shadow，避免同一流量被 collector 和 per-exit agent 计算两次。运维通过 `GET /admin/usage-metering-rollout`（或 `/ops/`）查看 legacy/named 行数、账号数、字节、active exit v2 readiness 与 legacy last-seen；只有每个 active exit 都在最近 15 分钟通过独立 metering ACK 声明 v2 能力（空闲节点无需伪造 0-byte usage），且 legacy usage 请求静默 1,800 秒后，显式 `POST {"phase":"v2_required"}` 才能在同一事务内保存 account/named baseline 并切换。切换后 legacy collector 和 named v1 都返回 `409 METERING_V2_REQUIRED`，没有自动启用或回退。完整迁移顺序和回滚限制见 `services/home-agent/EXIT_METERING.md`。
+- `/home/usage`、`/home/roster-ack` 与 `/home/metering-ack` 始终只接受节点专属 token；metering ACK 的精确 body 是 `{meteringProtocolVersion:2,observedAt}`，只更新 metering readiness，不更新 roster readiness。`observedAt` 必须来自最近 15 分钟内且不晚于服务器当前时间的 inventory/roster 观察；保存的是观察时间而非收件时间，重复/倒序观察不会续期。named usage 必须明确带与 token 绑定节点 ID 完全一致的 `sourceId`，遗漏返回 `SOURCE_ID_REQUIRED`。既有节点必须先清空旧 reporter 的 pending 队列并停止 timer，再以 agent state 中已持久化的 `sourceId` 原值创建 `exit_nodes.id`；禁止改名或删除 state。usage v2 的 exactly-once 权威仍是 token 绑定的 `(user, source)` 单调 `observedAt` 水位；counter reset 继续由 source accumulated total 结转。legacy MAX 的相同/更低 counter 不再移动 `usage_report_sources`，也不保存无用的新 report ID；独立的单例 last-seen 仍证明 collector 是否真的停止。
+- **1,000 活跃用户写入审计（确定性 cadence 模型）**：Worker cron 是每 5 分钟，即 288 次/日；usage-history key 是小时，因此旧模型最多写 `1,000 × 24 = 24,000` 个 logical snapshot rows/日，而不是 `1,000 × 288`。`0036` 后只在 counter 改变时写，公式为 `1,000 × 24 × changedFraction`：稳态全不变为 0（首次/90 天 retention re-baseline 另计），每小时 10% 改变为 2,400/日，全部每小时改变仍为 24,000/日。客户端 telemetry 的实际约 20 分钟 cadence 是 72,000 windows/日；每个 window 自身就是 operations activity 使用的 device heartbeat，因此删除重复的 `devices.last_seen_at` update 可再省 72,000 logical row updates/日而不丢 liveness。metering 的保守 5 分钟持续增长模型仍是 `1,000 × 288 = 288,000` observations/日、最多 source+user 576,000 logical row updates；没有增长时新版 agents 不发送，legacy 相同/更低值也不写 account watermark/report row。以上是 table-row change 数，不是假装精确的 D1 账单：主键/secondary index 维护也计 rows written，必须继续用 D1 `meta.rows_written` 与生产 Analytics 校准。
+- 不再把“每小时都有一行 usage snapshot”误当 cron heartbeat：稀疏历史中的空小时表示 counter 没变，Scheduled Worker 是否按 5 分钟执行应由 Cloudflare Cron Trigger invocation/error telemetry 和告警确认，而不是为每个用户制造 D1 liveness 写。新版 named agents 在本地抑制相同 counter，仅增长/reset 到达 API；服务端仍让任何实际收到的 v2 observation 推进严格时间水位，以免弱化乱序 reset 的 anti-replay。exit roster ACK 提供节点控制面活性，legacy collector 使用独立的分钟级单例 last-seen，客户端活性继续由不可变 `telemetry_windows` 本身证明。
+- **容量目标是当前已升级的 Paid 账号，不是 Free**：本次不改变 5 分钟 metering/revocation cron、约 20 分钟 telemetry 或关键 auth cadence，不以省写为由牺牲 quota freshness、replay protection 或撤销及时性。Cloudflare 2026-04-21 公布的额度单位是 rows（包含 index 维护），Paid 每月包含 `25B` rows read 与 `50M` rows written，超额继续服务并计费；Free 是每天 `5M` reads / `100k` writes，且 2026-09-01 起达到 daily limit 后 query 会硬失败到 00:00 UTC。此前 mass-login 后服务恢复与 Free hard enforcement 一致，但它不再是生产设计约束。本次只删除没有新增事实的 watermark、heartbeat 和 snapshot 写入/锁竞争。
 - **D1 对抗性写入上界**：一个获得有效目录凭据的用户并不受“当前 App 只选一个出口”约束，可以同时使全部 16 个出口的累计计数增长。1,000 人在每个 5 分钟窗口都命中 16 个出口时为 `1,000 × 16 × 288 = 4.608M` observations/日，source + user 更新约 `9.216M` writes/日、`276.48M`/月，另加 snapshot 与 ACK。Paid 不会像 Free 一样停库，但会显著超过 50M included writes 并产生数百美元级月度额外写费用。因此不能承诺无限恶意负载下“永不碰额度”；必须为认证 API 加边缘限流并设置成本告警。
 - **D1 读取量级**：16 个出口每 5 分钟拉取最多 2,000 台默认双设备 roster，约返回 `9.216M` rows/日；`dual` 模式的 credential backfill 会再扫描约 `9.216M+` device/credential rows/日。cron 的用户、pending/device eligibility 扫描约 `1.15M` rows/日；1,000 个客户端每 5 分钟请求 catalog/policy（macOS 另有 `/me`）的 auth/read 约 `2.30M–3.46M` rows/日，usage watermark、用户和聚合查询另计。macOS 15 秒 remote device-action polling 默认关闭；若全员启用，仅 auth join 就可增加至少 `17.28M` rows/日。正常量级仍远低于 Paid `25B` reads/月的月均约 `833M`/日，但请求数不能证明 query 实际扫描量。
 - 上述预算必须用代表性 roster、auth、cron、refresh 与 usage 查询返回的 D1 `meta.rows_read`/`meta.rows_written`，以及 GraphQL Analytics 或 Dashboard 持续校准；索引维护也计 rows written，设备上限可调高，query plan 与可选诊断流量都会改变结果。容量告警应同时覆盖 included allowance 消耗和异常成本，不能把静态模型当成额度保证。当前价格与额度以 <https://developers.cloudflare.com/d1/platform/pricing/> 为准。
@@ -161,7 +194,7 @@ OAuth client 只授予上述 scopes；tailnet policy 中声明标签所有者并
 
 ## 客户端合同（v1）
 
-- 远程诊断为设备本地明确 opt-in 的 15 秒 pull。管理员只能排队四个无参数固定动作：`diagnostic_snapshot`、`claude_traffic_snapshot`、`refresh_catalog`、`retry_protection`；服务端拒绝额外字段、代码和通用参数。`GET device-actions` 只返回当前 access session 设备的未过期 pending/delivered 动作并重复 delivered 直到终态；`POST device-actions/:id/result` 只接受固定、受限的 succeeded/failed 结果与已知紧凑状态字段。普通诊断快照不上传日志正文、原始错误、域名、IP、路径、进程、凭据或内部节点 ID，只用白名单错误类别标记失败阶段。Claude 流量研究需要设备用户第二次单独 opt-in，只从内存返回官方 `claude.ai` / `anthropic.com` endpoint 与可明确归因给 Claude App/Code 的非官方 destination host 前四组聚合，并报告全局代理/直连/阻断计数、进程识别覆盖率、Mihomo DIRECT 尝试、受控国内直连计数和 TUN/Kill Switch/DNS 状态。快照还执行两个无参数固定探针：比较普通系统 TUN 与 Mihomo 显式代理出口是否一致，以及在基准 HTTPS 目标确认可达后强制绑定物理网卡是否被 PF 阻断；云端只接收枚举判定，原始出口 IP 仅写入设备本地 mode-0600 audit。浏览器非官方请求、无法识别进程的非官方请求和相似第三方域名不会被猜测为 Claude 流量；客户端不读取 audit 文件，也不上传 URL、IP、进程名、路径或内容。所有结果上限 2 KiB。默认 TTL 5 分钟，最大 1 小时。
+- 远程诊断为设备本地明确 opt-in 的 15 秒 pull。管理员只能排队四个无参数固定动作：`diagnostic_snapshot`、`claude_traffic_snapshot`、`refresh_catalog`、`retry_protection`；服务端拒绝额外字段、代码和通用参数。`GET device-actions` 只返回当前 access session 设备的未过期 pending/delivered 动作并重复 delivered 直到终态；`POST device-actions/:id/result` 只接受固定、受限的 succeeded/failed 结果与已知紧凑状态字段。普通诊断快照不上传日志正文、原始错误、域名、IP、路径、进程、凭据或内部节点 ID，只用白名单错误类别标记失败阶段。Claude 流量研究需要设备用户第二次单独 opt-in，只从内存返回官方 `claude.ai` / `anthropic.com` endpoint 与可明确归因给 Claude App/Code 的非官方 destination host 前四组聚合，并报告全局住宅/代理/直连/阻断四个互斥 route bucket、进程识别覆盖率、Mihomo DIRECT 尝试、受控国内直连计数和 TUN/Kill Switch/DNS 状态。新客户端可发送 additive `residentialConnectionCount` 和 entry route `RESIDENTIAL`；旧 payload 省略该 count 时按 0 验证并保持原 canonical shape。保留的 endpoint entry 不能超过对应 top-level route count，host allowlist 不变。运维客户抽屉从已有 action JSON 只投影 aggregate proof：独立显示 `RESIDENTIAL` 与通用 `PROXIED`、DIRECT/BLOCKED、固定探针和保护层状态，并明确显示无证据或不确定；ops detail/action API 不向浏览器返回 endpoint sample、host、IP、process/profile 或 DoH template，也没有新增高频写入。快照还执行两个无参数固定探针：比较普通系统 TUN 与 Mihomo 显式代理出口是否一致，以及在基准 HTTPS 目标确认可达后强制绑定物理网卡是否被 PF 阻断；云端只接收枚举判定，原始出口 IP 仅写入设备本地 mode-0600 audit。浏览器非官方请求、无法识别进程的非官方请求和相似第三方域名不会被猜测为 Claude 流量；客户端不读取 audit 文件，也不上传 URL、IP、进程名、路径或内容。所有结果上限 2 KiB。默认 TTL 5 分钟，最大 1 小时。
 
 - 应用路由研究独立于远程诊断，升级后的缺省值为开启，但设置页明确允许用户随时关闭；关闭会同步停止采集并删除本地待上传数据。只有已登录且账户运行态为 Ready 时才采集或上传；暂停后恢复时先重建连接字节基线，不会把暂停期间流量补算进去。macOS 每个六小时窗口只把进程本地归类为 27 个固定 family（含 `other`），向 `POST routing-research/snapshots` 发送每类代理/直连/阻断计数、粗粒度流量档位、build、macOS major.minor 与架构。schema v2 会为 18 个经过审核的原生应用 family 把标准 `/Applications` app bundle 内路径在本机缩减成五个固定 component category（主程序、framework helper、XPC、plugin、其他 bundle helper）；不会发送可执行文件名或任何路径字符串。未知应用只进入 `other`。域名、IP、端口、用户名、原始进程名/路径、bundle ID、用户文件路径、内容、连接 ID 和逐连接记录不会写入研究 payload。每次上传还携带本地 lease 的 64 字符十六进制 account digest，Worker 会与认证账户重新计算的 digest 对照，防止已取消的旧账户请求在 token 切换后写到新账户。快照以 access session 认证，为防滥用在 D1 中关联 account/device，90 天内删除；管理员只能用 `GET admin/routing-research/summary?days=30` 读取至少三名参与者的 cohort 聚合（参与设备数、route totals、bundle component totals、流量档位直方图和 build 覆盖），整体不足三人时不返回任何 count，低于门槛的 category 也不返回或暴露数量。没有单用户读取 API。研究结果只生成待人工审核的候选，不能自动修改 traffic policy 或添加宽泛 DIRECT 规则。
 

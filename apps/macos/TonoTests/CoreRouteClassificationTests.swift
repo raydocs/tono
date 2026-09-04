@@ -10,6 +10,100 @@ final class CoreRouteClassificationTests: XCTestCase {
         LocalTrafficAudit.classifyCoreRouteLog(message)
     }
 
+    func testResidentialAndGenericProxyCountsPartitionObservedConnections() {
+        let wasEnabled = LocalTrafficAudit.isClaudeTrafficResearchEnabled
+        LocalTrafficAudit.shared.setClaudeTrafficResearchEnabled(true)
+        defer {
+            LocalTrafficAudit.shared.setClaudeTrafficResearchEnabled(wasEnabled)
+        }
+
+        let protection = TrafficAuditProtectionSnapshot(
+            connected: true,
+            connecting: false,
+            protectionBlocked: false,
+            killSwitchArmed: true,
+            tunPresent: true,
+            protectedDNSConfigured: true,
+            selectedExit: "US"
+        )
+        let metadata = APIConnectionMetadata(
+            network: "tcp",
+            type: "HTTP",
+            process: "Claude",
+            processPath: "/Applications/Claude.app/Contents/MacOS/Claude",
+            sourceIP: "198.18.0.1",
+            destinationIP: "203.0.113.1",
+            sourcePort: "51000",
+            destinationPort: "443",
+            host: "api.anthropic.com"
+        )
+        LocalTrafficAudit.shared.recordConnections(
+            [
+                APIConnection(
+                    id: UUID().uuidString,
+                    metadata: metadata,
+                    upload: 1,
+                    download: 2,
+                    start: "now",
+                    chains: [
+                        ConfigPipeline.homeResidentialProxyName,
+                        ConfigPipeline.claudeHomeGroupName,
+                    ],
+                    rule: "DOMAIN-SUFFIX",
+                    rulePayload: "anthropic.com"
+                ),
+                APIConnection(
+                    id: UUID().uuidString,
+                    metadata: metadata,
+                    upload: 3,
+                    download: 4,
+                    start: "now",
+                    chains: [ConfigPipeline.exitGroupName],
+                    rule: "MATCH",
+                    rulePayload: nil
+                ),
+                APIConnection(
+                    id: UUID().uuidString,
+                    metadata: APIConnectionMetadata(
+                        network: "tcp",
+                        type: "HTTPS",
+                        process: "Google Chrome",
+                        processPath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                        sourceIP: "198.18.0.2",
+                        destinationIP: "203.0.113.2",
+                        sourcePort: "51001",
+                        destinationPort: "443",
+                        host: "challenges.cloudflare.com"
+                    ),
+                    upload: 1,
+                    download: 1,
+                    start: "now",
+                    chains: [ConfigPipeline.exitGroupName],
+                    rule: "MATCH",
+                    rulePayload: nil
+                ),
+            ],
+            protection: protection
+        )
+
+        let snapshot = LocalTrafficAudit.shared.claudeTrafficResearchSnapshot()
+        XCTAssertEqual(snapshot.observedConnectionCount, 3)
+        XCTAssertEqual(snapshot.residentialConnectionCount, 1)
+        XCTAssertEqual(snapshot.proxiedConnectionCount, 2)
+        XCTAssertEqual(
+            snapshot.unsafeProtectionObservationCount,
+            2,
+            "a protected Claude endpoint on the generic exit must invalidate the residential proof"
+        )
+        XCTAssertEqual(
+            snapshot.residentialConnectionCount
+                + snapshot.proxiedConnectionCount
+                + snapshot.directConnectionCount
+                + snapshot.blockedConnectionCount,
+            snapshot.observedConnectionCount
+        )
+    }
+
     func testRejectIsBlockedRatherThanUnrecognised() {
         // 13 670 of the unclassified lines. `Tono-WeChat-TCP-*` groups carry
         // REJECT as their fail-closed first member, so this is by design and

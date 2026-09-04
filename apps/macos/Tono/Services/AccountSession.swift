@@ -149,6 +149,7 @@ final class AccountSession {
                     observedConnectionCount: 0,
                     identifiedProcessConnectionCount: 0,
                     proxiedConnectionCount: 0,
+                    residentialConnectionCount: 0,
                     directConnectionCount: 0,
                     blockedConnectionCount: 0,
                     directRouteAttemptCount: 0,
