@@ -193,7 +193,7 @@ Same backend, no server changes required (`https://api.afk.ccwu.cc/api/v1`):
 - Access token lives in memory only; refresh token lives in Windows
   Credential Manager (DPAPI-scoped to the user), mirroring the macOS
   Keychain split.
-- Catalog contract is identical: monotonic `revision` (regressions and
+- Catalog contract: monotonic `revision` (regressions and
   same-revision/different-digest are rejected), SHA-256 of the YAML as
   base64url-no-padding, ≤ 1 MiB, ≤ 200 nodes, full node whitelist
   validation, last-verified-copy caching, 300 s sync cadence with bounded
