@@ -67,13 +67,14 @@ Each of these is a trap that cost real downtime before it was automated.
   A fresh download is how versions drift apart across the fleet.
 - **An existing Komari entry is reused.** Creating a second one leaves a duplicate row that
   is permanently "never reported".
-- **Reality SNI is `www.bing.com` fleet-wide.** Measured from the mainland probe, Bing
-  completes a handshake inside China; cloudflare.com, apple.com, microsoft.com, amazon.com
-  and nvidia.com do not. Note that node→front latency is nearly irrelevant and easy to
-  optimise by mistake: the client never contacts the front, only the node does, and only
-  when answering an active probe. `serverNames` and `target` must name the same host —
-  Reality relays that host's real certificate, so a client claiming a name the certificate
-  does not cover fails the handshake.
+- **Reality SNI is the measured default in `tooling/scripts/reality-fronts.json`.**
+  The measured-unusable set and the rationale live in that one file too, the
+  provisioner and the fleet audit both read it, and re-measuring only updates it. Note
+  that node→front latency is nearly irrelevant and easy to optimise by mistake: the
+  client never contacts the front, only the node does, and only when answering an
+  active probe. `serverNames` and `target` must name the same host — Reality relays
+  that host's real certificate, so a client claiming a name the certificate does not
+  cover fails the handshake.
 - **The hub is what reaches nodes, not your laptop.** Node credentials are mixed: some
   key-only, some password-only. A tool that SSHes directly from the laptop works on the two
   or three nodes that happen to carry the fleet key and reports every other node as
