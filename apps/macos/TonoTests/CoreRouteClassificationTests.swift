@@ -253,6 +253,23 @@ final class CoreRouteClassificationTests: XCTestCase {
             0,
             "generic proxy is safe when no residential contract was admitted"
         )
+
+        LocalTrafficAudit.shared.setResidentialRouteContext(nil)
+        LocalTrafficAudit.shared.recordConnections(
+            [],
+            protection: TrafficAuditProtectionSnapshot(
+                connected: true, connecting: false, protectionBlocked: false,
+                killSwitchArmed: false, tunPresent: false,
+                protectedDNSConfigured: false, selectedExit: "stale"
+            ),
+            residentialContext: current
+        )
+        XCTAssertEqual(
+            LocalTrafficAudit.shared.claudeTrafficResearchSnapshot()
+                .unsafeProtectionObservationCount,
+            0,
+            "disconnect invalidates even a protection-only late sample"
+        )
     }
 
     func testRejectIsBlockedRatherThanUnrecognised() {

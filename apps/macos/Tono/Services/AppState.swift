@@ -6666,6 +6666,9 @@ final class AppState {
         nodes: [ProxyNode],
         digest: String
     ) {
+        // A native start/reload can finish after disconnect cancelled its
+        // caller. Never resurrect that runtime's admission in a later session.
+        guard !Task.isCancelled, isConnected || isConnecting else { return }
         let terminal: String?
         do {
             terminal = try ConfigPipeline.admittedResidentialTerminal(
@@ -6687,6 +6690,9 @@ final class AppState {
         residentialRouteAuditContext = context
         LocalTrafficAudit.shared.setResidentialRouteContext(context)
         LocalTrafficAudit.setAssistantDirectFirstMember(terminal)
+        // Callback-time lookup alone would stamp a buffered old WebSocket
+        // frame with the new context. Invalidate its receive task at commit.
+        webSocket?.restartConnectionsStreamAfterRuntimeChange()
     }
 
     func compactRemoteDiagnosticSnapshot() -> TonoDiagnosticSnapshot {
