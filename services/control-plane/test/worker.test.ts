@@ -4924,6 +4924,48 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     ).bind(account.device.id).first<any>()).toMatchObject({ status: 'revoked' });
   });
 
+  it('rotates failed revocations so a full failing batch cannot starve newer jobs', async () => {
+    const originalFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    const attempts: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(String(input), init);
+      if (request.method === 'DELETE') {
+        const node = new URL(request.url).pathname.split('/').pop()!;
+        attempts.push(node);
+        if (node.startsWith('poison-')) return new Response('upstream failure', { status: 500 });
+      }
+      return originalFetch(input, init);
+    });
+    try {
+      await env.DB.batch(Array.from({ length: 41 }, (_, index) => env.DB.prepare(
+        `INSERT INTO revocation_jobs(id, device_id, tailscale_node_id, created_at)
+         VALUES(?, ?, ?, ?)`,
+      ).bind(`fair-${index}`, `missing-${index}`, index < 40 ? `poison-${index}` : 'healthy-newer', index)));
+      const tick = async () => {
+        const context = createExecutionContext();
+        await worker.scheduled(createScheduledController(), env as unknown as Env, context);
+        await waitOnExecutionContext(context);
+      };
+      await tick();
+      expect(attempts).toHaveLength(40);
+      expect(attempts).not.toContain('healthy-newer');
+      attempts.length = 0;
+      await tick();
+      expect(attempts).toHaveLength(40);
+      expect(attempts[0]).toBe('healthy-newer');
+      const healthy = await env.DB.prepare(
+        "SELECT completed_at, last_error FROM revocation_jobs WHERE id = 'fair-40'",
+      ).first<any>();
+      expect(healthy.completed_at).toBeTypeOf('number');
+      expect(healthy.last_error).toBeNull();
+      expect(await env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM revocation_jobs WHERE completed_at IS NULL',
+      ).first<any>()).toMatchObject({ count: 40 });
+    } finally {
+      fetchSpy.mockImplementation(originalFetch);
+    }
+  });
+
   it('processes durable revocations before retention housekeeping can fail', async () => {
     const account = await createAccount('revocation-before-retention');
     resetMockInventory(account.device.id, account.enrollment.hostname);
