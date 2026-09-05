@@ -201,7 +201,7 @@ export const ConnectPill = ({
               'var(--tono-weight-title)' as CSSProperties['fontWeight'],
             lineHeight: 'var(--tono-leading-title)',
             letterSpacing: 'var(--tono-tracking-pill-title)',
-            color: spec.titleColored ? spec.color : text.primary,
+            color: spec.titleColored && dark ? spec.color : text.primary,
             transition: `color ${transition}`,
           }}
         >

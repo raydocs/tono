@@ -77,8 +77,9 @@ struct LoginView: View {
     @State private var resendCountdown = 0
     @State private var resendTimer: Task<Void, Never>?
     @State private var showErrorDetails = false
-    @State private var appeared = false
     @State private var showEmailForm = false
+    @FocusState private var focusedField: Field?
+    private enum Field { case email, code }
 
     /// Email is the first screen. A live challenge keeps the code field open.
     private var showsEmailForm: Bool {
@@ -119,23 +120,68 @@ struct LoginView: View {
     }
 
     var body: some View {
-        VStack(spacing: 14) {
-            // Brand glyph, not the app-icon bitmap: the icon carries its own
-            // rounded-rect plate and reads as a foreign object on the card.
-            VStack(spacing: 12) {
-                TonoMarkFlowing()
-                    .frame(width: 56, height: 56)
-
-                VStack(spacing: 5) {
-                    Text("Welcome to Tono")
-                        .font(.system(size: 20, weight: .semibold))
-                    Text("Sign in with a verified email to continue. No password is required.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+        ScrollView {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 40) {
+                    welcomeStory.frame(width: 320)
+                    signInForm.frame(width: 380)
+                }
+                VStack(alignment: .leading, spacing: 24) {
+                    Label("Tono", systemImage: "network")
+                        .font(.title2.weight(.semibold))
+                    signInForm.frame(maxWidth: 420)
                 }
             }
-            .padding(.bottom, 12)
+            .padding(40)
+            .frame(maxWidth: .infinity)
+        }
+        .defaultScrollAnchor(.center)
+    }
+
+    private var welcomeStory: some View {
+        VStack(alignment: .leading, spacing: 32) {
+            HStack(spacing: 12) {
+                Image("TonoMark").resizable().scaledToFit()
+                    .frame(width: 32, height: 32).accessibilityHidden(true)
+                Text("Tono").font(.title2.weight(.semibold))
+            }
+            Spacer(minLength: 32)
+            Text("YOUR EVERYDAY CONNECTION")
+                .font(.caption.weight(.semibold)).tracking(1)
+                .foregroundStyle(.secondary)
+            Text("A little closer.\nA world more open.")
+                .font(.system(size: 34, weight: .semibold))
+                .tracking(-1)
+            Text("One quiet space for your connection, your routes, and your peace of mind.")
+                .font(.body).foregroundStyle(.secondary)
+            HStack(spacing: 0) {
+                Circle().strokeBorder(.secondary, lineWidth: 1).frame(width: 32, height: 32)
+                Rectangle().fill(.secondary).frame(width: 80, height: 1)
+                Circle().strokeBorder(.secondary, lineWidth: 1).frame(width: 32, height: 32)
+            }.accessibilityHidden(true)
+            Spacer(minLength: 32)
+            Text("Your connection stays in your hands.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(32)
+        .frame(minHeight: 480, alignment: .leading)
+        .background(colorScheme == .dark ? Color(hex: "202B45") : Color(hex: "E4EBFA"),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var signInForm: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(LocalizedStringKey(session.emailChallenge == nil ? "01 / SIGN IN" : "02 / CHECK YOUR EMAIL"))
+                .font(.caption.weight(.semibold)).tracking(1)
+                .foregroundStyle(.secondary)
+            Text(LocalizedStringKey(session.emailChallenge == nil ? "Sign in to Tono" : "Open your inbox"))
+                .font(.system(size: 28, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text(LocalizedStringKey(session.emailChallenge == nil
+                 ? "Start with your email. We’ll send a sign-in code — no password to remember."
+                 : "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically."))
+                .font(.body).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if session.isAtDeviceLimit {
                 Label("Your \(session.deviceLimit)-device allowance is full. Sign in and revoke another device if needed.", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
@@ -245,14 +291,24 @@ struct LoginView: View {
                 Button("Sign Out", role: .destructive) { Task { await session.logout() } }
             } else {
                 if let methods {
-                    // One decision per screen, Manus-style: the landing shows
-                    // only the ways in; the form appears after a choice.
+                    // Email is the primary task. Alternate providers remain
+                    // debug-only and do not add a decision to the shipping flow.
                     if showsEmailForm {
                         VStack(spacing: 10) {
                             gateField("Email", text: $email)
-                            gateField("Device name", text: $deviceName)
+                                .focused($focusedField, equals: .email)
+                                .disabled(busy || session.emailChallenge != nil)
+                            if session.emailChallenge == nil {
+                                DisclosureGroup("Device name") {
+                                    gateField("Device name", text: $deviceName)
+                                }
+                                .font(.caption)
+                                .disabled(busy)
+                            }
                             if session.emailChallenge != nil {
                                 gateField("Six-digit email code", text: $emailCode)
+                                    .focused($focusedField, equals: .code)
+                                    .disabled(busy)
                                     .textContentType(.oneTimeCode)
                                     .onChange(of: emailCode) { _, newValue in
                                         handleCodeChange(newValue)
@@ -263,7 +319,7 @@ struct LoginView: View {
                                     busyLabel("Verify email code")
                                 }
                                 .buttonStyle(GateProminentButtonStyle())
-                                .disabled(busy)
+                                .disabled(busy || emailCode.count != 6)
                             }
                             Button {
                                 Task {
@@ -289,6 +345,17 @@ struct LoginView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .multilineTextAlignment(.center)
+                                    .textSelection(.enabled)
+                                Button("Use another email") {
+                                    session.resetEmailSignIn()
+                                    emailCode = ""
+                                    autoSubmittedCode = nil
+                                    resendTimer?.cancel()
+                                    resendCountdown = 0
+                                    focusedField = .email
+                                }
+                                .buttonStyle(.link)
+                                .disabled(busy)
                             }
 
                             #if DEBUG
@@ -404,18 +471,28 @@ struct LoginView: View {
                 }
             }
         }
-        .padding(.horizontal, 20)
-        .frame(width: 360)
-        // No card. The window itself is the page — content sits directly on
-        // the paper ground, Manus-style.
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 12)
-        .onAppear {
-            if reduceMotion {
-                appeared = true
-            } else {
-                withAnimation(.spring(response: 0.55, dampingFraction: 0.85)) {
-                    appeared = true
+        .padding(28)
+        .background(colorScheme == .dark ? Color(hex: "1B202B") : .white,
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.secondary.opacity(0.3), lineWidth: 1)
+        }
+        .onAppear { focusedField = session.emailChallenge == nil ? .email : .code }
+        .onChange(of: session.emailChallenge != nil) { _, hasCode in
+            if hasCode { focusedField = .code }
+        }
+        .onChange(of: busy) { _, isBusy in
+            if !isBusy && session.emailChallenge != nil { focusedField = .code }
+        }
+        .onSubmit {
+            guard !busy else { return }
+            Task {
+                if session.emailChallenge == nil {
+                    await session.requestEmailCode(email: email, deviceName: deviceName)
+                    if session.emailChallenge != nil { startResendCountdown() }
+                } else if emailCode.count == 6 {
+                    await session.verifyEmailCode(emailCode)
                 }
             }
         }
@@ -448,7 +525,7 @@ struct LoginView: View {
 
     /// Digits-only, capped at six; a complete code submits itself once.
     private func handleCodeChange(_ newValue: String) {
-        let digits = String(newValue.filter(\.isNumber).prefix(6))
+        let digits = String(newValue.filter { $0.isASCII && $0.isNumber }.prefix(6))
         if digits != newValue {
             emailCode = digits
             return
@@ -474,7 +551,7 @@ struct LoginView: View {
         }
     }
 
-    /// Rounded glass input matching the Proxies/Logs search fields.
+    /// A visible boundary even without vibrancy or a focused window.
     @ViewBuilder
     private func gateField(_ title: LocalizedStringKey, text: Binding<String>) -> some View {
         TextField(title, text: text)
@@ -490,9 +567,9 @@ struct LoginView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(
                         colorScheme == .dark
-                            ? .white.opacity(0.13)
-                            : .black.opacity(0.09),
-                        lineWidth: 0.5
+                            ? .white.opacity(0.45)
+                            : .black.opacity(0.45),
+                        lineWidth: 1
                     )
             }
     }
@@ -631,29 +708,18 @@ private struct AccountBlockedView: View {
 /// labels without a fill when the login card sits on glass / an inactive
 /// window — the control then vanishes on a light surface.
 private struct GateProminentButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(colorScheme == .dark ? .black : .white)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(height: 44)
             .background(
-                // The logo's own ramp, flat and quiet: no glow, no stroke —
-                // the gradient is the only voice of color on the page.
-                LinearGradient(
-                    colors: [TonoBrand.accent, TonoBrand.accentSoft, TonoBrand.accentWarm],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-            .shadow(
-                color: TonoBrand.accentSoft.opacity(colorScheme == .dark ? 0.35 : 0.25),
-                radius: 10, y: 4
+                TonoBrand.actionFill,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .opacity(isEnabled ? 1 : 0.4)
             .brightness(configuration.isPressed ? -0.06 : 0)
@@ -661,50 +727,6 @@ private struct GateProminentButtonStyle: ButtonStyle {
             .animation(TonoMotion.easeOut(0.12, reduceMotion: reduceMotion), value: configuration.isPressed)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .tint(.white)
-    }
-}
-
-/// The real product mark (the TO monogram, same transparent asset as the
-/// Windows shell — never on a tile) with a soft light band sweeping through
-/// the mark's own shape on a loop. Reduce Motion shows the static mark.
-private struct TonoMarkFlowing: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = -0.8
-
-    var body: some View {
-        Image("TonoMark")
-            .resizable()
-            .interpolation(.high)
-            .scaledToFit()
-            .overlay {
-                if !reduceMotion {
-                    GeometryReader { geo in
-                        LinearGradient(
-                            colors: [.clear, .white.opacity(0.75), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: geo.size.width * 0.55)
-                        .offset(x: phase * geo.size.width)
-                        .blendMode(.plusLighter)
-                    }
-                    // The band only lights the mark itself, never the paper.
-                    .mask(
-                        Image("TonoMark")
-                            .resizable()
-                            .scaledToFit()
-                    )
-                }
-            }
-            .onAppear {
-                guard !reduceMotion else { return }
-                // The travel range overshoots the mark on both sides, so each
-                // sweep is followed by a quiet pause before it repeats.
-                withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: false)) {
-                    phase = 1.8
-                }
-            }
-            .accessibilityHidden(true)
     }
 }
 

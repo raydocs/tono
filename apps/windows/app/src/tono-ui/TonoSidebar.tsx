@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { useLocation, useNavigate } from 'react-router'
+import { useLocation, useNavigate, useNavigation } from 'react-router'
 
 import { navItems } from '@/pages/_navigation'
 import { useThemeMode } from '@/services/states'
@@ -22,6 +22,7 @@ export const TonoSidebar = () => {
   const text = tonoText(dark)
   const location = useLocation()
   const navigate = useNavigate()
+  const navigation = useNavigation()
 
   const itemByPath = (path: string) =>
     navItems.find((item) => item.path === path)
@@ -45,6 +46,7 @@ export const TonoSidebar = () => {
         type="button"
         className="tono-nav__item"
         aria-current={active ? 'page' : undefined}
+        aria-busy={navigation.location?.pathname === item.path}
         onClick={() => navigate(item.path)}
         style={{
           // Structural properties are duplicated inline on purpose: a real
@@ -78,6 +80,9 @@ export const TonoSidebar = () => {
           {item.icon}
         </span>
         <span>{t(item.label)}</span>
+        {navigation.location?.pathname === item.path && (
+          <span aria-hidden="true">…</span>
+        )}
       </button>
     )
   }
@@ -85,14 +90,15 @@ export const TonoSidebar = () => {
   return (
     <nav
       className="tono-sidebar"
+      aria-label="Tono"
       style={{
         // See the note on the nav buttons: structural layout is inline so a
         // missing stylesheet cannot collapse the shell.
-        width: 220,
+        width: 'clamp(184px, 21vw, 220px)',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        padding: '12px 6px 12px',
+        padding: '24px 8px 16px',
         boxSizing: 'border-box',
         background: 'var(--tono-surface-sidebar)',
         borderRight: '1px solid var(--tono-surface-sidebar-border)',

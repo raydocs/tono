@@ -1115,7 +1115,12 @@ export interface TranslationResources {
         whatFailed: string
       }
       login: {
+        brandDescription: string
+        brandFootnote: string
+        brandLabel: string
+        brandTitle: string
         changeEmail: string
+        checkInbox: string
         codeFrom: string
         codeLabel: string
         codePlaceholder: string
@@ -1130,6 +1135,7 @@ export interface TranslationResources {
           sessionExpired: string
           unreachable: string
         }
+        inboxInstructions: string
         intro: string
         invalidCode: string
         invalidEmail: string
@@ -1145,9 +1151,12 @@ export interface TranslationResources {
           retry: string
           title: string
         }
+        restoringSession: string
         sendCode: string
         sending: string
         sendNewCode: string
+        stepCode: string
+        stepEmail: string
         subtitle: string
         suspended: {
           description: string

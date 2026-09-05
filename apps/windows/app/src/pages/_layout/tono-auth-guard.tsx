@@ -1,5 +1,5 @@
-import { Box, CircularProgress } from '@mui/material'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Navigate, useLocation } from 'react-router'
 
 import { useTonoStatus } from '@/hooks/use-tono'
@@ -11,14 +11,16 @@ import { resolveTonoGuard } from './tono-guard'
  * so `_layout.tsx` only decides what the chrome looks like per route.
  */
 export const TonoAuthGuard = ({ children }: { children: ReactNode }) => {
+  const { t } = useTranslation()
   const location = useLocation()
   const { status } = useTonoStatus()
   const action = resolveTonoGuard(status, location.pathname)
 
   if (action === 'loading') {
     return (
-      <Box
-        sx={{
+      <div
+        role="status"
+        style={{
           width: '100vw',
           height: '100vh',
           display: 'flex',
@@ -26,8 +28,8 @@ export const TonoAuthGuard = ({ children }: { children: ReactNode }) => {
           justifyContent: 'center',
         }}
       >
-        <CircularProgress />
-      </Box>
+        <p>{t('tono.login.restoringSession')}</p>
+      </div>
     )
   }
 

@@ -64,6 +64,41 @@ async function enterCodeStep() {
 }
 
 describe('login request exclusion', () => {
+  it('announces the inbox step, focuses code, and returns to the original email', async () => {
+    await enterCodeStep()
+    expect(
+      screen.getByRole('heading', { name: 'Open your inbox' }),
+    ).toBeDefined()
+    const code = screen.getByLabelText('6-digit code')
+    expect(document.activeElement).toBe(code)
+    expect(screen.getByRole('status').textContent).toBe('Code sent.')
+    expect(
+      document.getElementById(code.getAttribute('aria-describedby')!),
+    ).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Use another email' }))
+    expect(document.activeElement).toBe(screen.getByLabelText('Email'))
+    expect(screen.getByDisplayValue('person@example.com')).toBeDefined()
+    expect(screen.queryByLabelText('6-digit code')).toBeNull()
+  })
+
+  it('keeps inbox help available after a rejected code without resubmitting it', async () => {
+    await enterCodeStep()
+    mocks.verify.mockRejectedValue(new Error('Code rejected'))
+    await act(async () =>
+      fireEvent.change(screen.getByLabelText('6-digit code'), {
+        target: { value: '654321' },
+      }),
+    )
+    expect(screen.getByRole('alert').textContent).toBe('Code rejected')
+    const code = screen.getByLabelText('6-digit code')
+    expect(code.getAttribute('aria-invalid')).toBe('true')
+    expect(
+      document.getElementById(code.getAttribute('aria-describedby')!),
+    ).not.toBeNull()
+    await act(async () => vi.advanceTimersByTime(1000))
+    expect(mocks.verify).toHaveBeenCalledTimes(1)
+  })
+
   it('disables resend throughout verification and permits it after failure', async () => {
     const resend = await enterCodeStep()
     let rejectVerify!: (error: Error) => void

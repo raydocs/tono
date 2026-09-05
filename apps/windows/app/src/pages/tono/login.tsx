@@ -47,9 +47,7 @@ const LoginPage = () => {
     string | null
   >(null)
   const [countdown, setCountdown] = useState(0)
-  const [autoSubmittedCode, setAutoSubmittedCode] = useState<string | null>(
-    null,
-  )
+  const autoSubmittedCodeRef = useRef<string | null>(null)
   const codeInputRef = useRef<HTMLInputElement>(null)
   const emailInputRef = useRef<HTMLInputElement>(null)
   const authRequestPendingRef = useRef(false)
@@ -74,7 +72,7 @@ const LoginPage = () => {
     setCodeSent(false)
     setCode('')
     setError(null)
-    setAutoSubmittedCode(null)
+    autoSubmittedCodeRef.current = null
   }
 
   const handleSendCode = useLockFn(async () => {
@@ -129,9 +127,9 @@ const LoginPage = () => {
   })
 
   useEffect(() => {
-    if (!codeSent) return
+    if (!codeSent || sending || verifying) return
     codeInputRef.current?.focus()
-  }, [codeSent])
+  }, [codeSent, sending, verifying])
 
   useEffect(() => {
     if (codeSent) return
@@ -140,17 +138,10 @@ const LoginPage = () => {
 
   useEffect(() => {
     if (!codeSent || verifying || internetBlocked) return
-    if (!/^\d{6}$/.test(code) || autoSubmittedCode === code) return
-    setAutoSubmittedCode(code)
+    if (!/^\d{6}$/.test(code) || autoSubmittedCodeRef.current === code) return
+    autoSubmittedCodeRef.current = code
     void handleVerify()
-  }, [
-    autoSubmittedCode,
-    code,
-    codeSent,
-    handleVerify,
-    internetBlocked,
-    verifying,
-  ])
+  }, [code, codeSent, handleVerify, internetBlocked, verifying])
 
   const handleRetryRestore = useLockFn(async () => {
     setRetrying(true)
@@ -183,8 +174,8 @@ const LoginPage = () => {
   })
 
   const inputStyle: React.CSSProperties = {
-    background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.7)',
-    border: `1px solid ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(20,22,30,0.12)'}`,
+    background: 'var(--tono-surface-input)',
+    border: '1px solid var(--tono-surface-input-border)',
     color: text.primary,
   }
 
@@ -193,7 +184,7 @@ const LoginPage = () => {
     padding: '12px 16px',
     fontSize: 14,
     color: '#fff',
-    background: TONO_COLORS.accent,
+    background: 'var(--tono-action-fill)',
   }
 
   const internetRecovery = internetBlocked ? (
@@ -300,24 +291,31 @@ const LoginPage = () => {
   }
 
   return (
-    <div
-      className="tono-page"
-      style={{
-        ...TONO_PAGE_LAYOUT,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
+    <div className="tono-welcome">
+      <aside className="tono-welcome__story">
+        <div className="tono-welcome__brand">
+          <TonoLogo connected={false} size={32} />
+          <span>Tono</span>
+        </div>
+        <div className="tono-welcome__message">
+          <span className="tono-welcome__eyebrow">
+            {t('tono.login.brandLabel')}
+          </span>
+          <h2>{t('tono.login.brandTitle')}</h2>
+          <p>{t('tono.login.brandDescription')}</p>
+          <div className="tono-welcome__route" aria-hidden="true">
+            <span />
+            <i />
+            <span />
+          </div>
+        </div>
+        <p className="tono-welcome__footnote">
+          {t('tono.login.brandFootnote')}
+        </p>
+      </aside>
       <GlassCard
-        style={{
-          width: 470,
-          maxWidth: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'stretch',
-          gap: 18,
-          padding: 32,
-        }}
+        className="tono-welcome__form"
+        padding="clamp(24px, 4vw, 48px)"
       >
         {internetRecovery}
         {restoreFailed && (
@@ -363,22 +361,24 @@ const LoginPage = () => {
           style={{
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: 8,
-            textAlign: 'center',
+            textAlign: 'left',
           }}
         >
-          <TonoLogo connected={false} size={56} />
+          <span className="tono-welcome__eyebrow">
+            {t(codeSent ? 'tono.login.stepCode' : 'tono.login.stepEmail')}
+          </span>
           <h1
             style={{
-              margin: '8px 0 0',
-              fontSize: 22,
+              margin: 0,
+              fontSize: 28,
               fontWeight: 650,
               letterSpacing: -0.4,
               color: text.primary,
             }}
           >
-            {t('tono.login.welcome')}
+            {t(codeSent ? 'tono.login.checkInbox' : 'tono.login.welcome')}
           </h1>
           <p
             style={{
@@ -389,11 +389,22 @@ const LoginPage = () => {
               color: text.secondary,
             }}
           >
-            {t('tono.login.intro')}
+            {t(codeSent ? 'tono.login.inboxInstructions' : 'tono.login.intro')}
           </p>
         </div>
 
+        <p className="tono-sr-only" role="status">
+          {sending
+            ? t('tono.login.sending')
+            : verifying
+              ? t('tono.login.verifying')
+              : codeSent
+                ? t('tono.login.codeSent')
+                : ''}
+        </p>
+
         <form
+          aria-busy={sending || verifying}
           onSubmit={(event) => {
             event.preventDefault()
             if (!codeSent) void handleSendCode()
@@ -417,6 +428,8 @@ const LoginPage = () => {
               ref={emailInputRef}
               style={inputStyle}
               type="email"
+              required
+              aria-invalid={error === t('tono.login.invalidEmail')}
               autoComplete="email"
               placeholder={t('tono.login.emailPlaceholder')}
               value={email}
@@ -469,6 +482,8 @@ const LoginPage = () => {
                   maxLength={6}
                   inputMode="numeric"
                   autoComplete="one-time-code"
+                  aria-describedby="tono-code-help"
+                  aria-invalid={Boolean(error)}
                   onChange={(event) =>
                     setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
                   }
@@ -552,7 +567,7 @@ const LoginPage = () => {
               margin: 0,
               fontSize: 12,
               textAlign: 'center',
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
             }}
           >
             {error}
@@ -563,8 +578,9 @@ const LoginPage = () => {
           error !== t('tono.login.invalidCode') && (
             <SupportContact email={email} extra={error} />
           )}
-        {codeSent && !error && (
+        {codeSent && (
           <div
+            id="tono-code-help"
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -587,7 +603,7 @@ const LoginPage = () => {
                 margin: 0,
                 fontSize: 12,
                 textAlign: 'center',
-                color: TONO_COLORS.latencyGood,
+                color: text.secondary,
               }}
             >
               {t('tono.login.codeSentTo')}

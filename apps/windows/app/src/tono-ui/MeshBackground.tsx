@@ -1,10 +1,8 @@
 import { glassOpacity, useGlassTransparency } from './theme'
 
 /**
- * The frosted-glass window background (MeshGradientBackground.swift): a soft
- * ambient gradient sheet under a near-opaque wash whose alpha follows the
- * Appearance slider. The gradients are already soft, so the previous full-window
- * 40px backdrop blur only forced continuous WebView2 GPU composition.
+ * Clarity's quiet content ground. The appearance slider changes tint, not
+ * backdrop sampling. No mesh, canvas, or continuous compositor work.
  */
 
 export const MeshBackground = ({ dark }: { dark: boolean }) => {
@@ -20,7 +18,7 @@ export const MeshBackground = ({ dark }: { dark: boolean }) => {
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'var(--tono-mesh)',
+          background: dark ? '#202b45' : '#e4ebfa',
         }}
       />
       <div
@@ -29,8 +27,8 @@ export const MeshBackground = ({ dark }: { dark: boolean }) => {
           position: 'absolute',
           inset: 0,
           background: dark
-            ? `rgba(9, 11, 18, ${opacity})`
-            : `rgba(243, 245, 250, ${opacity})`,
+            ? `rgba(20, 25, 34, ${opacity})`
+            : `rgba(246, 248, 252, ${opacity})`,
           transition: 'background 0.2s ease',
         }}
       />
