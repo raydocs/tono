@@ -2349,6 +2349,11 @@ async function usageMeteringStatus(e: Env) {
   const legacyLastSeenAt = Number(state?.legacy_last_seen_at ?? 0);
   const blockers: string[] = [];
   if (phase === 'dual') {
+    // Silence is not a paired accounting boundary. Until the handoff protocol
+    // exists, only installations with no legacy history may advance.
+    if (legacyLastSeenAt > 0 || Number(legacy?.source_rows ?? 0) > 0) {
+      blockers.push('legacy_handoff_boundary_unavailable');
+    }
     if (nodes.length === 0) blockers.push('no_active_exit_nodes');
     if (nodes.some((node) =>
       Number(node.metering_protocol_version) !== 2 ||
