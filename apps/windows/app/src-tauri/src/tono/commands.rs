@@ -2163,21 +2163,18 @@ fn read_bounded_terminal_settings(path: &std::path::Path) -> Result<Option<Strin
 }
 
 fn file_uri_path(uri: &str) -> Option<std::path::PathBuf> {
-    let encoded = uri.strip_prefix("file://")?;
-    let decoded = percent_encoding::percent_decode_str(encoded)
-        .decode_utf8()
-        .ok()?
-        .into_owned();
-    #[cfg(windows)]
-    let decoded = {
-        let path = if decoded.as_bytes().get(2) == Some(&b':') && decoded.starts_with('/') {
-            &decoded[1..]
-        } else {
-            &decoded
-        };
-        path.replace('/', "\\")
-    };
-    Some(std::path::PathBuf::from(decoded))
+    let uri = reqwest::Url::parse(uri).ok()?;
+    // Diagnostic discovery is local-only. Do not turn a remote authority into
+    // a relative path, or newly probe stale/unreachable network shares here.
+    if uri.scheme() != "file"
+        || uri.host_str().is_some_and(|host| host != "localhost")
+        || uri.query().is_some()
+        || uri.fragment().is_some()
+    {
+        return None;
+    }
+    let path = uri.to_file_path().ok()?;
+    (path.is_absolute() && !path.to_string_lossy().contains('\0')).then_some(path)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -3187,6 +3184,7 @@ pub async fn resync_after_cancelled_quit(app: AppHandle) {
 mod tests {
     use super::{
         ProxyEnvEntry, TokenProbe, append_proxy_entries, command_output_with_timeout,
+        file_uri_path,
         proxy_assignments_in_json, proxy_assignments_in_text,
         scan_json_proxy_directory, scan_json_proxy_file, scan_powershell_profile_directories,
         scan_text_proxy_directory,
@@ -3474,6 +3472,29 @@ mod tests {
     }
 
     #[test]
+    fn vscode_file_uri_localhost_resolves_to_the_absolute_workspace() {
+        let path = std::env::temp_dir().join("project #settings 雪");
+        let uri = reqwest::Url::from_file_path(&path).unwrap().to_string();
+        let localhost = uri.replacen("file:///", "file://localhost/", 1);
+        assert_eq!(file_uri_path(&uri), Some(path.clone()));
+        assert_eq!(file_uri_path(&localhost), Some(path));
+    }
+
+    #[test]
+    fn vscode_file_uri_does_not_scan_remote_or_decorated_paths() {
+        for uri in [
+            "file://fileserver/team/project",
+            "file:///C:/project?query",
+            "file:///C:/project#fragment",
+            "file:///C:/project%00",
+            "https://example.com/project",
+            "vscode-remote://ssh-remote+host/project",
+        ] {
+            assert_eq!(file_uri_path(uri), None, "unsupported URI: {uri}");
+        }
+    }
+
+    #[test]
     fn vscode_workspace_discovery_follows_recent_folder_metadata() {
         let root = std::env::temp_dir().join(format!(
             "tono-terminal-env-{}-{}",
@@ -3489,10 +3510,10 @@ mod tests {
         std::fs::create_dir_all(&storage).unwrap();
         std::fs::create_dir_all(workspace.join(".vscode")).unwrap();
         std::fs::write(workspace.join(".vscode").join("settings.json"), "{}").unwrap();
-        let workspace_uri = format!("file://{}", workspace.to_string_lossy().replace(' ', "%20"));
+        let workspace_uri = reqwest::Url::from_file_path(&workspace).unwrap();
         std::fs::write(
             storage.join("workspace.json"),
-            format!(r#"{{"folder":"{workspace_uri}"}}"#),
+            serde_json::json!({ "folder": workspace_uri.as_str() }).to_string(),
         )
         .unwrap();
 

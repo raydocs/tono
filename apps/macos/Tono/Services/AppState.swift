@@ -833,6 +833,8 @@ final class AppState {
     /// last one written to disk. A rewrite that reproduces these bytes has
     /// nothing to reload, and the reload is what closes every open connection.
     private var loadedRuntimeConfigDigest: String?
+    private var residentialRouteAuditContext: ResidentialRouteAuditContext?
+    private var residentialRouteAuditGeneration: UInt64 = 0
     private var pendingFullConfigReload = false
     private var pendingDirectPolicyReload:
         ConfigPipeline.ManagedDirectRuntimePolicy?
@@ -1818,6 +1820,11 @@ final class AppState {
                 async let localDNSReady = self.testLocalProtectedDNS()
                 try await started
                 self.loadedRuntimeConfigDigest = digest
+                self.commitResidentialRouteAuditContext(
+                    overlay: overlay,
+                    nodes: runtimeNodes,
+                    digest: digest
+                )
                 RuntimeCleanup.markCoreStarted(tunEnabled: self.config.tunEnabled)
                 try Task.checkCancellation()
                 guard await tunReady else {
@@ -2216,6 +2223,10 @@ final class AppState {
         pendingFullConfigReload = false
         pendingDirectPolicyReload = nil
         loadedRuntimeConfigDigest = nil
+        residentialRouteAuditGeneration &+= 1
+        residentialRouteAuditContext = nil
+        LocalTrafficAudit.shared.setResidentialRouteContext(nil)
+        LocalTrafficAudit.setAssistantDirectFirstMember(nil)
 
         // Cancel any in-progress connect Task. The teardown sequence waits for
         // it to leave the serialized helper actor before issuing stop/disarm.
@@ -2477,7 +2488,8 @@ final class AppState {
             if let apiConnections = response.connections {
                 LocalTrafficAudit.shared.recordConnections(
                     apiConnections,
-                    protection: self.trafficAuditProtectionSnapshot()
+                    protection: self.trafficAuditProtectionSnapshot(),
+                    residentialContext: self.residentialRouteAuditContext
                 )
                 // Refresh scheduling depends on this, so it must not be gated on
                 // a window being visible: the rest of this handler only feeds
@@ -3774,6 +3786,11 @@ final class AppState {
                 try Task.checkCancellation()
                 try await api.reloadConfig(path: runtimeConfigPath)
                 self.loadedRuntimeConfigDigest = digest
+                self.commitResidentialRouteAuditContext(
+                    overlay: overlay,
+                    nodes: runtimeNodes,
+                    digest: digest
+                )
 
                 if let pendingDirectPolicy {
                     // Mihomo has accepted the new pins, so they are now the
@@ -4298,11 +4315,6 @@ final class AppState {
             }
         }
         appTrafficLedger.setInfrastructureDestinations(hosts)
-        // The assistant group only exists, and only has a residential first
-        // member, when the catalog carries this hop.
-        LocalTrafficAudit.setAssistantDirectFirstMember(
-            residentialHop == nil ? nil : ConfigPipeline.homeResidentialProxyName
-        )
     }
 
     private func validatedCatalogRouting(
@@ -5987,22 +5999,11 @@ final class AppState {
             )
             guard generation == protectionOperationGeneration,
                   !Task.isCancelled else { return }
+            let runtimeNodes = importedExitNodes
+            let overlay = currentOwnedRuntimeOverlay()
             let digest = try await coreRuntime.writeRuntimeConfig(
-                overlay: ConfigPipeline.OverlayConfig(
-                    mixedPort: config.mixedPort,
-                    externalController: config.externalController,
-                    secret: config.secret,
-                    mode: "rule",
-                    logLevel: "warning",
-                    allowLan: false,
-                    tunEnabled: true,
-                    selectedNodeName: selectedExitNode()?.name ?? ConfigPipeline.homeNodeName,
-                    tonoTransport: tonoTransport,
-                    claudeHomeNodeName: managedCatalogRouting?.homeProxy,
-                    defaultNodeName: managedCatalogRouting?.defaultProxy,
-                    claudeHomeSocks5: managedCatalogRouting?.homeSocks5
-                ),
-                customNodes: importedExitNodes,
+                overlay: overlay,
+                customNodes: runtimeNodes,
                 directPolicy: resolved
             )
             let runtimeConfigPath = try await PrivilegedRuntimeCoordinator.shared
@@ -6019,6 +6020,11 @@ final class AppState {
             guard generation == protectionOperationGeneration,
                   !Task.isCancelled else { return }
             loadedRuntimeConfigDigest = digest
+            commitResidentialRouteAuditContext(
+                overlay: overlay,
+                nodes: runtimeNodes,
+                digest: digest
+            )
             let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
             guard generation == protectionOperationGeneration else { return }
             if case .lost = tun {
@@ -6032,23 +6038,11 @@ final class AppState {
                 // root snapshot and the live core on the failed policy. Keep
                 // the home-routing directives too: omitting them silently
                 // changed Claude's egress identity during rollback.
+                let rollbackOverlay = currentOwnedRuntimeOverlay()
+                let rollbackNodes = importedExitNodes
                 let rollbackDigest = try await coreRuntime.writeRuntimeConfig(
-                    overlay: ConfigPipeline.OverlayConfig(
-                        mixedPort: config.mixedPort,
-                        externalController: config.externalController,
-                        secret: config.secret,
-                        mode: "rule",
-                        logLevel: "warning",
-                        allowLan: false,
-                        tunEnabled: true,
-                        selectedNodeName: selectedExitNode()?.name
-                            ?? ConfigPipeline.homeNodeName,
-                        tonoTransport: tonoTransport,
-                        claudeHomeNodeName: managedCatalogRouting?.homeProxy,
-                        defaultNodeName: managedCatalogRouting?.defaultProxy,
-                        claudeHomeSocks5: managedCatalogRouting?.homeSocks5
-                    ),
-                    customNodes: importedExitNodes,
+                    overlay: rollbackOverlay,
+                    customNodes: rollbackNodes,
                     directPolicy: base
                 )
                 let rollbackPath = try await PrivilegedRuntimeCoordinator.shared
@@ -6058,6 +6052,11 @@ final class AppState {
                     )
                 try await api.reloadConfig(path: rollbackPath)
                 loadedRuntimeConfigDigest = rollbackDigest
+                commitResidentialRouteAuditContext(
+                    overlay: rollbackOverlay,
+                    nodes: rollbackNodes,
+                    digest: rollbackDigest
+                )
                 try await PrivilegedRuntimeCoordinator.shared.armKillSwitch(
                     apiHosts: [],
                     tunnelInterfaces: [ConfigPipeline.tonoTunInterface],
@@ -6643,6 +6642,57 @@ final class AppState {
                 ?? selectedNodeId
                 ?? "unknown"
         )
+    }
+
+    private func currentOwnedRuntimeOverlay() -> ConfigPipeline.OverlayConfig {
+        ConfigPipeline.OverlayConfig(
+            mixedPort: config.mixedPort,
+            externalController: config.externalController,
+            secret: config.secret,
+            mode: "rule",
+            logLevel: "warning",
+            allowLan: false,
+            tunEnabled: true,
+            selectedNodeName: selectedExitNode()?.name ?? ConfigPipeline.homeNodeName,
+            tonoTransport: tonoTransport,
+            claudeHomeNodeName: managedCatalogRouting?.homeProxy,
+            defaultNodeName: managedCatalogRouting?.defaultProxy,
+            claudeHomeSocks5: managedCatalogRouting?.homeSocks5
+        )
+    }
+
+    private func commitResidentialRouteAuditContext(
+        overlay: ConfigPipeline.OverlayConfig,
+        nodes: [ProxyNode],
+        digest: String
+    ) {
+        // A native start/reload can finish after disconnect cancelled its
+        // caller. Never resurrect that runtime's admission in a later session.
+        guard !Task.isCancelled, isConnected || isConnecting else { return }
+        let terminal: String?
+        do {
+            terminal = try ConfigPipeline.admittedResidentialTerminal(
+                overlay: overlay,
+                customNodes: nodes
+            )
+        } catch {
+            // Generation already succeeded with the same validation, so this
+            // can only indicate programmer drift. Keep the prior evidence
+            // rather than publishing a context that did not describe runtime.
+            return
+        }
+        residentialRouteAuditGeneration &+= 1
+        let context = ResidentialRouteAuditContext(
+            generation: residentialRouteAuditGeneration,
+            runtimeConfigDigest: digest,
+            admittedTerminal: terminal
+        )
+        residentialRouteAuditContext = context
+        LocalTrafficAudit.shared.setResidentialRouteContext(context)
+        LocalTrafficAudit.setAssistantDirectFirstMember(terminal)
+        // Callback-time lookup alone would stamp a buffered old WebSocket
+        // frame with the new context. Invalidate its receive task at commit.
+        webSocket?.restartConnectionsStreamAfterRuntimeChange()
     }
 
     func compactRemoteDiagnosticSnapshot() -> TonoDiagnosticSnapshot {

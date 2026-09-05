@@ -18,6 +18,16 @@ describe('Tono updater version comparison', () => {
     expect(compareVersions('0.0.19+windows.2', '0.0.19+windows.1')).toBe(0)
   })
 
+  it('preserves hyphens inside prerelease identifiers', () => {
+    expect(compareVersions('1.0.0-alpha-2', '1.0.0-alpha-1')).toBe(1)
+    expect(compareVersions('1.0.0-alpha-1', '1.0.0-alpha-2')).toBe(-1)
+    expect(compareVersions('1.0.0-alpha-2.10', '1.0.0-alpha-2.2')).toBe(1)
+    expect(
+      compareVersions('1.0.0-alpha-2+build.1', '1.0.0-alpha-2+build.2'),
+    ).toBe(0)
+    expect(compareVersions('1.0.0-alpha-10', '1.0.0-alpha-2')).toBe(-1)
+  })
+
   it('rejects malformed or incomplete versions', () => {
     expect(compareVersions('release-0.0.19', '0.0.18')).toBeNull()
     expect(compareVersions('0.0', '0.0.18')).toBeNull()

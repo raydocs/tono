@@ -240,6 +240,32 @@ available. After changing Secure DNS, fully restart the browser and reconnect To
 without a residential Claude hop continue to use ordinary Tono protection without this stricter
 browser guarantee.
 
+Coverage is the current Windows user's standard Chrome/Edge Stable, Beta, Dev and
+Canary (`SxS`) data directories under `LOCALAPPDATA`, plus their HKLM/HKCU managed
+policies. The scan reads browser-wide `Local State`, not per-profile `Preferences`.
+It does not inspect portable/custom `--user-data-dir` locations, other browsers,
+other OS users, command-line switches, extensions, or live in-memory resolver state.
+Each file is limited to 4 MiB and each browser family to 16 MiB; missing required
+state, malformed/unreadable data, and a 5-second scan timeout all remain fail-closed.
+The 60-second recheck is a nominal interval, not a maximum leak window: scan time,
+scheduling delays and other awaited maintenance can extend the observation gap.
+This is not a system-wide zero-leak guarantee.
+
+Diagnostics distinguish an **incomplete scan** from a known unsafe setting: a
+failed read is not evidence that the user enabled Secure DNS. The service log now
+reports verification failure rather than asserting a settings change, with a
+close-and-retry step and specific support checks (Local State readability/JSON,
+limits, policy access). Known configuration conflicts instead suggest the existing
+Off/Automatic remedy and administrator policy checks for managed settings. These
+messages contain no profile paths or provider templates; the dashboard retains its
+existing localized generic preflight error. Do not delete browser data or disable
+protection to resolve an incomplete scan.
+
+Portable classifier/filesystem regressions (no Windows registry/WFP simulation):
+`cargo test --manifest-path apps/windows/Cargo.toml -p tono-core --test browser_dns`.
+Native Windows registry, installed-browser and reconnect validation remains necessary
+before release.
+
 While a residential route is connected, the App samples only protected destinations from
 Mihomo's controller for this evidence stream. It records cumulative, mutually-exclusive
 `RESIDENTIAL` / `DIRECT` / `PROXIED` / `BLOCKED` / `UNKNOWN` counts and the latest enum-only
