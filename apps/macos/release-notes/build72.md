@@ -2,8 +2,9 @@
 
 Release candidate prepared from the reviewed September 5 integration main,
 with policy, lifecycle and diagnostics fixes. The matching Windows candidate
-is 0.0.72. The divergent release/macos history must be reconciled before this
-candidate can replace build 71; this version bump alone does not integrate it.
+is 0.0.72. The build 71 release history is merged without rewriting its tags.
+The integrated source retains the newer default-off telemetry consent,
+browser Secure DNS checks and admitted residential-route audit context.
 
 ## Known limitations
 
