@@ -82,7 +82,8 @@ const BROWSERS: [BrowserSpec; 2] = [
     },
 ];
 
-/// Prove Chrome and Edge cannot bypass Mihomo's DNS visibility for protected Web traffic.
+/// Check known Chrome/Edge configuration locations for DNS visibility conflicts.
+/// This is not proof about portable browsers, command-line overrides, or in-memory state.
 ///
 /// The scan is blocking filesystem/registry work, so keep it off the async runtime. Both the
 /// source count and byte count are bounded; the outer timeout handles a filesystem or registry
@@ -130,9 +131,17 @@ fn scan_windows_browser_dns() -> Result<(), String> {
 }
 
 fn message(browser: &str, issue: BrowserDnsIssue) -> String {
+    let recovery = match issue {
+        BrowserDnsIssue::IncompleteScan => {
+            "Tono could not verify the configuration; this does not mean Secure DNS is enabled. Fully close the browser and retry connecting. If this persists, ask support to check Local State readability, valid JSON, scan limits, and policy access; do not delete browser data or disable Tono protection"
+        }
+        _ => {
+            "Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono. If the setting is managed, ask your administrator to check DnsOverHttpsMode and DnsOverHttpsTemplates"
+        }
+    };
     format!(
-        "{browser}: {}. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono",
-        issue.detail()
+        "{browser}: {}. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. {recovery}",
+        issue.detail(),
     )
 }
 
@@ -436,10 +445,20 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_scan_does_not_prescribe_changing_dns_settings() {
+        let text = message("Chrome/Edge", BrowserDnsIssue::IncompleteScan);
+        assert!(text.contains("does not mean Secure DNS is enabled"));
+        assert!(text.contains("retry connecting"));
+        assert!(text.contains("Local State readability"));
+        assert!(!text.contains("Set Secure DNS to Off"));
+    }
+
+    #[test]
     fn error_message_never_contains_profile_or_template_values() {
         let text = message("Chrome", BrowserDnsIssue::AutomaticCustomProvider);
         assert!(text.contains("all Chrome and Edge profiles"));
         assert!(text.contains("fully restart the browser"));
+        assert!(text.contains("ask your administrator"));
         assert!(!text.contains("resolver.example"));
     }
 }
