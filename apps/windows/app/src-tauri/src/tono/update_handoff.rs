@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use tono_core::update_journal::{
-    self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, journal_path, load, write_atomic,
+    self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, journal_path, load, write_prepared,
 };
 use tono_logging::{Type, logging};
 
@@ -29,8 +29,8 @@ pub fn load_pending() -> Option<UpdateHandoffJournal> {
     }
 }
 
-pub fn save(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
-    write_atomic(&current_path(), journal)
+pub fn save_prepared(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
+    write_prepared(&current_path(), journal)
 }
 
 pub fn begin_first_launch_migration() -> Option<UpdateHandoffJournal> {
@@ -64,7 +64,7 @@ pub fn prepare(
 ) -> UpdateHandoffJournal {
     let mut journal = UpdateHandoffJournal::new(previous, next, generation, was_connected, keep_kill_switch);
     journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
-    let _ = save(&journal);
+    // The command fills in metadata before the single fallible save_prepared.
     journal
 }
 

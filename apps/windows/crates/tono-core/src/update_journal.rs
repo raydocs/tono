@@ -118,6 +118,31 @@ pub fn journal_path(app_support: &Path) -> PathBuf {
     app_support.join("update-handoff.json")
 }
 
+/// Start a new attempt without destroying the previous attempt's evidence.
+/// Archive raw bytes, not a parsed journal: even corrupt/expired state matters.
+/// If archiving or writing fails, preparation fails and the current file stays.
+pub fn write_prepared(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<()> {
+    match fs::File::open(path) {
+        Ok(mut previous) => {
+            let history = path.with_extension("history");
+            fs::create_dir_all(&history)?;
+            let archive_path = history.join(format!("{}.json", uuid::Uuid::new_v4()));
+            let mut archive = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(archive_path)?;
+            io::copy(&mut previous, &mut archive)?;
+            archive.sync_all()?;
+            if let Ok(directory) = fs::File::open(&history) {
+                let _ = directory.sync_all();
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    write_atomic(path, journal)
+}
+
 pub fn write_atomic(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -336,6 +361,58 @@ mod tests {
             assert!(advance_pending(&path, UpdateHandoffPhase::Committed).is_err());
             assert_eq!(fs::read(&path).unwrap(), payload);
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn new_attempt_preserves_failed_expired_and_corrupt_history() {
+        let dir = env::temp_dir().join(format!("tono-journal-history-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("old", "new", 1, true, true);
+        write_prepared(&path, &journal).unwrap();
+        assert!(!path.with_extension("history").exists());
+        journal.phase = UpdateHandoffPhase::Failed;
+        journal.last_error_code = Some("original failure".into());
+        journal.expires_at_unix = 1;
+        write_atomic(&path, &journal).unwrap();
+        let failed = fs::read(&path).unwrap();
+        let next = UpdateHandoffJournal::new("new", "next", 2, false, false);
+        write_prepared(&path, &next).unwrap();
+        assert_eq!(load(&path).unwrap().unwrap(), next);
+        fs::write(&path, b"corrupt evidence").unwrap();
+        write_prepared(&path, &next).unwrap();
+        let archives: Vec<_> = fs::read_dir(path.with_extension("history"))
+            .unwrap()
+            .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+            .collect();
+        assert_eq!(archives.len(), 2);
+        assert!(archives.contains(&failed));
+        assert!(archives.contains(&b"corrupt evidence".to_vec()));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn preparation_failure_never_overwrites_current_evidence() {
+        let dir = env::temp_dir().join(format!("tono-journal-history-fail-{}", std::process::id()));
+        let path = journal_path(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&path, b"original evidence").unwrap();
+        let next = UpdateHandoffJournal::new("new", "next", 2, false, false);
+        // Occupy the archive-directory name to force archiving to fail.
+        fs::write(path.with_extension("history"), b"not a directory").unwrap();
+        assert!(write_prepared(&path, &next).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"original evidence");
+        fs::remove_file(path.with_extension("history")).unwrap();
+        // Archiving succeeds but saving the new current attempt fails.
+        fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        assert!(write_prepared(&path, &next).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"original evidence");
+        let archive = fs::read_dir(path.with_extension("history"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(fs::read(archive.path()).unwrap(), b"original evidence");
         fs::remove_dir_all(dir).unwrap();
     }
 
