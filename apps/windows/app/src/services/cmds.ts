@@ -30,10 +30,6 @@ export async function prepareUpdate(nextVersion: string) {
   return invoke<void>('tono_prepare_update', { nextVersion })
 }
 
-export async function restartForUpdate() {
-  return invoke<void>('restart_for_update')
-}
-
 // 获取当前运行模式
 export type RunningMode = 'Service' | 'Sidecar' | 'NotRunning'
 

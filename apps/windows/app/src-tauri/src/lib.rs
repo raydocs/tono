@@ -139,7 +139,6 @@ mod app_init {
             cmd::open_core_dir,
             cmd::open_windows_dns_settings,
             cmd::restart_app,
-            cmd::restart_for_update,
             tono::commands::tono_prepare_update,
             cmd::get_runtime_state,
             cmd::get_tono_preferences,

@@ -30,7 +30,13 @@ const ensureSemver = (input: string | null | undefined): string | null => {
 const splitVersion = (version: string | null): VersionParts | null => {
   if (!version) return null
   const withoutBuildMetadata = version.split('+', 1)[0]
-  const [mainPart, preRelease] = withoutBuildMetadata.split('-', 2)
+  const separator = withoutBuildMetadata.indexOf('-')
+  const mainPart =
+    separator < 0
+      ? withoutBuildMetadata
+      : withoutBuildMetadata.slice(0, separator)
+  const preRelease =
+    separator < 0 ? undefined : withoutBuildMetadata.slice(separator + 1)
   const main = mainPart.split('.').map((part) => BigInt(part))
 
   const pre =

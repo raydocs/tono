@@ -16,7 +16,7 @@ import type { Options as ReactMarkdownOptions } from 'react-markdown'
 
 import { BaseDialog, type DialogRef } from '@/components/base'
 import { useUpdate } from '@/hooks/use-update'
-import { prepareUpdate, restartForUpdate } from '@/services/cmds'
+import { prepareUpdate } from '@/services/cmds'
 import { showNotice } from '@/services/notice-service'
 import { useSetUpdateState, useUpdateState } from '@/services/states'
 
@@ -189,7 +189,7 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
   }, [updateInfo])
 
   const onUpdate = useLockFn(async () => {
-    if (!updateInfo?.body) return
+    if (!updateInfo) return
     if (breakChangeFlag) {
       showNotice.error('settings.modals.update.messages.breakChangeError')
       return
@@ -226,9 +226,11 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
     }
 
     try {
-      await updateInfo.downloadAndInstall(onDownloadEvent)
+      // download() resolves only after signature verification. Windows install
+      // exits this process, so durable preparation must finish before it starts.
+      await updateInfo.download(onDownloadEvent)
       await prepareUpdate(updateInfo.version)
-      await restartForUpdate()
+      await updateInfo.install()
     } catch (err: any) {
       showNotice.error(err)
     } finally {
