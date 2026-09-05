@@ -3,6 +3,14 @@
 macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前先读这份文档；
 两端必须保持一致，单端改动需要说明理由。
 
+## Clarity 桌面版更新（2026-09）
+
+欢迎/邮箱流程、内容材质、导航与启动策略以
+[Clarity 设计与验证记录](desktop-clarity.md) 为准。内容层使用实色，不再把
+每张卡片做成模糊玻璃；品牌渐变保留于标志，不作为登录按钮背景。
+登录主操作 token 为 macOS `TonoBrand.actionFill` / Windows
+`--tono-action-fill` (`#3658C9` + 白字)。状态颜色和延迟阈值的含义不变。
+
 ## 1. 设计 Token（唯一事实源）
 
 | 语义 | macOS（`Views/NodeCardView.swift`） | Windows（`tono-ui/theme.ts`） | 值 |

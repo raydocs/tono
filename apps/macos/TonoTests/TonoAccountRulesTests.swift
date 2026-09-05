@@ -3,6 +3,22 @@ import XCTest
 @testable import Tono
 
 final class TonoAccountRulesTests: XCTestCase {
+    @MainActor
+    func testEmailStepResetDoesNotInterruptRestoreAndClearsLocalError() async {
+        let session = AccountSession(sidecar: TonoSidecarService(), descriptorConsumer: { _ in })
+        session.resetEmailSignIn()
+        XCTAssertEqual(session.state, .restoring)
+        // Invalid input is rejected locally, without a network or keychain call.
+        await session.requestEmailCode(email: "invalid", deviceName: "Test")
+        guard case .error = session.state else {
+            return XCTFail("Expected a local validation error")
+        }
+        session.resetEmailSignIn()
+        XCTAssertEqual(session.state, .signedOut)
+        XCTAssertNil(session.emailChallenge)
+        XCTAssertNil(session.user)
+    }
+
     func testNormalizedEmailTrimsAndLowercases() {
         XCTAssertEqual(TonoAccountRules.normalizedEmail("  Foo@Example.COM \n"), "foo@example.com")
         XCTAssertEqual(TonoAccountRules.normalizedEmail(""), "")

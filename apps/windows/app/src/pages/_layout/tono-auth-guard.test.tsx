@@ -191,7 +191,11 @@ describe('TonoAuthGuard', () => {
 
     renderAt('/')
 
-    await waitFor(() => expect(screen.getByRole('progressbar')).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        'tono.login.restoringSession',
+      ),
+    )
     expect(screen.queryByText('dashboard page')).toBeNull()
   })
 
@@ -201,7 +205,11 @@ describe('TonoAuthGuard', () => {
 
     renderAt('/')
 
-    await waitFor(() => expect(screen.getByRole('progressbar')).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        'tono.login.restoringSession',
+      ),
+    )
     expect(screen.queryByText('dashboard page')).toBeNull()
   })
 })

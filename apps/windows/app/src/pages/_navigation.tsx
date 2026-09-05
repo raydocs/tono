@@ -3,13 +3,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { TonoIcon, type TonoIconName } from '@/tono-ui/TonoIcon'
 
 import { navigationItems } from './_navigation-meta'
-import SettingPage from './settings'
-import TonoAccountPage from './tono/account'
-import TonoActivityPage from './tono/activity'
-import TonoDashboardPage from './tono/dashboard'
 import TonoLoginPage from './tono/login'
-import TonoServersPage from './tono/servers'
-import TonoSupportPage from './tono/support'
 import TonoTrayPage from './tono/tray'
 
 type NavigationGroup = 'main' | 'advanced'
@@ -19,7 +13,7 @@ type NavigationItem = {
   path: string
   icon: ReactNode
   group: NavigationGroup
-  Component: ComponentType
+  lazy: () => Promise<{ Component: ComponentType }>
 }
 
 const navIcon = (name: TonoIconName) => <TonoIcon name={name} size={16} />
@@ -29,37 +23,41 @@ export const navItems: NavigationItem[] = [
     ...navigationItems.dashboard,
     icon: navIcon('dashboard'),
     group: 'main',
-    Component: TonoDashboardPage,
+    lazy: async () => ({
+      Component: (await import('./tono/dashboard')).default,
+    }),
   },
   {
     ...navigationItems.activity,
     icon: navIcon('activity'),
     group: 'main',
-    Component: TonoActivityPage,
+    lazy: async () => ({
+      Component: (await import('./tono/activity')).default,
+    }),
   },
   {
     ...navigationItems.servers,
     icon: navIcon('nodes'),
     group: 'main',
-    Component: TonoServersPage,
+    lazy: async () => ({ Component: (await import('./tono/servers')).default }),
   },
   {
     ...navigationItems.account,
     icon: navIcon('account'),
     group: 'main',
-    Component: TonoAccountPage,
+    lazy: async () => ({ Component: (await import('./tono/account')).default }),
   },
   {
     ...navigationItems.support,
     icon: navIcon('support'),
     group: 'main',
-    Component: TonoSupportPage,
+    lazy: async () => ({ Component: (await import('./tono/support')).default }),
   },
   {
     ...navigationItems.settings,
     icon: navIcon('settings'),
     group: 'main',
-    Component: SettingPage,
+    lazy: async () => ({ Component: (await import('./settings')).default }),
   },
 ]
 

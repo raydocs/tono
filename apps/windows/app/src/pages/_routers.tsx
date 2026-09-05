@@ -8,12 +8,11 @@ export const router = createBrowserRouter([
   {
     path: '/',
     Component: TonoLayout,
-    children: [...navItems, ...hiddenRoutes].map(
-      (item) =>
-        ({
-          path: item.path,
-          Component: item.Component,
-        }) as RouteObject,
-    ),
+    children: [
+      ...navItems.map(({ path, lazy }): RouteObject => ({ path, lazy })),
+      ...hiddenRoutes.map(
+        ({ path, Component }): RouteObject => ({ path, Component }),
+      ),
+    ],
   },
 ])

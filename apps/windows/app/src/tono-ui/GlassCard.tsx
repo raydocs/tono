@@ -1,10 +1,9 @@
 import type { CSSProperties, ReactNode } from 'react'
 
 /**
- * The Tono glass card: white-tinted background at the stepped opacities the
- * macOS design uses (4/6/8/12/24/40%), a 1px white border, rounded corners,
- * and a blurred backdrop. Defaults match the settings cards (light 40% /
- * dark 8%, radius 24); dashboard cards pass their own step.
+ * Shared content surface. Clarity tokens resolve this to an opaque card with
+ * a visible border and no backdrop filter. The name and optional tint API
+ * remain compatible with existing consumers, including the tray.
  */
 
 interface GlassCardProps {

@@ -2,6 +2,7 @@
    (TONO_COLORS) and docs/ui-design-system.md. Never introduce a bare hex with
    state semantics; decorative literals are allowed but must not carry state. */
 :root {
+  --tono-action-fill: #3658c9;
   /* Brand — the TO monogram gradient: deep blue → violet → warm peach */
   --tono-accent: #4b6eff;
   --tono-accent-soft: #7b5cff;
@@ -40,11 +41,11 @@
   /* Text ramps — tonoText(dark) */
   --tono-text-primary: rgba(255, 255, 255, 0.96);
   --tono-text-secondary: rgba(255, 255, 255, 0.72);
-  --tono-text-tertiary: rgba(255, 255, 255, 0.5);
+  --tono-text-tertiary: rgba(255, 255, 255, 0.65);
 }
 [data-tono-theme="light"],
 :root[data-tono-theme="light"] {
   --tono-text-primary: rgba(20, 22, 30, 0.94);
-  --tono-text-secondary: rgba(20, 22, 30, 0.68);
-  --tono-text-tertiary: rgba(20, 22, 30, 0.52);
+  --tono-text-secondary: rgba(20, 22, 30, 0.78);
+  --tono-text-tertiary: rgba(20, 22, 30, 0.64);
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
 
     var body: some View {
@@ -12,7 +13,7 @@ struct ContentView: View {
 
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(selectedPage: $appState.selectedPage)
-                    .navigationSplitViewColumnWidth(200)
+                    .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
             } detail: {
                 VStack(spacing: 0) {
                     if appState.isProtectionBlocked {
@@ -43,20 +44,17 @@ struct ContentView: View {
                                 appState.errorMessage = nil
                             }
                             .padding(16)
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                         }
                     }
                     .frame(minWidth: 660, minHeight: 540)
                     .animation(
-                        .easeOut(duration: 0.18),
+                        TonoMotion.easeOut(0.18, reduceMotion: reduceMotion),
                         value: appState.errorMessage != nil
                     )
                 }
             }
             .navigationSplitViewStyle(.balanced)
-            .onChange(of: columnVisibility) {
-                columnVisibility = .doubleColumn
-            }
         }
     }
 }

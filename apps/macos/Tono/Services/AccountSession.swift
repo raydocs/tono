@@ -346,6 +346,18 @@ final class AccountSession {
         await restore()
     }
 
+    /// Return to the email step without altering an authenticated session or
+    /// cancelling an in-flight request. The old challenge expires server-side.
+    func resetEmailSignIn() {
+        guard user == nil else { return }
+        switch state {
+        case .signedOut, .error: break
+        default: return
+        }
+        emailChallenge = nil
+        state = .signedOut
+    }
+
     func requestEmailCode(email: String, deviceName: String) async {
         guard TonoAccountRules.validEmail(email) else {
             state = .error(String(localized: "Enter a valid email address."))

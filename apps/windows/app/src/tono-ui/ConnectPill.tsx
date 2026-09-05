@@ -142,7 +142,7 @@ export const ConnectPill = ({
         borderRadius: 'var(--tono-radius-pill)',
         cursor: spec.disabled ? 'default' : 'pointer',
         color: text.primary,
-        background: `linear-gradient(120deg, ${hex(spec.color, dark ? 0.12 : 0.09)} 0%, ${hex(spec.color, 0)} 58%), var(--tono-surface-pill)`,
+        background: 'var(--tono-surface-pill)',
         backdropFilter: 'var(--tono-glass-blur)',
         WebkitBackdropFilter: 'var(--tono-glass-blur)',
         boxShadow:
@@ -201,7 +201,7 @@ export const ConnectPill = ({
               'var(--tono-weight-title)' as CSSProperties['fontWeight'],
             lineHeight: 'var(--tono-leading-title)',
             letterSpacing: 'var(--tono-tracking-pill-title)',
-            color: spec.titleColored ? spec.color : text.primary,
+            color: spec.titleColored && dark ? spec.color : text.primary,
             transition: `color ${transition}`,
           }}
         >

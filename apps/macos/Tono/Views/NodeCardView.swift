@@ -4,6 +4,8 @@ import SwiftUI
 /// Matches the Windows tokens in `tono-ui/theme.ts` (accent → soft → warm,
 /// the blue-to-peach sweep of the TO monogram).
 enum TonoBrand {
+    /// Solid action surface; the multicolor ramp belongs to the mark only.
+    static let actionFill = Color(hex: "3658C9")
     static let accent = Color(hex: "4B6EFF")
     static let accentSoft = Color(hex: "7B5CFF")
     static let accentWarm = Color(hex: "FFB07A")
