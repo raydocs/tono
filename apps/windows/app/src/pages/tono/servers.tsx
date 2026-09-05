@@ -81,7 +81,12 @@ const ServersPage = () => {
     failures: {},
   })
 
-  const { data: servers, refetch: mutateServers } = useQuery({
+  const {
+    data: servers,
+    error: serversError,
+    isFetching: fetchingServers,
+    refetch: mutateServers,
+  } = useQuery({
     queryKey: tonoServersQueryKey,
     queryFn: tonoServers,
   })
@@ -502,7 +507,41 @@ const ServersPage = () => {
         </p>
       )}
 
-      {(servers ?? []).length === 0 ? (
+      {serversError && (
+        <div
+          role="alert"
+          style={{ marginBottom: 8, fontSize: 13, color: TONO_COLORS.error }}
+        >
+          <p>{formatTonoActionError(serversError, t)}</p>
+          <button
+            type="button"
+            className="tono-button"
+            disabled={fetchingServers}
+            style={{
+              padding: '7px 12px',
+              color: text.primary,
+              background: dark
+                ? 'rgba(255,255,255,0.08)'
+                : 'rgba(255,255,255,0.55)',
+            }}
+            onClick={() =>
+              void mutateServers().catch(() => {
+                // The query retains the latest error for the alert above.
+              })
+            }
+          >
+            {t('shared.actions.retry')}
+          </button>
+        </div>
+      )}
+
+      {servers === undefined ? (
+        !serversError && (
+          <p role="status" style={{ fontSize: 13, color: text.secondary }}>
+            {t('shared.statuses.loading')}
+          </p>
+        )
+      ) : servers.length === 0 ? (
         <p style={{ fontSize: 13, color: text.secondary }}>
           {t('tono.nodes.empty')}
         </p>
