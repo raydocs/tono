@@ -8,7 +8,7 @@ import { useThemeMode } from '@/services/states'
 import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
 import { version } from '@root/package.json'
 
-export const buildSupportMessage = ({
+const buildSupportMessage = ({
   version: appVersion,
   email,
   status,

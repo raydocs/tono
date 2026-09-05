@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { MihomoWebSocket, Traffic } from 'tono-plugin-core-api'
 
 import { useMihomoWsSubscription } from './use-mihomo-ws-subscription'
@@ -33,10 +33,17 @@ export const useTrafficData = (options?: {
   const enabled = options?.enabled ?? true
   const generation = options?.generation
   const [live, setLive] = useState(false)
+  const [subscription, setSubscription] = useState({ generation, enabled })
 
-  useEffect(() => {
+  // Reset before publishing this render, rather than exposing the old live
+  // flag for one effect cycle after the controller or enabled state changes.
+  if (
+    subscription.generation !== generation ||
+    subscription.enabled !== enabled
+  ) {
+    setSubscription({ generation, enabled })
     setLive(false)
-  }, [generation, enabled])
+  }
 
   const {
     graphData: { appendData },
