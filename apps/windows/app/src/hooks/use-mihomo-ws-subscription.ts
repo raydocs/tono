@@ -142,6 +142,9 @@ export const createSharedSubscriptionEntry = (
       // while `onConnected` awaits its snapshot can be lost, and an exception leaves a live
       // socket with neither listener nor reconnect path.
       ws.addListener((msg: Message) => {
+        // close() only removes transport listeners after its IPC handshake settles. Once
+        // detached, this socket must not update the cache or schedule another reconnect.
+        if (entry.ws !== ws) return
         if (msg.type !== 'Text') return
         const activeOwner = pickActiveOwner(entry)
         if (!activeOwner) return
