@@ -11,6 +11,14 @@ nonisolated struct TrafficAuditProtectionSnapshot: Sendable {
     let selectedExit: String
 }
 
+nonisolated struct ResidentialRouteAuditContext: Equatable, Sendable {
+    let generation: UInt64
+    let runtimeConfigDigest: String
+    let admittedTerminal: String?
+
+    var contractRequired: Bool { admittedTerminal != nil }
+}
+
 nonisolated private struct CoreAuditEntry: Sendable {
     let level: String
     let message: String
@@ -113,6 +121,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     private var researchOtherManagedDirectConnectionCount = 0
     private var researchProtectedDirectConnectionCount = 0
     private var researchConnectionLimitReached = false
+    private var residentialRouteContext: ResidentialRouteAuditContext?
     private var researchProtection = TrafficAuditProtectionSnapshot(
         connected: false,
         connecting: false,
@@ -519,21 +528,31 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
 
     func recordConnections(
         _ connections: [APIConnection],
-        protection: TrafficAuditProtectionSnapshot
+        protection: TrafficAuditProtectionSnapshot,
+        residentialContext: ResidentialRouteAuditContext?
     ) {
         let localAuditEnabled = Self.isEnabled
         let researchEnabled = Self.isClaudeTrafficResearchEnabled
         let appResearchEnabled = AppRoutingResearch.isCollectionActive
         guard localAuditEnabled || researchEnabled || appResearchEnabled else { return }
-        if appResearchEnabled { AppRoutingResearch.shared.record(connections) }
         queue.async { [self] in
+            guard residentialContext == residentialRouteContext else { return }
+            if appResearchEnabled && AppRoutingResearch.isCollectionActive {
+                AppRoutingResearch.shared.record(connections)
+            }
             if researchEnabled && Self.isClaudeTrafficResearchEnabled {
                 recordResearchProtection(protection)
             }
             for connection in connections {
                 if researchEnabled && Self.isClaudeTrafficResearchEnabled {
-                    recordResearchConnectionObservation(connection)
-                    recordClaudeTrafficResearch(connection)
+                    recordResearchConnectionObservation(
+                        connection,
+                        residentialContext: residentialContext
+                    )
+                    recordClaudeTrafficResearch(
+                        connection,
+                        residentialContext: residentialContext
+                    )
                 }
                 guard localAuditEnabled, Self.isEnabled else { continue }
                 guard seenConnectionIDs.insert(connection.id).inserted else {
@@ -583,7 +602,10 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 } else {
                     client = "other"
                 }
-                let routeClassification = Self.routeClassification(connection)
+                let routeClassification = Self.routeClassification(
+                    connection,
+                    residentialContext: residentialContext
+                )
 
                 enqueue(
                     kind: "connection_opened",
@@ -613,10 +635,26 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                         "protected_dns_configured": String(
                             protection.protectedDNSConfigured
                         ),
+                        "residential_contract_required": String(
+                            residentialContext?.contractRequired == true
+                        ),
+                        "residential_terminal":
+                            residentialContext?.admittedTerminal ?? "none",
+                        "runtime_generation": residentialContext.map {
+                            String($0.generation)
+                        } ?? "none",
+                        "runtime_config_digest":
+                            residentialContext?.runtimeConfigDigest ?? "none",
                     ]
                 )
             }
         }
+    }
+
+    /// Synchronously swaps generation evidence so already-enqueued callbacks
+    /// from the old core cannot be attributed to the newly admitted runtime.
+    func setResidentialRouteContext(_ context: ResidentialRouteAuditContext?) {
+        queue.sync { residentialRouteContext = context }
     }
 
     private func recordResearchProtection(
@@ -635,7 +673,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     }
 
     private func recordResearchConnectionObservation(
-        _ connection: APIConnection
+        _ connection: APIConnection,
+        residentialContext: ResidentialRouteAuditContext?
     ) {
         guard !researchSeenConnectionIDs.contains(connection.id) else { return }
         researchSeenConnectionIDs.insert(connection.id)
@@ -668,7 +707,10 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 Self.maximumResearchCount
             )
         }
-        let route = Self.routeClassification(connection)
+        let route = Self.routeClassification(
+            connection,
+            residentialContext: residentialContext
+        )
         let isWeChat = Self.isNativeWeChatProcess(processPath)
         let isManagedDirect = Self.isManagedDirectConnection(connection)
         let isWebManagedDirect = Self.isWebManagedDirectConnection(connection)
@@ -736,7 +778,9 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
                 Self.maximumResearchCount
             )
         }
-        if route == "PROXIED", Self.isProtectedClaudeConnection(connection) {
+        if route == "PROXIED",
+           residentialContext?.contractRequired == true,
+           Self.isProtectedClaudeConnection(connection) {
             // A generic proxy protects privacy but violates the stronger
             // residential-only Claude contract just as surely as DIRECT.
             researchUnsafeProtectionObservationCount = min(
@@ -863,8 +907,14 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         )
     }
 
-    private func recordClaudeTrafficResearch(_ connection: APIConnection) {
-        guard let key = Self.claudeTrafficResearchKey(connection) else { return }
+    private func recordClaudeTrafficResearch(
+        _ connection: APIConnection,
+        residentialContext: ResidentialRouteAuditContext?
+    ) {
+        guard let key = Self.claudeTrafficResearchKey(
+            connection,
+            residentialContext: residentialContext
+        ) else { return }
         let upBytes = min(
             max(connection.upload, 0),
             Self.maximumResearchBytes
@@ -935,7 +985,8 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     }
 
     private static func claudeTrafficResearchKey(
-        _ connection: APIConnection
+        _ connection: APIConnection,
+        residentialContext: ResidentialRouteAuditContext?
     ) -> ClaudeTrafficResearchKey? {
         let host = connection.metadata.host.lowercased()
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
@@ -1004,7 +1055,10 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             host: reportedHost,
             network: network,
             port: port,
-            route: routeClassification(connection)
+            route: routeClassification(
+                connection,
+                residentialContext: residentialContext
+            )
         )
     }
 
@@ -1056,8 +1110,9 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         return redactedHomePrefix + String(remainder.dropFirst(owner.count))
     }
 
-    private static func routeClassification(
-        _ connection: APIConnection
+    static func routeClassification(
+        _ connection: APIConnection,
+        residentialContext: ResidentialRouteAuditContext?
     ) -> String {
         let upperRouteValues = connection.chains.map { $0.uppercased() }
         let upperRule = connection.rule.uppercased()
@@ -1065,9 +1120,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
             || upperRouteValues.contains(where: { $0.hasPrefix("REJECT") }) {
             return "BLOCKED"
         }
-        if upperRouteValues.contains(
-            ConfigPipeline.homeResidentialProxyName.uppercased()
-        ) {
+        // Mihomo's connections API orders chains terminal-first (matching the
+        // native Windows consumer and retained API fixtures). A selector with
+        // the same name later in the chain is not proof of the actual egress.
+        if let terminal = residentialContext?.admittedTerminal?.uppercased(),
+           upperRouteValues.first == terminal {
             return "RESIDENTIAL"
         }
         if upperRouteValues.contains("DIRECT")

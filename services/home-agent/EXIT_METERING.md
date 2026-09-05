@@ -235,14 +235,30 @@ this order:
 metering collection or advancing to `v2_required`. Keep the current collection
 and rollout state unchanged until a separate operational decision.
 
-**Known live-cutover accounting gap:** named growth observed after the final
+**Legacy cutover blocked (migration `0037`, issue #4):** GET returns
+`legacy_handoff_boundary_unavailable` whenever legacy source rows or a nonzero
+legacy last-seen exist. POST returns 409, and a database trigger also rejects a
+racing transition atomically. Waiting longer does not clear this blocker. Do not
+delete watermarks, clear last-seen, or drop the trigger to bypass it. Keep the
+legacy collector running: this guard prevents a lossy transition but does not
+bill named shadow growth while the collector is stopped. Existing `v2_required`
+installations are unchanged; no historical usage is corrected or rebilled.
+Only installations with no legacy history can currently advance.
+
+**Unresolved handoff design:** named growth observed after the final
 legacy report but before the cutover snapshot is absorbed into the baseline and
 is not billed. The mandatory 1,800-second legacy quiet period can therefore
-cause a permanent undercount while traffic continues. `canRequireV2` proves
-protocol readiness, not lossless coverage. Do not execute the sequence below as
-a lossless live migration: first establish a coordinated frozen traffic boundary,
-implement a continuous accounting handoff, or explicitly accept a one-time
-write-off. None of those operational actions is performed by shipping this code.
+cause a permanent undercount while traffic continues. A future protocol needs a
+durable, source-complete boundary pairing the last authoritative legacy total
+with named watermarks observed at the same accounting boundary, not at POST time.
+It must fence late legacy writes and define new-user, reset, missing-source and
+retry semantics before enabling live cutover. Neither MAX/SUM nor collector
+silence proves that pairing. See #4 for acceptance criteria.
+
+The sequence below describes the previous protocol for reference, **not an
+executable legacy migration after `0037`**. A future handoff must replace it.
+Apply migrations in order with the matching Worker; reverting only the Worker
+leaves the database guard active. Do not roll back the guard to enable cutover.
 
 1. Apply migration `0036`, deploy the matching Worker, and verify GET reports
    `phase: "dual"`. Do not start named agents against an older Worker: the old

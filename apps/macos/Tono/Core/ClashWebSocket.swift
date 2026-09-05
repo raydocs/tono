@@ -154,6 +154,15 @@ final class ClashWebSocket {
         stopWatchdogIfIdle()
     }
 
+    /// Discard any receive already in flight under the previous runtime.
+    /// The task-identity guard in receiveConnections rejects its callback.
+    func restartConnectionsStreamAfterRuntimeChange() {
+        guard connectionsEnabled, !isStopped else { return }
+        let interval = connectionsIntervalMilliseconds
+        stopConnectionsStream()
+        startConnectionsStream(intervalMilliseconds: interval)
+    }
+
     private func receiveConnections(from task: URLSessionWebSocketTask) {
         task.receive { [weak self] result in
             let response: APIConnectionsResponse? = if case .success(.string(let text)) = result,

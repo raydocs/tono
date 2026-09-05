@@ -37,6 +37,13 @@ final class CoreRouteClassificationTests: XCTestCase {
             destinationPort: "443",
             host: "api.anthropic.com"
         )
+        let context = ResidentialRouteAuditContext(
+            generation: 1,
+            runtimeConfigDigest: "fixture",
+            admittedTerminal: ConfigPipeline.homeResidentialProxyName
+        )
+        LocalTrafficAudit.shared.setResidentialRouteContext(context)
+        defer { LocalTrafficAudit.shared.setResidentialRouteContext(nil) }
         LocalTrafficAudit.shared.recordConnections(
             [
                 APIConnection(
@@ -83,7 +90,8 @@ final class CoreRouteClassificationTests: XCTestCase {
                     rulePayload: nil
                 ),
             ],
-            protection: protection
+            protection: protection,
+            residentialContext: context
         )
 
         let snapshot = LocalTrafficAudit.shared.claudeTrafficResearchSnapshot()
@@ -101,6 +109,166 @@ final class CoreRouteClassificationTests: XCTestCase {
                 + snapshot.directConnectionCount
                 + snapshot.blockedConnectionCount,
             snapshot.observedConnectionCount
+        )
+    }
+
+    func testAdmittedResidentialTerminalUsesOwnedRuntimeValidation() throws {
+        let home = Fixture.realityNode(name: "Home01")
+        XCTAssertEqual(
+            try ConfigPipeline.admittedResidentialTerminal(
+                overlay: Fixture.overlay(
+                    selectedNodeName: home.name,
+                    claudeHomeNodeName: home.name
+                ),
+                customNodes: [home]
+            ),
+            "Home01"
+        )
+        XCTAssertNil(
+            try ConfigPipeline.admittedResidentialTerminal(
+                overlay: Fixture.overlay(
+                    selectedNodeName: home.name,
+                    claudeHomeNodeName: "Not-Owned"
+                ),
+                customNodes: [home]
+            )
+        )
+        XCTAssertEqual(
+            try ConfigPipeline.admittedResidentialTerminal(
+                overlay: Fixture.overlay(
+                    selectedNodeName: home.name,
+                    claudeHomeSocks5: .init(
+                        host: "residential.example.com",
+                        port: 1080,
+                        username: "user",
+                        password: "password"
+                    )
+                ),
+                customNodes: [home]
+            ),
+            ConfigPipeline.homeResidentialProxyName
+        )
+    }
+
+    func testConnectionClassificationMatchesOnlyAdmittedTerminal() {
+        let context = ResidentialRouteAuditContext(
+            generation: 7,
+            runtimeConfigDigest: "installed",
+            admittedTerminal: "Home01"
+        )
+        func connection(chains: [String], rule: String = "MATCH") -> APIConnection {
+            APIConnection(
+                id: UUID().uuidString,
+                metadata: APIConnectionMetadata(
+                    network: "tcp", type: "HTTPS", process: "Claude",
+                    processPath: nil, sourceIP: nil, destinationIP: nil,
+                    sourcePort: nil, destinationPort: "443",
+                    host: "api.anthropic.com"
+                ),
+                upload: 0, download: 0, start: "now", chains: chains,
+                rule: rule, rulePayload: nil
+            )
+        }
+
+        XCTAssertEqual(LocalTrafficAudit.routeClassification(
+            connection(chains: ["Home01", ConfigPipeline.claudeHomeGroupName]),
+            residentialContext: context
+        ), "RESIDENTIAL")
+        XCTAssertEqual(LocalTrafficAudit.routeClassification(
+            connection(chains: ["Wrong-Terminal", "Home01"]),
+            residentialContext: context
+        ), "PROXIED", "a selector-only name is not terminal evidence")
+        XCTAssertEqual(LocalTrafficAudit.routeClassification(
+            connection(chains: ["Home01"]), residentialContext: nil
+        ), "PROXIED", "no admitted binding means no residential claim")
+        XCTAssertEqual(LocalTrafficAudit.routeClassification(
+            connection(chains: ["DIRECT"]), residentialContext: context
+        ), "DIRECT")
+        XCTAssertEqual(LocalTrafficAudit.routeClassification(
+            connection(chains: ["REJECT"]), residentialContext: context
+        ), "BLOCKED")
+    }
+
+    func testStaleResidentialGenerationCallbackIsDiscarded() {
+        let wasEnabled = LocalTrafficAudit.isClaudeTrafficResearchEnabled
+        LocalTrafficAudit.shared.setClaudeTrafficResearchEnabled(true)
+        defer {
+            LocalTrafficAudit.shared.setResidentialRouteContext(nil)
+            LocalTrafficAudit.shared.setClaudeTrafficResearchEnabled(wasEnabled)
+        }
+        let old = ResidentialRouteAuditContext(
+            generation: 10, runtimeConfigDigest: "old", admittedTerminal: "Home01"
+        )
+        let current = ResidentialRouteAuditContext(
+            generation: 11, runtimeConfigDigest: "new", admittedTerminal: nil
+        )
+        LocalTrafficAudit.shared.setResidentialRouteContext(current)
+        LocalTrafficAudit.shared.recordConnections(
+            [APIConnection(
+                id: UUID().uuidString,
+                metadata: APIConnectionMetadata(
+                    network: "tcp", type: "HTTPS", process: "Claude",
+                    processPath: nil, sourceIP: nil, destinationIP: nil,
+                    sourcePort: nil, destinationPort: "443",
+                    host: "api.anthropic.com"
+                ),
+                upload: 0, download: 0, start: "now", chains: ["Home01"],
+                rule: "MATCH", rulePayload: nil
+            )],
+            protection: TrafficAuditProtectionSnapshot(
+                connected: true, connecting: false, protectionBlocked: false,
+                killSwitchArmed: true, tunPresent: true,
+                protectedDNSConfigured: true, selectedExit: "US"
+            ),
+            residentialContext: old
+        )
+        LocalTrafficAudit.shared.recordConnections(
+            [APIConnection(
+                id: UUID().uuidString,
+                metadata: APIConnectionMetadata(
+                    network: "tcp", type: "HTTPS", process: "Claude",
+                    processPath: nil, sourceIP: nil, destinationIP: nil,
+                    sourcePort: nil, destinationPort: "443",
+                    host: "api.anthropic.com"
+                ),
+                upload: 0, download: 0, start: "now",
+                chains: [ConfigPipeline.exitGroupName],
+                rule: "MATCH", rulePayload: nil
+            )],
+            protection: TrafficAuditProtectionSnapshot(
+                connected: true, connecting: false, protectionBlocked: false,
+                killSwitchArmed: true, tunPresent: true,
+                protectedDNSConfigured: true, selectedExit: "US"
+            ),
+            residentialContext: current
+        )
+        let snapshot = LocalTrafficAudit.shared.claudeTrafficResearchSnapshot()
+        XCTAssertEqual(
+            snapshot.observedConnectionCount,
+            1,
+            "only the current-generation callback is accepted"
+        )
+        XCTAssertEqual(
+            snapshot.unsafeProtectionObservationCount,
+            0,
+            "generic proxy is safe when no residential contract was admitted"
+        )
+
+        LocalTrafficAudit.shared.setResidentialRouteContext(nil)
+        LocalTrafficAudit.shared.recordConnections(
+            [],
+            protection: TrafficAuditProtectionSnapshot(
+                connected: true, connecting: false, protectionBlocked: false,
+                killSwitchArmed: false, tunPresent: false,
+                protectedDNSConfigured: false, selectedExit: "stale"
+            ),
+            residentialContext: current
+        )
+        XCTAssertEqual(
+            LocalTrafficAudit.shared.claudeTrafficResearchSnapshot()
+                .unsafeProtectionObservationCount,
+            0,
+            "disconnect invalidates even a protection-only late sample"
         )
     }
 
