@@ -1419,6 +1419,8 @@ const WECHAT_PATH_REFRESH_INTERVAL: Duration = Duration::from_secs(2 * 60);
 /// Browser Secure DNS may be changed after Connect. Re-prove the browser-wide
 /// setting while a residential route is active so that Web traffic cannot
 /// silently lose hostname visibility until the next manual reconnect.
+/// Nominal interval, not a hard detection deadline: scan timeout (5s), task
+/// scheduling, and other awaited maintenance can extend the observation gap.
 const BROWSER_DNS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 /// How often the DIRECT overlay and protected residential routes are sampled while connected.
@@ -1945,7 +1947,7 @@ async fn spawn_control_plane_pin_refresh(
                         logging!(
                             error,
                             Type::Service,
-                            "Tono: browser Secure DNS changed during a residential session; restricting traffic and reconnecting: {redacted}"
+                            "Tono: browser Secure DNS verification failed during a residential session; restricting traffic and reconnecting: {redacted}"
                         );
                         task_state.audit().log(AuditEvent::HealthProbeFail {
                             probe: "browserDns",

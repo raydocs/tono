@@ -1331,13 +1331,10 @@ nonisolated struct ConfigPipeline {
             throw TonoInjectionError.missingSelection
         }
         let claudeHomeSocks5 = validatedHomeSocks5(overlay.claudeHomeSocks5)
-        let claudeHome = claudeHomeSocks5 == nil
-            ? overlay.claudeHomeNodeName
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .flatMap { name in
-                    nodes.contains(where: { $0.name == name }) ? name : nil
-                }
-            : nil
+        let claudeHome = admittedResidentialTerminal(
+            overlay: overlay,
+            validatedOwnedNodes: nodes
+        )
         let preferredDefault = overlay.defaultNodeName
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { name in
@@ -1814,6 +1811,33 @@ nonisolated struct ConfigPipeline {
             username: upstream.username,
             password: upstream.password
         )
+    }
+
+    /// The terminal that the owned runtime actually admits for the residential
+    /// contract. Audit callers use this same validation path rather than
+    /// interpreting the latest (possibly newer) mutable catalog themselves.
+    static func admittedResidentialTerminal(
+        overlay: OverlayConfig,
+        customNodes: [ProxyNode]
+    ) throws -> String? {
+        admittedResidentialTerminal(
+            overlay: overlay,
+            validatedOwnedNodes: try validatedOwnedNodes(customNodes)
+        )
+    }
+
+    private static func admittedResidentialTerminal(
+        overlay: OverlayConfig,
+        validatedOwnedNodes nodes: [ProxyNode]
+    ) -> String? {
+        if validatedHomeSocks5(overlay.claudeHomeSocks5) != nil {
+            return homeResidentialProxyName
+        }
+        return overlay.claudeHomeNodeName
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { name in
+                nodes.contains(where: { $0.name == name }) ? name : nil
+            }
     }
 
     static func validatedOwnedNodes(_ nodes: [ProxyNode]) throws -> [ProxyNode] {
