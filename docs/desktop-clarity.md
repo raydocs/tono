@@ -93,8 +93,8 @@ the polyfill entry, excluding dynamic route imports):
 
 | Initial JS | Before | After route splitting |
 | --- | ---: | ---: |
-| Raw bytes | 881,120 | 668,675 |
-| Gzip bytes | 270,596 | 220,843 |
+| Raw bytes | 881,120 | 668,883 |
+| Gzip bytes | 270,596 | 220,925 |
 
 This is a 24.1% reduction in initial JS / 18.4% gzip, **not** a claim that the
 entire download is the 337KB entry chunk, nor a measured native startup gain.
@@ -116,6 +116,13 @@ logo animation; native GPU/energy savings are not measured in Linux.
 - Browser visual/axe checks cover both themes, code and rejected-code states,
   keyboard flow and reduced motion. Screenshot evidence is attached to the Amp
   delivery; the preview remains the reproducible review surface.
+  Final Chromium axe runs: light rejected-code (33 passes), light standby and
+  connected galleries, dark connected gallery, and forced-colors/reduced-motion
+  gallery (24 passes each): zero violations and zero incomplete checks.
+  The gallery's version label no longer compounds text alpha with opacity;
+  the connection action uses a solid surface under its text. Loading, compact
+  Chinese and both welcome themes were also captured and visually inspected.
+  These are component checks, not a whole-application accessibility certification.
 - macOS must compile and run TonoTests in macOS CI. Linux cannot render SwiftUI,
   validate VoiceOver, notarization, installed WebView2, WFP or the updater.
 - [#17](https://github.com/raydocs/tono/issues/17) tracks installed-device acceptance,

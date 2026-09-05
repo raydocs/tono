@@ -6,7 +6,11 @@ const root = path.resolve('tests/desktop-preview')
 export default defineConfig({
   root,
   plugins: [react()],
-  server: { host: '0.0.0.0', port: Number(process.env.PORT || 3010) },
+  server: {
+    host: '0.0.0.0',
+    port: Number(process.env.PORT || 3010),
+    allowedHosts: ['.onamp.dev'],
+  },
   resolve: {
     alias: [
       ...[

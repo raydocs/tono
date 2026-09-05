@@ -142,7 +142,7 @@ export const ConnectPill = ({
         borderRadius: 'var(--tono-radius-pill)',
         cursor: spec.disabled ? 'default' : 'pointer',
         color: text.primary,
-        background: `linear-gradient(120deg, ${hex(spec.color, dark ? 0.12 : 0.09)} 0%, ${hex(spec.color, 0)} 58%), var(--tono-surface-pill)`,
+        background: 'var(--tono-surface-pill)',
         backdropFilter: 'var(--tono-glass-blur)',
         WebkitBackdropFilter: 'var(--tono-glass-blur)',
         boxShadow:

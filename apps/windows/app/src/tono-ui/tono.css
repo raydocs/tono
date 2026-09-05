@@ -147,11 +147,10 @@
   padding-left: 12px;
 }
 .tono-sidebar__version {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
-  opacity: 0.62;
 }
 .tono-sidebar__divider {
   height: 1px;
