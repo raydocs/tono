@@ -96,7 +96,7 @@ pub(crate) async fn verify_residential_browser_dns() -> Result<(), String> {
     .await;
     match result {
         Ok(Ok(verdict)) => verdict,
-        Ok(Err(_join_error)) | Err(_) => Err(message("Chrome/Edge", BrowserDnsIssue::IncompleteScan)),
+        Ok(Err(_)) | Err(_) => Err(message("Chrome/Edge", BrowserDnsIssue::IncompleteScan)),
     }
 }
 
