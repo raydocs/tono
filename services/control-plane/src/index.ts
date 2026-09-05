@@ -6700,13 +6700,19 @@ async function processRevocations(e: Env) {
   // Tailscale from API requests or scheduled maintenance.
   if (!tailscaleEnrollmentEnabled(e)) return;
   const jobs = await e.DB.prepare(
-    'SELECT * FROM revocation_jobs WHERE completed_at IS NULL ORDER BY created_at LIMIT 40',
+    `SELECT * FROM revocation_jobs WHERE completed_at IS NULL
+     ORDER BY last_attempt_at, created_at, id LIMIT 40`,
   ).all<Row>();
   let oauthToken: string | undefined;
   for (const job of jobs.results) {
     try {
       const jobGeneration = Number(job.ownership_generation ?? -1);
       const t = now();
+      // Rotate failed and claim-deferred jobs behind less recently attempted
+      // work, without dropping the durable retry or growing the batch limit.
+      await e.DB.prepare(
+        'UPDATE revocation_jobs SET last_attempt_at = ? WHERE id = ? AND completed_at IS NULL',
+      ).bind(t, job.id).run();
 
       // An active D1 owner is authoritative. This also retires a stale guard job
       // left behind after a successful activation acknowledgement failed.
