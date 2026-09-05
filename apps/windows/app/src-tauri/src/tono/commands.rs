@@ -3489,10 +3489,10 @@ mod tests {
         std::fs::create_dir_all(&storage).unwrap();
         std::fs::create_dir_all(workspace.join(".vscode")).unwrap();
         std::fs::write(workspace.join(".vscode").join("settings.json"), "{}").unwrap();
-        let workspace_uri = format!("file://{}", workspace.to_string_lossy().replace(' ', "%20"));
+        let workspace_uri = reqwest::Url::from_file_path(&workspace).unwrap();
         std::fs::write(
             storage.join("workspace.json"),
-            format!(r#"{{"folder":"{workspace_uri}"}}"#),
+            serde_json::json!({ "folder": workspace_uri.as_str() }).to_string(),
         )
         .unwrap();
 
