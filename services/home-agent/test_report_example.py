@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import fcntl
 import importlib.util
 import json
@@ -102,6 +103,61 @@ class ReporterTests(unittest.TestCase):
                 observe.assert_not_called()
             finally:
                 os.close(descriptor)
+
+    def test_run_lock_rejects_symlink_without_changing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "private" / "state.json"
+            reporter.ensure_private_parent(path.parent)
+            target = path.parent / "target"
+            target.write_text("untouched", encoding="utf-8")
+            target.chmod(0o644)
+            path.with_name(f"{path.name}.lock").symlink_to(target)
+            with self.assertRaises(OSError):
+                with reporter.agent_run_lock(path):
+                    self.fail("symlink lock must not be acquired")
+            self.assertEqual(target.read_text(encoding="utf-8"), "untouched")
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
+
+    def test_run_lock_rejects_untrusted_metadata_and_closes_descriptor(self) -> None:
+        real_fstat = os.fstat
+        for invalid in ("owner", "file_type"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "private" / "state.json"
+                descriptors = []
+
+                def invalid_metadata(descriptor):
+                    descriptors.append(descriptor)
+                    fields = list(real_fstat(descriptor))
+                    if invalid == "owner":
+                        fields[4] = os.geteuid() + 1
+                    else:
+                        fields[0] = stat.S_IFIFO | 0o600
+                    return os.stat_result(fields)
+
+                with mock.patch.object(reporter.os, "fstat", side_effect=invalid_metadata):
+                    with self.assertRaisesRegex(RuntimeError, "service-owned regular file"):
+                        with reporter.agent_run_lock(path):
+                            self.fail("untrusted lock must not be acquired")
+                self.assertEqual(len(descriptors), 1)
+                with self.assertRaises(OSError) as closed:
+                    real_fstat(descriptors[0])
+                self.assertEqual(closed.exception.errno, errno.EBADF)
+
+    def test_run_lock_preserves_unexpected_flock_error_and_closes_descriptor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "private" / "state.json"
+            failure = OSError(errno.EIO, "injected lock I/O failure")
+            with mock.patch.object(reporter.fcntl, "flock", side_effect=failure) as flock:
+                with self.assertRaises(OSError) as raised:
+                    with reporter.agent_run_lock(path):
+                        self.fail("failed lock must not be acquired")
+            self.assertIs(raised.exception, failure)
+            descriptor = flock.call_args.args[0]
+            with self.assertRaises(OSError) as closed:
+                os.fstat(descriptor)
+            self.assertEqual(closed.exception.errno, errno.EBADF)
+            with reporter.agent_run_lock(path):
+                pass
 
     def test_failed_delivery_is_replayed_with_the_exact_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
