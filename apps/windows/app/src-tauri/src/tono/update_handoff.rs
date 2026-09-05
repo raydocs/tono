@@ -3,8 +3,9 @@
 use std::path::PathBuf;
 
 use tono_core::update_journal::{
-    self, UpdateHandoffJournal, UpdateHandoffPhase, journal_path, load, write_atomic,
+    self, UpdateHandoffJournal, UpdateHandoffPhase, advance_pending, journal_path, load, write_atomic,
 };
+use tono_logging::{Type, logging};
 
 pub fn support_dir() -> PathBuf {
     crate::utils::dirs::app_home_dir().unwrap_or_else(|_| std::env::temp_dir().join("Tono"))
@@ -15,7 +16,17 @@ pub fn current_path() -> PathBuf {
 }
 
 pub fn load_pending() -> Option<UpdateHandoffJournal> {
-    load(&current_path()).ok().flatten()
+    match load(&current_path()) {
+        Ok(journal) => journal,
+        Err(error) => {
+            logging!(
+                warn,
+                Type::System,
+                "Tono: update journal unavailable; evidence retained: {error}"
+            );
+            None
+        }
+    }
 }
 
 pub fn save(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
@@ -23,17 +34,24 @@ pub fn save(journal: &UpdateHandoffJournal) -> std::io::Result<()> {
 }
 
 pub fn begin_first_launch_migration() -> Option<UpdateHandoffJournal> {
-    let mut journal = load_pending()?;
-    journal.advance(UpdateHandoffPhase::FirstLaunchMigration);
-    let _ = save(&journal);
-    Some(journal)
+    if let Err(error) = advance_pending(&current_path(), UpdateHandoffPhase::FirstLaunchMigration) {
+        logging!(
+            warn,
+            Type::System,
+            "Tono: update migration not recorded; evidence retained: {error}"
+        );
+        return None;
+    }
+    load_pending()
 }
 
 pub fn mark_committed() {
-    if let Some(mut journal) = load_pending() {
-        journal.advance(UpdateHandoffPhase::Committed);
-        let _ = save(&journal);
-        let _ = std::fs::remove_file(current_path());
+    if let Err(error) = advance_pending(&current_path(), UpdateHandoffPhase::Committed) {
+        logging!(
+            warn,
+            Type::System,
+            "Tono: update commit refused; evidence retained: {error}"
+        );
     }
 }
 
@@ -44,13 +62,7 @@ pub fn prepare(
     was_connected: bool,
     keep_kill_switch: bool,
 ) -> UpdateHandoffJournal {
-    let mut journal = UpdateHandoffJournal::new(
-        previous,
-        next,
-        generation,
-        was_connected,
-        keep_kill_switch,
-    );
+    let mut journal = UpdateHandoffJournal::new(previous, next, generation, was_connected, keep_kill_switch);
     journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
     let _ = save(&journal);
     journal
