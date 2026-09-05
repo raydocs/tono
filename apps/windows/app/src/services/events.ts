@@ -68,6 +68,8 @@ export const subscribeTonoEvents = (
     if (!handler) return Promise.resolve()
 
     return listen(name, ({ payload }) => {
+      // Events can arrive before registration returns its unlisten function.
+      if (disposed) return
       ;(handler as (payload: unknown) => void)(payload)
     })
       .then((unlisten) => {
