@@ -1821,7 +1821,7 @@ pub async fn tono_prepare_update(
         .or(option_env!("GITHUB_SHA"))
         .unwrap_or("")
         .to_string();
-    crate::tono::update_handoff::save(&journal)
+    crate::tono::update_handoff::save_prepared(&journal)
         .map_err(|error| format!("TONO_UPDATE_JOURNAL: {error}"))?;
     Ok(())
 }
