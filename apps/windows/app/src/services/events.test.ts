@@ -29,6 +29,36 @@ beforeEach(() => {
 })
 
 describe('subscribeTonoEvents', () => {
+  it('ignores events for a disposed subscription while registration is pending', async () => {
+    const { settleAll } = deferredListen()
+    const oldNotice = vi.fn()
+    const currentNotice = vi.fn()
+    const teardown = subscribeTonoEvents({
+      'tono://notice-message': oldNotice,
+    })
+    const oldCallback = listen.mock.calls[0][1]
+    const liveEvent = { payload: ['info', 'before teardown'] }
+    oldCallback(liveEvent)
+    expect(oldNotice).toHaveBeenCalledExactlyOnceWith(liveEvent.payload)
+    oldNotice.mockClear()
+
+    teardown()
+    const teardownCurrent = subscribeTonoEvents({
+      'tono://notice-message': currentNotice,
+    })
+    const currentCallback = listen.mock.calls[1][1]
+    const lateEvent = { payload: ['error', 'connection failed'] }
+    oldCallback(lateEvent)
+    currentCallback(lateEvent)
+
+    settleAll()
+    await flush()
+    teardownCurrent()
+
+    expect(oldNotice).not.toHaveBeenCalled()
+    expect(currentNotice).toHaveBeenCalledExactlyOnceWith(lateEvent.payload)
+  })
+
   it('reports subscribed only once every listener is live', async () => {
     const { registrations, settleAll } = deferredListen()
     const onSubscribed = vi.fn()
