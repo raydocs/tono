@@ -121,7 +121,7 @@ const SupportPage = () => {
   const {
     data: report,
     error: reportError,
-    isLoading,
+    isFetching,
     refetch: refreshReport,
   } = useQuery({
     queryKey: diagnosticsQueryKey,
@@ -259,7 +259,8 @@ const SupportPage = () => {
             type="button"
             className="tono-button"
             onClick={() => void refreshReport()}
-            disabled={isLoading}
+            disabled={isFetching}
+            aria-busy={isFetching}
             style={buttonStyle}
           >
             <TonoIcon name="refresh" size={15} />
