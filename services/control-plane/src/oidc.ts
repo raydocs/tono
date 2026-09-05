@@ -87,9 +87,13 @@ async function fetchKeys(url: string, force = false): Promise<SigningJWK[]> {
   } catch {
     throw new OidcVerificationError('OIDC key service failed', true);
   }
-  if (!response.ok) throw new OidcVerificationError('OIDC key service failed', true);
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new OidcVerificationError('OIDC key service failed', true);
+  }
   const declaredLength = Number(response.headers.get('content-length') ?? '0');
   if (Number.isFinite(declaredLength) && declaredLength > 256 * 1024) {
+    await response.body?.cancel();
     throw new OidcVerificationError('OIDC key response too large', true);
   }
   const raw = await response.text();
