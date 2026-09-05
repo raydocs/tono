@@ -1,6 +1,6 @@
 import { useLockFn } from 'ahooks'
 import dayjs from 'dayjs'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
@@ -296,20 +296,42 @@ export const TonoConfirmDialog = ({
 }: ConfirmDialogProps) => {
   const text = tonoText(dark)
   const panelRef = useRef<HTMLDivElement>(null)
+  const cancelFromKeyboard = useEffectEvent(() => onCancel())
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
-    const buttons =
-      panelRef.current?.querySelectorAll<HTMLButtonElement>('button')
-    buttons?.[buttons.length - 1]?.focus()
+    const panel = panelRef.current
+    // Start on the safe action, and don't reset the user's choice when a
+    // status refresh or action error rerenders the parent.
+    panel?.querySelector<HTMLButtonElement>('button')?.focus()
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        cancelFromKeyboard()
+      }
+      if (event.key !== 'Tab') return
+      const buttons = panel?.querySelectorAll<HTMLButtonElement>(
+        'button:not(:disabled)',
+      )
+      const first = buttons?.[0]
+      const last = buttons?.[buttons.length - 1]
+      if (!first || !last) return
+      if (!panel?.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
       previous?.focus()
     }
-  }, [onCancel])
+  }, [])
   return (
     <div
       role="dialog"
