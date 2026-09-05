@@ -52,6 +52,7 @@ const LoginPage = () => {
   )
   const codeInputRef = useRef<HTMLInputElement>(null)
   const emailInputRef = useRef<HTMLInputElement>(null)
+  const authRequestPendingRef = useRef(false)
 
   useEffect(() => {
     if (countdown <= 0) return
@@ -77,11 +78,13 @@ const LoginPage = () => {
   }
 
   const handleSendCode = useLockFn(async () => {
+    if (authRequestPendingRef.current) return
     const trimmed = email.trim().toLowerCase()
     if (!EMAIL_PATTERN.test(trimmed)) {
       setError(t('tono.login.invalidEmail'))
       return
     }
+    authRequestPendingRef.current = true
     setEmail(trimmed)
     setSending(true)
     setError(null)
@@ -94,16 +97,19 @@ const LoginPage = () => {
     } catch (error) {
       setError(formatTonoActionError(error, t))
     } finally {
+      authRequestPendingRef.current = false
       setSending(false)
     }
   })
 
   const handleVerify = useLockFn(async () => {
+    if (authRequestPendingRef.current) return
     const trimmedCode = code.trim()
     if (!/^\d{6}$/.test(trimmedCode)) {
       setError(t('tono.login.invalidCode'))
       return
     }
+    authRequestPendingRef.current = true
     setVerifying(true)
     setError(null)
     try {
@@ -117,6 +123,7 @@ const LoginPage = () => {
     } catch (error) {
       setError(formatTonoActionError(error, t))
     } finally {
+      authRequestPendingRef.current = false
       setVerifying(false)
     }
   })
@@ -508,6 +515,7 @@ const LoginPage = () => {
                   onClick={countdown > 0 ? undefined : handleSendCode}
                   disabled={
                     sending ||
+                    verifying ||
                     restoringInternet ||
                     internetBlocked ||
                     countdown > 0
