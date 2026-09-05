@@ -115,11 +115,11 @@ const ActivityPage = () => {
     refreshGetClashConnection,
   } = useConnectionData({ enabled: connected, generation })
   const [waitedForFeed, setWaitedForFeed] = useState(false)
+  if (waitedForFeed && (!connected || live)) {
+    setWaitedForFeed(false)
+  }
   useEffect(() => {
-    if (!connected || live) {
-      setWaitedForFeed(false)
-      return
-    }
+    if (!connected || live) return
     const timer = window.setTimeout(() => setWaitedForFeed(true), 4_000)
     return () => window.clearTimeout(timer)
   }, [connected, live, generation])

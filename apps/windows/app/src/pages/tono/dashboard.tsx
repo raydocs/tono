@@ -548,11 +548,11 @@ const DashboardPage = () => {
     generation: status?.controllerGeneration,
   })
   const [trafficWaited, setTrafficWaited] = useState(false)
+  if (trafficWaited && (!connected || trafficLive)) {
+    setTrafficWaited(false)
+  }
   useEffect(() => {
-    if (!connected || trafficLive) {
-      setTrafficWaited(false)
-      return
-    }
+    if (!connected || trafficLive) return
     const timer = window.setTimeout(() => setTrafficWaited(true), 4_000)
     return () => window.clearTimeout(timer)
   }, [connected, trafficLive, status?.controllerGeneration])

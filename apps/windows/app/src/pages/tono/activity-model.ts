@@ -1,7 +1,5 @@
 export type ActivityRoute = 'proxied' | 'home' | 'direct' | 'rejected' | 'local'
 
-const HOME_CHAIN_HOPS = new Set(['Tono-Home-Residential', 'Tono-Claude-Home'])
-
 export interface ActivityRow {
   id: string
   process: string
