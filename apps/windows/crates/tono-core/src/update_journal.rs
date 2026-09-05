@@ -142,10 +142,11 @@ pub fn write_atomic(path: &Path, journal: &UpdateHandoffJournal) -> io::Result<(
 }
 
 pub fn load(path: &Path) -> io::Result<Option<UpdateHandoffJournal>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let data = fs::read(path)?;
+    let data = match fs::read(path) {
+        Ok(data) => data,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
     let journal: UpdateHandoffJournal = serde_json::from_slice(&data)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if journal.schema_version != UpdateHandoffJournal::SCHEMA_VERSION {
@@ -157,12 +158,46 @@ pub fn load(path: &Path) -> io::Result<Option<UpdateHandoffJournal>> {
     if matches!(
         journal.phase,
         UpdateHandoffPhase::Committed | UpdateHandoffPhase::Idle
-    ) || journal.is_expired()
-    {
-        let _ = fs::remove_file(path);
+    ) {
+        fs::remove_file(path)?;
         return Ok(None);
     }
+    if journal.is_expired() {
+        // Expiry forbids resume, but does not prove that recovery succeeded.
+        // Keep the original bytes available for diagnosis, including Failed.
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "update journal expired",
+        ));
+    }
     Ok(Some(journal))
+}
+
+/// Persist a real owner's observed transition. An illegal transition records
+/// failure, never success; failed evidence is immutable on subsequent attempts.
+/// Only a durably saved successful commit permits removal.
+pub fn advance_pending(path: &Path, phase: UpdateHandoffPhase) -> io::Result<()> {
+    let Some(mut journal) = load(path)? else {
+        return Ok(());
+    };
+    if journal.phase == UpdateHandoffPhase::Failed {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "update journal failed",
+        ));
+    }
+    journal.advance(phase);
+    write_atomic(path, &journal)?;
+    if journal.phase == UpdateHandoffPhase::Failed {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "illegal update journal phase",
+        ));
+    }
+    if journal.phase == UpdateHandoffPhase::Committed {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 fn unix_now() -> u64 {
@@ -216,16 +251,92 @@ mod tests {
     }
 
     #[test]
-    fn expired_journal_is_cleared() {
+    fn expired_journal_cannot_resume_and_is_retained() {
         let dir = env::temp_dir().join(format!("tono-journal-exp-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let path = journal_path(&dir);
         let mut journal = UpdateHandoffJournal::new("0.0.34", "0.0.35", 1, true, true);
         journal.expires_at_unix = 1;
         write_atomic(&path, &journal).unwrap();
-        assert!(load(&path).unwrap().is_none());
-        assert!(!path.exists());
+        let original = fs::read(&path).unwrap();
+        assert_eq!(load(&path).unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(fs::read(&path).unwrap(), original);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skipped_lifecycle_and_repeated_commit_retain_first_failure() {
+        let dir = env::temp_dir().join(format!("tono-journal-failed-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let mut journal = UpdateHandoffJournal::new("old", "new", 1, true, true);
+        journal.advance(UpdateHandoffPhase::ConnectionQuiescing);
+        write_atomic(&path, &journal).unwrap();
+        assert!(advance_pending(&path, UpdateHandoffPhase::FirstLaunchMigration).is_err());
+        let failed = load(&path).unwrap().unwrap();
+        assert_eq!(failed.phase, UpdateHandoffPhase::Failed);
+        assert_eq!(
+            failed.last_error_stage.as_deref(),
+            Some("ConnectionQuiescing->FirstLaunchMigration")
+        );
+        let original = fs::read(&path).unwrap();
+        for phase in [
+            UpdateHandoffPhase::Committed,
+            UpdateHandoffPhase::FirstLaunchMigration,
+        ] {
+            assert!(advance_pending(&path, phase).is_err());
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn only_verified_commit_can_remove_journal() {
+        let dir = env::temp_dir().join(format!("tono-journal-commit-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let journal = UpdateHandoffJournal::new("old", "new", 1, false, false);
+        write_atomic(&path, &journal).unwrap();
+        for phase in [
+            UpdateHandoffPhase::ConnectionQuiescing,
+            UpdateHandoffPhase::CleanShutdownCompleted,
+            UpdateHandoffPhase::ProtectedHandoffRecorded,
+            UpdateHandoffPhase::InstallStarted,
+            UpdateHandoffPhase::FirstLaunchMigration,
+            UpdateHandoffPhase::ProtectionResuming,
+            UpdateHandoffPhase::Verified,
+        ] {
+            advance_pending(&path, phase).unwrap();
+            assert_eq!(load(&path).unwrap().unwrap().phase, phase);
+        }
+        // Inject a persistence failure without relying on root-sensitive chmod.
+        fs::create_dir(path.with_extension("json.tmp")).unwrap();
+        assert!(advance_pending(&path, UpdateHandoffPhase::Committed).is_err());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::Verified
+        );
+        fs::remove_dir(path.with_extension("json.tmp")).unwrap();
+        advance_pending(&path, UpdateHandoffPhase::Committed).unwrap();
+        assert!(!path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unverified_commit_and_unreadable_journals_never_disappear() {
+        let dir = env::temp_dir().join(format!("tono-journal-invalid-{}", std::process::id()));
+        let path = journal_path(&dir);
+        let journal = UpdateHandoffJournal::new("old", "new", 1, false, false);
+        write_atomic(&path, &journal).unwrap();
+        assert!(advance_pending(&path, UpdateHandoffPhase::Committed).is_err());
+        assert_eq!(
+            load(&path).unwrap().unwrap().phase,
+            UpdateHandoffPhase::Failed
+        );
+        for payload in [b"not JSON".as_slice(), b"{\"schemaVersion\":99}"] {
+            fs::write(&path, payload).unwrap();
+            assert!(advance_pending(&path, UpdateHandoffPhase::Committed).is_err());
+            assert_eq!(fs::read(&path).unwrap(), payload);
+        }
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
