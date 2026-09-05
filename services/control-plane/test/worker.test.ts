@@ -1544,7 +1544,44 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
   });
 
-  it('shadows named metering, exposes readiness, and only requires v2 after explicit cutover', async () => {
+  it('blocks unpaired legacy cutover even after quiet-window named growth', async () => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(
+      `INSERT INTO users(id,email,password_hash,password_salt,status,created_at,updated_at)
+       VALUES('usr-handoff','handoff@example.com','h','s','active',?,?)`,
+    ).bind(timestamp, timestamp).run();
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = 'collector-test-token-with-at-least-32-chars';
+    expect((await api('ops-ingest/usage', json({ reports: [{
+      reportId: 'handoff-legacy', userId: 'usr-handoff', totalBytes: 1000, observedAt: timestamp,
+    }] }, 'collector-test-token-with-at-least-32-chars'))).status).toBe(200);
+    for (const [index, totalBytes] of [400, 600].entries()) {
+      expect((await api('home/usage', json({ reports: [{
+        reportId: `handoff-named-${index}`, userId: 'usr-handoff', sourceId: 'exit-default',
+        protocolVersion: 2, totalBytes, observedAt: timestamp + index,
+      }] }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
+    }
+    await env.DB.prepare('UPDATE exit_nodes SET metering_protocol_version = 2, metering_last_seen_at = ?')
+      .bind(timestamp).run();
+    await env.DB.prepare('UPDATE usage_metering_rollout SET legacy_last_seen_at = ?')
+      .bind(timestamp - 1801).run();
+    expect(await (await admin('usage-metering-rollout', undefined, 'GET')).json()).toMatchObject({
+      canRequireV2: false, blockers: ['legacy_handoff_boundary_unavailable'],
+    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect((await admin('usage-metering-rollout', { phase: 'v2_required' }, 'POST')).status).toBe(409);
+    }
+    // Exercise the database race boundary and atomic baseline rollback too.
+    await expect(env.DB.batch([
+      env.DB.prepare(`INSERT INTO usage_metering_cutover_baselines VALUES('usr-handoff',1000,600,?)`).bind(timestamp),
+      env.DB.prepare("UPDATE usage_metering_rollout SET phase = 'v2_required'"),
+    ])).rejects.toThrow('USAGE_METERING_ROLLOUT_NOT_READY');
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM usage_metering_cutover_baselines').first()).toMatchObject({ n: 0 });
+    expect(await env.DB.prepare("SELECT phase FROM usage_metering_rollout").first()).toMatchObject({ phase: 'dual' });
+    expect(await env.DB.prepare("SELECT usage_reported_bytes FROM users WHERE id = 'usr-handoff'").first()).toMatchObject({ usage_reported_bytes: 1000 });
+    (env as unknown as Env).OPS_COLLECTOR_TOKEN = undefined;
+  });
+
+  it('exposes readiness and permits explicit v2 cutover without legacy history', async () => {
     const timestamp = Math.floor(Date.now() / 1000);
     await env.DB.prepare(
       `INSERT INTO users(id,email,password_hash,password_salt,status,usage_bytes,created_at,updated_at)
@@ -1569,22 +1606,20 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       observedAt,
     }] }, EXIT_NODE_TOKENS[nodeId]));
 
-    expect((await legacy('meter-legacy-1', 1_000)).status).toBe(200);
     expect((await named('exit-default', 'meter-shadow-1', 400)).status).toBe(200);
     expect(await env.DB.prepare(
       "SELECT usage_reported_bytes FROM users WHERE id = 'usr-meter-cutover'",
-    ).first()).toMatchObject({ usage_reported_bytes: 1_000 });
+    ).first()).toMatchObject({ usage_reported_bytes: 400 });
 
     const blockedState = await admin('usage-metering-rollout', undefined, 'GET');
     expect(blockedState.status).toBe(200);
     expect(await blockedState.json()).toMatchObject({
       phase: 'dual',
-      legacy: { sourceRows: 1, users: 1 },
+      legacy: { sourceRows: 0, users: 0 },
       named: { sourceRows: 1, sources: 1, v2Rows: 1 },
       canRequireV2: false,
       blockers: expect.arrayContaining([
         'active_exit_without_v2_readiness',
-        'legacy_collector_recently_active',
       ]),
     });
     expect((await admin(
@@ -1609,10 +1644,6 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
       meteringProtocolVersion: 2,
       observedAt: timestamp,
     }, EXIT_NODE_TOKENS['exit-default']))).status).toBe(200);
-    await env.DB.prepare(
-      `UPDATE usage_metering_rollout
-       SET legacy_last_seen_at = ? WHERE singleton_id = 1`,
-    ).bind(timestamp - 1801).run();
     await env.DB.prepare(
       `UPDATE exit_nodes SET metering_last_seen_at = ? WHERE id = 'exit-default'`,
     ).bind(timestamp - 901).run();
@@ -1655,14 +1686,14 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
     expect(await env.DB.prepare(
       "SELECT reported_bytes, named_bytes FROM usage_metering_cutover_baselines WHERE user_id = 'usr-meter-cutover'",
-    ).first()).toMatchObject({ reported_bytes: 1_000, named_bytes: 400 });
+    ).first()).toMatchObject({ reported_bytes: 400, named_bytes: 400 });
 
     expect((await legacy('meter-legacy-after', 1_100)).status).toBe(409);
     expect((await named('exit-default', 'meter-v1-after', 450, 1, timestamp + 10)).status).toBe(409);
     expect((await named('exit-default', 'meter-v2-after', 450, 2, timestamp + 10)).status).toBe(200);
     expect(await env.DB.prepare(
       "SELECT usage_reported_bytes FROM users WHERE id = 'usr-meter-cutover'",
-    ).first()).toMatchObject({ usage_reported_bytes: 1_050 });
+    ).first()).toMatchObject({ usage_reported_bytes: 450 });
 
     // Retrying the phase request is idempotent: it neither moves the baseline
     // nor records a second operator transition.

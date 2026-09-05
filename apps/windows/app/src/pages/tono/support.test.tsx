@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -144,6 +145,65 @@ describe('Tono Support page', () => {
     )
     expect(diagnosticsReportMock).toHaveBeenCalled()
     expect(auditLogPathMock).toHaveBeenCalled()
+  })
+
+  it('marks an existing report refresh busy and prevents repeat activation', async () => {
+    renderPage()
+    await screen.findByText('Tono 0.0.18 · Windows 11 Pro 23H2')
+    let finishRefresh!: (value: TonoDiagnosticsReport) => void
+    const pendingReport = new Promise<TonoDiagnosticsReport>((resolve) => {
+      finishRefresh = resolve
+    })
+    diagnosticsReportMock.mockReturnValue(pendingReport)
+    const refresh = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'Refresh',
+    })
+    fireEvent.click(refresh)
+    expect.soft(refresh.disabled).toBe(true)
+    expect.soft(refresh.getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(refresh)
+    expect.soft(diagnosticsReportMock).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('Tono 0.0.18 · Windows 11 Pro 23H2')).toBeDefined()
+    await act(async () => finishRefresh({ ...report, appVersion: '0.0.19' }))
+    expect(screen.getByText('Tono 0.0.19 · Windows 11 Pro 23H2')).toBeDefined()
+    expect(refresh.disabled).toBe(false)
+    expect(refresh.getAttribute('aria-busy')).toBe('false')
+  })
+
+  it('keeps Refresh disabled during the initial diagnostics load', async () => {
+    let finishLoad!: (value: TonoDiagnosticsReport) => void
+    diagnosticsReportMock.mockReturnValue(
+      new Promise<TonoDiagnosticsReport>((resolve) => {
+        finishLoad = resolve
+      }),
+    )
+    renderPage()
+    const refresh = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'Refresh',
+    })
+    expect(refresh.disabled).toBe(true)
+    expect(refresh.getAttribute('aria-busy')).toBe('true')
+    expect(screen.queryByRole('alert')).toBeNull()
+    await act(async () => finishLoad(report))
+    expect(refresh.disabled).toBe(false)
+    expect(screen.getByText('Tono 0.0.18 · Windows 11 Pro 23H2')).toBeDefined()
+  })
+
+  it('handles a rejected refresh through the existing alert and allows retry', async () => {
+    renderPage()
+    await screen.findByText('Tono 0.0.18 · Windows 11 Pro 23H2')
+    diagnosticsReportMock.mockRejectedValueOnce(new Error('Report timed out'))
+    const refresh = screen.getByRole<HTMLButtonElement>('button', {
+      name: 'Refresh',
+    })
+    await act(async () => fireEvent.click(refresh))
+    expect(screen.getByRole('alert').textContent).toBe(
+      "Couldn't load the diagnostics summary. Refresh to try again.",
+    )
+    expect(refresh.disabled).toBe(false)
+    await act(async () => fireEvent.click(refresh))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(diagnosticsReportMock).toHaveBeenCalledTimes(3)
   })
 
   it('copies the backend report and local audit path without constructing a payload', async () => {
