@@ -231,10 +231,17 @@ nonisolated enum BrowserDNSDiagnostics {
     enum Source: String, Sendable {
         case none, localState, userManaged, machineManaged
     }
+    /// Bounded diagnostic codes only: never include paths, browser JSON or
+    /// policy values in a connection failure or telemetry event.
+    enum FailureReason: String, Sendable {
+        case missingLocalState, unreadableFile, symbolicLink, oversizedFile
+        case changedDuringRead, invalidDocument, invalidSettings, unsupportedMode
+    }
     struct BrowserResult: Sendable {
         let outcome: Outcome
         let source: Source
         let preferenceStoreCount: Int
+        var failureReason: FailureReason? = nil
     }
     struct Report: Sendable {
         let chrome: BrowserResult
@@ -246,6 +253,22 @@ nonisolated enum BrowserDNSDiagnostics {
         }
         var inspectedPreferenceStoreCount: Int {
             chrome.preferenceStoreCount + edge.preferenceStoreCount
+        }
+        var diagnosticDetail: String {
+            let results = [("chrome", chrome), ("edge", edge)].map { name, result in
+                "\(name)=\(result.outcome.rawValue)/\(result.source.rawValue)/\(result.failureReason?.rawValue ?? "none")"
+            }
+            return "browser Secure DNS scan \(outcome.rawValue); " + results.joined(separator: "; ")
+        }
+        var failureMessage: String {
+            switch outcome {
+            case .incomplete:
+                return String(localized: "Tono could not verify Chrome or Edge's Secure DNS configuration. This does not mean Secure DNS is enabled. Fully quit both browsers and tap Retry Now. If it persists, copy the failure details for support; do not delete browser data. Choose Restore internet to end protection and restore normal Internet.")
+            case .blocking:
+                return String(localized: "Chrome or Microsoft Edge may bypass Tono's protected DNS. Turn off Secure DNS in Chrome and Edge for all profiles, fully restart the browsers, then reconnect.")
+            case .clear:
+                return ""
+            }
         }
     }
 
@@ -314,7 +337,8 @@ nonisolated enum BrowserDNSDiagnostics {
         return BrowserResult(
             outcome: selected?.outcome ?? .clear,
             source: selected?.source ?? .none,
-            preferenceStoreCount: results.reduce(0) { $0 + $1.preferenceStoreCount }
+            preferenceStoreCount: results.reduce(0) { $0 + $1.preferenceStoreCount },
+            failureReason: selected?.failureReason
         )
     }
 
@@ -338,12 +362,21 @@ nonisolated enum BrowserDNSDiagnostics {
             + userPolicies.map { (Optional($0), Source.userManaged) }
         for (url, source) in policies {
             guard let url, candidateExists(url) else { continue }
-            guard case .success(let object) = read(url, format: .plist),
-                  let dictionary = object as? [String: Any] else {
+            let object: Any
+            switch read(url, format: .plist) {
+            case .success(let value): object = value
+            case .failure(let reason):
                 return BrowserResult(
                     outcome: .incomplete,
                     source: source,
-                    preferenceStoreCount: 0
+                    preferenceStoreCount: 0,
+                    failureReason: reason
+                )
+            }
+            guard let dictionary = object as? [String: Any] else {
+                return BrowserResult(
+                    outcome: .incomplete, source: source,
+                    preferenceStoreCount: 0, failureReason: .invalidDocument
                 )
             }
             guard let policy = settings(
@@ -354,7 +387,8 @@ nonisolated enum BrowserDNSDiagnostics {
                 return BrowserResult(
                     outcome: .incomplete,
                     source: source,
-                    preferenceStoreCount: 0
+                    preferenceStoreCount: 0,
+                    failureReason: .invalidSettings
                 )
             }
             var contributed = false
@@ -381,21 +415,32 @@ nonisolated enum BrowserDNSDiagnostics {
                 return BrowserResult(
                     outcome: .incomplete,
                     source: managedSource ?? .localState,
-                    preferenceStoreCount: 0
+                    preferenceStoreCount: 0,
+                    failureReason: .missingLocalState
                 )
             }
             return BrowserResult(
                 outcome: managedOutcome,
                 source: managedSource ?? .none,
-                preferenceStoreCount: 0
+                preferenceStoreCount: 0,
+                failureReason: managedOutcome == .incomplete ? .unsupportedMode : nil
             )
         }
-        guard case .success(let object) = read(localState, format: .json),
-              let dictionary = object as? [String: Any] else {
+        let object: Any
+        switch read(localState, format: .json) {
+        case .success(let value): object = value
+        case .failure(let reason):
             return BrowserResult(
                 outcome: .incomplete,
                 source: .localState,
-                preferenceStoreCount: 1
+                preferenceStoreCount: 1,
+                failureReason: reason
+            )
+        }
+        guard let dictionary = object as? [String: Any] else {
+            return BrowserResult(
+                outcome: .incomplete, source: .localState,
+                preferenceStoreCount: 1, failureReason: .invalidDocument
             )
         }
         var localMode: String?
@@ -410,42 +455,51 @@ nonisolated enum BrowserDNSDiagnostics {
                 return BrowserResult(
                     outcome: .incomplete,
                     source: .localState,
-                    preferenceStoreCount: 1
+                    preferenceStoreCount: 1,
+                    failureReason: .invalidSettings
                 )
             }
             localMode = setting.mode
             localTemplates = setting.templates
         }
+        let outcome = classify(
+            mode: managedMode ?? localMode,
+            templates: managedTemplates ?? localTemplates
+        )
         return BrowserResult(
-            outcome: classify(
-                mode: managedMode ?? localMode,
-                templates: managedTemplates ?? localTemplates
-            ),
+            outcome: outcome,
             source: managedSource ?? .localState,
-            preferenceStoreCount: 1
+            preferenceStoreCount: 1,
+            failureReason: outcome == .incomplete ? .unsupportedMode : nil
         )
     }
 
     private enum Format { case json, plist }
-    private enum ReadResult { case success(Any), failure }
+    private enum ReadResult { case success(Any), failure(FailureReason) }
     private static func read(_ url: URL, format: Format) -> ReadResult {
-        guard !isSymbolicLink(url),
-              let before = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = before[.size] as? NSNumber,
-              size.intValue <= maximumFileBytes,
-              let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
-              data.count <= maximumFileBytes,
-              let after = try? FileManager.default.attributesOfItem(atPath: url.path),
-              before[.size] as? NSNumber == after[.size] as? NSNumber,
+        guard !isSymbolicLink(url) else { return .failure(.symbolicLink) }
+        guard let before = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = before[.size] as? NSNumber else {
+            return .failure(.unreadableFile)
+        }
+        guard size.intValue <= maximumFileBytes else { return .failure(.oversizedFile) }
+        guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else {
+            return .failure(.unreadableFile)
+        }
+        guard data.count <= maximumFileBytes else { return .failure(.oversizedFile) }
+        guard let after = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return .failure(.unreadableFile)
+        }
+        guard before[.size] as? NSNumber == after[.size] as? NSNumber,
               before[.modificationDate] as? Date == after[.modificationDate] as? Date else {
-            return .failure
+            return .failure(.changedDuringRead)
         }
         let object: Any?
         switch format {
         case .json: object = try? JSONSerialization.jsonObject(with: data)
         case .plist: object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)
         }
-        return object.map(ReadResult.success) ?? .failure
+        return object.map(ReadResult.success) ?? .failure(.invalidDocument)
     }
 
     private static func settings(
