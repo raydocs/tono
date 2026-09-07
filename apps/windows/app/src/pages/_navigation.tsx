@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { TonoIcon, type TonoIconName } from '@/tono-ui/TonoIcon'
 
 import { navigationItems } from './_navigation-meta'
+import TonoIntroPage from './tono/intro'
 import TonoLoginPage from './tono/login'
 import TonoTrayPage from './tono/tray'
 
@@ -64,6 +65,7 @@ export const navItems: NavigationItem[] = [
 // Reachable by URL but not listed in the navigation: the sign-in screen,
 // which the auth guard routes through.
 export const hiddenRoutes = [
+  { path: '/intro', Component: TonoIntroPage },
   { path: '/login', Component: TonoLoginPage },
   { path: '/tray', Component: TonoTrayPage },
 ]

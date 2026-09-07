@@ -830,6 +830,7 @@ struct LiquidClashApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @AppStorage(SettingsKey.themeMode, store: AppProfile.defaults) private var themeMode = "Adaptive"
     @AppStorage(SettingsKey.interfaceLanguage, store: AppProfile.defaults) private var interfaceLanguage = "Auto"
+    @AppStorage(SettingsKey.introSeen, store: AppProfile.defaults) private var introSeen = false
     @StateObject private var updater: AppUpdater
     @State private var appState: AppState
     @State private var sidecar: TonoSidecarService
@@ -951,11 +952,18 @@ struct LiquidClashApp: App {
                            minHeight: 540, idealHeight: 600)
 
                 if InterfaceLanguagePreference.hasChosen {
-                    AccountGateView(session: accountSession) {
-                        ContentView()
-                            .environment(appState)
-                            .environment(accountSession)
-                            .environmentObject(updater)
+                    if WelcomeLaunchGate.showsIntro(
+                        introSeen: introSeen,
+                        sessionState: accountSession.state
+                    ) {
+                        WelcomeIntroView()
+                    } else {
+                        AccountGateView(session: accountSession) {
+                            ContentView()
+                                .environment(appState)
+                                .environment(accountSession)
+                                .environmentObject(updater)
+                        }
                     }
                 } else {
                     LanguageSetupView()

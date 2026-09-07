@@ -1117,6 +1117,25 @@ export interface TranslationResources {
       errors: {
         unknownAction: string
       }
+      intro: {
+        getStarted: string
+        landmark: string
+        next: string
+        progress: string
+        skip: string
+        step1: {
+          body: string
+          headline: string
+        }
+        step2: {
+          body: string
+          headline: string
+        }
+        step3: {
+          body: string
+          headline: string
+        }
+      }
       login: {
         brandDescription: string
         brandFootnote: string
@@ -1160,6 +1179,7 @@ export interface TranslationResources {
         sendCode: string
         sending: string
         sendNewCode: string
+        sent: string
         stepCode: string
         stepEmail: string
         stillWaiting: string
@@ -1169,6 +1189,7 @@ export interface TranslationResources {
           title: string
         }
         title: string
+        trust: string
         validity: string
         verify: string
         verifying: string

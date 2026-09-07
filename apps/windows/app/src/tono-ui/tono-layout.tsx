@@ -61,7 +61,8 @@ const TonoLayout = () => {
   const windowControlsRef = useRef<any>(null)
   const { decorated } = useWindowDecorations()
 
-  const isLoginRoute = location.pathname === '/login'
+  const isLoginRoute =
+    location.pathname === '/login' || location.pathname === '/intro'
   const isTrayRoute = location.pathname === '/tray'
   const isDashboardRoute = location.pathname === '/'
 

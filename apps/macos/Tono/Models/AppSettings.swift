@@ -51,6 +51,8 @@ enum SettingsKey {
     nonisolated static let crashReportingEnabled =
         "crashReportingEnabled"
     static let hasCompletedOnboarding = "hasCompletedOnboarding"
+    /// First-run Welcome v2 intro. Set after Skip or Get started; never re-shown.
+    static let introSeen = "introSeen"
     static let hasChosenInterfaceLanguage = "hasChosenInterfaceLanguage"
     static let selectedProxyTargetName = "selectedProxyTargetName"
     static let cloudExitDefaultPolicyVersion = "cloudExitDefaultPolicyVersion"
