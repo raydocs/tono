@@ -234,7 +234,7 @@ nonisolated enum BrowserDNSDiagnostics {
     /// Bounded diagnostic codes only: never include paths, browser JSON or
     /// policy values in a connection failure or telemetry event.
     enum FailureReason: String, Sendable {
-        case missingLocalState, unreadableFile, symbolicLink, oversizedFile
+        case unreadableFile, symbolicLink, oversizedFile
         case changedDuringRead, invalidDocument, invalidSettings, unsupportedMode
     }
     struct BrowserResult: Sendable {
@@ -404,21 +404,19 @@ nonisolated enum BrowserDNSDiagnostics {
         }
 
         guard candidateExists(localState) else {
-            let browserRoot = localState.deletingLastPathComponent()
-            let managedOutcome = classify(
-                mode: managedMode,
-                templates: managedTemplates
-            )
-            if candidateExists(browserRoot), managedOutcome != .blocking,
-               managedMode?.trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() != "off" {
-                return BrowserResult(
-                    outcome: .incomplete,
-                    source: managedSource ?? .localState,
-                    preferenceStoreCount: 0,
-                    failureReason: .missingLocalState
-                )
-            }
+            // No Local State means this browser has never persisted
+            // preferences here. Chromium keeps `dns_over_https` in Local State
+            // and writes that file within seconds of first launch, so a missing
+            // file (fresh install, a support directory left behind by an
+            // uninstalled browser, or a wiped profile) cannot carry an enabled
+            // Secure DNS setting: the next launch starts from defaults. Managed
+            // policy is the only other authority and was resolved above.
+            // Build 72 treated a directory without Local State as "unknown" and
+            // failed closed on machines that had never run the browser (#17,
+            // #42) while adding nothing over the absent-directory case, which
+            // already returned the managed outcome; a custom --user-data-dir
+            // is invisible to both.
+            let managedOutcome = classify(mode: managedMode, templates: managedTemplates)
             return BrowserResult(
                 outcome: managedOutcome,
                 source: managedSource ?? .none,

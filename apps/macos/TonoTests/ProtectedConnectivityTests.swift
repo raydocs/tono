@@ -98,21 +98,66 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertEqual(result.preferenceStoreCount, 2)
     }
 
-    func testBrowserDoHMissingStateIsNotAnEnabledSettingAndCanRecover() throws {
+    func testBrowserDoHMissingStateIsDefaultsNotUnknown() throws {
+        // A support directory without Local State (never launched, uninstalled,
+        // or wiped) cannot hold an enabled Secure DNS setting; Build 72 failed
+        // closed here on real Macs with a leftover Edge directory (#17, #42).
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let localState = root.appendingPathComponent("Local State")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let missing = BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: nil)
-        XCTAssertEqual(missing.outcome, .incomplete)
-        XCTAssertEqual(missing.failureReason, .missingLocalState)
+        XCTAssertEqual(missing.outcome, .clear)
+        XCTAssertEqual(missing.source, .none)
+        XCTAssertEqual(missing.preferenceStoreCount, 0)
+        XCTAssertNil(missing.failureReason)
 
-        // A browser writing a valid Local State resolves the scan gap. Merely
-        // telling the user to toggle DNS off cannot fix an unreadable document.
-        try writeJSON(["dns_over_https": ["mode": "off"]], to: localState)
-        let recovered = BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: nil)
-        XCTAssertEqual(recovered.outcome, .clear)
-        XCTAssertNil(recovered.failureReason)
+        // Once the browser writes Local State, that document is authoritative.
+        try writeJSON(["dns_over_https": ["mode": "secure"]], to: localState)
+        let written = BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: nil)
+        XCTAssertEqual(written.outcome, .blocking)
+        XCTAssertEqual(written.source, .localState)
+    }
+
+    func testBrowserDoHMissingStateStillHonoursManagedPolicy() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let localState = root.appendingPathComponent("Local State")
+        let policy = root.appendingPathComponent("policy.plist")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePlist(["DnsOverHttpsMode": "secure"], to: policy)
+        let managed = BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: policy)
+        XCTAssertEqual(managed.outcome, .blocking)
+        XCTAssertEqual(managed.source, .machineManaged)
+
+        try writePlist(["DnsOverHttpsMode": "unrecognized"], to: policy)
+        let unsupported = BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: policy)
+        XCTAssertEqual(unsupported.outcome, .incomplete)
+        XCTAssertEqual(unsupported.failureReason, .unsupportedMode)
+
+        try writePlist(["DnsOverHttpsMode": 42], to: policy)
+        let invalid = BrowserDNSDiagnostics.scanBrowser(localState: localState, userPolicy: nil, machinePolicy: policy)
+        XCTAssertEqual(invalid.outcome, .incomplete)
+        XCTAssertEqual(invalid.failureReason, .invalidSettings)
+    }
+
+    func testBrowserDoHLeftoverChannelDirectoryDoesNotPoisonOtherChannels() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let stable = root.appendingPathComponent("stable/Local State")
+        let leftover = root.appendingPathComponent("beta/Local State")
+        try writeJSON(["dns_over_https": ["mode": "off"]], to: stable)
+        try FileManager.default.createDirectory(at: leftover.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        let result = BrowserDNSDiagnostics.scanBrowserChannels([
+            (stable, [], nil),
+            (leftover, [], nil),
+        ])
+        XCTAssertEqual(result.outcome, .clear)
+        XCTAssertEqual(result.source, .localState)
+        XCTAssertEqual(result.preferenceStoreCount, 1)
+        XCTAssertNil(result.failureReason)
     }
 
     func testBrowserDoHPolicyFailureRemainsIncompleteEvenWhenLocalDNSIsOff() throws {
