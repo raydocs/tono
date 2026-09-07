@@ -7,6 +7,7 @@ import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  describeTonoActionError,
   formatTonoActionError,
   formatTonoDiagnostics,
   tonoAuditLogPath,
@@ -230,9 +231,12 @@ const SupportPage = () => {
       report.killSwitchLastError ??
       (dnsWarning ? null : report.dnsLastError))
     : null
+  const describedLastError = rawLastError
+    ? describeTonoActionError(rawLastError, t)
+    : null
   const lastError = report
-    ? rawLastError
-      ? formatTonoActionError(rawLastError, t)
+    ? describedLastError
+      ? (describedLastError.detail ?? describedLastError.message)
       : t('tono.support.none')
     : '—'
   const secondaryBackground = dark

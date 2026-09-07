@@ -234,10 +234,6 @@ const MESSAGE_ERROR_KEYS: Array<{ match: RegExp; key: string }> = [
   },
 ]
 
-/**
- * Map backend error strings (including stable `TONO_*` prefixes) to a UI message.
- * Pass `t` from `useTranslation` when available; falls back to the raw string.
- */
 export const isEncryptedDnsFailure = (error: unknown): boolean => {
   const raw =
     error instanceof Error
@@ -248,35 +244,66 @@ export const isEncryptedDnsFailure = (error: unknown): boolean => {
   return /Encrypted DNS|EnableAutoDoh/i.test(raw)
 }
 
-export const formatTonoActionError = (
-  error: unknown,
-  t?: (key: string) => string,
-): string => {
-  const raw =
-    error instanceof Error
-      ? error.message
-      : typeof error === 'string'
-        ? error
-        : String(error)
+const actionErrorRaw = (error: unknown): string =>
+  error instanceof Error
+    ? error.message
+    : typeof error === 'string'
+      ? error
+      : String(error)
+
+const mappedTonoActionErrorKey = (raw: string): string | null => {
   if (
     (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
       raw.includes('CORE_EXIT_UNREACHABLE')) &&
     /tls handshake eof/i.test(raw)
   ) {
-    return t ? t('tono.dashboard.errors.protectedHttpsFailed') : raw
+    return 'tono.dashboard.errors.protectedHttpsFailed'
   }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
-      return t ? t(key) : raw
+      return key
     }
   }
   for (const { match, key } of MESSAGE_ERROR_KEYS) {
     if (match.test(raw)) {
-      return t ? t(key) : raw
+      return key
     }
   }
-  return raw
+  return null
 }
+
+/**
+ * Map backend error strings (including stable `TONO_*` prefixes) to a UI message.
+ * Pass `t` from `useTranslation` when available. Unmapped errors use
+ * `tono.errors.unknownAction`, with the raw text on `detail` for diagnostics.
+ */
+export type TonoActionErrorDescription = {
+  message: string
+  detail?: string
+}
+
+export const describeTonoActionError = (
+  error: unknown,
+  t?: (key: string) => string,
+): TonoActionErrorDescription => {
+  const raw = actionErrorRaw(error)
+  const key = mappedTonoActionErrorKey(raw)
+  if (key) {
+    return { message: t ? t(key) : raw }
+  }
+  if (t) {
+    return {
+      message: t('tono.errors.unknownAction'),
+      ...(raw ? { detail: raw } : {}),
+    }
+  }
+  return { message: raw }
+}
+
+export const formatTonoActionError = (
+  error: unknown,
+  t?: (key: string) => string,
+): string => describeTonoActionError(error, t).message
 
 /**
  * Whether a connect rejection means "no usable server is selected" — the

@@ -2202,7 +2202,7 @@
         }
       }
     },
-    "Kill Switch is blocking traffic while Tono retries. Tap Protected Offline to restore normal Internet.": {
+    "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -2212,7 +2212,7 @@
         }
       }
     },
-    "Kill Switch is blocking traffic. Automatic retries are paused because this needs your action — tap Retry Now after resolving it, or Protected Offline to restore normal Internet.": {
+    "Kill Switch is blocking traffic. Automatic retries are paused because this needs your action — click Retry now after resolving it, or Restore internet to get back online.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4867,7 +4867,7 @@
         }
       }
     },
-    "Tap to connect": {
+    "Click to connect": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4877,7 +4877,7 @@
         }
       }
     },
-    "Tap to connect via %@": {
+    "Click to connect via %@": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4887,7 +4887,7 @@
         }
       }
     },
-    "Tap to disconnect": {
+    "Click to disconnect": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4897,7 +4897,7 @@
         }
       }
     },
-    "Tap to restore internet": {
+    "Click to restore internet": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -5079,7 +5079,7 @@
         }
       }
     },
-    "The same failure repeated three times, so automatic retries are paused. Tap Retry Now to try again, or Protected Offline to restore normal Internet.": {
+    "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -5157,6 +5157,96 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前物理网络不可用。网络恢复后会自动继续保护。"
+          }
+        }
+      }
+    },
+    "One of the connection checks failed for a moment. Your protected connection is still working.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "个别探测来源暂时失败。受保护连接仍然可用。"
+          }
+        }
+      }
+    },
+    "System DNS has not joined the protected path yet, so the connection could not finish. Wait a moment and reconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统 DNS 尚未进入受保护路径，连接未能完成。请稍候再重新连接。"
+          }
+        }
+      }
+    },
+    "The protected connection is up, but this Mac's traffic did not go through it. Reconnect to try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护隧道已建立，但系统流量未能进入隧道。请重新连接再试一次。"
+          }
+        }
+      }
+    },
+    "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护连接的一部分暂时不可用。若你的流量看起来正常，连接会保持。"
+          }
+        }
+      }
+    },
+    "The current node could not complete a protected check. Choose another node, or reconnect to try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前节点无法完成受保护验证。请换一个节点，或重新连接再试一次。"
+          }
+        }
+      }
+    },
+    "The network helper does not match this copy of Tono. Repair it before connecting again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络组件协议不匹配，需要先完成组件修复。"
+          }
+        }
+      }
+    },
+    "The protected connection did not come back after the update. Reconnect to restore protection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新后的受保护连接未能恢复。请重新连接以恢复保护。"
+          }
+        }
+      }
+    },
+    "The selected node was removed from the catalog. Tono is switching to an available node.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选节点已从目录移除。正在改用可用节点。"
+          }
+        }
+      }
+    },
+    "The protected connection failed. Diagnostic details have been recorded.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护连接失败。诊断信息已记录。"
           }
         }
       }

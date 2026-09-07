@@ -123,7 +123,7 @@ const ServersPage = () => {
           }),
         )
       } catch (error) {
-        setSelectError(error instanceof Error ? error.message : String(error))
+        setSelectError(formatTonoActionError(error, t))
       }
     },
   )
@@ -136,7 +136,7 @@ const ServersPage = () => {
       const latency = await tonoTestCurrentServer()
       setCurrentExitTest({ name: selected.name, latency })
     } catch (error) {
-      setSelectError(error instanceof Error ? error.message : String(error))
+      setSelectError(formatTonoActionError(error, t))
     } finally {
       setTesting(false)
     }
@@ -166,7 +166,7 @@ const ServersPage = () => {
       })
     } catch (error) {
       if (!cancelRequestedRef.current) {
-        setSelectError(error instanceof Error ? error.message : String(error))
+        setSelectError(formatTonoActionError(error, t))
       }
     } finally {
       setTestingAll(false)
@@ -188,7 +188,7 @@ const ServersPage = () => {
       await Promise.all([mutateServers(), mutateCatalog(), mutateTonoStatus()])
       setRefreshFeedback(t('tono.nodes.refreshSuccess'))
     } catch (error) {
-      setSelectError(error instanceof Error ? error.message : String(error))
+      setSelectError(formatTonoActionError(error, t))
       await mutateCatalog()
     } finally {
       setRefreshing(false)

@@ -254,6 +254,9 @@
       "download": "下载"
     }
   },
+  "errors": {
+    "unknownAction": "出了点问题。详情见下方，可复制给客服。"
+  },
   "node": {
     "activeServer": "当前节点",
     "selectedServer": "已选节点",

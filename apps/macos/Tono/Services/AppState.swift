@@ -1672,7 +1672,7 @@ final class AppState {
             if KillSwitchService.isArmed {
                 self.disconnect(releaseKillSwitch: false)
                 self.errorMessage = stalledMessage + " "
-                    + String(localized: "Kill Switch is blocking traffic while Tono retries. Tap Protected Offline to restore normal Internet.")
+                    + String(localized: "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.")
                 self.scheduleProtectedReconnect()
             } else {
                 self.errorMessage = stalledMessage
@@ -2110,16 +2110,16 @@ final class AppState {
                             self.protectedReconnectPausedForUserAction = true
                             self.protectedReconnectPauseLiftsOnNetworkChange = false
                             self.errorMessage = failureMessage + " "
-                                + String(localized: "Kill Switch is blocking traffic. Automatic retries are paused because this needs your action — tap Retry Now after resolving it, or Protected Offline to restore normal Internet.")
+                                + String(localized: "Kill Switch is blocking traffic. Automatic retries are paused because this needs your action — click Retry now after resolving it, or Restore internet to get back online.")
                         } else if !environmentalFailure,
                                   self.consecutiveProtectedFailureCount >= 3 {
                             self.protectedReconnectPausedForUserAction = true
                             self.protectedReconnectPauseLiftsOnNetworkChange = true
                             self.errorMessage = failureMessage + " "
-                                + String(localized: "The same failure repeated three times, so automatic retries are paused. Tap Retry Now to try again, or Protected Offline to restore normal Internet.")
+                                + String(localized: "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.")
                         } else {
                             self.errorMessage = failureMessage + " "
-                                + String(localized: "Kill Switch is blocking traffic while Tono retries. Tap Protected Offline to restore normal Internet.")
+                                + String(localized: "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.")
                             self.scheduleProtectedReconnect()
                         }
                     } else {

@@ -168,6 +168,11 @@
     transform: rotate(360deg);
   }
 }
+@keyframes tono-spin-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
 
 /* Pages */
 .tono-page {
@@ -750,13 +755,16 @@
     --tono-glass-blur: none;
     --tono-glass-blur-strong: none;
   }
-  .tono-root *,
+  .tono-root *:not(.tono-spin),
   .tono-root *::before,
   .tono-root *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+  .tono-root .tono-spin {
+    animation: tono-spin-pulse 1.2s ease-in-out infinite;
   }
   .tono-sidebar,
   .tono-glass-card,
