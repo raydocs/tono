@@ -8,7 +8,7 @@ import { TONO_COLORS } from '@/tono-ui/theme'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
 import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
 
-import { resolveTonoGuard } from './tono-guard'
+import { readTonoIntroSeen, resolveTonoGuard } from './tono-guard'
 
 const RESTORE_ESCAPE_MS = 8000
 
@@ -121,10 +121,18 @@ const RestoringSessionScreen = ({
 export const TonoAuthGuard = ({ children }: { children: ReactNode }) => {
   const location = useLocation()
   const { status, mutateTonoStatus } = useTonoStatus()
-  const action = resolveTonoGuard(status, location.pathname)
+  const action = resolveTonoGuard(
+    status,
+    location.pathname,
+    readTonoIntroSeen(),
+  )
 
   if (action === 'loading') {
     return <RestoringSessionScreen onRefreshStatus={mutateTonoStatus} />
+  }
+
+  if (action === 'toIntro') {
+    return <Navigate to="/intro" replace />
   }
 
   if (action === 'toLogin') {

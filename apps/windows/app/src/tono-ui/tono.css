@@ -599,6 +599,54 @@
   border: 1px solid var(--tono-surface-input-border);
 }
 
+/* Welcome v2 ground: solid cream/night plus two faint sheens. No live blur. */
+.tono-welcome-ground {
+  background-color: var(--tono-welcome-ground);
+  background-image: var(--tono-welcome-sheen-1), var(--tono-welcome-sheen-2);
+}
+
+.tono-welcome-hero {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  pointer-events: none;
+  animation: tono-welcome-hero-in 400ms ease-out both;
+}
+.tono-welcome-hero--small {
+  width: min(22%, 180px);
+  flex-shrink: 0;
+  margin-top: 24px;
+}
+.tono-welcome-hero__tile {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border-radius: 22%;
+  overflow: hidden;
+  box-shadow:
+    var(--tono-welcome-hero-shadow-1), var(--tono-welcome-hero-shadow-2);
+}
+.tono-welcome-hero img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tono-welcome-hero::after {
+  content: "";
+  position: absolute;
+  left: 8%;
+  bottom: -5%;
+  width: 84%;
+  height: 10%;
+  border-radius: 50%;
+  background: var(--tono-welcome-hero-contact);
+  filter: blur(6px);
+  pointer-events: none;
+  z-index: 0;
+}
+
 .tono-welcome {
   position: relative;
   display: grid;
@@ -611,15 +659,21 @@
   gap: 48px;
 }
 .tono-welcome__story {
+  position: relative;
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  overflow: hidden;
   padding: 32px;
   min-height: 480px;
   border-radius: 20px;
-  background: var(--tono-welcome-ground);
   color: var(--tono-welcome-ink);
+}
+.tono-welcome__hero {
+  position: relative;
+  z-index: 1;
+  max-height: 55%;
 }
 .tono-welcome__brand {
   display: flex;
@@ -652,8 +706,10 @@
   max-width: 30ch;
 }
 .tono-welcome__footnote {
+  position: relative;
+  z-index: 1;
   font-size: 12px;
-  margin: 0;
+  margin: auto 0 0;
 }
 .tono-welcome__route {
   display: flex;
@@ -676,12 +732,197 @@
   background: currentColor;
   opacity: 0.45;
 }
+.tono-welcome__trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--tono-text-secondary);
+}
+.tono-welcome__trust svg {
+  margin-top: 1px;
+  flex-shrink: 0;
+}
 .tono-welcome__form {
   width: 100%;
   display: flex;
   flex-direction: column;
   gap: 24px;
   min-width: 0;
+}
+.tono-progress-pill {
+  position: relative;
+  overflow: hidden;
+}
+.tono-progress-pill > span {
+  position: relative;
+  z-index: 1;
+}
+.tono-progress-pill--sending::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 42%;
+  pointer-events: none;
+  background: rgb(255 255 255 / 0.18);
+  animation: tono-progress-pill-sweep 1.2s ease-in-out infinite;
+}
+
+.tono-intro {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 38% 1fr auto;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  padding: 48px 56px 40px;
+  color: var(--tono-welcome-ink);
+}
+.tono-intro__skip {
+  position: absolute;
+  top: 24px;
+  right: 32px;
+  z-index: 2;
+  min-height: 0;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--tono-welcome-control);
+  text-decoration: none;
+}
+.tono-intro__skip:hover {
+  color: var(--tono-welcome-control-active);
+  text-decoration: underline;
+}
+.tono-intro__copy {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  z-index: 1;
+  /* Wide enough for a one-line Chinese headline (8 CJK glyphs at 40px);
+     the body clamps itself below. */
+  max-width: 460px;
+  transform: translateY(-50%);
+  animation: tono-intro-fade 0.2s ease both;
+}
+.tono-intro__copy h1 {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  line-height: 1.2;
+  color: var(--tono-welcome-ink);
+  text-wrap: balance;
+}
+.tono-intro__headline:focus,
+.tono-intro__headline:focus-visible {
+  /* Programmatic focus moves the screen-reader cursor onto the new step
+     (paired with aria-live). The heading is not a control, so a focus ring
+     would look interactive. The no-orphan outline:none rule is for buttons,
+     links and inputs. */
+  outline: none;
+}
+.tono-intro__copy p {
+  margin: 16px 0 0;
+  max-width: 24em;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--tono-welcome-muted);
+}
+.tono-intro__figure {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  z-index: 0;
+  width: min(34vw, 320px);
+  min-width: 0;
+  min-height: 0;
+  pointer-events: none;
+}
+.tono-intro__nav {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--tono-welcome-control);
+}
+.tono-intro__dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tono-intro__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.28;
+}
+.tono-intro__dot[aria-current="step"] {
+  opacity: 1;
+  background: var(--tono-welcome-control-active);
+}
+.tono-intro__next {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tono-welcome-control);
+}
+.tono-intro__next:hover,
+.tono-intro__next:focus-visible {
+  color: var(--tono-welcome-control-active);
+}
+.tono-intro__start {
+  align-self: end;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    #2b2fb8 0%,
+    #7b5cff 55%,
+    #ffb07a 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: #2b2fb8;
+  -webkit-text-fill-color: transparent;
+  font-family: inherit;
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 14px;
+}
+.tono-intro__start:focus-visible {
+  /* Keyboard focus after ArrowRight lands here; keep the ring but round it
+     and push it off the glyphs so it reads as a halo, not a box. */
+  outline: 2px solid var(--tono-accent-soft, #7b5cff);
+  outline-offset: 12px;
+}
+.tono-intro--final .tono-intro__copy {
+  align-self: end;
+  transform: none;
+  padding-top: 0;
+  padding-bottom: 8%;
+  max-width: none;
+}
+.tono-intro--final .tono-intro__copy h1 {
+  display: none;
 }
 .tono-sr-only {
   position: absolute;
@@ -717,9 +958,17 @@
   }
   .tono-welcome__story {
     min-height: 0;
-    padding: 0;
-    background: none;
+    padding: 24px;
     gap: 16px;
+  }
+  .tono-welcome__hero {
+    max-height: none;
+  }
+  .tono-welcome-hero--small {
+    order: -1;
+    width: min(22%, 180px);
+    margin-top: 0;
+    margin-bottom: 8px;
   }
   .tono-welcome__message h2 {
     font-size: 28px;
@@ -730,6 +979,40 @@
   .tono-welcome__footnote {
     display: none;
   }
+  .tono-intro {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr auto;
+    padding: 40px 24px 32px;
+  }
+  .tono-intro__figure {
+    position: static;
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    justify-self: center;
+    width: min(46%, 260px);
+    padding: 0;
+    opacity: 1;
+  }
+  .tono-intro__copy {
+    grid-column: 1;
+    grid-row: 2;
+    transform: none;
+    padding-top: 16px;
+  }
+  .tono-intro__nav {
+    grid-column: 1;
+    grid-row: 4;
+  }
+  .tono-intro--final .tono-intro__copy {
+    grid-row: 3;
+  }
+  .tono-intro__copy h1 {
+    font-size: 32px;
+  }
+  .tono-intro__start {
+    font-size: 40px;
+  }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .tono-root * {
@@ -738,6 +1021,9 @@
   }
   .tono-welcome__route {
     box-shadow: none;
+  }
+  .tono-welcome-ground {
+    background-image: none;
   }
 }
 @media (forced-colors: active) {
@@ -749,6 +1035,16 @@
   }
   .tono-welcome__story {
     border: 1px solid CanvasText;
+  }
+  .tono-welcome-ground {
+    background: Canvas;
+    background-image: none;
+    color: CanvasText;
+  }
+  .tono-intro__start {
+    background-image: none;
+    color: ButtonText;
+    -webkit-text-fill-color: ButtonText;
   }
 }
 
@@ -781,5 +1077,15 @@
   .tono-pill:hover,
   .tono-server-card:hover {
     transform: none !important;
+  }
+  .tono-welcome-hero {
+    animation: none !important;
+  }
+  .tono-progress-pill--sending::after {
+    content: none;
+    animation: none !important;
+  }
+  .tono-intro__copy {
+    animation: none !important;
   }
 }

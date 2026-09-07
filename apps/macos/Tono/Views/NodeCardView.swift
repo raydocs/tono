@@ -10,6 +10,14 @@ enum TonoBrand {
     static let accentSoft = Color(hex: "7B5CFF")
     static let accentWarm = Color(hex: "FFB07A")
 
+    /// Welcome v2 cream / night ground and type. Sheen geometry lives in
+    /// `WelcomeGround`; opacities are applied there too.
+    static let welcomeGround = Color(lightHex: "F3EDE2", darkHex: "12122A")
+    static let welcomeSheen1 = Color(lightHex: "FFFFFF", darkHex: "7B5CFF")
+    static let welcomeSheen2 = Color(lightHex: "D6C8B2", darkHex: "FFB07A")
+    static let welcomeInk = Color(lightHex: "1B1F4B", darkHex: "F3F1F7")
+    static let welcomeMuted = Color(lightHex: "5A5E7A", darkHex: "B9B7CC")
+
     static var routeGradient: LinearGradient {
         LinearGradient(
             colors: [accent, accentSoft, accentWarm],
@@ -43,6 +51,10 @@ enum TonoTraffic {
 enum TonoMotion {
     static func easeOut(_ duration: Double, reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .easeOut(duration: duration)
+    }
+
+    static func easeInOut(_ duration: Double, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: duration)
     }
 }
 
