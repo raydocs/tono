@@ -1,6 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use tokio::runtime::Runtime;
 
 use tono_draft::Draft;
 
@@ -19,8 +18,6 @@ fn make_draft() -> Draft<IVerge> {
 }
 
 pub fn bench_draft(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap_or_else(|e| panic!("Tokio runtime init failed: {e}"));
-
     let mut group = c.benchmark_group("draft");
     group.sample_size(100);
     group.warm_up_time(std::time::Duration::from_millis(300));
@@ -92,18 +89,6 @@ pub fn bench_draft(c: &mut Criterion) {
             }
             draft.discard();
             black_box(&draft);
-        });
-    });
-
-    group.bench_function("with_data_modify_async", |b| {
-        b.to_async(&rt).iter(|| async {
-            let draft = black_box(make_draft());
-            let _: Result<(), anyhow::Error> = draft
-                .with_data_modify::<_, _, _>(|mut box_data| async move {
-                    box_data.enable_auto_launch = Some(!box_data.enable_auto_launch.unwrap_or(false));
-                    Ok((box_data, ()))
-                })
-                .await;
         });
     });
 
