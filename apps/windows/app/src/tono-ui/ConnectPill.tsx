@@ -143,8 +143,6 @@ export const ConnectPill = ({
         cursor: spec.disabled ? 'default' : 'pointer',
         color: text.primary,
         background: 'var(--tono-surface-pill)',
-        backdropFilter: 'var(--tono-glass-blur)',
-        WebkitBackdropFilter: 'var(--tono-glass-blur)',
         boxShadow:
           uiState === 'connected'
             ? 'var(--tono-shadow-pill-connected)'

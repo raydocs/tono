@@ -59,11 +59,11 @@ struct MenuBarView: View {
                 .lineLimit(1)
             if appState.isClaudeHomeActive {
                 Circle()
-                    .fill(Color(hex: "2ECC71"))
+                    .fill(TonoStatus.connected)
                     .frame(width: 5, height: 5)
                 Text("Claude AI")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(hex: "2ECC71"))
+                    .foregroundStyle(TonoStatus.connected)
             }
         }
         .padding(.horizontal, 16)

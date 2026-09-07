@@ -469,8 +469,8 @@ const LoginPage = () => {
                 type="submit"
                 className={
                   sending
-                    ? 'tono-button tono-progress-pill tono-progress-pill--sending'
-                    : 'tono-button tono-progress-pill'
+                    ? 'tono-button tono-action tono-progress-pill tono-progress-pill--sending'
+                    : 'tono-button tono-action tono-progress-pill'
                 }
                 style={primaryButtonStyle}
                 disabled={
@@ -527,7 +527,7 @@ const LoginPage = () => {
               </label>
               <button
                 type="submit"
-                className="tono-button"
+                className="tono-button tono-action"
                 style={primaryButtonStyle}
                 disabled={
                   sending ||

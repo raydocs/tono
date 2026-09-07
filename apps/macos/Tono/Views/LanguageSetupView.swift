@@ -10,7 +10,7 @@ struct LanguageSetupView: View {
             VStack(spacing: 22) {
                 Image(systemName: "globe")
                     .font(.system(size: 42, weight: .medium))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(TonoBrand.accent)
 
                 VStack(spacing: 8) {
                     Text(verbatim: "Choose your language")

@@ -5,7 +5,7 @@ import { useTonoStatus } from '@/hooks/use-tono'
 import { nodeCityTitleKey, nodeDisplayName } from '@/pages/tono/node-meta'
 import { showNotice } from '@/services/notice-service'
 import { useThemeMode } from '@/services/states'
-import { TONO_COLORS, tonoText } from '@/tono-ui/theme'
+import { tonoText } from '@/tono-ui/theme'
 import { version } from '@root/package.json'
 
 const buildSupportMessage = ({
@@ -86,14 +86,12 @@ export const SupportContact = ({
       </p>
       <button
         type="button"
-        className="tono-button"
+        className="tono-button tono-action"
         onClick={() => void copy()}
         style={{
           minHeight: 32,
           padding: '6px 12px',
           fontSize: 12,
-          color: '#fff',
-          background: TONO_COLORS.accent,
         }}
       >
         {t('tono.support.contact.copyMessage')}

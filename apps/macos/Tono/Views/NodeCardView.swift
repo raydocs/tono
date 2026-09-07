@@ -1,12 +1,36 @@
 import SwiftUI
 
 /// Brand ramp shared by the route mark and the selected-state hairline.
-/// Matches the Windows tokens in `tono-ui/theme.ts` (accent → soft → warm,
-/// the blue-to-peach sweep of the TO monogram).
+/// Matches the Windows tokens in `tono-ui/theme.ts` (indigo → violet → peach,
+/// the sweep of the TO monogram).
+///
+/// The accent is sampled from the monogram's violet band. It needs one value
+/// per appearance: the violet that clears AA on a white card is too dark on
+/// the night ground, and vice versa.
 enum TonoBrand {
-    /// Solid action surface; the multicolor ramp belongs to the mark only.
-    static let actionFill = Color(hex: "3658C9")
-    static let accent = Color(hex: "4B6EFF")
+    /// Accent for icons, selection, focus rings and tinted text.
+    /// 4.8:1 on white, 7.0:1 on the dark card.
+    static let accent = Color(lightHex: "7457F5", darkHex: "AB9EFF")
+    /// Solid stand-in for the action gradient (its midpoint); use the
+    /// gradient on real buttons, this where a gradient cannot be drawn.
+    static let actionFill = Color(lightHex: "6A4CF0", darkHex: "7457F5")
+    /// The primary action surface: a short violet sweep, lighter at the
+    /// top-left where light would catch it. White type stays above 4.5:1 at
+    /// the midpoint and 5.4:1+ at the deep end.
+    static var actionGradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color(lightHex: "8266FF", darkHex: "8F76FF"),
+                Color(lightHex: "5B3FE0", darkHex: "6A4CF0"),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    /// Colored shadow under the action surface.
+    static let actionShadow = Color(hex: "5B3FE0")
+    /// The monogram's deep end; only used inside the ramp.
+    static let indigo = Color(hex: "2B2FB8")
     static let accentSoft = Color(hex: "7B5CFF")
     static let accentWarm = Color(hex: "FFB07A")
 
@@ -20,7 +44,7 @@ enum TonoBrand {
 
     static var routeGradient: LinearGradient {
         LinearGradient(
-            colors: [accent, accentSoft, accentWarm],
+            colors: [indigo, accentSoft, accentWarm],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
