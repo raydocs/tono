@@ -69,7 +69,7 @@
     "js-yaml": "^5.4.1",
     "lodash-es": "^4.18.1",
     "meta-json-schema": "^1.19.30",
-    "monaco-editor": "^0.55.1",
+    "monaco-editor": "^0.56.0",
     "monaco-yaml": "^5.5.1",
     "nanoid": "^6.0.1",
     "qrcode.react": "^4.2.0",
