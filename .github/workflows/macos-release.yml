@@ -350,12 +350,12 @@ jobs:
           name: ${{ needs.build.outputs.artifact_name }}
           path: ${{ runner.temp }}/release
 
-      - name: Locate the pinned Sparkle 2.9.4 sign_update tool
+      - name: Locate the pinned Sparkle 2.9.6 sign_update tool
         run: |
           set -eu
           resolved=apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.4"' "$resolved"; then
-            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.4"
+          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.6"' "$resolved"; then
+            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.6"
             echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
             exit 1
           fi
@@ -371,7 +371,7 @@ jobs:
           if [ -z "$sign_update" ]; then
             echo "::error title=Sparkle sign_update not found::the resolved Sparkle artifact bundle has no bin/sign_update"
             echo "FATAL: cannot sign the enclosure without Sparkle's own sign_update tool." >&2
-            echo "This workflow never implements EdDSA signing itself; install the Sparkle 2.9.4" >&2
+            echo "This workflow never implements EdDSA signing itself; install the Sparkle 2.9.6" >&2
             echo "distribution's bin/sign_update on the runner and re-run." >&2
             exit 1
           fi

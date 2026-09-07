@@ -240,7 +240,7 @@ step "signing the archive for the update feed"
 # signs. Picking the first `sign_update` any past build left under DerivedData
 # signs with whichever copy happens to be lying around, and the key that copy
 # reaches for decides whether a customer can install the update at all.
-sparkle_version=2.9.4
+sparkle_version=2.9.6
 sparkle_pin_pattern="\"version\"[[:space:]]*:[[:space:]]*\"${sparkle_version//./\\.}\""
 resolved="$repo_root/apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 # Read out of Sparkle's own pin entry. Matched against the whole file, any other
