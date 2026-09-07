@@ -873,7 +873,7 @@ const DashboardPage = () => {
               {actionError.encryptedDns && <OpenDnsSettingsButton accent />}
               <button
                 type="button"
-                className="tono-button"
+                className="tono-button tono-action"
                 onClick={retryFailedAction}
                 style={{
                   minHeight: 32,
@@ -883,8 +883,6 @@ const DashboardPage = () => {
                   borderRadius: 9,
                   border: 'none',
                   cursor: 'pointer',
-                  color: '#fff',
-                  background: TONO_COLORS.accent,
                 }}
               >
                 {t('tono.dashboard.errorRetry')}

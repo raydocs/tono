@@ -459,14 +459,12 @@ export const ConnectProgressCard = ({
             </span>
             <button
               type="button"
-              className="tono-button"
+              className="tono-button tono-action"
               onClick={handleRetryNow}
               disabled={retrying}
               style={{
                 padding: '7px 13px',
                 fontSize: 12,
-                color: '#fff',
-                background: TONO_COLORS.accent,
               }}
             >
               {retrying ? '…' : t('tono.progress.retryNow')}

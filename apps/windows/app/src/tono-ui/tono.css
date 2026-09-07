@@ -303,6 +303,31 @@
 .tono-button:not(:disabled):hover {
   filter: brightness(1.06);
 }
+/* Primary action: the brand's violet sweep. Press lands in 100 ms and lets
+   go in 220 ms; it brightens (light catching the surface) and pulls its
+   shadow in, never darkens. macOS twin: GateProminentButtonStyle. */
+.tono-action {
+  color: #fff;
+  background: var(--tono-action-fill);
+  box-shadow: 0 5px 12px -4px
+    color-mix(in srgb, var(--tono-action-shadow) 30%, transparent);
+  transition:
+    transform var(--tono-duration-state) var(--tono-ease),
+    box-shadow var(--tono-duration-state) var(--tono-ease),
+    filter var(--tono-duration-state) var(--tono-ease);
+}
+.tono-action:not(:disabled):hover {
+  filter: brightness(1.04);
+  box-shadow: 0 7px 16px -4px
+    color-mix(in srgb, var(--tono-action-shadow) 42%, transparent);
+}
+.tono-action:not(:disabled):active {
+  transform: scale(0.97);
+  filter: brightness(1.12);
+  box-shadow: 0 2px 6px -2px
+    color-mix(in srgb, var(--tono-action-shadow) 18%, transparent);
+  transition-duration: var(--tono-duration-press);
+}
 .tono-link {
   background: none;
   border: none;

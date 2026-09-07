@@ -9,6 +9,7 @@ import SwiftUI
 /// 100 ms and lets go in 220 ms; pressing brightens the surface (light
 /// catching it) and pulls the shadow in, it never darkens. Hover lifts it a
 /// little. Reduce Motion keeps the brightening and drops the scale.
+/// Windows twin: `.tono-action` in tono.css.
 ///
 /// Compact (`.small` / `.mini`) drops the full-width 44pt gate chrome and the
 /// shadow so banner and progress-card actions stay inline.
@@ -18,20 +19,52 @@ struct GateProminentButtonStyle: ButtonStyle {
     @Environment(\.controlSize) private var controlSize
 
     func makeBody(configuration: Configuration) -> some View {
-        GateProminentBody(
+        ActionSurface(
             configuration: configuration,
             compact: controlSize == .mini || controlSize == .small,
             isEnabled: isEnabled,
             reduceMotion: reduceMotion
-        )
+        ) {
+            EmptyView()
+        }
     }
 }
 
-private struct GateProminentBody: View {
+enum ProgressPillPhase: Equatable {
+    case idle, sending, sent
+}
+
+/// Sign-in primary: the same action surface as `GateProminentButtonStyle`,
+/// with an indeterminate left-to-right sweep while a code is in flight.
+/// Reduce Motion keeps the text and drops the sweep. Never runs unless
+/// `phase == .sending`.
+struct ProgressPillButtonStyle: ButtonStyle {
+    var phase: ProgressPillPhase = .idle
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        ActionSurface(
+            configuration: configuration,
+            compact: false,
+            isEnabled: isEnabled,
+            reduceMotion: reduceMotion
+        ) {
+            if phase == .sending && !reduceMotion {
+                ProgressPillSweep()
+            }
+        }
+    }
+}
+
+/// The shared surface: gradient fill, a sheen that answers hover and press,
+/// a colored shadow that pulls in on press, asymmetric press/release timing.
+private struct ActionSurface<Extra: View>: View {
     let configuration: ButtonStyle.Configuration
     let compact: Bool
     let isEnabled: Bool
     let reduceMotion: Bool
+    @ViewBuilder let extra: () -> Extra
     @State private var isHovered = false
 
     private var pressed: Bool { configuration.isPressed }
@@ -64,8 +97,10 @@ private struct GateProminentBody: View {
             .background {
                 ZStack {
                     shape.fill(TonoBrand.actionGradient)
+                    extra()
                     shape.fill(.white.opacity(sheen))
                 }
+                .clipShape(shape)
             }
             .shadow(
                 color: TonoBrand.actionShadow.opacity(shadowOpacity),
@@ -88,45 +123,6 @@ private struct GateProminentBody: View {
             }
             .contentShape(shape)
             .tint(.white)
-    }
-}
-
-enum ProgressPillPhase: Equatable {
-    case idle, sending, sent
-}
-
-/// Sign-in primary: the same action fill as `GateProminentButtonStyle`, with an
-/// indeterminate left-to-right sweep while a code is in flight. Reduce Motion
-/// keeps the text and drops the sweep. Never runs unless `phase == .sending`.
-struct ProgressPillButtonStyle: ButtonStyle {
-    var phase: ProgressPillPhase = .idle
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(TonoBrand.actionFill)
-                    .overlay {
-                        if phase == .sending && !reduceMotion {
-                            ProgressPillSweep()
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .opacity(isEnabled ? 1 : 0.4)
-            .brightness(configuration.isPressed ? -0.06 : 0)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
-            .animation(
-                TonoMotion.easeOut(0.12, reduceMotion: reduceMotion),
-                value: configuration.isPressed
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
