@@ -4568,14 +4568,6 @@ fn describe_reqwest_error(error: &reqwest::Error) -> String {
     controller_error_detail(&joined).unwrap_or_else(|| category.to_string())
 }
 
-fn format_tun_probe_failures(failures: &[String]) -> String {
-    format!(
-        "all {} independent real TUN data-plane probes failed: {}",
-        TUN_DATA_PLANE_PROBES.len(),
-        failures.join(" | ")
-    )
-}
-
 // ---- WeChat-DIRECT cloud policy (Build 28) ----
 
 /// Product priority: **Claude first**. Hard invariants any optional DIRECT path must preserve:
@@ -6459,7 +6451,7 @@ mod tests {
         WFP_ENGINE_WEDGED_PREFIX, WINDOWS_OPTIONAL_DIRECT_ENABLED, build_direct_plan, classify_core_sample,
         collect_ipv4_literals, connection_loop_continues, controller_direct_graph_is_active, controller_error_detail,
         core_change_fires,
-        dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
+        dns_listener_conflict_message, expected_controller_direct_rules, guard_rejection_is_transient,
         health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
         map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
@@ -6918,20 +6910,6 @@ mod tests {
             TUN_DATA_PLANE_PROBES.len(),
             "nominally separate probes must not share an origin"
         );
-    }
-
-    #[test]
-    fn real_data_plane_failure_names_every_failed_origin() {
-        let failures = vec![
-            "Google: timeout".to_string(),
-            "Cloudflare: connect reset".to_string(),
-            "Apple: status 503".to_string(),
-        ];
-        let error = format_tun_probe_failures(&failures);
-        assert!(error.contains("all 3 independent"));
-        for failure in failures {
-            assert!(error.contains(&failure));
-        }
     }
 
     /// Fail-closed: retrying the checks changes nothing about the decision table. An exhausted
