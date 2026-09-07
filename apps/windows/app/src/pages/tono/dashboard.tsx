@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router'
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useTrafficData } from '@/hooks/use-traffic-data'
 import { showNotice } from '@/services/notice-service'
+import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
   connectErrorSuggestsServerSwitch,
@@ -13,6 +14,7 @@ import {
   formatTonoActionError,
   isEncryptedDnsFailure,
   formatTonoDiagnostics,
+  tonoCatalogStatus,
   tonoConnect,
   tonoDiagnosticsReport,
   tonoDisconnect,
@@ -27,7 +29,6 @@ import {
   TONO_COLORS,
   TONO_MONO_STACK,
   TONO_PAGE_LAYOUT,
-  TONO_SPRING,
   tonoText,
 } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
@@ -56,6 +57,7 @@ const hex = (color: string, alpha: number) =>
     .toUpperCase()}`
 
 const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
+const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
 
 const ConnectChecklist = ({ dark }: { dark: boolean }) => {
   const { t } = useTranslation()
@@ -95,7 +97,11 @@ const ConnectChecklist = ({ dark }: { dark: boolean }) => {
         <button
           type="button"
           className="tono-link"
-          style={{ fontSize: 12, color: TONO_COLORS.accent, flexShrink: 0 }}
+          style={{
+            fontSize: 12,
+            color: 'var(--tono-text-link)',
+            flexShrink: 0,
+          }}
           onClick={() => {
             try {
               window.localStorage.setItem(CHECKLIST_STORAGE_KEY, '1')
@@ -182,7 +188,6 @@ const ActiveNodeCard = ({
         width: 520,
         maxWidth: '100%',
         overflow: 'hidden',
-        animation: `tono-card-in 0.5s ${TONO_SPRING}`,
       }}
     >
       <div
@@ -214,7 +219,7 @@ const ActiveNodeCard = ({
             padding: '5px 9px',
             fontSize: 12,
             fontWeight: 600,
-            color: dark ? '#A9B7FF' : '#3453D5',
+            color: 'var(--tono-text-link)',
             background: hex(TONO_COLORS.accent, dark ? 0.12 : 0.08),
           }}
         >
@@ -382,7 +387,7 @@ const ActiveNodeCard = ({
               style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: dark ? '#A9B7FF' : '#3453D5',
+                color: 'var(--tono-text-link)',
                 background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
@@ -461,6 +466,13 @@ const DashboardPage = () => {
   const text = tonoText(dark)
   const navigate = useNavigate()
   const { status, mutateTonoStatus } = useTonoStatus()
+  // The overview's "server pool" card reads the same catalog status the
+  // Nodes page shows; it used to repeat the selected city instead.
+  const { data: catalog } = useQuery({
+    queryKey: catalogStatusQueryKey,
+    queryFn: tonoCatalogStatus,
+    refetchInterval: 30_000,
+  })
   const [actionError, setActionError] = useState<DashboardActionError | null>(
     null,
   )
@@ -776,7 +788,7 @@ const DashboardPage = () => {
           padding: '24px 0',
         }}
       >
-        <div style={{ transition: `all 0.5s ${TONO_SPRING}` }}>
+        <div>
           <ConnectPill
             uiState={uiState}
             stage={status?.stage}
@@ -889,7 +901,7 @@ const DashboardPage = () => {
                   borderRadius: 9,
                   border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
                   cursor: 'pointer',
-                  color: dark ? '#A9B7FF' : '#3453D5',
+                  color: 'var(--tono-text-link)',
                   background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
                 }}
               >
@@ -908,7 +920,7 @@ const DashboardPage = () => {
                   borderRadius: 9,
                   border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
                   cursor: 'pointer',
-                  color: dark ? '#A9B7FF' : '#3453D5',
+                  color: 'var(--tono-text-link)',
                   background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
                 }}
               >
@@ -930,7 +942,7 @@ const DashboardPage = () => {
                       borderRadius: 9,
                       border: `1px solid ${hex(TONO_COLORS.accent, 0.35)}`,
                       cursor: 'pointer',
-                      color: dark ? '#A9B7FF' : '#3453D5',
+                      color: 'var(--tono-text-link)',
                       background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.08),
                     }}
                   >
@@ -971,7 +983,7 @@ const DashboardPage = () => {
               borderRadius: 11,
               border: 'none',
               cursor: 'pointer',
-              color: dark ? '#A9B7FF' : '#3453D5',
+              color: 'var(--tono-text-link)',
               background: hex(TONO_COLORS.accent, dark ? 0.14 : 0.1),
             }}
           >
@@ -1003,7 +1015,13 @@ const DashboardPage = () => {
             <GlassCard radius="var(--tono-radius-card-sm)" padding={14}>
               <InfoItem
                 label={t('tono.dashboard.overview.serverPool')}
-                value={selectedCity}
+                value={
+                  catalog && catalog.nodeCount > 0
+                    ? t('tono.nodes.catalogNodes', {
+                        count: catalog.nodeCount,
+                      })
+                    : t('shared.statuses.loading')
+                }
               />
               <span
                 style={{

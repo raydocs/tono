@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 
 import { useThemeMode } from '@/services/states'
 
-import { TONO_COLORS, tonoText } from './theme'
+import { tonoAccent, tonoText } from './theme'
 import { TonoToastContext } from './tono-toast-context'
 import { TonoIcon } from './TonoIcon'
 
@@ -90,7 +90,7 @@ export const TonoToastProvider = ({ children }: { children: ReactNode }) => {
           <span
             aria-hidden
             style={{
-              color: TONO_COLORS.accent,
+              color: tonoAccent(dark),
               flexShrink: 0,
               display: 'flex',
             }}
