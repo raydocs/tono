@@ -54,7 +54,7 @@ tono-limiter = { path = "crates/tono-limiter" }
 tauri-plugin-tono-sysinfo = { path = "crates/tauri-plugin-tono-sysinfo" }
 
 tauri = { version = "2.11.5" }
-tauri-plugin-clipboard-manager = "2.3.2"
+tauri-plugin-clipboard-manager = "2.3.3"
 parking_lot = { version = "0.12.5", features = ["hardware-lock-elision"] }
 anyhow = "1.0.104"
 criterion = { version = "0.8.2", features = ["async_tokio"] }
@@ -64,8 +64,8 @@ tokio = { version = "1.53.1", features = [
   "time",
   "sync",
 ] }
-flexi_logger = "0.31.9"
-log = "0.4.33"
+flexi_logger = "0.31.10"
+log = "0.4.34"
 
 smartstring = { version = "1.0.1" }
 compact_str = { version = "0.10.0", features = ["serde"] }

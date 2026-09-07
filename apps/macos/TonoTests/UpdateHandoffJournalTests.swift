@@ -36,7 +36,7 @@ final class UpdateHandoffJournalTests: XCTestCase {
             phase: phase,
             previousAppVersion: "0.0.67",
             nextAppVersion: "0.0.68",
-            coreVersion: "v1.19.29-tono-gvisor-adaptive.1",
+            coreVersion: "v1.19.30-tono-gvisor-adaptive.1",
             coreSHA256: String(repeating: "a", count: 64),
             buildCommit: "abc123",
             helperProtocolVersion: "12",

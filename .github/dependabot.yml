@@ -1,0 +1,112 @@
+version: 2
+# Keeps every package-manager-tracked dependency current. Toolchain pins that
+# no package manager owns (mihomo, Go, Rust channel, Tailscale, Sparkle, Xray)
+# are watched by .github/workflows/toolchain-drift.yml instead.
+updates:
+  - package-ecosystem: npm
+    directory: /services/control-plane
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      control-plane:
+        patterns: ["*"]
+    labels: [dependencies, control-plane]
+
+  - package-ecosystem: npm
+    directory: /apps/windows/app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      windows-frontend:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: npm
+    directory: /apps/windows/crates/tono-plugin-core
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      plugin-core-js:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: cargo
+    directory: /apps/windows
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      windows-workspace:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: cargo
+    directory: /apps/windows/app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      windows-app:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: cargo
+    directory: /apps/windows/service
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      windows-service:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: cargo
+    directory: /apps/windows/crates/tono-plugin-core
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      plugin-core-rust:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: cargo
+    directory: /apps/macos/Tono/Tools
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      clash-fetcher:
+        patterns: ["*"]
+    labels: [dependencies, macos]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies, ci]
