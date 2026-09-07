@@ -36,7 +36,7 @@ jobs:
     # code error and is really a missing SDK.
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Build the macOS app without signing
         run: |
@@ -59,7 +59,7 @@ jobs:
   policy-tests:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Subscription URL policy
         run: tooling/scripts/test-subscription-url-policy.sh
@@ -94,7 +94,7 @@ jobs:
   privileged-tests:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Build the privileged helper
         run: tooling/scripts/build-core-helper.sh
