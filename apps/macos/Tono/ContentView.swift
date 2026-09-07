@@ -62,6 +62,14 @@ struct ContentView: View {
 private struct ProtectedOfflineBanner: View {
     @Environment(AppState.self) private var appState
 
+    /// Dashboard's ConnectionProgressCard already lists Retry / Choose route
+    /// whenever this banner is up (`isProtectionBlocked` is one of its
+    /// predicates). Other pages keep the full action set. Restore internet
+    /// stays on every page — fail-closed escape hatch.
+    private var progressCardOwnsRetryAndRoute: Bool {
+        appState.selectedPage == .dashboard
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Circle()
@@ -76,23 +84,26 @@ private struct ProtectedOfflineBanner: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Button("Retry now") {
-                appState.retryProtectedConnectionNow()
+            if !progressCardOwnsRetryAndRoute {
+                Button("Retry now") {
+                    appState.retryProtectedConnectionNow()
+                }
+                .buttonStyle(GateProminentButtonStyle())
+                .controlSize(.small)
+                .disabled(!appState.isTonoReady || appState.isDisconnecting)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(TonoStatus.blocked)
-            .controlSize(.small)
-            .disabled(!appState.isTonoReady || appState.isDisconnecting)
             Button("Restore internet") {
                 appState.disconnect(releaseKillSwitch: true)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            Button("Choose another route") {
-                appState.selectedPage = .proxies
+            if !progressCardOwnsRetryAndRoute {
+                Button("Choose another route") {
+                    appState.selectedPage = .proxies
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

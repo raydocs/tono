@@ -1,7 +1,7 @@
 import { useLockFn } from 'ahooks'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 
 import { useTonoStatus } from '@/hooks/use-tono'
 import { useThemeMode } from '@/services/states'
@@ -20,6 +20,7 @@ export const ProtectedOfflineBanner = () => {
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const navigate = useNavigate()
+  const location = useLocation()
   const { status, mutateTonoStatus } = useTonoStatus()
   const { requestRelease, dialog: releaseDialog } =
     useReleaseProtection(mutateTonoStatus)
@@ -38,7 +39,10 @@ export const ProtectedOfflineBanner = () => {
     }
   })
 
-  if (status?.uiState !== 'protectedOffline') return releaseDialog
+  // Dashboard already presents this state on ConnectProgressCard + ConnectPill.
+  if (status?.uiState !== 'protectedOffline' || location.pathname === '/') {
+    return releaseDialog
+  }
 
   const button = {
     minHeight: 30,
@@ -98,7 +102,7 @@ export const ProtectedOfflineBanner = () => {
                 marginTop: 4,
                 fontSize: 12,
                 fontWeight: 500,
-                color: TONO_COLORS.error,
+                color: 'var(--tono-text-error)',
               }}
             >
               {actionError}

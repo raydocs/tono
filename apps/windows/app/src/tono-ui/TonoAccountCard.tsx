@@ -147,7 +147,11 @@ export const TonoAccountCard = () => {
         <button
           type="button"
           className="tono-link"
-          style={{ fontSize: 12, color: TONO_COLORS.error, flexShrink: 0 }}
+          style={{
+            fontSize: 12,
+            color: 'var(--tono-text-error)',
+            flexShrink: 0,
+          }}
           onClick={() => {
             setRevokeError(null)
             setRevokeTarget(device)
@@ -378,7 +382,7 @@ export const TonoConfirmDialog = ({
             role="alert"
             style={{
               fontSize: 12,
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
               borderRadius: 8,
               padding: '8px 10px',
               background: `${TONO_COLORS.error}1F`,

@@ -44,7 +44,7 @@ describe('ConnectPill five states', () => {
     expect(onDisconnect).not.toHaveBeenCalled()
   })
 
-  it('connecting: title, translated stage key as subtitle, disabled', () => {
+  it('connecting: title, translated stage key as subtitle, aria-disabled and focusable', () => {
     const { onConnect, onDisconnect } = renderPill(
       'connecting',
       'lockingTraffic',
@@ -52,9 +52,18 @@ describe('ConnectPill five states', () => {
 
     expect(screen.getByText('tono.pill.title.connecting')).toBeDefined()
     expect(screen.getByText('tono.progress.steps.lockingTraffic')).toBeDefined()
-    expect((pillButton() as HTMLButtonElement).disabled).toBe(true)
+    const button = pillButton() as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    expect(
+      screen
+        .getByText('tono.progress.steps.lockingTraffic')
+        .getAttribute('aria-live'),
+    ).toBe('polite')
+    button.focus()
+    expect(document.activeElement).toBe(button)
 
-    fireEvent.click(pillButton())
+    fireEvent.click(button)
     expect(onConnect).not.toHaveBeenCalled()
     expect(onDisconnect).not.toHaveBeenCalled()
   })
@@ -89,14 +98,18 @@ describe('ConnectPill five states', () => {
     expect(onConnect).not.toHaveBeenCalled()
   })
 
-  it('disconnecting: title, restoring-access subtitle, disabled', () => {
+  it('disconnecting: title, restoring-access subtitle, aria-disabled and focusable', () => {
     const { onConnect, onDisconnect } = renderPill('disconnecting')
 
     expect(screen.getByText('tono.pill.title.disconnecting')).toBeDefined()
     expect(screen.getByText('tono.pill.subtitle.restoringAccess')).toBeDefined()
-    expect((pillButton() as HTMLButtonElement).disabled).toBe(true)
+    const button = pillButton() as HTMLButtonElement
+    expect(button.disabled).toBe(false)
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    button.focus()
+    expect(document.activeElement).toBe(button)
 
-    fireEvent.click(pillButton())
+    fireEvent.click(button)
     expect(onConnect).not.toHaveBeenCalled()
     expect(onDisconnect).not.toHaveBeenCalled()
   })

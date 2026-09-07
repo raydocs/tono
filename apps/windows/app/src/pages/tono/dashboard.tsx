@@ -745,7 +745,7 @@ const DashboardPage = () => {
             style={{
               fontSize: 13,
               fontWeight: 500,
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
               borderRadius: 10,
               padding: '8px 12px',
               background: hex(TONO_COLORS.error, 0.12),
@@ -830,7 +830,7 @@ const DashboardPage = () => {
                 fontSize: 11,
                 fontWeight: 600,
                 letterSpacing: 0.2,
-                color: dark ? '#FF8A84' : TONO_COLORS.error,
+                color: 'var(--tono-text-error)',
               }}
             >
               {t('tono.dashboard.whatFailed')}
@@ -841,7 +841,7 @@ const DashboardPage = () => {
                 fontSize: 13,
                 fontWeight: 500,
                 lineHeight: 1.45,
-                color: dark ? '#FF8A84' : TONO_COLORS.error,
+                color: 'var(--tono-text-error)',
                 textAlign: 'center',
                 maxWidth: '100%',
                 overflowWrap: 'anywhere',

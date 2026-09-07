@@ -87,6 +87,9 @@
   },
   "login": {
     "restoringSession": "正在打开你的 Tono 工作区…",
+    "stillWaiting": "还在等待？",
+    "restoreInternet": "恢复网络",
+    "restartTono": "重启 Tono",
     "brandLabel": "连接，从容一点",
     "brandTitle": "距离近一点。\n世界，开阔一点。",
     "brandDescription": "连接、线路与每一次出发，都在这一处安静的空间里。",

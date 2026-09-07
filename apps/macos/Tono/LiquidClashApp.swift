@@ -1014,11 +1014,11 @@ struct LiquidClashApp: App {
                 .environment(\.locale, appLocale)
         } label: {
             // Status items must be template images so AppKit can tint them
-            // for light/dark menu bars and the open-highlight state. The old
-            // asset was an opaque white tile with "original" rendering intent
-            // — washed out on light bars, never inverting when open. An SF
-            // Symbol is inherently a template and adapts automatically.
-            Image(systemName: "shield.lefthalf.filled")
+            // for light/dark menu bars and the open-highlight state. Color
+            // via palette/foregroundStyle is flattened; the symbol shape
+            // carries protection state. An SF Symbol is inherently a template.
+            MenuBarStatusItemLabel(appState: appState)
+                .environment(\.locale, appLocale)
         }
         .menuBarExtraStyle(.window)
     }

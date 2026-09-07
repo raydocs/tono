@@ -126,7 +126,7 @@ export const ConnectPill = ({
     <button
       type="button"
       className="tono-pill"
-      disabled={spec.disabled}
+      aria-disabled={spec.disabled || undefined}
       onClick={handleClick}
       aria-label={`${t(spec.titleKey)} — ${subtitle}`}
       style={{
@@ -246,6 +246,11 @@ export const ConnectPill = ({
             />
           )}
           <span
+            aria-live={
+              uiState === 'connecting' || uiState === 'disconnecting'
+                ? 'polite'
+                : undefined
+            }
             style={{
               overflow: 'hidden',
               textOverflow: 'ellipsis',

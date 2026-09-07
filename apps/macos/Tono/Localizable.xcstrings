@@ -32,12 +32,52 @@
         }
       }
     },
+    "AI and messaging routing research": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 与即时通讯路由研究"
+          }
+        }
+      }
+    },
+    "Auto": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跟随系统"
+          }
+        }
+      }
+    },
     "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "找到 Tono 发来的最新邮件，回到这里粘贴六位验证码，我们会自动验证。"
+          }
+        }
+      }
+    },
+    "Help fix problems": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帮助排查问题"
+          }
+        }
+      }
+    },
+    "Off by default. These only help Tono improve routing.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。打开后只用来帮 Tono 改进路由。"
           }
         }
       }
@@ -62,6 +102,16 @@
         }
       }
     },
+    "Research programs": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "研究项目"
+          }
+        }
+      }
+    },
     "Sign in to Tono": {
       "localizations": {
         "zh-Hans": {
@@ -78,6 +128,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "从你的邮箱开始。收取一封验证码邮件，无需记住密码。"
+          }
+        }
+      }
+    },
+    "Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会上传你连过的主机名、发起连接的进程，以及匹配的规则和线路"
           }
         }
       }

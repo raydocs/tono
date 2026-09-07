@@ -230,7 +230,7 @@ const LoginPage = () => {
       </button>
       {restoreInternetError && (
         <>
-          <span style={{ fontSize: 12, color: TONO_COLORS.error }}>
+          <span style={{ fontSize: 12, color: 'var(--tono-text-error)' }}>
             {restoreInternetError}
           </span>
           <SupportContact extra={restoreInternetError} />
@@ -328,7 +328,7 @@ const LoginPage = () => {
               borderRadius: 10,
               padding: '10px 12px',
               fontSize: 12,
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
               background: `${TONO_COLORS.error}1F`,
             }}
           >

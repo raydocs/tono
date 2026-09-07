@@ -312,17 +312,18 @@ export const TrayPanel = () => {
       )}
 
       {actionError && (
-        <div className="tono-tray-error" role="alert">
+        <div className="tono-tray-error" role="alert" title={actionError}>
           {actionError}
         </div>
       )}
 
       <button
         type="button"
-        disabled={busy}
+        aria-disabled={busy || undefined}
         onClick={() => void runAction()}
         className="tono-tray-action"
         style={{
+          flexShrink: 0,
           cursor: busy ? 'default' : 'pointer',
           opacity: busy ? 0.5 : 1,
           background:

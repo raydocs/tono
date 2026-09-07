@@ -285,7 +285,10 @@ const SupportPage = () => {
             {t('tono.support.summary.title')}
           </h2>
           {reportError && (
-            <p role="alert" style={{ fontSize: 12, color: TONO_COLORS.error }}>
+            <p
+              role="alert"
+              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+            >
               {t('tono.support.loadFailed')}
             </p>
           )}
@@ -372,7 +375,10 @@ const SupportPage = () => {
             {t('tono.support.audit.description')}
           </p>
           {auditPathError && (
-            <p role="alert" style={{ fontSize: 12, color: TONO_COLORS.error }}>
+            <p
+              role="alert"
+              style={{ fontSize: 12, color: 'var(--tono-text-error)' }}
+            >
               {t('tono.support.audit.loadFailed')}
             </p>
           )}
@@ -435,9 +441,9 @@ const SupportPage = () => {
                 color: terminalEnvLoading
                   ? TONO_COLORS.gray
                   : terminalEnvError || terminalEnv == null
-                    ? TONO_COLORS.error
+                    ? 'var(--tono-text-error)'
                     : terminalEnv.hasConflict
-                      ? TONO_COLORS.error
+                      ? 'var(--tono-text-error)'
                       : TONO_COLORS.latencyGood,
               }}
             >
@@ -492,7 +498,12 @@ const SupportPage = () => {
                       fontFamily: TONO_MONO_STACK,
                     }}
                   >
-                    <span style={{ fontWeight: 600, color: TONO_COLORS.error }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        color: 'var(--tono-text-error)',
+                      }}
+                    >
                       {entry.key}={entry.value}
                     </span>
                     <span style={{ color: text.tertiary }}>{entry.source}</span>
@@ -527,7 +538,7 @@ const SupportPage = () => {
                 style={{
                   ...buttonStyle,
                   background: hex(TONO_COLORS.error, dark ? 0.16 : 0.1),
-                  color: dark ? '#FF8A84' : TONO_COLORS.error,
+                  color: 'var(--tono-text-error)',
                   borderColor: hex(TONO_COLORS.error, 0.3),
                 }}
               >
