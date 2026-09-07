@@ -1149,17 +1149,20 @@ export interface TranslationResources {
           title: string
         }
         resendIn: string
+        restartTono: string
         restoreFailed: {
           description: string
           retry: string
           title: string
         }
+        restoreInternet: string
         restoringSession: string
         sendCode: string
         sending: string
         sendNewCode: string
         stepCode: string
         stepEmail: string
+        stillWaiting: string
         subtitle: string
         suspended: {
           description: string

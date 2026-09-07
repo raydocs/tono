@@ -47,6 +47,7 @@ const {
   tonoSignInVerifyMock,
   tonoRetryRestoreMock,
   tonoDisconnectMock,
+  restartAppMock,
 } = vi.hoisted(() => ({
   tonoStatusMock: vi.fn(),
   subscribeTonoStatusMock: vi.fn((_handler: unknown) => () => {}),
@@ -54,6 +55,7 @@ const {
   tonoSignInVerifyMock: vi.fn(),
   tonoRetryRestoreMock: vi.fn(),
   tonoDisconnectMock: vi.fn(),
+  restartAppMock: vi.fn(),
 }))
 
 vi.mock('@/services/tono', () => ({
@@ -79,6 +81,10 @@ vi.mock('@tauri-apps/api/window', () => ({
     onFocusChanged: async () => () => {},
     listen: async () => () => {},
   }),
+}))
+
+vi.mock('@/services/cmds', () => ({
+  restartApp: restartAppMock,
 }))
 
 import { TonoAuthGuard } from './tono-auth-guard'
@@ -116,10 +122,12 @@ beforeEach(() => {
   tonoSignInVerifyMock.mockReset()
   tonoRetryRestoreMock.mockReset()
   tonoDisconnectMock.mockReset().mockResolvedValue(undefined)
+  restartAppMock.mockReset()
 })
 
 afterEach(async () => {
   cleanup()
+  vi.useRealTimers()
   await removeCacheData(tonoStatusQueryKey)
 })
 
@@ -211,6 +219,45 @@ describe('TonoAuthGuard', () => {
       ),
     )
     expect(screen.queryByText('dashboard page')).toBeNull()
+  })
+
+  it('reveals restore and restart after 8 seconds if restore hangs', () => {
+    vi.useFakeTimers()
+    tonoStatusMock.mockReturnValue(new Promise(() => {}))
+
+    renderAt('/')
+
+    expect(screen.getByText('tono.login.restoringSession')).toBeDefined()
+    expect(screen.queryByText('tono.login.stillWaiting')).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'tono.login.restoreInternet' }),
+    ).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(7999)
+    })
+    expect(screen.queryByText('tono.login.stillWaiting')).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(screen.getByText('tono.login.stillWaiting')).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'tono.login.restoreInternet' }),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'tono.login.restartTono' }),
+    ).toBeDefined()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'tono.login.restartTono' }),
+    )
+    expect(restartAppMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'tono.login.restoreInternet' }),
+    )
+    expect(screen.getByRole('dialog')).toBeDefined()
   })
 })
 

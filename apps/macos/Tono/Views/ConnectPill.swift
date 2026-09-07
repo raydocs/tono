@@ -1,8 +1,25 @@
 import SwiftUI
 
-/// Press feedback for the connection pill: a quick 0.98 squeeze. The pill is
-/// disabled during connecting/disconnecting, so the press state only ever
-/// appears when a tap is actionable. Reduce Motion skips the scale entirely.
+/// ⌘. cancels an in-flight connect; ⌘K toggles connect/disconnect.
+/// Neither collides with sidebar ⌘1–⌘4 or Nodes ⌘F.
+private struct ConnectPillKeyboardShortcut: ViewModifier {
+    let isConnecting: Bool
+    let isDisconnecting: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isConnecting {
+            content.keyboardShortcut(".", modifiers: .command)
+        } else if !isDisconnecting {
+            content.keyboardShortcut("k", modifiers: .command)
+        } else {
+            content
+        }
+    }
+}
+
+/// Press feedback for the connection pill: a quick 0.98 squeeze. Reduce
+/// Motion skips the scale entirely.
 private struct ConnectPillPressStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -127,10 +144,13 @@ struct ConnectPill: View {
                 : Color.black.opacity(colorScheme == .dark ? 0.4 : 0.10),
             radius: isConnected ? 22 : 15, y: 6
         )
-        // The progress card owns the explicit cancel/restore action. Keeping
-        // the unlabeled pill inert during a transition prevents an accidental
-        // click from releasing fail-closed protection during an auto-retry.
-        .disabled(isConnecting || isDisconnecting)
+        // Connecting stays clickable so cancel is on the same control.
+        // Disconnecting stays inert: that path is already unwinding.
+        .disabled(isDisconnecting)
+        .modifier(ConnectPillKeyboardShortcut(
+            isConnecting: isConnecting,
+            isDisconnecting: isDisconnecting
+        ))
         .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isConnected)
         .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isConnecting)
         .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isDisconnecting)
@@ -139,7 +159,7 @@ struct ConnectPill: View {
     // MARK: - Copy
 
     private var statusText: LocalizedStringKey {
-        if isConnecting { return "Connecting…" }
+        if isConnecting { return "Cancel" }
         if isDisconnecting { return "Disconnecting…" }
         if isRecovering { return "Recovering protected connection…" }
         if isProtectionBlocked { return "Protected Offline" }

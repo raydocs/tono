@@ -420,7 +420,7 @@ export const ConnectProgressCard = ({
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
               userSelect: 'text',
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
               background: hex(TONO_COLORS.error, 0.1),
             }}
           >
@@ -492,7 +492,11 @@ export const ConnectProgressCard = ({
       {retryError && (
         <div
           role="alert"
-          style={{ marginTop: 6, fontSize: 11, color: TONO_COLORS.error }}
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            color: 'var(--tono-text-error)',
+          }}
         >
           {retryError}
         </div>

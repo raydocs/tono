@@ -63,6 +63,7 @@ const TonoLayout = () => {
 
   const isLoginRoute = location.pathname === '/login'
   const isTrayRoute = location.pathname === '/tray'
+  const isDashboardRoute = location.pathname === '/'
 
   useLoadingOverlay(themeReady)
 
@@ -162,7 +163,9 @@ const TonoLayout = () => {
                 }}
               >
                 {!isTrayRoute && <ServicePrereqBanner />}
-                {!isLoginRoute && !isTrayRoute && <ProtectedOfflineBanner />}
+                {!isLoginRoute && !isTrayRoute && !isDashboardRoute && (
+                  <ProtectedOfflineBanner />
+                )}
                 <div
                   style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}
                 >

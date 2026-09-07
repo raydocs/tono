@@ -406,7 +406,7 @@ const ServersPage = () => {
             style={{
               marginTop: 7,
               color: catalog?.error
-                ? TONO_COLORS.error
+                ? 'var(--tono-text-error)'
                 : TONO_COLORS.latencyGood,
             }}
           >
@@ -501,7 +501,11 @@ const ServersPage = () => {
       {selectError && (
         <p
           role="alert"
-          style={{ margin: '0 0 8px', fontSize: 12, color: TONO_COLORS.error }}
+          style={{
+            margin: '0 0 8px',
+            fontSize: 12,
+            color: 'var(--tono-text-error)',
+          }}
         >
           {selectError}
         </p>
@@ -510,7 +514,11 @@ const ServersPage = () => {
       {serversError && (
         <div
           role="alert"
-          style={{ marginBottom: 8, fontSize: 13, color: TONO_COLORS.error }}
+          style={{
+            marginBottom: 8,
+            fontSize: 13,
+            color: 'var(--tono-text-error)',
+          }}
         >
           <p>{formatTonoActionError(serversError, t)}</p>
           <button

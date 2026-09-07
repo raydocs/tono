@@ -7,6 +7,12 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var dashboardNS
     @State private var trafficHistory = TrafficHistory()
+    /// When the pill last flipped into connecting. A click that lands within
+    /// `cancelGraceInterval` of that moment is ignored: the pill is now the
+    /// Cancel control while connecting, so without this a double-click on
+    /// Connect would cancel the attempt and release fail-closed protection.
+    @State private var connectingSince: Date?
+    private static let cancelGraceInterval: TimeInterval = 1.2
 
     var body: some View {
         @Bindable var appState = appState
@@ -23,9 +29,16 @@ struct DashboardView: View {
                         get: { appState.isConnected },
                         set: { newValue in
                             if appState.isConnecting {
-                                // ConnectPill is disabled during transitions;
-                                // cancellation lives on the explicitly labeled
-                                // action below so a retry click cannot disarm PF.
+                                // Same path as ConnectionProgressCard's
+                                // "Cancel and restore internet" — no extra
+                                // confirmation; the card does not confirm.
+                                // Ignore the first moments so a double-click
+                                // on Connect cannot turn into a cancel.
+                                guard let since = connectingSince,
+                                      Date().timeIntervalSince(since) >= Self.cancelGraceInterval else {
+                                    return
+                                }
+                                appState.disconnect(releaseKillSwitch: true)
                             } else if appState.isProtectionBlocked {
                                 appState.disconnect(releaseKillSwitch: true)
                             } else if newValue {
@@ -85,6 +98,9 @@ struct DashboardView: View {
         }
         .contentShape(Rectangle())
         .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.15), value: appState.isConnected)
+        .onChange(of: appState.isConnecting) { _, connecting in
+            connectingSince = connecting ? Date() : nil
+        }
         .onChange(of: appState.isConnected) { _, connected in
             if !connected {
                 appState.networkInfo = NetworkInfo()
@@ -581,7 +597,7 @@ private struct ConnectionProgressCard: View {
                     : "Retry now") {
                     appState.retryProtectedConnectionNow()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(GateProminentButtonStyle())
                 .controlSize(.small)
                 .disabled(!appState.isTonoReady || appState.isDisconnecting)
 

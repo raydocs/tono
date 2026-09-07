@@ -704,32 +704,6 @@ private struct AccountBlockedView: View {
     }
 }
 
-/// Solid accent fill + white type. System `.borderedProminent` draws white
-/// labels without a fill when the login card sits on glass / an inactive
-/// window — the control then vanishes on a light surface.
-private struct GateProminentButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .background(
-                TonoBrand.actionFill,
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-            .opacity(isEnabled ? 1 : 0.4)
-            .brightness(configuration.isPressed ? -0.06 : 0)
-            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
-            .animation(TonoMotion.easeOut(0.12, reduceMotion: reduceMotion), value: configuration.isPressed)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .tint(.white)
-    }
-}
-
 /// Picks filled or quiet per call site so the screen only ever shows one
 /// filled primary (e.g. while Retry owns it, the send-code button steps back).
 private struct GateAdaptiveButtonStyle: ButtonStyle {

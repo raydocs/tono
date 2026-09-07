@@ -36,6 +36,7 @@ struct SettingsView: View {
         store: AppProfile.defaults
     ) private var periodicTelemetryEnabled = false
     @AppStorage(SettingsKey.themeMode) private var themeMode = "Adaptive"
+    @State private var researchProgramsExpanded = false
 
     private let languages = InterfaceLanguagePreference.options
     private let themes = ["Light", "Dark", "Adaptive"]
@@ -184,6 +185,9 @@ struct SettingsView: View {
 
     private var privacyCard: some View {
         SettingsCard(icon: "hand.raised", title: "Privacy") {
+            Text("Help fix problems")
+                .font(.system(size: 13, weight: .semibold))
+
             SettingToggleRow(
                 label: "Crash reporting",
                 subtitle: "Tell Tono support when this app crashed",
@@ -224,7 +228,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Network log upload",
-                subtitle: "Automatically upload the full traffic log in the background",
+                subtitle: "Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route",
                 isOn: $networkLogUploadEnabled
             )
             .onChange(of: networkLogUploadEnabled) { _, _ in
@@ -233,30 +237,8 @@ struct SettingsView: View {
 
             settingDivider
 
-            SettingToggleRow(
-                label: "App routing research",
-                subtitle: "Share anonymized app-route counts",
-                isOn: $aggregatedAppRoutingResearchEnabled
-            )
-            .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
-                appState.setAggregatedAppRoutingResearchEnabled(enabled)
-                accountSession.appRoutingResearchSettingChanged()
-            }
-
-            settingDivider
-
-            SettingToggleRow(
-                label: "Claude & WeChat research",
-                subtitle: "Requires diagnostics. Route aggregates only.",
-                isOn: $claudeTrafficResearchEnabled
-            )
-            .onChange(of: claudeTrafficResearchEnabled) { _, enabled in
-                appState.setClaudeTrafficResearchEnabled(enabled)
-            }
-            .disabled(!remoteDiagnosticsEnabled)
-
-            settingDivider
-
+            // Local-only diagnostic file, on by default — not a research
+            // upload. Network log upload above is the consent that sends it.
             SettingToggleRow(
                 label: "Local traffic log",
                 subtitle: "Save connections on this Mac",
@@ -276,6 +258,44 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tint)
+            }
+
+            settingDivider
+
+            DisclosureGroup(isExpanded: $researchProgramsExpanded) {
+                VStack(alignment: .leading, spacing: 16) {
+                    SettingToggleRow(
+                        label: "App routing research",
+                        subtitle: "Share anonymized app-route counts",
+                        isOn: $aggregatedAppRoutingResearchEnabled
+                    )
+                    .onChange(of: aggregatedAppRoutingResearchEnabled) { _, enabled in
+                        appState.setAggregatedAppRoutingResearchEnabled(enabled)
+                        accountSession.appRoutingResearchSettingChanged()
+                    }
+
+                    settingDivider
+
+                    SettingToggleRow(
+                        label: "AI and messaging routing research",
+                        subtitle: "Requires diagnostics. Route aggregates only.",
+                        isOn: $claudeTrafficResearchEnabled
+                    )
+                    .onChange(of: claudeTrafficResearchEnabled) { _, enabled in
+                        appState.setClaudeTrafficResearchEnabled(enabled)
+                    }
+                    .disabled(!remoteDiagnosticsEnabled)
+                }
+                .padding(.top, 8)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Research programs")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Off by default. These only help Tono improve routing.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

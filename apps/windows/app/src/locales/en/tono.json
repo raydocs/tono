@@ -87,6 +87,9 @@
   },
   "login": {
     "restoringSession": "Opening your Tono workspace…",
+    "stillWaiting": "Still waiting?",
+    "restoreInternet": "Restore internet",
+    "restartTono": "Restart Tono",
     "brandLabel": "YOUR EVERYDAY CONNECTION",
     "brandTitle": "A little closer.\nA world more open.",
     "brandDescription": "One quiet space for your connection, your routes, and your peace of mind.",
