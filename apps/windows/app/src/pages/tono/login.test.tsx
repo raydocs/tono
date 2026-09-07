@@ -63,6 +63,22 @@ async function enterCodeStep() {
   return screen.getByRole<HTMLButtonElement>('button', { name: 'Send again' })
 }
 
+describe('login welcome v2', () => {
+  it('shows the trust line above the send-code button', () => {
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    )
+    expect(
+      screen.getByText(
+        'Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.',
+      ),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Send code' })).toBeDefined()
+  })
+})
+
 describe('login request exclusion', () => {
   it('announces the inbox step, focuses code, and returns to the original email', async () => {
     await enterCodeStep()

@@ -109,6 +109,10 @@ const renderAt = (path: string) =>
           path="/login"
           element={<TonoAuthGuard>login page</TonoAuthGuard>}
         />
+        <Route
+          path="/intro"
+          element={<TonoAuthGuard>intro page</TonoAuthGuard>}
+        />
       </Routes>
     </MemoryRouter>,
     { wrapper: freshSWR },
@@ -123,11 +127,13 @@ beforeEach(() => {
   tonoRetryRestoreMock.mockReset()
   tonoDisconnectMock.mockReset().mockResolvedValue(undefined)
   restartAppMock.mockReset()
+  localStorage.setItem('tono.introSeen', '1')
 })
 
 afterEach(async () => {
   cleanup()
   vi.useRealTimers()
+  localStorage.removeItem('tono.introSeen')
   await removeCacheData(tonoStatusQueryKey)
 })
 
@@ -192,6 +198,27 @@ describe('TonoAuthGuard', () => {
     await waitFor(() =>
       expect(screen.getByText('dashboard page')).toBeDefined(),
     )
+  })
+
+  it('sends a first-run signed-out user to intro', async () => {
+    localStorage.removeItem('tono.introSeen')
+    tonoStatusMock.mockResolvedValue(statusPayload('signedOut'))
+
+    renderAt('/')
+
+    await waitFor(() => expect(screen.getByText('intro page')).toBeDefined())
+    expect(screen.queryByText('login page')).toBeNull()
+  })
+
+  it('kicks a ready account off /intro back to the dashboard', async () => {
+    tonoStatusMock.mockResolvedValue(statusPayload('ready'))
+
+    renderAt('/intro')
+
+    await waitFor(() =>
+      expect(screen.getByText('dashboard page')).toBeDefined(),
+    )
+    expect(screen.queryByText('intro page')).toBeNull()
   })
 
   it('shows a loading placeholder while restoring', async () => {
@@ -384,8 +411,9 @@ describe('login flow under status pushes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'tono.login.sendCode' }))
 
     await waitFor(() => expect(tonoSignInStartMock).toHaveBeenCalled())
-    const codeInput = await screen.findByPlaceholderText(
-      'tono.login.codePlaceholder',
+    const codeInput = await waitFor(
+      () => screen.getByPlaceholderText('tono.login.codePlaceholder'),
+      { timeout: 4000 },
     )
     expect(codeInput).toBeDefined()
 

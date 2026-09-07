@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 extension Color {
@@ -9,6 +10,24 @@ extension Color {
         let g = Double((int >> 8) & 0xFF) / 255
         let b = Double(int & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
+    }
+
+    /// Resolves independently of `@Environment(\.colorScheme)` so brand tokens
+    /// can be stored as `static let`s.
+    init(lightHex: String, darkHex: String) {
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? darkHex : lightHex
+            let trimmed = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+            var int: UInt64 = 0
+            Scanner(string: trimmed).scanHexInt64(&int)
+            return NSColor(
+                srgbRed: CGFloat((int >> 16) & 0xFF) / 255,
+                green: CGFloat((int >> 8) & 0xFF) / 255,
+                blue: CGFloat(int & 0xFF) / 255,
+                alpha: 1
+            )
+        })
     }
 }
 

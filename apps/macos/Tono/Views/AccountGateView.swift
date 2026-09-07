@@ -78,6 +78,9 @@ struct LoginView: View {
     @State private var resendTimer: Task<Void, Never>?
     @State private var showErrorDetails = false
     @State private var showEmailForm = false
+    /// After a successful send, hold the "sent" pill for 1.5 s before the code step.
+    @State private var revealCodeStep = false
+    @State private var sentHoldTask: Task<Void, Never>?
     @FocusState private var focusedField: Field?
     private enum Field { case email, code }
 
@@ -86,6 +89,18 @@ struct LoginView: View {
         (methods?.email.enabled == true)
             || showEmailForm
             || session.emailChallenge != nil
+    }
+
+    /// Code step is deferred 1.5 s after a successful send so the pill can say
+    /// "sent". A view that appears already holding a challenge skips the hold.
+    private var showsCodeStep: Bool {
+        session.emailChallenge != nil && revealCodeStep
+    }
+
+    private var sendPillPhase: ProgressPillPhase {
+        if session.emailChallenge != nil && !revealCodeStep { return .sent }
+        if busy && session.emailChallenge == nil { return .sending }
+        return .idle
     }
 
     private var stepSpring: Animation? {
@@ -123,12 +138,13 @@ struct LoginView: View {
         ScrollView {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 40) {
-                    welcomeStory.frame(width: 320)
+                    welcomeStory(compact: false)
+                        .frame(width: 320, height: 480)
                     signInForm.frame(width: 380)
                 }
                 VStack(alignment: .leading, spacing: 24) {
-                    Label("Tono", systemImage: "network")
-                        .font(.title2.weight(.semibold))
+                    welcomeStory(compact: true)
+                        .frame(maxWidth: 420, minHeight: 240)
                     signInForm.frame(maxWidth: 420)
                 }
             }
@@ -138,48 +154,63 @@ struct LoginView: View {
         .defaultScrollAnchor(.center)
     }
 
-    private var welcomeStory: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            HStack(spacing: 12) {
-                Image("TonoMark").resizable().scaledToFit()
-                    .frame(width: 32, height: 32).accessibilityHidden(true)
-                Text("Tono").font(.title2.weight(.semibold))
+    private func welcomeStory(compact: Bool) -> some View {
+        GeometryReader { geo in
+            let tileSide = min(geo.size.width * 0.22, 180)
+            ZStack(alignment: .topLeading) {
+                WelcomeGround()
+                VStack(alignment: .leading, spacing: 14) {
+                    if compact {
+                        WelcomeHeroTile()
+                            .frame(width: tileSide, height: tileSide)
+                    }
+                    HStack(spacing: 12) {
+                        Image("TonoMark").resizable().scaledToFit()
+                            .frame(width: 32, height: 32).accessibilityHidden(true)
+                        Text("Tono").font(.title2.weight(.semibold))
+                    }
+                    if !compact {
+                        Spacer(minLength: 8)
+                    }
+                    Text("YOUR EVERYDAY CONNECTION")
+                        .font(.caption.weight(.semibold)).tracking(1)
+                        .foregroundStyle(.secondary)
+                    Text("A little closer.\nA world more open.")
+                        .font(.system(size: 34, weight: .semibold))
+                        .tracking(-1)
+                }
+                .padding(32)
+                .frame(
+                    width: geo.size.width,
+                    height: compact ? geo.size.height : geo.size.height * 0.55,
+                    alignment: .topLeading
+                )
+                if !compact {
+                    WelcomeHeroTile()
+                        .frame(width: tileSide, height: tileSide)
+                        .padding(32)
+                        .frame(
+                            width: geo.size.width,
+                            height: geo.size.height,
+                            alignment: .bottomLeading
+                        )
+                }
             }
-            Spacer(minLength: 32)
-            Text("YOUR EVERYDAY CONNECTION")
-                .font(.caption.weight(.semibold)).tracking(1)
-                .foregroundStyle(.secondary)
-            Text("A little closer.\nA world more open.")
-                .font(.system(size: 34, weight: .semibold))
-                .tracking(-1)
-            Text("One quiet space for your connection, your routes, and your peace of mind.")
-                .font(.body).foregroundStyle(.secondary)
-            HStack(spacing: 0) {
-                Circle().strokeBorder(.secondary, lineWidth: 1).frame(width: 32, height: 32)
-                Rectangle().fill(.secondary).frame(width: 80, height: 1)
-                Circle().strokeBorder(.secondary, lineWidth: 1).frame(width: 32, height: 32)
-            }.accessibilityHidden(true)
-            Spacer(minLength: 32)
-            Text("Your connection stays in your hands.")
-                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(32)
-        .frame(minHeight: 480, alignment: .leading)
-        .background(colorScheme == .dark ? Color(hex: "202B45") : Color(hex: "E4EBFA"),
-                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private var signInForm: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(LocalizedStringKey(session.emailChallenge == nil ? "01 / SIGN IN" : "02 / CHECK YOUR EMAIL"))
+            Text(LocalizedStringKey(showsCodeStep ? "02 / CHECK YOUR EMAIL" : "01 / SIGN IN"))
                 .font(.caption.weight(.semibold)).tracking(1)
                 .foregroundStyle(.secondary)
-            Text(LocalizedStringKey(session.emailChallenge == nil ? "Sign in to Tono" : "Open your inbox"))
+            Text(LocalizedStringKey(showsCodeStep ? "Open your inbox" : "Sign in to Tono"))
                 .font(.system(size: 28, weight: .semibold))
                 .accessibilityAddTraits(.isHeader)
-            Text(LocalizedStringKey(session.emailChallenge == nil
-                 ? "Start with your email. We’ll send a sign-in code — no password to remember."
-                 : "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically."))
+            Text(LocalizedStringKey(showsCodeStep
+                 ? "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically."
+                 : "Start with your email. We’ll send a sign-in code — no password to remember."))
                 .font(.body).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -298,14 +329,22 @@ struct LoginView: View {
                             gateField("Email", text: $email)
                                 .focused($focusedField, equals: .email)
                                 .disabled(busy || session.emailChallenge != nil)
-                            if session.emailChallenge == nil {
+                            if !showsCodeStep {
                                 DisclosureGroup("Device name") {
                                     gateField("Device name", text: $deviceName)
                                 }
                                 .font(.caption)
                                 .disabled(busy)
+                                Label {
+                                    Text("Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.")
+                                } icon: {
+                                    Image(systemName: "lock.fill")
+                                }
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
-                            if session.emailChallenge != nil {
+                            if showsCodeStep {
                                 gateField("Six-digit email code", text: $emailCode)
                                     .focused($focusedField, equals: .code)
                                     .disabled(busy)
@@ -321,26 +360,8 @@ struct LoginView: View {
                                 .buttonStyle(GateProminentButtonStyle())
                                 .disabled(busy || emailCode.count != 6)
                             }
-                            Button {
-                                Task {
-                                    await session.requestEmailCode(
-                                        email: email,
-                                        deviceName: deviceName
-                                    )
-                                    // A fresh challenge means the send went
-                                    // through; the resend cooldown starts now.
-                                    if session.emailChallenge != nil {
-                                        startResendCountdown()
-                                    }
-                                }
-                            } label: {
-                                busyLabel(resendButtonTitle)
-                            }
-                            .buttonStyle(GateAdaptiveButtonStyle(
-                                prominent: error == nil && session.emailChallenge == nil
-                            ))
-                            .disabled(busy || resendCountdown > 0)
-                            if session.emailChallenge != nil {
+                            sendCodeButton
+                            if showsCodeStep {
                                 Text("Code sent to \(email). Sender is Tono <login@lecvia.com>. If this address is eligible, the code is valid for 10 minutes.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -472,26 +493,45 @@ struct LoginView: View {
             }
         }
         .padding(28)
-        .background(colorScheme == .dark ? Color(hex: "1B202B") : .white,
+        .background(colorScheme == .dark ? Color(hex: "1B1C36") : .white,
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(.secondary.opacity(0.3), lineWidth: 1)
         }
-        .onAppear { focusedField = session.emailChallenge == nil ? .email : .code }
+        .onAppear {
+            if session.emailChallenge != nil {
+                revealCodeStep = true
+                focusedField = .code
+            } else {
+                focusedField = .email
+            }
+        }
         .onChange(of: session.emailChallenge != nil) { _, hasCode in
-            if hasCode { focusedField = .code }
+            sentHoldTask?.cancel()
+            if hasCode {
+                sentHoldTask = Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard !Task.isCancelled, session.emailChallenge != nil else { return }
+                    withAnimation(TonoMotion.easeOut(0.2, reduceMotion: reduceMotion)) {
+                        revealCodeStep = true
+                    }
+                    focusedField = .code
+                }
+            } else {
+                revealCodeStep = false
+                focusedField = .email
+            }
         }
         .onChange(of: busy) { _, isBusy in
-            if !isBusy && session.emailChallenge != nil { focusedField = .code }
+            if !isBusy && showsCodeStep { focusedField = .code }
         }
         .onSubmit {
             guard !busy else { return }
             Task {
-                if session.emailChallenge == nil {
-                    await session.requestEmailCode(email: email, deviceName: deviceName)
-                    if session.emailChallenge != nil { startResendCountdown() }
-                } else if emailCode.count == 6 {
+                if !showsCodeStep && session.emailChallenge == nil {
+                    await sendEmailCode()
+                } else if showsCodeStep && emailCode.count == 6 {
                     await session.verifyEmailCode(emailCode)
                 }
             }
@@ -510,17 +550,52 @@ struct LoginView: View {
         }
         .onDisappear {
             resendTimer?.cancel()
+            sentHoldTask?.cancel()
+        }
+    }
+
+    @ViewBuilder
+    private var sendCodeButton: some View {
+        if showsCodeStep {
+            Button {
+                Task { await sendEmailCode() }
+            } label: {
+                busyLabel(resendButtonTitle)
+            }
+            .buttonStyle(GateAdaptiveButtonStyle(
+                prominent: error == nil && session.emailChallenge == nil
+            ))
+            .disabled(busy || resendCountdown > 0)
+        } else {
+            Button {
+                Task { await sendEmailCode() }
+            } label: {
+                Group {
+                    if sendPillPhase == .sent {
+                        Text("Sent to your email")
+                    } else {
+                        Text("Send a sign-in code")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(ProgressPillButtonStyle(phase: sendPillPhase))
+            .disabled(busy || sendPillPhase == .sent)
         }
     }
 
     private var resendButtonTitle: String {
-        if session.emailChallenge == nil {
-            return String(localized: "Email me a sign-in code")
-        }
         if resendCountdown > 0 {
             return String(localized: "Send a new code (\(resendCountdown)s)")
         }
         return String(localized: "Send a new code")
+    }
+
+    private func sendEmailCode() async {
+        await session.requestEmailCode(email: email, deviceName: deviceName)
+        if session.emailChallenge != nil {
+            startResendCountdown()
+        }
     }
 
     /// Digits-only, capped at six; a complete code submits itself once.
