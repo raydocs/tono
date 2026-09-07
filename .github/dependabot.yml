@@ -62,6 +62,13 @@ updates:
       windows-app:
         patterns: ["*"]
     labels: [dependencies, windows]
+    ignore:
+      # The updater crashes (sorbet type error, "unknown_error") while
+      # evaluating boa_engine 0.21 -> 0.22 and fails the whole job. The bump
+      # is a semver-breaking 0.x minor that needs call-site changes anyway;
+      # patch releases still flow.
+      - dependency-name: boa_engine
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: cargo
     directory: /apps/windows/service
