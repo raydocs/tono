@@ -21,12 +21,12 @@ struct MenuBarProtectionStatus {
         if appState.isDisconnecting {
             kind = .connecting
             title = "Disconnecting…"
-            color = TonoStatus.connecting
+            color = TonoBrand.accent
             symbolName = Self.connectingSymbol
         } else if appState.isConnecting {
             kind = .connecting
             title = LocalizedStringKey(appState.connectionStage.rawValue)
-            color = TonoStatus.connecting
+            color = TonoBrand.accent
             symbolName = Self.connectingSymbol
         } else if appState.isProtectedReconnectScheduled {
             kind = .blocked

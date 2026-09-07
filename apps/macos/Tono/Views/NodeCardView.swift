@@ -57,7 +57,6 @@ enum TonoBrand {
 enum TonoStatus {
     static let connected = Color(hex: "2ED573")
     static let positive = Color(hex: "30D158")   // latency good / success chips
-    static let connecting = Color(hex: "FFD60A")
     static let blocked = Color(hex: "FF9F0A")    // protected offline / degraded
     static let error = Color(hex: "FF453A")
     static let neutral = Color.secondary          // standby / not tested
@@ -477,6 +476,7 @@ private struct ActiveLineMatch: ViewModifier {
 }
 
 struct NodeLatencyBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let latency: Int
     var didFail: Bool = false
 
@@ -512,7 +512,7 @@ struct NodeLatencyBadge: View {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(tint)
-                    .contentTransition(.numericText())
+                    .contentTransition(reduceMotion ? .identity : .numericText())
                 if let detail {
                     Text(detail)
                         .font(.system(size: 9, weight: .medium))
@@ -527,8 +527,8 @@ struct NodeLatencyBadge: View {
             Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.7)
         }
         .fixedSize()
-        .animation(.easeOut(duration: 0.35), value: latency)
-        .animation(.easeOut(duration: 0.35), value: didFail)
+        .animation(TonoMotion.numeric(reduceMotion: reduceMotion), value: latency)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: didFail)
     }
 }
 

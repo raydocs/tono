@@ -1,0 +1,31 @@
+/* Connect-journey motion. Durations come from tokens/motion.css — do not
+   invent new ones. Arrival is the only overshoot in the app. */
+
+.tono-connect-glow {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  pointer-events: none;
+  box-shadow: 0 0 28px 6px var(--tono-connect-glow-color);
+  transition:
+    opacity var(--tono-duration-state) var(--tono-ease),
+    transform var(--tono-duration-state) var(--tono-ease),
+    box-shadow var(--tono-duration-state) var(--tono-ease);
+}
+
+.tono-connect-glow--arrival {
+  animation: tono-connect-arrival var(--tono-duration-arrival)
+    var(--tono-spring-arrival) both;
+}
+
+@keyframes tono-connect-arrival {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

@@ -62,7 +62,7 @@ struct DashboardView: View {
                         ConnectionProgressCard(appState: appState)
                             .glassEffectID("connection-progress", in: dashboardNS)
                             .glassEffectTransition(.materialize)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(TonoMotion.surfaceTransition)
                     } else if let nodeName = appState.activeNode?.name ?? appState.proxyService.activeNodeName {
                         let nodeLatency = appState.proxyService.latency(forNodeNamed: nodeName)
                         ActiveNodeCard(
@@ -77,7 +77,7 @@ struct DashboardView: View {
                         )
                             .glassEffectID("card", in: dashboardNS)
                             .glassEffectTransition(.materialize)
-                            .transition(.opacity)
+                            .transition(TonoMotion.surfaceTransition)
                     }
 
                 }
@@ -100,6 +100,7 @@ struct DashboardView: View {
         // Surfaces swap with the critically damped contract spring; the one
         // overshoot in the app belongs to the connected glow, not the layout.
         .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
+        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: showsConnectionDetails)
         .onChange(of: appState.isConnecting) { _, connecting in
             connectingSince = connecting ? Date() : nil
         }
@@ -180,7 +181,7 @@ struct DashboardView: View {
     }
 
     private var statusBadgeColor: Color {
-        if appState.isConnecting || appState.isDisconnecting { return TonoStatus.connecting }
+        if appState.isConnecting || appState.isDisconnecting { return TonoBrand.accent }
         if appState.isProtectionBlocked { return TonoStatus.blocked }
         if isDegradedWhileConnected { return TonoStatus.blocked }
         return appState.isConnected ? TonoStatus.positive : TonoStatus.neutral
@@ -373,11 +374,16 @@ struct DashboardView: View {
 
 private struct ConnectionProgressCard: View {
     @Bindable var appState: AppState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(alignment: .leading, spacing: 12) {
                 header(now: context.date)
+
+                if appState.isConnecting {
+                    stageDots
+                }
 
                 if !highlightedStages.isEmpty {
                     Divider().opacity(0.45)
@@ -404,7 +410,37 @@ private struct ConnectionProgressCard: View {
                 .regular.tint(cardTint),
                 in: RoundedRectangle(cornerRadius: 18)
             )
+            // A failure shifts the tint over 220 ms; it does not snap or shake.
+            .animation(
+                TonoMotion.stateChange(reduceMotion: reduceMotion),
+                value: appState.lastConnectionFailure != nil
+            )
         }
+    }
+
+    /// One dot per known stage, in order. Discrete on purpose: the stages
+    /// take wildly different times, so a time-based bar would leap and stall.
+    private var stageDots: some View {
+        HStack(spacing: 6) {
+            ForEach(ConnectionStage.allCases, id: \.self) { stage in
+                Circle()
+                    .fill(dotColor(stage))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .padding(.leading, 43)
+        .accessibilityHidden(true)
+        .animation(
+            TonoMotion.stateChange(reduceMotion: reduceMotion),
+            value: appState.connectionStage
+        )
+    }
+
+    private func dotColor(_ stage: ConnectionStage) -> Color {
+        if appState.completedConnectionStages.contains(stage) { return TonoBrand.accent }
+        if stage == appState.connectionStage { return TonoBrand.accent.opacity(0.55) }
+        if appState.lastConnectionFailure?.stage == stage { return TonoStatus.blocked }
+        return Color.secondary.opacity(0.35)
     }
 
     /// Current and failed steps only — listing every pending stage pushes
@@ -447,9 +483,17 @@ private struct ConnectionProgressCard: View {
                     .font(.system(size: 13, weight: .semibold))
 
                 if appState.isConnecting {
-                    Text(LocalizedStringKey(appState.connectionStage.rawValue))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                    ZStack(alignment: .leading) {
+                        Text(LocalizedStringKey(appState.connectionStage.rawValue))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .id(appState.connectionStage)
+                            .transition(TonoMotion.textSwapTransition)
+                    }
+                    .animation(
+                        TonoMotion.textSwap(reduceMotion: reduceMotion),
+                        value: appState.connectionStage
+                    )
                 } else if appState.isDisconnecting {
                     Text(LocalizedStringKey(appState.disconnectionStage.rawValue))
                         .font(.system(size: 12))
@@ -512,7 +556,7 @@ private struct ConnectionProgressCard: View {
     private var headerColor: Color {
         appState.lastConnectionFailure != nil && !appState.isConnecting
             ? .orange
-            : TonoStatus.connecting
+            : TonoBrand.accent
     }
 
     private var activeStartedAt: Date? {

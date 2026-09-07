@@ -28,7 +28,7 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 | 品牌渐变暖端 | `TonoBrand.accentWarm` | `TONO_COLORS.accentWarm` | `#FFB07A` |
 | 连接状态绿 | `TonoStatus.connected` | `TONO_COLORS.connected` | `#2ED573` |
 | 延迟良好 / 成功 | `TonoStatus.positive` | `TONO_COLORS.latencyGood` | `#30D158` |
-| 连接中黄 | `TonoStatus.connecting` | — | `#FFD60A` |
+| 连接中 / 断开中 | `TonoBrand.accent` | `TONO_COLORS.accent` | 强调色。进行中不是警告，2026-09-07 起两端统一，`TonoStatus.connecting` 黄已删除 |
 | 保护离线 / 降级橙 | `TonoStatus.blocked` | `TONO_COLORS.protectedOffline` | `#FF9F0A` |
 | 错误红 | `TonoStatus.error` | `TONO_COLORS.errorDark` | `#FF453A` |
 | 待机 / 中性 | `TonoStatus.neutral`（动态）/ `.standby`（实色，供渐变） | — | `.secondary` / `#98989D` |
@@ -108,6 +108,7 @@ Windows 用 `tono-ui/tokens/motion.css` 的同名 token，并依赖 `tono.css` �
 | 文字替换 | 220ms | easeOut | 淡入 + 上移 2px | `.textSwap` + `textSwapTransition` | `--tono-duration-text` / `--tono-rise-text` |
 | 表面出现 | 350ms | spring 无回弹 | 淡入 + 上移 6px | `.surfaceIn` + `surfaceTransition` | `--tono-duration-surface` / `--tono-ease-surface` |
 | 页面切换 | 180ms | easeOut | 淡入 + 上移 4px | `.pageSwitch` + `pageTransition` | `--tono-duration-page` |
+| 侧栏指示器滑动 | 160ms | easeOut | 同组内滑动，跨组淡入淡出 | `.nav` + matchedGeometryEffect | `--tono-duration-nav` |
 | 横幅进出 | 220ms | easeOut | 高度 + 不透明度 | `.banner` | `--tono-duration-banner`（用 `grid-template-rows`，不用 height） |
 | Toast | 250ms 进 / 200ms 出 | easeOut | 顶部滑入，原路退出 | 已有 | `--tono-duration-toast-*` |
 | 数字变化 | 300ms | easeOut | `numericText`，只在测速结果落地时 | `.numeric` | tabular-nums，不动画 |
