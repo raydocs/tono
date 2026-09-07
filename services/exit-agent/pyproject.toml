@@ -1,0 +1,10 @@
+[project]
+name = "tono-exit-agent"
+version = "0.0.0"
+description = "Tono exit-agent (stdlib only; see README.md)"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100

@@ -1,7 +1,7 @@
 # Tono adaptive gVisor core
 
-This experiment keeps Tono on upstream Mihomo `v1.19.29` and its existing
-`github.com/metacubex/sing-tun v0.4.21` dependency. The only runtime change is
+This experiment keeps Tono on upstream Mihomo `v1.19.30` and its existing
+`github.com/metacubex/sing-tun v0.4.22` dependency. The only runtime change is
 the gVisor TCP send/receive range:
 
 - stock: fixed `20 KiB`

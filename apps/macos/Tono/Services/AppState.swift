@@ -972,7 +972,7 @@ final class AppState {
                 forInfoDictionaryKey: "CFBundleShortVersionString"
             ) as? String ?? "unknown",
             nextAppVersion: nextVersion,
-            coreVersion: "v1.19.29-tono-gvisor-adaptive.1",
+            coreVersion: "v1.19.30-tono-gvisor-adaptive.1",
             coreSHA256: "",
             buildCommit: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
             helperProtocolVersion: HelperProtocolVersion.current,
