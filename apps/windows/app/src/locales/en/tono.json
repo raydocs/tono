@@ -254,6 +254,9 @@
       "download": "Download"
     }
   },
+  "errors": {
+    "unknownAction": "Something went wrong. Details are below; copy them for support."
+  },
   "node": {
     "activeServer": "Active server",
     "selectedServer": "Selected server",

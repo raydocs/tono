@@ -1114,6 +1114,9 @@ export interface TranslationResources {
         viewProtectedRules: string
         whatFailed: string
       }
+      errors: {
+        unknownAction: string
+      }
       login: {
         brandDescription: string
         brandFootnote: string

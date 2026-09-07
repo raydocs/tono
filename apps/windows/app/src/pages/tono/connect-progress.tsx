@@ -7,6 +7,7 @@ import { showNotice } from '@/services/notice-service'
 import { useQuery } from '@/services/query-client'
 import { useThemeMode } from '@/services/states'
 import {
+  describeTonoActionError,
   formatTonoActionError,
   isEncryptedDnsFailure,
   formatTonoDiagnostics,
@@ -14,7 +15,6 @@ import {
   subscribeTonoStatus,
   tonoConnectProgress,
   tonoDiagnosticsReport,
-  tonoDisconnect,
   tonoRetryNow,
   tonoUploadDiagnostics,
   type TonoConnectStep,
@@ -26,6 +26,7 @@ import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoConfirmDialog } from '@/tono-ui/TonoAccountCard'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
+import { useReleaseProtection } from '@/tono-ui/useReleaseProtection'
 
 /**
  * The connect-progress card (Mac Build 29 parity): the eight FSM stages with
@@ -148,8 +149,8 @@ export const ConnectProgressCard = ({
 
   const [retryError, setRetryError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
-  const [restoreOpen, setRestoreOpen] = useState(false)
-  const [restoreError, setRestoreError] = useState<string | null>(null)
+  const { requestRelease, dialog: restoreDialog } =
+    useReleaseProtection(onRefreshStatus)
   const [nowMs, setNowMs] = useState(() => Date.now())
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle')
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -175,18 +176,6 @@ export const ConnectProgressCard = ({
     } finally {
       setRetrying(false)
     }
-  })
-
-  const handleRestore = useLockFn(async () => {
-    setRestoreError(null)
-    try {
-      await tonoDisconnect()
-    } catch (error) {
-      setRestoreError(formatTonoActionError(error, t))
-      return
-    }
-    setRestoreOpen(false)
-    await onRefreshStatus()
   })
 
   // Copy details renders the *same* structured report the upload sends
@@ -268,6 +257,8 @@ export const ConnectProgressCard = ({
           'tono.progress.unknownStage',
       )
     : null
+  const progressError =
+    progress?.error != null ? describeTonoActionError(progress.error, t) : null
   const completedCount =
     progress?.steps.filter((step) => step.state === 'completed').length ?? 0
   const highlightedSteps =
@@ -402,7 +393,7 @@ export const ConnectProgressCard = ({
         </>
       )}
 
-      {progress?.error != null && (
+      {progressError && (
         <details style={{ marginTop: 8 }}>
           <summary
             style={{
@@ -433,9 +424,9 @@ export const ConnectProgressCard = ({
               background: hex(TONO_COLORS.error, 0.1),
             }}
           >
-            {formatTonoActionError(progress.error, t)}
+            {progressError.detail ?? progressError.message}
           </pre>
-          {isEncryptedDnsFailure(progress.error) && (
+          {isEncryptedDnsFailure(progress?.error) && (
             <div style={{ marginTop: 10 }}>
               <OpenDnsSettingsButton accent />
             </div>
@@ -521,10 +512,7 @@ export const ConnectProgressCard = ({
             <button
               type="button"
               className="tono-button"
-              onClick={() => {
-                setRestoreError(null)
-                setRestoreOpen(true)
-              }}
+              onClick={requestRelease}
               style={{
                 // The escape hatch keeps the full row; the two diagnostics
                 // actions share the next one.
@@ -658,18 +646,7 @@ export const ConnectProgressCard = ({
         />
       )}
 
-      {restoreOpen && (
-        <TonoConfirmDialog
-          dark={dark}
-          title={t('tono.progress.restoreConfirmTitle')}
-          message={t('tono.progress.restoreConfirmMessage')}
-          error={restoreError}
-          confirmLabel={t('tono.progress.restore')}
-          cancelLabel={t('shared.actions.cancel')}
-          onConfirm={handleRestore}
-          onCancel={() => setRestoreOpen(false)}
-        />
-      )}
+      {restoreDialog}
     </GlassCard>
   )
 }

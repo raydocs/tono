@@ -369,7 +369,9 @@ describe('ConnectProgressCard', () => {
       within(dialog).getByRole('button', { name: 'Restore Normal Internet' }),
     )
 
-    await screen.findByText('kill switch still armed')
+    await screen.findByText(
+      'Something went wrong. Details are below; copy them for support.',
+    )
     expect(screen.getByRole('dialog')).toBeDefined()
   })
 

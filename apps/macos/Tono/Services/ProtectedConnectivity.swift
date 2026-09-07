@@ -20,15 +20,15 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
     var userMessage: String {
         switch self {
         case .probeOriginDegraded:
-            return "个别探测来源暂时失败，受保护连接仍然可用。"
+            return String(localized: "One of the connection checks failed for a moment. Your protected connection is still working.")
         case .protectedDnsNotReady:
-            return "系统 DNS 尚未进入受保护路径，连接未能完成。"
+            return String(localized: "System DNS has not joined the protected path yet, so the connection could not finish. Wait a moment and reconnect.")
         case .tunRouteUnavailable:
-            return "受保护隧道已建立，但系统流量未能进入隧道。"
+            return String(localized: "The protected connection is up, but this Mac's traffic did not go through it. Reconnect to try again.")
         case .coreControllerUnavailable:
-            return "核心控制器暂时不可用。若真实流量正常，连接会保持。"
+            return String(localized: "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.")
         case .coreExitUnreachable:
-            return "当前节点和核心均无法完成受保护验证。"
+            return String(localized: "The current node could not complete a protected check. Choose another node, or reconnect to try again.")
         case .networkEnvironmentOffline:
             // Looked up rather than written in place: a physical-link
             // observation is what produces this code, and it reaches the
@@ -37,13 +37,13 @@ nonisolated enum ProtectedFailureCode: String, CaseIterable, Sendable {
                 localized: "This Mac has no network connection. Protection resumes automatically when the network returns."
             )
         case .helperProtocolMismatch:
-            return "网络助手协议不匹配，需要先完成助手修复。"
+            return String(localized: "The network helper does not match this copy of Tono. Repair it before connecting again.")
         case .updateRecoveryFailed:
-            return "更新后的受保护连接未能恢复。"
+            return String(localized: "The protected connection did not come back after the update. Reconnect to restore protection.")
         case .catalogNodeRemoved:
-            return "所选节点已从目录移除，正在改用可用节点。"
+            return String(localized: "The selected node was removed from the catalog. Tono is switching to an available node.")
         case .unknownClassifiedFailure:
-            return "受保护连接失败，已记录诊断信息。"
+            return String(localized: "The protected connection failed. Diagnostic details have been recorded.")
         }
     }
 }

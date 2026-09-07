@@ -763,6 +763,7 @@ export const translationKeys = [
   'tono.dashboard.info.country',
   'tono.dashboard.info.upload',
   'tono.dashboard.info.download',
+  'tono.errors.unknownAction',
   'tono.node.activeServer',
   'tono.node.selectedServer',
   'tono.node.switch',

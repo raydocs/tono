@@ -158,18 +158,18 @@ struct ConnectPill: View {
         if isConnecting { return String(localized: String.LocalizationValue(connectionStage.rawValue)) }
         if isDisconnecting { return String(localized: String.LocalizationValue(disconnectionStage.rawValue)) }
         if isRecovering { return String(localized: "Recovering protected connection…") }
-        if isProtectionBlocked { return String(localized: "Tap to restore internet") }
+        if isProtectionBlocked { return String(localized: "Click to restore internet") }
         if isConnected {
             if let nodeDisplay, nodeLatency > 0 {
                 return "\(nodeDisplay) — \(LatencyLevel.spokenTitle(for: nodeLatency, kind: .exit))"
             }
             if let nodeDisplay { return nodeDisplay }
-            return String(localized: "Tap to disconnect")
+            return String(localized: "Click to disconnect")
         }
         if let nodeDisplay {
-            return String(localized: "Tap to connect via \(nodeDisplay)")
+            return String(localized: "Click to connect via \(nodeDisplay)")
         }
-        return String(localized: "Tap to connect")
+        return String(localized: "Click to connect")
     }
 
     private var statusColor: Color {

@@ -66,7 +66,7 @@ it('shows a failed read, handles a failed retry, and recovers on retry', async (
   serversMock.mockRejectedValue(new Error('Server list unavailable'))
   renderPage()
   expect((await screen.findByRole('alert')).textContent).toContain(
-    'Server list unavailable',
+    'Something went wrong',
   )
   expect(screen.queryByText('No servers available')).toBeNull()
   let reject!: (error: Error) => void
@@ -81,7 +81,7 @@ it('shows a failed read, handles a failed retry, and recovers on retry', async (
       .disabled,
   ).toBe(true)
   await act(async () => reject(new Error('Still unavailable')))
-  expect(await screen.findByText('Still unavailable')).toBeDefined()
+  expect(await screen.findByText(/Something went wrong/)).toBeDefined()
   serversMock.mockResolvedValue([
     {
       name: 'US West 1',
