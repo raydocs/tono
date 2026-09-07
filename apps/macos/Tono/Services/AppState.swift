@@ -1923,10 +1923,10 @@ final class AppState {
                             stage: "securingDNS",
                             attempt: 3,
                             generation: self.protectionOperationGeneration,
-                            detail: "browser Secure DNS scan \(browserDNS.outcome.rawValue)"
+                            detail: browserDNS.diagnosticDetail
                         )
                         throw CoreControllerError.protectionFailed(
-                            self.browserProtectedDNSFailureMessage
+                            browserDNS.failureMessage
                         )
                     }
                 }
@@ -2748,10 +2748,10 @@ final class AppState {
                             stage: "health",
                             attempt: healthCycle,
                             generation: observedGeneration,
-                            detail: "browser Secure DNS scan \(browserDNS.outcome.rawValue)"
+                            detail: browserDNS.diagnosticDetail
                         )
                         self.disconnect(releaseKillSwitch: false)
-                        self.errorMessage = self.browserProtectedDNSFailureMessage
+                        self.errorMessage = browserDNS.failureMessage
                         return
                     }
                 }
@@ -6388,7 +6388,7 @@ final class AppState {
         return false
     }
 
-    /// Chromium writes Preferences by replace/rename. One short retry keeps a
+    /// Chromium writes Local State by replace/rename. One short retry keeps a
     /// harmless in-flight atomic save from looking like a permanent scan gap;
     /// a second incomplete result remains fail-closed.
     private func scanBrowserProtectedDNS() async -> BrowserDNSDiagnostics.Report {
@@ -6410,18 +6410,13 @@ final class AppState {
             ConnectionTelemetryBuffer.shared.record(
                 "browserDNSPreflight",
                 probe: browser,
+                reason: result.failureReason?.rawValue,
                 mode: result.source.rawValue,
                 counter: result.preferenceStoreCount,
                 generation: Int(protectionOperationGeneration),
                 outcome: result.outcome.rawValue
             )
         }
-    }
-
-    private var browserProtectedDNSFailureMessage: String {
-        String(localized:
-            "Chrome or Microsoft Edge may bypass Tono's protected DNS. Turn off Secure DNS in Chrome and Edge for all profiles, fully restart the browsers, then reconnect."
-        )
     }
 
     /// Distinguish Encrypted DNS / Private Relay hijacks from a dead listener.

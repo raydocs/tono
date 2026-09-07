@@ -6627,6 +6627,16 @@
         }
       }
     },
+    "Tono could not verify Chrome or Edge's Secure DNS configuration. This does not mean Secure DNS is enabled. Fully quit both browsers and tap Retry Now. If it persists, copy the failure details for support; do not delete browser data. Choose Restore internet to end protection and restore normal Internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 无法验证 Chrome 或 Edge 的安全 DNS 配置，这不代表安全 DNS 已开启。请完全退出两个浏览器后点「立即重试」。若仍失败，请复制故障详情交给支持人员，不要删除浏览器数据。选择「恢复网络」可结束保护并恢复普通互联网连接。"
+          }
+        }
+      }
+    },
     "Microsoft Edge": {
       "localizations": {
         "zh-Hans": {
