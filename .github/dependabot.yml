@@ -39,27 +39,23 @@ updates:
         patterns: ["*"]
     labels: [dependencies, windows]
 
+  # The Windows workspaces share path crates (tono-core, tono-plugin-core,
+  # tono-logger, sysproxy), so a bump in one lockfile must land in all of them
+  # or CI's `cargo --locked` refuses the PR. One multi-directory group keeps
+  # every lockfile in a single PR.
   - package-ecosystem: cargo
-    directory: /apps/windows
+    directories:
+      - /apps/windows
+      - /apps/windows/app
+      - /apps/windows/service
+      - /apps/windows/crates/tono-plugin-core
     schedule:
       interval: weekly
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
     groups:
-      windows-workspace:
-        patterns: ["*"]
-    labels: [dependencies, windows]
-
-  - package-ecosystem: cargo
-    directory: /apps/windows/app
-    schedule:
-      interval: weekly
-      day: monday
-      time: "03:00"
-      timezone: Asia/Shanghai
-    groups:
-      windows-app:
+      windows-rust:
         patterns: ["*"]
     labels: [dependencies, windows]
     ignore:
@@ -69,30 +65,6 @@ updates:
       # patch releases still flow.
       - dependency-name: boa_engine
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
-
-  - package-ecosystem: cargo
-    directory: /apps/windows/service
-    schedule:
-      interval: weekly
-      day: monday
-      time: "03:00"
-      timezone: Asia/Shanghai
-    groups:
-      windows-service:
-        patterns: ["*"]
-    labels: [dependencies, windows]
-
-  - package-ecosystem: cargo
-    directory: /apps/windows/crates/tono-plugin-core
-    schedule:
-      interval: weekly
-      day: monday
-      time: "03:00"
-      timezone: Asia/Shanghai
-    groups:
-      plugin-core-rust:
-        patterns: ["*"]
-    labels: [dependencies, windows]
 
   - package-ecosystem: cargo
     directory: /apps/macos/Tono/Tools
