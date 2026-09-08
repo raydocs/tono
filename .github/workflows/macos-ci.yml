@@ -76,6 +76,9 @@ jobs:
         # reads as untrustworthy, and managed direct routing stops fleet-wide.
         run: tooling/scripts/test-policy-signing-contract.sh
 
+      - name: Mixed proxy requires authenticated origin HTTPS
+        run: python3 tooling/scripts/tests/test_macos_mixed_probe.py
+
       - name: macOS incident regressions
         run: tooling/scripts/test-macos-incident-regressions.sh
 

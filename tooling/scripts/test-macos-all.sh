@@ -51,6 +51,7 @@ run "helper peer authorization" tooling/scripts/test-helper-peer-authorization.s
 run "multi-exit policy (mihomo validates)" \
   tooling/scripts/test-multi-exit-policy.sh "$fixture"
 run "policy signing contract" tooling/scripts/test-policy-signing-contract.sh
+run "mixed proxy verifies origin HTTPS" python3 tooling/scripts/tests/test_macos_mixed_probe.py
 run "macos incident regressions" tooling/scripts/test-macos-incident-regressions.sh
 run "reload preserves connections" tooling/scripts/test-reload-preserves-connections.sh
 run "app traffic ledger" tooling/scripts/test-app-traffic-ledger.sh

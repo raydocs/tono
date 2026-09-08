@@ -227,7 +227,7 @@ jobs:
             echo "short_version=$short_version"
             echo "build=$project_build"
             echo "artifact_name=$artifact_name"
-            echo "enclosure_url=https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$artifact_name.zip"
+            echo "enclosure_url=https://releases.afk.ccwu.cc/download/$artifact_name.zip"
             echo "release_link=https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
           } >> "$GITHUB_OUTPUT"
 
@@ -453,7 +453,7 @@ jobs:
 
       - name: Validate the appcast entry against the exact bytes users download
         run: |
-          set -eu
+          set -euo pipefail
           /usr/bin/ditto -x -k "$RUNNER_TEMP/release/$ARTIFACT_NAME.zip" "$RUNNER_TEMP/extracted"
           app_path=$(find "$RUNNER_TEMP/extracted" -maxdepth 1 -type d -name '*.app' | head -n 1)
           if [ -z "$app_path" ]; then
@@ -469,7 +469,7 @@ jobs:
             --link "$RELEASE_LINK" \
             --notes-file "apps/macos/release-notes/build$RELEASE_BUILD.md" \
             --signature-file "$RUNNER_TEMP/enclosure.sig" \
-            --expected-path-prefix "/$GITHUB_REPOSITORY/releases/download/" \
+            --expected-path-prefix "/download/" \
             --dry-run | tee "$RUNNER_TEMP/appcast-validation.txt"
           {
             echo "### macOS appcast candidate"
