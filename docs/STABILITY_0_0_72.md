@@ -327,3 +327,34 @@ unchanged source fingerprints. macOS now executes 241 tests: 240 pass, one
 script-emission skip, zero failures. The extra three account presentation tests
 pass alongside all previous cancellation/credential tests. Sparkle selection's
 six tests and appcast publisher's 25 tests were separately retained as green logs.
+
+## Candidate build checkpoint and isolated installation smoke
+
+- Final Mac source `bec56f9` passes all three hosted macOS CI jobs, including the
+  new Sparkle selector and hosted privileged fixtures:
+  https://github.com/raydocs/tono/actions/runs/34201123637
+- Windows source `90dde3c` passes all four native/frontend/core/service CI jobs:
+  https://github.com/raydocs/tono/actions/runs/34200179075
+- Its real release-profile NSIS candidate and extracted payload inspection pass:
+  https://github.com/raydocs/tono/actions/runs/34200179397
+  The same run built the pinned patched Core, verified its native identity,
+  compiled digest-pinned Service executables, ran 93 packaging checks, and
+  retained the candidate installer plus source/hash manifest as Actions artifact
+  `10046504113` (seven-day retention). No release or feed was published.
+- `apps/windows` tree is exactly `f7ce61c8e9a5b47055c66730d2ebb7c48cf09501`
+  in both `90dde3c` and `bec56f9`; later Mac-only work does not change those
+  installer bytes or their Windows source qualification.
+
+`windows-installer-smoke.yml` downloads only a successful candidate from this
+repository/branch, verifies its manifest and relevant source-tree identity, then
+runs fresh install, same-version repair and uninstall on an **ephemeral hosted
+Windows administrator runner**. It checks Service startup, installed Core pin,
+no silent GUI launch, removal and unchanged DNS. Its script refuses local or
+self-hosted execution. This new smoke has not yet been declared passing; the
+workflow result must be retained. It does not claim previous-version migration,
+real-account connectivity, physical sleep/wake or leak qualification.
+
+The owner offered a real Windows machine for further testing. Amp's private
+runner is not assumed accessible here; SSH or a separately secured execution
+channel must first be established, with the machine's interruption/reboot scope
+explicit. No connection details or permission to alter that machine are assumed.
