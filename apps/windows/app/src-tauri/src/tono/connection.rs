@@ -12,7 +12,28 @@
 //! side effects — no `fail_connect`, no emit, no core action — when it
 //! moved (H1).
 
-use std::{error::Error as _, future::Future, net::IpAddr, sync::Arc, time::Duration};
+mod failure;
+mod stages;
+mod transaction;
+
+// Compatibility surface for existing command and test callers. The transaction
+// and error modules do not import this orchestration facade.
+pub use failure::{
+    BFE_NOT_RUNNING_PREFIX, NODE_OR_CORE_UNREACHABLE_PREFIX,
+    RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
+    SERVICE_TOO_OLD_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
+    WFP_ENGINE_WEDGED_PREFIX, is_retryable_lock_error, map_service_ready_error,
+    map_wfp_engine_error,
+};
+#[allow(unused_imports, reason = "retain the existing public error-marker path")]
+pub use failure::SERVICE_NOT_RUNNING_PREFIX;
+use failure::{CATALOG_NOT_READY_REJECTION, StageFailure, TRANSITION_IN_FLIGHT_REJECTION};
+use stages::run_stages;
+use transaction::ConnectTransaction;
+#[cfg(test)]
+use transaction::{CONNECT_BUDGET_LEGS, CONNECT_TRANSACTION_TIMEOUT};
+
+use std::{error::Error as _, net::IpAddr, sync::Arc, time::Duration};
 
 use tono_logging::{Type, logging};
 use tono_service_protocol::{
@@ -25,7 +46,7 @@ use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use tokio_util::sync::CancellationToken;
 use tono_core::{
     EXIT_GROUP_NAME,
-    config::{self, RuntimePorts, build_owned_runtime_with_ports, generate_controller_secret},
+    config::{self, RuntimePorts, build_owned_runtime_with_ports},
     connection::{ConnectStage, ReconnectBackoff},
     node::ValidatedNode,
 };
@@ -188,42 +209,6 @@ const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 /// verification, fail-closed cloud-policy hot reload, locking, and the post-lock verification
 /// group. Per-stage retries never reset this clock.
 ///
-/// C4 — 120 s did not cover a real cold first connect. It was sized while the DNS stage still
-/// failed fast; once DNS starts *succeeding* (10–30 s of PowerShell) the sum crosses 120 s right
-/// at the exit check, and a timeout there lands on the same no-retry path C3 describes. The
-/// accounting below is per-leg worst case, machine-checked by `CONNECT_BUDGET_LEGS`:
-///
-/// | leg                                                    | worst |
-/// |--------------------------------------------------------|-------|
-/// | service readiness probe                                  |   3 s |
-/// | StartClash #1 — cold WinTUN install + WFP arm             |  60 s | Service handler budget
-/// | controller readiness (`CONTROLLER_READY_TIMEOUT`)         |  15 s |
-/// | lock ladder (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL`)     |  10 s |
-/// | securingDNS — PowerShell batches + read-back              |  30 s |
-/// | fake-ip verification (3 × (5 s + 0.5 s), cancellable)     |  16 s |
-/// | checkingExit (one advisory controller delay request)      |  16 s |
-/// | verifyingTraffic (WFP status + mainland App HTTP over TUN) |  26 s |
-/// | C3 second TUN round + concurrent proxy check + delay       |  27 s |
-/// | MarkVerified commit IPC                                   |   5 s |
-/// | **total**                                                 | 208 s |
-///
-/// Optional DIRECT resolution runs after Connected and no longer sits on this clock.
-/// 240 s leaves margin over the remaining critical-path sum.
-const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(240);
-/// The accounting table above, machine-checked by `connect_budget_covers_a_cold_first_connect`.
-#[cfg(test)]
-const CONNECT_BUDGET_LEGS: [(&str, u64); 10] = [
-    ("service readiness", 3),
-    ("StartClash #1 (cold WinTUN + WFP arm)", 60),
-    ("controller readiness", 15),
-    ("lock ladder", 10),
-    ("securingDNS", 30),
-    ("fake-ip verification", 16),
-    ("checkingExit", 16),
-    ("verifyingTraffic", 26),
-    ("C3 second verification round", 27),
-    ("MarkVerified commit", 5),
-];
 /// The redacted runtime copy is a diagnostics convenience, but it lands under `%APPDATA%`,
 /// which enterprise policy can redirect to a UNC share or a sync-provider placeholder folder.
 /// `OpenOptions::open`/`write_all` then have no timeout of their own, so an offline share can
@@ -328,66 +313,6 @@ enum Attempt {
     /// switch / catalog teardown). Exit without touching the FSM, the core,
     /// or the UI: the flow that bumped the generation owns the cleanup.
     Stale,
-}
-
-/// Why `run_stages` ended.
-#[derive(Debug)]
-enum StageFailure {
-    /// Generation moved; see [`Attempt::Stale`].
-    Stale,
-    /// The shared transaction deadline elapsed. The generation is retired before failure
-    /// handling so any detached privileged IPC completion performs the stale-commit repair.
-    TimedOut(String),
-    Error(String),
-}
-
-impl StageFailure {
-    /// Every stage funnels its errors through here, so the Service's stable WFP markers are
-    /// translated once — whichever stage (arm, lock, release) surfaced them.
-    fn error(err: impl std::fmt::Display) -> Self {
-        let text = err.to_string();
-        StageFailure::Error(map_wfp_engine_error(&text).unwrap_or(text))
-    }
-}
-
-#[derive(Clone)]
-struct ConnectTransaction {
-    deadline: tokio::time::Instant,
-    cancellation: CancellationToken,
-}
-
-impl ConnectTransaction {
-    fn new(cancellation: CancellationToken) -> Self {
-        Self {
-            deadline: tokio::time::Instant::now() + CONNECT_TRANSACTION_TIMEOUT,
-            cancellation,
-        }
-    }
-
-    fn check(&self, stage: &'static str) -> Result<(), StageFailure> {
-        if self.cancellation.is_cancelled() {
-            return Err(StageFailure::Stale);
-        }
-        if tokio::time::Instant::now() >= self.deadline {
-            return Err(StageFailure::TimedOut(format!(
-                "connection transaction exceeded {CONNECT_TRANSACTION_TIMEOUT:?} during {stage}"
-            )));
-        }
-        Ok(())
-    }
-
-    async fn wait<T>(&self, stage: &'static str, future: impl Future<Output = T>) -> Result<T, StageFailure> {
-        self.check(stage)?;
-        tokio::select! {
-            biased;
-            _ = self.cancellation.cancelled() => Err(StageFailure::Stale),
-            result = tokio::time::timeout_at(self.deadline, future) => result.map_err(|_| {
-                StageFailure::TimedOut(format!(
-                    "connection transaction exceeded {CONNECT_TRANSACTION_TIMEOUT:?} during {stage}"
-                ))
-            }),
-        }
-    }
 }
 
 fn seed_autostart_after_connect() {
@@ -607,99 +532,6 @@ async fn guard_snapshot(
     ))
 }
 
-/// Stable error-code prefix the frontend's i18n keys off: the Service has
-/// a privileged operation in flight (install/repair pending, possibly a
-/// UAC prompt nobody approved).
-pub const SERVICE_BUSY_PREFIX: &str = "TONO_SERVICE_BUSY";
-/// Disconnect/Sign-out/Quit release is still finishing. Connect must wait — racing would let
-/// a late release tear down a fresh StartClash (the P0 fixed in the final review).
-pub const RELEASE_RECONCILING_PREFIX: &str = "TONO_RELEASE_RECONCILING";
-/// The two guard rejections that clear on their own; see [`guard_rejection_is_transient`].
-/// Named so the classifier and the sites that produce them cannot drift apart.
-const TRANSITION_IN_FLIGHT_REJECTION: &str = "a connection transition is already in flight";
-const CATALOG_NOT_READY_REJECTION: &str = "the exit catalog is not available yet";
-/// Installed Service is below protocol revision 9 (Test 5 or older).
-pub const SERVICE_TOO_OLD_PREFIX: &str = "TONO_SERVICE_TOO_OLD";
-/// The Service's WFP engine call did not return inside its budget — the Base Filtering Engine
-/// is wedged, typically behind a third-party security product's filter hooks. Distinct from
-/// [`BFE_NOT_RUNNING_PREFIX`] because the user action differs (reboot / remove the hook versus
-/// simply starting the service). The Service nests these inside its own context string, so
-/// they are matched by `contains`, not `starts_with`.
-pub const WFP_ENGINE_WEDGED_PREFIX: &str = "TONO_WFP_ENGINE_WEDGED";
-/// Windows' Base Filtering Engine service is not running, so no kill switch can be installed.
-pub const BFE_NOT_RUNNING_PREFIX: &str = "TONO_BFE_NOT_RUNNING";
-/// The Service could not be reached at all, so nothing about protection can be read.
-///
-/// Distinct from every marker above: those are answers *from* a running Service. This one
-/// means TonoService itself is not up. It is AutoStart, and it declares a hard dependency on
-/// BFE, so the overwhelmingly common cause is BFE having been turned off by a "network
-/// optimiser" — Windows then refuses to start TonoService at boot and never retries. Without
-/// this marker the App showed only "protected, not connected" with every diagnostic field
-/// reading `(unknown)`, which is unactionable for the customer and for support.
-pub const SERVICE_NOT_RUNNING_PREFIX: &str = "TONO_SERVICE_NOT_RUNNING";
-/// Stable post-lock classifications. The loopback-proxy cross-check distinguishes a selected
-/// node/Core path that works without WinTUN from a failure shared by every Mihomo ingress path.
-/// None of these markers relaxes the real TUN proof required for Connected.
-pub const TUN_DATA_PLANE_BROKEN_PREFIX: &str = "TONO_TUN_DATA_PLANE_BROKEN";
-pub const TUN_INGRESS_BROKEN_PREFIX: &str = "TONO_TUN_INGRESS_BROKEN";
-pub const NODE_OR_CORE_UNREACHABLE_PREFIX: &str = "TONO_NODE_OR_CORE_UNREACHABLE";
-
-/// Translate the Service's stable WFP markers into an actionable message. Returns `None` for
-/// every other error so callers keep the original diagnostic text.
-pub fn map_wfp_engine_error(text: &str) -> Option<String> {
-    if text.contains(BFE_NOT_RUNNING_PREFIX) {
-        return Some(format!(
-            "{BFE_NOT_RUNNING_PREFIX}: Windows 基础筛选引擎 (BFE) 未运行，无法安装网络保护；请以管理员身份运行 `sc start BFE` 后重试"
-        ));
-    }
-    if text.contains(WFP_ENGINE_WEDGED_PREFIX) {
-        return Some(format!(
-            "{WFP_ENGINE_WEDGED_PREFIX}: Windows 防火墙引擎无响应（常见于第三方安全软件挂钩 WFP）；请重启电脑，若仍然如此请暂时退出杀毒/防火墙软件后重试"
-        ));
-    }
-    None
-}
-
-/// Layer the Run State's raw English onto a stable, actionable message.
-/// Everything else keeps the original detail for diagnostics.
-pub fn map_service_ready_error(err: &anyhow::Error) -> String {
-    let text = format!("{err:#}");
-    if text.contains(crate::core::runstate::SERVICE_OPERATION_BUSY)
-        || text.contains(crate::core::runstate::PRIVILEGED_OUTCOME_UNCERTAIN)
-    {
-        return format!(
-            "{SERVICE_BUSY_PREFIX}: Tono Service 正在安装/修复中，请检查是否有待授权的管理员提示；若无反应请重启 Tono"
-        );
-    }
-    // Everything that reaches here is "the Service did not answer", which the App used to
-    // render as raw English with the internal error appended. The detail stays for
-    // diagnostics, but the marker lets the UI say the one thing that actually fixes it.
-    format!("{SERVICE_NOT_RUNNING_PREFIX}: Tono Service is not ready: {text}")
-}
-
-/// Whether a lock failure is the expected "WinTUN still coming up" class that must be
-/// retried, versus a permanent failure that would only burn the connect budget if looped.
-///
-/// Permanent errors (owner mismatch, not armed, WFP engine failure, auth) must not be
-/// retried: each attempt is a full Service lifecycle IPC (up to 65 s), and blind retries
-/// after a transport timeout can also race a still-running lock on the Service side.
-pub fn is_retryable_lock_error(message: &str) -> bool {
-    let lower = message.to_lowercase();
-    // Primary: ConvertInterfaceAliasToLuid failed because the adapter is not registered yet.
-    if lower.contains("did not resolve to a luid") {
-        return true;
-    }
-    // validate_tunnel_luid refuses a non-tunnel LUID while WinTUN is still renaming/initializing.
-    if lower.contains("is not a tunnel device") {
-        return true;
-    }
-    // Transient service lifecycle contention while StartClash is still materializing.
-    if lower.contains("service unavailable") || lower.contains("operation already") || lower.contains("busy") {
-        return true;
-    }
-    false
-}
-
 /// Fail fast when BFE is known stopped. A query failure is not a refusal —
 /// StartClash still diagnoses a wedged or missing engine. StartPending is
 /// allowed through so a machine that is bringing BFE up is not rejected.
@@ -789,358 +621,6 @@ async fn ensure_service_ready() -> Result<(), String> {
         )),
         Err(err) => Err(format!("cannot query the Tono Service protocol: {err}")),
     }
-}
-
-/// The §6 stage sequence, from endpoint computation to `Connected`. The
-/// generation is re-checked at every stage boundary; a moved generation
-/// ends the transaction with no side effects.
-async fn run_stages(
-    state: &Arc<TonoState>,
-    app: &AppHandle,
-    node: &ValidatedNode,
-    nodes: &[ValidatedNode],
-    routing: Option<&tono_core::CatalogRouting>,
-    generation: u64,
-    started: std::time::Instant,
-    transaction: &ConnectTransaction,
-) -> Result<(), StageFailure> {
-    // §6.2: proxy endpoints (public IPv4/port/TCP) from the selected node;
-    // the bootstrap API hosts are the only control-plane recovery channel.
-    // When the catalog binds a home-broadband exit, its endpoint joins the
-    // WFP permit set — otherwise the kill switch would block Mihomo's dial
-    // to the very node the Claude split-routing rules point at. A homeSocks5
-    // upstream is dialed through the tunnel (dialer-proxy), so it never
-    // joins this permit set.
-    let home_socks5 = routing.and_then(|routing| routing.home_socks5.as_ref());
-    let home_node = if home_socks5.is_some() {
-        None
-    } else {
-        routing
-            .and_then(|routing| routing.home_proxy.as_deref())
-            .and_then(|name| nodes.iter().find(|entry| entry.name == name))
-    };
-    let mut proxy_endpoints = vec![proxy_endpoint_of(node)];
-    if let Some(home) = home_node
-        && (home.server != node.server || home.port != node.port)
-    {
-        proxy_endpoints.push(proxy_endpoint_of(home));
-    }
-
-    transaction.check("preparing service")?;
-    set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
-
-    // Revision 12 closes both DNS-owner ordering holes. Reconcile under the authenticated Service
-    // lifecycle lock before the App's loopback:53 availability test: orphaned installed cores and
-    // a still-supervised/recorded core whose WFP+DNS protection is no longer fully proven are
-    // stopped here. A completely protected runtime stays alive until StartClash replaces it;
-    // third-party DNS software is never touched and still fails the bind proof below.
-    let reconciled_cores = transaction
-        .wait("preparing Tono Core ownership", service::tono_prepare_core_start())
-        .await?
-        .map_err(StageFailure::error)?;
-    if reconciled_cores > 0 {
-        logging!(
-            warn,
-            Type::Service,
-            "Tono: Service stopped/reconciled {reconciled_cores} stale Core process(es) before DNS preflight"
-        );
-    }
-
-    // Capture both the policy and its physical egress before WinTUN changes the default route.
-    // Re-reading either after the first Core start can select the Tono adapter itself and makes
-    // the runtime plan disagree with the WFP preflight that was actually performed.
-    let traffic_policy = {
-        let inner = state.lock().await;
-        inner.traffic_policy.clone().map(|document| CapturedTrafficPolicy {
-            revision: inner.policy_tracker.current_revision(),
-            digest: inner.policy_tracker.current_digest().unwrap_or_default().to_owned(),
-            document,
-        })
-    };
-    let needs_physical_interface = WINDOWS_OPTIONAL_DIRECT_ENABLED
-        && traffic_policy.as_ref().is_some_and(|policy| {
-            !policy.document.domains.is_empty()
-                || !policy.document.media_endpoints.is_empty()
-                || !policy.document.web_domains.is_empty()
-                || !policy.document.direct_suffixes.is_empty()
-        });
-
-    // The preparation probes are independent of each other and all read-only /
-    // cancellation-safe (the two port binds are released immediately; the core-path query is a
-    // read IPC), so they run concurrently under one transaction wait instead of paying their
-    // worst cases back to back (the bootstrap DNS lookup alone budgets 2 s):
-    //  - F1: pinned bootstrap IPs merged with the live resolution — the WFP bootstrap permit
-    //    must not depend on the system resolver once blocking starts, and the app's own API
-    //    client is pinned to the same addresses (see `tono::bootstrap` / `tono::transport`).
-    //  - The physical egress interface, still strictly before the first Core start (above).
-    //  - Fresh loopback controller and diagnostic mixed-proxy ports eliminate collisions with
-    //    another proxy or stale fixed listeners. The mixed listener is never a connection proof
-    //    or product proxy: it is used only after a real TUN failure to distinguish node/Core
-    //    egress from the Windows TUN path, and the runtime binds it explicitly to 127.0.0.1.
-    //  - Mihomo's DNS listener still owns loopback:53 and publishes that resolver through the
-    //    TUN endpoint at 198.18.0.2. Prove both listener sockets are available before installing
-    //    WFP rather than timing out after the arm.
-    //  - The Service-side core binary path validation.
-    let (bootstrap_api_hosts, physical_interface_probe, runtime_ports, dns_preflight, active_runtime_resume, core_path, bfe_preflight) =
-        transaction
-            .wait("preparing service", async {
-                refresh_control_plane_pins_from_service(state).await;
-                tokio::join!(
-                    bootstrap_hosts(),
-                    async {
-                        if needs_physical_interface {
-                            Some(detect_physical_interface().await)
-                        } else {
-                            None
-                        }
-                    },
-                    allocate_runtime_ports(),
-                    preflight_dns_listener(),
-                    active_runtime_resume_status(),
-                    service::tono_core_binary_path(),
-                    preflight_bfe(),
-                )
-            })
-            .await?;
-    let runtime_ports = runtime_ports.map_err(StageFailure::error)?;
-    bfe_preflight.map_err(StageFailure::error)?;
-    let controller_port = runtime_ports.controller_port;
-    let mixed_port = runtime_ports.mixed_port;
-    if let Err(error) = dns_preflight {
-        if active_runtime_resume.is_some() {
-            // The old, strongly proven same-owner Core is expected to own TCP/UDP loopback:53.
-            // StartClash first re-arms WFP and then replaces that Core under the Service lifecycle
-            // gate, so bypassing this one availability probe creates no direct-traffic window.
-            logging!(
-                info,
-                Type::Service,
-                "Tono: authenticated active runtime owns protected DNS; admitting fail-closed startup replacement ({error})"
-            );
-        } else {
-            return Err(StageFailure::error(error));
-        }
-    }
-    let core_path = core_path.map_err(StageFailure::error)?;
-    let physical_interface = match physical_interface_probe {
-        Some(interface) => {
-            match interface {
-                Ok(interface) => {
-                    tono_core::config::DirectPlan::validate_physical_interface(&interface)
-                        .map_err(StageFailure::error)?;
-                    Some(interface)
-                }
-                Err(error) => {
-                    // The cloud DIRECT overlay is optional. A machine with a virtual-only
-                    // default route (or an adapter transition) must keep the proven full-tunnel
-                    // runtime rather than turning an unrelated VMware/Hyper-V condition into a
-                    // connection failure. WFP still has no physical DIRECT permits in this case.
-                    logging!(
-                        warn,
-                        Type::Service,
-                        "Tono: physical uplink discovery failed; skipping optional cloud DIRECT policy: {error}"
-                    );
-                    None
-                }
-            }
-        }
-        None => None,
-    };
-    // §5: the owned runtime carries a fresh random controller secret; only
-    // the redacted copy may touch disk.
-    let secret = generate_controller_secret();
-    let runtime =
-        build_owned_runtime_with_ports(nodes, &node.name, &secret, None, home_node.map(|home| home.name.as_str()), home_socks5, runtime_ports).map_err(StageFailure::error)?;
-    // Under the transaction like every other stage on this path. `apply_cloud_policy`'s copy is
-    // already covered because that whole stage runs inside a `wait`; this one was the only
-    // uncovered await in `run_stages`, and an %APPDATA% redirected to an offline share parks it
-    // where the `CONNECT_TRANSACTION_TIMEOUT` budget cannot reach — Connecting forever, every retry then rejected as
-    // "already connecting". The write itself never fails the connect (see `write_redacted_copy`),
-    // so this wait only trips when the budget was already spent.
-    transaction
-        .wait(
-            "writing redacted runtime copy",
-            write_redacted_copy(state, &runtime.redacted_yaml()),
-        )
-        .await?;
-    let bundle = RuntimeBundle {
-        yaml: runtime.yaml().to_string(),
-        assets: Vec::new(),
-        remote_providers: Vec::new(),
-        core_path: core_path.to_string_lossy().into_owned(),
-    };
-    let kill_switch = KillSwitchConfig {
-        tunnel_interface: config::TUN_DEVICE_NAME.to_string(),
-        proxy_endpoints: proxy_endpoints.clone(),
-        bootstrap_api_hosts: bootstrap_api_hosts.clone(),
-        // Omission = clear (service-side): the first start never carries
-        // direct permits; the cloud-policy stage adds them later if needed.
-        direct_endpoints: Vec::new(),
-    };
-
-    // §6.3: startingKillSwitch — the Service persists intent, installs the
-    // bootstrap WFP policy, writes the runtime copy, and starts the core;
-    // a failure inside is fail-closed on the Service side.
-    set_stage(state, app, ConnectStage::StartingKillSwitch, generation, false, started).await?;
-    ensure_fresh(state, generation).await?;
-    transaction
-        .wait(
-            "starting kill switch and core",
-            start_core_cancellation_safe(state, bundle, kill_switch, generation),
-        )
-        .await??;
-
-    // The WFP policy exists from here on: the machine is fail-closed.
-    {
-        let mut inner = state.lock().await;
-        if inner.connect_generation != generation {
-            // A disconnect/switch bumped us while the StartClash IPC was in
-            // flight; it cannot be retracted. Patch the late arm (H-1).
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
-        }
-        inner.fsm.mark_kill_switch_armed();
-        inner.controller_secret = Some(secret.clone());
-        inner.controller_port = Some(controller_port);
-        commands::emit_status(app, &commands::status_of(&inner));
-    }
-    // Pin every later session-gated mutation to the owner generation created by this StartClash.
-    // A stale detached operation must never consult the mutable global and accidentally adopt a
-    // node switch's replacement session.
-    let service_session = service::active_service_session().map_err(StageFailure::error)?;
-
-    // §6.4 + §6.5: the controller bind and the WinTUN LUID appear independently
-    // after StartClash. Waiting for them in series paid the lock ladder on
-    // every connect even when `/version` was already answering.
-    set_stage(state, app, ConnectStage::StartingTunnel, generation, true, started).await?;
-    set_stage(state, app, ConnectStage::LockingTraffic, generation, true, started).await?;
-    let (controller_ready, lock_ready) = transaction
-        .wait("controller readiness and lock", async {
-            tokio::join!(
-                wait_controller(&secret, controller_port),
-                lock_kill_switch_with_retries(&service_session),
-            )
-        })
-        .await?;
-    controller_ready.map_err(StageFailure::error)?;
-    lock_ready.map_err(StageFailure::error)?;
-
-    // Optional DIRECT is applied only after Connected. The critical path stays full-tunnel.
-
-    // §6.7: securingDNS — snapshot + point resolvers at the protected TUN endpoint, then prove
-    // an ordinary lookup returns a fake-ip address.
-    set_stage(state, app, ConnectStage::SecuringDns, generation, true, started).await?;
-    transaction
-        .wait(
-            "enabling protected DNS",
-            enable_dns_cancellation_safe(state, generation, service_session.clone()),
-        )
-        .await??;
-    if state.lock().await.connect_generation != generation {
-        return Err(stale_after_dns(state, generation).await);
-    }
-    transaction
-        .wait("fake-IP verification", verify_fake_ip())
-        .await?
-        .map_err(StageFailure::error)?;
-
-    // §6.8 + §6.9: checkingExit → verifyingTraffic, as one retryable verification group (C3).
-    let mut kill_status = verify_post_lock(
-        state,
-        app,
-        &secret,
-        controller_port,
-        mixed_port,
-        generation,
-        started,
-        transaction,
-    )
-    .await?;
-
-    // The durable logical-session latch is committed only after every existing check and a
-    // final generation guard. A failure remains an ordinary connect failure.
-    ensure_fresh(state, generation).await?;
-    transaction
-        .wait(
-            "committing verified session",
-            service::tono_mark_kill_switch_verified_for_session(&service_session),
-        )
-        .await?
-        .map_err(StageFailure::error)?;
-    kill_status.verified = true;
-
-    // The Tono runtime owns a fresh HTTP controller port and secret on every connection. The
-    // dashboard reuses the Mihomo plugin's traffic WebSocket, so point that plugin at this
-    // generation before publishing Connected. Updating the protocol last prevents a subscriber
-    // from observing a half-configured HTTP context.
-    configure_owned_controller_for_ui(state, app, &secret, controller_port);
-
-    // §6.10: only now Connected; monitors start.
-    {
-        let mut inner = state.lock().await;
-        if inner.connect_generation != generation {
-            drop(inner);
-            return Err(stale_after_arm(state, generation).await);
-        }
-        inner.kill_switch = Some(kill_status);
-        inner.controller_generation = inner.controller_generation.wrapping_add(1);
-        inner.fsm.mark_session_verified();
-        inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
-        crate::tono::update_handoff::mark_committed();
-        inner.exit_ip = None;
-        inner.exit_org = None;
-        inner.exit_location = None;
-        // M4 seeds must reset on *every* success, not only on disconnect: a
-        // reconnect's own StartClash always changes the core pid and bumps
-        // the netmon counter, so comparing against pre-reconnect values made
-        // the fresh monitor's first poll re-invalidate immediately — a
-        // self-sustaining connect/teardown loop. Clearing them re-enters the
-        // documented "first sample seeds without firing" path.
-        inner.network_events_counter = None;
-        inner.last_core_pid = None;
-        inner.last_restart_count = None;
-        // H5: the debounce timestamp is a monitor seed too. Leaving the previous session's
-        // stamp behind meant a reconnect that completed inside NETWORK_EVENT_DEBOUNCE silently
-        // *discarded* its first genuine event — the counter seed advanced past it, so the event
-        // was lost rather than deferred, and the tunnel stayed green over a changed network.
-        inner.last_network_event_at = None;
-        // F3: every step completed; retry bookkeeping resets.
-        let elapsed = inner
-            .step_started_at
-            .map(|at| at.elapsed().as_millis() as u64)
-            .unwrap_or(0);
-        crate::tono::steps::complete_all(&mut inner.connect_steps, elapsed);
-        inner.retry_attempt = 0;
-        inner.next_retry_at_ms = None;
-        commands::emit_status(app, &commands::status_of(&inner));
-    }
-    state.audit().log(AuditEvent::ConnectOk {
-        node: node.name.clone(),
-        elapsed_ms: started.elapsed().as_millis() as u64,
-    });
-    spawn_network_monitor(state, app).await;
-    spawn_exit_identity_lookup(state, app, generation);
-    let residential_target = if home_socks5.is_some() {
-        Some(config::HOME_SOCKS5_OUTBOUND_NAME.to_owned())
-    } else {
-        home_node.map(|home| home.name.clone())
-    };
-    spawn_control_plane_pin_refresh(state, app, generation, residential_target).await;
-    spawn_optional_direct_after_connected(
-        state,
-        app,
-        node.clone(),
-        nodes.to_vec(),
-        home_node.cloned(),
-        home_socks5.cloned(),
-        secret,
-        controller_port,
-        mixed_port,
-        generation,
-        traffic_policy,
-        physical_interface,
-        service_session,
-    );
-    Ok(())
 }
 
 /// Remember control-plane addresses only from the protected resolver.
