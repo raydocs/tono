@@ -10,7 +10,7 @@ use tono_plugin_core::{MihomoExt as _, models::Protocol};
 use crate::core::service;
 use crate::process::AsyncHandler;
 use crate::tono::{
-    audit::AuditEvent,
+    audit::{self, AuditEvent},
     bootstrap, commands, signed_apps,
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,

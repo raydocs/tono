@@ -8,7 +8,9 @@ use tono_logging::{Type, logging};
 use crate::core::{CoreManager, manager::RunningMode};
 use crate::core::service;
 use crate::process::AsyncHandler;
-use crate::tono::{audit::AuditEvent, commands, connection_plan::stop_core_before_release, state::TonoState};
+use crate::tono::{audit::AuditEvent, commands, state::TonoState};
+#[cfg(not(windows))]
+use crate::tono::connection_plan::stop_core_before_release;
 use super::{BoxedTask, fail_connect};
 
 /// UI budget for an explicit release. The ordered DNS → Core → WFP sequence runs in a detached

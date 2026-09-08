@@ -116,6 +116,7 @@ use probes::{
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
 pub use disconnect::{disconnect, release_explicit};
+#[cfg(test)]
 use disconnect::{EXPLICIT_RELEASE_TIMEOUT, SERVICE_LIFECYCLE_TIMEOUT};
 pub use reconnect::{retry_reconnect_now, schedule_reconnect, schedule_startup_resume_if_proven};
 use reconnect::active_runtime_resume_status;
