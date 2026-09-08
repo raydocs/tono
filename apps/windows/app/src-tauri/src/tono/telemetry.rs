@@ -450,7 +450,7 @@ fn map_protected_route_events(value: &Value, ts: i64) -> Vec<TelemetryEvent> {
         ("BLOCKED", "blockedConnectionCount"),
         ("UNKNOWN", "unknownConnectionCount"),
     ];
-    const DESTINATIONS: [&str; 4] = ["ANTHROPIC", "TURNSTILE", "UPDATE", "TELEMETRY"];
+    const DESTINATIONS: [&str; 5] = ["ANTHROPIC", "TURNSTILE", "PAYMENT", "UPDATE", "TELEMETRY"];
 
     // Protected-route evidence is a privacy boundary: do not clone arbitrary audit fields into
     // the upload. Only the timestamp argument and numeric generation are allowed into the base;
@@ -585,6 +585,21 @@ mod tests {
         assert!(events.iter().all(|e| e.kind != "signInOk"));
         assert_eq!(events[0].kind, "networkChange");
         assert_eq!(events[0].counter, Some(3));
+    }
+
+    #[test]
+    fn payment_route_evidence_preserves_only_the_reviewed_category() {
+        let value = serde_json::json!({
+            "generation":3, "residentialConnectionCount":1,
+            "latestRoute":"RESIDENTIAL", "latestDestination":"PAYMENT",
+            "host":"private-payment.example", "process":"private.exe", "token":"secret"
+        });
+        let events = map_protected_route_events(&value, 100);
+        assert!(events.iter().any(|event| event.code.as_deref() == Some("PAYMENT")));
+        let json = serde_json::to_string(&events).unwrap();
+        for private in ["private-payment", "private.exe", "secret"] {
+            assert!(!json.contains(private));
+        }
     }
 
     #[test]

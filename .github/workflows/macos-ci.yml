@@ -82,6 +82,15 @@ jobs:
       - name: Reload preserves established connections
         run: tooling/scripts/test-reload-preserves-connections.sh
 
+      - name: Install lifecycle recovery safety (no root)
+        run: python3 tooling/scripts/tests/test_helper_install_recovery.py
+
+      - name: Notarization refusal and diagnostic privacy
+        run: python3 tooling/scripts/tests/test_notarize_macos.py
+
+      - name: Candidate signing workflow boundaries
+        run: ruby tooling/scripts/tests/macos-candidate-workflow.test.rb
+
       - name: Sparkle signing tool selection
         run: python3 tooling/scripts/tests/test_sparkle_tool.py
 

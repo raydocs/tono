@@ -28,8 +28,8 @@ extension ConfigPipeline {
     }
 
     /// Validate the credential-bearing residential upstream without ever
-    /// logging its username or password. Invalid optional routing degrades to
-    /// the normal full-tunnel runtime instead of rejecting the catalog.
+    /// logging its username or password. Callers must reject a present value
+    /// when this returns nil; absence and invalidity are not interchangeable.
     static func validatedHomeSocks5(
         _ upstream: TonoExitCatalogHomeSocks5?
     ) -> TonoExitCatalogHomeSocks5? {
@@ -61,6 +61,28 @@ extension ConfigPipeline {
             username: upstream.username,
             password: upstream.password
         )
+    }
+
+    /// Admission before a catalog may replace the verified cache. A default
+    /// selector is a hint; a declared residential identity is a requirement.
+    static func validateRequiredResidentialRouting(
+        _ routing: TonoExitCatalogRouting?,
+        nodes: [ProxyNode]
+    ) throws {
+        guard let routing else { return }
+        if let upstream = routing.homeSocks5 {
+            guard validatedHomeSocks5(upstream) != nil else {
+                throw TonoInjectionError.unsafeOverlay
+            }
+        } else if let rawName = routing.homeProxy {
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanName = ConfigParser.extractFlag(from: name).cleanName
+            guard !name.isEmpty, nodes.contains(where: {
+                $0.name == name || ConfigParser.extractFlag(from: $0.name).cleanName == cleanName
+            }) else {
+                throw TonoInjectionError.unsafeOverlay
+            }
+        }
     }
 
     /// The terminal that the owned runtime actually admits for the residential
