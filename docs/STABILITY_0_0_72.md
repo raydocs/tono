@@ -367,3 +367,26 @@ and reported a remaining Service. This is not evidence that the actual product
 uninstaller failed. The harness now uses the supported location, disposes its
 ServiceController handles, and records primary and cleanup errors separately.
 The original failed run/report is preserved; no installer safety rule changed.
+
+The corrected **real** installation smoke passes:
+https://github.com/raydocs/tono/actions/runs/34203373542
+Its retained report records `freshInstall`, `sameVersionRepair`, `uninstall`, and
+`dnsUnchanged` all true; `physicalUpgradeQualified` remains false. Service startup,
+installed Core/hash agreement, no GUI auto-launch, replacement/restart, and
+Service/runtime removal were actually exercised on the hosted Windows machine.
+No lower-level product behavior was altered to make this pass.
+
+Downloaded installer bytes were independently SHA-256 checked locally against
+the CI manifest:
+
+- File: `Tono_0.0.72_x64-setup.exe`
+- SHA-256: `1c8aa75896c796112f2f09a9b875d4123271f984f8b11973d98c8ffa272623a7`
+- Artifact source: `90dde3c771428edc2ab7dce8b7ad75ffe0082e7e`
+- Local artifact: `artifacts/stability-0072/windows-candidate-90dde3c/`
+- The source manifest explicitly retains `releaseAccepted: false`.
+
+The current Mac app tree equals the successful `bec56f9` app tree
+(`e6c82c9d2d49cca26728840f1a622a614cabdbf0`). Windows app/service/core and its
+candidate build workflow/patch inputs likewise remain identical to the artifact
+source. Subsequent changes only correct the hosted smoke harness and document
+its results; they do not relabel a different binary as tested.
