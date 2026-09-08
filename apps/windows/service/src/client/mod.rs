@@ -1,4 +1,7 @@
-use std::{future::Future, path::Path, sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
+
+#[cfg(unix)]
+use std::path::Path;
 
 #[cfg(windows)]
 use anyhow::Result;
@@ -16,7 +19,7 @@ mod windows_identity;
 use crate::{
     AuthenticatedRequest, AuthenticatedSessionRequest, BootstrapPins, DirectRuntimeReloadResult,
     DnsProtectionStatus, FinalizeDirectRuntimeReloadRequest, IPC_AUTH_EXPECT, IPC_PATH, IpcCommand,
-    KillSwitchLockRequest, KillSwitchStatus, MIN_REQUIRED_SERVICE_REVISION, MacosProxyConfig,
+    KillSwitchLockRequest, KillSwitchStatus, MacosProxyConfig,
     OwnerCredentials, OwnerSessionProof, ProtocolInfo, ProtocolVersion, ProxyApplyOutcome,
     RenewDirectRuntimeReloadRequest, ReplaceDirectEndpointsRequest, ReplaceProxyEndpointsRequest,
     RuntimeBundle,
@@ -378,13 +381,6 @@ async fn connect_with_max_retries(max_retries: Option<usize>) -> Result<IpcHttpC
     Ok(client)
 }
 
-/// Synchronous by design and synchronous in fact — an async caller must offload it, the way
-/// [`is_reinstall_service_needed`] does, rather than probe the pipe namespace from a runtime
-/// worker.
-pub fn is_ipc_path_exists() -> bool {
-    Path::new(IPC_PATH).exists()
-}
-
 /// Liveness probe: prove a verified transport can be built, and drop it again.
 ///
 /// The client itself is deliberately never handed out (see [`connect_with_max_retries`]) — on
@@ -694,22 +690,6 @@ pub async fn remember_bootstrap_pins(
         Some(STATUS_TIMEOUT),
     )
     .await
-}
-
-pub async fn is_reinstall_service_needed() -> bool {
-    // `Path::exists` is a synchronous filesystem probe, and on Windows it touches the pipe
-    // namespace itself. Keep it off the caller's runtime for the same reason the request path
-    // is kept off it; a probe that cannot answer counts as no pipe at all.
-    let ipc_path_exists = run_blocking(CONNECT_PHASE_BUDGET, || Ok(is_ipc_path_exists()))
-        .await
-        .unwrap_or(false);
-    ipc_path_exists
-        && match get_version().await {
-            Ok(resp) => resp.data.is_none_or(|info| {
-                !info.supports_client(ProtocolVersion::current(), MIN_REQUIRED_SERVICE_REVISION)
-            }),
-            Err(_) => true,
-        }
 }
 
 /// Ask the authenticated Service to reconcile Tono-installed Core processes before the App probes

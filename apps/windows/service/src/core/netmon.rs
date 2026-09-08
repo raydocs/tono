@@ -70,11 +70,6 @@ pub fn note_power_event() {
     note_event("power-event");
 }
 
-/// Bounded recent-event log for `/status` reporting.
-pub fn recent_events() -> Vec<String> {
-    EVENTS.lock().unwrap().iter().cloned().collect()
-}
-
 /// The pollable counter + latest-event summary the product layer watches via `/status`.
 pub fn status() -> crate::core::structure::NetworkEventsStatus {
     crate::core::structure::NetworkEventsStatus {
@@ -266,9 +261,6 @@ mod tests {
         for index in 0..(super::MAX_RECORDED_EVENTS + 8) {
             super::note_event(&format!("test-event-{index}"));
         }
-        let events = super::recent_events();
-        assert_eq!(events.len(), super::MAX_RECORDED_EVENTS);
-        assert!(events.last().unwrap().contains("test-event-"));
         assert!(super::change_count() >= super::MAX_RECORDED_EVENTS as u64);
     }
 

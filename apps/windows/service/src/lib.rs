@@ -43,7 +43,7 @@ pub use core::{
     stop_ipc_server,
 };
 #[cfg(all(feature = "standalone", windows))]
-pub use core::{note_power_event, recent_network_events, start_network_monitor};
+pub use core::{note_power_event, start_network_monitor};
 
 #[cfg(feature = "test")]
 pub use core::test_owner_credentials;
