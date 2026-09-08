@@ -9,8 +9,15 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 }
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Administrator runner required.' }
-$target = Join-Path $env:ProgramFiles 'Tono-CI-Candidate'
-if ((Test-Path $target) -or (Get-Service TonoService -ErrorAction SilentlyContinue)) { throw 'Refusing a runner with an existing Tono installation.' }
+function Test-TonoServiceExists {
+    $service = Get-Service TonoService -ErrorAction SilentlyContinue
+    if ($null -eq $service) { return $false }
+    try { return $true } finally { $service.Dispose() }
+}
+# installer.nsi intentionally overrides /D= to protect the privileged runtime.
+# Exercise that real Program Files location, not an unsupported test directory.
+$target = Join-Path $env:ProgramFiles 'Tono'
+if ((Test-Path $target) -or (Test-TonoServiceExists)) { throw 'Refusing a runner with an existing Tono installation.' }
 $installers = @(Get-ChildItem -LiteralPath $CandidateDirectory -Filter '*-setup.exe')
 if ($installers.Count -ne 1) { throw 'Exactly one candidate installer is required.' }
 $installer = $installers[0].FullName
@@ -33,7 +40,12 @@ function Dns-State {
 }
 function Assert-Installed {
     $service = Get-Service TonoService
-    $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
+    try {
+        $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
+    } finally {
+        # An open ServiceController handle can defer SCM deletion during cleanup.
+        $service.Dispose()
+    }
     $pin = (Get-Content (Join-Path $target 'resources/core-sha256.txt') -Raw).Trim()
     $actual = (Get-FileHash (Join-Path $target 'tono-core.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($pin -ne $actual) { throw 'Installed Core and pin disagree.' }
@@ -46,14 +58,18 @@ $beforeDns = Dns-State
 $report = [ordered]@{ source = $manifest.source; version = $manifest.version; freshInstall = $false; sameVersionRepair = $false; uninstall = $false; dnsUnchanged = $false; physicalUpgradeQualified = $false }
 $out = Join-Path $env:RUNNER_TEMP 'tono-installer-smoke.json'
 try {
-    Invoke-Installer $installer "/S /D=$target"
+    Invoke-Installer $installer '/S'
     Assert-Installed
     $report.freshInstall = $true
     Write-Output 'PASS fresh silent install, Service running, installed Core pin, no GUI auto-launch'
-    Invoke-Installer $installer "/S /UPDATE /D=$target"
+    Invoke-Installer $installer '/S /UPDATE'
     Assert-Installed
     $report.sameVersionRepair = $true
     Write-Output 'PASS same-version replacement/repair and Service restart'
+} catch {
+    $report['primaryError'] = $_.Exception.Message
+    Write-Warning "Primary installer smoke failure: $($_.Exception.Message)"
+    throw
 } finally {
     $uninstaller = Join-Path $target 'uninstall.exe'
     try {
@@ -61,8 +77,8 @@ try {
             # _?= keeps NSIS in this waited process instead of spawning a temp copy.
             Invoke-Installer $uninstaller "/S _?=$target"
         }
-        for ($i = 0; $i -lt 30 -and (Get-Service TonoService -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Seconds 1 }
-        if (Get-Service TonoService -ErrorAction SilentlyContinue) { throw 'TonoService remains after uninstall.' }
+        for ($i = 0; $i -lt 30 -and (Test-TonoServiceExists); $i++) { Start-Sleep -Seconds 1 }
+        if (Test-TonoServiceExists) { throw 'TonoService remains after uninstall.' }
         foreach ($name in @('Tono.exe', 'tono-core.exe', 'resources/tono-service.exe')) {
             if (Test-Path (Join-Path $target $name)) { throw "Runtime payload remains after uninstall: $name" }
         }
@@ -70,6 +86,10 @@ try {
         $report.dnsUnchanged = ((Dns-State) -eq $beforeDns)
         if (-not $report.dnsUnchanged) { throw 'Runner DNS changed across unconfigured install/repair/uninstall.' }
         Write-Output 'PASS uninstall removed Service/runtime payload and preserved DNS'
+    } catch {
+        $report['cleanupError'] = $_.Exception.Message
+        Write-Warning "Cleanup failure: $($_.Exception.Message)"
+        throw
     } finally {
         $report | ConvertTo-Json | Set-Content $out
     }

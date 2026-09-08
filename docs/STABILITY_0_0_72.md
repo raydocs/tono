@@ -358,3 +358,12 @@ The owner offered a real Windows machine for further testing. Amp's private
 runner is not assumed accessible here; SSH or a separately secured execution
 channel must first be established, with the machine's interruption/reboot scope
 explicit. No connection details or permission to alter that machine are assumed.
+
+The first installer smoke (`34203017032`) failed before qualifying a fresh
+install. Its test harness incorrectly expected `/D=...\Tono-CI-Candidate` to
+control the destination; production deliberately overrides `/D=` and installs
+under Program Files\Tono. Cleanup therefore looked for the wrong uninstaller
+and reported a remaining Service. This is not evidence that the actual product
+uninstaller failed. The harness now uses the supported location, disposes its
+ServiceController handles, and records primary and cleanup errors separately.
+The original failed run/report is preserved; no installer safety rule changed.
