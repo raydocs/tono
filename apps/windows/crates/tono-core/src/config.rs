@@ -152,7 +152,7 @@ pub const HOME_SOCKS5_OUTBOUND_NAME: &str = "Tono-Home-Residential";
 /// the desktop apps. `google.com`, `googleapis.com`, and `gstatic.com`
 /// stay out: they are shared by Search, YouTube, Gmail, and Tono's own
 /// exit probe. Gemini is pinned by its product hostnames instead.
-pub const CLAUDE_HOME_DOMAINS: [&str; 50] = [
+pub const CLAUDE_HOME_DOMAINS: [&str; 55] = [
     "anthropic.com",
     "claude.ai",
     "claude.com",
@@ -176,9 +176,14 @@ pub const CLAUDE_HOME_DOMAINS: [&str; 50] = [
     "browser-intake-datadoghq.eu",
     "browser-intake-ddog-gov.com",
     "datadoghq.com",
+    "statsig.com",
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
+    "stripe.com",
+    "stripecdn.com",
+    "link.com",
+    "hcaptcha.com",
     "stripe.network",
     // Claude Code install/update dependencies and Claude Desktop essential
     // telemetry. Keep these exact suffixes rather than routing node.exe: npm
@@ -719,12 +724,12 @@ fn runtime_value(
     // exit). Connect no longer treats `/delay` as the data-plane verdict, so
     // the doubled request cannot stall the fail-closed TUN check.
     put(&mut root, "unified-delay", Value::Bool(true));
-    let process_lookup = home.is_some() || home_socks5.is_some() || direct.is_some();
-    put(
-        &mut root,
-        "find-process-mode",
-        string(if process_lookup { "strict" } else { "off" }),
-    );
+    // Activity is an all-application view, not just a view of PROCESS rules.
+    // `strict` may skip lookup when an earlier destination rule matched (notably
+    // Claude residential traffic), and `off` loses every cloud-only attribution.
+    // Ask the local desktop core to look up every flow. Lookup can still fail:
+    // never infer an application from a hostname or promise complete coverage.
+    put(&mut root, "find-process-mode", string("always"));
     let mut profile = Mapping::new();
     // Never let a stale cache.db choice resurrect an old selection.
     put(&mut profile, "store-selected", Value::Bool(false));
@@ -1101,6 +1106,22 @@ reality-opts:
     }
 
     #[test]
+    fn activity_process_attribution_is_requested_for_every_owned_route_mode() {
+        // Destination rules can match before PROCESS rules. `strict` then leaves
+        // Claude/CDN/browser rows unattributed; cloud-only `off` never looks up.
+        for runtime in [
+            build(),
+            build_with_home(Some("US Reality 01")),
+            build_with_home_socks5(Some(&home_socks5())),
+        ] {
+            assert_eq!(
+                get(&parsed(&runtime), &["find-process-mode"]).as_str(),
+                Some("always"),
+            );
+        }
+    }
+
+    #[test]
     fn forces_top_level_control_values() {
         let value = parsed(&build());
         assert_eq!(get(&value, &["mixed-port"]).as_i64(), Some(28990));
@@ -1110,7 +1131,7 @@ reality-opts:
         assert_eq!(get(&value, &["mode"]).as_str(), Some("rule"));
         assert_eq!(get(&value, &["log-level"]).as_str(), Some("warning"));
         assert_eq!(get(&value, &["unified-delay"]).as_bool(), Some(true));
-        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("off"));
+        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
         assert_eq!(
             get(&value, &["profile", "store-selected"]).as_bool(),
             Some(false)
@@ -1928,6 +1949,7 @@ reality-opts:
     #[test]
     fn home_domains_cover_reviewed_assistants_without_google_at_large() {
         for required in [
+            "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "statsig.com",
             "openai.com",
             "chatgpt.com",
             "anthropic.com",
@@ -2299,7 +2321,7 @@ reality-opts:
     #[test]
     fn home_build_adds_the_dedicated_group_rules_and_route_exclusion() {
         let value = parsed(&build_with_home(Some("US Reality 01")));
-        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("strict"));
+        assert_eq!(get(&value, &["find-process-mode"]).as_str(), Some("always"));
 
         let groups = get(&value, &["proxy-groups"]).as_sequence().unwrap();
         assert_eq!(groups.len(), 2);

@@ -228,7 +228,7 @@ nonisolated struct ConfigPipeline {
     /// Only first-party provider domains belong here, plus the exact install,
     /// update and telemetry hosts in Anthropic's published network requirements.
     /// Shared infrastructure the public AI rule lists bundle in — auth0,
-    /// stripe.com, statsig.com, segment, cloudflare.net, googleapis.com at
+    /// segment, cloudflare.net, googleapis.com at
     /// large, and gstatic.com — is used by
     /// thousands of unrelated apps, so routing it here would push ordinary
     /// traffic onto a consumer uplink. `gstatic.com` would be actively harmful:
@@ -261,11 +261,12 @@ nonisolated struct ConfigPipeline {
         "browser-intake-datadoghq.eu",
         "browser-intake-ddog-gov.com",
         "datadoghq.com",
-        "statsigapi.net",
+        "statsig.com", "statsigapi.net",
         "featuregates.org",
         "growthbook.io",
-        // Stripe Fraud Telemetry (Radar)
-        "stripe.network",
+        // Payments, Link, CDN and challenge dependencies intentionally share
+        // the residential identity across every browser (not just Radar).
+        "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "stripe.network",
         // Claude Code install/update dependencies and Claude Desktop essential
         // telemetry. Exact suffixes avoid sending every node process, Google
         // API or GitHub request over the residential hop.

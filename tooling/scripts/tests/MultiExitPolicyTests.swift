@@ -267,6 +267,11 @@ struct MultiExitPolicyTests {
             throw TestFailure("Claude home route must demand process lookup")
         }
         let claudeHomeRequired = [
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,stripe.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,stripecdn.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,link.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,hcaptcha.com)),\(ConfigPipeline.claudeHomeGroupName)",
+            "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,statsig.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "name: \"\(ConfigPipeline.claudeHomeGroupName)\"",
             "AND,((NETWORK,TCP),(PROCESS-NAME,Claude)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(PROCESS-NAME,claude)),\(ConfigPipeline.claudeHomeGroupName)",
@@ -326,7 +331,8 @@ struct MultiExitPolicyTests {
         }
 
         // Every named assistant provider must ride the residential hop, and the
-        // shared infrastructure the public AI rule lists bundle in must not:
+        // Unrelated shared infrastructure must stay off home; reviewed payment
+        // dependencies are now an explicit browser-independent exception:
         // gstatic.com in particular is this group's own liveness probe, so
         // routing it here would test the hop through itself.
         for provider in ConfigPipeline.assistantHomeDomainSuffixes {
@@ -346,7 +352,7 @@ struct MultiExitPolicyTests {
         guard !claudeSocks5Runtime.contains("2607:6bc0") else {
             throw TestFailure("IPv6 home CIDRs must not ship while the runtime is ipv6: false")
         }
-        for shared in ["gstatic.com", "auth0.com", "stripe.com", "statsig.com", "googleapis.com", "x.com"] {
+        for shared in ["gstatic.com", "auth0.com", "googleapis.com", "x.com"] {
             guard !claudeSocks5Runtime.contains(
                 "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,\(shared))),\(ConfigPipeline.claudeHomeGroupName)"
             ) else {
@@ -1407,6 +1413,8 @@ struct MultiExitPolicyTests {
             "api.anthropic.com", "anthropic.com", "claude.ai", "www.claude.ai",
             "claude.com", "cdn.claudeusercontent.com",
             "challenges.cloudflare.com", "events.statsig.com",
+            "js.stripe.com", "checkout.stripe.com", "a.stripecdn.com",
+            "checkout.link.com", "newassets.hcaptcha.com",
             "browser-intake-us5.datadoghq.com", "sentry.io",
             "tono.app", "api.tono.app", "tono.com",
         ] {

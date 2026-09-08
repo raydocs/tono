@@ -89,7 +89,7 @@ pub use crate::tono::connection_plan::stop_core_before_release;
 pub(crate) use crate::tono::connection_routes::{
     ANTHROPIC_DESTINATIONS, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES,
     ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections,
-    TELEMETRY_DESTINATIONS, TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route,
+    PAYMENT_DESTINATIONS, TELEMETRY_DESTINATIONS, TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route,
     new_direct_samples, observe_protected_routes, protected_destination,
 };
 
@@ -2956,6 +2956,7 @@ mod tests {
         for destination in [
             super::ANTHROPIC_DESTINATIONS,
             super::TURNSTILE_DESTINATIONS,
+            super::PAYMENT_DESTINATIONS,
             super::UPDATE_DESTINATIONS,
             super::TELEMETRY_DESTINATIONS,
         ]

@@ -570,3 +570,63 @@ for Chrome and Edge (one persisted preference store), without logging browser
 contents or altering preferences/DNS. This is not the signed-app connection or
 post-connect browser-change qualification required by #17/#42. Noninteractive
 root is unavailable; no privileged Mac test or helper installation was attempted.
+
+### b489ea1 physical UI follow-up and payment-dependency route audit
+
+Candidate `b489ea1687a88e763ef05e224b5e234a80f6ba68` passed Windows CI
+`34216891023` and candidate build `34216890531`. Its exact unsigned candidate
+installer (SHA-256 `832b076d5f2dc2cd6a1db193b82361767ee13a2186d9e939750a7aac35a68555`)
+installed successfully on the owner-authorized Windows device, without reboot.
+Installed GUI/Core/Service hashes matched the candidate manifest at installation.
+Physical Apps/Connections case-insensitive domain search, nonmatching search, and
+cold-launch unknown-protection copy in both the main window and tray passed.
+Normal Repair followed by reconnect again proved live/verified locked protection
+and protected DNS. The later unprivileged Service hash read was denied by its ACL;
+that is not evidence that the executable disappeared. Final cleanup and the next
+candidate's installed-byte checks remain separate requirements.
+
+The owner's subsequent **metadata-only** routing audit found an actual dependency
+gap, not merely an empty Activity table. On b489ea1, controlled certificate-verified
+TLS connections to `js.stripe.com`, `link.com` and `hcaptcha.com` appeared on the
+cloud route, while `m.stripe.network` appeared on the residential route. Claude
+Desktop's challenge requests could already use the residential PROCESS rule,
+which did not cover the same dependency reached by an arbitrary browser. One
+`a.stripecdn.com` baseline handshake timed out; it is not recorded as a successful
+connection. No payment, account login, request body, cookies or browser history
+were submitted or collected. Private device artifacts remain ignored under
+`artifacts/stability-0072/windows-device/traffic-audit/`.
+
+Corrections under verification:
+
+- Add `stripe.com`, `stripecdn.com`, `link.com`, `hcaptcha.com`, and the previously
+  DIRECT-protected-but-not-home-routed `statsig.com` to both desktop residential
+  destination lists. Payment dependencies are an intentional shared-domain
+  exception, independent of the application/browser. Unknown traffic keeps its
+  existing default; no geographic-IP heuristic or global home fallback is added.
+- Keep the Mac/Windows/control-plane protected-DIRECT lists equal, so even a
+  signed policy cannot move payment dependencies onto the physical interface.
+- Include these dependencies in local protected-route observation. Windows emits
+  a bounded `PAYMENT` category without uploading raw hosts, processes or secrets.
+- Request process attribution for every owned Windows runtime, rather than only
+  when a PROCESS rule needs it. This is not a guarantee that lookup always works.
+  Preserve process-only DIRECT evidence and enforce the 512-sample cap *inside*
+  each batch. Activity no longer guesses that every `Claude.exe` is Claude Code.
+
+Source rationale: [Stripe's domain requirements](https://docs.stripe.com/ips),
+[Stripe's Link integration security guidance](https://github.com/stripe/ai/blob/main/skills/stripe-best-practices/references/security.md),
+and [Mihomo process lookup modes](https://github.com/MetaCubeX/Meta-Docs/blob/main/docs/config/general.en.md).
+The residential selector remains single-member; the cloud dialer is transport for
+the residential SOCKS hop, not a permitted final-egress fallback. Existing generated
+runtime tests enforce that distinction. New physical candidate routing proof is
+still required. This is not exhaustive qualification for custom payment domains,
+bank-hosted 3DS redirects, encrypted unnamed browser flows, connections shorter
+than sampling intervals, crash-time leaks or protected update lifecycle #26.
+The proposed per-browser expansion was stopped following the owner's clarification;
+Comet/Tabbit read-only reconnaissance did not change browser settings or product
+browser support.
+
+Local correction checks: 219 portable core tests, 425 Mac-hosted App library
+tests, 216 frontend tests, 329 Worker tests, frontend/Worker typechecks, policy
+parity, and all 12 nonprivileged Mac umbrella suites pass. Six privileged/data-
+plane Mac checks remain explicitly skipped; hosted Windows and new installed-byte
+payment-route verification are still pending.

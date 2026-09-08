@@ -245,10 +245,11 @@ describe('Activity connection presentation', () => {
     expect(JSON.stringify(row)).not.toContain('private-user')
   })
 
-  it('maps Cursor, VS Code, and Claude Code process names to product families', () => {
+  it('maps product families without claiming ambiguous Claude executables are Code', () => {
     expect(activityProcessFamily('Cursor.exe')).toBe('Cursor')
     expect(activityProcessFamily('Code.exe')).toBe('Code')
-    expect(activityProcessFamily('claude.exe')).toBe('ClaudeCode')
+    expect(activityProcessFamily('claude.exe')).toBe('Claude')
+    expect(activityProcessFamily('Claude.exe')).toBe('Claude')
     expect(
       toActivityRow(
         connection('cursor', {

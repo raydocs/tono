@@ -105,7 +105,9 @@ export const isWeChatActivityProcess = (
 const ACTIVITY_FAMILY_STEMS: Record<string, string> = {
   cursor: 'Cursor',
   code: 'Code',
-  claude: 'ClaudeCode',
+  // Desktop and the native CLI both use Claude.exe on Windows. The basename
+  // alone cannot prove which one owns the flow; never label Desktop as Code.
+  claude: 'Claude',
   chatgpt: 'ChatGPT',
   grok: 'Grok',
   chrome: 'Chrome',

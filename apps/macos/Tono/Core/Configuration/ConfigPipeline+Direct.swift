@@ -19,7 +19,7 @@ extension ConfigPipeline {
         "browser-intake-ap2-datadoghq.com",
         "browser-intake-datadoghq.eu", "browser-intake-ddog-gov.com",
         "datadoghq.com", "statsig.com", "statsigapi.net", "featuregates.org",
-        "growthbook.io", "stripe.network", "storage.googleapis.com",
+        "growthbook.io", "stripe.com", "stripecdn.com", "link.com", "hcaptcha.com", "stripe.network", "storage.googleapis.com",
         "registry.npmjs.org", "raw.githubusercontent.com", "formulae.brew.sh",
         "sentry.io",
         "tono.app", "tono.com",
