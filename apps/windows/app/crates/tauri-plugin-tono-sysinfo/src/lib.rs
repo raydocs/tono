@@ -1,5 +1,5 @@
 use std::{
-    fmt::{Debug, Display},
+    fmt::Display,
     time::Instant,
 };
 
@@ -68,21 +68,6 @@ impl Default for AppInfo {
 pub struct Platform {
     pub sysinfo: SysInfo,
     pub appinfo: AppInfo,
-}
-
-impl Debug for Platform {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Platform")
-            .field("system_name", &self.sysinfo.system_name)
-            .field("system_version", &self.sysinfo.system_version)
-            .field("system_kernel_version", &self.sysinfo.system_kernel_version)
-            .field("system_arch", &self.sysinfo.system_arch)
-            .field("app_version", &self.appinfo.app_version)
-            .field("app_core_mode", &self.appinfo.app_core_mode)
-            .field("app_is_admin", &self.appinfo.app_is_admin)
-            .finish()
-    }
 }
 
 impl Display for Platform {
