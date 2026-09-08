@@ -482,3 +482,28 @@ jobs:
             echo "tooling/scripts/publish-macos-appcast.mjs without --dry-run once the"
             echo "GitHub Release for this build is published and immutable."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the exact validated release archive
+        run: |
+          set -eu
+          python3 - <<'PYTHON'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          archive = root / "release" / (os.environ["ARTIFACT_NAME"] + ".zip")
+          receipt = {"source": os.environ["GITHUB_SHA"], "ref": os.environ["GITHUB_REF"],
+                     "version": os.environ["RELEASE_SHORT_VERSION"], "build": os.environ["RELEASE_BUILD"],
+                     "archive": archive.name, "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                     "developerIDSigned": True, "notarized": True, "sparkleSignatureVerified": True,
+                     "physicalInstallAccepted": False, "published": False}
+          (root / "release-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          PYTHON
+
+      - name: Export public signature and provenance for physical acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: macos-release-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/enclosure.sig
+            ${{ runner.temp }}/release-receipt.json
+          if-no-files-found: error
+          retention-days: 7
