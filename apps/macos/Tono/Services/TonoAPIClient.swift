@@ -231,6 +231,7 @@ actor TonoAPIClient {
     }
 
     func adopt(_ auth: TonoAuthResponse) throws {
+        try Task.checkCancellation()
         guard let refresh = auth.refreshToken, !refresh.isEmpty else {
             throw APIError.invalidResponse
         }

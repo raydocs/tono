@@ -265,10 +265,11 @@ extension AccountSession {
     }
 
     func pollDeviceActions() async {
-        guard !systemSleeping else { return }
+        guard !systemSleeping, user != nil, !Task.isCancelled else { return }
+        let revision = accountReadRevision
         do {
             for action in try await api.deviceActions().actions {
-                guard !Task.isCancelled, !systemSleeping else { return }
+                guard !Task.isCancelled, !systemSleeping, accountReadRevision == revision else { return }
                 guard action.expiresAt > Int(Date().timeIntervalSince1970) else {
                     continue
                 }
@@ -330,6 +331,7 @@ extension AccountSession {
                         trafficResearch: nil
                     )
                 }
+                guard !Task.isCancelled, accountReadRevision == revision else { return }
                 try await api.submitDeviceActionResult(id: action.id, result: result)
             }
         } catch {
@@ -340,13 +342,13 @@ extension AccountSession {
 
     func refreshDevicesInBackground() {
         deviceRefreshTask?.cancel()
+        let revision = accountReadRevision
         deviceRefreshTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, accountReadRevision == revision else { return }
             do {
-                let refreshed = try await api.devices().devices
-                guard !Task.isCancelled else { return }
-                devices = refreshed
-                device = refreshed.first(where: { $0.current == true })
+                let published = try await reloadDevices()
+                guard published, !Task.isCancelled, accountReadRevision == revision else { return }
+                device = devices.first(where: { $0.current == true })
             } catch {
                 // Device management can be retried from account settings. A
                 // transient inventory failure must not hold the dashboard.

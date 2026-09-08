@@ -41,7 +41,8 @@ nonisolated private final class HeldAccountProtocol: URLProtocol, @unchecked Sen
 final class AccountSessionRequestTests: XCTestCase {
     private func fixture(
         catalogConsumer: @escaping @MainActor (TonoExitCatalogResponse) async throws -> Void = { _ in },
-        trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Void = { _ in }
+        trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
+        cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in }
     ) -> (AccountSession, URLSession, String, AsyncStream<HeldAccountProtocol>) {
         let host = "\(UUID().uuidString.lowercased()).invalid"
         let (requests, continuation) = AsyncStream<HeldAccountProtocol>.makeStream()
@@ -50,7 +51,7 @@ final class AccountSessionRequestTests: XCTestCase {
         config.protocolClasses = [HeldAccountProtocol.self]
         let transport = URLSession(configuration: config)
         let api = TonoAPIClient(baseURL: URL(string: "https://\(host)")!, keychain: testKeychain(host), session: transport)
-        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer)
+        let account = AccountSession(api: api, keychain: testKeychain(host), sidecar: TonoSidecarService(), descriptorConsumer: { _ in }, catalogConsumer: catalogConsumer, trafficPolicyConsumer: trafficPolicyConsumer, cloudFallbackConsumer: cloudFallbackConsumer)
         account.state = .signedOut
         return (account, transport, host, requests)
     }
@@ -293,7 +294,7 @@ final class AccountSessionRequestTests: XCTestCase {
 
     func testCurrentPolicyStillReachesItsConsumer() async throws {
         var consumed = 0
-        let (account, transport, host, requests) = fixture(trafficPolicyConsumer: { _ in consumed += 1 })
+        let (account, transport, host, requests) = fixture(trafficPolicyConsumer: { policy in consumed += 1; return policy.revision })
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
         try await adoptTestAccount(account)
         let task = Task { await account.refreshManagedTrafficPolicy() }
@@ -307,7 +308,7 @@ final class AccountSessionRequestTests: XCTestCase {
 
     func testLatePolicySuccessDoesNotReachNewAccountConsumer() async throws {
         var consumed = 0
-        let (account, transport, host, requests) = fixture(trafficPolicyConsumer: { _ in consumed += 1 })
+        let (account, transport, host, requests) = fixture(trafficPolicyConsumer: { policy in consumed += 1; return policy.revision })
         defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
         try await adoptTestAccount(account)
         let task = Task { await account.refreshManagedTrafficPolicy() }
@@ -564,8 +565,163 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertEqual(try testKeychain(host).string(for: .refreshToken), "test-only-refresh")
     }
 
+    func testCancelledAuthenticationDoesNotAdoptLateCredentials() async throws {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let entered = AccountResponseGate()
+        let release = AccountResponseGate()
+        let user = try JSONDecoder().decode(TonoUser.self, from: Data(Self.originalUser.utf8))
+        let authentication = Task {
+            await account.authenticate {
+                entered.open()
+                await release.wait() // deliberately non-cooperative completion
+                return TonoAuthResponse(accessToken: "late-access", refreshToken: "late-refresh", user: user, device: nil, enrollment: nil)
+            }
+        }
+        await entered.wait()
+        authentication.cancel()
+        release.open()
+        await authentication.value
+        XCTAssertNil(account.user)
+        XCTAssertNil(try testKeychain(host).string(for: .refreshToken))
+    }
+
+    func testLateDeviceInventoryDoesNotRepopulateASignedOutAccount() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let reload = Task { try await account.reloadDevices() }
+        let request = try await nextRequest(requests)
+        account.user = nil
+        account.state = .signedOut
+        request.respond(status: 200, body: #"{"devices":[{"id":"old-device","name":"Old device"}]}"#)
+        _ = await reload.result
+        XCTAssertTrue(account.devices.isEmpty)
+    }
+
+    func testNewestDeviceInventoryOwnsTheResult() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let first = Task { try await account.reloadDevices() }
+        let firstRequest = try await nextRequest(requests)
+        let second = Task { try await account.reloadDevices() }
+        let secondRequest = try await nextRequest(requests)
+        secondRequest.respond(status: 200, body: #"{"devices":[{"id":"new-device","name":"New device"}]}"#)
+        _ = try await second.value
+        firstRequest.respond(status: 200, body: #"{"devices":[{"id":"old-device","name":"Old device"}]}"#)
+        _ = await first.result
+        XCTAssertEqual(account.devices.map(\.id), ["new-device"])
+    }
+
+    func testLateRevokeFailureDoesNotWriteIntoAnotherAccount() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let target = try JSONDecoder().decode(TonoDevice.self, from: Data(#"{"id":"00000000-0000-0000-0000-000000000007","name":"Old device"}"#.utf8))
+        let revoke = Task { await account.revoke(target) }
+        let request = try await nextRequest(requests)
+        account.user = nil
+        account.state = .signedOut
+        request.respond(status: 400, body: #"{"error":{"message":"old revoke failure"}}"#)
+        await revoke.value
+        XCTAssertNil(account.deviceActionError)
+    }
+
+    func testOlderPolicyResponseDoesNotDowngradeRevisionDiagnostics() async throws {
+        let (account, transport, host, requests) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let first = Task { await account.refreshManagedTrafficPolicy() }
+        let firstRequest = try await nextRequest(requests)
+        let second = Task { await account.refreshManagedTrafficPolicy() }
+        let secondRequest = try await nextRequest(requests)
+        secondRequest.respond(status: 200, body: #"{"revision":8,"json":"fixture","sha256":"fixture"}"#)
+        _ = await second.value
+        firstRequest.respond(status: 200, body: #"{"revision":7,"json":"fixture","sha256":"fixture"}"#)
+        _ = await first.value
+        XCTAssertEqual(account.lastTrafficPolicyRevision, 8)
+    }
+
+    func testCancelledFallbackCannotReactivateProtection() async throws {
+        var activated = false
+        let (account, transport, host, _) = fixture(cloudFallbackConsumer: { _ in activated = true })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let fallback = Task { try await account.activateCloudFallback(resumeProtection: true) }
+        fallback.cancel()
+        _ = await fallback.result
+        XCTAssertFalse(activated)
+    }
+
+    func testPolicyDiagnosticsReportTheActuallyInstalledRevision() async throws {
+        let (account, transport, host, requests) = fixture(trafficPolicyConsumer: { _ in 100 })
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        try await adoptTestAccount(account)
+        let refresh = Task { await account.refreshManagedTrafficPolicy() }
+        let request = try await nextRequest(requests)
+        request.respond(status: 200, body: #"{"revision":7,"json":"fixture","sha256":"fixture"}"#)
+        let accepted = await refresh.value
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(account.lastTrafficPolicyRevision, 100)
+    }
+
+    func testRuntimeMonitorCancellationDrainsBeforeReturning() async {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let entered = AccountResponseGate()
+        let release = AccountResponseGate()
+        var finished = false
+        account.runtimeMonitor = Task {
+            await withTaskCancellationHandler {
+                entered.open()
+                await release.wait()
+                finished = true
+            } onCancel: {
+                Task { @MainActor in release.open() }
+            }
+        }
+        await entered.wait()
+        await account.cancelRuntimeMonitor()
+        XCTAssertTrue(finished)
+        XCTAssertNil(account.runtimeMonitor)
+    }
+
+    func testAccountEntryPointsCannotStartDuringCleanup() async {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host); try? testKeychain(host).remove(.refreshToken) }
+        let release = AccountResponseGate()
+        let cleanup = account.accountLifecycle.enqueueCleanup(kind: .signOut) {
+            await release.wait()
+        }
+        // Even invalid input cannot replace the cleanup's current presentation.
+        await account.requestEmailCode(email: "invalid", deviceName: "fixture")
+        await account.verifyEmailCode("123")
+        XCTAssertEqual(account.state, .signedOut)
+        XCTAssertTrue(account.accountLifecycle.isBusy)
+        release.open()
+        await cleanup.value
+        XCTAssertFalse(account.accountLifecycle.isBusy)
+    }
+
     private static let originalUser = #"{"id":"original","email":"old@example.test"}"#
 
     private static let enabledMethods = #"{"email":{"enabled":true},"apple":{"enabled":false},"google":{"enabled":false}}"#
 
+}
+
+@MainActor
+private final class AccountResponseGate {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func wait() async {
+        guard !opened else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+    func open() {
+        opened = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume() }
+    }
 }

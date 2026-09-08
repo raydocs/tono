@@ -29,6 +29,9 @@ final class AccountSession {
     // enum value. Leaving and returning to the same account/state retires them.
     @ObservationIgnored private(set) var accountReadRevision: UInt64 = 0
     @ObservationIgnored var nextAccountRefreshID: UInt64 = 0
+    @ObservationIgnored var nextDeviceReloadID: UInt64 = 0
+    @ObservationIgnored var nextDeviceRevokeID: UInt64 = 0
+    @ObservationIgnored var nextTrafficPolicyRefreshID: UInt64 = 0
     func invalidateAccountReads() { accountReadRevision &+= 1 }
 
     var user: TonoUser? {
@@ -59,7 +62,7 @@ final class AccountSession {
     let sidecar: TonoSidecarService
     let descriptorConsumer: @MainActor (TonoTransportDescriptor?) async -> Void
     let catalogConsumer: @MainActor (TonoExitCatalogResponse) async throws -> Void
-    let trafficPolicyConsumer: @MainActor (TonoTrafficPolicyResponse) async throws -> Void
+    let trafficPolicyConsumer: @MainActor (TonoTrafficPolicyResponse) async throws -> Int
     let cloudFallbackPreferred: @MainActor () -> Bool
     let cloudFallbackConsumer: @MainActor (Bool) throws -> Void
     let killSwitchDisarmConsumer: @MainActor () async -> Void
@@ -96,6 +99,7 @@ final class AccountSession {
     var lastCatalogFailureMessage: String?
     var lastTrafficPolicyFailureMessage: String?
     var lastTrafficPolicyRevision: Int?
+    @ObservationIgnored let accountLifecycle = AccountLifecycleCoordinator()
     var authMethodsLoading = false
     var hasStartedRestore = false
     var shouldResumeProtection = false
@@ -140,7 +144,7 @@ final class AccountSession {
          exitNode: String = Bundle.main.object(forInfoDictionaryKey: "TonoExitNode") as? String ?? "",
          descriptorConsumer: @escaping @MainActor (TonoTransportDescriptor?) async -> Void,
          catalogConsumer: @escaping @MainActor (TonoExitCatalogResponse) async throws -> Void = { _ in },
-         trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Void = { _ in },
+         trafficPolicyConsumer: @escaping @MainActor (TonoTrafficPolicyResponse) async throws -> Int = { $0.revision },
          cloudFallbackPreferred: @escaping @MainActor () -> Bool = { false },
          cloudFallbackConsumer: @escaping @MainActor (Bool) throws -> Void = { _ in },
          killSwitchDisarmConsumer: @escaping @MainActor () async -> Void = {},

@@ -6,10 +6,8 @@ extension AccountSession {
         invalidateAccountReads()
         pauseAppRoutingResearch()
         runtimeMonitor?.cancel()
-        runtimeMonitor = nil
         catalogSyncTask?.cancel()
         catalogSyncTask = nil
-        await cancelManagedCatalogRefresh()
         deviceRefreshTask?.cancel()
         deviceRefreshTask = nil
         deviceActionTask?.cancel()
@@ -18,6 +16,8 @@ extension AccountSession {
         appRoutingResearchTask = nil
         periodicTelemetryTask?.cancel()
         periodicTelemetryTask = nil
+        await cancelManagedCatalogRefresh()
+        await cancelRuntimeMonitor()
         if logOutIdentity {
             await abandonDiagnosticsLogUploader()
         } else if let uploader = diagnosticsLogUploader {
@@ -42,7 +42,22 @@ extension AccountSession {
     /// NOT ready (crash recovery with an unreachable control plane). Without
     /// it the sign-in gate and menu bar offered no way to restore internet.
     func restoreDirectInternet() async {
-        await releaseNetworkProtection()
+        invalidateAccountReads()
+        await accountLifecycle.enqueueCleanup(kind: .releaseProtection) {
+            await self.cancelRuntimeMonitor()
+            await self.releaseNetworkProtection()
+            self.shouldResumeProtection = false
+            if self.user == nil, self.state == .authenticating || self.state == .restoring {
+                self.state = .signedOut
+            }
+        }.value
+    }
+
+    func cancelRuntimeMonitor() async {
+        let pending = runtimeMonitor
+        runtimeMonitor = nil
+        pending?.cancel()
+        await pending?.value
     }
 
     func releaseNetworkProtection() async {
@@ -112,6 +127,7 @@ extension AccountSession {
         async let trafficPolicyRefresh: Bool = refreshManagedTrafficPolicy()
         await refreshManagedCatalog()
         _ = await trafficPolicyRefresh
+        var monitorHome = false
         if !AppProfile.homeExitEnabled || cloudFallbackPreferred() {
             // A persisted managed-cloud selection is independent of Home-US.
             // While Home-US is disabled, every production launch takes this
@@ -122,7 +138,7 @@ extension AccountSession {
             do {
                 try await sidecar.start(exitNode: exitNode)
                 await descriptorConsumer(try await sidecar.descriptor())
-                startRuntimeMonitor()
+                monitorHome = true
             } catch TonoSidecarService.Error.socksUnavailable {
                 // Enrollment and confirm are already authoritative. Home-US is
                 // an optional data path, so a failed home SOCKS probe must not
@@ -134,7 +150,10 @@ extension AccountSession {
                 try await activateCloudFallback()
             }
         }
+        try Task.checkCancellation()
         state = .ready
+        // Capture the ready read-context, not the startup state it retires.
+        if monitorHome { startRuntimeMonitor() }
         startCatalogSync()
     }
 
@@ -149,8 +168,7 @@ extension AccountSession {
     }
 
     func startCloudOnlyRuntimeThrowing() async throws {
-        runtimeMonitor?.cancel()
-        runtimeMonitor = nil
+        await cancelRuntimeMonitor()
         await descriptorConsumer(nil)
 
         // Terminate a verified legacy Tono sidecar, including one left by an
@@ -169,21 +187,28 @@ extension AccountSession {
 
     func startRuntimeMonitor() {
         runtimeMonitor?.cancel()
+        let revision = accountReadRevision
         runtimeMonitor = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(10))
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, accountReadRevision == revision else { return }
                 if await sidecar.isHealthy(exitNode: exitNode) == false {
+                    guard !Task.isCancelled, accountReadRevision == revision else { return }
                     // Drop the failed Home-US path but KEEP the kill switch
                     // armed. A separately authenticated managed cloud exit
                     // must not depend on the optional home sidecar remaining
                     // healthy after startup.
                     await descriptorConsumer(nil)
+                    guard !Task.isCancelled, accountReadRevision == revision else { return }
                     await sidecar.stop()
+                    guard !Task.isCancelled, accountReadRevision == revision else { return }
                     do {
                         try await activateCloudFallback(resumeProtection: true)
                         state = .ready
+                    } catch is CancellationError {
+                        return
                     } catch {
+                        guard !Task.isCancelled, accountReadRevision == revision else { return }
                         pauseAppRoutingResearch()
                         state = .error(
                             String(localized: "The Tono home transport stopped and no managed cloud exit is available. Internet remains blocked by the kill switch.")
@@ -200,13 +225,20 @@ extension AccountSession {
     /// request can otherwise reuse a control-plane connection invalidated when
     /// PF is armed and its previous states are flushed.
     func activateCloudFallback(resumeProtection: Bool? = nil) async throws {
+        try Task.checkCancellation()
+        guard user != nil else { throw CancellationError() }
+        let revision = accountReadRevision
         let resume = resumeProtection ?? shouldResumeProtection
         do {
             try cloudFallbackConsumer(resume)
             shouldResumeProtection = false
             return
         } catch {
-            guard await refreshManagedCatalog(attempts: 2) else {
+            try Task.checkCancellation()
+            let refreshed = await refreshManagedCatalog(attempts: 2)
+            try Task.checkCancellation()
+            guard accountReadRevision == revision else { throw CancellationError() }
+            guard refreshed else {
                 let detail = lastCatalogFailureMessage.map { " \($0)" } ?? ""
                 throw TonoSidecarService.Error.commandFailed(
                     "Managed cloud catalog is unavailable.\(detail)"

@@ -3,6 +3,10 @@ import Observation
 
 extension AccountSession {
     func restore() async {
+        await accountLifecycle.run { await self.performRestore() }
+    }
+
+    private func performRestore() async {
         guard !hasStartedRestore else { return }
         hasStartedRestore = true
         state = .restoring
@@ -66,8 +70,9 @@ extension AccountSession {
                     state = .suspended
                     return
                 }
-                refreshDevicesInBackground()
                 await startCloudOnlyRuntime()
+                try Task.checkCancellation()
+                if !Task.isCancelled, state == .ready { refreshDevicesInBackground() }
                 return
             }
             // These are independent authenticated reads. TonoAPIClient
@@ -89,6 +94,7 @@ extension AccountSession {
             }
             device = devices.first(where: { $0.current == true })
             await resumeOrEnrollRuntime()
+            try Task.checkCancellation()
         } catch is CancellationError {
             // The restore task is scoped to the SwiftUI window. Closing and
             // recreating that window must be allowed to start a fresh restore
@@ -130,6 +136,7 @@ extension AccountSession {
     /// Retrying only the sign-in-method request would leave an existing refresh
     /// token stranded behind the login screen.
     func retryRestore() async {
+        guard !accountLifecycle.isBusy else { return }
         switch state {
         case .error: break
         case .suspended:
@@ -162,6 +169,12 @@ extension AccountSession {
     }
 
     func requestEmailCode(email: String, deviceName: String) async {
+        await accountLifecycle.run {
+            await self.performEmailCodeRequest(email: email, deviceName: deviceName)
+        }
+    }
+
+    private func performEmailCodeRequest(email: String, deviceName: String) async {
         guard TonoAccountRules.validEmail(email) else {
             state = .error(String(localized: "Enter a valid email address."))
             return
@@ -180,6 +193,7 @@ extension AccountSession {
     }
 
     func verifyEmailCode(_ code: String) async {
+        guard !accountLifecycle.isBusy else { return }
         let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let emailChallenge,
               normalizedCode.count == 6,
@@ -198,6 +212,7 @@ extension AccountSession {
 
     #if DEBUG
     func signInWithApple(deviceName: String) async {
+        guard !accountLifecycle.isBusy else { return }
         guard authMethods?.apple.enabled == true else {
             state = .error(String(localized: "Sign in with Apple is not configured."))
             return
@@ -220,6 +235,7 @@ extension AccountSession {
     }
 
     func signInWithGoogle(deviceName: String) async {
+        guard !accountLifecycle.isBusy else { return }
         guard authMethods?.google.enabled == true,
               let advertisedClientID = authMethods?.google.clientId
         else {
@@ -254,11 +270,19 @@ extension AccountSession {
         // into a later account even when server logout is slow or unavailable.
         deactivateAppRoutingResearch()
         ManagedExitCatalogOwnership.purge()
-        await stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
-        await api.logout(); clearAccount(); state = .signedOut
+        await accountLifecycle.enqueueCleanup(kind: .signOut) {
+            await self.stopRuntime(logOutIdentity: true, releaseKillSwitch: true)
+            await self.api.logout()
+            self.clearAccount()
+            self.state = .signedOut
+        }.value
     }
 
     func retryRuntime() async {
+        await accountLifecycle.run { await self.performRuntimeRetry() }
+    }
+
+    private func performRuntimeRetry() async {
         if !AppProfile.homeExitEnabled {
             await startCloudOnlyRuntime()
         } else if device?.status == "pending" {
@@ -341,21 +365,26 @@ extension AccountSession {
     func refreshManagedTrafficPolicy(attempts: Int = 1) async -> Bool {
         guard user != nil, !Task.isCancelled else { return false }
         let accountRevision = accountReadRevision
+        nextTrafficPolicyRefreshID &+= 1
+        let requestID = nextTrafficPolicyRefreshID
         let boundedAttempts = min(max(attempts, 1), 3)
         for attempt in 0..<boundedAttempts {
-            guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
+            guard !Task.isCancelled, accountReadRevision == accountRevision, nextTrafficPolicyRefreshID == requestID else { return false }
             do {
                 let policy = try await api.trafficPolicy()
-                guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
-                try await trafficPolicyConsumer(policy)
-                guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
+                guard !Task.isCancelled, accountReadRevision == accountRevision, nextTrafficPolicyRefreshID == requestID else { return false }
+                let acceptedRevision = try await trafficPolicyConsumer(policy)
+                guard !Task.isCancelled, accountReadRevision == accountRevision, nextTrafficPolicyRefreshID == requestID else { return false }
+                guard acceptedRevision >= 0 else { throw TonoAPIClient.APIError.invalidResponse }
                 lastTrafficPolicyFailureMessage = nil
-                lastTrafficPolicyRevision = policy.revision
+                // The install owner may have kept a newer verified disk policy.
+                // Report what is active, not merely what this response advertised.
+                lastTrafficPolicyRevision = max(lastTrafficPolicyRevision ?? acceptedRevision, acceptedRevision)
                 return true
             } catch is CancellationError {
                 return false
             } catch {
-                guard !Task.isCancelled, accountReadRevision == accountRevision else { return false }
+                guard !Task.isCancelled, accountReadRevision == accountRevision, nextTrafficPolicyRefreshID == requestID else { return false }
                 // Direct routing is optional. A failed refresh keeps the last
                 // verified policy; an absent policy never becomes clearnet.
                 lastTrafficPolicyFailureMessage =
@@ -369,7 +398,22 @@ extension AccountSession {
         return false
     }
 
-    func reloadDevices() async throws { devices = try await api.devices().devices }
+    @discardableResult
+    func reloadDevices() async throws -> Bool {
+        guard let ownerID = user?.id, !Task.isCancelled else { throw CancellationError() }
+        let revision = accountReadRevision
+        nextDeviceReloadID &+= 1
+        let requestID = nextDeviceReloadID
+        let refreshed = try await api.devices().devices
+        guard !Task.isCancelled, user?.id == ownerID, accountReadRevision == revision else {
+            throw CancellationError()
+        }
+        // A superseded inventory read must not abort its enclosing sign-in;
+        // another current read owns the inventory publication now.
+        guard nextDeviceReloadID == requestID else { return false }
+        devices = refreshed
+        return true
+    }
 
     func clearDeviceActionError() { deviceActionError = nil }
 
@@ -378,6 +422,13 @@ extension AccountSession {
     /// dropping the descriptor over one would take a protected Mac offline
     /// behind an armed kill switch and replace the window with the gate.
     func revoke(_ target: TonoDevice) async {
+        guard let ownerID = user?.id, !Task.isCancelled else { return }
+        let revision = accountReadRevision
+        nextDeviceRevokeID &+= 1
+        let requestID = nextDeviceRevokeID
+        func isCurrent() -> Bool {
+            !Task.isCancelled && user?.id == ownerID && accountReadRevision == revision
+        }
         guard target.id != device?.id && target.current != true else {
             deviceActionError = String(localized: "The current device cannot revoke itself.")
             return
@@ -388,12 +439,14 @@ extension AccountSession {
         } catch is CancellationError {
             return
         } catch {
+            guard isCurrent(), nextDeviceRevokeID == requestID else { return }
             deviceActionError = (error as? LocalizedError)?.errorDescription
                 ?? String(localized: "Something went wrong. Please try again.")
             return
         }
         // The device is revoked either way; only the refreshed inventory is
         // missing, and the next panel appearance reloads it.
+        guard isCurrent() else { return }
         try? await reloadDevices()
     }
 
@@ -515,13 +568,20 @@ extension AccountSession {
         } catch { await fail(error) }
     }
 
-    func authenticate(_ operation: () async throws -> TonoAuthResponse) async {
+    func authenticate(_ operation: @escaping @MainActor () async throws -> TonoAuthResponse) async {
+        await accountLifecycle.run { await self.performAuthentication(operation) }
+    }
+
+    private func performAuthentication(_ operation: @MainActor () async throws -> TonoAuthResponse) async {
         state = .authenticating
         // A failed revoke from the device-limit list belongs to the attempt
         // that raised it, not to the one starting here.
         deviceActionError = nil
         do {
-            let response = try await operation(); try await api.adopt(response)
+            let response = try await operation()
+            try Task.checkCancellation()
+            try await api.adopt(response)
+            try Task.checkCancellation()
             emailChallenge = nil
             user = response.user
             device = response.device

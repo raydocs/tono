@@ -45,6 +45,7 @@ struct TonoApp: App {
             },
             trafficPolicyConsumer: { policy in
                 try await appState.acceptManagedTrafficPolicy(policy)
+                return appState.managedTrafficPolicyRevision
             },
             cloudFallbackPreferred: {
                 appState.prefersManagedCloudExit
