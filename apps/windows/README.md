@@ -3,21 +3,18 @@
 Native Windows client for **Tono** — authenticated accounts, cloud-managed
 VLESS Reality exits, and a fail-closed kill switch.
 
-Tono for Windows is built on a hardened fork of **Clash Verge Rev** (React +
-Tauri + Rust + Mihomo) and its Windows service, into which the complete Tono
-product and security model from the macOS client is transplanted. It replaces
-Clash Verge's open, user-configurable proxy-client model with Tono's closed,
-server-managed, fail-closed model.
+Tono for Windows is Tono's own client: React + Tauri UI, a Rust product
+layer, and a LocalSystem service that owns WFP, DNS, and Mihomo. Production
+binaries, pipes, and core image names are Tono (`Tono.exe`, `TonoService`,
+`tono-core.exe`). Leftover Clash Verge process and token names are read only
+to clean up an upgrade; they are not shipped as the product identity.
 
-It is **not** a port of the macOS SwiftUI client, and **not** a rebranded
-Clash Verge. The GUI, IPC, service, and installer infrastructure comes from
-the fork; every security decision comes from Tono.
+It is **not** a port of the macOS SwiftUI client.
 
-- macOS client: `../Tono` (SwiftUI, PF kill switch, privileged helper)
-- Windows base client: fork of `clash-verge-rev` (`app/`)
-- Windows base service: fork of `clash-verge-service-ipc` (`service/`)
-- Kill switch references: Proton VPN (`ProtonVPN/win-app`) and Mullvad
-  (`mullvadvpn-app` `winfw`) — see `docs/wfp-kill-switch.md`
+- macOS client: `apps/macos/Tono` (SwiftUI, PF kill switch, `tono-core-helper`)
+- Windows UI + product layer: `app/`
+- Windows service: `service/` (`TonoService.exe`)
+- Kill switch: Windows Filtering Platform, described in `SECURITY.md`
 
 ## Design goals
 
@@ -305,8 +302,8 @@ permit *before* moving the selector, and never fall back to direct.
 ## Kill switch (WFP)
 
 Designed from Proton VPN's proven model, hardened with Mullvad's
-simplicity and Tono's PF semantics. Summary (full rule tables in
-`docs/wfp-kill-switch.md`):
+simplicity and Tono's PF semantics. Rule tables live in
+`service/src/core/wfp.rs`.
 
 - One fixed-GUID persistent provider; one persistent sublayer
   (**tono-kill-switch**, Mullvad-style) holding every rule, layered purely by
@@ -315,7 +312,7 @@ simplicity and Tono's PF semantics. Summary (full rule tables in
   physical DNS leaks; there is deliberately no extra port-53 block, because
   Windows resolver traffic transitions between loopback and the TUN path.
   WFP arbitrates sublayer-first, so "weighted permits over a floor block" is
-  only sound inside a single sublayer (see `docs/wfp-kill-switch.md` §2).
+  only sound inside a single sublayer.
 - `ALE_AUTH_CONNECT_V4/V6` for the outbound fail-closed boundary; IPv6 is
   blocked wholesale at WFP (no adapter reconfiguration needed).
 - Persistent flags only on the condition-free block-all pair; every rule
@@ -332,15 +329,11 @@ simplicity and Tono's PF semantics. Summary (full rule tables in
 ## Repository layout
 
 ```text
-app/        Tono UI + product layer (fork of clash-verge-rev, reduced)
-service/    TonoService (fork of clash-verge-service-ipc, + WFP/DNS/events)
-docs/       architecture.md · product-contract.md · wfp-kill-switch.md ·
-            roadmap.md (phases + acceptance matrix)
+app/        Tono UI + product layer (`Tono.exe`)
+service/    TonoService (`TonoService.exe`, WFP / DNS / Mihomo)
+crates/     tono-core, tono-authenticode, tono-plugin-core
 SECURITY.md security invariants and disclosure
 ```
-
-The forks are imported as source trees (not git submodules) so the product
-can diverge freely; upstream sync is a deliberate, reviewed operation.
 
 ## Development
 

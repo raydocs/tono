@@ -1,4 +1,4 @@
-//! Credential storage abstraction (product-contract.md §2).
+//! Credential storage abstraction.
 //!
 //! The Windows production implementation is a Windows Credential Manager
 //! generic credential (DPAPI-scoped, target `tono/refresh-token`) and lives

@@ -1,4 +1,4 @@
-//! Local traffic audit (product-contract.md §8, macOS `LocalTrafficAudit`
+//! Local traffic audit (macOS `LocalTrafficAudit`
 //! parity subset): a JSONL protection/connection event log with size-capped
 //! rotation, owner-only file protection, and regex redaction for
 //! credentials/URL patterns.

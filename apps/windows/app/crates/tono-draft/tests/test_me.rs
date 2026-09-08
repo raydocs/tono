@@ -9,15 +9,15 @@ mod tests {
     use tokio::time::sleep;
 
     #[derive(Clone, Debug, Default, PartialEq)]
-    struct IVerge {
+    struct TonoPreferences {
         enable_auto_launch: Option<bool>,
         enable_tun_mode: Option<bool>,
     }
 
     const STRESS_LEVELS: [usize; 6] = [8, 16, 32, 64, 128, 256];
 
-    fn verge(enable_auto_launch: bool, enable_tun_mode: bool) -> IVerge {
-        IVerge {
+    fn prefs(enable_auto_launch: bool, enable_tun_mode: bool) -> TonoPreferences {
+        TonoPreferences {
             enable_auto_launch: Some(enable_auto_launch),
             enable_tun_mode: Some(enable_tun_mode),
         }
@@ -29,7 +29,7 @@ mod tests {
 
     #[test]
     fn test_draft_basic_flow() {
-        let draft = Draft::new(verge(true, false));
+        let draft = Draft::new(prefs(true, false));
 
         {
             let data = draft.data_arc();
@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_arc_pointer_behavior_on_edit_and_apply() {
-        let draft = Draft::new(verge(true, false));
+        let draft = Draft::new(prefs(true, false));
 
         let committed = draft.data_arc();
         let latest = draft.latest_arc();
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_discard_restores_latest_to_committed() {
-        let draft = Draft::new(verge(false, false));
+        let draft = Draft::new(prefs(false, false));
 
         draft.edit_draft(|d| d.enable_auto_launch = Some(true));
         let committed = draft.data_arc();
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_edit_draft_returns_closure_result() {
-        let draft = Draft::new(IVerge::default());
+        let draft = Draft::new(TonoPreferences::default());
         let ret = draft.edit_draft(|d| {
             d.enable_tun_mode = Some(true);
             123usize
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_with_data_modify_ok_and_replaces_committed() {
-        let draft = Draft::new(verge(false, false));
+        let draft = Draft::new(prefs(false, false));
 
         let res = block_on_ready(draft.with_data_modify(|mut v| async move {
             v.enable_auto_launch = Some(true);
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_with_data_modify_keeps_boxed_data_shape() {
-        let draft = Draft::new(Box::new(verge(false, false)));
+        let draft = Draft::new(Box::new(prefs(false, false)));
 
         block_on_ready(draft.with_data_modify(|mut v| async move {
             v.enable_auto_launch = Some(true);
@@ -174,10 +174,10 @@ mod tests {
 
     #[test]
     fn test_with_data_modify_error_releases_permit() {
-        let draft = Draft::new(IVerge::default());
+        let draft = Draft::new(TonoPreferences::default());
 
         #[allow(clippy::unwrap_used)]
-        let err = block_on_ready(draft.with_data_modify(|_v| async move { Err::<(IVerge, ()), _>(anyhow!("boom")) }))
+        let err = block_on_ready(draft.with_data_modify(|_v| async move { Err::<(TonoPreferences, ()), _>(anyhow!("boom")) }))
             .unwrap_err();
 
         assert_eq!(format!("{err}"), "boom");
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_with_data_modify_keeps_apply_conflict_detection() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let draft = Arc::new(Draft::new(verge(false, false)));
+        let draft = Arc::new(Draft::new(prefs(false, false)));
         let started = Arc::new(Notify::new());
         let finish = Arc::new(Notify::new());
 
@@ -242,7 +242,7 @@ mod tests {
 
     fn run_with_data_modify_stress(task_count: usize, delay: Duration) {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let draft = Arc::new(Draft::new(verge(false, false)));
+        let draft = Arc::new(Draft::new(prefs(false, false)));
 
         rt.block_on(async {
             let mut handles = Vec::with_capacity(task_count);
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_with_data_modify_does_not_touch_existing_draft() {
-        let draft = Draft::new(verge(false, false));
+        let draft = Draft::new(prefs(false, false));
 
         draft.edit_draft(|d| {
             d.enable_auto_launch = Some(true);

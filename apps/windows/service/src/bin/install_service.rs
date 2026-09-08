@@ -1587,7 +1587,7 @@ fn main() -> anyhow::Result<()> {
         executable_path: target.clone(),
         launch_arguments: vec![],
         // Start after the Base Filtering Engine so the service never races the filtering
-        // engine at boot (docs/wfp-kill-switch.md §1).
+        // engine at boot.
         dependencies: vec![ServiceDependency::Service(OsString::from("BFE"))],
         account_name: None,
         account_password: None,

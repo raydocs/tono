@@ -1,4 +1,4 @@
-//! Connect orchestration (product-contract.md §6).
+//! Connect orchestration.
 //!
 //! Every privileged step goes through the Service IPC wrappers in
 //! `core::service` — the owner/session machinery is never bypassed. The
@@ -16,7 +16,7 @@ use std::{error::Error as _, future::Future, net::IpAddr, sync::Arc, time::Durat
 
 use tono_logging::{Type, logging};
 use tono_service_protocol::{
-    DnsProtectionStatus, KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint,
+    KillSwitchConfig, KillSwitchStatus, KillSwitchStatusMode, OwnerSessionProof, ProxyEndpoint,
     ProxyProtocol, RuntimeBundle, ServiceLifecycleState, ServiceStatusSnapshot, StageRuntimeOutcome,
 };
 use futures::{StreamExt as _, stream::FuturesUnordered};
@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tono_core::{
     EXIT_GROUP_NAME,
     config::{self, RuntimePorts, build_owned_runtime_with_ports, generate_controller_secret},
-    connection::{ConnectStage, ConnectionStatus, ReconnectBackoff},
+    connection::{ConnectStage, ReconnectBackoff},
     node::ValidatedNode,
 };
 
@@ -40,6 +40,25 @@ use crate::{
         bootstrap, catalog_sync, commands, signed_apps,
         state::{AccountState, TonoInner, TonoState},
     },
+};
+
+pub use crate::tono::connection_health::{
+    CORE_MISSING_SUSTAINED_SAMPLES, CoreSample, HEALTH_FAILURE_THRESHOLD, HealthLegs, NETWORK_EVENT_DEBOUNCE,
+    NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires,
+    health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect, network_event_fires,
+    protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
+};
+pub use crate::tono::connection_plan::{
+    FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, reconnect_allowed, retry_now_is_noop,
+    select_action, sign_out_needs_release, single_flight_begin, stale_exit_needs_release,
+};
+#[cfg(any(not(windows), test))]
+pub use crate::tono::connection_plan::stop_core_before_release;
+pub(crate) use crate::tono::connection_routes::{
+    ANTHROPIC_DESTINATIONS, MAX_DIRECT_SAMPLES, MAX_PROTECTED_ROUTE_SAMPLES,
+    ProtectedDestination, ProtectedRoute, ProtectedRouteAggregate, SampledConnections,
+    TELEMETRY_DESTINATIONS, TURNSTILE_DESTINATIONS, UPDATE_DESTINATIONS, classify_protected_route,
+    new_direct_samples, observe_protected_routes, protected_destination,
 };
 
 /// §6.8 exit probe target.
@@ -233,16 +252,6 @@ const SERVICE_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(65);
 const MAX_DIRECT_ENDPOINTS: usize = 256;
 /// network_events poll cadence while Connected.
 const NETWORK_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
-/// H4: consecutive *quiet* missing-core samples before a core change is believed. The Service's
-/// `/status` reports `core_pid: None, restart_count: 0` on a non-error path — whenever its
-/// per-poll `is_active` check reads `Ok(None)` it considers the session inactive — so a single
-/// such sample must not be able to tear a healthy tunnel down. Same treatment as `core_is_gone`
-/// in `core/runstate/owner.rs`.
-const CORE_MISSING_SUSTAINED_SAMPLES: u32 = 2;
-/// P0-13: bursts of network events inside this window merge into a single
-/// invalidation (interface-level filtering — GetBestRoute2 — is the
-/// documented follow-up; the debounce covers the common route-flap storm).
-const NETWORK_EVENT_DEBOUNCE: Duration = Duration::from_secs(2);
 /// F2: exit-probe cadence while Connected (the Mac "9.17 h fake-green"
 /// lesson — a silent tunnel must be caught by probing, not by watching).
 const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(120);
@@ -270,15 +279,6 @@ const NETWORK_EVENT_PROBE_COOLDOWN: Duration = Duration::from_secs(15);
 /// of the very failure it is reporting. Inside this window the last proof still stands; a core
 /// restart or a failed data-plane proof is fresh evidence and is never held back by it.
 const IN_PLACE_RECOVERY_COOLDOWN: Duration = Duration::from_secs(120);
-/// F2: consecutive failures before the tunnel is declared dead.
-///
-/// H7 — the threshold's premise ("two consecutive failures ≈ 4 s of sustained failure") holds
-/// only because the monitor's interval uses [`MissedTickBehavior::Delay`]. Under the default
-/// `Burst`, a tick that overran (each tick makes two named-pipe round trips, and the Windows pipe
-/// connect is synchronous and bounded only by a 30 s guard) is followed by the next tick ~0 ms
-/// later, so two samples milliseconds apart could read the *same* stale value and tear down a
-/// healthy tunnel. Never build the monitor's interval anywhere but [`monitor_interval`].
-pub const HEALTH_FAILURE_THRESHOLD: u32 = 2;
 
 /// The connected-lifetime monitor's tick source (H7). `Delay` re-bases the schedule after a slow
 /// tick, so every threshold in [`HealthLegs`] counts genuinely *separate* observations spaced by
@@ -288,242 +288,6 @@ fn monitor_interval() -> tokio::time::Interval {
     let mut interval = tokio::time::interval(NETWORK_MONITOR_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     interval
-}
-
-/// The independent health legs of the connected-lifetime monitor (F2).
-///
-/// H8 — a failing `tono_service_status_snapshot()` used to increment *both* the kill-switch and
-/// the protected-DNS counters against an `||` threshold test, so a single failed observation
-/// counted as two failures and two failing polls guaranteed a teardown (with H7, two polls 0 ms
-/// apart). It now has its own leg: one failed observation is one failure, on one counter.
-/// Fail-closed is preserved — a dead Service still reaches `HEALTH_FAILURE_THRESHOLD` on that
-/// leg and invalidates Connected — but at the honest rate of one failure per tick, and the
-/// unobserved legs are never *reset* by a failed poll either.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct HealthLegs {
-    /// Consecutive unhealthy kill-switch snapshots.
-    pub kill_switch: u32,
-    /// Consecutive unhealthy protected-DNS snapshots.
-    pub protected_dns: u32,
-    /// Consecutive failed periodic exit probes.
-    pub probe: u32,
-    /// Consecutive failed Service status IPCs.
-    pub service: u32,
-}
-
-impl HealthLegs {
-    /// One failed Service observation: exactly one failure, on the Service leg. The other legs
-    /// were not observed at all, so they are neither incremented nor cleared.
-    pub const fn observe_service_failure(&mut self) {
-        self.service = self.service.saturating_add(1);
-    }
-
-    /// A Service snapshot arrived; the Service leg is healthy again.
-    pub const fn observe_service_ok(&mut self) {
-        self.service = 0;
-    }
-
-    pub const fn observe_kill_switch(&mut self, unhealthy: bool) {
-        self.kill_switch = if unhealthy {
-            self.kill_switch.saturating_add(1)
-        } else {
-            0
-        };
-    }
-
-    pub const fn observe_protected_dns(&mut self, unhealthy: bool) {
-        self.protected_dns = if unhealthy {
-            self.protected_dns.saturating_add(1)
-        } else {
-            0
-        };
-    }
-
-    pub const fn observe_probe(&mut self, failed: bool) {
-        self.probe = if failed { self.probe.saturating_add(1) } else { 0 };
-    }
-
-    /// Any leg that reached the threshold invalidates Connected.
-    pub const fn invalid(&self) -> bool {
-        health_threshold_reached(self.kill_switch)
-            || health_threshold_reached(self.protected_dns)
-            || health_threshold_reached(self.probe)
-            || health_threshold_reached(self.service)
-    }
-
-    /// A sustained failure of the fail-closed boundary itself. A working HTTPS
-    /// request cannot overrule this: traffic may flow now while the missing WFP
-    /// barrier would leak it the moment the tunnel dies, and unprotected DNS is
-    /// already outside the tunnel contract.
-    pub const fn protection_invalid(&self) -> bool {
-        health_threshold_reached(self.kill_switch)
-            || health_threshold_reached(self.protected_dns)
-    }
-}
-
-/// One core-identity observation against the recorded baseline (H4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoreSample {
-    /// Same pid, no restart-counter bump.
-    Unchanged,
-    /// The Service reports no core while we recorded one. This is the *quiet* path — a
-    /// `core_pid: None, restart_count: 0` payload the Service emits whenever its per-poll
-    /// `is_active` check reads `Ok(None)`, with no error anywhere — so it must be sustained
-    /// before it counts as a change.
-    Missing,
-    /// A different live pid, or a strictly increased restart counter: the Service is explicitly
-    /// reporting a crash/restart, which still fires on the first sample.
-    Restarted,
-}
-
-/// Classify one `/status` core-identity sample (M4/H4). `restart_count` counts only as an
-/// *increase*: the quiet inactive payload resets it to 0, and a decrease is that artefact, never
-/// a restart.
-pub fn classify_core_sample(
-    last_pid: Option<u32>,
-    last_restart_count: Option<u32>,
-    observed_pid: Option<u32>,
-    observed_restart_count: u32,
-) -> CoreSample {
-    if observed_pid.is_none() && last_pid.is_some() {
-        return CoreSample::Missing;
-    }
-    if last_pid != observed_pid {
-        return CoreSample::Restarted;
-    }
-    match last_restart_count {
-        Some(previous) if observed_restart_count > previous => CoreSample::Restarted,
-        _ => CoreSample::Unchanged,
-    }
-}
-
-/// Whether a classified sample invalidates Connected, given how many consecutive `Missing`
-/// samples (this one included) have been seen. `Missing` needs
-/// [`CORE_MISSING_SUSTAINED_SAMPLES`]; an explicit restart report does not.
-pub const fn core_change_fires(sample: CoreSample, missing_samples: u32) -> bool {
-    match sample {
-        CoreSample::Unchanged => false,
-        CoreSample::Restarted => true,
-        CoreSample::Missing => missing_samples >= CORE_MISSING_SUSTAINED_SAMPLES,
-    }
-}
-
-/// P0-13 debounce: only the first change inside the window invalidates Connected.
-///
-/// H5 — `last_network_event_at` must be cleared on connect success along with the other monitor
-/// seeds. It was not, so a reconnect completing in under [`NETWORK_EVENT_DEBOUNCE`] silently
-/// *discarded* its first genuine event (the counter seed still advanced, so the event was lost,
-/// not deferred). `None` — the post-reset state — always fires.
-pub fn network_event_fires(changed: bool, since_last_event: Option<Duration>) -> bool {
-    changed && since_last_event.is_none_or(|elapsed| elapsed >= NETWORK_EVENT_DEBOUNCE)
-}
-
-/// A Windows route/interface notification is only a hint: WinTUN creation, protected-DNS
-/// reconciliation, and their delayed IP Helper callbacks can all arrive after Connect has
-/// already committed. Keep the fail-closed response for a changed Core identity or a failed
-/// health leg, but require a fresh locked data-plane failure before a notification by itself
-/// tears down a tunnel that is still carrying authenticated HTTPS traffic.
-pub fn monitor_requires_reconnect(
-    event_invalidated: bool,
-    core_changed: bool,
-    health_invalid: bool,
-    event_probe_failed: bool,
-) -> bool {
-    health_invalid || (event_invalidated && (core_changed || event_probe_failed))
-}
-
-/// What one [`handle_network_change`] call did to the session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NetworkChangeOutcome {
-    /// The locked TUN still carried traffic, so the core was never stopped and this session —
-    /// generation, tasks and all — is the same one that was Connected before the event.
-    RecoveredInPlace,
-    /// The session was torn down, handed to a newer generation, or was never this caller's to
-    /// act on. Nothing connection-scoped survives it.
-    Handled,
-}
-
-/// Whether a connection-scoped loop keeps running after one [`handle_network_change`] call.
-///
-/// Only the recovered-in-place verdict leaves the loop's own session alive, and its callers
-/// used to treat every call as terminal. One such event — roughly four seconds of Service IPC
-/// unavailability while mihomo and WFP are untouched, which an SCM recovery restart or the
-/// updater's replace-runtime step produces — therefore ended the connection-phase health
-/// monitor for the rest of the session, and nothing restarts it before the next connect. With
-/// it went the 120 s exit probe, the one leg that notices a dead exit behind a live tunnel.
-pub const fn connection_loop_continues(outcome: NetworkChangeOutcome) -> bool {
-    matches!(outcome, NetworkChangeOutcome::RecoveredInPlace)
-}
-
-/// F2: while Connected, the barrier must be wanted, live, fully locked, and actually
-/// carrying the tunnel; anything else (or no answer) is unhealthy.
-///
-/// `tunnel_permit_rendered` is here because the other three cannot answer the question. The
-/// Service's own doc on the field says it: a `Locked` session whose permit was retracted —
-/// the core was respawned, or the core instance could not be identified when the lock was
-/// taken — looks exactly like a `Locked` session that is carrying traffic, while every
-/// application's traffic is in fact dropped leaving the TUN, and `wanted`/`verified`/`live`
-/// all keep reporting health. `is_protected_startup_replacement_candidate` and
-/// `mark_verified_committed` already require the field; the continuous leg did not, so the
-/// one state that reads as Connected while nothing gets out was the one it scored healthy.
-///
-/// No version gate is needed: the field arrived in protocol revision 12 and
-/// `MIN_REQUIRED_SERVICE_REVISION` is now 14, so every Service this App will pair
-/// with sets it. The floor only ever rises, which is what keeps this true without
-/// a check here.
-pub fn kill_switch_unhealthy(status: Option<&KillSwitchStatus>) -> bool {
-    match status {
-        Some(status) => !(status.wanted
-            && status.live
-            && status.mode == KillSwitchStatusMode::Locked
-            && status.tunnel_permit_rendered),
-        None => true,
-    }
-}
-
-/// Stable Service markers that ride in `last_error` on an operation that SUCCEEDED. They are
-/// warnings about what could not be proven, not reports of a broken tunnel, and the health
-/// monitor must not tear a live connection down for them.
-///
-/// `TONO_DNS_UNVERIFIED`: DNS was applied but the read-back could not confirm every adapter.
-/// `TONO_DNS_RESTORE_DEGRADED`: a restore was accepted on registry evidence alone.
-///
-/// Treating these as unhealthy is not a cosmetic mistake: two consecutive samples invalidate
-/// Connected, and a machine that can never verify would then reconnect forever.
-const DNS_WARNING_MARKERS: [&str; 2] = ["TONO_DNS_UNVERIFIED", "TONO_DNS_RESTORE_DEGRADED"];
-
-/// Whether a `last_error` string reports an actual failure rather than an unproven-but-applied
-/// state. Substring, not prefix: the Service nests these markers inside its own context.
-fn dns_error_is_a_failure(last_error: Option<&str>) -> bool {
-    match last_error {
-        None => false,
-        Some(text) => !DNS_WARNING_MARKERS.iter().any(|marker| text.contains(marker)),
-    }
-}
-
-/// Connected is not healthy unless every currently known adapter is proven to use Tono's
-/// protected DNS endpoint.
-/// The Service status deliberately includes adapters that appeared after the original snapshot,
-/// closing the first-netmon-sample race and covering a failed Windows notification registration.
-pub fn protected_dns_unhealthy(status: Option<&DnsProtectionStatus>) -> bool {
-    match status {
-        Some(status) => {
-            !(status.enabled
-                && status.snapshot_present
-                && status.adapters > 0
-                && !dns_error_is_a_failure(status.last_error.as_deref()))
-        }
-        None => true,
-    }
-}
-
-/// A fresh GUI may find a Core that the same authenticated owner left running across an
-/// installer repair or process restart. This is deliberately stronger than the Connected health
-/// predicate: it authorizes only a fail-closed *replacement attempt*, never a direct transition to
-/// Connected. The new process still has to create a fresh Service session/controller secret and
-/// pass every ordinary DNS, WFP, exit, and real-data-plane verification stage.
-pub fn startup_runtime_is_resume_candidate(snapshot: &ServiceStatusSnapshot, dns: &DnsProtectionStatus) -> bool {
-    tono_service_protocol::is_protected_startup_replacement_candidate(snapshot, dns)
 }
 
 /// Re-prove the complete current-owner runtime immediately before either scheduling or admitting
@@ -539,30 +303,6 @@ async fn active_runtime_resume_status() -> Option<KillSwitchStatus> {
     startup_runtime_is_resume_candidate(&snapshot, &dns)
         .then(|| snapshot.kill_switch)
         .flatten()
-}
-
-/// Pure final-admission gate for a startup replacement. Keeping both generations explicit is a
-/// regression guard: auth replacement and connection release are independent cancellation axes,
-/// and either one must make an asynchronously obtained Service proof unusable.
-const fn startup_resume_guards_hold(
-    auth_generation_current: bool,
-    connection_generation_current: bool,
-    account_ready: bool,
-    selected_is_valid: bool,
-    session_verified: bool,
-    reconnectable: bool,
-) -> bool {
-    auth_generation_current
-        && connection_generation_current
-        && account_ready
-        && selected_is_valid
-        && session_verified
-        && reconnectable
-}
-
-/// F2: threshold test shared by the kill-switch and exit-probe legs.
-pub const fn health_threshold_reached(consecutive_failures: u32) -> bool {
-    consecutive_failures >= HEALTH_FAILURE_THRESHOLD
 }
 
 /// Spawned task futures are boxed into this trait object so a spawner's
@@ -1431,371 +1171,6 @@ const BROWSER_DNS_RECHECK_INTERVAL: Duration = Duration::from_secs(60);
 const DIRECT_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Upper bound on distinct destinations recorded in one session. WeChat's CDN rotates, so a
-/// long session on a busy account could otherwise write an unbounded number of lines into a
-/// log that is uploaded. Reaching the cap is itself worth knowing — it means the destination
-/// set is wider than a prefix list would comfortably cover — so it is recorded once and
-/// sampling then stops for the session.
-const MAX_DIRECT_SAMPLES: usize = 512;
-/// Independent privacy/size cap for protected connection IDs observed in one session. IDs are
-/// hashed and retained in memory only; the audit event contains cumulative enum/count evidence.
-const MAX_PROTECTED_ROUTE_SAMPLES: usize = 512;
-
-/// The subset of `/connections` this sampler reads. Deliberately not the full shape: every
-/// field here is one the audit record needs, and anything the controller adds later is
-/// ignored rather than a parse failure.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct SampledConnection {
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    metadata: SampledMetadata,
-    #[serde(default)]
-    chains: Vec<String>,
-    #[serde(default)]
-    rule: String,
-    #[serde(default, rename = "rulePayload")]
-    rule_payload: String,
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-struct SampledMetadata {
-    #[serde(default, rename = "destinationIP")]
-    destination_ip: String,
-    #[serde(default)]
-    host: String,
-    #[serde(default, rename = "destinationPort")]
-    destination_port: String,
-    #[serde(default)]
-    network: String,
-    #[serde(default, rename = "processPath")]
-    process_path: String,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-struct SampledConnections {
-    #[serde(default)]
-    connections: Vec<SampledConnection>,
-}
-
-/// One destination worth recording, already deduplicated.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DirectSample {
-    /// The resolved address, when the flow carried one. Empty for a domain-routed flow under
-    /// fake-ip, where the controller reports the name and not an address the prefix set could
-    /// be computed from.
-    address: String,
-    /// The destination name, when the flow carried one.
-    host: String,
-    port: u16,
-    udp: bool,
-    process: String,
-    chain: String,
-    rule: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProtectedDestination {
-    Anthropic,
-    Turnstile,
-    Update,
-    Telemetry,
-}
-
-impl ProtectedDestination {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Anthropic => "ANTHROPIC",
-            Self::Turnstile => "TURNSTILE",
-            Self::Update => "UPDATE",
-            Self::Telemetry => "TELEMETRY",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProtectedRoute {
-    Residential,
-    Direct,
-    Proxied,
-    Blocked,
-    Unknown,
-}
-
-impl ProtectedRoute {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Residential => "RESIDENTIAL",
-            Self::Direct => "DIRECT",
-            Self::Proxied => "PROXIED",
-            Self::Blocked => "BLOCKED",
-            Self::Unknown => "UNKNOWN",
-        }
-    }
-
-    fn violates_residential_route(self) -> bool {
-        matches!(self, Self::Direct | Self::Proxied)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ProtectedRouteAggregate {
-    residential: u32,
-    direct: u32,
-    proxied: u32,
-    blocked: u32,
-    unknown: u32,
-    latest: Option<(ProtectedRoute, ProtectedDestination)>,
-}
-
-impl ProtectedRouteAggregate {
-    fn observe(&mut self, route: ProtectedRoute, destination: ProtectedDestination) {
-        match route {
-            ProtectedRoute::Residential => self.residential = self.residential.saturating_add(1),
-            ProtectedRoute::Direct => self.direct = self.direct.saturating_add(1),
-            ProtectedRoute::Proxied => self.proxied = self.proxied.saturating_add(1),
-            ProtectedRoute::Blocked => self.blocked = self.blocked.saturating_add(1),
-            ProtectedRoute::Unknown => self.unknown = self.unknown.saturating_add(1),
-        }
-        self.latest = Some((route, destination));
-    }
-
-    fn invariant_violations(self) -> u32 {
-        self.direct.saturating_add(self.proxied)
-    }
-}
-
-const ANTHROPIC_DESTINATIONS: &[&str] = &[
-    "anthropic.com",
-    "claude.ai",
-    "claude.com",
-    "claude.app",
-    "claude.site",
-    "clau.de",
-    "anthropic.ai",
-    "claudestudio.com",
-    "claudemcpclient.com",
-    "claudemcpcontent.com",
-    "claudeusercontent.com",
-    "servd-anthropic-website.b-cdn.net",
-];
-const TURNSTILE_DESTINATIONS: &[&str] = &[
-    "challenges.cloudflare.com",
-    "cf-assets.www.cloudflare.com",
-];
-const UPDATE_DESTINATIONS: &[&str] = &[
-    "storage.googleapis.com",
-    "registry.npmjs.org",
-    "raw.githubusercontent.com",
-    "formulae.brew.sh",
-];
-const TELEMETRY_DESTINATIONS: &[&str] = &[
-    "cloudflareinsights.com",
-    "browser-intake-datadoghq.com",
-    "browser-intake-us5-datadoghq.com",
-    "browser-intake-us3-datadoghq.com",
-    "browser-intake-ap1-datadoghq.com",
-    "browser-intake-ap2-datadoghq.com",
-    "browser-intake-datadoghq.eu",
-    "browser-intake-ddog-gov.com",
-    "datadoghq.com",
-    "statsigapi.net",
-    "featuregates.org",
-    "growthbook.io",
-    "stripe.network",
-    "sentry.io",
-];
-
-fn host_matches_suffix(host: &str, suffix: &str) -> bool {
-    host == suffix
-        || host
-            .strip_suffix(suffix)
-            .is_some_and(|prefix| prefix.ends_with('.'))
-}
-
-fn protected_destination(connection: &SampledConnection) -> Option<ProtectedDestination> {
-    let host = connection
-        .metadata
-        .host
-        .trim()
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    for (category, suffixes) in [
-        (ProtectedDestination::Anthropic, ANTHROPIC_DESTINATIONS),
-        (ProtectedDestination::Turnstile, TURNSTILE_DESTINATIONS),
-        (ProtectedDestination::Update, UPDATE_DESTINATIONS),
-        (ProtectedDestination::Telemetry, TELEMETRY_DESTINATIONS),
-    ] {
-        if suffixes.iter().any(|suffix| host_matches_suffix(&host, suffix)) {
-            return Some(category);
-        }
-    }
-
-    let address = connection.metadata.destination_ip.trim();
-    config::CLAUDE_HOME_IPV4_CIDRS
-        .iter()
-        .any(|cidr| ipv4_in_cidr(address, cidr))
-        .then_some(ProtectedDestination::Anthropic)
-}
-
-fn ipv4_in_cidr(address: &str, cidr: &str) -> bool {
-    let Ok(address) = address.parse::<std::net::Ipv4Addr>() else {
-        return false;
-    };
-    let Some((network, prefix)) = cidr.split_once('/') else {
-        return false;
-    };
-    let (Ok(network), Ok(prefix)) = (network.parse::<std::net::Ipv4Addr>(), prefix.parse::<u32>()) else {
-        return false;
-    };
-    if prefix > 32 {
-        return false;
-    }
-    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
-    u32::from(address) & mask == u32::from(network) & mask
-}
-
-/// Mihomo lists the terminal outbound first and selector groups after it. The terminal is the
-/// authority: a residential SOCKS hop can legitimately be followed by `Tono-Exit` because that
-/// is its dialer transport, while `Tono-Exit` as the terminal means protected traffic missed the
-/// residential route. Every outcome is mutually exclusive.
-fn classify_protected_route(connection: &SampledConnection, residential_target: &str) -> ProtectedRoute {
-    let blocked = |value: &str| {
-        matches!(
-            value.trim().to_ascii_uppercase().as_str(),
-            "REJECT" | "REJECT-DROP" | "DROP" | "BLOCK"
-        )
-    };
-    if connection.chains.iter().any(|hop| blocked(hop))
-        || blocked(&connection.rule)
-        || blocked(&connection.rule_payload)
-    {
-        return ProtectedRoute::Blocked;
-    }
-    let Some(terminal) = connection.chains.first().map(|hop| hop.trim()).filter(|hop| !hop.is_empty()) else {
-        return ProtectedRoute::Unknown;
-    };
-    if terminal == residential_target {
-        return ProtectedRoute::Residential;
-    }
-    if terminal.eq_ignore_ascii_case("DIRECT")
-        || terminal == config::DIRECT_GROUP_NAME
-        || terminal == config::WEB_DIRECT_GROUP_NAME
-    {
-        return ProtectedRoute::Direct;
-    }
-    ProtectedRoute::Proxied
-}
-
-fn protected_connection_key(connection: &SampledConnection) -> u64 {
-    use std::hash::{Hash as _, Hasher as _};
-
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    if connection.id.is_empty() {
-        connection.metadata.host.hash(&mut hasher);
-        connection.metadata.destination_ip.hash(&mut hasher);
-        connection.metadata.destination_port.hash(&mut hasher);
-        connection.metadata.network.hash(&mut hasher);
-        connection.metadata.process_path.hash(&mut hasher);
-        connection.chains.hash(&mut hasher);
-    } else {
-        connection.id.hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-fn observe_protected_routes(
-    payload: &SampledConnections,
-    residential_target: &str,
-    seen: &mut std::collections::HashSet<u64>,
-    aggregate: &mut ProtectedRouteAggregate,
-) -> bool {
-    let mut changed = false;
-    for connection in &payload.connections {
-        if seen.len() >= MAX_PROTECTED_ROUTE_SAMPLES {
-            break;
-        }
-        let Some(destination) = protected_destination(connection) else {
-            continue;
-        };
-        if !seen.insert(protected_connection_key(connection)) {
-            continue;
-        }
-        let route = classify_protected_route(connection, residential_target);
-        aggregate.observe(route, destination);
-        changed = true;
-    }
-    changed
-}
-
-/// Which connections went out the physical interface, and which of those are new this session.
-///
-/// A connection counts as DIRECT when its proxy chain names one of the interface-bound direct
-/// outbounds. The chain is the authority, not the rule: a rule names a *group*, and a group
-/// that failed over is exactly the case where the rule and the actual path disagree — the same
-/// distinction the macOS route classifier had to make.
-fn new_direct_samples(
-    payload: &SampledConnections,
-    seen: &mut std::collections::HashSet<(String, u16, bool, String)>,
-) -> Vec<DirectSample> {
-    let mut fresh = Vec::new();
-    for connection in &payload.connections {
-        let direct = connection.chains.iter().any(|hop| {
-            hop == config::DIRECT_GROUP_NAME || hop == config::WEB_DIRECT_GROUP_NAME
-        });
-        if !direct {
-            continue;
-        }
-        // Both shapes occur and both matter. A raw-IP dial — WeChat's HTTPDNS path, the one
-        // rule H exists for — reports an address and no name. A domain-routed flow under
-        // fake-ip reports the name, and its `destinationIP` is either absent or a fake-ip
-        // placeholder that no prefix set could be computed from. Recording only the address
-        // would therefore miss exactly the traffic this instrumentation is for on half the
-        // flows, so keep whichever the controller gave.
-        let address = connection.metadata.destination_ip.trim();
-        let host = connection.metadata.host.trim();
-        if address.is_empty() && host.is_empty() {
-            continue;
-        }
-        let Ok(port) = connection.metadata.destination_port.trim().parse::<u16>() else {
-            continue;
-        };
-        let udp = connection.metadata.network.eq_ignore_ascii_case("udp");
-        let process = connection
-            .metadata
-            .process_path
-            .rsplit(['\\', '/'])
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        // The process belongs in the key. Without it, the second process to reach an address
-        // some other process already reached is silently dropped — and "a process that is not
-        // WeChat went direct" is an alarm, not a statistic, so suppressing it is the one
-        // deduplication this must not do.
-        let key = (
-            if address.is_empty() { host.to_owned() } else { address.to_owned() },
-            port,
-            udp,
-        );
-        if !seen.insert((key.0.clone(), key.1, key.2, process.clone())) {
-            continue;
-        }
-        fresh.push(DirectSample {
-            address: address.to_owned(),
-            host: host.to_owned(),
-            port,
-            udp,
-            process,
-            chain: connection.chains.join(" <- "),
-            rule: if connection.rule_payload.is_empty() {
-                connection.rule.clone()
-            } else {
-                format!("{} {}", connection.rule, connection.rule_payload)
-            },
-        });
-    }
-    fresh
-}
-
 /// Read the controller once, record DIRECT diagnostics, and update protected-route evidence.
 ///
 /// Returns `false` when the caller should stop sampling — a superseded generation, or every
@@ -2405,15 +1780,6 @@ async fn enable_dns_cancellation_safe(
         .map_err(|error| StageFailure::error(format!("DNS reconciliation task failed: {error}")))?
 }
 
-/// H-1 decision: a stale exit only patches the late arm when the StartClash
-/// IPC actually returned success (a failed IPC never armed anything) *and*
-/// the generation bump came from a releasing flow (disconnect / sign-out /
-/// quit) — a node switch or catalog teardown re-arms or keeps the barrier,
-/// so releasing here would tear down their protection instead.
-pub fn stale_exit_needs_release(start_clash_committed: bool, release_intent: bool) -> bool {
-    start_clash_committed && release_intent
-}
-
 /// A stale exit past a committed StartClash (H-1): the IPC cannot be
 /// retracted and the bumper's release may have run before the Service
 /// committed, so patch the late arm with one best-effort owner-gated
@@ -2462,54 +1828,6 @@ async fn stale_after_dns(state: &Arc<TonoState>, generation: u64) -> StageFailur
         return stale_after_arm(state, generation).await;
     }
     StageFailure::Stale
-}
-
-/// What a connect failure does, decided purely (§6 decision table + the
-/// raced-disconnect rule). Exhaustively unit-tested; `fail_connect` only
-/// executes the plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FailurePlan {
-    /// Latch the FSM armed flag before the decision table runs.
-    pub mark_armed: bool,
-    /// Stop the core: `Some(false)` keeps WFP armed, `Some(true)` releases,
-    /// `None` leaves the core alone entirely.
-    pub stop_core: Option<bool>,
-    /// Restrict to the bootstrap recovery channel after the stop.
-    pub restrict_bootstrap: bool,
-}
-
-pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool) -> FailurePlan {
-    if was_disconnecting {
-        // A disconnect is in flight and owns the release sequence end to
-        // end; the failing transaction must not double it.
-        FailurePlan {
-            mark_armed: false,
-            stop_core: None,
-            restrict_bootstrap: false,
-        }
-    } else if armed && session_verified {
-        FailurePlan {
-            mark_armed: true,
-            stop_core: Some(false),
-            restrict_bootstrap: true,
-        }
-    } else {
-        // §6: failure before the WFP policy exists is a full release.
-        FailurePlan {
-            mark_armed: false,
-            stop_core: Some(true),
-            restrict_bootstrap: false,
-        }
-    }
-}
-
-/// Whether the explicit-release sequence may attempt a session-gated core
-/// stop before the owner-gated release. Only a live session can stop; the
-/// release itself never depends on one (C1: Protected Offline's session is
-/// long gone).
-#[cfg(any(not(windows), test))]
-pub fn stop_core_before_release(core_active: bool, session_active: bool) -> bool {
-    core_active && session_active
 }
 
 /// The §6 failure decision table, executing [`plan_failure`]. After arm:
@@ -2879,102 +2197,6 @@ pub async fn schedule_startup_resume_if_proven(state: &Arc<TonoState>, app: &App
     // Register under this same generation/admission lock. A later Disconnect/sign-out either
     // sees this handle and aborts it, or ran first and failed one of the checks above.
     schedule_reconnect_locked(&mut inner, state, app);
-}
-
-/// Whether a protected reconnect may run: the barrier is up, the machine is
-/// idle in Protected Offline, and the catalog is not waiting for the user.
-/// Guard rejections that describe a moment rather than a decision.
-///
-/// `guard_snapshot`'s first check is `release_in_progress`, which is transient by construction,
-/// and its transition check clears as soon as the in-flight attempt ends. Treating either as a
-/// verdict ends the reconnect chain for good, and the machine then sits blocked in Protected
-/// Offline with no scheduled retry and nothing shown to the user. Everything else — suspended,
-/// signed out, no selection, a vanished node — needs a person, so it correctly stops the chain.
-pub fn guard_rejection_is_transient(reason: &str) -> bool {
-    reason.contains(RELEASE_RECONCILING_PREFIX)
-        || reason == TRANSITION_IN_FLIGHT_REJECTION
-        || reason == CATALOG_NOT_READY_REJECTION
-}
-
-pub fn reconnect_allowed(requires_choice: bool, status: &ConnectionStatus, kill_switch_armed: bool) -> bool {
-    kill_switch_armed
-        && !requires_choice
-        && status.is_protection_blocked
-        && !status.is_connected
-        && !status.is_connecting
-        && !status.is_disconnecting
-}
-
-/// Whether sign-out must run the explicit-release sequence before clearing
-/// account state (§2/§6): anything that could hold protection counts —
-/// including an in-flight connect (M-1: disconnect's guard and quit_release
-/// already include it; sign-out must not be the exception).
-pub fn sign_out_needs_release(status: &ConnectionStatus, kill_switch_armed: bool) -> bool {
-    kill_switch_armed
-        || status.is_connected
-        || status.is_connecting
-        || status.is_protection_blocked
-        || status.is_disconnecting
-}
-
-/// F3: `tono_retry_now` is a success-no-op in these states; anything else
-/// falls through to the normal reconnect predicate (`reconnect_allowed`).
-pub fn retry_now_is_noop(status: &ConnectionStatus) -> bool {
-    status.is_connected || status.is_connecting
-}
-
-/// F5 single-flight predicate (called with the state lock already held):
-/// begin the transaction only when the generation matches *and* no tunnel
-/// or transaction exists. Two racing attempts calling this back-to-back
-/// produce exactly one `true` — the observable proof that only one of them
-/// enters `run_stages`.
-pub fn single_flight_begin(
-    fsm: &mut tono_core::connection::ConnectionFsm,
-    current_generation: u64,
-    captured_generation: u64,
-) -> bool {
-    if current_generation != captured_generation {
-        return false;
-    }
-    if fsm.status().is_connecting || fsm.status().is_connected {
-        return false;
-    }
-    fsm.begin_connect();
-    true
-}
-
-/// What selecting a server does to the connection machinery (H1/M2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectAction {
-    /// Same node, no pending catalog choice: the command is a pure no-op —
-    /// generation, tasks, and the H-1 intent bit stay untouched.
-    Noop,
-    /// Selection state updates only (new pick while idle); no transaction,
-    /// no generation bump, no intent write.
-    UpdateOnly,
-    /// Derive the §6 node-switch transaction.
-    Switch,
-    /// Schedule a protected reconnect (M5: also when a vanished node's
-    /// replacement was just picked, i.e. `requires_choice` cleared).
-    Reconnect,
-}
-
-pub fn select_action(
-    changed: bool,
-    requires_choice: bool,
-    status: &ConnectionStatus,
-    kill_switch_armed: bool,
-) -> SelectAction {
-    if !changed && !requires_choice {
-        return SelectAction::Noop;
-    }
-    if changed && (status.is_connected || status.is_connecting) {
-        return SelectAction::Switch;
-    }
-    if (changed || requires_choice) && reconnect_allowed(false, status, kill_switch_armed) {
-        return SelectAction::Reconnect;
-    }
-    SelectAction::UpdateOnly
 }
 
 /// F3: publish (or withdraw) the deadline the Protected Offline card counts down to.

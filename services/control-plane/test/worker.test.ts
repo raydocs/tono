@@ -2192,15 +2192,19 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
   });
 
   it('does not serve the legacy token admin page on the API host', async () => {
-    const context = createExecutionContext();
-    const response = await worker.fetch(
-      new Request('https://test/'),
-      env as unknown as Env,
-      context,
-    );
-    await waitOnExecutionContext(context);
-    expect(response.status).toBe(404);
-    expect((await response.json() as any).error.code).toBe('NOT_FOUND');
+    for (const path of ['/', '/index.html', '/admin.js', '/style.css']) {
+      const context = createExecutionContext();
+      const response = await worker.fetch(
+        new Request(`https://test${path}`),
+        env as unknown as Env,
+        context,
+      );
+      await waitOnExecutionContext(context);
+      expect(response.status).toBe(404);
+      const body = await response.json() as { error: { code: string; message: string } };
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.message).toBe('This host is the Tono API');
+    }
   });
 
   it('lets Access admins add users and bind home exits through ops product routes', async () => {

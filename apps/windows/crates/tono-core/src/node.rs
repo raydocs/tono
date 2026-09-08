@@ -1,4 +1,4 @@
-//! Catalog node admission contract (product-contract.md §4).
+//! Catalog node admission contract.
 //!
 //! A catalog node is usable only if every rule holds: VLESS over TLS with
 //! Reality, a valid UUID, `xtls-rprx-vision` flow (when present), TCP
@@ -182,7 +182,7 @@ struct RawRealityOpts {
     short_id: Option<String>,
 }
 
-/// Admit one YAML proxy map (product-contract.md §4). Every rejection branch
+/// Admit one YAML proxy map. Every rejection branch
 /// returns a dedicated [`NodeRejection`].
 pub fn admit_node(value: &serde_yaml_ng::Value) -> Result<ValidatedNode, NodeRejection> {
     let raw: RawProxy = serde_yaml_ng::from_value(value.clone())

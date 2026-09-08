@@ -1,5 +1,5 @@
 use crate::{
-    config::IVerge,
+    config::TonoPreferences,
     core::{CoreManager, manager::RunningMode, service, sysopt::Sysopt},
 };
 use anyhow::{Result, bail, ensure};
@@ -123,7 +123,7 @@ fn truncate_utf8(value: &mut String, max_bytes: usize) {
 }
 
 #[allow(dead_code)]
-fn service_bypass(verge: &IVerge) -> Result<String> {
+fn service_bypass(verge: &TonoPreferences) -> Result<String> {
     let custom = verge.system_proxy_bypass.as_deref().unwrap_or("");
     ensure!(!custom.contains('\0'), "system proxy bypass contains NUL");
 
@@ -139,7 +139,7 @@ fn service_bypass(verge: &IVerge) -> Result<String> {
 }
 
 #[allow(dead_code)]
-fn service_proxy_config(verge: &IVerge, mixed_port: u16, pac_port: u16) -> Result<MacosProxyConfig> {
+fn service_proxy_config(verge: &TonoPreferences, mixed_port: u16, pac_port: u16) -> Result<MacosProxyConfig> {
     if !verge.enable_system_proxy.unwrap_or_default() {
         return Ok(MacosProxyConfig::Disabled);
     }
@@ -192,7 +192,7 @@ mod tests {
         ProxyBackendRoute, ServiceProxyOperations, guard_generation_is_current, proxy_backend_route,
         service_proxy_config,
     };
-    use crate::{config::IVerge, core::manager::RunningMode};
+    use crate::{config::TonoPreferences, core::manager::RunningMode};
     use tono_service_protocol::{MacosProxyConfig, OwnerSessionProof, ProxyApplyOutcome};
     use parking_lot::Mutex;
     use std::sync::{
@@ -398,13 +398,13 @@ mod tests {
 
     #[test]
     fn service_proxy_config_forces_loopback_targets_and_bounds_bypass() {
-        let verge = IVerge {
+        let verge = TonoPreferences {
             enable_system_proxy: Some(true),
             proxy_auto_config: Some(false),
             proxy_host: Some("192.0.2.1".into()),
             system_proxy_bypass: Some(format!("{}界", "x".repeat(8191)).into()),
             use_default_bypass: Some(false),
-            ..IVerge::default()
+            ..TonoPreferences::default()
         };
 
         let proxy = service_proxy_config(&verge, 7897, 3333).unwrap_or_else(|_| unreachable!());
@@ -417,7 +417,7 @@ mod tests {
         assert!(bypass.len() <= 8192);
         assert!(bypass.is_char_boundary(bypass.len()));
 
-        let pac_verge = IVerge {
+        let pac_verge = TonoPreferences {
             proxy_auto_config: Some(true),
             ..verge
         };

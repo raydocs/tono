@@ -1335,23 +1335,20 @@ fn create_ipc_router() -> Result<Router> {
             {
                 return service_error(ServiceError::invalid_proxy_config(error.to_string()));
             }
-            if let Some(kill_switch) = start_request.kill_switch.as_ref()
-                && kill_switch.mode != crate::MacosKillSwitchMode::Disabled
-                && !cfg!(target_os = "macos")
-            {
-                return bad_request("macOS kill switch is unsupported on this platform");
-            }
-            if start_request.windows_kill_switch.is_some() && !cfg!(windows) {
-                return bad_request("Windows kill switch is unsupported on this platform");
+            if let Some(message) = start_clash_kill_switch_rejection(
+                std::env::consts::OS,
+                start_request
+                    .kill_switch
+                    .as_ref()
+                    .is_some_and(|config| config.mode != crate::MacosKillSwitchMode::Disabled),
+                start_request.windows_kill_switch.is_some(),
+                cfg!(all(windows, not(feature = "test"))),
+            ) {
+                return bad_request(message);
             }
             // Snapshot before waiting for the lifecycle lock: a Disconnect that
             // wins the lock first must make this StartClash retract after it arms.
             let release_epoch = windows_kill_switch::release_epoch();
-            if cfg!(all(windows, not(feature = "test")))
-                && start_request.windows_kill_switch.is_none()
-            {
-                return bad_request("Windows kill switch configuration is required");
-            }
             #[cfg(feature = "test")]
             test_proxy_barrier_note_start_waiting();
             let _lifecycle_guard =
@@ -1814,6 +1811,32 @@ fn ok_empty(message: impl Into<String>) -> Result<HttpResponse> {
 
 fn service_unavailable(message: impl Into<String>) -> Result<HttpResponse> {
     json_response::<()>(StatusCode::SERVICE_UNAVAILABLE, 1, message, None)
+}
+
+/// Why StartClash must not proceed on this OS, given the kill-switch payloads.
+///
+/// `os` is `std::env::consts::OS`. `windows_required` is true for a live Windows
+/// service binary (not the test feature). Linux has no nftables engine yet, so
+/// every StartClash is refused rather than connecting without a barrier.
+fn start_clash_kill_switch_rejection(
+    os: &str,
+    macos_kill_switch_enabled: bool,
+    has_windows_kill_switch: bool,
+    windows_required: bool,
+) -> Option<&'static str> {
+    if macos_kill_switch_enabled && os != "macos" {
+        return Some("macOS kill switch is unsupported on this platform");
+    }
+    if has_windows_kill_switch && os != "windows" {
+        return Some("Windows kill switch is unsupported on this platform");
+    }
+    if os == "linux" {
+        return Some("Linux kill switch is not implemented; refusing to start without a barrier");
+    }
+    if os == "windows" && windows_required && !has_windows_kill_switch {
+        return Some("Windows kill switch configuration is required");
+    }
+    None
 }
 
 fn bad_request(message: impl Into<String>) -> Result<HttpResponse> {
@@ -2302,5 +2325,54 @@ mod owner_goodbye_tests {
             owner_goodbye_verdict(true, Some(false)).expect_err("armed must refuse");
         let response = service_error(error).expect("refusals encode as responses");
         assert_eq!(response.status, StatusCode::CONFLICT);
+    }
+}
+
+#[cfg(test)]
+mod start_clash_kill_switch_gate_tests {
+    use super::start_clash_kill_switch_rejection;
+
+    #[test]
+    fn linux_refuses_start_without_a_barrier() {
+        assert_eq!(
+            start_clash_kill_switch_rejection("linux", false, false, false),
+            Some("Linux kill switch is not implemented; refusing to start without a barrier"),
+        );
+    }
+
+    #[test]
+    fn linux_does_not_accept_a_windows_kill_switch_payload() {
+        assert_eq!(
+            start_clash_kill_switch_rejection("linux", false, true, false),
+            Some("Windows kill switch is unsupported on this platform"),
+        );
+    }
+
+    #[test]
+    fn macos_kill_switch_stays_macos_only() {
+        assert_eq!(
+            start_clash_kill_switch_rejection("linux", true, false, false),
+            Some("macOS kill switch is unsupported on this platform"),
+        );
+        assert_eq!(
+            start_clash_kill_switch_rejection("macos", true, false, false),
+            None,
+        );
+    }
+
+    #[test]
+    fn windows_live_binary_requires_its_kill_switch() {
+        assert_eq!(
+            start_clash_kill_switch_rejection("windows", false, false, true),
+            Some("Windows kill switch configuration is required"),
+        );
+        assert_eq!(
+            start_clash_kill_switch_rejection("windows", false, true, true),
+            None,
+        );
+        assert_eq!(
+            start_clash_kill_switch_rejection("windows", false, false, false),
+            None,
+        );
     }
 }

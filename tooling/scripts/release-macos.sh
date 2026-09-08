@@ -108,7 +108,7 @@ step "checking the tree describes this release"
 # against — reading "the" version out of it picked the test target's build number
 # of 1 and would have failed every release. The authoritative check is on the
 # built app below.
-project="$repo_root/apps/macos/LiquidClash.xcodeproj/project.pbxproj"
+project="$repo_root/apps/macos/Tono.xcodeproj/project.pbxproj"
 /usr/bin/grep -q "MARKETING_VERSION = $short_version;" "$project" \
   || fail "no target in the project declares MARKETING_VERSION $short_version"
 /usr/bin/grep -q "CURRENT_PROJECT_VERSION = $build;" "$project" \
@@ -229,7 +229,7 @@ print "  gate $gate_ok/6, stapled, accepted by Gatekeeper"
 step "confirming the app carries the contract the tree declares"
 declared_contract=$(/usr/bin/sed -n 's/.*static let current = "\([^"]*\)".*/\1/p' \
   "$repo_root/apps/macos/Tono/Core/HelperProtocolVersion.swift")
-shipped_contract=$("$app/Contents/Resources/liquidclash-helper" --version 2>/dev/null | /usr/bin/tr -d '[:space:]')
+shipped_contract=$("$app/Contents/Resources/tono-core-helper" --version 2>/dev/null | /usr/bin/tr -d '[:space:]')
 [[ $shipped_contract == $declared_contract ]] \
   || fail "the bundled helper reports $shipped_contract, the tree declares $declared_contract"
 print "  helper contract $shipped_contract"
@@ -242,7 +242,7 @@ step "signing the archive for the update feed"
 # reaches for decides whether a customer can install the update at all.
 sparkle_version=2.9.6
 sparkle_pin_pattern="\"version\"[[:space:]]*:[[:space:]]*\"${sparkle_version//./\\.}\""
-resolved="$repo_root/apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+resolved="$repo_root/apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 # Read out of Sparkle's own pin entry. Matched against the whole file, any other
 # dependency sitting at this version would satisfy it while Sparkle moved, which
 # is the substitution this check exists to refuse.
@@ -251,8 +251,8 @@ sparkle_pin=$(/usr/bin/grep -A6 '"identity" : "sparkle"' "$resolved" 2>/dev/null
   || fail "$resolved no longer pins Sparkle $sparkle_version; the signing tool must come from the Sparkle version the app embeds"
 sparkle_tools="$out/.sparkle-$sparkle_version"
 [[ -L $sparkle_tools ]] && fail "refusing to use $sparkle_tools: it is a symlink"
-/usr/bin/xcodebuild -project "$repo_root/apps/macos/LiquidClash.xcodeproj" \
-  -scheme LiquidClash -resolvePackageDependencies \
+/usr/bin/xcodebuild -project "$repo_root/apps/macos/Tono.xcodeproj" \
+  -scheme Tono -resolvePackageDependencies \
   -derivedDataPath "$sparkle_tools" >/dev/null \
   || fail "could not resolve the Sparkle $sparkle_version package artifacts"
 # -u+x, not -111: an artifact bundle extracted under a restrictive umask leaves

@@ -81,7 +81,7 @@
 //! one CIM call either fails on every adapter or silently drops the IPv6 address, which leaves
 //! an IPv6 resolver leaking while the registry still reads "protected".
 //!
-//! **Degraded exit (`docs/wfp-kill-switch.md`):** a registry-only match is not accepted as a
+//! **Degraded exit:** a registry-only match is not accepted as a
 //! normal restore — but it *is* accepted, once, after the live apply has failed
 //! `DEGRADED_RESTORE_STREAK` rounds in a row and the registry read-back matches the snapshot
 //! exactly. On a machine where PowerShell/CIM is structurally unavailable (constrained-language
@@ -890,7 +890,7 @@ fn live_loopback_label(live_loopback: Option<bool>) -> &'static str {
 }
 
 /// Consecutive failing live-apply rounds after which a registry-matching restore is accepted as
-/// *degraded*. Three, as specified in `docs/wfp-kill-switch.md`: one failure is noise, two is
+/// *degraded*. Three: one failure is noise, two is
 /// bad luck, three in a row on the machine's own retry cadence means the live mechanism is
 /// structurally unavailable (constrained-language mode, AppLocker, a broken WMI repository, an
 /// EDR blocking `Win32_NetworkAdapterConfiguration`) and will not recover by being asked again.

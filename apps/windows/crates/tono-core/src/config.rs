@@ -1,4 +1,4 @@
-//! Owned runtime configuration (product-contract.md §5).
+//! Owned runtime configuration.
 //!
 //! The runtime is generated locally per connect from validated catalog
 //! nodes only — imported YAML is never copied. Every control value is

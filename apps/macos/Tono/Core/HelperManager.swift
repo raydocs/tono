@@ -234,7 +234,7 @@ nonisolated struct HelperManager {
             }
         }
 
-        guard let helperSource = Bundle.main.url(forResource: "liquidclash-helper", withExtension: nil),
+        guard let helperSource = Bundle.main.url(forResource: "tono-core-helper", withExtension: nil),
               let mihomoSource = Bundle.main.url(forResource: "mihomo", withExtension: nil) else {
             throw HelperInstallError.resourceNotFound
         }

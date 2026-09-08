@@ -11,7 +11,7 @@ use tono_logging::{Type, logging};
 use scopeguard::defer;
 
 use crate::{
-    config::{Config, IVerge},
+    config::{Config, TonoPreferences},
     core::{handle::Handle, manager::RunningMode, runstate::RUN_STATE},
 };
 
@@ -49,7 +49,7 @@ pub async fn reconcile_tun_availability() {
         return;
     }
 
-    let tun_enabled = Config::verge().await.latest_arc().enable_tun_mode.unwrap_or(false);
+    let tun_enabled = Config::preferences().await.latest_arc().enable_tun_mode.unwrap_or(false);
     if !state.tun_should_be_disabled(tun_enabled) {
         return;
     }
@@ -66,13 +66,13 @@ pub async fn reconcile_tun_availability() {
         Type::Core,
         "TUN mode cannot work in the current run state; turning it off"
     );
-    let patch = IVerge {
+    let patch = TonoPreferences {
         enable_tun_mode: Some(false),
-        ..IVerge::default()
+        ..TonoPreferences::default()
     };
 
     // The patch-and-reconcile form would call straight back into here; this is the plain apply.
-    match super::apply_verge_patch(&patch, false).await {
+    match super::apply_preferences_patch(&patch, false).await {
         Ok(()) => Handle::notice_message("tun_mode::auto_disabled", ""),
         // Losing the race for the config layer is not a failure the user can act on: this runs
         // on every Run State transition and again whenever the setting itself is patched, so

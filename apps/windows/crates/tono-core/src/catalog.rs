@@ -1,4 +1,4 @@
-//! Exit catalog contract (product-contract.md §3).
+//! Exit catalog contract.
 //!
 //! Validation order, all mandatory: revision >= 0 and YAML <= 1 MiB; SHA-256
 //! digest matches (base64url, no padding); YAML parses and every node passes

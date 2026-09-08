@@ -49,7 +49,7 @@ fn restore_default_size_if_needed(window: &WebviewWindow) {
 pub async fn build_new_window() -> Result<WebviewWindow, String> {
     let app_handle = handle::Handle::app_handle();
 
-    let config = Config::verge().await;
+    let config = Config::preferences().await;
     let latest = config.latest_arc();
     let start_page = latest.start_page.as_deref().unwrap_or("/");
     let initial_theme_mode = match latest.theme_mode.as_deref() {

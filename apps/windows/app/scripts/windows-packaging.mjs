@@ -26,12 +26,16 @@ export const WINDOWS_RESOURCE_BUNDLE_ENTRIES = Object.freeze(
 export const STABLE_EXTERNAL_BIN = 'sidecar/tono-core'
 
 export const FORBIDDEN_PAYLOAD_NAME_PATTERNS = Object.freeze([
-  /verge-mihomo-alpha/i,
-  /^verge-mihomo(\.exe)?$/i,
+  /verge-mihomo/i,
   /clash-verge-service/i,
   /^set_dns\.sh$/i,
   /^unset_dns\.sh$/i,
 ])
+
+/** Basenames that must not sit in sidecar/ or the portable release dir. */
+export function leftoverVergeSidecars(fileNames) {
+  return fileNames.filter((name) => /verge-mihomo/i.test(String(name)))
+}
 
 // Exact paths emitted by pre-0.0.6 Windows bundles but deliberately absent from the current
 // payload allowlist. Because generated NSIS removal only knows the *current* manifest, the custom

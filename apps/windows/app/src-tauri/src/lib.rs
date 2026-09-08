@@ -143,8 +143,6 @@ mod app_init {
             cmd::get_runtime_state,
             cmd::get_tono_preferences,
             cmd::patch_tono_preferences,
-            cmd::get_verge_config,
-            cmd::patch_verge_config,
             tono::commands::tono_sign_in_start,
             tono::commands::tono_sign_in_verify,
             tono::commands::tono_sign_out,

@@ -176,8 +176,8 @@ jobs:
           esac
           settings=$(
             xcodebuild \
-              -project apps/macos/LiquidClash.xcodeproj \
-              -scheme LiquidClash \
+              -project apps/macos/Tono.xcodeproj \
+              -scheme Tono \
               -configuration Release \
               -showBuildSettings 2>/dev/null
           )
@@ -224,8 +224,8 @@ jobs:
         run: |
           set -eu
           xcodebuild test \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-tests" \
@@ -353,15 +353,15 @@ jobs:
       - name: Locate the pinned Sparkle 2.9.6 sign_update tool
         run: |
           set -eu
-          resolved=apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
           if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.6"' "$resolved"; then
             echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.6"
             echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
             exit 1
           fi
           xcodebuild \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -resolvePackageDependencies \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
           sign_update=$(

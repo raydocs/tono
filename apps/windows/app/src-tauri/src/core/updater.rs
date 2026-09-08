@@ -210,7 +210,7 @@ impl SilentUpdater {
         let updater_builder = app_handle.updater_builder();
         #[cfg(target_os = "windows")]
         let updater_builder = {
-            let verge_lang = Config::verge().await.latest_arc().language.clone();
+            let verge_lang = Config::preferences().await.latest_arc().language.clone();
             let lang_id = nsis_language_id(&tono_i18n::current_language(verge_lang.as_deref()));
             updater_builder.installer_arg(format!("/LANG={lang_id}"))
         };
@@ -438,7 +438,7 @@ impl SilentUpdater {
             return Ok(());
         }
 
-        let auto_check = Config::verge().await.latest_arc().auto_check_update.unwrap_or(true);
+        let auto_check = Config::preferences().await.latest_arc().auto_check_update.unwrap_or(true);
         if !auto_check {
             logging!(debug, Type::System, "Silent update skipped: auto_check_update is false");
             return Ok(());

@@ -41,7 +41,7 @@ impl MixedPort {
     /// start/stop transition, so the endpoint cannot serve a stale port while the Core
     /// is being replaced.
     pub async fn desired() -> u16 {
-        let selected = Config::verge().await.latest_arc().verge_mixed_port;
+        let selected = Config::preferences().await.latest_arc().verge_mixed_port;
         // `get_mixed_port` already falls back to the default when the Merge Config is silent.
         let merged = Config::clash().await.latest_arc().get_mixed_port();
         resolve_desired(selected, merged)

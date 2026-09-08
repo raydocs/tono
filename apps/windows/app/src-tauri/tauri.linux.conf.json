@@ -27,8 +27,7 @@
       "./sidecar/tono-service",
       "./sidecar/tono-service-install",
       "./sidecar/tono-service-uninstall",
-      "./sidecar/tono-core",
-      "./sidecar/tono-core-alpha"
+      "./sidecar/tono-core"
     ]
   }
 }

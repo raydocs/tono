@@ -37,13 +37,9 @@ impl Config {
         Self::global().await.preferences.clone()
     }
 
-    pub async fn verge() -> Draft<TonoPreferences> {
-        Self::preferences().await
-    }
-
     pub async fn init_config_before_window() -> Result<()> {
-        let verge = Self::verge().await.latest_arc();
-        tono_i18n::sync_locale(verge.language.as_deref());
+        let prefs = Self::preferences().await.latest_arc();
+        tono_i18n::sync_locale(prefs.language.as_deref());
 
         Ok(())
     }
@@ -68,13 +64,13 @@ impl Config {
             logging_error!(Type::Config, clash.data_arc().save_config().await);
         });
 
-        let save_verge_task = AsyncHandler::spawn(|| async {
-            let verge = Self::verge().await;
-            verge.apply();
-            logging_error!(Type::Config, verge.data_arc().save_file().await);
+        let save_preferences_task = AsyncHandler::spawn(|| async {
+            let prefs = Self::preferences().await;
+            prefs.apply();
+            logging_error!(Type::Config, prefs.data_arc().save_file().await);
         });
 
-        let _ = tokio::join!(save_clash_task, save_verge_task);
+        let _ = tokio::join!(save_clash_task, save_preferences_task);
         logging!(info, Type::Config, "save all draft data finished");
     }
 }

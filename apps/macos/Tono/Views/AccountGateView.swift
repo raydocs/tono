@@ -1003,7 +1003,7 @@ private struct LoginErrorPreviewCard: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            LiquidClashLogo(compact: true)
+            TonoLogo(compact: true)
                 .frame(width: 56, height: 56)
             Text("Welcome to Tono").font(.title.bold())
             Text("Sign in with a verified email to continue. No password is required.")

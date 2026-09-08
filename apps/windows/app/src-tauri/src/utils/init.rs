@@ -1,6 +1,6 @@
 // #[cfg(not(feature = "tracing"))]
 use crate::{
-    config::{Config, IClashTemp, IVerge},
+    config::{Config, IClashTemp, TonoPreferences},
     constants, logging,
     process::AsyncHandler,
     utils::{
@@ -55,7 +55,7 @@ pub async fn delete_log() -> Result<()> {
     }
 
     let auto_log_clean = {
-        let verge = Config::verge().await;
+        let verge = Config::preferences().await;
         let verge = verge.data_arc();
         verge.auto_log_clean.unwrap_or(0)
     };
@@ -415,7 +415,7 @@ async fn initialize_config_files() -> Result<()> {
     if let Ok(path) = dirs::verge_path()
         && !path.exists()
     {
-        let template = IVerge::template();
+        let template = TonoPreferences::template();
         help::save_yaml(&path, &template, Some("# Tono"))
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create verge config: {}", e))?;
@@ -423,7 +423,7 @@ async fn initialize_config_files() -> Result<()> {
     }
 
     // 验证并修正verge配置
-    IVerge::validate_and_fix_config()
+    TonoPreferences::validate_and_fix_config()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to validate verge config: {}", e))?;
 
