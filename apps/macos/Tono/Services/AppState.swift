@@ -8,10 +8,8 @@ import Darwin
 
 @Observable
 final class AppState {
-    nonisolated static let managedCatalogRegionID =
-        "tono-managed-catalog"
-    nonisolated static let managedCatalogSourceID =
-        "tono-managed-catalog"
+    nonisolated static let managedCatalogRegionID = ManagedCatalogIdentity.regionID
+    nonisolated static let managedCatalogSourceID = ManagedCatalogIdentity.sourceID
     // Navigation
     var selectedPage: AppPage = .dashboard {
         didSet {
