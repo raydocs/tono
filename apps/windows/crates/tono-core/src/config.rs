@@ -237,6 +237,8 @@ pub const RULES: [&str; 3] = [
 pub enum ConfigError {
     #[error("selected node is not in the catalog: {0}")]
     MissingSelection(String),
+    #[error("the required residential route is unavailable or invalid")]
+    ResidentialRouteUnavailable,
     #[error("node set rejected: {0}")]
     Node(#[from] NodeRejection),
     #[error("direct plan rejected: {0}")]
@@ -490,7 +492,7 @@ pub fn build_owned_runtime(
 /// `nodes`, Claude processes and the Claude/Anthropic domains exit through a dedicated
 /// `Tono-Claude-Home` group holding that node alone, and the node's address joins the TUN
 /// route exclusions so Mihomo's second Reality socket stays out of the tunnel. A name not in
-/// `nodes` (stale caller) degrades to the unsplit runtime instead of failing the connect.
+/// `nodes` (stale caller) is rejected rather than silently changing the final egress.
 ///
 /// `home_socks5` is the catalog's verified `homeSocks5` directive and takes precedence over
 /// `home_proxy` (mirroring [`crate::catalog::sanitize_routing`]): the group then holds a
@@ -522,6 +524,14 @@ pub fn build_owned_runtime_with_ports(
         .iter()
         .find(|node| node.name == selected)
         .ok_or_else(|| ConfigError::MissingSelection(selected.to_string()))?;
+    crate::catalog::validate_residential_routing(
+        &crate::catalog::CatalogRouting {
+            home_proxy: home_proxy.map(str::to_owned),
+            default_proxy: None,
+            home_socks5: home_socks5.cloned(),
+        },
+        nodes,
+    ).map_err(|_| ConfigError::ResidentialRouteUnavailable)?;
     // `home_socks5` wins over `home_proxy`: a catalog home node is ignored
     // while a chained residential upstream is in force.
     let home_node = if home_socks5.is_some() {
@@ -2312,10 +2322,17 @@ reality-opts:
     }
 
     #[test]
-    fn unknown_home_name_degrades_to_the_unsplit_runtime() {
-        // A stale caller must never produce a group pointing nowhere, and a
-        // control-plane hiccup must not block the whole connect.
-        assert_eq!(build_with_home(Some("No Such Node")).yaml(), build().yaml());
+    fn unknown_home_name_is_refused_instead_of_generating_a_cloud_runtime() {
+        assert_eq!(build_owned_runtime_with_ports(
+            &three_nodes(), "JP Reality 02", "s", None, Some("No Such Node"),
+            None, RuntimePorts::default(),
+        ).unwrap_err(), ConfigError::ResidentialRouteUnavailable);
+        let mut upstream = home_socks5();
+        upstream.password.clear();
+        assert_eq!(build_owned_runtime_with_ports(
+            &three_nodes(), "JP Reality 02", "s", None, Some("US Reality 01"),
+            Some(&upstream), RuntimePorts::default(),
+        ).unwrap_err(), ConfigError::ResidentialRouteUnavailable);
     }
 
     #[test]

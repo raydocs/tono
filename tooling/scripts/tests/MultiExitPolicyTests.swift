@@ -266,6 +266,28 @@ struct MultiExitPolicyTests {
         guard claudeHomeRuntime.contains("\nfind-process-mode: strict\n") else {
             throw TestFailure("Claude home route must demand process lookup")
         }
+        // A declared but unusable residential hop must not silently disappear.
+        var invalidHomeOverlay = cloudOnlyOverlay
+        invalidHomeOverlay.claudeHomeNodeName = "missing-residential-node"
+        do {
+            _ = try ConfigPipeline.buildOwnedTonoRuntime(
+                subscriptionYAML: "", overlay: invalidHomeOverlay,
+                transport: nil, customNodes: [sanitizedNode]
+            )
+            throw TestFailure("invalid home node silently degraded to cloud routing")
+        } catch is ConfigPipeline.TonoInjectionError { }
+        invalidHomeOverlay.claudeHomeNodeName = nil
+        invalidHomeOverlay.claudeHomeSocks5 = .init(
+            host: "residential.example.com", port: 11080, username: "u", password: ""
+        )
+        do {
+            _ = try ConfigPipeline.buildOwnedTonoRuntime(
+                subscriptionYAML: "", overlay: invalidHomeOverlay,
+                transport: nil, customNodes: [sanitizedNode]
+            )
+            throw TestFailure("invalid SOCKS hop silently degraded to cloud routing")
+        } catch is ConfigPipeline.TonoInjectionError { }
+
         let claudeHomeRequired = [
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,stripe.com)),\(ConfigPipeline.claudeHomeGroupName)",
             "AND,((NETWORK,TCP),(DOMAIN-SUFFIX,stripecdn.com)),\(ConfigPipeline.claudeHomeGroupName)",

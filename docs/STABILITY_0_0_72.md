@@ -628,5 +628,41 @@ browser support.
 Local correction checks: 219 portable core tests, 425 Mac-hosted App library
 tests, 216 frontend tests, 329 Worker tests, frontend/Worker typechecks, policy
 parity, and all 12 nonprivileged Mac umbrella suites pass. Six privileged/data-
-plane Mac checks remain explicitly skipped; hosted Windows and new installed-byte
-payment-route verification are still pending.
+plane Mac checks remain explicitly skipped. Hosted Windows, macOS and Services CI
+for `3c7aafd` pass; new installed-byte payment-route verification is still pending.
+
+### Reject an unusable declared home hop instead of silently becoming cloud-only
+
+The dependency audit exposed a second, independent fail-open-at-the-routing-layer
+path. Windows catalog sanitization and direct runtime calls could discard an
+unknown home node or invalid preferred SOCKS upstream. macOS also swallowed
+malformed residential wire fields and persisted a candidate before validating
+its routing. The control plane filtered disabled assigned homes out of its
+binding query, making an unavailable assignment look like a legitimate unbind.
+These are final-egress identity failures even when TUN/firewall protection remains
+active; “inside the tunnel” alone is not residential qualification.
+
+The correction rejects an explicit unusable home requirement at catalog/cache
+admission and runtime generation. Mac admission validates before cache persistence;
+its wire decoder rejects malformed home objects while retaining optional default
+selection-hint tolerance. A valid preferred SOCKS hop still wins over a secondary
+home-node name. Windows cache load/store/tracker installation share the same
+residential admission check. The backend returns a generic 503 for disabled or
+missing assigned homes; a genuinely unbound user and an explicit binding deletion
+still receive the existing cloud-only behavior. No production binding, credential,
+network configuration or control-plane deployment was changed during these tests.
+
+Before correction, two Rust admission cases failed, five malformed Mac wire
+fixtures decoded without throwing, a generated Mac runtime silently lost a required
+home, and the inactive-home API test returned success. Corrected local checks pass:
+220 portable core tests, 426 Mac-hosted App library tests, 329 Worker tests plus
+typecheck, and all 12 nonprivileged Mac umbrella suites (six explicit skips).
+The new Mac XCTest admission cases are pure decoding/configuration tests, without
+account, cache, network or privileged-helper operations. Hosted CI, candidate
+installation and protected real-device routing qualification remain required.
+
+The App regression additionally proves rejection preserves the prior verified cache
+bytes and tracker revision, and accepts a corrected redelivery at the next revision.
+An independent tool-free Grok 4.6 high-effort review found no changed-symbol
+regression (advisory only); stale-cache behavior and physical failure qualification
+are not inferred from that review. The unsigned local Mac Release build passes.

@@ -225,8 +225,9 @@ nonisolated struct ConfigPipeline {
     /// Grok, and `google.com` / `googleapis.com` / `gstatic.com` at large.
     /// Gemini is pinned by its product hostnames so Search, YouTube, and
     /// Tono's own home-group probe stay off the residential hop.
-    /// Only first-party provider domains belong here, plus the exact install,
-    /// update and telemetry hosts in Anthropic's published network requirements.
+    /// Reviewed provider, install, telemetry and payment dependencies belong
+    /// here. Shared payment hosts intentionally retain the same residential
+    /// identity across browsers; unrelated infrastructure is not swept in.
     /// Shared infrastructure the public AI rule lists bundle in — auth0,
     /// segment, cloudflare.net, googleapis.com at
     /// large, and gstatic.com — is used by
