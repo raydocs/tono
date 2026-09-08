@@ -500,3 +500,38 @@ executes the same non-privileged fixture and tracks both harness/test paths.
 The native driver was separately built with Rust 1.98.1 and read-only diagnosis
 confirmed the first explicit disconnect cleared desired Core/protection ownership.
 This evidence is not a live Core crash, Service crash or adapter-flap qualification.
+
+
+### Rebuilt Windows candidate: real telemetry and reconnect verified
+
+Candidate run `34209929299`, source `20bb37f6b0e1d377ebcd9a4ee34585061c138635`,
+passed both jobs; Windows CI `34209929130` passed all four jobs. The owner-authorized
+same-version repair installed SHA-256
+`7cbc7d4b573756c429624467dff17f7a18c4df1021fdda445718d6e2016d4197`.
+Installer exit was zero, without reboot or silent GUI launch. The installed GUI
+matched the independently extracted NSIS `Tono.exe.next` SHA-256
+`454609e7c1fb20a877803dc1e6c44582959c5e7c42672627765b3b8d57fee908`; Core,
+Service and both privileged helpers also matched that candidate manifest.
+
+On the physical Windows host, live dashboard rates and Activity populated. A
+controlled, certificate-verified HTTPS/TLS connection appeared in the live
+Connections view with its expected process, destination, TUN/TCP and route. Two
+connect cycles used different Service-owned Core PIDs; each reported wanted/live/
+verified locked protection and passed the protected DNS probe. Each explicit
+disconnect stopped Core, cleared desired runtime/protection ownership, restored
+the pre-upgrade DNS baseline and allowed direct HTTPS again. Private evidence is
+retained under `artifacts/stability-0072/windows-device/plugin-fix-*`.
+
+This closes the namespace blocker for these exact installed bytes. It does not
+qualify crash-time leaks, all policy routes, browser/profile behavior, connected
+update lifecycle #26, signing or owner-Mac privileged installation. The harness
+follow-up `fd15e46` separately passed Windows CI `34211103544` and macOS CI
+`34211103561`.
+
+Real-device testing also found that Activity's default Apps view ignored domain,
+protocol and rule queries even though Connections could find them. The app
+aggregation now retains deduplicated, already-sanitized connection search terms,
+without altering app/route totals. WeChat aliases are no longer attached to every
+unrelated connection. Three new tests failed before correction; the focused
+suite passes 14 tests, the full frontend suite passes 207, and typecheck passes.
+A rebuilt package's physical search verification remains pending.

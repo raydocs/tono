@@ -304,6 +304,47 @@ describe('Activity connection presentation', () => {
   })
 })
 
+describe('Activity app search regressions', () => {
+  it('retains every connection search term without changing app totals or exposing private fields', () => {
+    const first = connection('first', {
+      metadata: { ...connection('first').metadata, process: 'pwsh.exe',
+        host: 'https://alice:secret@api.ipify.org/private?token=abc' },
+    })
+    const second = connection('second', {
+      metadata: { ...connection('second').metadata, process: 'pwsh.exe', host: 'second.example.com' },
+      chains: ['DIRECT'],
+    })
+    const apps = aggregateActivityApps([toActivityRow(first), toActivityRow(second)])
+    expect(apps).toHaveLength(1)
+    expect(apps[0]).toMatchObject({ total: 2, proxied: 1, direct: 1 })
+    for (const term of ['api.ipify.org', 'second.example.com', 'https', 'domain-suffix']) {
+      expect(apps[0].searchText).toContain(term)
+    }
+    expect(apps[0].searchText).not.toMatch(/alice|secret|token=|private-user/)
+  })
+
+  it('adds WeChat aliases only to actual WeChat process rows', () => {
+    const ordinary = toActivityRow(connection('pwsh'))
+    expect(ordinary.searchText).not.toMatch(/wechat|weixin|微信/)
+    const helper = toActivityRow(connection('helper', {
+      metadata: { ...connection('helper').metadata, process: 'WeChatAppEx.exe' },
+    }))
+    const app = aggregateActivityApps([helper])[0]
+    for (const term of ['wechatappex.exe', 'wechat', 'weixin', '微信']) {
+      expect(app.searchText).toContain(term)
+    }
+  })
+
+  it('finds the app by a case-insensitive domain query in the default app view', () => {
+    render(<ActivityPage />)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'PROXY.EXAMPLE.COM' } })
+    expect(screen.getByText('proxy.exe')).toBeDefined()
+    expect(screen.queryByText('direct.exe')).toBeNull()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'no-match.example' } })
+    expect(screen.queryByText('proxy.exe')).toBeNull()
+  })
+})
+
 describe('ActivityPage', () => {
   it('subscribes only while the Tono managed runtime is connected', () => {
     tonoStatusMock.uiState = 'notConnected'
