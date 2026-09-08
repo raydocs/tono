@@ -1,6 +1,6 @@
 //! The connect stage sequence. Stage order and cancellation-safe IPC are unchanged.
-//! Explicit adapter imports below are the remaining extraction boundary; do not
-//! give this module its own generation, cleanup owner, or reconnect loop.
+//! Adapters live in sibling modules. Do not give this module its own generation,
+//! cleanup owner, or reconnect loop.
 
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -12,14 +12,23 @@ use tono_core::{
 use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, RuntimeBundle};
 
-use super::{
-    CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, active_runtime_resume_status, allocate_runtime_ports,
-    bootstrap_hosts, configure_owned_controller_for_ui, detect_physical_interface, enable_dns_cancellation_safe,
-    ensure_fresh, lock_kill_switch_with_retries, preflight_bfe, preflight_dns_listener, proxy_endpoint_of,
-    refresh_control_plane_pins_from_service, set_stage, spawn_control_plane_pin_refresh, spawn_exit_identity_lookup,
-    spawn_network_monitor, spawn_optional_direct_after_connected, stale_after_arm, stale_after_dns,
-    start_core_cancellation_safe, verify_fake_ip, verify_post_lock, wait_controller, write_redacted_copy,
+use super::cleanup::{
+    enable_dns_cancellation_safe, ensure_fresh, stale_after_arm, stale_after_dns, start_core_cancellation_safe,
 };
+use super::controller::{
+    allocate_runtime_ports, configure_owned_controller_for_ui, lock_kill_switch_with_retries, preflight_bfe,
+    preflight_dns_listener, wait_controller,
+};
+use super::endpoints::proxy_endpoint_of;
+use super::monitor::{
+    bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
+    spawn_exit_identity_lookup, spawn_network_monitor,
+};
+use super::probes::{verify_fake_ip, verify_post_lock};
+use super::status::set_stage;
+use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
+use super::platform::{detect_physical_interface, write_redacted_copy};
+use super::reconnect::active_runtime_resume_status;
 use super::{failure::StageFailure, transaction::ConnectTransaction};
 use crate::{
     core::service,

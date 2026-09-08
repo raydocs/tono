@@ -165,7 +165,7 @@ extension AppState {
                     .catalogNodeRemoved,
                     stage: "catalogInstall",
                     attempt: 1,
-                    generation: protectionOperationGeneration,
+                    generation: connectionCoordinator.protectionOperationGeneration,
                     detail: "selected catalog exit absent at revision \(catalog.revision)"
                 )
             }
@@ -735,7 +735,7 @@ extension AppState {
     func refreshManagedDirectPins() async {
         guard isConnected, isOwnedTonoMode,
               switchingNodeId == nil,
-              configReloadTask == nil,
+              connectionCoordinator.configReloadTask == nil,
               let api = coreController,
               let base = activeDirectPolicy,
               !managedTrafficPolicy.domains.isEmpty
@@ -747,7 +747,7 @@ extension AppState {
             api: api
         )
         guard !Task.isCancelled, isConnected,
-              switchingNodeId == nil, configReloadTask == nil,
+              switchingNodeId == nil, connectionCoordinator.configReloadTask == nil,
               let resolved else { return }
         guard let merged = Self.mergedManagedDirectPolicy(
             current: base,

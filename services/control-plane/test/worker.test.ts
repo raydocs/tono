@@ -1431,53 +1431,64 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     })).status).toBe(200);
   });
 
-  it('retires shared legacy only after credentials, catalog and node acknowledgements are ready', async () => {
-    const account = await createAccount('credential-rollout');
-    const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
-    expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
+  it.each([0, 999])('retires shared legacy only after credentials, catalog and node acknowledgements are ready (clock offset %i ms)', async (offset) => {
+    // The ambiguous first acknowledgement must deliberately tie the credential
+    // second. Real request scheduling can cross that boundary even in 20 ms,
+    // in which case a 200 is correct and the old hard-coded 503 was flaky.
+    const startedAt = Math.floor(Date.now() / 1_000) * 1_000 + offset;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    try {
+      const account = await createAccount('credential-rollout');
+      const yaml = `proxies:\n  - name: Tono-Exit\n    type: vless\n    server: exit.example.com\n    port: 443\n    uuid: {{TONO_CLIENT_UUID}}\n    tls: true\n`;
+      expect((await admin('exit-catalog', { yaml, expectedRevision: 0 }, 'PUT')).status).toBe(200);
 
-    const advanced = await admin('exit-credential-rollout', { phase: 'device_only' });
-    expect(advanced.status).toBe(200);
-    const roster = await api('home/exit-identities', {
-      headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
-    });
-    expect((await roster.json() as any).retireSharedLegacy).toBe(true);
-    expect((await api('home/exit-identities', {
-      headers: { authorization: `Bearer ${HOME_TOKEN}` },
-    })).status).toBe(401);
+      const advanced = await admin('exit-credential-rollout', { phase: 'device_only' });
+      expect(advanced.status).toBe(200);
+      const roster = await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${EXIT_NODE_TOKENS['exit-default']}` },
+      });
+      expect((await roster.json() as any).retireSharedLegacy).toBe(true);
+      expect((await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${HOME_TOKEN}` },
+      })).status).toBe(401);
 
-    // Adding an unacknowledged node after cutover must hold new catalog
-    // credentials until that node has actually reconciled the roster.
-    const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
-    const lateToken = String((await late.json() as any).token);
-    const blocked = await api('exit-catalog', {
-      headers: { authorization: `Bearer ${account.accessToken}` },
-    });
-    expect(blocked.status).toBe(503);
-    expect((await blocked.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
+      // Adding an unacknowledged node after cutover must hold new catalog
+      // credentials until that node has actually reconciled the roster.
+      const late = await admin('exit-nodes', { id: 'exit-late', name: 'Late Exit' });
+      const lateToken = String((await late.json() as any).token);
+      const blocked = await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      });
+      expect(blocked.status).toBe(503);
+      expect((await blocked.json() as any).error.code).toBe('EXIT_IDENTITY_PROPAGATING');
 
-    const lateRoster = await api('home/exit-identities', {
-      headers: { authorization: `Bearer ${lateToken}` },
-    });
-    const observedAt = Number((await lateRoster.json() as any).observedAt);
-    expect((await api('home/roster-ack', json({ observedAt }, lateToken))).status).toBe(200);
-    expect((await api('exit-catalog', {
-      headers: { authorization: `Bearer ${account.accessToken}` },
-    })).status).toBe(503);
+      const lateRoster = await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${lateToken}` },
+      });
+      const observedAt = Number((await lateRoster.json() as any).observedAt);
+      expect(observedAt).toBe(Math.floor(startedAt / 1_000));
+      expect((await api('home/roster-ack', json({ observedAt }, lateToken))).status).toBe(200);
+      expect((await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      })).status).toBe(503);
 
-    // Seconds are the persisted wire precision. An acknowledgement tied with a
-    // credential's creation cannot prove whether it was fetched before or after
-    // that credential; the next poll gives the ordering a strict boundary.
-    const delay = Math.max(0, (observedAt + 1) * 1_000 - Date.now() + 10);
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    const settledRoster = await api('home/exit-identities', {
-      headers: { authorization: `Bearer ${lateToken}` },
-    });
-    const settledAt = Number((await settledRoster.json() as any).observedAt);
-    expect((await api('home/roster-ack', json({ observedAt: settledAt }, lateToken))).status).toBe(200);
-    expect((await api('exit-catalog', {
-      headers: { authorization: `Bearer ${account.accessToken}` },
-    })).status).toBe(200);
+      // Seconds are the persisted wire precision. An acknowledgement tied with a
+      // credential's creation cannot prove whether it was fetched before or after
+      // that credential; the next poll gives the ordering a strict boundary.
+      clock.mockReturnValue((observedAt + 1) * 1_000);
+      const settledRoster = await api('home/exit-identities', {
+        headers: { authorization: `Bearer ${lateToken}` },
+      });
+      const settledAt = Number((await settledRoster.json() as any).observedAt);
+      expect(settledAt).toBe(observedAt + 1);
+      expect((await api('home/roster-ack', json({ observedAt: settledAt }, lateToken))).status).toBe(200);
+      expect((await api('exit-catalog', {
+        headers: { authorization: `Bearer ${account.accessToken}` },
+      })).status).toBe(200);
+
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('accepts usage from the collector under its own token, on the same rules', async () => {

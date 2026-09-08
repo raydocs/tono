@@ -96,8 +96,6 @@ final class AppState {
     /// one first so a live session is not hit by three cold TLS races.
     var lastSuccessfulProbeOrigin: String?
     var consecutiveProtectedFailureCount = 0
-    var connectAttemptID: UUID?
-    var connectWatchdogTask: Task<Void, Never>?
     /// The protected path failed and PF is intentionally still blocking direct
     /// egress. Keep this distinct from ordinary "Not Connected" so the user
     /// can explicitly restore normal Internet instead of unknowingly retrying
@@ -192,16 +190,9 @@ final class AppState {
     var autoUpdateTimer: Timer?
     private var proxyGuardTimer: Timer?
     private var latencyTestTimer: Timer?
-    var coreMonitorTask: Task<Void, Never>?
-    var protectedReconnectTask: Task<Void, Never>?
-    var protectedReconnectID: UUID?
-    var lastProtectedReconnectKick: Date?
     /// Catalog exits already tried in this fail-closed connect loop. Reset on
     /// a fresh user connect so a China GFW hit on one city can move on.
     private var catalogFailoverNamesTried: Set<String> = []
-    var networkEnvironmentTask: Task<Void, Never>?
-    var wakeRecoveryTask: Task<Void, Never>?
-    var sleepRestrictTask: Task<Void, Never>?
     var resumeProtectionAfterWake = false
     var initialDataLoaded = false
     var autoConnectRequested = false
@@ -251,14 +242,12 @@ final class AppState {
 
     // Core components
     let coreRuntime = CoreRuntimeManager()
+    let connectionCoordinator = ConnectionCoordinator()
     let subscriptionManager = SubscriptionManager()
     let proxyService = ProxyService()
     private let providerRuleLoader = ProviderRuleLoader()
     var coreController: CoreControllerClient?
     var webSocket: ClashWebSocket?
-    var connectTask: Task<Void, Never>?
-    var configReloadTask: Task<Void, Never>?
-    var configReloadRequestID = 0
     /// Digest of the config the running core actually loaded, as opposed to the
     /// last one written to disk. A rewrite that reproduces these bytes has
     /// nothing to reload, and the reload is what closes every open connection.
@@ -268,13 +257,7 @@ final class AppState {
     var pendingFullConfigReload = false
     var pendingDirectPolicyReload:
         ConfigPipeline.ManagedDirectRuntimePolicy?
-    var disconnectSequence: Task<Void, Never>?
-    var disconnectRequestID = 0
-    /// Invalidates helper-status observations when a newer protected network
-    /// transition starts while the IPC request is in flight.
-    var protectionOperationGeneration: UInt64 = 0
     var networkInfoTask: Task<Void, Never>?
-    var nodeSwitchTask: Task<Void, Never>?
     var protectedDNSService: String?
 
     // MARK: - Init
@@ -330,7 +313,7 @@ final class AppState {
             // Wake recovery owns its barrier/retry sequence. Dynamic Store
             // emits several route and DNS notifications during the same wake;
             // they must not create a second coordinator that races its connect.
-            guard wakeRecoveryTask == nil else { return }
+            guard connectionCoordinator.wakeRecoveryTask == nil else { return }
             LocalTrafficAudit.shared.recordEvent(
                 "protected_reconnect_network_kick",
                 details: auditProtectionDetails()
@@ -343,8 +326,8 @@ final class AppState {
             "system_network_change_observed",
             details: auditProtectionDetails()
         )
-        networkEnvironmentTask?.cancel()
-        networkEnvironmentTask = Task { [weak self] in
+        connectionCoordinator.networkEnvironmentTask?.cancel()
+        connectionCoordinator.networkEnvironmentTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(750))
             guard let self, !Task.isCancelled, self.isConnected,
                   !self.isConnecting, !self.isDisconnecting else { return }
@@ -361,15 +344,15 @@ final class AppState {
             // tearing the session down on it closes every flow for a restart
             // that resolves itself.
             guard dnsIntegrity != .unverifiable else {
-                self.networkEnvironmentTask = nil
+                self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
             guard primaryService != self.protectedDNSService
                     || dnsIntegrity == .broken else {
-                self.networkEnvironmentTask = nil
+                self.connectionCoordinator.networkEnvironmentTask = nil
                 return
             }
-            self.networkEnvironmentTask = nil
+            self.connectionCoordinator.networkEnvironmentTask = nil
             LocalTrafficAudit.shared.recordEvent(
                 "system_network_change_requires_reconnect",
                 details: self.auditProtectionDetails()
@@ -390,11 +373,11 @@ final class AppState {
     /// armed until cleanup proves DNS + core stop, or the journal records a
     /// fail-closed handoff.
     func prepareForSoftwareUpdate(nextVersion: String) async -> UpdateHandoffJournal {
-        protectionOperationGeneration &+= 1
-        coreMonitorTask?.cancel()
-        nodeSwitchTask?.cancel()
-        protectedReconnectTask?.cancel()
-        connectTask?.cancel()
+        connectionCoordinator.bumpGeneration()
+        connectionCoordinator.coreMonitorTask?.cancel()
+        connectionCoordinator.nodeSwitchTask?.cancel()
+        connectionCoordinator.protectedReconnectTask?.cancel()
+        connectionCoordinator.connectTask?.cancel()
         isProtectedReconnectScheduled = false
         var journal = UpdateHandoffJournal(
             phase: .updatePrepared,
@@ -410,7 +393,7 @@ final class AppState {
             keepKillSwitchArmed: isConnected || isConnecting || isProtectionBlocked || KillSwitchService.isArmed,
             selectedNodeAnonymousId: selectedExitNode()?.id,
             catalogRevision: nil,
-            connectionGeneration: protectionOperationGeneration
+            connectionGeneration: connectionCoordinator.protectionOperationGeneration
         )
         // Each hop has to start from the phase actually reached. Advancing the
         // written value and then advancing the original again skips a step,
@@ -441,25 +424,25 @@ final class AppState {
             details: auditProtectionDetails()
         )
         guard shouldResume else { return }
-        protectionOperationGeneration &+= 1
-        wakeRecoveryTask?.cancel()
-        wakeRecoveryTask = nil
-        sleepRestrictTask?.cancel()
-        sleepRestrictTask = nil
-        networkEnvironmentTask?.cancel()
-        networkEnvironmentTask = nil
-        protectedReconnectTask?.cancel()
-        protectedReconnectTask = nil
-        protectedReconnectID = nil
-        lastProtectedReconnectKick = nil
+        connectionCoordinator.bumpGeneration()
+        connectionCoordinator.wakeRecoveryTask?.cancel()
+        connectionCoordinator.wakeRecoveryTask = nil
+        connectionCoordinator.sleepRestrictTask?.cancel()
+        connectionCoordinator.sleepRestrictTask = nil
+        connectionCoordinator.networkEnvironmentTask?.cancel()
+        connectionCoordinator.networkEnvironmentTask = nil
+        connectionCoordinator.protectedReconnectTask?.cancel()
+        connectionCoordinator.protectedReconnectTask = nil
+        connectionCoordinator.protectedReconnectID = nil
+        connectionCoordinator.lastProtectedReconnectKick = nil
         isProtectedReconnectScheduled = false
         protectedReconnectAttempt = 0
         protectedReconnectNextAttemptAt = nil
         if isConnected || isConnecting || coreRuntime.isRunning {
             disconnect(releaseKillSwitch: false)
         } else if KillSwitchService.isArmed || isProtectionBlocked {
-            sleepRestrictTask?.cancel()
-            sleepRestrictTask = Task {
+            connectionCoordinator.sleepRestrictTask?.cancel()
+            connectionCoordinator.sleepRestrictTask = Task {
                 try? await PrivilegedRuntimeCoordinator.shared
                     .restrictKillSwitchToBootstrap()
             }
@@ -478,17 +461,17 @@ final class AppState {
             details: auditProtectionDetails()
         )
         guard shouldResume else { return }
-        protectionOperationGeneration &+= 1
-        networkEnvironmentTask?.cancel()
-        networkEnvironmentTask = nil
-        wakeRecoveryTask?.cancel()
-        wakeRecoveryTask = Task { [weak self] in
+        connectionCoordinator.bumpGeneration()
+        connectionCoordinator.networkEnvironmentTask?.cancel()
+        connectionCoordinator.networkEnvironmentTask = nil
+        connectionCoordinator.wakeRecoveryTask?.cancel()
+        connectionCoordinator.wakeRecoveryTask = Task { [weak self] in
             guard let self else { return }
             if self.isConnected || self.isConnecting || self.coreRuntime.isRunning {
                 self.disconnect(releaseKillSwitch: false)
             }
-            _ = await self.sleepRestrictTask?.value
-            self.sleepRestrictTask = nil
+            _ = await self.connectionCoordinator.sleepRestrictTask?.value
+            self.connectionCoordinator.sleepRestrictTask = nil
             await self.finishPendingDisconnect()
             var barrierReady = false
             for delay in [0, 1, 2, 5, 10, 30] {
@@ -522,7 +505,7 @@ final class AppState {
                     // transport-ready callback. Do not leave a completed task
                     // handle that suppresses every later route-change kick.
                     if !Task.isCancelled {
-                        self.wakeRecoveryTask = nil
+                        self.connectionCoordinator.wakeRecoveryTask = nil
                     }
                     return
                 }
@@ -531,10 +514,10 @@ final class AppState {
                     localized: "Re-protecting this Mac after wake. Kill Switch is blocking direct traffic."
                 )
                 self.connect()
-                self.wakeRecoveryTask = nil
+                self.connectionCoordinator.wakeRecoveryTask = nil
                 return
             }
-            self.wakeRecoveryTask = nil
+            self.connectionCoordinator.wakeRecoveryTask = nil
             // Exhausting the wake delays must not strand a fail-closed host
             // with nothing scheduled: sleep preparation cancelled the standard
             // reconnect loop, and on a stable network no route-change kick may
@@ -1314,7 +1297,7 @@ final class AppState {
                     )
                 )
             }
-            if generation != protectionOperationGeneration {
+            if generation != connectionCoordinator.protectionOperationGeneration {
                 controllerTask?.cancel()
                 return .failed(
                     ProtectedConnectivity.failure(
@@ -1420,22 +1403,22 @@ final class AppState {
         // digest. Take the shared serialization handle so two of them cannot
         // interleave, and so disconnect drains this one with the others rather
         // than letting it re-arm PF after a release.
-        guard configReloadTask == nil, switchingNodeId == nil else {
+        guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil else {
             ConnectionTelemetryBuffer.shared.record(
                 "optionalPolicyRollback",
                 reason: "runtime_mutation_in_flight",
-                generation: Int(protectionOperationGeneration)
+                generation: Int(connectionCoordinator.protectionOperationGeneration)
             )
             return
         }
         ConnectionTelemetryBuffer.shared.record(
             "optionalPolicyBegin",
             revision: managedTrafficPolicyRevision,
-            generation: Int(protectionOperationGeneration)
+            generation: Int(connectionCoordinator.protectionOperationGeneration)
         )
-        configReloadRequestID += 1
-        let requestID = configReloadRequestID
-        configReloadTask = Task { [weak self] in
+        connectionCoordinator.configReloadRequestID += 1
+        let requestID = connectionCoordinator.configReloadRequestID
+        connectionCoordinator.configReloadTask = Task { [weak self] in
             guard let self else { return }
             await self.applyOptionalDirectPolicyInBackground(policy: policy)
             self.finishConfigReloadRequest(requestID)
@@ -1445,7 +1428,7 @@ final class AppState {
     private func applyOptionalDirectPolicyInBackground(policy: TonoTrafficPolicy) async {
         guard isConnected, !isDisconnecting, !Task.isCancelled,
               let api = coreController else { return }
-        let generation = protectionOperationGeneration
+        let generation = connectionCoordinator.protectionOperationGeneration
         ConnectionTelemetryBuffer.shared.record(
             "optionalPolicyBegin",
             action: "resolve",
@@ -1458,7 +1441,7 @@ final class AppState {
             base: base,
             api: api
         )
-        guard generation == protectionOperationGeneration, isConnected,
+        guard generation == connectionCoordinator.protectionOperationGeneration, isConnected,
               !Task.isCancelled else { return }
         guard let resolved, resolved != base else {
             ConnectionTelemetryBuffer.shared.record(
@@ -1478,7 +1461,7 @@ final class AppState {
                 helperPrepared: true,
                 reviewedBundleDirect: resolved.requiresAddressFreeDirectPermit
             )
-            guard generation == protectionOperationGeneration,
+            guard generation == connectionCoordinator.protectionOperationGeneration,
                   !Task.isCancelled else { return }
             let runtimeNodes = importedExitNodes
             let overlay = currentOwnedRuntimeOverlay()
@@ -1498,7 +1481,7 @@ final class AppState {
             // who tapped Restore internet spends waiting. The verification
             // below is eight seconds of exactly that, and the session it would
             // verify is already going away.
-            guard generation == protectionOperationGeneration,
+            guard generation == connectionCoordinator.protectionOperationGeneration,
                   !Task.isCancelled else { return }
             loadedRuntimeConfigDigest = digest
             commitResidentialRouteAuditContext(
@@ -1507,7 +1490,7 @@ final class AppState {
                 digest: digest
             )
             let tun = await ProtectedConnectivityVerifier.raceSystemTUNProbes(timeoutSeconds: 8)
-            guard generation == protectionOperationGeneration else { return }
+            guard generation == connectionCoordinator.protectionOperationGeneration else { return }
             if case .lost = tun {
                 ConnectionTelemetryBuffer.shared.record(
                     "optionalPolicyRollback",
@@ -1894,7 +1877,7 @@ final class AppState {
                 reason: result.failureReason?.rawValue,
                 mode: result.source.rawValue,
                 counter: result.preferenceStoreCount,
-                generation: Int(protectionOperationGeneration),
+                generation: Int(connectionCoordinator.protectionOperationGeneration),
                 outcome: result.outcome.rawValue
             )
         }

@@ -47,8 +47,10 @@ tree, not only in this file.
 
 `AppState.swift` holds published state. Domain extensions:
 `AppState+Connect`, `+Catalog`, `+Proxy`, `+Subscriptions`, `+Persistence`.
-Supporting types live in `AppStateSupport.swift`. Do not merge `Core/` into
-`Services/`.
+Supporting value types live in `Models/`; isolated workers live in
+`Services/Catalog/`, `Services/Persistence/`, and `Services/Diagnostics/`.
+`ManagedCatalogIdentity` owns the stable catalog identifiers, so catalog validation
+does not depend on `AppState`. Do not merge `Core/` into `Services/`.
 
 ### Windows (`apps/windows`)
 
@@ -60,10 +62,19 @@ Supporting types live in `AppStateSupport.swift`. Do not merge `Core/` into
 | `service/src/core/` | Privileged WFP, DNS, Mihomo supervision |
 | `crates/tono-core/` | Portable catalog, policy, connect FSM |
 
-`tono/connection.rs` still owns `run_stages`. Split out:
-`connection_health.rs`, `connection_plan.rs`, `connection_routes.rs`.
-Next: peel disconnect / `run_stages`. Do not merge `app/crates/` into
-`crates/` in the same change as a logic split.
+`tono/connection.rs` still owns the outer attempt, disconnect, switching,
+monitoring, probes and DIRECT lifecycle. `connection/stages.rs` now owns
+`run_stages`; `connection/transaction.rs` owns the shared deadline and cancellation;
+`connection/failure.rs` owns stable error mapping. Health, decision tables and route
+classification remain in `connection_health.rs`, `connection_plan.rs`, and
+`connection_routes.rs`.
+
+The stage module still has an explicit list of adapter imports from its parent:
+this is an intermediate extraction boundary, not the final independent client
+library. Next isolate cleanup/monitor/controller adapters without changing the
+generation owner or privileged operation order. Do not merge `app/crates/` into
+`crates/` in the same change as a logic split. The three primary Cargo workspaces
+remain separate; shared dependencies must be tested in each consumer workspace.
 
 Leftover Clash Verge UI (Monaco, subscription editors) stays until a
 screen is proven unreachable. `LEGACY_*` on-disk cleanup stays.
@@ -74,6 +85,10 @@ screen is proven unreachable. `LEGACY_*` on-disk cleanup stays.
 2. Split those god files by domain (`AppState+Connect`, connect transaction).
 3. Delete leftover Verge surfaces with no route (Monaco / unused base widgets done).
 4. Linux nftables, CLI, further Worker splits.
+
+See [upgrade execution status](ARCHITECTURE_UPGRADE_PROGRESS.md) for completed
+commits, verification evidence and the remaining DAG. File extraction alone is
+not completion of the architecture upgrade.
 
 ## Linux product (not shipped yet)
 

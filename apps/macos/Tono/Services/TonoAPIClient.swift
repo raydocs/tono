@@ -73,7 +73,10 @@ actor TonoAPIClient {
     private let session: URLSession
     private let keychain: KeychainStore
     private var accessToken: String?
-    private var refreshTask: Task<String, Error>?
+    private var refreshTask: (id: UUID, task: Task<String, Error>)?
+    private var logoutTask: (id: UUID, generation: UInt64, task: Task<Void, Never>)?
+    private var credentialGeneration: UInt64 = 0
+    private var isLoggingOut = false
     /// Expiry of `accessToken`, read from its own `exp` claim.
     ///
     /// Nothing here trusts the claim for security — the server validates the
@@ -231,6 +234,7 @@ actor TonoAPIClient {
         guard let refresh = auth.refreshToken, !refresh.isEmpty else {
             throw APIError.invalidResponse
         }
+        retireCredentialGeneration()
         accessToken = auth.accessToken
         accessTokenExpiry = Self.expiry(ofJWT: auth.accessToken)
         do {
@@ -289,6 +293,25 @@ actor TonoAPIClient {
     }
 
     func logout() async {
+        if let current = logoutTask, current.generation == credentialGeneration {
+            await current.task.value
+            return
+        }
+        let id = UUID()
+        let generation = credentialGeneration
+        // Block ordinary requests immediately, but allow a refresh already
+        // rotating this account to finish so logout can revoke its newest token.
+        isLoggingOut = true
+        let task = Task { await performLogout(generation: generation) }
+        logoutTask = (id, generation, task)
+        await task.value
+        if logoutTask?.id == id { logoutTask = nil }
+    }
+
+    private func performLogout(generation: UInt64) async {
+        guard generation == credentialGeneration else { return }
+        if let pending = refreshTask { _ = try? await pending.task.value }
+        guard generation == credentialGeneration else { return }
         // Revoke server-side whenever a refresh token exists, even without a
         // live access token — deleting only the local copy leaves a valid
         // credential orphaned server-side. The body is re-encoded per attempt:
@@ -302,11 +325,15 @@ actor TonoAPIClient {
                 } else {
                     token = try await refreshAccessToken()
                 }
+                guard generation == credentialGeneration else { return }
                 do {
                     try await sendLogout(bearer: token)
                 } catch APIError.unauthorized {
+                    guard generation == credentialGeneration else { return }
                     accessToken = nil
+                    accessTokenExpiry = nil
                     let renewed = try await refreshAccessToken()
+                    guard generation == credentialGeneration else { return }
                     try await sendLogout(bearer: renewed)
                 }
             } catch {
@@ -315,10 +342,32 @@ actor TonoAPIClient {
                 // that remains either way.
             }
         }
+        // A new sign-in may have been adopted while server revocation waited.
+        // The old logout may finish remotely, but does not own those credentials.
+        guard generation == credentialGeneration else { return }
+        retireCredentialGeneration()
         accessToken = nil
         accessTokenExpiry = nil
         unpersistedRefreshToken = nil
         try? keychain.remove(.refreshToken)
+    }
+
+    private func retireCredentialGeneration() {
+        credentialGeneration &+= 1
+        refreshTask?.task.cancel()
+        refreshTask = nil
+        isLoggingOut = false
+    }
+
+    private func requireCredentialGeneration(_ generation: UInt64) throws {
+        guard !Task.isCancelled, generation == credentialGeneration else {
+            throw CancellationError()
+        }
+    }
+
+    private func requireAuthenticatedRequest(_ generation: UInt64) throws {
+        try requireCredentialGeneration(generation)
+        guard !isLoggingOut else { throw CancellationError() }
     }
 
     private func sendLogout(bearer: String) async throws {
@@ -337,14 +386,18 @@ actor TonoAPIClient {
     }
 
     private func refreshAccessToken() async throws -> String {
-        if let refreshTask { return try await refreshTask.value }
+        if let refreshTask { return try await refreshTask.task.value }
+        let id = UUID()
+        let generation = credentialGeneration
         let task = Task<String, Error> {
+            try requireCredentialGeneration(generation)
             if let pending = unpersistedRefreshToken,
                (try? keychain.set(pending, for: .refreshToken)) != nil {
                 unpersistedRefreshToken = nil
             }
             guard let refresh = currentRefreshToken() else { throw APIError.unauthorized }
             let response: TonoTokenResponse = try await publicRequest("auth/refresh", body: TonoRefreshRequest(refreshToken: refresh))
+            try requireCredentialGeneration(generation)
             accessToken = response.accessToken
             accessTokenExpiry = Self.expiry(ofJWT: response.accessToken)
             do {
@@ -358,8 +411,10 @@ actor TonoAPIClient {
             }
             return response.accessToken
         }
-        refreshTask = task
-        defer { refreshTask = nil }
+        refreshTask = (id, task)
+        defer {
+            if refreshTask?.id == id { refreshTask = nil }
+        }
         return try await task.value
     }
 
@@ -398,12 +453,15 @@ actor TonoAPIClient {
         additionalHeaders: [String: String] = [:],
         requestIsCurrent: (@Sendable () -> Bool)? = nil
     ) async throws -> Response {
+        let generation = credentialGeneration
+        try requireAuthenticatedRequest(generation)
         try Self.requireCurrent(requestIsCurrent)
         let token = try await currentAccessToken()
+        try requireAuthenticatedRequest(generation)
         try Self.requireCurrent(requestIsCurrent)
         do {
             try Self.requireCurrent(requestIsCurrent)
-            return try await send(
+            let response: Response = try await send(
                 path,
                 method: method,
                 body: bodyData,
@@ -411,43 +469,69 @@ actor TonoAPIClient {
                 additionalHeaders: additionalHeaders,
                 requestIsCurrent: requestIsCurrent
             )
+            try requireAuthenticatedRequest(generation)
+            return response
         }
         catch APIError.unauthorized {
+            try requireAuthenticatedRequest(generation)
             try Self.requireCurrent(requestIsCurrent)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
+            try requireAuthenticatedRequest(generation)
             try Self.requireCurrent(requestIsCurrent)
-            return try await send(
-                path,
-                method: method,
-                body: bodyData,
-                bearer: renewed,
-                additionalHeaders: additionalHeaders,
-                requestIsCurrent: requestIsCurrent
-            )
+            do {
+                let response: Response = try await send(
+                    path,
+                    method: method,
+                    body: bodyData,
+                    bearer: renewed,
+                    additionalHeaders: additionalHeaders,
+                    requestIsCurrent: requestIsCurrent
+                )
+                try requireAuthenticatedRequest(generation)
+                return response
+            } catch {
+                try requireAuthenticatedRequest(generation)
+                throw error
+            }
+        } catch {
+            try requireAuthenticatedRequest(generation)
+            throw error
         }
     }
     private func authorizedVoid(_ path: String, method: String) async throws {
+        let generation = credentialGeneration
+        try requireAuthenticatedRequest(generation)
         let token = try await currentAccessToken()
+        try requireAuthenticatedRequest(generation)
         do { _ = try await sendData(path, method: method, body: nil, bearer: token) }
         catch APIError.unauthorized {
+            try requireAuthenticatedRequest(generation)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
+            try requireAuthenticatedRequest(generation)
             _ = try await sendData(path, method: method, body: nil, bearer: renewed)
         }
+        try requireAuthenticatedRequest(generation)
     }
     private func authorizedVoid<Body: Encodable>(_ path: String, method: String, body: Body) async throws {
+        let generation = credentialGeneration
+        try requireAuthenticatedRequest(generation)
         let token = try await currentAccessToken()
+        try requireAuthenticatedRequest(generation)
         let bodyData = try TonoCoding.encoder().encode(body)
         do { _ = try await sendData(path, method: method, body: bodyData, bearer: token) }
         catch APIError.unauthorized {
+            try requireAuthenticatedRequest(generation)
             accessToken = nil
             accessTokenExpiry = nil
             let renewed = try await refreshAccessToken()
+            try requireAuthenticatedRequest(generation)
             _ = try await sendData(path, method: method, body: bodyData, bearer: renewed)
         }
+        try requireAuthenticatedRequest(generation)
     }
 
     private func send<Response: Decodable>(

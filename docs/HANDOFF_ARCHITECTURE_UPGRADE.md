@@ -1,5 +1,10 @@
 # Handoff: Tono macOS + Windows architecture upgrade
 
+> Historical input snapshot from the original working tree. The isolated upgrade
+> branch has since recovered and committed it, fixed the macOS compile failures,
+> and merged the recorded upstream changes. For current status, read
+> [ARCHITECTURE_UPGRADE_PROGRESS.md](ARCHITECTURE_UPGRADE_PROGRESS.md).
+
 For GPT Astra (or any follow-on): read this whole file before proposing
 or executing a “complete upgrade.” The working tree is dirty and
 **uncommitted**. Local `main` is **behind `origin/main` by 6 commits**.

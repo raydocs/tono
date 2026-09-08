@@ -12,8 +12,6 @@ import { useSetThemeMode, useThemeMode } from '@/services/states'
 import { createTauriNoncedStyleElement } from '@/utils/csp-style-nonce'
 
 const CSS_INJECTION_SCOPE_ROOT = '[data-css-injection-root]'
-const CSS_INJECTION_SCOPE_LIMIT =
-  ':is(.monaco-editor .view-lines, .monaco-editor .view-line, .monaco-editor .margin, .monaco-editor .margin-view-overlays, .monaco-editor .view-overlays, .monaco-editor [class^="mtk"], .monaco-editor [class*=" mtk"])'
 const TOP_LEVEL_AT_RULES = [
   '@charset',
   '@import',
@@ -59,8 +57,7 @@ const wrapCssInjectionWithScope = (css?: string) => {
     return null
   }
   const scopeRoot = CSS_INJECTION_SCOPE_ROOT
-  const scopeLimit = CSS_INJECTION_SCOPE_LIMIT
-  const scopedBlock = `@scope (${scopeRoot}) to (${scopeLimit}) {
+  const scopedBlock = `@scope (${scopeRoot}) {
 ${css}
 }`
   return scopedBlock

@@ -6,7 +6,7 @@ extension AppState {
     /// Select a node/group by name or id.
     func selectNode(_ nameOrId: String) {
         guard !isDisconnecting, switchingNodeId == nil else { return }
-        guard configReloadTask == nil else {
+        guard connectionCoordinator.configReloadTask == nil else {
             errorMessage = String(
                 localized: "Secure routing is updating. Try switching the cloud server again in a moment."
             )
@@ -64,7 +64,7 @@ extension AppState {
                 "to": nodeName,
             ]
         )
-        nodeSwitchTask = Task { [weak self] in
+        connectionCoordinator.nodeSwitchTask = Task { [weak self] in
             guard let self else { return }
             defer {
                 self.switchingNodeId = nil
@@ -88,7 +88,7 @@ extension AppState {
                 ConnectionTelemetryBuffer.shared.record(
                     "switchBegin",
                     node: desiredNode?.id,
-                    generation: Int(self.protectionOperationGeneration)
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                 )
                 try await api.selectProxy(
                     group: ConfigPipeline.exitGroupName,
@@ -106,7 +106,7 @@ extension AppState {
                         )
                     },
                     mixedPort: self.config.mixedPort,
-                    generation: self.protectionOperationGeneration,
+                    generation: self.connectionCoordinator.protectionOperationGeneration,
                     rounds: 1
                 )
                 try Task.checkCancellation()
@@ -123,13 +123,13 @@ extension AppState {
                             )
                         },
                         mixedPort: self.config.mixedPort,
-                        generation: self.protectionOperationGeneration,
+                        generation: self.connectionCoordinator.protectionOperationGeneration,
                         rounds: 1
                     )
                     ConnectionTelemetryBuffer.shared.record(
                         "switchRollback",
                         node: desiredNode?.id,
-                        generation: Int(self.protectionOperationGeneration)
+                        generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                     )
                     try await self.armSwitchKillSwitch(proxyEndpoints: previousEndpoints)
                     if case .failed(let failure) = rollback {
@@ -157,7 +157,7 @@ extension AppState {
                     "switchOk",
                     elapsedMs: max(0, Int(Date().timeIntervalSince(switchStartedAt) * 1_000)),
                     node: desiredNode?.id,
-                    generation: Int(self.protectionOperationGeneration)
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                 )
                 LocalTrafficAudit.shared.recordEvent(
                     "node_switch_succeeded",
@@ -362,7 +362,7 @@ extension AppState {
         // Do not cancel a mutation after PF or Mihomo may already have accepted
         // part of it. Coalesce behind the active transaction instead; the most
         // recent pin set wins, while a requested full rewrite is preserved.
-        if configReloadTask != nil || switchingNodeId != nil {
+        if connectionCoordinator.configReloadTask != nil || switchingNodeId != nil {
             if let pendingDirectPolicy {
                 pendingDirectPolicyReload = pendingDirectPolicy
             } else {
@@ -391,10 +391,10 @@ extension AppState {
         let api = coreController
         let ownedRuntime = isOwnedTonoMode
         let installedDigest = loadedRuntimeConfigDigest
-        configReloadRequestID += 1
-        let requestID = configReloadRequestID
+        connectionCoordinator.configReloadRequestID += 1
+        let requestID = connectionCoordinator.configReloadRequestID
         let pinsOnlyRefresh = pendingDirectPolicy != nil
-        configReloadTask = Task { [weak self] in
+        connectionCoordinator.configReloadTask = Task { [weak self] in
             guard let self else { return }
             let effectiveDirectPolicy = pendingDirectPolicy ?? activeDirectPolicy
             var pinsRuntimeCommitted = false
@@ -563,7 +563,7 @@ extension AppState {
                     return
                 }
                 guard !Task.isCancelled, !isDisconnecting else { return }
-                guard configReloadRequestID == requestID else { return }
+                guard connectionCoordinator.configReloadRequestID == requestID else { return }
                 if pinsOnlyRefresh {
                     // A background pin refresh must never take the session
                     // down. The armed endpoint set is a superset of the
@@ -598,8 +598,8 @@ extension AppState {
         _ requestID: Int,
         startPending: Bool = true
     ) {
-        guard configReloadRequestID == requestID else { return }
-        configReloadTask = nil
+        guard connectionCoordinator.configReloadRequestID == requestID else { return }
+        connectionCoordinator.configReloadTask = nil
         guard startPending, isConnected, !isDisconnecting else {
             if !startPending {
                 pendingDirectPolicyReload = nil
@@ -611,7 +611,7 @@ extension AppState {
     }
 
     private func startPendingConfigReloadIfPossible() {
-        guard configReloadTask == nil, switchingNodeId == nil,
+        guard connectionCoordinator.configReloadTask == nil, switchingNodeId == nil,
               isConnected, !isDisconnecting else { return }
         if let policy = pendingDirectPolicyReload {
             pendingDirectPolicyReload = nil

@@ -5,8 +5,7 @@ extension AppState {
 
     func connect() {
         if isDisconnecting {
-            Task { [weak self] in
-                await self?.finishPendingDisconnect()
+            connectionCoordinator.connectAfterDisconnect { [weak self] in
                 guard let self,
                       !self.isConnected,
                       !self.isConnecting,
@@ -24,7 +23,7 @@ extension AppState {
             errorMessage = String(localized: "No protected Tono cloud exit is ready.")
             return
         }
-        protectionOperationGeneration &+= 1
+        self.connectionCoordinator.bumpGeneration()
         isProtectionBlocked = false
         connectionStage = .preparing
         completedConnectionStages = []
@@ -75,7 +74,7 @@ extension AppState {
             "connectBegin",
             stage: ConnectionStage.preparing.rawValue,
             node: selectedExit?.id,
-            generation: Int(protectionOperationGeneration)
+            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
         )
 
         let overlay = ConfigPipeline.OverlayConfig(
@@ -103,25 +102,25 @@ extension AppState {
         let trafficPolicy = managedTrafficPolicy
 
         let attemptID = UUID()
-        connectAttemptID = attemptID
+        self.connectionCoordinator.connectAttemptID = attemptID
         // Every stage is individually bounded, but their worst-case sum is
         // multi-minute. One overall deadline converts a wedged-but-not-erroring
         // attempt into the ordinary failure path instead of an endless spinner.
-        connectWatchdogTask?.cancel()
-        connectWatchdogTask = Task { [weak self] in
+        self.connectionCoordinator.connectWatchdogTask?.cancel()
+        self.connectionCoordinator.connectWatchdogTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(240))
             // A first-run attempt can legitimately sit on the administrator
             // prompt past the deadline; the prompt itself is already bounded
             // (180s in HelperManager), so grant that stage one extension
             // instead of tearing down under the user's credential dialog.
             if let self, !Task.isCancelled, self.isConnecting,
-               self.connectAttemptID == attemptID,
+               self.connectionCoordinator.connectAttemptID == attemptID,
                self.connectionStage == .preparingHelper
                 || self.connectionStage == .preparing {
                 try? await Task.sleep(for: .seconds(200))
             }
             guard let self, !Task.isCancelled,
-                  self.isConnecting, self.connectAttemptID == attemptID else {
+                  self.isConnecting, self.connectionCoordinator.connectAttemptID == attemptID else {
                 return
             }
             LocalTrafficAudit.shared.recordEvent(
@@ -141,7 +140,7 @@ extension AppState {
                 self.disconnect(releaseKillSwitch: true)
             }
         }
-        connectTask = Task { [weak self, coreRuntime] in
+        self.connectionCoordinator.connectTask = Task { [weak self, coreRuntime] in
             guard let self else { return }
             do {
                 guard let networkService =
@@ -220,7 +219,7 @@ extension AppState {
                         .helperProtocolMismatch,
                         stage: "preparingHelper",
                         attempt: 1,
-                        generation: self.protectionOperationGeneration,
+                        generation: self.connectionCoordinator.protectionOperationGeneration,
                         detail: String(describing: error)
                     )
                     throw error
@@ -332,7 +331,7 @@ extension AppState {
                         .protectedDnsNotReady,
                         stage: "securingDNS",
                         attempt: 1,
-                        generation: self.protectionOperationGeneration,
+                        generation: self.connectionCoordinator.protectionOperationGeneration,
                         detail: "loopback DNS listener preflight failed"
                     )
                     throw CoreControllerError.protectionFailed(
@@ -363,7 +362,7 @@ extension AppState {
                         .protectedDnsNotReady,
                         stage: "securingDNS",
                         attempt: 2,
-                        generation: self.protectionOperationGeneration,
+                        generation: self.connectionCoordinator.protectionOperationGeneration,
                         detail: "system resolver did not reach the protected listener"
                     )
                     throw CoreControllerError.protectionFailed(diagnostic)
@@ -384,7 +383,7 @@ extension AppState {
                             .protectedDnsNotReady,
                             stage: "securingDNS",
                             attempt: 3,
-                            generation: self.protectionOperationGeneration,
+                            generation: self.connectionCoordinator.protectionOperationGeneration,
                             detail: browserDNS.diagnosticDetail
                         )
                         throw CoreControllerError.protectionFailed(
@@ -407,7 +406,7 @@ extension AppState {
                 let verdict = await self.verifyProtectedConnection(
                     controllerTask: controllerTask,
                     mixedPort: self.config.mixedPort,
-                    generation: self.protectionOperationGeneration,
+                    generation: self.connectionCoordinator.protectionOperationGeneration,
                     rounds: ProtectedConnectivity.postLockVerifyRounds
                 )
                 try Task.checkCancellation()
@@ -423,7 +422,7 @@ extension AppState {
                             stage: ConnectionStage.checkingExit.rawValue,
                             error: advisory,
                             node: selectedExit?.id,
-                            generation: Int(self.protectionOperationGeneration)
+                            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                         )
                     }
                 case .failed(let failure):
@@ -468,9 +467,9 @@ extension AppState {
                 self.connectionStage = .preparing
                 self.lastProtectedFailureSignature = nil
                 self.consecutiveProtectedFailureCount = 0
-                self.connectWatchdogTask?.cancel()
-                self.connectWatchdogTask = nil
-                self.connectTask = nil
+                self.connectionCoordinator.connectWatchdogTask?.cancel()
+                self.connectionCoordinator.connectWatchdogTask = nil
+                self.connectionCoordinator.connectTask = nil
             } catch {
                 // A second click while connecting is an intentional cancel.
                 // The serialized disconnect sequence runs after any in-flight
@@ -508,7 +507,7 @@ extension AppState {
                     code: self.lastClassifiedFailure?.code ?? .unknownClassifiedFailure,
                     elapsedMs: totalDuration,
                     node: selectedExit?.id,
-                    generation: Int(self.protectionOperationGeneration)
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                 )
                 await MainActor.run {
                     // An explicit Disconnect/Quit can cancel while the status
@@ -562,7 +561,7 @@ extension AppState {
                         occurredAt: failedAt
                     )
                     self.connectionStageStartedAt = nil
-                    self.connectWatchdogTask?.cancel()
+                    self.connectionCoordinator.connectWatchdogTask?.cancel()
                     if KillSwitchService.isArmed {
                         // Once PF has committed, every automatic failure path is
                         // fail-closed. Only the user's explicit Protected Offline
@@ -606,7 +605,7 @@ extension AppState {
     /// intentional logout / user "turn off protection" so a crash or health failure
     /// leaves the host fail-closed via Kill Switch.
     func disconnect(releaseKillSwitch: Bool = false) {
-        protectionOperationGeneration &+= 1
+        self.connectionCoordinator.bumpGeneration()
         LocalTrafficAudit.shared.recordEvent(
             "disconnect_requested",
             details: [
@@ -638,17 +637,17 @@ extension AppState {
             consecutiveProtectedFailureCount = 0
             protectedReconnectPausedForUserAction = false
             protectedReconnectPauseLiftsOnNetworkChange = false
-            protectedReconnectTask?.cancel()
-            protectedReconnectTask = nil
-            protectedReconnectID = nil
-            lastProtectedReconnectKick = nil
+            self.connectionCoordinator.protectedReconnectTask?.cancel()
+            self.connectionCoordinator.protectedReconnectTask = nil
+            self.connectionCoordinator.protectedReconnectID = nil
+            self.connectionCoordinator.lastProtectedReconnectKick = nil
             isProtectedReconnectScheduled = false
             protectedReconnectAttempt = 0
             protectedReconnectNextAttemptAt = nil
-            wakeRecoveryTask?.cancel()
-            wakeRecoveryTask = nil
-            sleepRestrictTask?.cancel()
-            sleepRestrictTask = nil
+            self.connectionCoordinator.wakeRecoveryTask?.cancel()
+            self.connectionCoordinator.wakeRecoveryTask = nil
+            self.connectionCoordinator.sleepRestrictTask?.cancel()
+            self.connectionCoordinator.sleepRestrictTask = nil
             resumeProtectionAfterWake = false
             autoConnectRequested = false
             connectionStartedAt = nil
@@ -669,19 +668,19 @@ extension AppState {
         // suspended on the coordinator actor resumes regardless of cancellation,
         // so the release sequence has to wait for it to unwind before it
         // restores DNS and disarms PF.
-        let pendingCoreMonitor = coreMonitorTask
+        let pendingCoreMonitor = self.connectionCoordinator.coreMonitorTask
         pendingCoreMonitor?.cancel()
-        coreMonitorTask = nil
-        networkEnvironmentTask?.cancel()
-        networkEnvironmentTask = nil
+        self.connectionCoordinator.coreMonitorTask = nil
+        self.connectionCoordinator.networkEnvironmentTask?.cancel()
+        self.connectionCoordinator.networkEnvironmentTask = nil
         networkInfoTask?.cancel()
         networkInfoTask = nil
-        let pendingNodeSwitch = nodeSwitchTask
+        let pendingNodeSwitch = self.connectionCoordinator.nodeSwitchTask
         pendingNodeSwitch?.cancel()
-        nodeSwitchTask = nil
-        let pendingConfigReload = configReloadTask
+        self.connectionCoordinator.nodeSwitchTask = nil
+        let pendingConfigReload = self.connectionCoordinator.configReloadTask
         pendingConfigReload?.cancel()
-        configReloadTask = nil
+        self.connectionCoordinator.configReloadTask = nil
         pendingFullConfigReload = false
         pendingDirectPolicyReload = nil
         loadedRuntimeConfigDigest = nil
@@ -692,9 +691,9 @@ extension AppState {
 
         // Cancel any in-progress connect Task. The teardown sequence waits for
         // it to leave the serialized helper actor before issuing stop/disarm.
-        let pendingConnect = connectTask
+        let pendingConnect = self.connectionCoordinator.connectTask
         pendingConnect?.cancel()
-        connectTask = nil
+        self.connectionCoordinator.connectTask = nil
         isConnecting = false
         connectionStage = .preparing
         isDisconnecting = true
@@ -731,16 +730,10 @@ extension AppState {
         isLoadingProviderRules = false
         activeDirectPolicy = nil
 
-        disconnectRequestID += 1
-        let requestID = disconnectRequestID
-        let previousDisconnect = disconnectSequence
-        disconnectSequence = Task { [weak self, coreRuntime] in
-            _ = await previousDisconnect?.value
-            _ = await pendingConnect?.value
-            _ = await pendingNodeSwitch?.value
-            _ = await pendingConfigReload?.value
-            _ = await pendingCoreMonitor?.value
-
+        connectionCoordinator.enqueueDisconnect(
+            waitingFor: [pendingConnect, pendingNodeSwitch, pendingConfigReload, pendingCoreMonitor]
+                .compactMap { $0 }
+        ) { [weak self, coreRuntime] requestID in
             var transitionError: String?
             var helperReadyForRelease = true
             if releaseKillSwitch {
@@ -850,14 +843,14 @@ extension AppState {
 
             await MainActor.run {
                 guard let self else { return }
-                self.isProtectionBlocked = transitionLeavesProtectionBlocked
-                if releaseKillSwitch, !transitionLeavesProtectionBlocked {
-                    self.protectedDNSService = nil
-                }
-                if let transitionError {
-                    self.errorMessage = transitionError
-                }
-                if self.disconnectRequestID == requestID {
+                self.connectionCoordinator.completeDisconnect(requestID) {
+                    self.isProtectionBlocked = transitionLeavesProtectionBlocked
+                    if releaseKillSwitch, !transitionLeavesProtectionBlocked {
+                        self.protectedDNSService = nil
+                    }
+                    if let transitionError {
+                        self.errorMessage = transitionError
+                    }
                     self.isDisconnecting = false
                     self.disconnectionStartedAt = nil
                 }
@@ -867,12 +860,12 @@ extension AppState {
 
     func disconnectAndWait(releaseKillSwitch: Bool = false) async {
         disconnect(releaseKillSwitch: releaseKillSwitch)
-        let pending = disconnectSequence
+        let pending = self.connectionCoordinator.disconnectSequence
         _ = await pending?.value
     }
 
     func finishPendingDisconnect() async {
-        let pending = disconnectSequence
+        let pending = self.connectionCoordinator.disconnectSequence
         _ = await pending?.value
     }
 
@@ -909,7 +902,7 @@ extension AppState {
             "connectOk",
             stage: ConnectionStage.verifyingTraffic.rawValue,
             node: selectedExitNode()?.id,
-            generation: Int(protectionOperationGeneration)
+            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
         )
         if var journal = UpdateHandoffStore.load(),
            journal.phase != .committed {
@@ -918,7 +911,7 @@ extension AppState {
             UpdateHandoffStore.clear()
             ConnectionTelemetryBuffer.shared.record(
                 "updateResumeOk",
-                generation: Int(protectionOperationGeneration),
+                generation: Int(self.connectionCoordinator.protectionOperationGeneration),
                 updateResume: true
             )
         }
@@ -1123,8 +1116,8 @@ extension AppState {
     /// avoids a synchronous helper IPC call on the UI actor. Recovery fails
     /// closed first, then retries the same selected exit.
     private func startCoreMonitor() {
-        coreMonitorTask?.cancel()
-        coreMonitorTask = Task { [weak self] in
+        self.connectionCoordinator.coreMonitorTask?.cancel()
+        self.connectionCoordinator.coreMonitorTask = Task { [weak self] in
             var healthCycle = 0
             var consecutiveHealthFailures = 0
             var tunRouteRearmAttempts = 0
@@ -1156,14 +1149,14 @@ extension AppState {
                         // *before* these resume. Without re-checking, the stale
                         // verdict then re-armed protection and blamed "Protected
                         // DNS stopped" — an explicit release silently undone.
-                        // Cancelling coreMonitorTask cannot help: a task
+                        // Cancelling self.connectionCoordinator.coreMonitorTask cannot help: a task
                         // suspended on an actor call still resumes.
-                        let observedGeneration = self.protectionOperationGeneration
+                        let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
                         let primaryService =
                             await PrivilegedRuntimeCoordinator.shared
                                 .primaryNetworkService()
                         guard !Task.isCancelled, self.isConnected,
-                              self.protectionOperationGeneration == observedGeneration
+                              self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                         else { return }
                         guard primaryService == service else {
                             self.disconnect(releaseKillSwitch: false)
@@ -1177,7 +1170,7 @@ extension AppState {
                             await PrivilegedRuntimeCoordinator.shared
                                 .protectedDNSIntegrity(service: service)
                         guard !Task.isCancelled, self.isConnected,
-                              self.protectionOperationGeneration == observedGeneration
+                              self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                         else { return }
                         guard dnsIntegrity != .unverifiable else { continue }
                         guard dnsIntegrity == .intact else {
@@ -1198,10 +1191,10 @@ extension AppState {
                 // enabled explicit DoH mode cannot leave a residential claim
                 // active for the rest of a long-running session.
                 if healthCycle.isMultiple(of: 6), self.isClaudeHomeConfigured {
-                    let observedGeneration = self.protectionOperationGeneration
+                    let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
                     let browserDNS = await self.scanBrowserProtectedDNS()
                     guard !Task.isCancelled, self.isConnected,
-                          self.protectionOperationGeneration == observedGeneration
+                          self.connectionCoordinator.protectionOperationGeneration == observedGeneration
                     else { return }
                     self.recordBrowserDNSPreflight(browserDNS)
                     guard browserDNS.outcome == .clear else {
@@ -1232,7 +1225,7 @@ extension AppState {
                 // clobber. The flag stays set and retries next cycle.
                 if KillSwitchService.needsSessionExceptionReassert,
                    self.switchingNodeId == nil,
-                   self.configReloadTask == nil {
+                   self.connectionCoordinator.configReloadTask == nil {
                     LocalTrafficAudit.shared.recordEvent(
                         "killswitch_heal_reassert",
                         details: [
@@ -1307,7 +1300,7 @@ extension AppState {
                 // immediately.
                 guard healthCycle.isMultiple(of: 3),
                       self.switchingNodeId == nil,
-                      self.configReloadTask == nil,
+                      self.connectionCoordinator.configReloadTask == nil,
                       let api = self.coreController
                 else { continue }
 
@@ -1333,7 +1326,7 @@ extension AppState {
                 }
                 guard !Task.isCancelled, self.isConnected else { return }
                 guard self.switchingNodeId == nil,
-                      self.configReloadTask == nil else {
+                      self.connectionCoordinator.configReloadTask == nil else {
                     consecutiveHealthFailures = 0
                     continue
                 }
@@ -1344,7 +1337,7 @@ extension AppState {
                         .isPhysicallyOffline,
                     stage: "health",
                     attempt: healthCycle,
-                    generation: self.protectionOperationGeneration
+                    generation: self.connectionCoordinator.protectionOperationGeneration
                 )
                 switch decision {
                 case .connected(let advisory):
@@ -1364,7 +1357,7 @@ extension AppState {
                             "controllerExitAdvisory",
                             reason: ProtectedFailureCode.probeOriginDegraded.rawValue,
                             error: advisory,
-                            generation: Int(self.protectionOperationGeneration)
+                            generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                         )
                     }
                     self.isProxyDegraded = advisory != nil
@@ -1396,7 +1389,7 @@ extension AppState {
                         reason: failure.code.rawValue,
                         error: failure.detail,
                         counter: consecutiveHealthFailures,
-                        generation: Int(self.protectionOperationGeneration)
+                        generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                     )
                     guard self.healthCounters.shouldEnterRecovering
                         || consecutiveHealthFailures >= 2 else {
@@ -1406,7 +1399,7 @@ extension AppState {
                     ConnectionTelemetryBuffer.shared.record(
                         "recoveryBegin",
                         reason: failure.code.rawValue,
-                        generation: Int(self.protectionOperationGeneration)
+                        generation: Int(self.connectionCoordinator.protectionOperationGeneration)
                     )
                     // Recover in place first. Restart the core only when the
                     // node/core path itself is proven unreachable.
@@ -1450,7 +1443,7 @@ extension AppState {
                             // unions this re-arm would clobber, so a cycle that
                             // finds either simply retries at the next one.
                             guard self.switchingNodeId == nil,
-                                  self.configReloadTask == nil else {
+                                  self.connectionCoordinator.configReloadTask == nil else {
                                 self.errorMessage = String(localized: "Recovering protected connection…")
                                 continue
                             }
@@ -1513,7 +1506,7 @@ extension AppState {
         guard isConnected,
               !isDisconnecting,
               switchingNodeId == nil,
-              configReloadTask == nil else {
+              self.connectionCoordinator.configReloadTask == nil else {
             return false
         }
         let current = selectedExitNode()
@@ -1540,7 +1533,7 @@ extension AppState {
             ]
         )
         selectNode(candidate.name)
-        guard let switchTask = nodeSwitchTask else { return false }
+        guard let switchTask = self.connectionCoordinator.nodeSwitchTask else { return false }
         _ = await switchTask.value
         guard !Task.isCancelled,
               isConnected,
@@ -1575,11 +1568,11 @@ extension AppState {
     private func reconcileConfirmedExternalProtectionRelease() async -> Bool {
         guard isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
-        let observedGeneration = protectionOperationGeneration
+        let observedGeneration = self.connectionCoordinator.protectionOperationGeneration
         let observation = await PrivilegedRuntimeCoordinator.shared
             .refreshKillSwitchStatus()
         guard !Task.isCancelled,
-              protectionOperationGeneration == observedGeneration,
+              self.connectionCoordinator.protectionOperationGeneration == observedGeneration,
               isProtectionBlocked, !isConnected, !isConnecting,
               !isDisconnecting else { return false }
 
@@ -1592,9 +1585,9 @@ extension AppState {
             // action owns the one administrator repair attempt.
             protectedReconnectPausedForUserAction = true
             protectedReconnectPauseLiftsOnNetworkChange = false
-            protectedReconnectTask?.cancel()
-            protectedReconnectTask = nil
-            protectedReconnectID = nil
+            self.connectionCoordinator.protectedReconnectTask?.cancel()
+            self.connectionCoordinator.protectedReconnectTask = nil
+            self.connectionCoordinator.protectedReconnectID = nil
             isProtectedReconnectScheduled = false
             protectedReconnectNextAttemptAt = nil
             errorMessage =
@@ -1611,13 +1604,13 @@ extension AppState {
     }
 
     private func acceptConfirmedExternalProtectionRelease() {
-        protectionOperationGeneration &+= 1
+        self.connectionCoordinator.bumpGeneration()
         KillSwitchService.isArmed = false
         KillSwitchService.needsSessionExceptionReassert = false
-        protectedReconnectTask?.cancel()
-        protectedReconnectTask = nil
-        protectedReconnectID = nil
-        lastProtectedReconnectKick = nil
+        self.connectionCoordinator.protectedReconnectTask?.cancel()
+        self.connectionCoordinator.protectedReconnectTask = nil
+        self.connectionCoordinator.protectedReconnectID = nil
+        self.connectionCoordinator.lastProtectedReconnectKick = nil
         isProtectedReconnectScheduled = false
         protectedReconnectAttempt = 0
         protectedReconnectNextAttemptAt = nil
@@ -1625,10 +1618,10 @@ extension AppState {
         protectedReconnectPauseLiftsOnNetworkChange = false
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
-        wakeRecoveryTask?.cancel()
-        wakeRecoveryTask = nil
-        sleepRestrictTask?.cancel()
-        sleepRestrictTask = nil
+        self.connectionCoordinator.wakeRecoveryTask?.cancel()
+        self.connectionCoordinator.wakeRecoveryTask = nil
+        self.connectionCoordinator.sleepRestrictTask?.cancel()
+        self.connectionCoordinator.sleepRestrictTask = nil
         resumeProtectionAfterWake = false
         autoConnectRequested = false
         connectionStartedAt = nil
@@ -1676,30 +1669,30 @@ extension AppState {
         }
         if immediate {
             let now = Date()
-            if let lastProtectedReconnectKick,
-               now.timeIntervalSince(lastProtectedReconnectKick) < 30,
-               protectedReconnectTask != nil {
+            if let lastKick = self.connectionCoordinator.lastProtectedReconnectKick,
+               now.timeIntervalSince(lastKick) < ProtectedReconnectSchedule.networkChangeKickCooldown,
+               self.connectionCoordinator.protectedReconnectTask != nil {
                 return
             }
-            lastProtectedReconnectKick = now
-            protectedReconnectTask?.cancel()
-            protectedReconnectTask = nil
-            protectedReconnectID = nil
-        } else if protectedReconnectTask != nil {
+            self.connectionCoordinator.lastProtectedReconnectKick = now
+            self.connectionCoordinator.protectedReconnectTask?.cancel()
+            self.connectionCoordinator.protectedReconnectTask = nil
+            self.connectionCoordinator.protectedReconnectID = nil
+        } else if self.connectionCoordinator.protectedReconnectTask != nil {
             // The existing loop owns the attempt counter. A failed connect must
             // never cancel it and reset weak-network backoff to two seconds.
             return
         }
 
         let recoveryID = UUID()
-        protectedReconnectID = recoveryID
+        self.connectionCoordinator.protectedReconnectID = recoveryID
         isProtectedReconnectScheduled = true
-        protectedReconnectTask = Task { [weak self] in
+        self.connectionCoordinator.protectedReconnectTask = Task { [weak self] in
             guard let self else { return }
             defer {
-                if self.protectedReconnectID == recoveryID {
-                    self.protectedReconnectTask = nil
-                    self.protectedReconnectID = nil
+                if self.connectionCoordinator.protectedReconnectID == recoveryID {
+                    self.connectionCoordinator.protectedReconnectTask = nil
+                    self.connectionCoordinator.protectedReconnectID = nil
                     self.isProtectedReconnectScheduled = false
                     self.protectedReconnectNextAttemptAt = nil
                     if self.isConnected || !self.isProtectionBlocked {
@@ -1710,7 +1703,7 @@ extension AppState {
 
             // Stay responsive through brief packet loss, then settle at a
             // battery-friendly 30-second cadence for prolonged weak signal.
-            let delays = [2, 5, 10, 20, 30]
+            let delays = ProtectedReconnectSchedule.delaysSeconds
             var attempt = 0
             while !Task.isCancelled {
                 // A user-action failure recorded by the previous attempt ends
@@ -1748,7 +1741,7 @@ extension AppState {
                     return
                 }
                 if self.isConnecting {
-                    let pending = self.connectTask
+                    let pending = self.connectionCoordinator.connectTask
                     _ = await pending?.value
                 } else if !self.isDisconnecting {
                     LocalTrafficAudit.shared.recordEvent(
@@ -1760,7 +1753,7 @@ extension AppState {
                         ]
                     )
                     self.connect()
-                    let pending = self.connectTask
+                    let pending = self.connectionCoordinator.connectTask
                     _ = await pending?.value
                 }
                 await self.finishPendingDisconnect()
@@ -1782,10 +1775,10 @@ extension AppState {
         lastProtectedFailureSignature = nil
         consecutiveProtectedFailureCount = 0
         clearCatalogFailoverSweep()
-        protectedReconnectTask?.cancel()
-        protectedReconnectTask = nil
-        protectedReconnectID = nil
-        lastProtectedReconnectKick = nil
+        self.connectionCoordinator.protectedReconnectTask?.cancel()
+        self.connectionCoordinator.protectedReconnectTask = nil
+        self.connectionCoordinator.protectedReconnectID = nil
+        self.connectionCoordinator.lastProtectedReconnectKick = nil
         isProtectedReconnectScheduled = false
         protectedReconnectNextAttemptAt = nil
         scheduleProtectedReconnect(immediate: true)

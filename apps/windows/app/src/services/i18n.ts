@@ -84,7 +84,7 @@ const STARTUP_LANGUAGE_SECTIONS = [
   'tono',
 ] as const
 
-const localeModules = import.meta.glob<LocaleModule>('@/locales/*/*.json')
+const localeModules = import.meta.glob<LocaleModule>('@/locales/{en,zh}/*.json')
 
 const localeLoaders = Object.entries(localeModules).reduce<
   Record<string, Record<string, () => Promise<LocaleModule>>>
@@ -92,6 +92,9 @@ const localeLoaders = Object.entries(localeModules).reduce<
   const match = path.match(/[/\\]locales[/\\]([^/\\]+)[/\\]([^/\\]+)\.json$/)
   if (match) {
     const [, language, section] = match
+    if (!supportedLanguages.includes(language)) {
+      return acc
+    }
     acc[language] ??= {}
     acc[language][section] = loader
   }

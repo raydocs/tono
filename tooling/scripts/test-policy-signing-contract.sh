@@ -27,12 +27,13 @@ checks=0
 ok() { printf '  ok: %s\n' "$1"; checks=$((checks + 1)); }
 
 worker="$repo_root/services/control-plane/src/crypto.ts"
+worker_policy="$repo_root/services/control-plane/src/traffic-policy.ts"
 wrangler="$repo_root/services/control-plane/wrangler.jsonc"
 swift="$repo_root/apps/macos/Tono/Core/ManagedTrafficPolicySignature.swift"
 windows_policy="$repo_root/apps/windows/crates/tono-core/src/policy.rs"
 publisher="$repo_root/tooling/scripts/publish-traffic-policy.mjs"
 
-for file in "$worker" "$wrangler" "$swift" "$windows_policy" "$publisher"; do
+for file in "$worker" "$worker_policy" "$wrangler" "$swift" "$windows_policy" "$publisher"; do
   [[ -f $file ]] || fail "missing $(basename -- "$file"); the contract cannot be checked"
 done
 
@@ -112,10 +113,10 @@ if (!hosts.length) { process.stderr.write("declaration contains no hosts\n"); pr
 process.stdout.write([...new Set(hosts)].sort().join(" "));
 ' "$1" "$2"; }
 
-protected_swift=$(extract "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift" \
+protected_swift=$(extract "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Direct.swift" \
   'managedDirectProtectedSuffixes = \[(.*?)\]') \
   || fail "the macOS protected list could not be read"
-protected_worker=$(extract "$repo_root/services/control-plane/src/index.ts" \
+protected_worker=$(extract "$worker_policy" \
   'const protectedSuffixes = \[(.*?)\]') \
   || fail "the control plane's protected list could not be read"
 protected_windows=$(extract "$windows_policy" \
