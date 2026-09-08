@@ -2,14 +2,26 @@
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-source_file="$repo_dir/tooling/scripts/core-helper/main.swift"
-kill_switch_source="$repo_dir/tooling/scripts/core-helper/KillSwitchManager.swift"
-protected_dns_source="$repo_dir/tooling/scripts/core-helper/ProtectedDNSManager.swift"
-peer_authorization_source="$repo_dir/tooling/scripts/helper-shared/PeerAuthorization.swift"
+helper_dir="$repo_dir/tooling/scripts/core-helper"
 protocol_version_source="$repo_dir/apps/macos/Tono/Core/HelperProtocolVersion.swift"
-output_file="$repo_dir/apps/macos/Tono/Resources/liquidclash-helper"
+output_file="$repo_dir/apps/macos/Tono/Resources/tono-core-helper"
 temporary_file="$output_file.new"
-contract_file="$repo_dir/tooling/scripts/core-helper/CONTRACT.sha256"
+contract_file="$helper_dir/CONTRACT.sha256"
+# One manifest for both CONTRACT hashing and swiftc. Adding a helper source
+# without listing it here would compile an old daemon while the hash gate
+# passed on a subset of files.
+set -- \
+  "$helper_dir/main.swift" \
+  "$helper_dir/CoreManager.swift" \
+  "$helper_dir/HelperHTTP.swift" \
+  "$helper_dir/HelperPower.swift" \
+  "$helper_dir/SocketServer.swift" \
+  "$helper_dir/KillSwitchManager.swift" \
+  "$helper_dir/KillSwitchPF.swift" \
+  "$helper_dir/KillSwitchTests.swift" \
+  "$helper_dir/ProtectedDNSManager.swift" \
+  "$repo_dir/tooling/scripts/helper-shared/PeerAuthorization.swift" \
+  "$protocol_version_source"
 
 # The app decides whether to reinstall the daemon by comparing
 # HelperProtocolVersion.current alone. Change helper behavior without changing
@@ -29,12 +41,7 @@ fi
 # daemon can observe. Only lines whose first non-blank characters are `//` are
 # removed, so nothing inside code or a string literal (`http://…`) is touched,
 # and a trailing comment still counts as a change.
-helper_sources_hash=$(cat \
-  "$source_file" \
-  "$kill_switch_source" \
-  "$protected_dns_source" \
-  "$peer_authorization_source" \
-  "$protocol_version_source" \
+helper_sources_hash=$(cat "$@" \
   | sed -E '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' | shasum -a 256 | cut -d' ' -f1)
 if [ -f "$contract_file" ]; then
   recorded_version=$(cut -d' ' -f1 "$contract_file")
@@ -57,11 +64,7 @@ xcrun swiftc \
   -whole-module-optimization \
   -module-cache-path "$module_cache_dir" \
   -target arm64-apple-macosx26.3 \
-  "$source_file" \
-  "$kill_switch_source" \
-  "$protected_dns_source" \
-  "$peer_authorization_source" \
-  "$protocol_version_source" \
+  "$@" \
   -framework IOKit \
   -framework Security \
   -framework SystemConfiguration \

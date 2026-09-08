@@ -64,7 +64,11 @@ reports should use redacted examples.
     unpinned case decided first, since an absent pin is currently a hard refusal
     and no pin exists in test or standalone environments.
 - The Clash Verge Rev forks provide GUI/service infrastructure; Tono's
-  product layer replaces their configuration trust model as documented in
+  product layer replaces their configuration trust model (catalog-only
+  nodes, no DIRECT fallback, service-owned WFP/DNS). That contract lives
+  in `crates/tono-core` and the invariants above, not in a separate
   `docs/product-contract.md`.
 - Kill-switch design references: Proton VPN (`ProtonVPN/win-app`) and
-  Mullvad (`mullvadvpn-app`). See `docs/wfp-kill-switch.md`.
+  Mullvad (`mullvadvpn-app`). Rule tables and the wanted/live watchdog
+  are in `service/src/core/wfp.rs` and the Kill switch section of
+  `README.md`.

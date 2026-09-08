@@ -1,0 +1,30 @@
+name: Pinned Windows Core
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Build the audited patch from its pinned upstream commit
+        run: |
+          mkdir -p apps/windows/app/src-tauri/sidecar
+          tooling/scripts/build-mihomo-adaptive.sh --install-adaptive-windows
+          # The builder and the committed identities must describe the same inputs.
+          git diff --exit-code -- apps/macos/Tono/Resources/core-identity.json apps/windows/app/src-tauri/core-identity.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-core-${{ github.sha }}
+          path: apps/windows/app/src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe
+          if-no-files-found: error
+          retention-days: 7

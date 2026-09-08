@@ -7,22 +7,28 @@ Thanks for your interest in contributing!
 ```text
 tono/
 ├── apps/
-│   ├── macos/                 SwiftUI client and privileged helper resources
-│   └── windows/               Tauri client, Windows Service, and WFP support
+│   ├── macos/                 SwiftUI client and privileged helper
+│   └── windows/               Tauri GUI, Service, WFP; Linux desktop packaging
 ├── services/
 │   ├── control-plane/         Cloudflare Worker, static assets, and D1 schema
+│   ├── exit-agent/            VPS Xray roster + metering
 │   └── home-agent/            Home exit-node usage reporter
+├── ops-panel/                 SSH quality collector
 ├── tooling/scripts/           Shared build, release, test, and operations tools
-├── docs/                      Screenshots and archived project handoffs
+├── docs/                      Architecture, release lines, archived handoffs
 └── .agents/                   Repository-specific automation guidance
 ```
+
+See [`docs/architecture.md`](docs/architecture.md) for the system map.
+Ubuntu desktop and a `tono` CLI share the same privileged service; that
+Linux product line is not shipped yet.
 
 ## Build from Source
 
 ```bash
-git clone https://github.com/raydocs/liquidclash.git tono
+git clone https://github.com/raydocs/tono.git tono
 cd tono
-open apps/macos/LiquidClash.xcodeproj
+open apps/macos/Tono.xcodeproj
 ```
 
 Build and run the macOS client with `⌘R` in Xcode. Requires macOS 26.0+ and

@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 use crate::core::service;
 use crate::{
-    config::{Config, IVerge, TonoPreferences},
+    config::{Config, TonoPreferences},
     core::{CoreManager, autostart, handle, logger::Logger, tray},
 };
 use anyhow::Result;
@@ -34,7 +34,7 @@ bitflags! {
      }
 }
 
-fn determine_update_flags(patch: &IVerge) -> UpdateFlags {
+fn determine_update_flags(patch: &TonoPreferences) -> UpdateFlags {
     let tun_mode = patch.enable_tun_mode;
     let auto_launch = patch.enable_auto_launch;
     let system_proxy = patch.enable_system_proxy;
@@ -166,10 +166,10 @@ fn determine_update_flags(patch: &IVerge) -> UpdateFlags {
 }
 
 #[allow(clippy::cognitive_complexity)]
-async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> Result<()> {
+async fn process_terminated_flags(update_flags: UpdateFlags, patch: &TonoPreferences) -> Result<()> {
     // Process updates based on flags
     if update_flags.contains(UpdateFlags::VERGE_CONFIG) {
-        handle::Handle::refresh_verge();
+        handle::Handle::refresh_tono_preferences();
     }
     if update_flags.contains(UpdateFlags::LAUNCH) {
         autostart::update_launch().await?;
@@ -189,7 +189,7 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
     }
     if update_flags.contains(UpdateFlags::SYSTRAY_ICON) {
         tray::Tray::global()
-            .update_icon(&Config::verge().await.latest_arc())
+            .update_icon(&Config::preferences().await.latest_arc())
             .await?;
         if patch.enable_tray_speed.is_some() {
             tray::Tray::global().update_speed_task(patch.enable_tray_speed.unwrap_or(true));
@@ -222,14 +222,10 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
 /// and every surface reports TUN as enabled while nothing carries its traffic.
 ///
 /// The reconciliation writes configuration of its own, so it goes through
-/// [`apply_verge_patch`] rather than back through here. That makes the absence of a cycle a
+/// [`apply_preferences_patch`] rather than back through here. That makes the absence of a cycle a
 /// property of the call graph rather than of a runtime early-return.
 pub async fn patch_preferences(patch: &TonoPreferences, not_save_file: bool) -> Result<()> {
-    patch_verge(patch, not_save_file).await
-}
-
-pub async fn patch_verge(patch: &IVerge, not_save_file: bool) -> Result<()> {
-    apply_verge_patch(patch, not_save_file).await?;
+    apply_preferences_patch(patch, not_save_file).await?;
     if patch.enable_tun_mode.is_some() {
         super::reconcile_tun_availability().await;
     }
@@ -237,7 +233,7 @@ pub async fn patch_verge(patch: &IVerge, not_save_file: bool) -> Result<()> {
 }
 
 /// Apply a patch and nothing else. For callers that are themselves a reconciliation.
-pub(super) async fn apply_verge_patch(patch: &IVerge, not_save_file: bool) -> Result<()> {
+pub(super) async fn apply_preferences_patch(patch: &TonoPreferences, not_save_file: bool) -> Result<()> {
     #[cfg(target_os = "macos")]
     let mut normalized_patch = patch.clone();
     #[cfg(target_os = "macos")]
@@ -256,7 +252,7 @@ pub(super) async fn apply_verge_patch(patch: &IVerge, not_save_file: bool) -> Re
         // currently working Core. StartClash repeats this check immediately before PF mutation.
         service::preflight_macos_kill_switch().await?;
     }
-    let verge = Config::verge().await;
+    let verge = Config::preferences().await;
     // Applying the flags can fail, and until now that `?` returned straight out of here past
     // an `if let Err(..) { discard() }` the compiler could never reach — leaving the failed
     // edit sitting in the draft, where every later reader saw a value that was never applied
@@ -294,14 +290,14 @@ pub(super) async fn apply_verge_patch(patch: &IVerge, not_save_file: bool) -> Re
     if !not_save_file {
         // 分离数据获取和异步调用
         let verge_data = verge.data_arc();
-        logging!(debug, Type::Setup, "Saving Verge configuration to file...");
+        logging!(debug, Type::Setup, "Saving Tono preferences to file...");
         verge_data.save_file().await?;
     }
     Ok(())
 }
 
-pub async fn fetch_verge_config() -> Result<SharedDraft<IVerge>> {
-    let draft = Config::verge().await;
+pub async fn fetch_tono_preferences() -> Result<SharedDraft<TonoPreferences>> {
+    let draft = Config::preferences().await;
     let data = draft.data_arc();
     Ok(data)
 }
@@ -310,8 +306,8 @@ pub async fn fetch_verge_config() -> Result<SharedDraft<IVerge>> {
 /// its inert value and persist, so a hand-edited `verge.yaml` cannot
 /// resurrect the legacy proxy/TUN/script/WebDAV surface. Runs right after
 /// config load, before anything consumes the config.
-pub async fn sanitize_verge_config_for_tono() {
-    let verge = Config::verge().await;
+pub async fn sanitize_preferences_for_tono() {
+    let verge = Config::preferences().await;
     let needs_fix = {
         let data = verge.latest_arc();
         data.enable_system_proxy == Some(true)

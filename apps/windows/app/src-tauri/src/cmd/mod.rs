@@ -3,7 +3,7 @@ use smartstring::alias::String;
 
 pub type CmdResult<T = ()> = Result<T, String>;
 
-const USER_ERROR_PREFIX: &str = "CVR_ERROR:";
+const USER_ERROR_PREFIX: &str = "TONO_ERROR:";
 
 pub fn coded_error(code: &str, detail: impl std::fmt::Display) -> String {
     format!("{USER_ERROR_PREFIX}{code}\n{detail}").into()
@@ -11,13 +11,13 @@ pub fn coded_error(code: &str, detail: impl std::fmt::Display) -> String {
 
 // Command modules
 pub mod app;
+pub mod preferences;
 pub mod system;
-pub mod verge;
 
 // Re-export all command functions for backwards compatibility
 pub use app::*;
+pub use preferences::*;
 pub use system::*;
-pub use verge::*;
 
 pub trait StringifyErr<T> {
     fn stringify_err(self) -> CmdResult<T>;
@@ -80,7 +80,7 @@ mod tests {
     fn coded_error_preserves_stable_code_and_diagnostic_detail() {
         assert_eq!(
             coded_error("CORE_RESTART_FAILED", "connection refused"),
-            "CVR_ERROR:CORE_RESTART_FAILED\nconnection refused"
+            "TONO_ERROR:CORE_RESTART_FAILED\nconnection refused"
         );
     }
 }

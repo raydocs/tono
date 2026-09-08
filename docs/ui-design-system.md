@@ -155,7 +155,7 @@ Windows 用 `tono-ui/tokens/motion.css` 的同名 token，并依赖 `tono.css` �
 ```bash
 # macOS（勿用 /Applications/Tono.app 验证——那是独立安装副本）
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
-  -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \
+  -project apps/macos/Tono.xcodeproj -scheme Tono \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/tono-xcode-derived
 
 # Windows（apps/windows/app）

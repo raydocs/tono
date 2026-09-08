@@ -81,7 +81,7 @@ impl ReleaseOperation {
     }
 }
 
-/// Account state machine (product-contract.md §2, macOS parity):
+/// Account state machine (macOS parity):
 /// `restoring → signedOut | authenticating | ready | suspended | error`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountState {

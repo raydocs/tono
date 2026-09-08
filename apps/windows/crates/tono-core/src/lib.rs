@@ -1,6 +1,6 @@
 //! tono-core: portable product layer for the Tono Windows client.
 //!
-//! Implements the normative rules of `docs/product-contract.md` without any
+//! Implements Tono's catalog, session, and connect contract without any
 //! Windows API dependency: catalog admission and caching, owned Mihomo
 //! runtime generation, API models and session logic, the connect state
 //! machine, and credential storage abstractions.

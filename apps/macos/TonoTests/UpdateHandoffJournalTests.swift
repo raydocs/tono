@@ -120,39 +120,18 @@ final class UpdateHandoffJournalTests: XCTestCase {
     }
 
     func testAtomicWriteRoundTrip() throws {
-        let original = UpdateHandoffStore.fileURL
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tono-journal-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let journal = UpdateHandoffJournal(
-            phase: .protectedHandoffRecorded,
-            previousAppVersion: "0.0.67",
-            nextAppVersion: "0.0.68",
-            coreVersion: "core",
-            coreSHA256: "deadbeef",
-            buildCommit: "c0ffee",
-            helperProtocolVersion: "12",
-            wasConnected: true,
-            keepKillSwitchArmed: true,
-            selectedNodeAnonymousId: "n1",
-            catalogRevision: 1,
-            connectionGeneration: 3
-        )
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(journal)
-        let url = directory.appendingPathComponent("update-handoff.json")
-        let temp = directory.appendingPathComponent("tmp")
-        try data.write(to: temp, options: .atomic)
-        try FileManager.default.moveItem(at: temp, to: url)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let decoded = try decoder.decode(UpdateHandoffJournal.self, from: Data(contentsOf: url))
-        XCTAssertEqual(decoded.phase, .protectedHandoffRecorded)
-        XCTAssertEqual(decoded.wasConnected, true)
-        _ = original
+        try withStore { url in
+            let journal = fixture(phase: .protectedHandoffRecorded)
+            try UpdateHandoffStore.write(journal, at: url)
+            let decoded = try XCTUnwrap(UpdateHandoffStore.load(at: url))
+            XCTAssertEqual(decoded.phase, .protectedHandoffRecorded)
+            XCTAssertEqual(decoded.wasConnected, true)
+            XCTAssertEqual(decoded.coreSHA256, journal.coreSHA256)
+            XCTAssertEqual(decoded.connectionGeneration, journal.connectionGeneration)
+            let leftovers = try FileManager.default.contentsOfDirectory(
+                at: url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+            XCTAssertEqual(leftovers.map(\.lastPathComponent), ["update-handoff.json"])
+        }
     }
 
     func testExpiredJournalIsNotResumedAsSuccess() {
@@ -173,4 +152,123 @@ final class UpdateHandoffJournalTests: XCTestCase {
         )
         XCTAssertTrue(journal.isExpired)
     }
+    private func withStore(_ body: (URL) throws -> Void) throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tono-journal-store-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try body(directory.appendingPathComponent("update-handoff.json"))
+    }
+
+    func testExpiredJournalRetainsExactEvidence() throws {
+        try withStore { url in
+            var journal = fixture(phase: .failed)
+            journal.expiresAt = Date().addingTimeInterval(-60)
+            try UpdateHandoffStore.write(journal, at: url)
+            let before = try Data(contentsOf: url)
+            XCTAssertNil(UpdateHandoffStore.load(at: url))
+            XCTAssertEqual(try Data(contentsOf: url), before)
+        }
+    }
+
+    func testFailedOrIncompleteRecoveryCannotCommitOrEraseEvidence() throws {
+        for phase: UpdateHandoffPhase in [.failed, .updatePrepared, .connectionQuiescing,
+                                         .cleanShutdownCompleted, .protectedHandoffRecorded,
+                                         .installStarted, .firstLaunchMigration] {
+            try withStore { url in
+                try UpdateHandoffStore.write(fixture(phase: phase), at: url)
+                let before = try Data(contentsOf: url)
+                XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(
+                    currentAppVersion: "0.0.68", at: url), phase.rawValue)
+                XCTAssertEqual(try Data(contentsOf: url), before, phase.rawValue)
+            }
+        }
+    }
+
+    func testOldProcessCannotCommitNewVersionRecovery() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .protectionResuming), at: url)
+            let before = try Data(contentsOf: url)
+            XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.67", at: url))
+            XCTAssertEqual(try Data(contentsOf: url), before)
+        }
+    }
+
+    func testVerifiedRecoveryPersistsEachPhaseBeforeRemoval() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .protectionResuming), at: url)
+            var phases: [UpdateHandoffPhase] = []
+            XCTAssertTrue(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.68", at: url,
+                persist: { journal, path in
+                    phases.append(journal.phase)
+                    try UpdateHandoffStore.write(journal, at: path)
+                }))
+            XCTAssertEqual(phases, [.verified, .committed])
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testPersistenceFailureNeverClaimsCommitOrRemovesJournal() throws {
+        struct InjectedWriteFailure: Error {}
+        for failingPhase: UpdateHandoffPhase in [.verified, .committed] {
+            try withStore { url in
+                try UpdateHandoffStore.write(fixture(phase: .protectionResuming), at: url)
+                XCTAssertThrowsError(try UpdateHandoffStore.commitVerifiedRecovery(
+                    currentAppVersion: "0.0.68", at: url,
+                    persist: { journal, path in
+                        if journal.phase == failingPhase { throw InjectedWriteFailure() }
+                        try UpdateHandoffStore.write(journal, at: path)
+                    }))
+                let retained = try XCTUnwrap(UpdateHandoffStore.load(at: url))
+                XCTAssertEqual(retained.phase, failingPhase == .verified ? .protectionResuming : .verified)
+            }
+        }
+    }
+
+    func testUnprotectedFirstLaunchCanCommitAfterActualConnectionVerification() throws {
+        try withStore { url in
+            var journal = fixture(phase: .firstLaunchMigration)
+            journal.wasConnected = false
+            journal.keepKillSwitchArmed = false
+            try UpdateHandoffStore.write(journal, at: url)
+            XCTAssertTrue(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.68", at: url))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
+    func testVerifiedPhaseRetriesOnlyCommitPersistence() throws {
+        try withStore { url in
+            try UpdateHandoffStore.write(fixture(phase: .verified), at: url)
+            var phases: [UpdateHandoffPhase] = []
+            XCTAssertTrue(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.68", at: url,
+                persist: { journal, path in
+                    phases.append(journal.phase)
+                    try UpdateHandoffStore.write(journal, at: path)
+                }))
+            XCTAssertEqual(phases, [.committed])
+        }
+    }
+
+    func testCorruptJournalIsNotErasedOrReplacedByConnectionSuccess() throws {
+        try withStore { url in
+            let bytes = Data("{corrupt handoff evidence".utf8)
+            try bytes.write(to: url)
+            XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.68", at: url))
+            XCTAssertEqual(try Data(contentsOf: url), bytes)
+        }
+    }
+
+    func testNoJournalDoesNotReportUpdateRecovery() throws {
+        try withStore { url in
+            XCTAssertFalse(try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: "0.0.68", at: url))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
+
 }

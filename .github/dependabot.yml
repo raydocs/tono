@@ -66,18 +66,6 @@ updates:
       - dependency-name: boa_engine
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
-  - package-ecosystem: cargo
-    directory: /apps/macos/Tono/Tools
-    schedule:
-      interval: weekly
-      day: monday
-      time: "03:00"
-      timezone: Asia/Shanghai
-    groups:
-      clash-fetcher:
-        patterns: ["*"]
-    labels: [dependencies, macos]
-
   - package-ecosystem: github-actions
     directory: /
     schedule:

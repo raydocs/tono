@@ -40,11 +40,7 @@ impl Handle {
     }
 
     pub fn refresh_tono_preferences() {
-        Self::send_event(FrontendEvent::RefreshVerge);
-    }
-
-    pub fn refresh_verge() {
-        Self::refresh_tono_preferences();
+        Self::send_event(FrontendEvent::RefreshPreferences);
     }
 
     pub fn refresh_profiles() {

@@ -1,0 +1,137 @@
+name: Windows candidate installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['stability/desktop-0.0.72-20260908']
+    paths:
+      - .github/workflows/windows-candidate.yml
+      - .github/workflows/windows-core.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pinned-core:
+    uses: ./.github/workflows/windows-core.yml
+  build:
+    needs: pinned-core
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/windows/app
+        shell: pwsh
+    env:
+      VITE_TONO_UPDATES_CONFIGURED: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.3.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.98.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/windows/app/pnpm-lock.yaml
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: windows-core-${{ github.sha }}
+          path: apps/windows/app/src-tauri/sidecar
+      - name: Install dependencies and check desktop versions
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm install --frozen-lockfile
+          python ../../../tooling/scripts/verify-desktop-version.py --expected 0.0.72
+      - name: Prepare the exact stable Mihomo and Windows resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          # The Service cannot be built safely until the exact core it will launch exists.
+          # Skip only the Service-input check here; the full prebuild below performs it after
+          # all three Service binaries have been compiled with this core's digest.
+          pnpm prebuild -- x86_64-pc-windows-msvc --skip-windows-service
+
+      - name: Build Tono Windows Service from the same commit
+        shell: pwsh
+        working-directory: apps/windows/service
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $core = (Resolve-Path '../app/src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe').Path
+          $coreSha256 = (Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($coreSha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "Invalid Mihomo SHA-256: $coreSha256"
+          }
+          $env:TONO_CORE_SHA256 = $coreSha256
+          "TONO_CORE_SHA256=$coreSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force ../app/src-tauri/resources | Out-Null
+          Set-Content -LiteralPath ../app/src-tauri/resources/core-sha256.txt -Value "$coreSha256" -Encoding ascii
+          cargo build --locked --release --features standalone,client --bins
+          # resources/ is gitignored locally (built artifacts), so a fresh CI checkout lacks it.
+          New-Item -ItemType Directory -Force ../app/src-tauri/resources | Out-Null
+          Copy-Item target/release/tono-service.exe ../app/src-tauri/resources/tono-service.exe -Force
+          Copy-Item target/release/tono-service-install.exe ../app/src-tauri/resources/tono-service-install.exe -Force
+          Copy-Item target/release/tono-service-uninstall.exe ../app/src-tauri/resources/tono-service-uninstall.exe -Force
+          # Both the daemon that authorizes a launch and the privileged replacement helper must
+          # carry the exact digest. Without it the package installs successfully but every connect
+          # fails closed at startingKillSwitch, which is what made 0.0.30 unusable.
+          foreach ($binary in @(
+            '../app/src-tauri/resources/tono-service.exe',
+            '../app/src-tauri/resources/tono-service-install.exe'
+          )) {
+            $binaryPath = (Resolve-Path $binary).Path
+            $ascii = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($binaryPath))
+            if (-not $ascii.Contains($coreSha256)) {
+              throw "The built $(Split-Path -Leaf $binary) does not contain the Mihomo SHA-256 pin."
+            }
+          }
+
+      - name: Prepare and validate the Windows payload inputs
+        run: |
+          # PowerShell normally continues after a native executable returns nonzero. Without
+          # these preferences the release preflight can fail, then a later passing test makes
+          # the whole step green and allows an unchecked installer to be uploaded.
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm prebuild -- x86_64-pc-windows-msvc
+          pnpm release:preflight --config-only
+          pnpm typecheck
+          pnpm exec vitest run tests/update.test.ts
+          pnpm test:dev-control
+
+      - name: Build candidate only (no updater signature or release publication)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm tauri build --bundles nsis
+      - name: Inspect installer payload and record provenance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          if ($installers.Count -ne 1) { throw "Expected exactly one installer, found $($installers.Count)" }
+          $installer = $installers[0]
+          pnpm release:preflight --payload-only $installer.FullName
+          $version = node -p "require('./package.json').version"
+          $files = @($installer.FullName) + @(Get-ChildItem src-tauri/resources/tono-service*.exe | ForEach-Object FullName)
+          $files += (Resolve-Path src-tauri/sidecar/tono-core-x86_64-pc-windows-msvc.exe).Path
+          $hashes = @($files | ForEach-Object { @{ name = (Split-Path -Leaf $_); sha256 = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant() } })
+          @{ version = $version; source = $env:GITHUB_SHA; candidateOnly = $true; releaseAccepted = $false; updaterSigned = $false; authenticodeSigned = $false; files = $hashes } | ConvertTo-Json -Depth 5 | Set-Content target/release/bundle/nsis/candidate-manifest.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: tono-windows-0.0.72-candidate-${{ github.sha }}
+          path: |
+            apps/windows/app/target/release/bundle/nsis/*-setup.exe
+            apps/windows/app/target/release/bundle/nsis/candidate-manifest.json
+          if-no-files-found: error
+          retention-days: 7

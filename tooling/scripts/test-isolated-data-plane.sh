@@ -64,6 +64,11 @@ DEVELOPER_DIR="$tono_developer_dir" /usr/bin/xcrun swiftc \
   "$repo_root/apps/macos/Tono/Services/ConfigParser.swift" \
   "$repo_root/apps/macos/Tono/Core/HelperProtocolVersion.swift" \
   "$repo_root/apps/macos/Tono/Core/ConfigPipeline.swift" \
+  "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Identity.swift" \
+  "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Runtime.swift" \
+  "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Nodes.swift" \
+  "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Direct.swift" \
+  "$repo_root/apps/macos/Tono/Core/Configuration/ConfigPipeline+Write.swift" \
   "$repo_root/tooling/scripts/tests/IsolatedDataPlaneRuntime.swift" \
   -o "$test_dir/isolated-runtime"
 

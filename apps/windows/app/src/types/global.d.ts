@@ -270,7 +270,7 @@ interface IProfilesConfig {
   items?: IProfileItem[]
 }
 
-interface IVergeTestItem {
+interface TonoTestItem {
   uid: string
   name?: string
   icon?: string
@@ -951,7 +951,7 @@ interface TonoPreferences {
   auto_backup_interval_hours?: number
   auto_backup_on_change?: boolean
   proxy_layout_column?: number
-  test_list?: IVergeTestItem[]
+  test_list?: TonoTestItem[]
   webdav_url?: string
   webdav_username?: string
   webdav_password?: string
@@ -960,9 +960,6 @@ interface TonoPreferences {
   hover_jump_navigator_delay?: number
   enable_external_controller?: boolean
 }
-
-/** @deprecated use TonoPreferences */
-type IVergeConfig = TonoPreferences
 
 interface IWebDavFile {
   filename: string

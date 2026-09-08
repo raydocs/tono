@@ -65,8 +65,8 @@ describe('subscribeTonoEvents', () => {
 
     subscribeTonoEvents(
       {
-        'verge://run-state-changed': () => {},
-        'verge://notice-message': () => {},
+        'tono://run-state-changed': () => {},
+        'tono://notice-message': () => {},
       },
       onSubscribed,
     )
@@ -88,7 +88,7 @@ describe('subscribeTonoEvents', () => {
     const onSubscribed = vi.fn()
 
     const teardown = subscribeTonoEvents(
-      { 'verge://run-state-changed': () => {} },
+      { 'tono://run-state-changed': () => {} },
       onSubscribed,
     )
     teardown()
@@ -104,7 +104,7 @@ describe('subscribeTonoEvents', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const onSubscribed = vi.fn()
 
-    subscribeTonoEvents({ 'verge://run-state-changed': () => {} }, onSubscribed)
+    subscribeTonoEvents({ 'tono://run-state-changed': () => {} }, onSubscribed)
 
     await vi.waitFor(() => expect(onSubscribed).toHaveBeenCalledTimes(1))
   })
@@ -121,11 +121,11 @@ describe('subscribeTonoEvents', () => {
     const onNotice = vi.fn()
 
     subscribeTonoEvents({
-      'verge://run-state-changed': onRunState,
-      'verge://notice-message': onNotice,
+      'tono://run-state-changed': onRunState,
+      'tono://notice-message': onNotice,
     })
 
-    handlers.get('verge://run-state-changed')?.({ mode: 'Sidecar' })
+    handlers.get('tono://run-state-changed')?.({ mode: 'Sidecar' })
 
     expect(onRunState).toHaveBeenCalledWith({ mode: 'Sidecar' })
     expect(onNotice).not.toHaveBeenCalled()

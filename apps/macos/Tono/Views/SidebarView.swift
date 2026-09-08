@@ -26,7 +26,7 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             // 品牌区
             HStack(spacing: 10) {
-                LiquidClashLogo(compact: true)
+                TonoLogo(compact: true)
                     .frame(width: 22, height: 22)
                 Text(AppProfile.displayName)
                     .font(.system(size: 15, weight: .semibold))

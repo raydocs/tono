@@ -162,7 +162,6 @@ fetch_rust_dependencies() {
     apps/windows/app/Cargo.toml
     apps/windows/service/Cargo.toml
     apps/windows/vendor/kode-bridge/Cargo.toml
-    apps/macos/Tono/Tools/Cargo.toml
   )
   local manifest
 

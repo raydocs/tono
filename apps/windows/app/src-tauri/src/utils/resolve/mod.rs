@@ -50,7 +50,7 @@ pub fn resolve_setup_async() {
         init_service_manager().await;
         init_verge_config_before_window().await;
         // Tono P0-10: hand-edited dangerous fields never survive startup.
-        feat::sanitize_verge_config_for_tono().await;
+        feat::sanitize_preferences_for_tono().await;
         init_window().await;
         init_resources().await;
 
@@ -126,7 +126,7 @@ pub(super) async fn refresh_tray_menu() {
 }
 
 pub(super) async fn init_window() {
-    let is_silent_start = Config::verge().await.data_arc().enable_silent_start.unwrap_or(false);
+    let is_silent_start = Config::preferences().await.data_arc().enable_silent_start.unwrap_or(false);
     WindowManager::create_window(!is_silent_start).await;
 }
 
@@ -134,7 +134,7 @@ pub(super) async fn init_window() {
 pub(super) async fn resolve_dock_show() {
     use crate::core::handle::Handle;
 
-    let is_silent_start = Config::verge().await.data_arc().enable_silent_start.unwrap_or(false);
+    let is_silent_start = Config::preferences().await.data_arc().enable_silent_start.unwrap_or(false);
     if is_silent_start {
         Handle::global().set_activation_policy_accessory();
     }

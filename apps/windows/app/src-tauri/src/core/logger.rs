@@ -55,7 +55,7 @@ impl Logger {
 
     pub async fn init(&self) -> Result<()> {
         let (log_level, log_max_size, log_max_count) = {
-            let verge_guard = crate::config::Config::verge().await;
+            let verge_guard = crate::config::Config::preferences().await;
             let verge = verge_guard.latest_arc();
             (
                 verge.get_log_level(),
