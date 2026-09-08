@@ -486,3 +486,17 @@ pass locally after correction. **Physical verification of a rebuilt package is
 still pending**, as are the protected update lifecycle #26 and remaining device gates.
 See [the device runbook](WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md). Raw owner-device
 network evidence and backups remain private and must not be uploaded to this public repo.
+
+### Device QA harness correction
+
+Preparing native device diagnostics exposed another stale de-fork name: the Core
+fault injector accepted only process names containing `mihomo`, so it refused the
+shipped `tono-core` process and its snapshots omitted that process. It now accepts
+only the exact shipped/legacy Core names, obtains a fresh authenticated Service
+PID instead of reusing the baseline PID, and stops the validated process object.
+Fourteen mocked fault-targeting cases passed in native Windows PowerShell; the old
+function failed that regression. No real process was killed by those tests. CI
+executes the same non-privileged fixture and tracks both harness/test paths.
+The native driver was separately built with Rust 1.98.1 and read-only diagnosis
+confirmed the first explicit disconnect cleared desired Core/protection ownership.
+This evidence is not a live Core crash, Service crash or adapter-flap qualification.
