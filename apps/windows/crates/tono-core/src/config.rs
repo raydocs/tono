@@ -53,19 +53,6 @@ pub const ALWAYS_ADDRESS_FREE_WEB_SUFFIXES: [&str; 5] = [
 pub fn is_address_free_web_suffix(host: &str) -> bool {
     ADDRESS_FREE_WEB_SUFFIXES.contains(&host)
 }
-/// Reviewed WeChat product executables. Keep this list narrow: WFP remains
-/// the exact IP:port security boundary for each generated DIRECT rule.
-pub const WECHAT_PROCESS_NAMES: [&str; 9] = [
-    "WeChat.exe",
-    "Weixin.exe",
-    "xwechat.exe",
-    "WeChatAppEx.exe",
-    "WeChatPlayer.exe",
-    "WeixinPlay.exe",
-    "WeChatApp.exe",
-    "WeixinApp.exe",
-    "WeChatBrowser.exe",
-];
 /// Main and known helper executables for the three reviewed China-office
 /// clients. These names are used only alongside exact cloud-approved media
 /// IP/port tuples; TCP raw-IP traffic uses the signature-verified path regexes
