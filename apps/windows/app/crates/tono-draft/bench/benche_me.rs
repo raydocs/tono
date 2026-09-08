@@ -5,17 +5,17 @@ use tokio::runtime::Runtime;
 use tono_draft::Draft;
 
 #[derive(Default, Clone, Debug)]
-struct IVerge {
+struct TonoPreferences {
     enable_auto_launch: Option<bool>,
     enable_tun_mode: Option<bool>,
 }
 
-fn make_draft() -> Draft<IVerge> {
-    let verge = IVerge {
+fn make_draft() -> Draft<TonoPreferences> {
+    let prefs = TonoPreferences {
         enable_auto_launch: Some(true),
         enable_tun_mode: Some(false),
     };
-    Draft::new(verge)
+    Draft::new(prefs)
 }
 
 pub fn bench_draft(c: &mut Criterion) {

@@ -1,8 +1,25 @@
 import SwiftUI
 
-/// Press feedback for the connection pill: a quick 0.98 squeeze. The pill is
-/// disabled during connecting/disconnecting, so the press state only ever
-/// appears when a tap is actionable. Reduce Motion skips the scale entirely.
+/// ⌘. cancels an in-flight connect; ⌘K toggles connect/disconnect.
+/// Neither collides with sidebar ⌘1–⌘4 or Nodes ⌘F.
+private struct ConnectPillKeyboardShortcut: ViewModifier {
+    let isConnecting: Bool
+    let isDisconnecting: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isConnecting {
+            content.keyboardShortcut(".", modifiers: .command)
+        } else if !isDisconnecting {
+            content.keyboardShortcut("k", modifiers: .command)
+        } else {
+            content
+        }
+    }
+}
+
+/// Press feedback for the connection pill: a quick 0.98 squeeze. Reduce
+/// Motion skips the scale entirely.
 private struct ConnectPillPressStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -31,7 +48,7 @@ struct ConnectPill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var accentColor: Color {
-        if isConnecting || isDisconnecting || isRecovering { return TonoStatus.connecting }
+        if isConnecting || isDisconnecting || isRecovering { return TonoBrand.accent }
         if isProtectionBlocked { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : TonoStatus.standby
     }
@@ -58,17 +75,29 @@ struct ConnectPill: View {
                     )
                     .accessibilityHidden(true)
 
+                // Live text replacing live text: each new string crossfades
+                // in over the old one (ZStack so the height never jumps).
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(statusText)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(statusColor)
-                        .lineLimit(1)
-                    Text(contextText)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    ZStack(alignment: .leading) {
+                        Text(statusText)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(statusColor)
+                            .lineLimit(1)
+                            .id(statusID)
+                            .transition(TonoMotion.textSwapTransition)
+                    }
+                    ZStack(alignment: .leading) {
+                        Text(contextText)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .id(contextText)
+                            .transition(TonoMotion.textSwapTransition)
+                    }
                 }
+                .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: statusID)
+                .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: contextText)
 
                 Spacer(minLength: 10)
 
@@ -127,19 +156,32 @@ struct ConnectPill: View {
                 : Color.black.opacity(colorScheme == .dark ? 0.4 : 0.10),
             radius: isConnected ? 22 : 15, y: 6
         )
-        // The progress card owns the explicit cancel/restore action. Keeping
-        // the unlabeled pill inert during a transition prevents an accidental
-        // click from releasing fail-closed protection during an auto-retry.
-        .disabled(isConnecting || isDisconnecting)
-        .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isConnected)
-        .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isConnecting)
-        .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isDisconnecting)
+        // Connecting stays clickable so cancel is on the same control.
+        // Disconnecting stays inert: that path is already unwinding.
+        .disabled(isDisconnecting)
+        .modifier(ConnectPillKeyboardShortcut(
+            isConnecting: isConnecting,
+            isDisconnecting: isDisconnecting
+        ))
+        // The tunnel coming up is the one overshoot in the app: the mark
+        // saturates and its green glow rises with a little bounce. Every
+        // other state change is a plain 220 ms color transition.
+        .animation(TonoMotion.arrival(reduceMotion: reduceMotion), value: isConnected)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isConnecting)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isDisconnecting)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isProtectionBlocked)
+    }
+
+    /// Identity for the headline crossfade; `LocalizedStringKey` is not
+    /// `Equatable`, so the state tuple stands in for it.
+    private var statusID: String {
+        "\(isConnecting)-\(isDisconnecting)-\(isRecovering)-\(isProtectionBlocked)-\(isConnected)"
     }
 
     // MARK: - Copy
 
     private var statusText: LocalizedStringKey {
-        if isConnecting { return "Connecting…" }
+        if isConnecting { return "Cancel" }
         if isDisconnecting { return "Disconnecting…" }
         if isRecovering { return "Recovering protected connection…" }
         if isProtectionBlocked { return "Protected Offline" }
@@ -158,22 +200,22 @@ struct ConnectPill: View {
         if isConnecting { return String(localized: String.LocalizationValue(connectionStage.rawValue)) }
         if isDisconnecting { return String(localized: String.LocalizationValue(disconnectionStage.rawValue)) }
         if isRecovering { return String(localized: "Recovering protected connection…") }
-        if isProtectionBlocked { return String(localized: "Tap to restore internet") }
+        if isProtectionBlocked { return String(localized: "Click to restore internet") }
         if isConnected {
             if let nodeDisplay, nodeLatency > 0 {
                 return "\(nodeDisplay) — \(LatencyLevel.spokenTitle(for: nodeLatency, kind: .exit))"
             }
             if let nodeDisplay { return nodeDisplay }
-            return String(localized: "Tap to disconnect")
+            return String(localized: "Click to disconnect")
         }
         if let nodeDisplay {
-            return String(localized: "Tap to connect via \(nodeDisplay)")
+            return String(localized: "Click to connect via \(nodeDisplay)")
         }
-        return String(localized: "Tap to connect")
+        return String(localized: "Click to connect")
     }
 
     private var statusColor: Color {
-        if isConnecting || isDisconnecting { return TonoStatus.connecting }
+        if isConnecting || isDisconnecting { return TonoBrand.accent }
         if isProtectionBlocked { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : Color.primary
     }

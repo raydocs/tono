@@ -49,7 +49,12 @@ jobs:
     # on Linux keeps the cheap half of the coverage fast and unconditional.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Verify desktop product versions agree
+        run: |
+          python3 tooling/scripts/tests/test_desktop_version.py
+          python3 tooling/scripts/verify-desktop-version.py
 
       - name: Test tono-core
         # Run from the workspace root: the lockfile lives there, so `--locked`
@@ -70,11 +75,11 @@ jobs:
       run:
         working-directory: apps/windows/app
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Install pnpm as the project pins it
         run: npm install --global pnpm@11.3.0
@@ -88,19 +93,22 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Packaging and pinned Core identity contracts
+        run: pnpm test:dev-control
+
   app-rust:
     # The `app` job above type-checks and unit-tests the frontend. Nothing ran
     # the Tauri crate's own 357 Rust tests — not this workflow, not the release
     # one — so two of them had been failing unnoticed. On Windows because that is
     # what ships, and because `build.rs` gives every test harness its own Common
     # Controls activation context there; the tests die at load time without it.
-    runs-on: windows-2022
+    runs-on: windows-2025
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Install pnpm as the project pins it
         run: npm install --global pnpm@11.3.0
@@ -149,9 +157,9 @@ jobs:
         run: cargo test --locked
 
   service:
-    runs-on: windows-2022
+    runs-on: windows-2025
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Build the service the way the release does
         working-directory: apps/windows/service
@@ -174,8 +182,19 @@ jobs:
       # this step is for.
       - name: Ask the real filtering engine
         working-directory: apps/windows/service
+        env:
+          TONO_REQUIRE_REAL_WFP: '1'
         # `--lib` because `tests/common.rs` reaches for helpers that only exist under the
         # `test` feature and is compiled whatever the integration files' own `cfg` says, so
         # the crate does not build its integration targets in this configuration at all.
         # Verified locally before pushing rather than by watching this step fail.
-        run: cargo test --locked --features standalone,client --lib core::wfp::real_engine_tests -- --nocapture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $test = 'core::wfp::real_engine_tests::the_kernel_accepts_a_filter_with_many_same_field_conditions'
+          $listed = cargo test --locked --features standalone,client --lib $test -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate real WFP tests' }
+          if (-not ($listed -match "^$([regex]::Escape($test)): test$")) {
+            throw 'Expected real WFP test is missing; zero executed tests is not qualification'
+          }
+          cargo test --locked --features standalone,client --lib $test -- --exact --nocapture

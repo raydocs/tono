@@ -107,7 +107,7 @@ struct LogsView: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(TonoBrand.accent)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

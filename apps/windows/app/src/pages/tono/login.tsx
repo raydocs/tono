@@ -20,9 +20,12 @@ import {
   TONO_PAGE_LAYOUT,
   tonoText,
 } from '@/tono-ui/theme'
+import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoLogo } from '@/tono-ui/TonoLogo'
+import { WelcomeHeroTile } from '@/tono-ui/WelcomeHeroTile'
 
 const RESEND_COUNTDOWN = 60
+const SENT_ACK_MS = 1500
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -36,6 +39,7 @@ const LoginPage = () => {
   const [email, setEmail] = useState('')
   const [code, setCode] = useState('')
   const [codeSent, setCodeSent] = useState(false)
+  const [sentAck, setSentAck] = useState(false)
   const [sending, setSending] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [retrying, setRetrying] = useState(false)
@@ -70,6 +74,7 @@ const LoginPage = () => {
 
   const resetToStart = () => {
     setCodeSent(false)
+    setSentAck(false)
     setCode('')
     setError(null)
     autoSubmittedCodeRef.current = null
@@ -88,7 +93,7 @@ const LoginPage = () => {
     setError(null)
     try {
       await tonoSignInStart(trimmed)
-      setCodeSent(true)
+      setSentAck(true)
       // The challenge's `expiresIn` is the code's validity window (minutes),
       // not a resend cooldown — the resend cooldown stays a fixed 60s.
       setCountdown(RESEND_COUNTDOWN)
@@ -125,6 +130,15 @@ const LoginPage = () => {
       setVerifying(false)
     }
   })
+
+  useEffect(() => {
+    if (!sentAck) return
+    const timer = window.setTimeout(() => {
+      setSentAck(false)
+      setCodeSent(true)
+    }, SENT_ACK_MS)
+    return () => window.clearTimeout(timer)
+  }, [sentAck])
 
   useEffect(() => {
     if (!codeSent || sending || verifying) return
@@ -230,7 +244,7 @@ const LoginPage = () => {
       </button>
       {restoreInternetError && (
         <>
-          <span style={{ fontSize: 12, color: TONO_COLORS.error }}>
+          <span style={{ fontSize: 12, color: 'var(--tono-text-error)' }}>
             {restoreInternetError}
           </span>
           <SupportContact extra={restoreInternetError} />
@@ -292,23 +306,21 @@ const LoginPage = () => {
 
   return (
     <div className="tono-welcome">
-      <aside className="tono-welcome__story">
-        <div className="tono-welcome__brand">
-          <TonoLogo connected={false} size={32} />
-          <span>Tono</span>
-        </div>
-        <div className="tono-welcome__message">
-          <span className="tono-welcome__eyebrow">
-            {t('tono.login.brandLabel')}
-          </span>
-          <h2>{t('tono.login.brandTitle')}</h2>
-          <p>{t('tono.login.brandDescription')}</p>
-          <div className="tono-welcome__route" aria-hidden="true">
-            <span />
-            <i />
-            <span />
+      <aside className="tono-welcome__story tono-welcome-ground">
+        <div className="tono-welcome__hero">
+          <div className="tono-welcome__brand">
+            <TonoLogo connected={false} size={32} />
+            <span>Tono</span>
+          </div>
+          <div className="tono-welcome__message">
+            <span className="tono-welcome__eyebrow">
+              {t('tono.login.brandLabel')}
+            </span>
+            <h2>{t('tono.login.brandTitle')}</h2>
+            <p>{t('tono.login.brandDescription')}</p>
           </div>
         </div>
+        <WelcomeHeroTile size="small" />
         <p className="tono-welcome__footnote">
           {t('tono.login.brandFootnote')}
         </p>
@@ -328,7 +340,7 @@ const LoginPage = () => {
               borderRadius: 10,
               padding: '10px 12px',
               fontSize: 12,
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
               background: `${TONO_COLORS.error}1F`,
             }}
           >
@@ -396,15 +408,17 @@ const LoginPage = () => {
         <p className="tono-sr-only" role="status">
           {sending
             ? t('tono.login.sending')
-            : verifying
-              ? t('tono.login.verifying')
-              : codeSent
-                ? t('tono.login.codeSent')
-                : ''}
+            : sentAck
+              ? t('tono.login.sent')
+              : verifying
+                ? t('tono.login.verifying')
+                : codeSent
+                  ? t('tono.login.codeSent')
+                  : ''}
         </p>
 
         <form
-          aria-busy={sending || verifying}
+          aria-busy={sending || sentAck || verifying}
           onSubmit={(event) => {
             event.preventDefault()
             if (!codeSent) void handleSendCode()
@@ -436,6 +450,7 @@ const LoginPage = () => {
               onChange={(event) => setEmail(event.target.value)}
               disabled={
                 sending ||
+                sentAck ||
                 verifying ||
                 restoringInternet ||
                 internetBlocked ||
@@ -445,14 +460,32 @@ const LoginPage = () => {
           </label>
 
           {!codeSent ? (
-            <button
-              type="submit"
-              className="tono-button"
-              style={primaryButtonStyle}
-              disabled={sending || restoringInternet || internetBlocked}
-            >
-              {sending ? t('tono.login.sending') : t('tono.login.sendCode')}
-            </button>
+            <>
+              <p className="tono-welcome__trust">
+                <TonoIcon name="lock" size={14} />
+                <span>{t('tono.login.trust')}</span>
+              </p>
+              <button
+                type="submit"
+                className={
+                  sending
+                    ? 'tono-button tono-action tono-progress-pill tono-progress-pill--sending'
+                    : 'tono-button tono-action tono-progress-pill'
+                }
+                style={primaryButtonStyle}
+                disabled={
+                  sending || sentAck || restoringInternet || internetBlocked
+                }
+              >
+                <span>
+                  {sending
+                    ? t('tono.login.sending')
+                    : sentAck
+                      ? t('tono.login.sent')
+                      : t('tono.login.sendCode')}
+                </span>
+              </button>
+            </>
           ) : (
             <>
               <label
@@ -494,7 +527,7 @@ const LoginPage = () => {
               </label>
               <button
                 type="submit"
-                className="tono-button"
+                className="tono-button tono-action"
                 style={primaryButtonStyle}
                 disabled={
                   sending ||

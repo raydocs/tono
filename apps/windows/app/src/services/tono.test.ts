@@ -11,6 +11,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 import {
   connectErrorSuggestsServerSwitch,
   connectRejectionNeedsServerChoice,
+  describeTonoActionError,
   formatTonoActionError,
   isEncryptedDnsFailure,
   subscribeTonoStatus,
@@ -265,5 +266,39 @@ describe('connectErrorSuggestsServerSwitch', () => {
         (key) => `translated:${key}`,
       ),
     ).toBe('translated:tono.dashboard.errors.browserDnsPreflight')
+  })
+})
+
+describe('describeTonoActionError', () => {
+  const t = (key: string) => `translated:${key}`
+
+  it('keeps mapped errors as a message with no diagnostic detail', () => {
+    expect(
+      describeTonoActionError(
+        new Error('TONO_SERVICE_BUSY: repair pending'),
+        t,
+      ),
+    ).toEqual({ message: 'translated:tono.dashboard.errors.serviceBusy' })
+    expect(
+      formatTonoActionError(new Error('TONO_SERVICE_BUSY: repair pending'), t),
+    ).toBe('translated:tono.dashboard.errors.serviceBusy')
+  })
+
+  it('returns a localized fallback and the raw text as detail when nothing matches', () => {
+    const raw =
+      'sc.exe start TonoService failed: os error 10061; HKLM\\SYSTEM\\CurrentControlSet'
+    expect(describeTonoActionError(new Error(raw), t)).toEqual({
+      message: 'translated:tono.errors.unknownAction',
+      detail: raw,
+    })
+    expect(formatTonoActionError(new Error(raw), t)).toBe(
+      'translated:tono.errors.unknownAction',
+    )
+  })
+
+  it('returns the raw string when no translator is provided', () => {
+    const raw = 'os error 10061'
+    expect(describeTonoActionError(raw)).toEqual({ message: raw })
+    expect(formatTonoActionError(raw)).toBe(raw)
   })
 })

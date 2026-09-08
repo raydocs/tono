@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tono-admin-production",
   "main": "src/admin-worker.ts",
-  "compatibility_date": "2025-09-02",
+  "compatibility_date": "2026-08-22",
   "workers_dev": false,
   "routes": [
     {

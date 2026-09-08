@@ -16,7 +16,7 @@ repo_root=${0:A:h:h:h}
 cd "$repo_root"
 
 fixture="$repo_root/tooling/scripts/tests/fixtures/multi-vless-reality.yaml"
-helper="$repo_root/apps/macos/Tono/Resources/liquidclash-helper"
+helper="$repo_root/apps/macos/Tono/Resources/tono-core-helper"
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 
 typeset -a passed failed skipped
@@ -43,7 +43,7 @@ skip() {
 print "Tono macOS suite"
 
 run "xctest (app unit tests)" \
-  xcodebuild test -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \
+  xcodebuild test -project apps/macos/Tono.xcodeproj -scheme Tono \
     -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO -quiet
 
 run "subscription url policy" tooling/scripts/test-subscription-url-policy.sh

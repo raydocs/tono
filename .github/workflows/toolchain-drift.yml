@@ -1,0 +1,122 @@
+name: Toolchain drift
+
+# Dependabot covers npm, cargo and GitHub Actions. The pins below live in shell
+# scripts, rust-toolchain.toml, Package.resolved and provisioning scripts, so
+# nothing else watches them. Every Monday this compares each pin with the
+# newest upstream release and keeps one open issue current with the diff.
+# It never edits the pins: mihomo carries a local patch, Tailscale and
+# Sparkle ship inside a notarized bundle, and Xray is rolled out to live
+# exit nodes, so each bump needs a human to run the matching build script.
+
+on:
+  schedule:
+    - cron: "30 19 * * 0" # Monday 03:30 Asia/Shanghai
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
+
+      - name: Compare pinned versions with upstream
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          pin() { sed -n "s/^$2=\"\([^\"]*\)\".*/\1/p" "$1" | head -1; }
+          latest_release() { gh api "repos/$1/releases/latest" --jq .tag_name; }
+          latest_tag() { gh api "repos/$1/tags?per_page=50" --jq "[.[].name | select(test(\"$2\"))][0]"; }
+
+          rows=""
+          drift=0
+          row() {
+            # name current latest
+            local mark="ok"
+            if [ "$2" != "$3" ]; then mark="**behind**"; drift=$((drift+1)); fi
+            rows="$rows| $1 | \`$2\` | \`$3\` | $mark |"$'\n'
+          }
+
+          mihomo_pin=$(pin tooling/scripts/build-mihomo-adaptive.sh upstream_tag)
+          row "mihomo (build-mihomo-adaptive.sh)" "$mihomo_pin" "$(latest_release MetaCubeX/mihomo)"
+
+          singtun_pin=$(pin tooling/scripts/build-mihomo-adaptive.sh sing_tun_version)
+          singtun_latest=$(curl -fsSL "https://raw.githubusercontent.com/MetaCubeX/mihomo/$(latest_release MetaCubeX/mihomo)/go.mod" \
+            | sed -n 's/.*github.com\/metacubex\/sing-tun \(v[0-9.]*\).*/\1/p' | head -1)
+          row "sing-tun (build-mihomo-adaptive.sh)" "$singtun_pin" "$singtun_latest"
+
+          go_pin=$(pin tooling/scripts/build-mihomo-adaptive.sh required_go_version)
+          row "Go (build-mihomo-adaptive.sh)" "$go_pin" "$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)"
+
+          ts_pin=$(pin tooling/scripts/build-tailscale-sidecar.sh TAILSCALE_TAG)
+          row "Tailscale sidecar (build-tailscale-sidecar.sh)" "$ts_pin" "$(latest_release tailscale/tailscale)"
+
+          rust_pin=$(sed -n 's/^channel = "\([^"]*\)".*/\1/p' apps/windows/app/rust-toolchain.toml)
+          # Read the whole manifest: an early awk exit would close the pipe on
+          # curl and trip pipefail.
+          rust_manifest=$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml)
+          rust_latest=$(printf '%s\n' "$rust_manifest" \
+            | awk '/^\[pkg.rust\]/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; f=0}')
+          row "Rust (rust-toolchain.toml)" "$rust_pin" "$rust_latest"
+
+          sparkle_pin=$(python3 -c 'import json;d=json.load(open("apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"));print(next(p["state"]["version"] for p in d["pins"] if p["identity"]=="sparkle"))')
+          row "Sparkle (Package.resolved)" "$sparkle_pin" "$(latest_release sparkle-project/Sparkle)"
+
+          xray_pin=$(sed -n 's/^XRAY_VERSION = "\([^"]*\)".*/\1/p' tooling/scripts/provision-tono-node.py)
+          row "Xray (provision-tono-node.py)" "$xray_pin" "$(latest_release XTLS/Xray-core)"
+
+          {
+            echo "table<<EOF"
+            echo "| Component | Pinned | Latest | |"
+            echo "|---|---|---|---|"
+            printf '%s' "$rows"
+            echo "EOF"
+            echo "drift=$drift"
+          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$rows"
+
+      - name: Open or update the drift issue
+        if: steps.compare.outputs.drift != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TABLE: ${{ steps.compare.outputs.table }}
+          DRIFT: ${{ steps.compare.outputs.drift }}
+        run: |
+          set -euo pipefail
+          title="Toolchain drift: $DRIFT pinned component(s) behind upstream"
+          body=$(cat <<EOF
+          Weekly comparison of script-pinned toolchains against upstream releases (run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID).
+
+          $TABLE
+
+          How to bump each one:
+          - mihomo / sing-tun / Go: edit the pins at the top of \`tooling/scripts/build-mihomo-adaptive.sh\` (tag, commit, sing-tun, Go, stock SHA-256s), then run \`--install-adaptive\` and \`--install-adaptive-windows\`; the patch under \`tooling/scripts/mihomo-adaptive/\` must still apply and its test must pass.
+          - Tailscale: edit \`TAILSCALE_TAG\`/\`TAILSCALE_COMMIT\` in \`tooling/scripts/build-tailscale-sidecar.sh\` and run it.
+          - Rust: edit every \`rust-toolchain.toml\` and the \`dtolnay/rust-toolchain\` input in \`windows-release.yml\`.
+          - Sparkle: bump the exact version in \`project.pbxproj\` and \`Package.resolved\`, and the version in \`THIRD_PARTY_NOTICES.md\`.
+          - Xray: bump \`XRAY_VERSION\` in \`tooling/scripts/provision-tono-node.py\` and \`provision-reality-node.rb\` and roll it to the fleet with the node scripts.
+          EOF
+          )
+          existing=$(gh issue list --state open --label toolchain-drift --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+          else
+            gh label create toolchain-drift --description "Script-pinned toolchain behind upstream" --color C5DEF5 2>/dev/null || true
+            gh issue create --title "$title" --body "$body" --label toolchain-drift
+          fi
+
+      - name: Close the drift issue when everything is current
+        if: steps.compare.outputs.drift == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --label toolchain-drift --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "All pinned toolchains match upstream as of this run."
+          fi

@@ -1,4 +1,4 @@
-//! `tono_core::HttpTransport` over the app's reqwest stack (product-contract.md §1):
+//! `tono_core::HttpTransport` over the app's reqwest stack:
 //! redirects disabled, cookies disabled, 30 s connect / 45 s total timeouts (the
 //! mainland-link budget), and a 2 MiB response cap. The Bearer token is computed by
 //! `ApiClient` and carried on the request; this layer only passes it through.

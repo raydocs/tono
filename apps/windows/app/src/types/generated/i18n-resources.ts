@@ -1114,6 +1114,28 @@ export interface TranslationResources {
         viewProtectedRules: string
         whatFailed: string
       }
+      errors: {
+        unknownAction: string
+      }
+      intro: {
+        getStarted: string
+        landmark: string
+        next: string
+        progress: string
+        skip: string
+        step1: {
+          body: string
+          headline: string
+        }
+        step2: {
+          body: string
+          headline: string
+        }
+        step3: {
+          body: string
+          headline: string
+        }
+      }
       login: {
         brandDescription: string
         brandFootnote: string
@@ -1146,23 +1168,28 @@ export interface TranslationResources {
           title: string
         }
         resendIn: string
+        restartTono: string
         restoreFailed: {
           description: string
           retry: string
           title: string
         }
+        restoreInternet: string
         restoringSession: string
         sendCode: string
         sending: string
         sendNewCode: string
+        sent: string
         stepCode: string
         stepEmail: string
+        stillWaiting: string
         subtitle: string
         suspended: {
           description: string
           title: string
         }
         title: string
+        trust: string
         validity: string
         verify: string
         verifying: string

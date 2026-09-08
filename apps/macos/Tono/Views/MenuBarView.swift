@@ -26,38 +26,20 @@ struct MenuBarView: View {
         .fixedSize()
     }
 
-    private var statusColor: Color {
-        if appState.isProtectionBlocked { return TonoStatus.blocked }
-        if appState.isConnecting || appState.isDisconnecting || appState.isProxyDegraded {
-            return TonoStatus.connecting
-        }
-        if appState.isConnected { return TonoStatus.connected }
-        return TonoStatus.neutral
-    }
-
-    private var statusTitle: LocalizedStringKey {
-        if appState.isDisconnecting { return "Disconnecting…" }
-        if appState.isConnecting { return LocalizedStringKey(appState.connectionStage.rawValue) }
-        if appState.isProtectedReconnectScheduled { return "Waiting to retry…" }
-        if appState.protectedReconnectPausedForUserAction {
-            return "Protected Offline · retries paused"
-        }
-        if appState.isProtectionBlocked { return "Protected Offline" }
-        if appState.isProxyDegraded { return "Degraded" }
-        if appState.isConnected { return "Protected" }
-        return "Standby"
+    private var status: MenuBarProtectionStatus {
+        MenuBarProtectionStatus(appState)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(statusColor)
+                .fill(status.color)
                 .frame(width: 8, height: 8)
                 .shadow(color: appState.isConnected ? TonoStatus.connected.opacity(0.6) : .clear, radius: 3)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Tono")
                     .font(.system(size: 13, weight: .semibold))
-                Text(statusTitle)
+                Text(status.title)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -77,11 +59,11 @@ struct MenuBarView: View {
                 .lineLimit(1)
             if appState.isClaudeHomeActive {
                 Circle()
-                    .fill(Color(hex: "2ECC71"))
+                    .fill(TonoStatus.connected)
                     .frame(width: 5, height: 5)
                 Text("Claude AI")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(hex: "2ECC71"))
+                    .foregroundStyle(TonoStatus.connected)
             }
         }
         .padding(.horizontal, 16)

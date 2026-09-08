@@ -6,8 +6,17 @@ import { useSyncExternalStore } from 'react'
  */
 
 export const TONO_COLORS = {
-  /** Primary brand blue — matches TO monogram deep end. */
-  accent: '#4B6EFF',
+  /**
+   * Brand accent, sampled from the TO monogram's violet band. This is the
+   * light-theme value (4.8:1 on white); text and icons on dark surfaces use
+   * `accentDark` via `tonoAccent(dark)`. Fills with white type can use this
+   * value in both themes. CSS twin: --tono-accent.
+   */
+  accent: '#7457F5',
+  /** Accent for text/icons on dark surfaces (7.0:1 on the dark card). */
+  accentDark: '#AB9EFF',
+  /** The monogram's deep end; only used inside the brand ramp. */
+  indigo: '#2B2FB8',
   /** Soft violet used for secondary brand glows (TO mid gradient). */
   accentSoft: '#7B5CFF',
   /** Warm peach highlight from the TO monogram sunset end. */
@@ -21,6 +30,10 @@ export const TONO_COLORS = {
   notConnected: '#E83B3B',
   gray: '#8E8E93',
 } as const
+
+/** Accent for text and icons that sit directly on a surface. */
+export const tonoAccent = (dark: boolean) =>
+  dark ? TONO_COLORS.accentDark : TONO_COLORS.accent
 
 /** SwiftUI .easeOut(0.22) — used for every ConnectPill color/glow transition. */
 export const TONO_EASE = 'cubic-bezier(0.25, 0.1, 0.25, 1)'

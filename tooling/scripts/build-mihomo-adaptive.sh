@@ -8,16 +8,17 @@ windows_alpha_target="$repo_root/apps/windows/app/src-tauri/sidecar/tono-core-al
 patch_file="$repo_root/tooling/scripts/mihomo-adaptive/gvisor-adaptive-buffer.patch"
 mode=${1:---install-adaptive}
 
-upstream_tag="v1.19.29"
-upstream_commit="e26714a181ac0e2fa803453c0a8e9a9ce94e31cb"
-sing_tun_version="v0.4.21"
-adaptive_version="v1.19.29-tono-gvisor-adaptive.1"
-stock_archive_sha256="4dc25df9e899f14161911302a8ee5fc9e202ed9c976fc405bf82c50ff27466ca"
-stock_binary_sha256="ec66e3e883bdc3fca06753784e324e08921e13239f8e945587cb1bfbf4c6b936"
-stock_url="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-darwin-arm64-v1.19.29.gz"
-windows_stock_archive_sha256="55feeada4feed7b86edf7c853fb37e498d646400acc37b7cc5905bb5d1f77899"
-windows_stock_binary_sha256="98986b574e41f92b22ed65aa42a61ad8cadf886cc7b3f76b722cd73a3a52d878"
-windows_stock_url="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.29/mihomo-windows-amd64-v2-v1.19.29.zip"
+upstream_tag="v1.19.30"
+upstream_commit="ac017cdd246ce8bd547653d927e7bf77d7ee73d5"
+sing_tun_version="v0.4.22"
+adaptive_version="v1.19.30-tono-gvisor-adaptive.1"
+required_go_version="go1.27.1"
+stock_archive_sha256="2c7f3a7904fa1cee291e124123e630e7b1ebd13765dd9bf26c0a28432004d9f4"
+stock_binary_sha256="e80c6334b4e3aae53dfbc86cddd4434cec1565a61d4483931fac2ae12fec6d30"
+stock_url="https://github.com/MetaCubeX/mihomo/releases/download/$upstream_tag/mihomo-darwin-arm64-$upstream_tag.gz"
+windows_stock_archive_sha256="837bcaa45aed61d698bba76da70c44818b1d345d497937b4db0fa5075e3c4a5c"
+windows_stock_binary_sha256="b37011cd25192f1e7a7151b19a209df01f08c3da936be9e90155f94137740892"
+windows_stock_url="https://github.com/MetaCubeX/mihomo/releases/download/$upstream_tag/mihomo-windows-amd64-v2-$upstream_tag.zip"
 
 work_dir=$(mktemp -d /tmp/tono-mihomo-adaptive.XXXXXX)
 install_tmp=""
@@ -44,7 +45,7 @@ atomic_install() {
 }
 
 restore_stock() {
-  local archive="$work_dir/mihomo-darwin-arm64-v1.19.29.gz"
+  local archive="$work_dir/mihomo-darwin-arm64-$upstream_tag.gz"
   /usr/bin/curl --fail --location --retry 3 --silent --show-error \
     --output "$archive" "$stock_url"
   local archive_digest=$(sha256 "$archive")
@@ -64,7 +65,7 @@ restore_stock() {
 }
 
 restore_windows_stock() {
-  local archive="$work_dir/mihomo-windows-amd64-v2-v1.19.29.zip"
+  local archive="$work_dir/mihomo-windows-amd64-v2-$upstream_tag.zip"
   /usr/bin/curl --fail --location --retry 3 --silent --show-error \
     --output "$archive" "$windows_stock_url"
   local archive_digest=$(sha256 "$archive")
@@ -93,8 +94,8 @@ install_adaptive() {
     exit 1
   fi
   local go_version=$($go_binary env GOVERSION)
-  if [[ $go_version != "go1.26.5" ]]; then
-    echo "adaptive core requires go1.26.5; found $go_version" >&2
+  if [[ $go_version != "$required_go_version" ]]; then
+    echo "adaptive core requires $required_go_version; found $go_version" >&2
     exit 1
   fi
 
@@ -182,25 +183,27 @@ install_adaptive() {
     echo "$version_output"
     echo "adaptive Mihomo SHA-256: $(sha256 "$mac_target")"
   fi
-  python3 - <<PY
-import json
-from pathlib import Path
-identity = {
-    "tonoCoreVersion": "$adaptive_version",
-    "mihomoUpstreamTag": "$upstream_tag",
-    "upstreamCommit": "$upstream_commit",
-    "tonoPatchRevision": "gvisor-adaptive.1",
-    "goVersion": "$go_version",
-    "buildTags": ["with_gvisor"],
-    "singTun": "$sing_tun_version",
-    "tcpBufferBytes": {"min": 4096, "default": 32768, "max": 131072},
+  # Written as a fixed template rather than json.dumps so the layout stays
+  # exactly what the Windows app's biome format check expects.
+  local identity_json
+  identity_json=$(cat <<JSON
+{
+  "tonoCoreVersion": "$adaptive_version",
+  "mihomoUpstreamTag": "$upstream_tag",
+  "upstreamCommit": "$upstream_commit",
+  "tonoPatchRevision": "gvisor-adaptive.1",
+  "goVersion": "$go_version",
+  "buildTags": ["with_gvisor"],
+  "singTun": "$sing_tun_version",
+  "tcpBufferBytes": { "min": 4096, "default": 32768, "max": 131072 }
 }
-for dest in [
-    Path("$repo_root") / "apps/macos/Tono/Resources/core-identity.json",
-    Path("$repo_root") / "apps/windows/app/src-tauri/resources/core-identity.json",
-]:
-    dest.write_text(json.dumps(identity, indent=2) + "\n")
-PY
+JSON
+  )
+  for dest in \
+    "$repo_root/apps/macos/Tono/Resources/core-identity.json" \
+    "$repo_root/apps/windows/app/src-tauri/core-identity.json"; do
+    printf '%s\n' "$identity_json" > "$dest"
+  done
 }
 
 case $mode in

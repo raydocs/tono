@@ -40,8 +40,8 @@ if ! security find-identity -v -p codesigning | grep -q "$identity"; then
 fi
 
 DEVELOPER_DIR="$developer_dir" /usr/bin/xcodebuild build \
-  -project "$repo_root/apps/macos/LiquidClash.xcodeproj" \
-  -scheme LiquidClash \
+  -project "$repo_root/apps/macos/Tono.xcodeproj" \
+  -scheme Tono \
   -configuration Release \
   -destination 'platform=macOS' \
   -derivedDataPath "$derived" \

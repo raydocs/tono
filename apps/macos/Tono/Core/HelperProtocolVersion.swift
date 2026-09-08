@@ -71,7 +71,15 @@ nonisolated enum HelperProtocolVersion {
     ///   verification then fails, the next arm performs a conservative full
     ///   state flush instead of comparing against a generation that never
     ///   finished committing and potentially retaining a withdrawn permit.
-    static let current = "3.13.1"
+    /// - 3.13.1 → 3.14.0: helper PF rendering and lifecycle self-tests live in
+    ///   their own source files. Behaviour is unchanged; the bump exists so
+    ///   installed daemons pick up the same compiled helper.
+    /// - 3.14.0 → 3.15.0: helper dispatch, Core supervision, HTTP read/send,
+    ///   power-transition gate, and socket server live in their own source
+    ///   files. Behaviour is unchanged; the bump exists so installed daemons
+    ///   pick up the same compiled helper. Compile and CONTRACT hash now share
+    ///   one source-file manifest in `build-core-helper.sh`.
+    static let current = "3.15.0"
 }
 
 /// The root helper and generated Mihomo runtime must agree on one DNS

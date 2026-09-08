@@ -5,11 +5,13 @@ import { initReactI18next } from 'react-i18next'
 import { createHashRouter, RouterProvider } from 'react-router'
 import en from '@/locales/en/tono.json'
 import zh from '@/locales/zh/tono.json'
+import IntroPage from '@/pages/tono/intro'
 import LoginPage from '@/pages/tono/login'
 import { MeshBackground } from '@/tono-ui/MeshBackground'
 import { TonoSidebar } from '@/tono-ui/TonoSidebar'
 import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
+import { WelcomeHeroTile } from '@/tono-ui/WelcomeHeroTile'
 import { useThemeMode } from './fixtures'
 import '@/tono-ui/design-tokens.css'
 import '@/tono-ui/tono.css'
@@ -44,6 +46,28 @@ function Components() {
             <h2>No node selected</h2>
             <p>Choose a node in Tono to get connected.</p>
           </GlassCard>
+          <h1 className="tono-page-title">Welcome v2</h1>
+          <p>
+            <a href="#/intro">Intro</a>
+            {' · '}
+            <a href="#/login">Login story</a>
+          </p>
+          <div
+            className="tono-welcome-ground"
+            style={{
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: 280,
+              borderRadius: 20,
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ width: 180 }}>
+              <WelcomeHeroTile />
+            </div>
+          </div>
         </div>
       </main>
     </div>
@@ -56,6 +80,14 @@ const router = createHashRouter([
     element: (
       <main className="tono-main" style={{ height: '100%' }}>
         <LoginPage />
+      </main>
+    ),
+  },
+  {
+    path: '/intro',
+    element: (
+      <main className="tono-main" style={{ height: '100%' }}>
+        <IntroPage />
       </main>
     ),
   },

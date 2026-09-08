@@ -1,0 +1,79 @@
+version: 2
+# Keeps every package-manager-tracked dependency current. Toolchain pins that
+# no package manager owns (mihomo, Go, Rust channel, Tailscale, Sparkle, Xray)
+# are watched by .github/workflows/toolchain-drift.yml instead.
+updates:
+  - package-ecosystem: npm
+    directory: /services/control-plane
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      control-plane:
+        patterns: ["*"]
+    labels: [dependencies, control-plane]
+
+  - package-ecosystem: npm
+    directory: /apps/windows/app
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      windows-frontend:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  - package-ecosystem: npm
+    directory: /apps/windows/crates/tono-plugin-core
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      plugin-core-js:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+
+  # The Windows workspaces share path crates (tono-core, tono-plugin-core,
+  # tono-logger, sysproxy), so a bump in one lockfile must land in all of them
+  # or CI's `cargo --locked` refuses the PR. One multi-directory group keeps
+  # every lockfile in a single PR.
+  - package-ecosystem: cargo
+    directories:
+      - /apps/windows
+      - /apps/windows/app
+      - /apps/windows/service
+      - /apps/windows/crates/tono-plugin-core
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      windows-rust:
+        patterns: ["*"]
+    labels: [dependencies, windows]
+    ignore:
+      # The updater crashes (sorbet type error, "unknown_error") while
+      # evaluating boa_engine 0.21 -> 0.22 and fails the whole job. The bump
+      # is a semver-breaking 0.x minor that needs call-site changes anyway;
+      # patch releases still flow.
+      - dependency-name: boa_engine
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies, ci]

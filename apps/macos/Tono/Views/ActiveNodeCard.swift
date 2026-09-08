@@ -115,10 +115,10 @@ struct ActiveNodeCard: View {
             if isConnected {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor)
+                        .fill(isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent)
                         .frame(width: 8, height: 8)
                         .shadow(
-                            color: (isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor).opacity(0.5),
+                            color: (isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent).opacity(0.5),
                             radius: 3
                         )
 
@@ -147,7 +147,7 @@ struct ActiveNodeCard: View {
                     } label: {
                         Text(String(localized: "View Rules"))
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(TonoBrand.accent)
                     }
                     .buttonStyle(.plain)
                     .popover(isPresented: $showsRulesPopover) {
@@ -168,14 +168,14 @@ struct ActiveNodeCard: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(
-                    (isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor)
+                    (isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent)
                         .opacity(colorScheme == .dark ? 0.12 : 0.08),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
                 .overlay {
                     RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(
-                            (isClaudeHomeActive ? Color(hex: "2ECC71") : Color.accentColor)
+                            (isClaudeHomeActive ? TonoStatus.connected : TonoBrand.accent)
                                 .opacity(colorScheme == .dark ? 0.22 : 0.18),
                             lineWidth: 1
                         )

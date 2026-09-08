@@ -115,8 +115,8 @@ final class LocalizationCoverageTests: XCTestCase {
         // The app's own helpers take the label and build the `Text`
         // themselves, so the literal at the call site is never extracted.
         let helperNames = [
-            "actionButton", "SettingRow", "SupportRow", "SupportCard", "formField",
-            "ActivityCard", "DashboardStatCard", "infoItem",
+            "actionButton", "SettingRow", "SettingToggleRow", "SupportRow", "SupportCard",
+            "formField", "ActivityCard", "DashboardStatCard", "infoItem",
         ]
         let argumentLabels = ["title:", "label:", "subtitle:"]
 

@@ -92,7 +92,7 @@ jobs:
       # this file already uses.
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -176,8 +176,8 @@ jobs:
           esac
           settings=$(
             xcodebuild \
-              -project apps/macos/LiquidClash.xcodeproj \
-              -scheme LiquidClash \
+              -project apps/macos/Tono.xcodeproj \
+              -scheme Tono \
               -configuration Release \
               -showBuildSettings 2>/dev/null
           )
@@ -224,8 +224,8 @@ jobs:
         run: |
           set -eu
           xcodebuild test \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-tests" \
@@ -291,7 +291,7 @@ jobs:
           /usr/sbin/spctl -a -t exec -vv "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
 
       - name: Upload the notarized archive for the gated appcast job
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.release-version.outputs.artifact_name }}
           path: ${{ runner.temp }}/release/${{ steps.release-version.outputs.artifact_name }}.zip
@@ -316,9 +316,9 @@ jobs:
       RELEASE_LINK: ${{ needs.build.outputs.release_link }}
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
 
@@ -345,36 +345,27 @@ jobs:
           fi
 
       - name: Download the notarized archive built from this commit
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: ${{ runner.temp }}/release
 
-      - name: Locate the pinned Sparkle 2.9.4 sign_update tool
+      - name: Locate the pinned Sparkle 2.9.6 sign_update tool
         run: |
           set -eu
-          resolved=apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.4"' "$resolved"; then
-            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.4"
+          resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.6"' "$resolved"; then
+            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.6"
             echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
             exit 1
           fi
           xcodebuild \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -resolvePackageDependencies \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
-          sign_update=$(
-            find "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts" \
-              -type f -name sign_update -perm -111 2>/dev/null | head -n 1
-          )
-          if [ -z "$sign_update" ]; then
-            echo "::error title=Sparkle sign_update not found::the resolved Sparkle artifact bundle has no bin/sign_update"
-            echo "FATAL: cannot sign the enclosure without Sparkle's own sign_update tool." >&2
-            echo "This workflow never implements EdDSA signing itself; install the Sparkle 2.9.4" >&2
-            echo "distribution's bin/sign_update on the runner and re-run." >&2
-            exit 1
-          fi
+          sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
+            "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts")
           echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
 
       - name: Sign the enclosure with Sparkle and verify the signature round-trips

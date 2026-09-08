@@ -26,7 +26,12 @@ the timeseries tier and frontend rate math get frequent samples.
 
 `operations_servers` / `operations_logical_nodes` (migration `0016`) are unused
 read-only inventory. Real nodes live in the Clash catalog, Komari snapshot, and
-`home_exits`. The API host does not serve a website.
+`home_exits`. The API host does not serve a website; `/`, `/index.html`,
+`/admin.js`, and `/style.css` return 404 JSON. The old token-admin HTML is
+not in `public/`. Token CLI remains `/api/v1/admin/*`.
+
+Applied D1 files keep their names. Prefixes `0016`, `0017`, and `0018` each
+have more than one file; see `migrations/README.md`. Do not rename them.
 
 The console and its API fail closed unless all of these non-secret Worker vars
 are configured from the same Cloudflare Access application:

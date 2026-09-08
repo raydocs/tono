@@ -19,12 +19,12 @@ nonisolated struct ResidentialRouteAuditContext: Equatable, Sendable {
     var contractRequired: Bool { admittedTerminal != nil }
 }
 
-nonisolated private struct CoreAuditEntry: Sendable {
+nonisolated struct CoreAuditEntry: Sendable {
     let level: String
     let message: String
 }
 
-nonisolated private struct ClaudeTrafficResearchKey: Hashable, Sendable {
+nonisolated struct ClaudeTrafficResearchKey: Hashable, Sendable {
     let service: String
     let client: String
     let host: String
@@ -33,19 +33,19 @@ nonisolated private struct ClaudeTrafficResearchKey: Hashable, Sendable {
     let route: String
 }
 
-nonisolated private struct ClaudeTrafficResearchTotal: Sendable {
+nonisolated struct ClaudeTrafficResearchTotal: Sendable {
     var connections: Int
     var upBytes: Int64
     var downBytes: Int64
 }
 
-nonisolated private struct ClaudeTrafficResearchConnection: Sendable {
+nonisolated struct ClaudeTrafficResearchConnection: Sendable {
     let key: ClaudeTrafficResearchKey
     var upBytes: Int64
     var downBytes: Int64
 }
 
-nonisolated private struct AuditRedaction: @unchecked Sendable {
+nonisolated struct AuditRedaction: @unchecked Sendable {
     let expression: NSRegularExpression
     let replacement: String
 }
@@ -73,56 +73,56 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
 
     let logFileURL: URL
 
-    private let fileManager = FileManager.default
+    let fileManager = FileManager.default
     /// One report per group per process: the point is to learn that it happened
     /// at all, not to add a line to every connection while it stays failed over.
-    private var reportedManagedDirectFallbacks: Set<String> = []
-    private let queue = DispatchQueue(
+    var reportedManagedDirectFallbacks: Set<String> = []
+    let queue = DispatchQueue(
         label: "com.raydocs.tono.local-traffic-audit",
         qos: .utility
     )
-    private let sessionID = UUID().uuidString
-    private let timestampFormatter: ISO8601DateFormatter
-    private var pending: [Data] = []
-    private var pendingBytes = 0
-    private var flushWorkItem: DispatchWorkItem?
-    private var seenConnectionIDs = Set<String>()
-    private var seenConnectionOrder: [String] = []
-    private var researchObservedSince = Int(Date().timeIntervalSince1970)
-    private var researchTotals: [
+    let sessionID = UUID().uuidString
+    let timestampFormatter: ISO8601DateFormatter
+    var pending: [Data] = []
+    var pendingBytes = 0
+    var flushWorkItem: DispatchWorkItem?
+    var seenConnectionIDs = Set<String>()
+    var seenConnectionOrder: [String] = []
+    var researchObservedSince = Int(Date().timeIntervalSince1970)
+    var researchTotals: [
         ClaudeTrafficResearchKey: ClaudeTrafficResearchTotal
     ] = [:]
-    private var researchConnections: [
+    var researchConnections: [
         String: ClaudeTrafficResearchConnection
     ] = [:]
     /// Insertion order for `researchConnections`, so the oldest byte cursors can
     /// be evicted instead of freezing every counter at the cap.
-    private var researchConnectionOrder: [String] = []
-    private var researchSeenConnectionIDs = Set<String>()
-    private var researchSeenConnectionOrder: [String] = []
-    private var researchDroppedKeys = Set<ClaudeTrafficResearchKey>()
-    private var researchObservedConnectionCount = 0
-    private var researchIdentifiedProcessConnectionCount = 0
-    private var researchResidentialConnectionCount = 0
-    private var researchProxiedConnectionCount = 0
-    private var researchDirectConnectionCount = 0
-    private var researchBlockedConnectionCount = 0
-    private var researchDirectRouteAttemptCount = 0
-    private var researchManagedDirectRouteCount = 0
-    private var researchUnclassifiedRouteCount = 0
-    private var researchUnsafeProtectionObservationCount = 0
-    private var researchWebManagedDirectConnectionCount = 0
-    private var researchWeChatConnectionCount = 0
-    private var researchWeChatManagedDirectConnectionCount = 0
-    private var researchWeChatProxiedConnectionCount = 0
-    private var researchWeChatBlockedConnectionCount = 0
-    private var researchWeChatEndpointUnknownProcessConnectionCount = 0
-    private var researchUnknownManagedDirectConnectionCount = 0
-    private var researchOtherManagedDirectConnectionCount = 0
-    private var researchProtectedDirectConnectionCount = 0
-    private var researchConnectionLimitReached = false
-    private var residentialRouteContext: ResidentialRouteAuditContext?
-    private var researchProtection = TrafficAuditProtectionSnapshot(
+    var researchConnectionOrder: [String] = []
+    var researchSeenConnectionIDs = Set<String>()
+    var researchSeenConnectionOrder: [String] = []
+    var researchDroppedKeys = Set<ClaudeTrafficResearchKey>()
+    var researchObservedConnectionCount = 0
+    var researchIdentifiedProcessConnectionCount = 0
+    var researchResidentialConnectionCount = 0
+    var researchProxiedConnectionCount = 0
+    var researchDirectConnectionCount = 0
+    var researchBlockedConnectionCount = 0
+    var researchDirectRouteAttemptCount = 0
+    var researchManagedDirectRouteCount = 0
+    var researchUnclassifiedRouteCount = 0
+    var researchUnsafeProtectionObservationCount = 0
+    var researchWebManagedDirectConnectionCount = 0
+    var researchWeChatConnectionCount = 0
+    var researchWeChatManagedDirectConnectionCount = 0
+    var researchWeChatProxiedConnectionCount = 0
+    var researchWeChatBlockedConnectionCount = 0
+    var researchWeChatEndpointUnknownProcessConnectionCount = 0
+    var researchUnknownManagedDirectConnectionCount = 0
+    var researchOtherManagedDirectConnectionCount = 0
+    var researchProtectedDirectConnectionCount = 0
+    var researchConnectionLimitReached = false
+    var residentialRouteContext: ResidentialRouteAuditContext?
+    var researchProtection = TrafficAuditProtectionSnapshot(
         connected: false,
         connecting: false,
         protectionBlocked: false,
@@ -131,11 +131,11 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
         protectedDNSConfigured: false,
         selectedExit: "unknown"
     )
-    private static let maximumResearchEndpointKeys = 64
-    private static let maximumResearchConnections = 20_000
-    private static let maximumResearchCount = 1_000_000
-    private static let maximumResearchBytes: Int64 = 1_000_000_000_000_000
-    private static let redactions: [AuditRedaction] = [
+    static let maximumResearchEndpointKeys = 64
+    static let maximumResearchConnections = 20_000
+    static let maximumResearchCount = 1_000_000
+    static let maximumResearchBytes: Int64 = 1_000_000_000_000_000
+    static let redactions: [AuditRedaction] = [
         (
             #"(?i)(authorization|proxy-authorization|cookie|set-cookie)\s*[:=].*$"#,
             "$1=<redacted>"
@@ -337,7 +337,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     /// The China groups are fixed. The assistant group is not: it exists only
     /// when the catalog carries a residential hop, and its first member is that
     /// hop, so it is registered at the same moment the runtime commits to one.
-    private static let staticDirectFirstGroupMembers = [
+    static let staticDirectFirstGroupMembers = [
         ConfigPipeline.appDirectGroupName: ConfigPipeline.directProxyName,
         ConfigPipeline.webDirectGroupName: ConfigPipeline.webDirectProxyName,
     ]
@@ -347,7 +347,7 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     /// nil, because without a hop the group either does not exist or its first
     /// member is a catalog node whose name is not knowable here.
     nonisolated(unsafe) private static var assistantDirectFirstMember: String?
-    private static let assistantMemberLock = NSLock()
+    static let assistantMemberLock = NSLock()
 
     /// Registers the member `Tono-Claude-Home` is expected to be sitting on.
     ///
@@ -655,642 +655,5 @@ nonisolated final class LocalTrafficAudit: @unchecked Sendable {
     /// from the old core cannot be attributed to the newly admitted runtime.
     func setResidentialRouteContext(_ context: ResidentialRouteAuditContext?) {
         queue.sync { residentialRouteContext = context }
-    }
-
-    private func recordResearchProtection(
-        _ protection: TrafficAuditProtectionSnapshot
-    ) {
-        researchProtection = protection
-        if protection.connected
-            && (!protection.killSwitchArmed
-                || !protection.tunPresent
-                || !protection.protectedDNSConfigured) {
-            researchUnsafeProtectionObservationCount = min(
-                researchUnsafeProtectionObservationCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-    }
-
-    private func recordResearchConnectionObservation(
-        _ connection: APIConnection,
-        residentialContext: ResidentialRouteAuditContext?
-    ) {
-        guard !researchSeenConnectionIDs.contains(connection.id) else { return }
-        researchSeenConnectionIDs.insert(connection.id)
-        researchSeenConnectionOrder.append(connection.id)
-        // Prune dedup memory instead of freezing every counter forever once
-        // 20k unique connections have been seen. Dropping the oldest IDs can
-        // at worst double-count a connection that outlives 18k successors,
-        // which is far better than a silently dead metric.
-        if researchSeenConnectionOrder.count > Self.maximumResearchConnections {
-            researchConnectionLimitReached = true
-            let expired = researchSeenConnectionOrder.prefix(2_000)
-            researchSeenConnectionIDs.subtract(expired)
-            researchSeenConnectionOrder.removeFirst(expired.count)
-        }
-        researchObservedConnectionCount = min(
-            researchObservedConnectionCount + 1,
-            Self.maximumResearchCount
-        )
-        let process = (connection.metadata.process ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let processPath = (connection.metadata.processPath ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let processIdentified = Self.processIsIdentified(
-            process: process,
-            processPath: processPath
-        )
-        if processIdentified {
-            researchIdentifiedProcessConnectionCount = min(
-                researchIdentifiedProcessConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-        let route = Self.routeClassification(
-            connection,
-            residentialContext: residentialContext
-        )
-        let isWeChat = Self.isNativeWeChatProcess(processPath)
-        let isManagedDirect = Self.isManagedDirectConnection(connection)
-        let isWebManagedDirect = Self.isWebManagedDirectConnection(connection)
-        if isWebManagedDirect {
-            researchWebManagedDirectConnectionCount = min(
-                researchWebManagedDirectConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-        if isWeChat {
-            researchWeChatConnectionCount = min(
-                researchWeChatConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-            switch route {
-            case "DIRECT" where isManagedDirect || isWebManagedDirect:
-                researchWeChatManagedDirectConnectionCount = min(
-                    researchWeChatManagedDirectConnectionCount + 1,
-                    Self.maximumResearchCount
-                )
-            case "DIRECT":
-                // Unmanaged direct is neither a managed-direct success nor a
-                // proxy verdict. It stays visible through the global direct
-                // counter instead of skewing the WeChat proxied count.
-                break
-            case "BLOCKED":
-                researchWeChatBlockedConnectionCount = min(
-                    researchWeChatBlockedConnectionCount + 1,
-                    Self.maximumResearchCount
-                )
-            default:
-                researchWeChatProxiedConnectionCount = min(
-                    researchWeChatProxiedConnectionCount + 1,
-                    Self.maximumResearchCount
-                )
-            }
-        } else if isManagedDirect {
-            if processIdentified {
-                researchOtherManagedDirectConnectionCount = min(
-                    researchOtherManagedDirectConnectionCount + 1,
-                    Self.maximumResearchCount
-                )
-            } else {
-                researchUnknownManagedDirectConnectionCount = min(
-                    researchUnknownManagedDirectConnectionCount + 1,
-                    Self.maximumResearchCount
-                )
-            }
-        }
-        // Endpoint-based safety net for WeChat attribution gaps: count every
-        // WeChat-destined flow that the bundle-path predicate above did NOT
-        // claim, whether the process was identified (a helper outside the
-        // reviewed bundle, a relocated install) or unknown. Gating this on
-        // unidentified processes hid exactly the dominant gap.
-        if !isWeChat,
-           Self.isWeChatEndpoint(connection.metadata.host) {
-            researchWeChatEndpointUnknownProcessConnectionCount = min(
-                researchWeChatEndpointUnknownProcessConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-        if route == "DIRECT", Self.isProtectedClaudeConnection(connection) {
-            researchProtectedDirectConnectionCount = min(
-                researchProtectedDirectConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-        if route == "PROXIED",
-           residentialContext?.contractRequired == true,
-           Self.isProtectedClaudeConnection(connection) {
-            // A generic proxy protects privacy but violates the stronger
-            // residential-only Claude contract just as surely as DIRECT.
-            researchUnsafeProtectionObservationCount = min(
-                researchUnsafeProtectionObservationCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-        switch route {
-        case "RESIDENTIAL":
-            researchResidentialConnectionCount = min(
-                researchResidentialConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        case "DIRECT":
-            researchDirectConnectionCount = min(
-                researchDirectConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        case "BLOCKED":
-            researchBlockedConnectionCount = min(
-                researchBlockedConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        default:
-            researchProxiedConnectionCount = min(
-                researchProxiedConnectionCount + 1,
-                Self.maximumResearchCount
-            )
-        }
-    }
-
-    private static func processIsIdentified(
-        process: String,
-        processPath: String
-    ) -> Bool {
-        (!process.isEmpty && process.lowercased() != "unknown")
-            || (!processPath.isEmpty && processPath.lowercased() != "unknown")
-    }
-
-    private static func isNativeWeChatProcess(_ processPath: String) -> Bool {
-        // Match the whole reviewed bundle, mirroring the routing rules: image
-        // and media traffic comes from helper executables inside the bundle,
-        // not the main binary.
-        let path = processPath.lowercased()
-        return ConfigPipeline.wechatProcessBundlePaths.contains {
-            path.hasPrefix($0.lowercased())
-        }
-    }
-
-    private static func isManagedDirectConnection(_ connection: APIConnection) -> Bool {
-        connection.chains.contains {
-            $0.caseInsensitiveCompare(ConfigPipeline.directProxyName) == .orderedSame
-        }
-    }
-
-    private static func isWebManagedDirectConnection(
-        _ connection: APIConnection
-    ) -> Bool {
-        connection.chains.contains {
-            $0.caseInsensitiveCompare(
-                ConfigPipeline.webDirectProxyName
-            ) == .orderedSame
-        }
-    }
-
-    private static func isWeChatEndpoint(_ rawHost: String) -> Bool {
-        let host = rawHost.lowercased().trimmingCharacters(
-            in: CharacterSet(charactersIn: ".")
-        )
-        // WeChat-specific subtrees only. Bare "qq.com" matched every Tencent
-        // property (QQ Music, mail, game CDNs) and drowned the counter this
-        // suffix list feeds in non-WeChat traffic.
-        let suffixes = [
-            "weixin.qq.com", "wx.qq.com", "wxs.qq.com", "tc.qq.com",
-            "qpic.cn", "qlogo.cn", "gtimg.cn",
-            "gtimg.com", "wechat.com", "weixin.com", "weixinbridge.com",
-            "wechatos.net",
-        ]
-        return suffixes.contains { host == $0 || host.hasSuffix(".\($0)") }
-    }
-
-    private static func isClaudeResidentialHost(_ host: String) -> Bool {
-        let suffixes = [
-            "claude.ai", "claude.com", "anthropic.com",
-            "anthropic.ai",
-            "claudeusercontent.com", "clau.de", "claude.app",
-            "claude.site", "claudestudio.com",
-            "claudemcpclient.com", "claudemcpcontent.com",
-            "servd-anthropic-website.b-cdn.net",
-            "challenges.cloudflare.com", "cf-assets.www.cloudflare.com",
-            "cloudflareinsights.com",
-            "browser-intake-datadoghq.com",
-            "browser-intake-us5-datadoghq.com",
-            "browser-intake-us3-datadoghq.com",
-            "browser-intake-ap1-datadoghq.com",
-            "browser-intake-ap2-datadoghq.com",
-            "browser-intake-datadoghq.eu",
-            "browser-intake-ddog-gov.com", "datadoghq.com",
-            "statsigapi.net", "featuregates.org", "growthbook.io",
-            "stripe.network", "storage.googleapis.com",
-            "registry.npmjs.org", "raw.githubusercontent.com",
-            "formulae.brew.sh", "sentry.io",
-        ]
-        return suffixes.contains { host == $0 || host.hasSuffix(".\($0)") }
-    }
-
-    private static func isProtectedClaudeConnection(
-        _ connection: APIConnection
-    ) -> Bool {
-        let host = connection.metadata.host.lowercased().trimmingCharacters(
-            in: CharacterSet(charactersIn: ".")
-        )
-        if isClaudeResidentialHost(host) {
-            return true
-        }
-        let process = connection.metadata.process ?? ""
-        let processPath = connection.metadata.processPath ?? ""
-        return ConfigPipeline.isClaudeCodeIdentity(
-            process: process,
-            processPath: processPath
-        ) || ConfigPipeline.isClaudeAppIdentity(
-            process: process,
-            processPath: processPath
-        )
-    }
-
-    private func recordClaudeTrafficResearch(
-        _ connection: APIConnection,
-        residentialContext: ResidentialRouteAuditContext?
-    ) {
-        guard let key = Self.claudeTrafficResearchKey(
-            connection,
-            residentialContext: residentialContext
-        ) else { return }
-        let upBytes = min(
-            max(connection.upload, 0),
-            Self.maximumResearchBytes
-        )
-        let downBytes = min(
-            max(connection.download, 0),
-            Self.maximumResearchBytes
-        )
-
-        if var previous = researchConnections[connection.id] {
-            guard previous.key == key,
-                  var total = researchTotals[key] else { return }
-            total.upBytes = min(
-                total.upBytes + max(0, upBytes - previous.upBytes),
-                Self.maximumResearchBytes
-            )
-            total.downBytes = min(
-                total.downBytes + max(0, downBytes - previous.downBytes),
-                Self.maximumResearchBytes
-            )
-            previous.upBytes = max(previous.upBytes, upBytes)
-            previous.downBytes = max(previous.downBytes, downBytes)
-            researchConnections[connection.id] = previous
-            researchTotals[key] = total
-            return
-        }
-
-        guard researchTotals[key] != nil
-                || researchTotals.count < Self.maximumResearchEndpointKeys else {
-            if researchDroppedKeys.count < Self.maximumResearchEndpointKeys {
-                researchDroppedKeys.insert(key)
-            }
-            return
-        }
-        if researchConnections.count >= Self.maximumResearchConnections {
-            // Mirrors the dedup map's pruning rather than returning forever:
-            // returning froze `researchTotals` for the rest of the session once
-            // 20k connections had been seen, so the metric silently died on any
-            // long-lived session. Evicting the oldest byte cursors can at worst
-            // double-count a connection that outlives 18k successors, which the
-            // sibling map already accepts for the same reason.
-            researchConnectionLimitReached = true
-            let expired = researchConnectionOrder.prefix(2_000)
-            for identifier in expired { researchConnections[identifier] = nil }
-            researchConnectionOrder.removeFirst(expired.count)
-        }
-        researchConnectionOrder.append(connection.id)
-        var total = researchTotals[key] ?? ClaudeTrafficResearchTotal(
-            connections: 0,
-            upBytes: 0,
-            downBytes: 0
-        )
-        total.connections = min(total.connections + 1, 1_000_000)
-        total.upBytes = min(
-            total.upBytes + upBytes,
-            Self.maximumResearchBytes
-        )
-        total.downBytes = min(
-            total.downBytes + downBytes,
-            Self.maximumResearchBytes
-        )
-        researchTotals[key] = total
-        researchConnections[connection.id] = ClaudeTrafficResearchConnection(
-            key: key,
-            upBytes: upBytes,
-            downBytes: downBytes
-        )
-    }
-
-    private static func claudeTrafficResearchKey(
-        _ connection: APIConnection,
-        residentialContext: ResidentialRouteAuditContext?
-    ) -> ClaudeTrafficResearchKey? {
-        let host = connection.metadata.host.lowercased()
-            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        guard isResearchHostname(host) else { return nil }
-        let network = connection.metadata.network.uppercased()
-        guard network == "TCP" || network == "UDP",
-              let port = Int(connection.metadata.destinationPort ?? ""),
-              (1...65_535).contains(port) else { return nil }
-
-        let process = connection.metadata.process ?? ""
-        let processPath = connection.metadata.processPath ?? ""
-        let client: String
-        if ConfigPipeline.isClaudeAppIdentity(
-            process: process,
-            processPath: processPath
-        ) {
-            client = "app"
-        } else if ConfigPipeline.isClaudeCodeIdentity(
-            process: process,
-            processPath: processPath
-        ) {
-            client = "code"
-        } else if [
-            "safari", "google chrome", "chromium", "arc", "firefox",
-            "brave browser", "microsoft edge",
-        ].contains(where: {
-            process == $0 || processPath.contains("/\($0).app/")
-        }) {
-            client = "web"
-        } else {
-            client = "unknown"
-        }
-
-        let service: String
-        if host == "claude.ai" || host.hasSuffix(".claude.ai")
-            || host == "claude.com" || host.hasSuffix(".claude.com")
-            || host == "clau.de" || host.hasSuffix(".clau.de")
-            || host == "claudeusercontent.com"
-            || host.hasSuffix(".claudeusercontent.com") {
-            service = "claude"
-        } else if host == "anthropic.com"
-                    || host.hasSuffix(".anthropic.com") {
-            service = "anthropic"
-        } else if client == "app" || client == "code" {
-            // Only a positively attributed Claude process may contribute a
-            // non-official destination. Browser processes are intentionally
-            // excluded because Mihomo cannot identify which browser tab made
-            // a request, and child tools remain explicitly reported as an
-            // attribution-coverage limitation rather than guessed.
-            service = "other"
-        } else {
-            return nil
-        }
-
-        // The research consent promises aggregates and verdicts, not browsing
-        // destinations. Official Claude/Anthropic hostnames are the research
-        // subject and may be transmitted; every other destination is folded
-        // into a single "other" bucket so no third-party hostname leaves the
-        // device.
-        let reportedHost = (service == "claude" || service == "anthropic")
-            ? host
-            : "other"
-        return ClaudeTrafficResearchKey(
-            service: service,
-            client: client,
-            host: reportedHost,
-            network: network,
-            port: port,
-            route: routeClassification(
-                connection,
-                residentialContext: residentialContext
-            )
-        )
-    }
-
-    private static func isResearchHostname(_ host: String) -> Bool {
-        guard !host.isEmpty, host.utf8.count <= 100,
-              host.unicodeScalars.allSatisfy({ $0.isASCII }),
-              !host.contains("..") else { return false }
-        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard labels.count >= 2,
-              labels.allSatisfy({ label in
-                  guard !label.isEmpty, label.utf8.count <= 63,
-                        label.first != "-", label.last != "-" else {
-                      return false
-                  }
-                  return label.allSatisfy {
-                      $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
-                  }
-              }),
-              let topLevel = labels.last,
-              topLevel.count >= 2,
-              topLevel.allSatisfy({ $0.isASCII && $0.isLetter }) else {
-            return false
-        }
-        return !["local", "internal", "localhost", "home", "lan"].contains(
-            String(topLevel)
-        )
-    }
-
-    private static func displayProcessField(_ value: String?) -> String {
-        guard let value, !value.isEmpty else { return "unknown" }
-        return value
-    }
-
-    static let redactedHomePrefix = "/Users/<redacted>"
-
-    /// A process path under a home directory carries the account's short name
-    /// in `/Users/<name>/`, and this file is drained by the log upload. Replace
-    /// that one component where the path enters a record and keep the rest: the
-    /// bundle and the executable are what a `process_path` is read for. Paths
-    /// with no such component, `/Users/Shared` among them, are a location
-    /// rather than an account and stay as they are.
-    static func displayProcessPath(_ value: String?) -> String {
-        let path = displayProcessField(value)
-        let prefix = "/Users/"
-        guard path.hasPrefix(prefix) else { return path }
-        let remainder = path.dropFirst(prefix.count)
-        let owner = remainder.prefix(while: { $0 != "/" })
-        guard owner != "Shared" else { return path }
-        return redactedHomePrefix + String(remainder.dropFirst(owner.count))
-    }
-
-    static func routeClassification(
-        _ connection: APIConnection,
-        residentialContext: ResidentialRouteAuditContext?
-    ) -> String {
-        let upperRouteValues = connection.chains.map { $0.uppercased() }
-        let upperRule = connection.rule.uppercased()
-        if upperRule.hasPrefix("REJECT")
-            || upperRouteValues.contains(where: { $0.hasPrefix("REJECT") }) {
-            return "BLOCKED"
-        }
-        // Mihomo's connections API orders chains terminal-first (matching the
-        // native Windows consumer and retained API fixtures). A selector with
-        // the same name later in the chain is not proof of the actual egress.
-        if let terminal = residentialContext?.admittedTerminal?.uppercased(),
-           upperRouteValues.first == terminal {
-            return "RESIDENTIAL"
-        }
-        if upperRouteValues.contains("DIRECT")
-            || upperRouteValues.contains(ConfigPipeline.directProxyName.uppercased())
-            || upperRouteValues.contains(
-                ConfigPipeline.webDirectProxyName.uppercased()
-            )
-            || upperRule == "DIRECT" {
-            return "DIRECT"
-        }
-        return "PROXIED"
-    }
-
-    /// Flush queued entries before revealing the file in Finder.
-    func prepareForReveal() -> URL {
-        queue.sync { [self] in
-            flushPending()
-            _ = ensureLogFile()
-        }
-        return logFileURL
-    }
-
-    private func enqueue(
-        kind: String,
-        fields: [String: String],
-        force: Bool = false
-    ) {
-        guard force || Self.isEnabled else { return }
-        var object: [String: Any] = [
-            "schema": 1,
-            "timestamp": timestampFormatter.string(from: Date()),
-            "session_id": sessionID,
-            "kind": kind,
-        ]
-        for (key, value) in fields {
-            object[key] = Self.sanitize(value)
-        }
-        guard var data = try? JSONSerialization.data(
-            withJSONObject: object,
-            options: [.sortedKeys]
-        ) else { return }
-        data.append(0x0A)
-        pending.append(data)
-        pendingBytes += data.count
-
-        if pending.count >= 64 || pendingBytes >= 64 * 1_024 {
-            flushPending()
-            return
-        }
-        guard flushWorkItem == nil else { return }
-        let work = DispatchWorkItem { [weak self] in
-            self?.flushPending()
-        }
-        flushWorkItem = work
-        queue.asyncAfter(deadline: .now() + 1, execute: work)
-    }
-
-    private func flushPending() {
-        flushWorkItem?.cancel()
-        flushWorkItem = nil
-        guard !pending.isEmpty else { return }
-        let output = pending.reduce(into: Data()) { $0.append($1) }
-        let snapshot = pending
-        let snapshotBytes = pendingBytes
-        pending.removeAll(keepingCapacity: true)
-        pendingBytes = 0
-        func restorePending() {
-            pending.insert(contentsOf: snapshot, at: 0)
-            pendingBytes += snapshotBytes
-        }
-        guard rotateIfNeeded(adding: output.count), ensureLogFile(),
-              let handle = try? FileHandle(forWritingTo: logFileURL) else {
-            restorePending()
-            return
-        }
-        defer { try? handle.close() }
-        do {
-            try handle.seekToEnd()
-            try handle.write(contentsOf: output)
-        } catch {
-            restorePending()
-        }
-    }
-
-    private func rotateIfNeeded(adding bytes: Int) -> Bool {
-        let currentSize = (
-            try? fileManager.attributesOfItem(atPath: logFileURL.path)[.size]
-                as? NSNumber
-        )??.intValue ?? 0
-        guard currentSize + bytes > Self.maximumFileBytes else { return true }
-
-        for index in stride(
-            from: Self.maximumBackups,
-            through: 2,
-            by: -1
-        ) {
-            let destination = backupURL(index)
-            let source = backupURL(index - 1)
-            if fileManager.fileExists(atPath: destination.path) {
-                try? fileManager.removeItem(at: destination)
-            }
-            if fileManager.fileExists(atPath: source.path) {
-                try? fileManager.moveItem(at: source, to: destination)
-            }
-        }
-        let firstBackup = backupURL(1)
-        if fileManager.fileExists(atPath: firstBackup.path) {
-            do {
-                try fileManager.removeItem(at: firstBackup)
-            } catch {
-                return false
-            }
-        }
-        guard fileManager.fileExists(atPath: logFileURL.path) else {
-            return true
-        }
-        do {
-            try fileManager.moveItem(at: logFileURL, to: firstBackup)
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    private func backupURL(_ index: Int) -> URL {
-        logFileURL.deletingLastPathComponent()
-            .appendingPathComponent("traffic-audit.jsonl.\(index)")
-    }
-
-    private func ensureLogFile() -> Bool {
-        if fileManager.fileExists(atPath: logFileURL.path) {
-            guard let values = try? logFileURL.resourceValues(forKeys: [
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-            ]),
-                  values.isRegularFile == true,
-                  values.isSymbolicLink != true,
-                  let attributes = try? fileManager.attributesOfItem(
-                    atPath: logFileURL.path
-                  ),
-                  (attributes[.ownerAccountID] as? NSNumber)?.uint32Value
-                    == getuid(),
-                  let permissions = (attributes[.posixPermissions] as? NSNumber)?
-                    .uint16Value,
-                  permissions & 0o077 == 0 else {
-                return false
-            }
-            return true
-        }
-        return fileManager.createFile(
-            atPath: logFileURL.path,
-            contents: nil,
-            attributes: [.posixPermissions: 0o600]
-        )
-    }
-
-    private static func sanitize(_ raw: String) -> String {
-        var value = raw.replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-        for redaction in redactions {
-            value = redaction.expression.stringByReplacingMatches(
-                in: value,
-                range: NSRange(value.startIndex..., in: value),
-                withTemplate: redaction.replacement
-            )
-        }
-        return String(value.prefix(4_096))
     }
 }

@@ -18,7 +18,7 @@ import XCTest
 final class HelperInstallScriptTests: XCTestCase {
     private func script(uid: uid_t = 501) -> String {
         HelperManager.installScript(
-            helperSource: "/Applications/Tono.app/Contents/Resources/liquidclash-helper",
+            helperSource: "/Applications/Tono.app/Contents/Resources/tono-core-helper",
             mihomoSource: "/Applications/Tono.app/Contents/Resources/mihomo",
             uid: uid
         )
@@ -102,7 +102,8 @@ final class HelperInstallScriptTests: XCTestCase {
     }
 
     /// Earlier products left daemons behind under different labels. One still
-    /// running would answer a socket this build no longer controls.
+    /// running would answer a socket this build no longer controls. These
+    /// names are cleanup-only; Tono does not install them.
     func testLegacyDaemonsAreRemoved() {
         let text = script()
         for legacy in [
@@ -142,12 +143,12 @@ final class HelperInstallScriptTests: XCTestCase {
     /// Paths are interpolated into a shell command, so they must arrive escaped.
     func testSourcePathsAreShellEscaped() {
         let text = HelperManager.installScript(
-            helperSource: "/tmp/a b'c/liquidclash-helper",
+            helperSource: "/tmp/a b'c/tono-core-helper",
             mihomoSource: "/tmp/a b'c/mihomo",
             uid: 501
         )
         XCTAssertFalse(
-            text.contains("/tmp/a b'c/liquidclash-helper "),
+            text.contains("/tmp/a b'c/tono-core-helper "),
             "an unescaped space would split this into two arguments"
         )
         XCTAssertTrue(text.contains("\\'") || text.contains("'\\''"))
@@ -188,7 +189,7 @@ final class HelperInstallScriptTests: XCTestCase {
             return XCTFail("TONO_EMIT_INSTALL_UID must be a non-root uid")
         }
         let text = HelperManager.installScript(
-            helperSource: "\(app)/Contents/Resources/liquidclash-helper",
+            helperSource: "\(app)/Contents/Resources/tono-core-helper",
             mihomoSource: "\(app)/Contents/Resources/mihomo",
             uid: uid
         )

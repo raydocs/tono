@@ -22,7 +22,7 @@
   --tono-surface-input-border: #657087;
   --tono-surface-sidebar: #141922;
   --tono-surface-sidebar-border: #353d4d;
-  --tono-surface-nav-active: #2a3552;
+  --tono-surface-nav-active: #2c284a;
   --tono-surface-pill: #1b202b;
   --tono-hairline: #353d4d;
   --tono-divider: #353d4d;
@@ -37,9 +37,24 @@
   --tono-weight-title: 650;
   --tono-tracking-page-title: -0.5px;
   --tono-tracking-pill-title: -0.4px;
-  --tono-welcome-ground: #202b45;
-  --tono-welcome-ink: #ecf0ff;
-  --tono-welcome-muted: #bdc9e4;
+  --tono-welcome-ground: #12122a;
+  --tono-welcome-sheen-1: radial-gradient(
+    ellipse 160% 110% at 70% 100%,
+    rgb(123 92 255 / 0.22),
+    transparent
+  );
+  --tono-welcome-sheen-2: radial-gradient(
+    ellipse 120% 80% at 85% 90%,
+    rgb(255 176 122 / 0.1),
+    transparent
+  );
+  --tono-welcome-ink: #f3f1f7;
+  --tono-welcome-muted: #b9b7cc;
+  --tono-welcome-control: #8e90a8;
+  --tono-welcome-control-active: #ffb07a;
+  --tono-welcome-hero-shadow-1: 0 40px 80px -20px rgb(123 92 255 / 0.45);
+  --tono-welcome-hero-shadow-2: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --tono-welcome-hero-contact: none;
 }
 
 [data-tono-refined][data-tono-theme="light"] {
@@ -52,14 +67,33 @@
   --tono-surface-input-border: #8995ab;
   --tono-surface-sidebar: #eaf0f8;
   --tono-surface-sidebar-border: #d5dce8;
-  --tono-surface-nav-active: #dce5fa;
+  --tono-surface-nav-active: #e9e4ff;
   --tono-surface-pill: #ffffff;
   --tono-hairline: #d5dce8;
   --tono-divider: #d5dce8;
   --tono-row-divider: #d5dce8;
   --tono-shadow-card: 0 4px 16px -12px #20385830;
   --tono-shadow-pill: inset 0 1px 0 #fff, 0 8px 24px -16px #20385830;
-  --tono-welcome-ground: #e4ebfa;
-  --tono-welcome-ink: #1d2d50;
-  --tono-welcome-muted: #475a7c;
+  --tono-welcome-ground: #f3ede2;
+  --tono-welcome-sheen-1: radial-gradient(
+    ellipse 140% 110% at 30% 0%,
+    rgb(255 255 255 / 0.7),
+    transparent 70%
+  );
+  --tono-welcome-sheen-2: radial-gradient(
+    ellipse 160% 80% at 60% 110%,
+    rgb(214 200 178 / 0.55),
+    transparent 70%
+  );
+  --tono-welcome-ink: #1b1f4b;
+  --tono-welcome-muted: #5a5e7a;
+  --tono-welcome-control: #7a7c90;
+  --tono-welcome-control-active: #2b2fb8;
+  --tono-welcome-hero-shadow-1: 0 30px 60px -20px rgb(43 47 184 / 0.35);
+  --tono-welcome-hero-shadow-2: 0 18px 30px -18px rgb(27 31 75 / 0.35);
+  --tono-welcome-hero-contact: radial-gradient(
+    ellipse,
+    rgb(27 31 75 / 0.22),
+    transparent
+  );
 }

@@ -3,7 +3,7 @@
 //! Everything here is a pure function of the desired protection state: [`expected_filters`]
 //! renders the exact filter set the Windows engine (`wfp.rs`) must install, and [`diff`] turns
 //! the live set into an ordered change plan. Keeping this module free of `windows-sys` is what
-//! makes the rule tables from `docs/wfp-kill-switch.md` unit-testable on any host.
+//! makes the rule tables unit-testable on any host.
 //!
 //! Arbitration note: WFP arbitrates **sublayer-by-sublayer, highest sublayer weight first**;
 //! within a sublayer, filters are ordered by descending filter weight and the first match with

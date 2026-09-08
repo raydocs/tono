@@ -8,19 +8,27 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 欢迎/邮箱流程、内容材质、导航与启动策略以
 [Clarity 设计与验证记录](desktop-clarity.md) 为准。内容层使用实色，不再把
 每张卡片做成模糊玻璃；品牌渐变保留于标志，不作为登录按钮背景。
-登录主操作 token 为 macOS `TonoBrand.actionFill` / Windows
-`--tono-action-fill` (`#3658C9` + 白字)。状态颜色和延迟阈值的含义不变。
+登录主操作 token 为 macOS `TonoBrand.actionGradient` / Windows
+`--tono-action-fill`（紫色短渐变 + 白字，见第 1 节）。状态颜色和延迟阈值的含义不变。
+
+### 强调色改为标志里的紫（2026-09-07）
+
+强调色从钴蓝 `#4B6EFF` 改为从 TO 标志取样的紫，浅深两套值，主按钮改为
+紫色短渐变。玻璃材质保留。
 
 ## 1. 设计 Token（唯一事实源）
 
 | 语义 | macOS（`Views/NodeCardView.swift`） | Windows（`tono-ui/theme.ts`） | 值 |
 |---|---|---|---|
-| 品牌主色 | `TonoBrand.accent` | `TONO_COLORS.accent` | `#4B6EFF` |
+| 强调色（图标、选中、焦点、着色文字） | `TonoBrand.accent`（浅/深动态） | `TONO_COLORS.accent` / `accentDark`，`tonoAccent(dark)`，CSS `--tono-accent` | 浅 `#7457F5`（白底 4.8:1）/ 深 `#AB9EFF`（深卡 7.0:1） |
+| 主按钮填充 | `TonoBrand.actionGradient`（实色替身 `actionFill`） | `--tono-action-fill`（实色替身 `--tono-action-solid`） | 浅 `#8266FF→#5B3FE0` / 深 `#8F76FF→#6A4CF0`，135°，白字 |
+| 链接文字 | `TonoBrand.accent` | `--tono-text-link` | 浅 `#5B3FE0` / 深 `#B4A5FF` |
+| 品牌渐变深端 | `TonoBrand.indigo` | `TONO_COLORS.indigo` / `--tono-indigo` | `#2B2FB8`，只在标志和选中卡顶线的渐变里 |
 | 品牌渐变中段 | `TonoBrand.accentSoft` | `TONO_COLORS.accentSoft` | `#7B5CFF` |
 | 品牌渐变暖端 | `TonoBrand.accentWarm` | `TONO_COLORS.accentWarm` | `#FFB07A` |
 | 连接状态绿 | `TonoStatus.connected` | `TONO_COLORS.connected` | `#2ED573` |
 | 延迟良好 / 成功 | `TonoStatus.positive` | `TONO_COLORS.latencyGood` | `#30D158` |
-| 连接中黄 | `TonoStatus.connecting` | — | `#FFD60A` |
+| 连接中 / 断开中 | `TonoBrand.accent` | `TONO_COLORS.accent` | 强调色。进行中不是警告，2026-09-07 起两端统一，`TonoStatus.connecting` 黄已删除 |
 | 保护离线 / 降级橙 | `TonoStatus.blocked` | `TONO_COLORS.protectedOffline` | `#FF9F0A` |
 | 错误红 | `TonoStatus.error` | `TONO_COLORS.errorDark` | `#FF453A` |
 | 待机 / 中性 | `TonoStatus.neutral`（动态）/ `.standby`（实色，供渐变） | — | `.secondary` / `#98989D` |
@@ -33,8 +41,10 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
   （Dashboard 统计卡 `32ADE6`/`5856D6`、住宅路由 `BF5AF2` 等）可以保留字面量，
   但不得混入状态语义。
 - **绿色双轨是有意设计**：连接绿 `2ED573` ≠ 延迟/成功绿 `30D158`，不要合并。
-- **禁止 `Color.accentColor` / `.tint(.accentColor)`**（系统强调色随用户设置漂移），
-  一律 `TonoBrand.accent`。
+- **禁止 `Color.accentColor` / `.tint(.accentColor)` / `.foregroundStyle(.tint)`**
+  （系统强调色随用户设置漂移），一律 `TonoBrand.accent`。
+- **主按钮用渐变，其余表面用实色**：`actionGradient` 只给主操作按钮；
+  选中态、边框、光晕用 `accent` 的透明度版本。
 
 ## 2. 延迟阈值（全 app 唯一标准）
 
@@ -82,10 +92,29 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 
 ## 7. 动效
 
-所有装饰动画走 `TonoMotion.easeOut(_:reduceMotion:)` + 
-`@Environment(\.accessibilityReduceMotion)`；Windows 依赖 `tono.css` 的
+所有装饰动画走 `TonoMotion`（`Views/TonoMotion.swift`，扩展自
+`NodeCardView.swift` 里的 `easeOut`）+ `@Environment(\.accessibilityReduceMotion)`；
+Windows 用 `tono-ui/tokens/motion.css` 的同名 token，并依赖 `tono.css` 的
 `prefers-reduced-motion` 全局块。reduceMotion 下缩放类效果固定为 1，
-过渡退化为 opacity。状态切换动画 0.2s，hover 0.15s，作用域限制在单个组件。
+过渡退化为 opacity。作用域限制在单个组件。
+
+动效契约（两端同一张表；动效只做反馈，不做等待，除连接中的 spinner 外不循环）：
+
+| 场景 | 时长 | 曲线 | 位移 | macOS | Windows |
+|---|---|---|---|---|---|
+| 按下 | 100ms | easeOut | scale 0.98，按下即反馈 | `TonoMotion.press` | `--tono-duration-press` |
+| 悬停 | 150ms | easeOut | 背景提亮 | `.hover` | `--tono-duration-hover` |
+| 状态色变化 | 220ms | easeOut | 无 | `.stateChange` | `--tono-duration-state` |
+| 文字替换 | 220ms | easeOut | 淡入 + 上移 2px | `.textSwap` + `textSwapTransition` | `--tono-duration-text` / `--tono-rise-text` |
+| 表面出现 | 350ms | spring 无回弹 | 淡入 + 上移 6px | `.surfaceIn` + `surfaceTransition` | `--tono-duration-surface` / `--tono-ease-surface` |
+| 页面切换 | 180ms | easeOut | 淡入 + 上移 4px | `.pageSwitch` + `pageTransition` | `--tono-duration-page` |
+| 侧栏指示器滑动 | 160ms | easeOut | 同组内滑动，跨组淡入淡出 | `.nav` + matchedGeometryEffect | `--tono-duration-nav` |
+| 横幅进出 | 220ms | easeOut | 高度 + 不透明度 | `.banner` | `--tono-duration-banner`（用 `grid-template-rows`，不用 height） |
+| Toast | 250ms 进 / 200ms 出 | easeOut | 顶部滑入，原路退出 | 已有 | `--tono-duration-toast-*` |
+| 数字变化 | 300ms | easeOut | `numericText`，只在测速结果落地时 | `.numeric` | tabular-nums，不动画 |
+| 连接成功 | 500ms | spring bounce 0.15 | 光晕升起 | `.arrival` | `--tono-spring-arrival` |
+
+**全 app 只有「连接成功」这一处过冲**；其他表面一律临界阻尼。
 
 ## 8. 操作反馈
 
@@ -126,7 +155,7 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 ```bash
 # macOS（勿用 /Applications/Tono.app 验证——那是独立安装副本）
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
-  -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \
+  -project apps/macos/Tono.xcodeproj -scheme Tono \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/tono-xcode-derived
 
 # Windows（apps/windows/app）

@@ -1,4 +1,4 @@
-//! Tono account API: wire models and client logic (product-contract.md §1/§2).
+//! Tono account API: wire models and client logic.
 //!
 //! The crate ships no HTTP stack: [`HttpTransport`] abstracts request →
 //! response so the Windows app can plug in its own client (which must then

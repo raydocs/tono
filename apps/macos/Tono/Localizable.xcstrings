@@ -2,6 +2,126 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "Connected means protected.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连上，就受保护。"
+          }
+        }
+      }
+    },
+    "Open Tono, click once, and all your traffic takes the protected route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 Tono，点一下，所有流量都走受保护线路。"
+          }
+        }
+      }
+    },
+    "Offline, never exposed.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断网，也不裸奔。"
+          }
+        }
+      }
+    },
+    "If the route fails, Tono cuts off first so nothing leaks out.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "线路出问题时，Tono 会先切断，不让流量漏出去。"
+          }
+        }
+      }
+    },
+    "Routes are Tono's job.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "线路，Tono 替你选。"
+          }
+        }
+      }
+    },
+    "Nothing to configure. To change region, pick a node.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有设置要调。想换地区，选一个节点就好。"
+          }
+        }
+      }
+    },
+    "Get started →": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始使用 →"
+          }
+        }
+      }
+    },
+    "Skip": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳过"
+          }
+        }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
+          }
+        }
+      }
+    },
+    "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邮箱只用于登录。流量日志不会上传，除非你在设置里打开。"
+          }
+        }
+      }
+    },
+    "Send a sign-in code": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送验证码"
+          }
+        }
+      }
+    },
+    "Sent to your email": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发送到邮箱"
+          }
+        }
+      }
+    },
     "01 / SIGN IN": {
       "localizations": {
         "zh-Hans": {
@@ -32,12 +152,52 @@
         }
       }
     },
+    "AI and messaging routing research": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI 与即时通讯路由研究"
+          }
+        }
+      }
+    },
+    "Auto": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跟随系统"
+          }
+        }
+      }
+    },
     "Find the latest email from Tono, then return here and paste the six-digit code. Tono verifies it automatically.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
             "value": "找到 Tono 发来的最新邮件，回到这里粘贴六位验证码，我们会自动验证。"
+          }
+        }
+      }
+    },
+    "Help fix problems": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帮助排查问题"
+          }
+        }
+      }
+    },
+    "Off by default. These only help Tono improve routing.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。打开后只用来帮 Tono 改进路由。"
           }
         }
       }
@@ -62,6 +222,16 @@
         }
       }
     },
+    "Research programs": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "研究项目"
+          }
+        }
+      }
+    },
     "Sign in to Tono": {
       "localizations": {
         "zh-Hans": {
@@ -78,6 +248,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "从你的邮箱开始。收取一封验证码邮件，无需记住密码。"
+          }
+        }
+      }
+    },
+    "Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会上传你连过的主机名、发起连接的进程，以及匹配的规则和线路"
           }
         }
       }
@@ -2202,7 +2382,7 @@
         }
       }
     },
-    "Kill Switch is blocking traffic while Tono retries. Tap Protected Offline to restore normal Internet.": {
+    "Kill Switch is blocking traffic while Tono retries. Click Restore internet to get back online.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -2212,7 +2392,7 @@
         }
       }
     },
-    "Kill Switch is blocking traffic. Automatic retries are paused because this needs your action — tap Retry Now after resolving it, or Protected Offline to restore normal Internet.": {
+    "Kill Switch is blocking traffic. Automatic retries are paused because this needs your action — click Retry now after resolving it, or Restore internet to get back online.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4581,12 +4761,12 @@
         }
       }
     },
-    "Subscription source refused access. Import nodes via \"Import from Clash Verge\" or \"Import File\" first, then update the subscription after connecting the proxy.": {
+    "Subscription source refused access. Import a subscription file first, then update the subscription after connecting.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "订阅源拒绝访问。请先通过「从 Clash Verge 导入」或「文件导入」获取节点，连接代理后再更新订阅。"
+            "value": "订阅源拒绝访问。请先导入订阅文件，连上后再更新订阅。"
           }
         }
       }
@@ -4867,7 +5047,7 @@
         }
       }
     },
-    "Tap to connect": {
+    "Click to connect": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4877,7 +5057,7 @@
         }
       }
     },
-    "Tap to connect via %@": {
+    "Click to connect via %@": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4887,7 +5067,7 @@
         }
       }
     },
-    "Tap to disconnect": {
+    "Click to disconnect": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -4897,7 +5077,7 @@
         }
       }
     },
-    "Tap to restore internet": {
+    "Click to restore internet": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -5079,7 +5259,7 @@
         }
       }
     },
-    "The same failure repeated three times, so automatic retries are paused. Tap Retry Now to try again, or Protected Offline to restore normal Internet.": {
+    "The same failure repeated three times, so automatic retries are paused. Click Retry now to try again, or Restore internet to get back online.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
@@ -5157,6 +5337,96 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前物理网络不可用。网络恢复后会自动继续保护。"
+          }
+        }
+      }
+    },
+    "One of the connection checks failed for a moment. Your protected connection is still working.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "个别探测来源暂时失败。受保护连接仍然可用。"
+          }
+        }
+      }
+    },
+    "System DNS has not joined the protected path yet, so the connection could not finish. Wait a moment and reconnect.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统 DNS 尚未进入受保护路径，连接未能完成。请稍候再重新连接。"
+          }
+        }
+      }
+    },
+    "The protected connection is up, but this Mac's traffic did not go through it. Reconnect to try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护隧道已建立，但系统流量未能进入隧道。请重新连接再试一次。"
+          }
+        }
+      }
+    },
+    "Part of the protected connection is temporarily unavailable. If your traffic still looks normal, the connection will stay up.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护连接的一部分暂时不可用。若你的流量看起来正常，连接会保持。"
+          }
+        }
+      }
+    },
+    "The current node could not complete a protected check. Choose another node, or reconnect to try again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前节点无法完成受保护验证。请换一个节点，或重新连接再试一次。"
+          }
+        }
+      }
+    },
+    "The network helper does not match this copy of Tono. Repair it before connecting again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网络组件协议不匹配，需要先完成组件修复。"
+          }
+        }
+      }
+    },
+    "The protected connection did not come back after the update. Reconnect to restore protection.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新后的受保护连接未能恢复。请重新连接以恢复保护。"
+          }
+        }
+      }
+    },
+    "The selected node was removed from the catalog. Tono is switching to an available node.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所选节点已从目录移除。正在改用可用节点。"
+          }
+        }
+      }
+    },
+    "The protected connection failed. Diagnostic details have been recorded.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "受保护连接失败。诊断信息已记录。"
           }
         }
       }
@@ -5329,6 +5599,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tono 保护"
+          }
+        }
+      }
+    },
+    "Tono account setup was interrupted. Retry to continue.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 账户设置已中断，请重试以继续。"
           }
         }
       }
@@ -6623,6 +6903,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Chrome 或 Microsoft Edge 可能绕过 Tono 的受保护 DNS。请在 Chrome 和 Edge 的所有配置文件中关闭安全 DNS，彻底重启浏览器，然后重新连接。"
+          }
+        }
+      }
+    },
+    "Tono could not verify Chrome or Edge's Secure DNS configuration. This does not mean Secure DNS is enabled. Fully quit both browsers and tap Retry Now. If it persists, copy the failure details for support; do not delete browser data. Choose Restore internet to end protection and restore normal Internet.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 无法验证 Chrome 或 Edge 的安全 DNS 配置，这不代表安全 DNS 已开启。请完全退出两个浏览器后点「立即重试」。若仍失败，请复制故障详情交给支持人员，不要删除浏览器数据。选择「恢复网络」可结束保护并恢复普通互联网连接。"
           }
         }
       }

@@ -37,8 +37,8 @@ YAML
 
 echo "[1/3] Building the macOS app without signing"
 DEVELOPER_DIR=$developer_dir /usr/bin/xcodebuild \
-  -project "$repo_root/apps/macos/LiquidClash.xcodeproj" \
-  -scheme LiquidClash \
+  -project "$repo_root/apps/macos/Tono.xcodeproj" \
+  -scheme Tono \
   -configuration Debug \
   -derivedDataPath "$test_dir/DerivedData" \
   CODE_SIGNING_ALLOWED=NO \
