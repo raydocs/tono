@@ -606,10 +606,10 @@ fn service_core_path(clash_core: &str, bin_ext: &str) -> Result<PathBuf> {
 /// 卸载服务前以 root 清理残留 core 和 IPC 套接字。
 #[cfg(target_os = "macos")]
 fn macos_force_stop_core_shell() -> String {
-    use crate::config::IVerge;
+    use crate::config::TonoPreferences;
 
     // 只清理 root 拥有的服务内核。
-    let mut parts: Vec<String> = IVerge::VALID_CLASH_CORES
+    let mut parts: Vec<String> = TonoPreferences::VALID_CLASH_CORES
         .iter()
         .map(|core| format!("/usr/bin/pkill -U root -x {core} 2>/dev/null || true"))
         .collect();
@@ -883,7 +883,7 @@ fn uninstall_service() -> Result<()> {
     let uninstall_path = macos_service_tool_path(&uninstall_path)?;
     let uninstall_shell: String = uninstall_path.to_string_lossy().into_owned();
 
-    // tono_i18n::sync_locale(Config::verge().await.latest_arc().language.as_deref());
+    // tono_i18n::sync_locale(Config::preferences().await.latest_arc().language.as_deref());
 
     let prompt = tono_i18n::t!("service.adminUninstallPrompt");
     // 先清理服务残留,再执行卸载器。
@@ -922,7 +922,7 @@ fn install_service() -> Result<()> {
     macos_service_tool_path(&binary_path)?;
     let install_path = macos_service_tool_path(&install_path)?;
 
-    // tono_i18n::sync_locale(Config::verge().await.latest_arc().language.as_deref());
+    // tono_i18n::sync_locale(Config::preferences().await.latest_arc().language.as_deref());
 
     let gid = tauri_plugin_tono_sysinfo::current_gid();
     let prompt = tono_i18n::t!("service.adminInstallPrompt");

@@ -370,7 +370,7 @@ impl TonoPreferences {
             &updated_config.clash_core
         );
 
-        let config_draft = Config::verge().await;
+        let config_draft = Config::preferences().await;
         config_draft.edit_draft(|d| {
             *d = updated_config;
         });
@@ -608,9 +608,6 @@ impl TonoPreferences {
         }
     }
 }
-
-/// Temporary name while remaining call sites move to [`TonoPreferences`].
-pub type IVerge = TonoPreferences;
 
 #[cfg(test)]
 mod auto_launch_seed {

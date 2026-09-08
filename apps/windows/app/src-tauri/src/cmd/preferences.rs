@@ -1,24 +1,19 @@
 use super::CmdResult;
-use crate::{cmd::StringifyErr as _, config::IVerge, feat};
+use crate::{cmd::StringifyErr as _, config::TonoPreferences, feat};
 use tono_draft::SharedDraft;
 
 /// Display/behavior preferences. The Tauri command name is Tono's; the
 /// stored document is still migrated from the legacy Verge file once.
 #[tauri::command]
-pub async fn get_tono_preferences() -> CmdResult<SharedDraft<IVerge>> {
-    feat::fetch_verge_config().await.stringify_err()
+pub async fn get_tono_preferences() -> CmdResult<SharedDraft<TonoPreferences>> {
+    feat::fetch_tono_preferences().await.stringify_err()
 }
 
-#[tauri::command]
-pub async fn get_verge_config() -> CmdResult<SharedDraft<IVerge>> {
-    get_tono_preferences().await
-}
-
-/// Tono whitelist: `patch_verge_config` only accepts display/behavior
+/// Tono whitelist: `patch_tono_preferences` only accepts display/behavior
 /// fields. Anything that can steer traffic, the core, the proxy surface,
 /// credentials, or backups is rejected *before* it reaches the draft
 /// (P0-3). A forbidden key present (non-None) fails the whole patch.
-fn forbidden_field_present(patch: &IVerge) -> Option<&'static str> {
+fn forbidden_field_present(patch: &TonoPreferences) -> Option<&'static str> {
     #[allow(clippy::type_complexity)]
     #[allow(unused_mut)] // the platform `extend` below may be compiled out
     let mut forbidden: Vec<(&'static str, bool)> = vec![
@@ -83,33 +78,28 @@ fn forbidden_field_present(patch: &IVerge) -> Option<&'static str> {
 }
 
 #[tauri::command]
-pub async fn patch_tono_preferences(payload: IVerge) -> CmdResult {
+pub async fn patch_tono_preferences(payload: TonoPreferences) -> CmdResult {
     if let Some(field) = forbidden_field_present(&payload) {
         return Err(format!("disabled by Tono: {field}").into());
     }
     feat::patch_preferences(&payload, false).await.stringify_err()
 }
 
-#[tauri::command]
-pub async fn patch_verge_config(payload: IVerge) -> CmdResult {
-    patch_tono_preferences(payload).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::forbidden_field_present;
-    use crate::config::IVerge;
+    use crate::config::TonoPreferences;
 
     #[test]
     fn display_fields_pass_the_whitelist() {
-        let patch = IVerge {
+        let patch = TonoPreferences {
             language: Some("en".into()),
             theme_mode: Some("dark".into()),
             enable_auto_launch: Some(true),
             home_cards: None,
             test_list: None,
             tray_event: Some("dashboard".into()),
-            ..IVerge::default()
+            ..TonoPreferences::default()
         };
         assert_eq!(forbidden_field_present(&patch), None);
     }
@@ -117,13 +107,13 @@ mod tests {
     #[test]
     fn hidden_start_fields_are_rejected() {
         for patch in [
-            IVerge {
+            TonoPreferences {
                 enable_silent_start: Some(true),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 enable_auto_light_weight_mode: Some(true),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
         ] {
             assert!(forbidden_field_present(&patch).is_some());
@@ -133,49 +123,49 @@ mod tests {
     #[test]
     fn traffic_and_core_fields_are_rejected() {
         for patch in [
-            IVerge {
+            TonoPreferences {
                 enable_tun_mode: Some(true),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 enable_system_proxy: Some(false),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 proxy_auto_config: Some(true),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 verge_mixed_port: Some(7890),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 enable_external_controller: Some(true),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 hotkeys: Some(vec!["dashboard,CTRL+Q".into()]),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 startup_script: Some("echo hi".into()),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 clash_core: Some("tono-core".into()),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 webdav_url: Some("https://dav.example.com".into()),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 auto_backup_on_change: Some(true),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
-            IVerge {
+            TonoPreferences {
                 tray_event: Some("system_proxy".into()),
-                ..IVerge::default()
+                ..TonoPreferences::default()
             },
         ] {
             assert!(forbidden_field_present(&patch).is_some(), "{patch:?}");

@@ -1,4 +1,4 @@
-//! The WFP engine for the Tono kill switch (`docs/wfp-kill-switch.md`).
+//! The WFP engine for the Tono kill switch.
 //!
 //! This module is the *only* place that talks to `Fwpm*`: all `unsafe` FFI for the kill switch
 //! lives here, behind a small safe API the cross-platform facade (`windows_kill_switch.rs`)

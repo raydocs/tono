@@ -2,7 +2,7 @@
 //!
 //! `NotifyIpInterfaceChange` / `NotifyRouteChange2` callbacks and `SERVICE_CONTROL_POWEREVENT`
 //! all funnel into one debounced (750 ms) event note. The service-side contract per
-//! `docs/wfp-kill-switch.md`'s failure matrix is deliberately narrow: **the barrier stays** —
+//! The kill-switch failure matrix is deliberately narrow: **the barrier stays** —
 //! every event is recorded for `/status` reporting and the log, an armed kill switch stays
 //! armed, and "Connected invalidated → reconnect behind the barrier" is the product layer's
 //! job (it owns the UI `Connected` state; the service merely guarantees the fail-closed link

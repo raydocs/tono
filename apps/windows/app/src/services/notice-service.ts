@@ -45,7 +45,7 @@ const DEFAULT_DURATIONS: Readonly<Record<NoticeType, number>> = {
 }
 
 const TRANSLATION_KEY_PATTERN = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/
-const CODED_ERROR_PATTERN = /^CVR_ERROR:([A-Z0-9_]+)(?:\n([\s\S]*))?$/
+const CODED_ERROR_PATTERN = /^TONO_ERROR:([A-Z0-9_]+)(?:\n([\s\S]*))?$/
 const CODED_ERROR_TRANSLATION_KEYS: Readonly<Record<string, string>> = {
   CLASH_CONFIG_UPDATE_FAILED:
     'settings.feedback.errors.clash.configUpdateFailed',

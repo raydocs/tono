@@ -1,5 +1,5 @@
 //! Cloud traffic policy (WeChat DIRECT) — wire models, validation, revision
-//! tracking, and the verified on-disk cache (product-contract.md §3 parity,
+//! tracking, and the verified on-disk cache (catalog/policy cache parity,
 //! Mac `ManagedTrafficPolicyProcessor` parity).
 //!
 //! Trust model: the policy is server-managed but untrusted input. Everything

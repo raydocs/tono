@@ -8,6 +8,7 @@ import AdmZip from 'adm-zip'
 
 import {
   WINDOWS_RESOURCE_ALLOWLIST,
+  leftoverVergeSidecars,
   partitionReleaseResources,
 } from './windows-packaging.mjs'
 
@@ -54,9 +55,10 @@ async function resolvePortable() {
   if (!fs.existsSync(stableMihomo)) {
     throw new Error(`missing stable Mihomo at ${stableMihomo}`)
   }
-  if (fs.existsSync(path.join(releaseDir, 'verge-mihomo-alpha.exe'))) {
+  const leftover = leftoverVergeSidecars(await fsp.readdir(releaseDir))
+  if (leftover.length) {
     throw new Error(
-      'refuse to build portable zip while verge-mihomo-alpha.exe is present in the release dir',
+      `refuse to build portable zip while leftover Verge cores sit in the release dir: ${leftover.join(', ')}`,
     )
   }
   zip.addLocalFile(stableMihomo)
