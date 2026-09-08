@@ -180,6 +180,23 @@ afterEach(async () => {
 })
 
 describe('ConnectProgressCard', () => {
+  it('reports a confirmed live barrier without inventing a scheduled retry', async () => {
+    tonoConnectProgressMock.mockResolvedValue(makeProgress({ steps: [], totalElapsedMs: 0 }))
+    renderCard({ uiState: 'protectedOffline', protectionConfirmed: true })
+    expect(await screen.findByText(enTono.progress.statusBody)).toBeDefined()
+    expect(screen.queryByText('Protection not verified')).toBeNull()
+    expect(enTono.progress.statusBody).not.toMatch(/will switch|switching routes/i)
+  })
+
+  it('never claims blocking or scheduled retry without protection evidence', async () => {
+    tonoConnectProgressMock.mockResolvedValue(makeProgress({ steps: [], totalElapsedMs: 0 }))
+    renderCard({ uiState: 'protectedOffline' })
+    expect(await screen.findByText('Protection not verified')).toBeDefined()
+    expect(screen.getByText('Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.')).toBeDefined()
+    expect(screen.queryByText(enTono.progress.statusBody)).toBeNull()
+    expect(screen.queryByText(enTono.progress.statusTitle)).toBeNull()
+  })
+
   it('does not fabricate a Preparing transaction for idle protected-offline startup', async () => {
     tonoConnectProgressMock.mockResolvedValue(
       makeProgress({

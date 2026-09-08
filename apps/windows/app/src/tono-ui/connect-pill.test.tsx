@@ -19,6 +19,7 @@ const renderPill = (uiState: TonoUiState, stage?: string | null) => {
   render(
     <ConnectPill
       uiState={uiState}
+      protectionConfirmed
       stage={stage}
       onConnect={onConnect}
       onDisconnect={onDisconnect}
@@ -91,6 +92,17 @@ describe('ConnectPill five states', () => {
     expect(screen.getByText('tono.pill.subtitle.tapToRestore')).toBeDefined()
     expect((pillButton() as HTMLButtonElement).disabled).toBe(false)
 
+    fireEvent.click(pillButton())
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
+    expect(onConnect).not.toHaveBeenCalled()
+  })
+
+  it('unknown protection retains the restore action without claiming a live barrier', () => {
+    const onConnect = vi.fn()
+    const onDisconnect = vi.fn()
+    render(<ConnectPill uiState="protectedOffline" onConnect={onConnect} onDisconnect={onDisconnect} />)
+    expect(screen.getByText('tono.pill.title.protectionUnknown')).toBeDefined()
+    expect(screen.queryByText('tono.pill.title.protectedOffline')).toBeNull()
     fireEvent.click(pillButton())
     expect(onDisconnect).toHaveBeenCalledTimes(1)
     expect(onConnect).not.toHaveBeenCalled()

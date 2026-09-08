@@ -535,3 +535,38 @@ without altering app/route totals. WeChat aliases are no longer attached to ever
 unrelated connection. Three new tests failed before correction; the focused
 suite passes 14 tests, the full frontend suite passes 207, and typecheck passes.
 A rebuilt package's physical search verification remains pending.
+
+
+### Cold launch: do not present unknown protection as a proven barrier
+
+Physical 20bb37f follow-up reproduced a separate UI defect: normal unprotected
+Quit stopped GUI/Core and the Service; a later interactive launch correctly
+reported the Service was stopped, but simultaneously claimed direct traffic was
+blocked and an automatic route retry was happening. The backend deliberately
+keeps an unknown barrier conservatively armed so recovery remains possible; that
+FSM intent is not proof of live filtering.
+
+Dashboard pill/hint, progress copy and tray label now require both `wanted` and
+`live` Service evidence before claiming the offline barrier is active. Missing
+evidence displays “Protection not verified” with repair/recovery guidance. The
+confirmed-barrier copy no longer invents a scheduled retry. The FSM, Service/WFP
+policy, IPC schema, release action and confirmation guard are unchanged.
+Two UI tests failed before correction; full frontend verification now passes
+**216 tests**, typecheck, production Web build and targeted strict ESLint.
+A ROG Grok 4.6/high no-tools read-only review found no concrete defect in the
+supplied correction; this is advisory, not physical acceptance.
+
+Search commit `2bed18a` passed all four Windows CI jobs in `34215119628`. Its
+installer-only run `34215118955` was deliberately cancelled while building, so
+one replacement candidate can include both physical-UI fixes; cancellation is
+not a CI failure or successful artifact. The new installed-byte tests remain due.
+
+The current-source Mac local report `20260908T102800Z/report.json` passes version
+regressions, version gate, policy contract, the Mac umbrella, unsigned Release
+and nonprivileged Helper self-test, with unchanged source fingerprints. The
+umbrella retains six explicit privileged/data-plane skips. A separate read-only
+execution of the verbatim production browser scanner on this Mac returned clear
+for Chrome and Edge (one persisted preference store), without logging browser
+contents or altering preferences/DNS. This is not the signed-app connection or
+post-connect browser-change qualification required by #17/#42. Noninteractive
+root is unavailable; no privileged Mac test or helper installation was attempted.
