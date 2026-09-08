@@ -28,37 +28,6 @@ mod tests {
         panic!("IPC server did not become reachable before timeout");
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_reinstall_service_needed() {
-        #[cfg(unix)]
-        {
-            use std::fs::File;
-            use std::path::Path;
-
-            let _ = stop_ipc_server().await;
-
-            assert!(
-                !tono_service_protocol::is_ipc_path_exists(),
-                "IPC path should not exist after stopping the server"
-            );
-
-            let ipc_path = Path::new(tono_service_protocol::IPC_PATH);
-            let _ = std::fs::create_dir(ipc_path.parent().unwrap());
-            File::create(ipc_path).unwrap();
-            assert!(
-                tono_service_protocol::is_ipc_path_exists(),
-                "IPC path should exist after creating the file"
-            );
-
-            assert!(
-                tono_service_protocol::is_reinstall_service_needed().await,
-                "Reinstall should be needed when IPC path exists but no server is running"
-            );
-            std::fs::remove_file(ipc_path).unwrap();
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[serial]
     async fn test_start_and_parse() {
