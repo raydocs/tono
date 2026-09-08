@@ -348,6 +348,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Preserve notarization diagnostics even on rejection
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: macos-notary-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/release/notary-diagnostics/submission.json
+            ${{ runner.temp }}/release/notary-diagnostics/issues.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Remove the release keychain
         if: always()
         run: |
