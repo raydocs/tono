@@ -195,3 +195,17 @@ no release/tag/feed is changed by candidate testing.
   history before packaging; never overwrite a published 0.0.72 tag/installer.
 - Worker and Linux remain separate milestones; neither should expand this
   desktop stability slice. No new Linux capability is enabled.
+
+## Candidate history
+
+- `e8ebf1a`: preserves the incoming structural work and the three local stability
+  slices on `stability/desktop-0.0.72-20260908`. Redundant trailing blank lines in
+  16 newly split Rust files were removed at the staged whitespace gate; no Rust
+  logic was changed by that cleanup.
+- Upstream `origin/main @ 1648e10` is integrated by a normal merge. Its
+  24-file UI/motion change is retained. Conflict resolution keeps the extracted
+  theme/node modules, removes the retired connecting-yellow token in its new
+  theme owner, and applies the new accent in `ProxiesView+Nodes` rather than
+  restoring the old giant view. The merged source passed all five selected platform checks in
+  `20260908T065052Z/report.json`, with unchanged source hashes (version gate,
+  frontend types/tests, Mac umbrella, unsigned Release). Hosted CI follows.

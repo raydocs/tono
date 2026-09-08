@@ -54,6 +54,18 @@
   }
 }
 
+/* Detail-column page switch: fade + 4px rise. */
+@keyframes tono-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--tono-rise-page));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Live text replacing live text — connect stages, latency values. */
 @keyframes tono-text-in {
   from {
@@ -182,6 +194,9 @@
 .tono-value-pop {
   animation: tono-value-pop 0.3s var(--tono-ease);
 }
+.tono-page-in {
+  animation: tono-page-in var(--tono-duration-page) var(--tono-ease) both;
+}
 .tono-spin {
   display: inline-block;
   animation: tono-rotate 0.8s linear infinite;
@@ -192,7 +207,8 @@
      macOS side gets from TonoMotion + accessibilityReduceMotion. */
   .tono-rise-in,
   .tono-flyout-in,
-  .tono-text-in {
+  .tono-text-in,
+  .tono-page-in {
     animation: tono-text-in 0.001ms both;
   }
   .tono-value-pop {

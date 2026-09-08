@@ -139,7 +139,7 @@ extension ProxiesView {
                                 .controlSize(.mini)
                             Text("Connecting…")
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(TonoStatus.connecting)
+                                .foregroundStyle(TonoBrand.accent)
                         }
                     } else {
                         NodeLatencyBadge(

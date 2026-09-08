@@ -57,7 +57,6 @@ enum TonoBrand {
 enum TonoStatus {
     static let connected = Color(hex: "2ED573")
     static let positive = Color(hex: "30D158")   // latency good / success chips
-    static let connecting = Color(hex: "FFD60A")
     static let blocked = Color(hex: "FF9F0A")    // protected offline / degraded
     static let error = Color(hex: "FF453A")
     static let neutral = Color.secondary          // standby / not tested

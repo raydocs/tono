@@ -395,6 +395,7 @@ private struct ActiveLineMatch: ViewModifier {
 }
 
 struct NodeLatencyBadge: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let latency: Int
     var didFail: Bool = false
 
@@ -430,7 +431,7 @@ struct NodeLatencyBadge: View {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(tint)
-                    .contentTransition(.numericText())
+                    .contentTransition(reduceMotion ? .identity : .numericText())
                 if let detail {
                     Text(detail)
                         .font(.system(size: 9, weight: .medium))
@@ -445,8 +446,8 @@ struct NodeLatencyBadge: View {
             Capsule().strokeBorder(tint.opacity(0.18), lineWidth: 0.7)
         }
         .fixedSize()
-        .animation(.easeOut(duration: 0.35), value: latency)
-        .animation(.easeOut(duration: 0.35), value: didFail)
+        .animation(TonoMotion.numeric(reduceMotion: reduceMotion), value: latency)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: didFail)
     }
 }
 

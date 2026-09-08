@@ -69,6 +69,19 @@ const useConnectProgress = (active: boolean) => {
   return progress
 }
 
+const CONNECT_STAGE_KEYS = Object.keys(CONNECT_STAGE_LABEL_KEYS)
+
+const STEP_TRANSITION = 'var(--tono-duration-state) var(--tono-ease)'
+
+const dotFill = (state: TonoConnectStep['state']) => {
+  if (state === 'completed') return 'var(--tono-accent)'
+  if (state === 'current') {
+    return 'color-mix(in srgb, var(--tono-accent) 55%, transparent)'
+  }
+  if (state === 'failed') return 'var(--tono-protected-offline)'
+  return 'rgba(142,142,147,0.35)'
+}
+
 const StepIcon = ({ state }: { state: TonoConnectStep['state'] }) => {
   if (state === 'current') {
     return (
@@ -96,7 +109,9 @@ const StepIcon = ({ state }: { state: TonoConnectStep['state'] }) => {
         : 'rgba(142,142,147,0.5)'
   return (
     <span
+      key={state}
       aria-hidden
+      className={state === 'failed' ? 'tono-text-in' : undefined}
       data-testid="tono-step-icon"
       data-state={state}
       style={{
@@ -272,9 +287,18 @@ export const ConnectProgressCard = ({
     <GlassCard
       radius="var(--tono-radius-card)"
       padding={18}
+      tint={
+        showFailureCopy
+          ? hex(TONO_COLORS.protectedOffline, 0.08)
+          : 'var(--tono-surface-card)'
+      }
       style={{
         width: 520,
         maxWidth: '100%',
+        borderColor: showFailureCopy
+          ? hex(TONO_COLORS.protectedOffline, 0.35)
+          : 'var(--tono-surface-card-border)',
+        transition: `background ${STEP_TRANSITION}, border-color ${STEP_TRANSITION}`,
       }}
     >
       {showFailureCopy && (
@@ -343,53 +367,92 @@ export const ConnectProgressCard = ({
             )}
           </div>
 
-          {highlightedSteps.map((step) => (
+          {uiState === 'connecting' && (
             <div
-              key={step.key}
-              data-testid={`tono-step-${step.key}`}
-              data-state={step.state}
+              aria-hidden
+              data-testid="tono-connect-dots"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 7,
-                minWidth: 0,
-                marginBottom: 8,
+                gap: 6,
+                marginBottom: 10,
               }}
             >
-              <StepIcon state={step.state} />
-              <span
+              {CONNECT_STAGE_KEYS.map((key) => {
+                const state =
+                  progress.steps.find((step) => step.key === key)?.state ??
+                  'pending'
+                return (
+                  <span
+                    key={key}
+                    data-testid={`tono-connect-dot-${key}`}
+                    data-state={state}
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      background: dotFill(state),
+                      transition: `background ${STEP_TRANSITION}`,
+                    }}
+                  />
+                )
+              })}
+            </div>
+          )}
+
+          {highlightedSteps.map((step) => {
+            const stepLabel = t(
+              CONNECT_STAGE_LABEL_KEYS[step.key] ??
+                'tono.progress.unknownStage',
+            )
+            return (
+              <div
+                key={step.key}
+                data-testid={`tono-step-${step.key}`}
+                data-state={step.state}
                 style={{
-                  flex: 1,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color:
-                    step.state === 'failed'
-                      ? TONO_COLORS.protectedOffline
-                      : text.primary,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  minWidth: 0,
+                  marginBottom: 8,
                 }}
               >
-                {t(
-                  CONNECT_STAGE_LABEL_KEYS[step.key] ??
-                    'tono.progress.unknownStage',
-                )}
-              </span>
-              {step.elapsedMs != null && (
+                <StepIcon state={step.state} />
                 <span
+                  key={stepLabel}
+                  className="tono-text-in"
                   style={{
-                    fontSize: 11,
-                    fontFamily: TONO_MONO_STACK,
-                    color: text.secondary,
-                    flexShrink: 0,
+                    flex: 1,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color:
+                      step.state === 'failed'
+                        ? TONO_COLORS.protectedOffline
+                        : text.primary,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  {formatElapsed(step.elapsedMs)}
+                  {stepLabel}
                 </span>
-              )}
-            </div>
-          ))}
+                {step.elapsedMs != null && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontFamily: TONO_MONO_STACK,
+                      color: text.secondary,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {formatElapsed(step.elapsedMs)}
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </>
       )}
 

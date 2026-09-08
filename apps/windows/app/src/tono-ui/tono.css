@@ -91,6 +91,19 @@
 .tono-nav {
   padding-inline: 6px;
 }
+.tono-nav__track {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tono-nav__indicator {
+  border-radius: var(--tono-radius-lg);
+  background: var(--tono-surface-nav-active);
+  box-shadow: var(--tono-shadow-nav-active);
+  transition: transform var(--tono-duration-nav) var(--tono-ease);
+  pointer-events: none;
+}
 .tono-nav__item {
   display: flex;
   align-items: center;
@@ -106,6 +119,8 @@
   line-height: 1.2;
   text-align: left;
   cursor: pointer;
+  position: relative;
+  z-index: 1;
   transition:
     background 0.16s ease,
     color 0.16s ease,
@@ -379,6 +394,59 @@
 .tono-server-card:not(:disabled):hover {
   transform: translateY(-1px);
   box-shadow: 0 12px 28px -22px rgba(30, 45, 90, 0.6);
+}
+.tono-server-card__line {
+  transform-origin: center;
+  animation: tono-sweep-in var(--tono-duration-surface) var(--tono-ease) both;
+}
+.tono-server-skeleton {
+  min-height: 126px;
+  border-radius: 18px;
+  background: var(--tono-surface-raised);
+}
+.tono-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 16px;
+  text-align: center;
+  font-size: 13px;
+}
+.tono-empty p {
+  margin: 0;
+}
+.tono-banner {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  /* Collapsed content must not take focus: visibility flips after the
+     collapse finishes, and immediately on open. */
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--tono-duration-banner) var(--tono-ease),
+    opacity var(--tono-duration-banner) var(--tono-ease),
+    visibility 0s linear var(--tono-duration-banner);
+}
+.tono-banner--open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    grid-template-rows var(--tono-duration-banner) var(--tono-ease),
+    opacity var(--tono-duration-banner) var(--tono-ease),
+    visibility 0s;
+}
+@starting-style {
+  .tono-banner--open {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+.tono-banner__clip {
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* App-wide toast (TonoToast.tsx). Centering translate lives in the transforms

@@ -34,6 +34,11 @@ extension TonoMotion {
         reduceMotion ? nil : .spring(duration: 0.35, bounce: 0)
     }
 
+    /// The sidebar indicator sliding to the chosen item.
+    static func nav(reduceMotion: Bool) -> Animation? {
+        easeOut(0.16, reduceMotion: reduceMotion)
+    }
+
     /// Page content switching in the detail column.
     static func pageSwitch(reduceMotion: Bool) -> Animation? {
         easeOut(0.18, reduceMotion: reduceMotion)
