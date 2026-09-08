@@ -390,3 +390,36 @@ The current Mac app tree equals the successful `bec56f9` app tree
 candidate build workflow/patch inputs likewise remain identical to the artifact
 source. Subsequent changes only correct the hosted smoke harness and document
 its results; they do not relabel a different binary as tested.
+
+## Release-line integration and CI trigger audit
+
+The final smoke-harness checkpoint also passes all three macOS CI jobs:
+https://github.com/raydocs/tono/actions/runs/34203373499
+The complete raw log is retained locally. Under the owner's subsequent explicit
+commit/test/merge authorization, candidate `5427d28` was normally merged into:
+
+- `release/macos`: `9ad2af0b58b13eb36750625efebc7d232730c77b`
+- `release/windows`: `6b9d83a71f85aac225d8a0d1a503ddb8353b150b`
+
+Both merge trees exactly equal candidate tree
+`40a04478b7e9af5e79a8070c410c54f66f5fcdeb`; neither required conflict edits.
+Their original first parents and the candidate history are preserved. Work used
+a separate detached integration worktree; the original dirty local `main` status
+is unchanged. Platform/Services CI is running on those exact release-line SHAs;
+integration into remote `main` remains gated on the results. No release, tag,
+customer update feed or production service was published or deployed.
+
+Issue #12's trigger gap is reproducible on the candidate: workspace `Cargo.toml`,
+`Cargo.lock` and `vendor/**` alone do not match Windows CI. Both push and PR lists
+now include those paths. Three regression tests parse the actual workflow,
+exercise representative pin/vendor/policy paths, exclude unrelated docs, and
+require the workflow to execute the regression test. All three fail before the
+fix and pass after it. Hosted CI and a vendor-only PR event are separate evidence;
+the latter has not yet been exercised. This changes CI/tooling only, not any
+Windows installer source input.
+
+Issue #26 remains a real release gate, not a clean bill of health from the green
+installer smoke: failed journal bytes are now retained by earlier fixes, but the
+full owner-observed protected upgrade phase sequence is still incomplete. A
+same-version installer repair without a connected GUI does not exercise that
+sequence. Do not label #26 resolved or an installed older-version upgrade proven.
