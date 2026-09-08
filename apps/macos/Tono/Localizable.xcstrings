@@ -2,6 +2,126 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    "Connected means protected.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连上，就受保护。"
+          }
+        }
+      }
+    },
+    "Open Tono, click once, and all your traffic takes the protected route.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 Tono，点一下，所有流量都走受保护线路。"
+          }
+        }
+      }
+    },
+    "Offline, never exposed.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "断网，也不裸奔。"
+          }
+        }
+      }
+    },
+    "If the route fails, Tono cuts off first so nothing leaks out.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "线路出问题时，Tono 会先切断，不让流量漏出去。"
+          }
+        }
+      }
+    },
+    "Routes are Tono's job.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "线路，Tono 替你选。"
+          }
+        }
+      }
+    },
+    "Nothing to configure. To change region, pick a node.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有设置要调。想换地区，选一个节点就好。"
+          }
+        }
+      }
+    },
+    "Get started →": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始使用 →"
+          }
+        }
+      }
+    },
+    "Skip": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳过"
+          }
+        }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
+          }
+        }
+      }
+    },
+    "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邮箱只用于登录。流量日志不会上传，除非你在设置里打开。"
+          }
+        }
+      }
+    },
+    "Send a sign-in code": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送验证码"
+          }
+        }
+      }
+    },
+    "Sent to your email": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发送到邮箱"
+          }
+        }
+      }
+    },
     "01 / SIGN IN": {
       "localizations": {
         "zh-Hans": {

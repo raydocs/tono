@@ -97,7 +97,9 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .contentShape(Rectangle())
-        .animation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.15), value: appState.isConnected)
+        // Surfaces swap with the critically damped contract spring; the one
+        // overshoot in the app belongs to the connected glow, not the layout.
+        .animation(TonoMotion.surfaceIn(reduceMotion: reduceMotion), value: appState.isConnected)
         .onChange(of: appState.isConnecting) { _, connecting in
             connectingSince = connecting ? Date() : nil
         }
@@ -112,7 +114,7 @@ struct DashboardView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Dashboard")
-                    .font(.system(size: 27, weight: .bold))
+                    .font(.system(size: 24, weight: .semibold))
 
                 Text("Reality cloud protection")
                     .font(.system(size: 13, weight: .medium))

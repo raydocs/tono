@@ -651,11 +651,32 @@ const ServersPage = () => {
                         : server.selected
                           ? t('tono.node.activeServer')
                           : t('tono.nodes.readyToConnect')
+                  const cityKey = nodeCityTitleKey(server.name)
+                  const cityTitle = cityKey
+                    ? t(cityKey)
+                    : nodeDisplayName(server.name)
+                  const latencyText = !available
+                    ? t('tono.nodes.unavailable')
+                    : endpointFailure === 'timeout'
+                      ? t('tono.nodes.timeout')
+                      : endpointFailure
+                        ? t('tono.nodes.testFailed')
+                        : latencyLabel
+                  // One sentence for assistive tech, in the order the card
+                  // reads: city, region, measurement, state. The macOS card
+                  // has the same summary (localNodeAccessibilitySummary).
+                  const cardSummary = [
+                    cityTitle,
+                    regionLabel(nodeCode(server.name)),
+                    latencyText,
+                    cardStatus,
+                  ].join(', ')
                   return (
                     <button
                       key={server.name}
                       type="button"
                       className="tono-server-card"
+                      aria-label={cardSummary}
                       disabled={!available}
                       onClick={() =>
                         void handleSelect(
@@ -743,9 +764,7 @@ const ServersPage = () => {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {nodeCityTitleKey(server.name)
-                              ? t(nodeCityTitleKey(server.name)!)
-                              : nodeDisplayName(server.name)}
+                            {cityTitle}
                           </span>
                           {nodeCityParts(server.name).codename && (
                             <span
@@ -812,13 +831,7 @@ const ServersPage = () => {
                                   : 'none',
                               }}
                             />
-                            {!available
-                              ? t('tono.nodes.unavailable')
-                              : endpointFailure === 'timeout'
-                                ? t('tono.nodes.timeout')
-                                : endpointFailure
-                                  ? t('tono.nodes.testFailed')
-                                  : latencyLabel}
+                            {latencyText}
                           </span>
                         </span>
                         <span
@@ -857,28 +870,6 @@ const ServersPage = () => {
                             }}
                           >
                             {nodeProtocol(server.name)}
-                          </span>
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            <span
-                              aria-hidden
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: TONO_COLORS.connected,
-                                flexShrink: 0,
-                              }}
-                            />
-                            {t('tono.dashboard.info.protection')}
                           </span>
                         </span>
                       </span>
@@ -946,20 +937,6 @@ const ServersPage = () => {
                           </span>
                         )}
                       </span>
-                      {server.selected && (
-                        <span
-                          aria-hidden
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 18,
-                            right: 18,
-                            height: 2,
-                            borderRadius: 999,
-                            background: `linear-gradient(90deg, ${TONO_COLORS.accent}, ${TONO_COLORS.accentWarm})`,
-                          }}
-                        />
-                      )}
                     </button>
                   )
                 })}

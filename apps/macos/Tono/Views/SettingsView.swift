@@ -147,7 +147,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tint)
+                .foregroundStyle(TonoBrand.accent)
                 .disabled(!updater.canCheckForUpdates)
             }
         }
@@ -257,7 +257,7 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tint)
+                .foregroundStyle(TonoBrand.accent)
             }
 
             settingDivider

@@ -234,7 +234,7 @@ export const TrayPanel = () => {
 
       {picking && (
         <div className="tono-tray-picker">
-          {(servers ?? []).slice(0, 8).map((server) => {
+          {(servers ?? []).map((server) => {
             const key = nodeCityTitleKey(server.name)
             const label = key ? t(key) : nodeDisplayName(server.name)
             const active = server.selected || server.name === serverName

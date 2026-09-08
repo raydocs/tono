@@ -5,7 +5,7 @@ import { navItems } from '@/pages/_navigation'
 import { useThemeMode } from '@/services/states'
 import { version as appVersion } from '@root/package.json'
 
-import { TONO_COLORS, tonoText } from './theme'
+import { tonoAccent, tonoText } from './theme'
 import { TonoLogo } from './TonoLogo'
 
 /**
@@ -74,7 +74,7 @@ export const TonoSidebar = () => {
         <span
           className="tono-nav__icon"
           style={{
-            color: active ? TONO_COLORS.accent : text.primary,
+            color: active ? tonoAccent(dark) : text.primary,
           }}
         >
           {item.icon}
