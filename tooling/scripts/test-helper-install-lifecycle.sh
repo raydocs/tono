@@ -97,78 +97,100 @@ uid_path=/Library/PrivilegedHelperTools/tono.allowed-uid
 plist_path=/Library/LaunchDaemons/$label.plist
 socket_path=/var/run/tono-core/service.sock
 
-backup=$(mktemp -d /var/root/tono-install-lifecycle.XXXXXX)
+backup=$(mktemp -d /var/root/tono-install-lifecycle.XXXXXX) \
+  || { print "could not create a private backup directory; nothing changed" >&2; exit 1; }
 was_loaded=no
 /bin/launchctl print system/$label > /dev/null 2>&1 && was_loaded=yes
 
-# Restoring is the part that must not be sloppy: getting it wrong leaves the
-# machine with a daemon its installed app does not expect, and the first version
-# of this did exactly that. `cp` onto a running executable fails with ETXTBSY on
-# macOS, and with no error check it failed silently and reported success — the
-# production install writes `.new` and renames for precisely this reason, and
-# copying that pattern was not optional. Renaming also keeps the swap atomic, so
-# an interrupted restore cannot leave a partial binary behind.
-# Restoring is the part that must not be sloppy: getting it wrong leaves the
-# machine with a daemon its installed app does not expect, and two earlier
-# versions of this did exactly that.
-#
-# First it used `cp` straight onto the running executable, which fails with
-# ETXTBSY on macOS and, with no error check, failed silently while reporting
-# success. Then it packed "path:name" pairs into a loop and half the iterations
-# never reached the branch that restores — which is why this is now four explicit
-# calls with no string packing to reason about. The production install writes
-# `.new` and renames for the same ETXTBSY reason, and copying that was not
-# optional.
-restore_one() {
-  local target=$1
-  local saved=$2
-  if [[ -f $saved ]]; then
-    if ! /bin/cp -p "$saved" "$target.restore"; then
-      print "  could not stage a restore for $target" >&2
-      return 1
-    fi
-    if ! /bin/mv -f "$target.restore" "$target"; then
-      print "  could not move the restore into place for $target" >&2
-      /bin/rm -f "$target.restore"
-      return 1
-    fi
-    return 0
+# No protected path may be changed until all four original files have a
+# verified backup (or an explicit absent marker). A failed copy is not absence.
+backup_one() {
+  local target=$1 saved=$2
+  if [[ -L $target || ( -e $target && ! -f $target ) ]]; then
+    print "refusing a non-regular original at $target" >&2
+    return 1
   fi
-  # Nothing was there before, so nothing should be there now.
-  /bin/rm -f "$target" || return 1
-  return 0
+  if [[ -f $target ]]; then
+    /bin/cp -p "$target" "$saved" && /usr/bin/cmp -s "$target" "$saved" || return 1
+    [[ $(/usr/bin/stat -f '%u:%g:%Lp' "$target") == $(/usr/bin/stat -f '%u:%g:%Lp' "$saved") ]] || return 1
+  else
+    : > "$saved.absent" || return 1
+  fi
+}
+
+restore_one() {
+  local target=$1 saved=$2
+  if [[ -f $saved && ! -L $saved ]]; then
+    if [[ -L $target.restore ]] || ! /bin/cp -p "$saved" "$target.restore"; then
+      print "could not stage a restore for $target" >&2
+      return 1
+    fi
+    /usr/bin/cmp -s "$saved" "$target.restore" || return 1
+    /bin/mv -f "$target.restore" "$target" || return 1
+    /usr/bin/cmp -s "$saved" "$target" || return 1
+    [[ $(/usr/bin/stat -f '%u:%g:%Lp' "$saved") == $(/usr/bin/stat -f '%u:%g:%Lp' "$target") ]] || return 1
+  elif [[ -f $saved.absent && ! -L $saved.absent ]]; then
+    /bin/rm -f "$target" || return 1
+  else
+    print "missing backup/absence evidence for $target; leaving it intact" >&2
+    return 1
+  fi
 }
 
 restore() {
   print "restoring the previous install"
   local trouble=no
-  /bin/launchctl bootout system/$label > /dev/null 2>&1
+  if /bin/launchctl print system/$label > /dev/null 2>&1; then
+    if ! /bin/launchctl bootout system/$label > /dev/null 2>&1; then
+      print "RESTORE INCOMPLETE — could not stop the candidate; backup retained at $backup" >&2
+      return 1
+    fi
+  fi
   restore_one "$helper_path" "$backup/helper" || trouble=yes
   restore_one "$mihomo_path" "$backup/mihomo" || trouble=yes
   restore_one "$uid_path"    "$backup/uid"    || trouble=yes
   restore_one "$plist_path"  "$backup/plist"  || trouble=yes
-  if [[ $was_loaded == yes && -f $plist_path ]]; then
-    /bin/launchctl bootstrap system "$plist_path" > /dev/null 2>&1
+  if [[ $trouble == no && $was_loaded == yes ]]; then
+    /bin/launchctl bootstrap system "$plist_path" > /dev/null 2>&1 || trouble=yes
+    /bin/launchctl print system/$label > /dev/null 2>&1 || trouble=yes
   fi
-  # Report what is installed, not that restoring was attempted. The silent
-  # failure was invisible because the message described the intention.
+  if [[ $trouble == yes ]]; then
+    print "RESTORE INCOMPLETE — backup retained at $backup; do not connect" >&2
+    return 1
+  fi
   if [[ -x $helper_path ]]; then
     print "  installed contract is now $("$helper_path" --version 2>/dev/null)"
   else
     print "  no daemon is installed"
   fi
-  if [[ $trouble == yes ]]; then
-    print "  RESTORE INCOMPLETE — reinstall from the app before connecting" >&2
-  fi
-  /bin/rm -rf "$backup"
+  /bin/rm -rf "$backup" || return 1
 }
 
-trap restore EXIT
+for pair in helper mihomo uid plist; do
+  case $pair in
+    helper) original=$helper_path ;;
+    mihomo) original=$mihomo_path ;;
+    uid) original=$uid_path ;;
+    plist) original=$plist_path ;;
+  esac
+  if ! backup_one "$original" "$backup/$pair"; then
+    print "backup failed; installation not started; evidence retained at $backup" >&2
+    exit 1
+  fi
+done
 
-[[ -f $helper_path ]] && /bin/cp -p "$helper_path" "$backup/helper"
-[[ -f $mihomo_path ]] && /bin/cp -p "$mihomo_path" "$backup/mihomo"
-[[ -f $uid_path ]] && /bin/cp -p "$uid_path" "$backup/uid"
-[[ -f $plist_path ]] && /bin/cp -p "$plist_path" "$backup/plist"
+install_started=no
+finish() {
+  local result=$?
+  trap - EXIT
+  if [[ $install_started == yes ]]; then
+    restore || result=1
+  else
+    /bin/rm -rf "$backup" || result=1
+  fi
+  exit $result
+}
+trap finish EXIT
 
 typeset -a failures
 check() {
@@ -215,7 +237,7 @@ if [[ -n $prebuilt_script ]]; then
   # point of this test is that root runs what production runs.
   /usr/bin/grep -q 'identifier "com.raydocs.tono.helper"' "$prebuilt_script" \
     || { print "the supplied script does not carry the helper requirement" >&2; exit 2 }
-  /bin/cp "$prebuilt_script" "$script"
+  /bin/cp "$prebuilt_script" "$script" || exit 1
   print "using the install script emitted at $prebuilt_script"
 else
 # xcodebuild as root fails on this machine class — DerivedData, the signing
@@ -259,6 +281,7 @@ fi
 [[ -s $script ]] || { print "the emitted script is empty" >&2; exit 1 }
 
 print "running it as root"
+install_started=yes
 if ! /bin/sh "$script" > "$backup/install.log" 2>&1; then
   print "the install script failed" >&2
   /usr/bin/tail -12 "$backup/install.log" >&2
@@ -343,22 +366,30 @@ fi
 # stands between the daemon and an arbitrary binary, so it is asserted against a
 # real ad-hoc-signed file rather than trusted.
 adhoc=$backup/adhoc-helper
-/bin/cp "$app/Contents/Resources/tono-core-helper" "$adhoc"
-/usr/bin/codesign --force --sign - --identifier com.raydocs.tono.helper "$adhoc" 2>/dev/null
-refute "ad-hoc signature is refused by the install requirement" \
-  /usr/bin/codesign --verify --strict --all-architectures \
-    -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' \
-    "$adhoc"
+if ! /bin/cp "$app/Contents/Resources/tono-core-helper" "$adhoc" \
+  || ! /usr/bin/codesign --force --sign - --identifier com.raydocs.tono.helper "$adhoc" 2>/dev/null; then
+  check "ad-hoc refusal fixture can be constructed" bad
+else
+  refute "ad-hoc signature is refused by the install requirement" \
+    /usr/bin/codesign --verify --strict --all-architectures \
+      -R='anchor apple generic and identifier "com.raydocs.tono.helper" and certificate leaf[subject.OU] = "YY57758GS7"' \
+      "$adhoc"
+fi
 
 print ""
 if (( ${#failures} > 0 )); then
   print "failed: ${(j:, :)failures}"
   exit 1
 fi
-print "install lifecycle passed"
 # Printed only on a pass, and only for the bundle that was actually installed.
 token=$(bundle_token "$app") \
   || { print "the lifecycle passed but $app could not be digested" >&2; exit 1 }
+# A success token must describe completed restoration, not just installation.
+# Disable the EXIT fallback before this explicit attempt: a failed restore keeps
+# its only verified backup, and must not be retried/deleted by another trap.
+trap - EXIT
+restore || exit 1
+print "install lifecycle passed (previous installation restored)"
 print "  bundle token: $token"
 print "  the publish that ships this bundle wants it:"
 print "    tooling/scripts/release-macos.sh --version <x.y.z> --build <n> \\"

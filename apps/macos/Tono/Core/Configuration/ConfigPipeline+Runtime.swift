@@ -417,6 +417,13 @@ extension ConfigPipeline {
             overlay: overlay,
             validatedOwnedNodes: nodes
         )
+        guard overlay.claudeHomeSocks5 == nil || claudeHomeSocks5 != nil,
+              claudeHomeSocks5 != nil || overlay.claudeHomeNodeName == nil || claudeHome != nil
+        else {
+            // Never turn an explicitly required but unusable home identity
+            // into a successfully generated cloud-only configuration.
+            throw TonoInjectionError.unsafeOverlay
+        }
         let preferredDefault = overlay.defaultNodeName
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .flatMap { name in

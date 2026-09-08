@@ -78,7 +78,8 @@ pub const MAX_SOCKS5_FIELD_BYTES: usize = 255;
 /// Keep only the routing fields that name an admitted node. A field that is
 /// empty, over [`MAX_ROUTING_NAME_CHARS`] chars, or matches no node is
 /// dropped and reported in the second return value so the caller can log a
-/// warning; a bad directive never fails the catalog itself. Returns `None`
+/// warning. This projection is not admission: `validate_catalog` first rejects
+/// unusable declared home hops. Returns `None`
 /// when nothing survives.
 pub fn sanitize_routing(
     routing: &CatalogRouting,
@@ -149,6 +150,27 @@ fn keep_socks5(
     Some(socks5.clone())
 }
 
+/// A declared home hop is an egress requirement, unlike a default selection
+/// hint. Reject it before cache/tracker mutation rather than accepting the
+/// sanitizer's lossy projection as an ordinary cloud-only catalog.
+pub(crate) fn validate_residential_routing(
+    routing: &CatalogRouting,
+    nodes: &[ValidatedNode],
+) -> Result<(), CatalogError> {
+    if routing.home_socks5.is_some() {
+        if keep_socks5(&routing.home_socks5, &mut Vec::new()).is_none() {
+            return Err(CatalogError::InvalidResponse);
+        }
+    } else if let Some(name) = &routing.home_proxy {
+        if name.is_empty() || name.chars().count() > MAX_ROUTING_NAME_CHARS
+            || !nodes.iter().any(|node| &node.name == name)
+        {
+            return Err(CatalogError::InvalidResponse);
+        }
+    }
+    Ok(())
+}
+
 /// SHA-256 of the YAML's UTF-8 bytes, base64url **without padding** (§3).
 pub fn catalog_digest(yaml: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(yaml.as_bytes()))
@@ -202,6 +224,9 @@ pub fn validate_catalog(catalog: &ExitCatalogResponse) -> Result<Vec<ValidatedNo
         if catalog.yaml.trim() != "proxies: []" {
             return Err(CatalogError::InvalidResponse);
         }
+    }
+    if let Some(routing) = &catalog.routing {
+        validate_residential_routing(routing, &nodes)?;
     }
     Ok(nodes)
 }
@@ -756,15 +781,27 @@ mod tests {
     }
 
     #[test]
-    fn catalog_with_bogus_routing_still_validates() {
+    fn catalog_with_bogus_home_routing_is_rejected() {
         let mut catalog = valid_catalog(0);
         catalog.routing = Some(CatalogRouting {
             home_proxy: Some("No Such Node".to_string()),
             default_proxy: None,
             home_socks5: None,
         });
-        let nodes = validate_catalog(&catalog).unwrap();
-        assert_eq!(nodes.len(), 1, "a bad directive never fails the catalog");
+        assert_eq!(validate_catalog(&catalog), Err(CatalogError::InvalidResponse));
+    }
+
+    #[test]
+    fn invalid_preferred_socks_hop_cannot_degrade_to_home_node_or_cloud() {
+        let mut catalog = valid_catalog(0);
+        let mut upstream = home_socks5();
+        upstream.password.clear();
+        catalog.routing = Some(CatalogRouting {
+            home_proxy: Some("US Reality 01".to_string()),
+            default_proxy: None,
+            home_socks5: Some(upstream),
+        });
+        assert_eq!(validate_catalog(&catalog), Err(CatalogError::InvalidResponse));
     }
 
     // ---- homeSocks5 routing directive ----

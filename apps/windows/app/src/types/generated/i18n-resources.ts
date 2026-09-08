@@ -1267,6 +1267,7 @@ export interface TranslationResources {
           disconnecting: string
           notConnected: string
           protectedOffline: string
+          protectionUnknown: string
         }
       }
       progress: {
@@ -1275,6 +1276,7 @@ export interface TranslationResources {
         copyDetails: string
         copyFailed: string
         failedAt: string
+        protectionUnknownBody: string
         restore: string
         restoreConfirmMessage: string
         restoreConfirmTitle: string

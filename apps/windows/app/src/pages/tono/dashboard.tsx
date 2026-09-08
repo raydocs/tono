@@ -25,6 +25,7 @@ import { ConnectPill } from '@/tono-ui/ConnectPill'
 import { GlassCard } from '@/tono-ui/GlassCard'
 import { OpenDnsSettingsButton } from '@/tono-ui/OpenDnsSettingsButton'
 import { PageHeader } from '@/tono-ui/PageHeader'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import {
   TONO_COLORS,
   TONO_MONO_STACK,
@@ -528,6 +529,7 @@ const DashboardPage = () => {
     }
   })
 
+  const protectionConfirmed = hasLiveProtection(status)
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
   const connectingSinceRef = useRef<number | null>(null)
@@ -692,11 +694,13 @@ const DashboardPage = () => {
 
   const [up, upUnit] = parseTraffic(traffic?.up ?? 0)
   const [down, downUnit] = parseTraffic(traffic?.down ?? 0)
-  const connectHint = connected
-    ? status?.directOverlay === 'skipped'
-      ? t('tono.dashboard.directSkipped')
-      : t('tono.dashboard.directOn')
-    : t('tono.dashboard.taglineIdle')
+  const connectHint = uiState === 'protectedOffline' && !protectionConfirmed
+    ? t('tono.progress.protectionUnknownBody')
+    : connected
+      ? status?.directOverlay === 'skipped'
+        ? t('tono.dashboard.directSkipped')
+        : t('tono.dashboard.directOn')
+      : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
     ? nodeCityTitleKey(status.selectedServer)
       ? t(nodeCityTitleKey(status.selectedServer)!)
@@ -800,6 +804,7 @@ const DashboardPage = () => {
         <div>
           <ConnectPill
             uiState={uiState}
+            protectionConfirmed={protectionConfirmed}
             stage={status?.stage}
             onConnect={handleConnect}
             onDisconnect={() => {
@@ -970,6 +975,7 @@ const DashboardPage = () => {
         {/* Progress card self-hides when idle and no uncleared failure record. */}
         <ConnectProgressCard
           uiState={uiState}
+          protectionConfirmed={protectionConfirmed}
           onRefreshStatus={mutateTonoStatus}
           onChooseRoute={() => navigate('/servers')}
         />

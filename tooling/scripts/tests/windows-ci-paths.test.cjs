@@ -21,6 +21,8 @@ for (const event of ['push', 'pull_request']) {
       'apps/windows/app/**',
       '.github/workflows/windows-ci.yml',
       'tooling/scripts/tests/windows-ci-paths.test.cjs',
+      'tooling/scripts/test-windows-qa.ps1',
+      'tooling/scripts/tests/windows-qa-guards.Tests.ps1',
     ]) assert.ok(paths.includes(required), `${event} omits ${required}`)
 
     for (const changed of [
@@ -40,4 +42,10 @@ test('the frontend job actually executes this trigger regression test', () => {
   assert.ok(Object.values(workflow.jobs).some(job => job.steps?.some(step =>
     step['working-directory'] === 'apps/windows/app' &&
     step.run?.includes('node --test ../../../tooling/scripts/tests/windows-ci-paths.test.cjs'))))
+})
+
+
+test('the native Service job executes safe QA fault-targeting regressions', () => {
+  assert.ok(workflow.jobs.service.steps.some(step =>
+    step.shell === 'pwsh' && step.run?.includes('tooling/scripts/tests/windows-qa-guards.Tests.ps1')))
 })

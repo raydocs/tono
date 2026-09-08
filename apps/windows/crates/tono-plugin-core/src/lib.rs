@@ -99,7 +99,9 @@ impl Builder {
         let socket_path = self.socket_path;
         let request_timeout = self.request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT);
 
-        PluginBuilder::new("mihomo")
+        // Match Cargo links / generated capability namespace. A stale runtime name
+        // silently rejects renderer IPC even though native controller calls work.
+        PluginBuilder::new("tono-plugin-core")
             .invoke_handler(tauri::generate_handler![
                 commands::update_controller,
                 commands::update_secret,

@@ -82,6 +82,10 @@ extension AppState {
         ) {
             return
         }
+        // Validate the residential requirement before persisting the candidate.
+        // A rejected home directive must neither replace the verified cache nor
+        // downgrade a live session to ordinary cloud routing.
+        let validatedRouting = try validatedCatalogRouting(catalog.routing, nodes: nodes)
         if persistCache {
             try await managedCatalogProcessor.persistIfNewest(
                 catalog,
@@ -106,8 +110,6 @@ extension AppState {
                 return
             }
         }
-
-        let validatedRouting = validatedCatalogRouting(catalog.routing, nodes: nodes)
 
         let previousSelection = currentProxySelectionTarget()
         let previousCloudNodes = proxyRegions
@@ -317,7 +319,7 @@ extension AppState {
     private func validatedCatalogRouting(
         _ routing: TonoExitCatalogRouting?,
         nodes: [ProxyNode]
-    ) -> TonoExitCatalogRouting? {
+    ) throws -> TonoExitCatalogRouting? {
         guard let routing else { return nil }
 
         func validatedName(_ raw: String?, field: String) -> String? {
@@ -338,16 +340,16 @@ extension AppState {
         let homeSocks5 = ConfigPipeline.validatedHomeSocks5(routing.homeSocks5)
         if routing.homeSocks5 != nil, homeSocks5 == nil {
             // Never include the credential-bearing value in diagnostics.
-            LocalTrafficAudit.shared.recordEvent(
-                "managed_catalog_routing_ignored",
-                details: ["field": "homeSocks5"]
-            )
+            throw TonoAPIClient.APIError.invalidResponse
         }
         // homeSocks5 is the stronger directive: if both arrive in a hand
         // edited cache, keep exactly one Claude home route.
         let homeProxy = homeSocks5 == nil
             ? validatedName(routing.homeProxy, field: "homeProxy")
             : nil
+        if homeSocks5 == nil, routing.homeProxy != nil, homeProxy == nil {
+            throw TonoAPIClient.APIError.invalidResponse
+        }
         let defaultProxy = validatedName(routing.defaultProxy, field: "defaultProxy")
         guard homeProxy != nil || homeSocks5 != nil || defaultProxy != nil else {
             return nil

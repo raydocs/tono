@@ -139,6 +139,10 @@ verify_signed_executable() {
     executable=$1
     metadata=$(/usr/bin/codesign --display --verbose=2 "$executable" 2>&1)
     printf '%s\n' "$metadata" | /usr/bin/grep -F "TeamIdentifier=$team_id" >/dev/null
+    if ! printf '%s\n' "$metadata" | /usr/bin/grep -q '^Timestamp='; then
+        echo "Missing secure signing timestamp: $executable" >&2
+        exit 1
+    fi
 }
 
 # HelperManager.verifyEmbeddedExecutable pins the signing identifier as well as
@@ -178,11 +182,8 @@ if [ "$notarize" = 1 ]; then
         echo "TONO_MACOS_NOTARY_PROFILE is required when TONO_MACOS_NOTARIZE=1." >&2
         exit 1
     fi
-    DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun notarytool submit \
-        "$artifact_zip" \
-        --keychain-profile "$notary_profile" \
-        --wait \
-        --output-format json > "$build_root/notary-result.json"
+    DEVELOPER_DIR="$developer_dir" python3 "$repo_root/tooling/scripts/notarize-macos.py" \
+        "$artifact_zip" "$notary_profile" "$artifact_dir/notary-diagnostics"
     DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun stapler staple "$artifact_app" >/dev/null
     DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun stapler validate "$artifact_app"
     /usr/sbin/spctl -a -t exec -vv "$artifact_app"

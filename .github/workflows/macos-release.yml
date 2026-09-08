@@ -36,6 +36,11 @@ on:
         description: Exact CFBundleShortVersionString (MARKETING_VERSION) to release, e.g. 0.0.2
         required: true
         type: string
+      candidate_only:
+        description: Build a signed and notarized test candidate without preparing any update feed
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - tono-macos-*-build*
@@ -61,8 +66,18 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Refuse a ref that is not the release line
+        env:
+          CANDIDATE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only }}
         run: |
           set -euo pipefail
+          if [ "$CANDIDATE_ONLY" = true ]; then
+            if [ "$GITHUB_REF" != refs/heads/stability/desktop-0.0.72-20260908 ]; then
+              echo "::error::Candidate signing is restricted to the reviewed 0.0.72 stability branch."
+              exit 1
+            fi
+            echo "candidate only: no appcast job or release publication"
+            exit 0
+          fi
           if [ "$GITHUB_REF_TYPE" != tag ] \
             && [ "$GITHUB_REF" != refs/heads/release/macos ]; then
             echo "::error::A macOS release must run from refs/heads/release/macos or a tono-macos-*-build* tag, but this run is on $GITHUB_REF. Nothing was built."
@@ -103,8 +118,16 @@ jobs:
         run: echo "KEYCHAIN_PATH=$RUNNER_TEMP/tono-macos-release.keychain-db" >> "$GITHUB_ENV"
 
       - name: Require the macOS release line
+        env:
+          CANDIDATE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_only }}
         run: |
           set -eu
+          if [ "$CANDIDATE_ONLY" = true ]; then
+            test "$GITHUB_REF" = refs/heads/stability/desktop-0.0.72-20260908
+            test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+            python3 tooling/scripts/verify-desktop-version.py --expected 0.0.72
+            exit 0
+          fi
           git fetch --no-tags origin release/macos
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/release/macos; then
             echo "FATAL: $GITHUB_SHA is not on release/macos; refusing a macOS release from another platform line." >&2
@@ -290,12 +313,50 @@ jobs:
           /usr/bin/xcrun stapler validate "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
           /usr/sbin/spctl -a -t exec -vv "$RUNNER_TEMP/release/$ARTIFACT_NAME.app"
 
+      - name: Record signed candidate provenance without update authority
+        if: github.event_name == 'workflow_dispatch' && inputs.candidate_only
+        env:
+          ARTIFACT_NAME: ${{ steps.release-version.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import hashlib, json, os, pathlib, plistlib
+          root = pathlib.Path(os.environ["RUNNER_TEMP"]) / "release"
+          name = os.environ["ARTIFACT_NAME"]
+          app = root / (name + ".app")
+          with (app / "Contents/Info.plist").open("rb") as stream:
+              info = plistlib.load(stream)
+          assert info["CFBundleShortVersionString"] == "0.0.72"
+          assert str(info["CFBundleVersion"]) == "72"
+          files = [root / (name + ".zip"), app / "Contents/MacOS/Tono",
+                   app / "Contents/Resources/tono-core-helper", app / "Contents/Resources/mihomo"]
+          report = {"source": os.environ["GITHUB_SHA"], "version": "0.0.72", "build": 72,
+                    "candidateOnly": True, "releaseAccepted": False, "developerIDSigned": True,
+                    "notarized": True, "sparkleSigned": False,
+                    "files": [{"name": str(path.relative_to(root)),
+                               "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in files]}
+          (root / "candidate-manifest.json").write_text(json.dumps(report, indent=2) + "\n")
+          PYTHON
+
       - name: Upload the notarized archive for the gated appcast job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.release-version.outputs.artifact_name }}
-          path: ${{ runner.temp }}/release/${{ steps.release-version.outputs.artifact_name }}.zip
+          path: |
+            ${{ runner.temp }}/release/${{ steps.release-version.outputs.artifact_name }}.zip
+            ${{ runner.temp }}/release/candidate-manifest.json
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Preserve notarization diagnostics even on rejection
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: macos-notary-diagnostics-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/release/notary-diagnostics/submission.json
+            ${{ runner.temp }}/release/notary-diagnostics/issues.json
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Remove the release keychain
@@ -305,6 +366,8 @@ jobs:
           security delete-keychain "$KEYCHAIN_PATH" || true
 
   validate-appcast:
+    # A local physical-test candidate must never obtain the Sparkle signing key.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.candidate_only) }}
     needs: build
     runs-on: macos-26
     environment: macos-appcast
@@ -419,3 +482,28 @@ jobs:
             echo "tooling/scripts/publish-macos-appcast.mjs without --dry-run once the"
             echo "GitHub Release for this build is published and immutable."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the exact validated release archive
+        run: |
+          set -eu
+          python3 - <<'PYTHON'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          archive = root / "release" / (os.environ["ARTIFACT_NAME"] + ".zip")
+          receipt = {"source": os.environ["GITHUB_SHA"], "ref": os.environ["GITHUB_REF"],
+                     "version": os.environ["RELEASE_SHORT_VERSION"], "build": os.environ["RELEASE_BUILD"],
+                     "archive": archive.name, "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                     "developerIDSigned": True, "notarized": True, "sparkleSignatureVerified": True,
+                     "physicalInstallAccepted": False, "published": False}
+          (root / "release-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          PYTHON
+
+      - name: Export public signature and provenance for physical acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: macos-release-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/enclosure.sig
+            ${{ runner.temp }}/release-receipt.json
+          if-no-files-found: error
+          retention-days: 7

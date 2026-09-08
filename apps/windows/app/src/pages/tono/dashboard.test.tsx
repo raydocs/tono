@@ -94,6 +94,15 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('dashboard action-error ownership', () => {
+  it('does not claim protection when startup has no Service barrier evidence', () => {
+    mocks.status = makeStatus({ uiState: 'protectedOffline', protectionBlocked: true })
+    renderDashboard()
+    expect(screen.getByRole('button', {
+      name: 'Protection not verified — Click to restore internet',
+    })).toBeDefined()
+    expect(screen.queryByText('Protected, not connected')).toBeNull()
+  })
+
   it('retries a failed disconnect with disconnect and never offers a server switch', async () => {
     mocks.status = makeStatus({
       uiState: 'connected',
@@ -119,6 +128,7 @@ describe('dashboard action-error ownership', () => {
 
   it('will not release fail-closed protection from the pill without a confirmation', async () => {
     mocks.status = makeStatus({
+      killSwitch: { wanted: true, live: true, mode: 'blocked', endpoints: [], last_error: null },
       uiState: 'protectedOffline',
       selectedServer: 'US West 1',
       protectionBlocked: true,

@@ -137,6 +137,7 @@ const StepIcon = ({ state }: { state: TonoConnectStep['state'] }) => {
 
 interface ConnectProgressCardProps {
   uiState: TonoUiState
+  protectionConfirmed?: boolean
   onRefreshStatus: () => Promise<unknown>
   onChooseRoute?: () => void
 }
@@ -152,6 +153,7 @@ type UploadPhase = 'idle' | 'confirming' | 'uploading' | 'sent'
 
 export const ConnectProgressCard = ({
   uiState,
+  protectionConfirmed = false,
   onRefreshStatus,
   onChooseRoute,
 }: ConnectProgressCardProps) => {
@@ -312,10 +314,11 @@ export const ConnectProgressCard = ({
               marginBottom: 6,
             }}
           >
-            {t('tono.progress.statusTitle')}
+            {t(uiState === 'protectedOffline' && !protectionConfirmed
+              ? 'tono.pill.title.protectionUnknown' : 'tono.progress.statusTitle')}
           </div>
           <div style={{ fontSize: 13, lineHeight: 1.5, color: text.secondary }}>
-            {t('tono.progress.statusBody')}
+            {t(protectionConfirmed ? 'tono.progress.statusBody' : 'tono.progress.protectionUnknownBody')}
           </div>
         </div>
       )}

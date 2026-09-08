@@ -122,18 +122,22 @@ export async function homeRoutingForUser(e: Env, userId: string) {
   }
   const restricted = new Set(proxyNames);
   const binding = await e.DB.prepare(
-    `SELECT home_exits.proxy_name, home_exits.kind,
+    `SELECT home_exits.proxy_name, home_exits.kind, home_exits.status AS home_status,
             home_exits.socks5_host, home_exits.socks5_port,
             home_exits.socks5_username, home_exits.socks5_password,
             user_home_bindings.default_proxy_name
      FROM user_home_bindings
-     JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
-     WHERE user_home_bindings.user_id = ?
-       AND home_exits.status = 'active'`,
+     LEFT JOIN home_exits ON home_exits.id = user_home_bindings.home_exit_id
+     WHERE user_home_bindings.user_id = ?`,
   ).bind(userId).first<Row>();
   const allowed = new Set<string>();
   let routing: CatalogRouting | undefined;
   if (binding) {
+    // A disabled/missing assigned exit is not an explicit unbind. Returning
+    // an otherwise healthy cloud-only catalog would silently change identity.
+    if (binding.home_status !== 'active') {
+      throw new ApiError(503, 'CATALOG_UNAVAILABLE', 'Assigned home exit is unavailable');
+    }
     allowed.add(String(binding.proxy_name));
     const directives: CatalogRouting = {};
     if (String(binding.kind ?? 'catalog') === 'socks5') {

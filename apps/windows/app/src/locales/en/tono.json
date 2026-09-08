@@ -169,6 +169,7 @@
       "connecting": "Connecting…",
       "connected": "Connected",
       "protectedOffline": "Protected, not connected",
+      "protectionUnknown": "Protection not verified",
       "disconnecting": "Disconnecting…"
     },
     "subtitle": {
@@ -293,7 +294,8 @@
     "failedAt": "Failed at {{stage}}",
     "unknownStage": "Unknown stage",
     "statusTitle": "This route did not pass the connection check",
-    "statusBody": "Tono is blocking a direct leak. It will switch to a working route and retry.",
+    "statusBody": "Direct traffic is blocked while this connection is unavailable. Retry or restore normal Internet.",
+    "protectionUnknownBody": "Tono cannot confirm network protection. Repair the service if prompted, or choose Restore Normal Internet.",
     "completedCount": "{{count}} completed",
     "technicalDetails": "Technical details",
     "switchRoute": "Choose another route",

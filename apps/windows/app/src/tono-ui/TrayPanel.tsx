@@ -28,6 +28,7 @@ import {
   tonoServers,
   type TonoUiState,
 } from '@/services/tono'
+import { hasLiveProtection } from '@/tono-ui/protection-evidence'
 import { TONO_COLORS, TONO_MONO_STACK, tonoText } from '@/tono-ui/theme'
 import { TonoIcon } from '@/tono-ui/TonoIcon'
 import { TonoNodeBadge } from '@/tono-ui/TonoNodeBadge'
@@ -173,7 +174,8 @@ export const TrayPanel = () => {
                 color: text.primary,
               }}
             >
-              {t(STATUS_LABEL[uiState])}
+              {t(uiState === 'protectedOffline' && !hasLiveProtection(status)
+                ? 'tono.pill.title.protectionUnknown' : STATUS_LABEL[uiState])}
             </span>
           </div>
           <div

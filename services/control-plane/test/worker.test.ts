@@ -3228,6 +3228,16 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // A socks5-kind exit names no catalog node, so nothing is filtered out.
     expect(ownerBody.yaml).toContain('Shared VPS JP');
 
+    // An assigned home becoming unavailable is not an authorized unbind.
+    await env.DB.prepare("UPDATE home_exits SET status = 'disabled' WHERE id = ?").bind(homeId).run();
+    const unavailableHome = await api('exit-catalog', {
+      headers: { authorization: `Bearer ${owner.accessToken}` },
+    });
+    expect(unavailableHome.status).toBe(503);
+    expect(await unavailableHome.text()).not.toContain('resi-secret');
+    await env.DB.prepare("UPDATE home_exits SET status = 'active' WHERE id = ?").bind(homeId).run();
+
+
     // Unbound users get no routing and no credential material at all.
     const otherCatalog = await api('exit-catalog', {
       headers: { authorization: `Bearer ${other.accessToken}` },
@@ -4006,7 +4016,8 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
         'api.statsigapi.net',
         'featuregates.org',
         'growthbook.io',
-        'stripe.network',
+        'stripe.network', 'js.stripe.com', 'checkout.stripe.com',
+        'a.stripecdn.com', 'checkout.link.com', 'newassets.hcaptcha.com',
         'storage.googleapis.com',
         'registry.npmjs.org',
         'raw.githubusercontent.com',
