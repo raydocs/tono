@@ -26,7 +26,7 @@ tooling/scripts/build-mihomo-adaptive.sh --restore-stock
 tooling/scripts/build-mihomo-adaptive.sh --restore-stock-windows
 ```
 
-The script pins the Mihomo tag and commit, requires Go 1.26.5, tests the live
+The script pins the Mihomo tag and commit, requires Go 1.27.1, tests the live
 gVisor stack options before building, and verifies the official compressed and
 decompressed SHA-256 values during rollback. The Windows build keeps the
 official release's `GOAMD64=v2` baseline and installs the same verified binary
