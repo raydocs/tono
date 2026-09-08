@@ -1,5 +1,7 @@
 # Clash Verge leftover inventory
 
+> Historical inventory. Product identity is Tono; leftover names remain only as upgrade cleanup. See [architecture.md](../architecture.md).
+
 Target: production runtime, UI, logs, package names, and payload must not
 use `clash-verge` or `verge-mihomo`. Allowed hits: migration, notices,
 LICENSE, historical tests.

@@ -126,7 +126,7 @@ macOS 与 Windows 客户端共用的视觉与交互约定。改任何 UI 之前�
 ```bash
 # macOS（勿用 /Applications/Tono.app 验证——那是独立安装副本）
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild test \
-  -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \
+  -project apps/macos/Tono.xcodeproj -scheme Tono \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/tono-xcode-derived
 
 # Windows（apps/windows/app）
