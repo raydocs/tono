@@ -1,4 +1,4 @@
-use crate::config::IVerge;
+use crate::config::TonoPreferences;
 use crate::core::tray::menu_def::TrayAction;
 use crate::process::AsyncHandler;
 use crate::singleton;
@@ -94,11 +94,11 @@ pub struct Tray {
 }
 
 impl TrayState {
-    async fn get_tray_icon(verge: &IVerge, ui_state: &str) -> (bool, Cow<'static, [u8]>) {
+    async fn get_tray_icon(verge: &TonoPreferences, ui_state: &str) -> (bool, Cow<'static, [u8]>) {
         Self::load_icon(verge, tray_icon_kind(ui_state)).await
     }
 
-    async fn load_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'static, [u8]>) {
+    async fn load_icon(verge: &TonoPreferences, kind: IconKind) -> (bool, Cow<'static, [u8]>) {
         let (custom_enabled, icon_name) = match kind {
             IconKind::Common => (verge.common_tray_icon.unwrap_or(false), "common"),
             IconKind::SysProxy => (verge.sysproxy_tray_icon.unwrap_or(false), "sysproxy"),
@@ -116,7 +116,7 @@ impl TrayState {
     }
 
     #[allow(clippy::missing_const_for_fn)]
-    fn default_icon(verge: &IVerge, kind: IconKind) -> (bool, Cow<'static, [u8]>) {
+    fn default_icon(verge: &TonoPreferences, kind: IconKind) -> (bool, Cow<'static, [u8]>) {
         #[cfg(target_os = "macos")]
         {
             let is_mono = verge.tray_icon.as_deref().unwrap_or("monochrome") == "monochrome";
@@ -198,7 +198,7 @@ impl Tray {
         }
 
         let app_handle = handle::Handle::app_handle();
-        let tray_event = { Config::verge().await.latest_arc().tray_event.clone() };
+        let tray_event = { Config::preferences().await.latest_arc().tray_event.clone() };
         let tray_event = TrayAction::from(tray_event.as_deref().unwrap_or("main_window"));
         let tray = app_handle
             .tray_by_id(TRAY_ID)
@@ -244,7 +244,7 @@ impl Tray {
     }
 
     /// 更新托盘图标
-    pub async fn update_icon(&self, verge: &IVerge) -> Result<()> {
+    pub async fn update_icon(&self, verge: &TonoPreferences) -> Result<()> {
         if handle::Handle::global().is_exiting() {
             logging!(debug, Type::Tray, "应用正在退出，跳过托盘图标更新");
             return Ok(());
@@ -317,7 +317,7 @@ impl Tray {
             logging!(debug, Type::Tray, "应用正在退出，跳过托盘局部更新");
             return Ok(());
         }
-        let verge = Config::verge().await.data_arc();
+        let verge = Config::preferences().await.data_arc();
         let app_handle = handle::Handle::app_handle();
         self.update_menu_internal(app_handle, false).await?;
         AsyncHandler::spawn(|| async {
@@ -337,7 +337,7 @@ impl Tray {
 
         logging!(info, Type::Tray, "正在从AppHandle创建系统托盘");
 
-        let verge = Config::verge().await.data_arc();
+        let verge = Config::preferences().await.data_arc();
 
         let menu_state = tono_menu_state(app_handle).await;
         let icon_bytes = TrayState::get_tray_icon(&verge, &menu_state.ui_state).await.1;

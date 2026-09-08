@@ -27,7 +27,6 @@ export const useLayoutEvents = (
     const refreshPreferences = () => {
       revalidateKeys([
         'getTonoPreferences',
-        'getVergeConfig',
         'getSystemProxy',
         'getAutotemProxy',
       ])
@@ -39,15 +38,11 @@ export const useLayoutEvents = (
     return subscribeTonoEvents(
       {
         'tono://refresh-core-config': refreshCore,
-        'verge://refresh-clash-config': refreshCore,
         'tono://refresh-preferences': refreshPreferences,
-        'verge://refresh-verge-config': refreshPreferences,
         // The Run State is pushed, not polled: every transition carries the new snapshot, so it
         // is written straight into the cache instead of triggering a fetch.
         'tono://run-state-changed': applyRunState,
-        'verge://run-state-changed': applyRunState,
         'tono://notice-message': handleNotice,
-        'verge://notice-message': handleNotice,
       },
       // The Run State is the one thing here that arrives *only* by event, so it is the one
       // thing a missed event leaves stale — until the next transition, which during startup can

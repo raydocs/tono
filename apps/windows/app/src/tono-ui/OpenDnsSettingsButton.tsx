@@ -21,7 +21,7 @@ export const OpenDnsSettingsButton = ({
   return (
     <button
       type="button"
-      className="tono-button"
+      className={accent ? 'tono-button tono-action' : 'tono-button'}
       onClick={() => void onOpen()}
       style={{
         minHeight: 32,
@@ -32,7 +32,7 @@ export const OpenDnsSettingsButton = ({
         border: 'none',
         cursor: 'pointer',
         color: '#fff',
-        background: accent ? TONO_COLORS.accent : TONO_COLORS.protectedOffline,
+        background: accent ? undefined : TONO_COLORS.protectedOffline,
       }}
     >
       {t('tono.dashboard.openDnsSettings')}

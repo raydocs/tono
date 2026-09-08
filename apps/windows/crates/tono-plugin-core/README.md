@@ -6,10 +6,10 @@
 >
 > ```shell
 > # Cargo.toml
-> tono-plugin-core = { git = "https://github.com/clash-verge-rev/tono-plugin-core" }
+> tono-plugin-core = { path = "apps/windows/crates/tono-plugin-core" }
 >
 > # package.json
-> "tono-plugin-core-api": "git+https://github.com/clash-verge-rev/tono-plugin-core"
+> "tono-plugin-core-api": "workspace:*"
 > ```
 
 一个基于 Tauri 框架调用 Mihomo API 的插件，支持 Mihomo 的 HTTP 和 Socket 通信

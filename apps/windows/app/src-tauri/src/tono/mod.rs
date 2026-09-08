@@ -1,7 +1,8 @@
-//! Tono product layer: account session, exit catalog, and the §6 connect
+//! Tono product layer: account session, exit catalog, and the connect
 //! transaction, built on the portable `tono-core` crate and the Service IPC
-//! client in `core::service`. Nothing here touches the legacy CVR feature
-//! set; the two coexist until the legacy UI is retired.
+//! client in `core::service`. Tono pages are the only UI. Leftover Clash Verge
+//! engine-room (sidecar manager, IClashTemp) is still compiled until those
+//! modules are peeled.
 
 pub mod audit;
 pub mod bootstrap;
@@ -9,6 +10,9 @@ mod browser_dns;
 pub mod catalog_sync;
 pub mod commands;
 pub mod connection;
+mod connection_health;
+mod connection_plan;
+mod connection_routes;
 pub mod credentials;
 pub mod diagnostics;
 mod integration_profile;

@@ -267,6 +267,42 @@ describe('ConnectProgressCard', () => {
     expect(screen.queryByTestId('tono-upload-diagnostics')).toBeNull()
   })
 
+  it('renders nine discrete step dots with matching data-state while connecting', async () => {
+    tonoConnectProgressMock.mockResolvedValue(
+      makeProgress({
+        steps: [
+          step('preparing', 'completed', 80),
+          step('preparingService', 'completed', 90),
+          step('startingKillSwitch', 'completed', 110),
+          step('startingTunnel', 'current', 3400),
+          step('lockingTraffic', 'pending'),
+          step('applyingCloudPolicy', 'pending'),
+          step('securingDNS', 'pending'),
+          step('checkingExit', 'pending'),
+          step('verifyingTraffic', 'failed'),
+        ],
+      }),
+    )
+
+    renderCard()
+
+    const dots = await screen.findByTestId('tono-connect-dots')
+    expect(dots.getAttribute('aria-hidden')).toBe('true')
+    expect(dots.querySelectorAll('[data-state]')).toHaveLength(9)
+    expect(screen.getByTestId('tono-connect-dot-preparing').dataset.state).toBe(
+      'completed',
+    )
+    expect(
+      screen.getByTestId('tono-connect-dot-startingTunnel').dataset.state,
+    ).toBe('current')
+    expect(
+      screen.getByTestId('tono-connect-dot-lockingTraffic').dataset.state,
+    ).toBe('pending')
+    expect(
+      screen.getByTestId('tono-connect-dot-verifyingTraffic').dataset.state,
+    ).toBe('failed')
+  })
+
   it('shows the failure block for an uncleared failure even when idle', async () => {
     tonoConnectProgressMock.mockResolvedValue(
       makeProgress({

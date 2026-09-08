@@ -336,7 +336,7 @@ const assertNsisPayload = (installer) => {
       ...new Set(
         entries
           .map((entry) => entry.base)
-          .filter((base) => /verge-mihomo/i.test(base) && !/alpha/i.test(base)),
+          .filter((base) => /^tono-core\.exe\.next$/i.test(base)),
       ),
     ],
     sample: entries

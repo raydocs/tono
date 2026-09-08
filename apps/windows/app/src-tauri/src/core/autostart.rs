@@ -11,7 +11,7 @@ use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_tono_sysinfo::is_current_app_handle_admin;
 
 pub async fn update_launch() -> Result<()> {
-    let enable_auto_launch = { Config::verge().await.latest_arc().enable_auto_launch };
+    let enable_auto_launch = { Config::preferences().await.latest_arc().enable_auto_launch };
     let is_enable = enable_auto_launch.unwrap_or(false);
     logging!(info, Type::System, "Setting auto-launch enabled state to: {is_enable}");
 
@@ -38,7 +38,7 @@ pub async fn update_launch() -> Result<()> {
 /// First successful connect turns launch-at-startup on unless the user already
 /// chose in Settings. Later connects do nothing.
 pub async fn enable_on_first_connect() {
-    let verge = Config::verge().await;
+    let verge = Config::preferences().await;
     if verge.latest_arc().auto_launch_seeded.unwrap_or(false) {
         return;
     }
@@ -64,7 +64,7 @@ pub async fn enable_on_first_connect() {
         );
         return;
     }
-    Handle::refresh_verge();
+    Handle::refresh_tono_preferences();
     logging!(
         info,
         Type::System,

@@ -212,7 +212,7 @@ struct SupportView: View {
         let hasConflict = !issues.isEmpty
         let isIncomplete = terminalEnvReport.map { !$0.isComplete } ?? true
         let statusColor: Color = isIncomplete ? .orange
-            : hasConflict ? .red : Color(hex: "2ECC71")
+            : hasConflict ? TonoStatus.error : TonoStatus.positive
 
         return SupportCard(
             icon: "terminal",
@@ -453,7 +453,7 @@ struct SupportView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(TonoBrand.accent)
                     .disabled(isUploadingLog || logUploadBlockedReason != nil)
                 }
 
@@ -473,7 +473,7 @@ struct SupportView: View {
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(TonoBrand.accent)
                         }
                     }
                 } else if let outcome = logUploadOutcome {
@@ -581,7 +581,7 @@ struct SupportView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(TonoBrand.accent)
                 }
             }
         }
@@ -639,7 +639,7 @@ struct SupportView: View {
                 Button(String(localized: "Show in Finder"), action: reveal)
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(TonoBrand.accent)
 
                 Button(
                     copiedTarget == copyTarget
@@ -650,7 +650,7 @@ struct SupportView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tint)
+                .foregroundStyle(TonoBrand.accent)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

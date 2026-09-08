@@ -5,7 +5,8 @@ import { useThemeMode } from '@/services/states'
 import type { TonoUiState } from '@/services/tono'
 import { CONNECT_STAGE_LABEL_KEYS } from '@/tono-ui/connect-stages'
 
-import { TONO_COLORS, TONO_EASE, tonoText } from './theme'
+import './connect-motion.css'
+import { TONO_COLORS, tonoText } from './theme'
 import { TonoIcon } from './TonoIcon'
 import { TonoLogo } from './TonoLogo'
 
@@ -40,10 +41,10 @@ const STATE_SPECS: Record<TonoUiState, StateSpec> = {
     color: TONO_COLORS.accent,
     glowOpacity: 0.26,
     glowScale: 1.03,
-    titleKey: 'tono.pill.title.connecting',
+    titleKey: 'shared.actions.cancel',
     titleColored: true,
     indicator: 'spinner',
-    disabled: true,
+    disabled: false,
   },
   connected: {
     color: TONO_COLORS.connected,
@@ -113,20 +114,25 @@ export const ConnectPill = ({
 
   const handleClick = () => {
     if (spec.disabled) return
-    if (uiState === 'connected' || uiState === 'protectedOffline') {
+    if (
+      uiState === 'connecting' ||
+      uiState === 'connected' ||
+      uiState === 'protectedOffline'
+    ) {
       onDisconnect()
     } else {
       onConnect()
     }
   }
 
-  const transition = `0.22s ${TONO_EASE}`
+  const transition = 'var(--tono-duration-state) var(--tono-ease)'
+  const connected = uiState === 'connected'
 
   return (
     <button
       type="button"
       className="tono-pill"
-      disabled={spec.disabled}
+      aria-disabled={spec.disabled || undefined}
       onClick={handleClick}
       aria-label={`${t(spec.titleKey)} — ${subtitle}`}
       style={{
@@ -143,12 +149,9 @@ export const ConnectPill = ({
         cursor: spec.disabled ? 'default' : 'pointer',
         color: text.primary,
         background: 'var(--tono-surface-pill)',
-        backdropFilter: 'var(--tono-glass-blur)',
-        WebkitBackdropFilter: 'var(--tono-glass-blur)',
-        boxShadow:
-          uiState === 'connected'
-            ? 'var(--tono-shadow-pill-connected)'
-            : 'var(--tono-shadow-pill)',
+        boxShadow: connected
+          ? 'var(--tono-shadow-pill-connected)'
+          : 'var(--tono-shadow-pill)',
         transition: `background ${transition}, border-color ${transition}, box-shadow ${transition}, transform ${transition}`,
       }}
     >
@@ -165,20 +168,22 @@ export const ConnectPill = ({
         }}
       >
         <span
+          key={connected ? 'arrival' : 'idle'}
           aria-hidden
-          style={{
-            position: 'absolute',
-            width: 64,
-            height: 64,
-            borderRadius: 20,
-            background: `radial-gradient(circle at 50% 45%, ${hex(spec.color, 0.42)} 0%, ${hex(spec.color, 0.16)} 46%, ${hex(spec.color, 0)} 74%)`,
-            filter: 'blur(7px)',
-            opacity: spec.glowOpacity,
-            transform: `scale(${spec.glowScale})`,
-            transition: `opacity ${transition}, transform ${transition}, background ${transition}`,
-          }}
+          className={
+            connected
+              ? 'tono-connect-glow tono-connect-glow--arrival'
+              : 'tono-connect-glow'
+          }
+          style={
+            {
+              '--tono-connect-glow-color': hex(spec.color, 0.35),
+              opacity: connected ? undefined : spec.glowOpacity,
+              transform: connected ? undefined : `scale(${spec.glowScale})`,
+            } as CSSProperties
+          }
         />
-        <TonoLogo connected={uiState === 'connected'} size={54} />
+        <TonoLogo connected={connected} size={54} />
       </span>
 
       {/* Text zone */}
@@ -246,6 +251,13 @@ export const ConnectPill = ({
             />
           )}
           <span
+            key={subtitle}
+            className="tono-text-in"
+            aria-live={
+              uiState === 'connecting' || uiState === 'disconnecting'
+                ? 'polite'
+                : undefined
+            }
             style={{
               overflow: 'hidden',
               textOverflow: 'ellipsis',

@@ -20,10 +20,43 @@ const status = (accountState: TonoStatus['accountState']): TonoStatus =>
 
 describe('resolveTonoGuard', () => {
   it('leaves the tray flyout mounted while signed out', () => {
-    expect(resolveTonoGuard(status('signedOut'), '/tray')).toBeNull()
+    expect(resolveTonoGuard(status('signedOut'), '/tray', false)).toBeNull()
   })
 
   it('does not send a ready session away from the tray flyout', () => {
-    expect(resolveTonoGuard(status('ready'), '/tray')).toBeNull()
+    expect(resolveTonoGuard(status('ready'), '/tray', true)).toBeNull()
+  })
+
+  it('sends a first-run signed-out user to intro instead of login', () => {
+    expect(resolveTonoGuard(status('signedOut'), '/', false)).toBe('toIntro')
+    expect(resolveTonoGuard(status('signedOut'), '/login', false)).toBe(
+      'toIntro',
+    )
+    expect(resolveTonoGuard(status('signedOut'), '/intro', false)).toBeNull()
+  })
+
+  it('sends a signed-out user who has seen intro to login', () => {
+    expect(resolveTonoGuard(status('signedOut'), '/', true)).toBe('toLogin')
+    expect(resolveTonoGuard(status('signedOut'), '/intro', true)).toBe(
+      'toLogin',
+    )
+    expect(resolveTonoGuard(status('signedOut'), '/login', true)).toBeNull()
+  })
+
+  it('never shows intro to a signed-in user', () => {
+    expect(resolveTonoGuard(status('ready'), '/intro', false)).toBe('toHome')
+    expect(resolveTonoGuard(status('ready'), '/login', false)).toBe('toHome')
+    expect(resolveTonoGuard(status('ready'), '/', false)).toBeNull()
+  })
+
+  it('keeps mid-sign-in and account errors on login, not intro', () => {
+    expect(resolveTonoGuard(status('authenticating'), '/', false)).toBe(
+      'toLogin',
+    )
+    expect(resolveTonoGuard(status('authenticating'), '/intro', false)).toBe(
+      'toLogin',
+    )
+    expect(resolveTonoGuard(status('suspended'), '/', false)).toBe('toLogin')
+    expect(resolveTonoGuard(status('error'), '/intro', false)).toBe('toLogin')
   })
 })

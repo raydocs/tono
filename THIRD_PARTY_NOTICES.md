@@ -22,7 +22,7 @@ No binary is committed by this integration. Build both executables from the
 pinned, verified source, then codesign them with the same team used for the app
 before signing/archiving the outer app. Hardened-runtime, entitlement and
 notarization validation must include both nested executables. Tono runs them as
-an unprivileged app child; it is separate from LiquidClash's root Mihomo helper.
+an unprivileged app child; it is separate from Tono's root Mihomo helper.
 
 ## Sparkle
 

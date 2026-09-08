@@ -20,6 +20,27 @@
   --tono-duration-toast-out: 0.2s; /* @kind other */
   --tono-duration-page-in: 0.5s; /* @kind other */
   --tono-press-scale: 0.98; /* @kind other */
+
+  /* Motion contract — one table, both clients (macOS: Views/TonoMotion.swift;
+     the numbers are listed in docs/ui-design-system.md §7). Everything is
+     feedback for something that just happened; nothing here loops. */
+  --tono-duration-press: 0.1s; /* @kind other */
+  --tono-duration-text: 0.22s; /* @kind other */ /* live text replacing live text */
+  --tono-duration-surface: 0.35s; /* @kind other */ /* a card arriving or leaving */
+  --tono-duration-page: 0.18s; /* @kind other */ /* detail column switching pages */
+  --tono-duration-banner: 0.22s; /* @kind other */
+  --tono-duration-numeric: 0.3s; /* @kind other */ /* a measurement landing */
+  --tono-duration-arrival: 0.5s; /* @kind other */ /* the tunnel coming up */
+  --tono-ease-surface: cubic-bezier(
+    0.2,
+    0.7,
+    0.2,
+    1
+  ); /* @kind other */ /* critically damped, no overshoot */
+  --tono-spring-arrival: var(--tono-spring); /* the only overshoot in the app */
+  --tono-rise-text: 2px;
+  --tono-rise-page: 4px;
+  --tono-rise-surface: 6px;
   --tono-hover-lift: -2px; /* ConnectPill */
   --tono-hover-lift-card: -1px;
 }

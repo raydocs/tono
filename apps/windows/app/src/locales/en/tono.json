@@ -85,8 +85,30 @@
       "split": "Route split"
     }
   },
+  "intro": {
+    "landmark": "Welcome to Tono",
+    "skip": "Skip",
+    "next": "Continue",
+    "getStarted": "Get started →",
+    "progress": "Step {{step}} of 4",
+    "step1": {
+      "headline": "Connected means protected.",
+      "body": "Open Tono, click once, and all your traffic takes the protected route."
+    },
+    "step2": {
+      "headline": "Offline, never exposed.",
+      "body": "If the route fails, Tono cuts off first so nothing leaks out."
+    },
+    "step3": {
+      "headline": "Routes are Tono's job.",
+      "body": "Nothing to configure. To change region, pick a node."
+    }
+  },
   "login": {
     "restoringSession": "Opening your Tono workspace…",
+    "stillWaiting": "Still waiting?",
+    "restoreInternet": "Restore internet",
+    "restartTono": "Restart Tono",
     "brandLabel": "YOUR EVERYDAY CONNECTION",
     "brandTitle": "A little closer.\nA world more open.",
     "brandDescription": "One quiet space for your connection, your routes, and your peace of mind.",
@@ -104,6 +126,8 @@
     "sendCode": "Send code",
     "sendNewCode": "Send again",
     "sending": "Sending…",
+    "sent": "Sent to your inbox",
+    "trust": "Your email is only used to sign in. Traffic logs are never uploaded unless you turn that on in Settings.",
     "resendIn": "Resend in {{seconds}}s",
     "codeSent": "Code sent.",
     "codeSentTo": "Sent to the address above. Check the full address, and spam.",

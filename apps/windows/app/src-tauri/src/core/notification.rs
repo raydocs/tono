@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter as _, Manager as _, WebviewWindow};
 #[derive(Debug)]
 pub enum FrontendEvent<'a> {
     RefreshClash,
-    RefreshVerge,
+    RefreshPreferences,
     RefreshProfiles,
     NoticeMessage { status: &'a str, message: String },
     RunStateChanged { state: serde_json::Value },
@@ -28,23 +28,23 @@ impl NotificationSystem {
     ) -> (&'static [&'static str], Result<serde_json::Value, serde_json::Error>) {
         match event {
             FrontendEvent::RefreshClash => (
-                &["tono://refresh-core-config", "verge://refresh-clash-config"],
+                &["tono://refresh-core-config"],
                 Ok(json!("yes")),
             ),
-            FrontendEvent::RefreshVerge => (
-                &["tono://refresh-preferences", "verge://refresh-verge-config"],
+            FrontendEvent::RefreshPreferences => (
+                &["tono://refresh-preferences"],
                 Ok(json!("yes")),
             ),
             FrontendEvent::RefreshProfiles => (
-                &["tono://refresh-profiles", "verge://refresh-profiles"],
+                &["tono://refresh-profiles"],
                 Ok(json!("yes")),
             ),
             FrontendEvent::NoticeMessage { status, message } => (
-                &["tono://notice-message", "verge://notice-message"],
+                &["tono://notice-message"],
                 serde_json::to_value((status, message)),
             ),
             FrontendEvent::RunStateChanged { state } => (
-                &["tono://run-state-changed", "verge://run-state-changed"],
+                &["tono://run-state-changed"],
                 Ok(state),
             ),
         }

@@ -47,6 +47,7 @@ const {
   tonoSignInVerifyMock,
   tonoRetryRestoreMock,
   tonoDisconnectMock,
+  restartAppMock,
 } = vi.hoisted(() => ({
   tonoStatusMock: vi.fn(),
   subscribeTonoStatusMock: vi.fn((_handler: unknown) => () => {}),
@@ -54,6 +55,7 @@ const {
   tonoSignInVerifyMock: vi.fn(),
   tonoRetryRestoreMock: vi.fn(),
   tonoDisconnectMock: vi.fn(),
+  restartAppMock: vi.fn(),
 }))
 
 vi.mock('@/services/tono', () => ({
@@ -81,6 +83,10 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }))
 
+vi.mock('@/services/cmds', () => ({
+  restartApp: restartAppMock,
+}))
+
 import { TonoAuthGuard } from './tono-auth-guard'
 
 // No resources loaded: t() returns the key, which is what the login-flow test
@@ -103,6 +109,10 @@ const renderAt = (path: string) =>
           path="/login"
           element={<TonoAuthGuard>login page</TonoAuthGuard>}
         />
+        <Route
+          path="/intro"
+          element={<TonoAuthGuard>intro page</TonoAuthGuard>}
+        />
       </Routes>
     </MemoryRouter>,
     { wrapper: freshSWR },
@@ -116,10 +126,14 @@ beforeEach(() => {
   tonoSignInVerifyMock.mockReset()
   tonoRetryRestoreMock.mockReset()
   tonoDisconnectMock.mockReset().mockResolvedValue(undefined)
+  restartAppMock.mockReset()
+  localStorage.setItem('tono.introSeen', '1')
 })
 
 afterEach(async () => {
   cleanup()
+  vi.useRealTimers()
+  localStorage.removeItem('tono.introSeen')
   await removeCacheData(tonoStatusQueryKey)
 })
 
@@ -186,6 +200,27 @@ describe('TonoAuthGuard', () => {
     )
   })
 
+  it('sends a first-run signed-out user to intro', async () => {
+    localStorage.removeItem('tono.introSeen')
+    tonoStatusMock.mockResolvedValue(statusPayload('signedOut'))
+
+    renderAt('/')
+
+    await waitFor(() => expect(screen.getByText('intro page')).toBeDefined())
+    expect(screen.queryByText('login page')).toBeNull()
+  })
+
+  it('kicks a ready account off /intro back to the dashboard', async () => {
+    tonoStatusMock.mockResolvedValue(statusPayload('ready'))
+
+    renderAt('/intro')
+
+    await waitFor(() =>
+      expect(screen.getByText('dashboard page')).toBeDefined(),
+    )
+    expect(screen.queryByText('intro page')).toBeNull()
+  })
+
   it('shows a loading placeholder while restoring', async () => {
     tonoStatusMock.mockResolvedValue(statusPayload('restoring'))
 
@@ -211,6 +246,45 @@ describe('TonoAuthGuard', () => {
       ),
     )
     expect(screen.queryByText('dashboard page')).toBeNull()
+  })
+
+  it('reveals restore and restart after 8 seconds if restore hangs', () => {
+    vi.useFakeTimers()
+    tonoStatusMock.mockReturnValue(new Promise(() => {}))
+
+    renderAt('/')
+
+    expect(screen.getByText('tono.login.restoringSession')).toBeDefined()
+    expect(screen.queryByText('tono.login.stillWaiting')).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'tono.login.restoreInternet' }),
+    ).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(7999)
+    })
+    expect(screen.queryByText('tono.login.stillWaiting')).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(screen.getByText('tono.login.stillWaiting')).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'tono.login.restoreInternet' }),
+    ).toBeDefined()
+    expect(
+      screen.getByRole('button', { name: 'tono.login.restartTono' }),
+    ).toBeDefined()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'tono.login.restartTono' }),
+    )
+    expect(restartAppMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'tono.login.restoreInternet' }),
+    )
+    expect(screen.getByRole('dialog')).toBeDefined()
   })
 })
 
@@ -337,8 +411,9 @@ describe('login flow under status pushes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'tono.login.sendCode' }))
 
     await waitFor(() => expect(tonoSignInStartMock).toHaveBeenCalled())
-    const codeInput = await screen.findByPlaceholderText(
-      'tono.login.codePlaceholder',
+    const codeInput = await waitFor(
+      () => screen.getByPlaceholderText('tono.login.codePlaceholder'),
+      { timeout: 4000 },
     )
     expect(codeInput).toBeDefined()
 

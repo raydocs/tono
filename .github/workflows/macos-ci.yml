@@ -41,8 +41,8 @@ jobs:
       - name: Build the macOS app without signing
         run: |
           xcodebuild \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
             build
@@ -50,8 +50,8 @@ jobs:
       - name: Run the TonoTests unit tests
         run: |
           xcodebuild \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             test
@@ -81,6 +81,9 @@ jobs:
 
       - name: Reload preserves established connections
         run: tooling/scripts/test-reload-preserves-connections.sh
+
+      - name: Sparkle signing tool selection
+        run: python3 tooling/scripts/tests/test_sparkle_tool.py
 
       - name: Appcast publisher validation
         run: node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
@@ -116,20 +119,20 @@ jobs:
             apps/macos/Tono/Resources/mihomo /Library/PrivilegedHelperTools/tono-mihomo
 
       - name: Helper self-test including the PF parse
-        run: sudo apps/macos/Tono/Resources/liquidclash-helper --self-test
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --self-test
 
       - name: Helper lifecycle self-test
         # Loads into an anchor no parent ruleset references, so pfctl parses and
         # installs it for real while no packet is ever evaluated against it.
-        run: sudo apps/macos/Tono/Resources/liquidclash-helper --lifecycle-self-test
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --lifecycle-self-test
 
       - name: Helper core lifecycle self-test
         # Starts the installed core against a config staged through the real
         # digest check, in the `Tono-Dev` directory production already accepts, so
         # no live configuration is involved and no tunnel is created.
-        run: sudo apps/macos/Tono/Resources/liquidclash-helper --core-lifecycle-self-test
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --core-lifecycle-self-test
 
       - name: Helper staging refusal matrix
         # Proves ownership, permission, and symlink enforcement by constructing
         # the failing cases, which needs the ability to chown to another user.
-        run: sudo apps/macos/Tono/Resources/liquidclash-helper --staging-self-test
+        run: sudo apps/macos/Tono/Resources/tono-core-helper --staging-self-test

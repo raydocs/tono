@@ -85,8 +85,30 @@
       "split": "路径拆分"
     }
   },
+  "intro": {
+    "landmark": "欢迎使用 Tono",
+    "skip": "跳过",
+    "next": "继续",
+    "getStarted": "开始使用 →",
+    "progress": "第 {{step}} 步，共 4 步",
+    "step1": {
+      "headline": "连上，就受保护。",
+      "body": "打开 Tono，点一下，所有流量都走受保护线路。"
+    },
+    "step2": {
+      "headline": "断网，也不裸奔。",
+      "body": "线路出问题时，Tono 会先切断，不让流量漏出去。"
+    },
+    "step3": {
+      "headline": "线路，Tono 替你选。",
+      "body": "没有设置要调。想换地区，选一个节点就好。"
+    }
+  },
   "login": {
     "restoringSession": "正在打开你的 Tono 工作区…",
+    "stillWaiting": "还在等待？",
+    "restoreInternet": "恢复网络",
+    "restartTono": "重启 Tono",
     "brandLabel": "连接，从容一点",
     "brandTitle": "距离近一点。\n世界，开阔一点。",
     "brandDescription": "连接、线路与每一次出发，都在这一处安静的空间里。",
@@ -104,6 +126,8 @@
     "sendCode": "发送验证码",
     "sendNewCode": "重新发送",
     "sending": "发送中…",
+    "sent": "已发送到邮箱",
+    "trust": "邮箱只用于登录。流量日志不会上传，除非你在设置里打开。",
     "resendIn": "{{seconds}} 秒后可重发",
     "codeSent": "验证码已发送。",
     "codeSentTo": "已发到上面这封邮箱。核对完整地址，也可看垃圾箱。",

@@ -176,8 +176,8 @@ jobs:
           esac
           settings=$(
             xcodebuild \
-              -project apps/macos/LiquidClash.xcodeproj \
-              -scheme LiquidClash \
+              -project apps/macos/Tono.xcodeproj \
+              -scheme Tono \
               -configuration Release \
               -showBuildSettings 2>/dev/null
           )
@@ -224,8 +224,8 @@ jobs:
         run: |
           set -eu
           xcodebuild test \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-tests" \
@@ -350,31 +350,22 @@ jobs:
           name: ${{ needs.build.outputs.artifact_name }}
           path: ${{ runner.temp }}/release
 
-      - name: Locate the pinned Sparkle 2.9.4 sign_update tool
+      - name: Locate the pinned Sparkle 2.9.6 sign_update tool
         run: |
           set -eu
-          resolved=apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.4"' "$resolved"; then
-            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.4"
+          resolved=apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if ! grep -qE '"version"[[:space:]]*:[[:space:]]*"2\.9\.6"' "$resolved"; then
+            echo "::error title=Sparkle pin drifted::$resolved no longer pins Sparkle 2.9.6"
             echo "FATAL: the signing tool must come from the same Sparkle version the app embeds." >&2
             exit 1
           fi
           xcodebuild \
-            -project apps/macos/LiquidClash.xcodeproj \
-            -scheme LiquidClash \
+            -project apps/macos/Tono.xcodeproj \
+            -scheme Tono \
             -resolvePackageDependencies \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
-          sign_update=$(
-            find "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts" \
-              -type f -name sign_update -perm -111 2>/dev/null | head -n 1
-          )
-          if [ -z "$sign_update" ]; then
-            echo "::error title=Sparkle sign_update not found::the resolved Sparkle artifact bundle has no bin/sign_update"
-            echo "FATAL: cannot sign the enclosure without Sparkle's own sign_update tool." >&2
-            echo "This workflow never implements EdDSA signing itself; install the Sparkle 2.9.4" >&2
-            echo "distribution's bin/sign_update on the runner and re-run." >&2
-            exit 1
-          fi
+          sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
+            "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts")
           echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
 
       - name: Sign the enclosure with Sparkle and verify the signature round-trips

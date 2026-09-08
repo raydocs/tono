@@ -1,0 +1,174 @@
+use super::CmdResult;
+use crate::{cmd::StringifyErr as _, config::TonoPreferences, feat};
+use tono_draft::SharedDraft;
+
+/// Display/behavior preferences. The Tauri command name is Tono's; the
+/// stored document is still migrated from the legacy Verge file once.
+#[tauri::command]
+pub async fn get_tono_preferences() -> CmdResult<SharedDraft<TonoPreferences>> {
+    feat::fetch_tono_preferences().await.stringify_err()
+}
+
+/// Tono whitelist: `patch_tono_preferences` only accepts display/behavior
+/// fields. Anything that can steer traffic, the core, the proxy surface,
+/// credentials, or backups is rejected *before* it reaches the draft
+/// (P0-3). A forbidden key present (non-None) fails the whole patch.
+fn forbidden_field_present(patch: &TonoPreferences) -> Option<&'static str> {
+    #[allow(clippy::type_complexity)]
+    #[allow(unused_mut)] // the platform `extend` below may be compiled out
+    let mut forbidden: Vec<(&'static str, bool)> = vec![
+        ("enable_tun_mode", patch.enable_tun_mode.is_some()),
+        ("enable_system_proxy", patch.enable_system_proxy.is_some()),
+        ("enable_proxy_guard", patch.enable_proxy_guard.is_some()),
+        ("proxy_guard_duration", patch.proxy_guard_duration.is_some()),
+        ("enable_bypass_check", patch.enable_bypass_check.is_some()),
+        ("use_default_bypass", patch.use_default_bypass.is_some()),
+        ("system_proxy_bypass", patch.system_proxy_bypass.is_some()),
+        ("proxy_auto_config", patch.proxy_auto_config.is_some()),
+        ("pac_file_content", patch.pac_file_content.is_some()),
+        ("proxy_host", patch.proxy_host.is_some()),
+        ("verge_mixed_port", patch.verge_mixed_port.is_some()),
+        ("verge_socks_port", patch.verge_socks_port.is_some()),
+        ("verge_socks_enabled", patch.verge_socks_enabled.is_some()),
+        ("verge_port", patch.verge_port.is_some()),
+        ("verge_http_enabled", patch.verge_http_enabled.is_some()),
+        ("webdav_url", patch.webdav_url.is_some()),
+        ("webdav_username", patch.webdav_username.is_some()),
+        ("webdav_password", patch.webdav_password.is_some()),
+        ("enable_external_controller", patch.enable_external_controller.is_some()),
+        ("hotkeys", patch.hotkeys.is_some()),
+        ("startup_script", patch.startup_script.is_some()),
+        ("clash_core", patch.clash_core.is_some()),
+        // Tono has no hidden-start or lightweight-mode controls. Letting a migrated legacy
+        // component persist either flag makes a normal desktop/installer launch appear to do
+        // nothing because the process starts without a window.
+        ("enable_silent_start", patch.enable_silent_start.is_some()),
+        (
+            "enable_auto_light_weight_mode",
+            patch.enable_auto_light_weight_mode.is_some(),
+        ),
+        (
+            "enable_auto_backup_schedule",
+            patch.enable_auto_backup_schedule.is_some(),
+        ),
+        ("auto_backup_interval_hours", patch.auto_backup_interval_hours.is_some()),
+        ("auto_backup_on_change", patch.auto_backup_on_change.is_some()),
+        // Tray click behavior is pinned to `dashboard` (P0-5); any other
+        // value is a proxy/TUN steer.
+        (
+            "tray_event",
+            patch.tray_event.as_deref().is_some_and(|event| event != "dashboard"),
+        ),
+    ];
+    #[cfg(target_os = "macos")]
+    forbidden.push(("macos_kill_switch_mode", patch.macos_kill_switch_mode.is_some()));
+    #[cfg(not(target_os = "windows"))]
+    forbidden.extend([
+        ("verge_redir_port", patch.verge_redir_port.is_some()),
+        ("verge_redir_enabled", patch.verge_redir_enabled.is_some()),
+    ]);
+    #[cfg(target_os = "linux")]
+    forbidden.extend([
+        ("verge_tproxy_port", patch.verge_tproxy_port.is_some()),
+        ("verge_tproxy_enabled", patch.verge_tproxy_enabled.is_some()),
+    ]);
+    forbidden
+        .into_iter()
+        .find_map(|(field, present)| present.then_some(field))
+}
+
+#[tauri::command]
+pub async fn patch_tono_preferences(payload: TonoPreferences) -> CmdResult {
+    if let Some(field) = forbidden_field_present(&payload) {
+        return Err(format!("disabled by Tono: {field}").into());
+    }
+    feat::patch_preferences(&payload, false).await.stringify_err()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::forbidden_field_present;
+    use crate::config::TonoPreferences;
+
+    #[test]
+    fn display_fields_pass_the_whitelist() {
+        let patch = TonoPreferences {
+            language: Some("en".into()),
+            theme_mode: Some("dark".into()),
+            enable_auto_launch: Some(true),
+            home_cards: None,
+            test_list: None,
+            tray_event: Some("dashboard".into()),
+            ..TonoPreferences::default()
+        };
+        assert_eq!(forbidden_field_present(&patch), None);
+    }
+
+    #[test]
+    fn hidden_start_fields_are_rejected() {
+        for patch in [
+            TonoPreferences {
+                enable_silent_start: Some(true),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                enable_auto_light_weight_mode: Some(true),
+                ..TonoPreferences::default()
+            },
+        ] {
+            assert!(forbidden_field_present(&patch).is_some());
+        }
+    }
+
+    #[test]
+    fn traffic_and_core_fields_are_rejected() {
+        for patch in [
+            TonoPreferences {
+                enable_tun_mode: Some(true),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                enable_system_proxy: Some(false),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                proxy_auto_config: Some(true),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                verge_mixed_port: Some(7890),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                enable_external_controller: Some(true),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                hotkeys: Some(vec!["dashboard,CTRL+Q".into()]),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                startup_script: Some("echo hi".into()),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                clash_core: Some("tono-core".into()),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                webdav_url: Some("https://dav.example.com".into()),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                auto_backup_on_change: Some(true),
+                ..TonoPreferences::default()
+            },
+            TonoPreferences {
+                tray_event: Some("system_proxy".into()),
+                ..TonoPreferences::default()
+            },
+        ] {
+            assert!(forbidden_field_present(&patch).is_some(), "{patch:?}");
+        }
+    }
+}

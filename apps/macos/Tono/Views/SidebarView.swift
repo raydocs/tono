@@ -6,6 +6,7 @@ struct SidebarView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @State private var hoveredPage: AppPage?
+    @Namespace private var navNS
 
     // Keep the primary flow focused on connection, servers, and diagnostics.
     // Catalog synchronization is part of Nodes; it is not a separate user
@@ -25,7 +26,7 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             // 品牌区
             HStack(spacing: 10) {
-                LiquidClashLogo(compact: true)
+                TonoLogo(compact: true)
                     .frame(width: 22, height: 22)
                 Text(AppProfile.displayName)
                     .font(.system(size: 15, weight: .semibold))
@@ -103,6 +104,9 @@ struct SidebarView: View {
                 // Liquid glass selection: a lifted glass capsule, not a
                 // filled color block.
                 if isSelected {
+                    // One capsule per group slides to the chosen item
+                    // (matched geometry); crossing groups it fades instead of
+                    // stretching through the spacer.
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.white.opacity(colorScheme == .dark ? 0.13 : 0.78))
                         .overlay {
@@ -113,6 +117,7 @@ struct SidebarView: View {
                                 )
                         }
                         .shadow(color: .black.opacity(colorScheme == .dark ? 0.3 : 0.10), radius: 8, y: 3)
+                        .matchedGeometryEffect(id: indicatorID(for: page), in: navNS)
                 } else if hoveredPage == page {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.white.opacity(colorScheme == .dark ? 0.07 : 0.5))
@@ -131,6 +136,7 @@ struct SidebarView: View {
                         .frame(width: 3)
                         .padding(.vertical, 8)
                         .padding(.leading, 4)
+                        .matchedGeometryEffect(id: indicatorID(for: page) + ".line", in: navNS)
                 }
             }
         }
@@ -138,14 +144,18 @@ struct SidebarView: View {
         .onHover { hovering in
             hoveredPage = hovering ? page : (hoveredPage == page ? nil : hoveredPage)
         }
-        .animation(TonoMotion.easeOut(0.15, reduceMotion: reduceMotion), value: hoveredPage)
-        .animation(TonoMotion.easeOut(0.15, reduceMotion: reduceMotion), value: isSelected)
+        .animation(TonoMotion.hover(reduceMotion: reduceMotion), value: hoveredPage)
+        .animation(TonoMotion.nav(reduceMotion: reduceMotion), value: isSelected)
 
         if let shortcut = commandShortcut(for: page) {
             item.keyboardShortcut(shortcut, modifiers: .command)
         } else {
             item
         }
+    }
+
+    private func indicatorID(for page: AppPage) -> String {
+        mainPages.contains(page) ? "nav.main" : "nav.footer"
     }
 
     /// ⌘1–⌘4 follow the visible `mainPages` order so Logs only claims ⌘4

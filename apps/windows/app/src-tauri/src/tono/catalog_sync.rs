@@ -1,4 +1,4 @@
-//! Exit catalog sync (product-contract.md §3): fetch → validate → persist the
+//! Exit catalog sync: fetch → validate → persist the
 //! verified copy, immediately on login/restore and then every 300 s. Failures
 //! retry at 1 s intervals, at most 3 retries. A `StaleRevision` install result
 //! is a benign no-op (out-of-order delivery), never an error and never counted

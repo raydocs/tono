@@ -1,4 +1,4 @@
-//! Credential plumbing for the Tono account session (product-contract.md §2).
+//! Credential plumbing for the Tono account session.
 //!
 //! Two layers, deliberately separate:
 //!

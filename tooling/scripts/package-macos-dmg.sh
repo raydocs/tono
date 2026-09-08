@@ -78,7 +78,7 @@ esac
 
 for executable in \
     "$source_app/Contents/MacOS/Tono" \
-    "$source_app/Contents/Resources/liquidclash-helper" \
+    "$source_app/Contents/Resources/tono-core-helper" \
     "$source_app/Contents/Resources/mihomo"; do
     if [ ! -x "$executable" ]; then
         echo "Missing embedded executable: $executable" >&2
@@ -99,7 +99,7 @@ verify_app_trust_boundary() {
     app_path=$1
     /usr/bin/codesign --verify --deep --strict --all-architectures "$app_path"
     verify_team_identifier "$app_path/Contents/MacOS/Tono"
-    verify_team_identifier "$app_path/Contents/Resources/liquidclash-helper"
+    verify_team_identifier "$app_path/Contents/Resources/tono-core-helper"
     verify_team_identifier "$app_path/Contents/Resources/mihomo"
 }
 

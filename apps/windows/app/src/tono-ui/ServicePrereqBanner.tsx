@@ -104,7 +104,7 @@ export const ServicePrereqBanner = () => {
               marginTop: 4,
               fontSize: 12,
               fontWeight: 500,
-              color: TONO_COLORS.error,
+              color: 'var(--tono-text-error)',
             }}
           >
             {error}

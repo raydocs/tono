@@ -11,6 +11,7 @@ import { initReactI18next } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoStatus } from '@/services/tono'
 
@@ -54,7 +55,7 @@ vi.mock('./connect-progress', () => ({ ConnectProgressCard: () => null }))
 import DashboardPage from './dashboard'
 
 void i18n.use(initReactI18next).init({
-  resources: { en: { translation: { tono: enTono } } },
+  resources: { en: { translation: { tono: enTono, shared: enShared } } },
   lng: 'en',
 })
 
@@ -257,6 +258,40 @@ describe('dashboard action-error ownership', () => {
     await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(2))
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
     expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+  })
+})
+
+describe('dashboard cancel while connecting', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('ignores a pill click inside the 1.2s grace and disconnects after it', async () => {
+    vi.useFakeTimers()
+    mocks.status = makeStatus({
+      uiState: 'connecting',
+      selectedServer: 'US West 1',
+      stage: 'lockingTraffic',
+    })
+    renderDashboard()
+
+    const pill = screen.getByRole('button', { name: /^Cancel/ })
+    expect((pill as HTMLButtonElement).disabled).toBe(false)
+    expect(pill.getAttribute('aria-disabled')).toBeNull()
+
+    fireEvent.click(pill)
+    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1199)
+    fireEvent.click(pill)
+    expect(mocks.tonoDisconnect).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    fireEvent.click(pill)
+    await Promise.resolve()
+    expect(mocks.tonoDisconnect).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
 

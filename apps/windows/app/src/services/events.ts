@@ -13,29 +13,18 @@ import type { RunState } from './cmds'
 interface TonoEvents {
   /** The core's own configuration changed. */
   'tono://refresh-core-config': string
-  'verge://refresh-clash-config': string
   /** The app's configuration changed. */
   'tono://refresh-preferences': string
-  'verge://refresh-verge-config': string
   /** The set of profiles changed. */
   'tono://refresh-profiles': string
-  'verge://refresh-profiles': string
-  /** The active profile's proxies changed. */
-  'verge://refresh-proxy-config': null
   /** A backend message for the user: `[status, message]`. */
   'tono://notice-message': [string, string]
-  'verge://notice-message': [string, string]
-  /** A profile's auto-update timer was rescheduled. */
-  'verge://timer-updated': string
   /** How the core is running changed; carries the whole snapshot. */
   'tono://run-state-changed': RunState
-  'verge://run-state-changed': RunState
   /** Which profile is active changed. */
   'profile-changed': string
   'profile-update-started': { uid?: string }
   'profile-update-completed': { uid?: string }
-  /** Frontend to frontend: the home card asks the test page to run every test. */
-  'verge://test-all': null
 }
 
 type TonoEventName = keyof TonoEvents
@@ -103,6 +92,3 @@ export const subscribeTonoEvents = (
     }
   }
 }
-
-/** @deprecated use subscribeTonoEvents */
-export const subscribeVergeEvents = subscribeTonoEvents

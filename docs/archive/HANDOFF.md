@@ -1,5 +1,7 @@
 # Tono 0.0.1 engineering handoff
 
+> Historical handoff. Current layout and names: [architecture.md](../architecture.md).
+
 Last reviewed: 2026-07-29 (build 3 r4 catalog retry and diagnostics)
 
 ## Read this first

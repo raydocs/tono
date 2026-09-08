@@ -11,6 +11,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { extract } from 'tar'
 
 import { resolveServiceRelease } from './service-release.mjs'
+import { verifyPinnedWindowsCore } from './pinned-core.mjs'
 import { log_debug, log_error, log_info, log_success } from './utils.mjs'
 
 /**
@@ -23,7 +24,7 @@ import { log_debug, log_error, log_info, log_success } from './utils.mjs'
  */
 
 const cwd = process.cwd()
-const TEMP_DIR = path.join(cwd, 'node_modules/.verge')
+const TEMP_DIR = path.join(cwd, 'node_modules/.tono')
 const FORCE = process.argv.includes('--force') || process.argv.includes('-f')
 const VERSION_CACHE_FILE = path.join(TEMP_DIR, '.version_cache.json')
 const HASH_CACHE_FILE = path.join(TEMP_DIR, '.hash_cache.json')
@@ -300,8 +301,8 @@ function clashMetaAlpha() {
   const isWin = platform === 'win32'
   const urlExt = isWin ? 'zip' : 'gz'
   return {
-    name: 'verge-mihomo-alpha',
-    targetFile: `verge-mihomo-alpha-${SIDECAR_HOST}${isWin ? '.exe' : ''}`,
+    name: 'tono-core-alpha',
+    targetFile: `tono-core-alpha-${SIDECAR_HOST}${isWin ? '.exe' : ''}`,
     exeFile: `${name}${isWin ? '.exe' : ''}`,
     zipFile: `${name}-${META_ALPHA_VERSION}.${urlExt}`,
     downloadURL: `${META_ALPHA_URL_PREFIX}/${name}-${META_ALPHA_VERSION}.${urlExt}`,
@@ -501,9 +502,9 @@ async function resolveResource(binInfo) {
 // service chmod (保留并使用 glob)
 const resolveServicePermission = async () => {
   const serviceExecutables = [
-    'clash-verge-service*',
-    'clash-verge-service-install*',
-    'clash-verge-service-uninstall*',
+    'tono-service*',
+    'tono-service-install*',
+    'tono-service-uninstall*',
   ]
   const hashCache = await loadHashCache()
   let hasChanges = false
@@ -538,9 +539,9 @@ const resolveServicePermission = async () => {
 // Other resource resolvers (service, mmdb, geosite, geoip, enableLoopback)
 // =======================
 const SERVICE_BINARIES = [
-  'clash-verge-service',
-  'clash-verge-service-install',
-  'clash-verge-service-uninstall',
+  'tono-service',
+  'tono-service-install',
+  'tono-service-uninstall',
 ]
 
 function serviceFileInfo(name) {
@@ -625,7 +626,7 @@ async function resolveServiceBundle() {
     SIDECAR_HOST,
     platform,
   )
-  const tempDir = path.join(TEMP_DIR, 'clash-verge-service-ipc')
+  const tempDir = path.join(TEMP_DIR, 'tono-service-ipc')
   const tempArchive = path.join(tempDir, archiveFile)
 
   await fsp.mkdir(tempDir, { recursive: true })
@@ -639,7 +640,7 @@ async function resolveServiceBundle() {
       zip
         .getEntries()
         .forEach((entry) =>
-          log_debug('"clash-verge-service-ipc" entry:', entry.entryName),
+          log_debug('"tono-service-ipc" entry:', entry.entryName),
         )
       zip.extractAllTo(tempDir, true)
     } else {
@@ -701,7 +702,7 @@ const resolveUnSetDnsScript = () =>
 // =======================
 const tasks = [
   {
-    name: 'verge-mihomo-alpha',
+    name: 'tono-core-alpha',
     func: () =>
       getLatestAlphaVersion().then(() => resolveSidecar(clashMetaAlpha())),
     retry: 5,
@@ -710,10 +711,11 @@ const tasks = [
     skipWindows: true,
   },
   {
-    name: 'verge-mihomo',
-    func: () =>
-      getLatestReleaseVersion().then(() => resolveSidecar(clashMeta())),
-    retry: 5,
+    name: 'tono-core',
+    func: () => platform === 'win32'
+      ? resolvePinnedWindowsCore()
+      : getLatestReleaseVersion().then(() => resolveSidecar(clashMeta())),
+    retry: platform === 'win32' ? 1 : 5,
   },
   {
     name: 'service',
@@ -780,9 +782,11 @@ async function runTask() {
  */
 async function assertWindowsPackagingConfig() {
   if (platform !== 'win32') return
-  const { validateExternalBin, validateResourcesWhitelist } = await import(
-    './windows-packaging.mjs'
-  )
+  const {
+    leftoverVergeSidecars,
+    validateExternalBin,
+    validateResourcesWhitelist,
+  } = await import('./windows-packaging.mjs')
   const tauriConfig = JSON.parse(
     await fsp.readFile(path.join(cwd, 'src-tauri', 'tauri.conf.json'), 'utf8'),
   )
@@ -793,18 +797,30 @@ async function assertWindowsPackagingConfig() {
   )
   if (resourcesError) throw new Error(resourcesError)
 
-  const alphaSidecar = path.join(
-    SIDECAR_DIR,
-    `verge-mihomo-alpha-${SIDECAR_HOST}.exe`,
-  )
-  if (fs.existsSync(alphaSidecar)) {
-    log_info(
-      `alpha sidecar exists on disk but is not in externalBin (will not be packaged): ${path.basename(alphaSidecar)}`,
-    )
+  if (fs.existsSync(SIDECAR_DIR)) {
+    const leftover = leftoverVergeSidecars(await fsp.readdir(SIDECAR_DIR))
+    if (leftover.length) {
+      throw new Error(
+        `refuse to package while leftover Verge sidecars sit in sidecar/: ${leftover.join(', ')}`,
+      )
+    }
   }
   log_success(
-    'Windows packaging config: stable-only Mihomo + resource whitelist',
+    'Windows packaging config: stable-only Tono Core + resource whitelist',
   )
+}
+
+// Never silently replace the audited patch with a mutable upstream latest.
+// A fresh Windows checkout must receive the pinned build from windows-core.yml.
+async function resolvePinnedWindowsCore() {
+  const binary = path.join(SIDECAR_DIR, `tono-core-${SIDECAR_HOST}.exe`)
+  if (!fs.existsSync(binary)) {
+    throw new Error('Pinned Windows Core is missing. Build with tooling/scripts/build-mihomo-adaptive.sh --install-adaptive-windows or download the same-commit windows-core CI artifact; upstream latest is not a substitute.')
+  }
+  if (process.platform !== 'win32') {
+    throw new Error('Verify Windows prebuild on Windows; use build-windows-release.sh for cross-compilation.')
+  }
+  log_success(verifyPinnedWindowsCore(binary, path.join(cwd, 'src-tauri', 'core-identity.json')))
 }
 
 async function writeCoreDigestPin() {

@@ -8,16 +8,6 @@ export async function patchTonoPreferences(payload: TonoPreferences) {
   return invoke<void>('patch_tono_preferences', { payload })
 }
 
-/** @deprecated use getTonoPreferences */
-export async function getVergeConfig() {
-  return getTonoPreferences()
-}
-
-/** @deprecated use patchTonoPreferences */
-export async function patchVergeConfig(payload: TonoPreferences) {
-  return patchTonoPreferences(payload)
-}
-
 export async function openWindowsDnsSettings() {
   return invoke<void>('open_windows_dns_settings')
 }

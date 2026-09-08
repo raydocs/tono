@@ -23,6 +23,7 @@ import {
 import { TonoAuthGuard } from '@/pages/_layout/tono-auth-guard'
 import { handleNoticeMessage } from '@/pages/_layout/utils'
 import { useThemeMode } from '@/services/states'
+import { tonoConnect, tonoDisconnect } from '@/services/tono'
 import getSystem from '@/utils/get-system'
 
 import { MeshBackground } from './MeshBackground'
@@ -38,6 +39,63 @@ import 'dayjs/locale/ru'
 import 'dayjs/locale/zh-cn'
 
 const OS = getSystem()
+
+const SHORTCUT_ROUTES = ['/', '/servers', '/activity', '/account'] as const
+
+// Keyboard helper is exported for unit tests; this file's Fast Refresh
+// boundary is the layout component.
+// eslint-disable-next-line react-refresh/only-export-components
+export const handleTonoWindowShortcut = (
+  event: KeyboardEvent,
+  {
+    navigate,
+    uiState,
+    connect,
+    disconnect,
+  }: {
+    navigate: (path: string) => void
+    uiState: string | undefined
+    connect: () => void
+    disconnect: () => void
+  },
+) => {
+  if (!(event.ctrlKey || event.metaKey)) return false
+  const key = event.key.toUpperCase()
+  const target = event.target
+  const inField =
+    target instanceof HTMLElement &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+
+  if (key >= '1' && key <= '4') {
+    const route = SHORTCUT_ROUTES[Number(key) - 1]
+    if (route) {
+      event.preventDefault()
+      navigate(route)
+      return true
+    }
+  }
+
+  if (key === 'K') {
+    event.preventDefault()
+    if (uiState === 'notConnected') connect()
+    else if (uiState === 'connected') disconnect()
+    return true
+  }
+
+  if (inField) return false
+
+  if (key === 'F') {
+    event.preventDefault()
+    const input = document.querySelector(
+      '.tono-search input',
+    ) as HTMLInputElement | null
+    if (input) input.focus()
+    else navigate('/servers')
+    return true
+  }
+
+  return false
+}
 
 /**
  * The Tono application shell: frosted window background, 200px sidebar,
@@ -61,8 +119,10 @@ const TonoLayout = () => {
   const windowControlsRef = useRef<any>(null)
   const { decorated } = useWindowDecorations()
 
-  const isLoginRoute = location.pathname === '/login'
+  const isLoginRoute =
+    location.pathname === '/login' || location.pathname === '/intro'
   const isTrayRoute = location.pathname === '/tray'
+  const isDashboardRoute = location.pathname === '/'
 
   useLoadingOverlay(themeReady)
 
@@ -80,6 +140,24 @@ const TonoLayout = () => {
 
   useLayoutEvents(handleNotice)
   useUpdate(true)
+
+  useEffect(() => {
+    if (isLoginRoute || isTrayRoute) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      handleTonoWindowShortcut(event, {
+        navigate,
+        uiState: status?.uiState,
+        connect: () => {
+          void tonoConnect()
+        },
+        disconnect: () => {
+          void tonoDisconnect()
+        },
+      })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isLoginRoute, isTrayRoute, navigate, status?.uiState])
 
   useEffect(() => {
     if (language) {
@@ -162,12 +240,20 @@ const TonoLayout = () => {
                 }}
               >
                 {!isTrayRoute && <ServicePrereqBanner />}
-                {!isLoginRoute && !isTrayRoute && <ProtectedOfflineBanner />}
+                {!isLoginRoute && !isTrayRoute && !isDashboardRoute && (
+                  <ProtectedOfflineBanner />
+                )}
                 <div
                   style={{ flex: isTrayRoute ? undefined : 1, minHeight: 0 }}
                 >
                   <BaseErrorBoundary>
-                    <Outlet />
+                    {isLoginRoute || isTrayRoute ? (
+                      <Outlet />
+                    ) : (
+                      <div key={location.pathname} className="tono-page-in">
+                        <Outlet />
+                      </div>
+                    )}
                   </BaseErrorBoundary>
                 </div>
               </main>

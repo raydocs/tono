@@ -1,4 +1,4 @@
-//! Connect state machine (product-contract.md §6/§7).
+//! Connect state machine.
 //!
 //! Pure logic only: stages, UI state derivation, reconnect backoff, and the
 //! failure decision table. An initial, not-yet-verified attempt is released

@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import {
   KNOWN_LEGACY_WINDOWS_PAYLOAD,
+  leftoverVergeSidecars,
   parseNsisListing,
   STABLE_EXTERNAL_BIN,
   WINDOWS_RESOURCE_ALLOWLIST,
@@ -638,6 +639,23 @@ test('release Tauri handler excludes unused native probes and secret-bearing rea
       new RegExp(command),
     )
   }
+})
+
+test('leftover Verge sidecar names are refused', () => {
+  assert.deepEqual(leftoverVergeSidecars(['tono-core.exe', 'Tono.exe']), [])
+  assert.deepEqual(
+    leftoverVergeSidecars([
+      'tono-core.exe',
+      'verge-mihomo.exe',
+      'verge-mihomo-alpha.exe',
+      'verge-mihomo-x86_64-pc-windows-msvc.exe',
+    ]),
+    [
+      'verge-mihomo.exe',
+      'verge-mihomo-alpha.exe',
+      'verge-mihomo-x86_64-pc-windows-msvc.exe',
+    ],
+  )
 })
 
 test('externalBin accepts only the stable sidecar', () => {

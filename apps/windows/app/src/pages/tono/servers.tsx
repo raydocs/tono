@@ -57,6 +57,8 @@ const hex = (color: string, alpha: number) =>
 
 const TonoTestIcon = () => <TonoIcon name="bolt" size={13} />
 
+const SERVER_SKELETONS = ['sk-a', 'sk-b', 'sk-c', 'sk-d'] as const
+
 const ServersPage = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -64,6 +66,7 @@ const ServersPage = () => {
   const { status, mutateTonoStatus } = useTonoStatus()
   const showToast = useTonoToast()
   const [selectError, setSelectError] = useState<string | null>(null)
+  const [switchingName, setSwitchingName] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [testingAll, setTestingAll] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -111,6 +114,7 @@ const ServersPage = () => {
         return
       }
       setSelectError(null)
+      setSwitchingName(name)
       try {
         await tonoSelectServer(name)
         await Promise.all([mutateServers(), mutateTonoStatus()])
@@ -124,6 +128,8 @@ const ServersPage = () => {
         )
       } catch (error) {
         setSelectError(formatTonoActionError(error, t))
+      } finally {
+        setSwitchingName(null)
       }
     },
   )
@@ -406,7 +412,7 @@ const ServersPage = () => {
             style={{
               marginTop: 7,
               color: catalog?.error
-                ? TONO_COLORS.error
+                ? 'var(--tono-text-error)'
                 : TONO_COLORS.latencyGood,
             }}
           >
@@ -455,6 +461,7 @@ const ServersPage = () => {
             }}
           />
         </label>
+        {/* biome-ignore lint/a11y/useSemanticElements: chip row is a filter toolbar, not a form fieldset */}
         <div
           className="tono-chip-row"
           role="group"
@@ -501,7 +508,11 @@ const ServersPage = () => {
       {selectError && (
         <p
           role="alert"
-          style={{ margin: '0 0 8px', fontSize: 12, color: TONO_COLORS.error }}
+          style={{
+            margin: '0 0 8px',
+            fontSize: 12,
+            color: 'var(--tono-text-error)',
+          }}
         >
           {selectError}
         </p>
@@ -510,7 +521,11 @@ const ServersPage = () => {
       {serversError && (
         <div
           role="alert"
-          style={{ marginBottom: 8, fontSize: 13, color: TONO_COLORS.error }}
+          style={{
+            marginBottom: 8,
+            fontSize: 13,
+            color: 'var(--tono-text-error)',
+          }}
         >
           <p>{formatTonoActionError(serversError, t)}</p>
           <button
@@ -537,18 +552,79 @@ const ServersPage = () => {
 
       {servers === undefined ? (
         !serversError && (
-          <p role="status" style={{ fontSize: 13, color: text.secondary }}>
-            {t('shared.statuses.loading')}
-          </p>
+          <div
+            className="tono-server-grid"
+            aria-busy="true"
+            role="status"
+            aria-label={t('shared.statuses.loading')}
+          >
+            {SERVER_SKELETONS.map((id) => (
+              <div
+                key={id}
+                className="tono-server-skeleton tono-rise-in"
+                style={{
+                  minHeight: 126,
+                  borderRadius: 18,
+                  background: 'var(--tono-surface-raised)',
+                }}
+              />
+            ))}
+          </div>
         )
       ) : servers.length === 0 ? (
-        <p style={{ fontSize: 13, color: text.secondary }}>
-          {t('tono.nodes.empty')}
-        </p>
+        <div
+          className="tono-empty"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            padding: '48px 16px',
+            textAlign: 'center',
+            color: text.secondary,
+            fontSize: 13,
+          }}
+        >
+          <TonoIcon name="globe" size={28} />
+          <p style={{ margin: 0 }}>{t('tono.nodes.empty')}</p>
+        </div>
       ) : visibleServers.length === 0 ? (
-        <p style={{ fontSize: 13, color: text.secondary }}>
-          {t('tono.nodes.noMatches')}
-        </p>
+        <div
+          className="tono-empty"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            padding: '48px 16px',
+            textAlign: 'center',
+            color: text.secondary,
+            fontSize: 13,
+          }}
+        >
+          <TonoIcon name="search" size={28} />
+          <p style={{ margin: 0 }}>{t('tono.nodes.noMatches')}</p>
+          <button
+            type="button"
+            className="tono-button"
+            onClick={() => {
+              setSearchText('')
+              setRegionFilter(null)
+            }}
+            style={{
+              padding: '8px 14px',
+              color: text.primary,
+              background: dark
+                ? 'rgba(255,255,255,0.08)'
+                : 'rgba(255,255,255,0.62)',
+              border: `1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(56,72,108,0.1)'}`,
+            }}
+          >
+            {t('tono.nodes.regions.all')}
+          </button>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           {serverGroups.map((group) => (
@@ -643,12 +719,40 @@ const ServersPage = () => {
                         : server.selected
                           ? t('tono.node.activeServer')
                           : t('tono.nodes.readyToConnect')
+                  const cityKey = nodeCityTitleKey(server.name)
+                  const cityTitle = cityKey
+                    ? t(cityKey)
+                    : nodeDisplayName(server.name)
+                  const latencyText = !available
+                    ? t('tono.nodes.unavailable')
+                    : endpointFailure === 'timeout'
+                      ? t('tono.nodes.timeout')
+                      : endpointFailure
+                        ? t('tono.nodes.testFailed')
+                        : latencyLabel
+                  const isSwitchingCard = switchingName === server.name
+                  const othersLocked =
+                    switchingName !== null && switchingName !== server.name
+                  const cardDisabled = !available || othersLocked
+                  const highlighted =
+                    isSwitchingCard ||
+                    (server.selected && switchingName === null)
+                  // One sentence for assistive tech, in the order the card
+                  // reads: city, region, measurement, state. The macOS card
+                  // has the same summary (localNodeAccessibilitySummary).
+                  const cardSummary = [
+                    cityTitle,
+                    regionLabel(nodeCode(server.name)),
+                    latencyText,
+                    cardStatus,
+                  ].join(', ')
                   return (
                     <button
                       key={server.name}
                       type="button"
                       className="tono-server-card"
-                      disabled={!available}
+                      aria-label={cardSummary}
+                      disabled={cardDisabled}
                       onClick={() =>
                         void handleSelect(
                           server.name,
@@ -669,30 +773,31 @@ const ServersPage = () => {
                         borderRadius: 18,
                         fontFamily: 'inherit',
                         textAlign: 'left',
-                        cursor: !available
+                        cursor: cardDisabled
                           ? 'not-allowed'
-                          : server.selected
+                          : highlighted
                             ? 'default'
                             : 'pointer',
-                        opacity: available ? 1 : 0.55,
+                        opacity: cardDisabled ? 0.55 : 1,
                         color: text.primary,
-                        background: server.selected
+                        background: highlighted
                           ? hex(TONO_COLORS.accent, dark ? 0.13 : 0.08)
                           : dark
                             ? 'rgba(16,21,33,0.72)'
                             : 'rgba(255,255,255,0.76)',
-                        border: server.selected
+                        border: highlighted
                           ? `1px solid ${hex(TONO_COLORS.accent, 0.55)}`
                           : `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(56,72,108,0.09)'}`,
-                        boxShadow: server.selected
+                        boxShadow: highlighted
                           ? `0 18px 34px -22px ${hex(TONO_COLORS.accent, 0.82)}`
                           : `0 10px 24px -22px rgba(16,24,48,${dark ? 0.9 : 0.28})`,
                         transition: `background 0.15s ${TONO_EASE}, border-color 0.15s ${TONO_EASE}, transform 0.15s ${TONO_EASE}`,
                       }}
                     >
-                      {server.selected && (
+                      {highlighted && (
                         <span
                           aria-hidden
+                          className="tono-server-card__line"
                           style={{
                             position: 'absolute',
                             top: 0,
@@ -735,9 +840,7 @@ const ServersPage = () => {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {nodeCityTitleKey(server.name)
-                              ? t(nodeCityTitleKey(server.name)!)
-                              : nodeDisplayName(server.name)}
+                            {cityTitle}
                           </span>
                           {nodeCityParts(server.name).codename && (
                             <span
@@ -772,46 +875,83 @@ const ServersPage = () => {
                               {t('tono.servers.selected')}
                             </span>
                           )}
-                          <span
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                              flexShrink: 0,
-                              padding: '6px 8px',
-                              borderRadius: 999,
-                              color: latencyTone,
-                              background: latencyHasTone
-                                ? hex(latencyTone, 0.11)
-                                : dark
-                                  ? 'rgba(255,255,255,0.06)'
-                                  : 'rgba(56,72,108,0.06)',
-                              fontSize: 11,
-                              fontWeight: 650,
-                              fontFamily: TONO_MONO_STACK,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
+                          {isSwitchingCard ? (
                             <span
-                              aria-hidden
                               style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: latencyTone,
-                                boxShadow: latencyHasTone
-                                  ? `0 0 0 3px ${hex(latencyTone, 0.1)}`
-                                  : 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                flexShrink: 0,
+                                padding: '6px 8px',
+                                borderRadius: 999,
+                                color: TONO_COLORS.accent,
+                                background: hex(TONO_COLORS.accent, 0.11),
+                                fontSize: 11,
+                                fontWeight: 650,
+                                whiteSpace: 'nowrap',
                               }}
-                            />
-                            {!available
-                              ? t('tono.nodes.unavailable')
-                              : endpointFailure === 'timeout'
-                                ? t('tono.nodes.timeout')
-                                : endpointFailure
-                                  ? t('tono.nodes.testFailed')
-                                  : latencyLabel}
-                          </span>
+                            >
+                              <span
+                                aria-hidden
+                                className="tono-spin"
+                                style={{
+                                  width: 12,
+                                  height: 12,
+                                  borderRadius: '50%',
+                                  border: `1.5px solid ${hex(TONO_COLORS.accent, 0.35)}`,
+                                  borderTopColor: TONO_COLORS.accent,
+                                  flexShrink: 0,
+                                }}
+                              />
+                              {t('tono.dashboard.status.connecting')}
+                            </span>
+                          ) : (
+                            <span
+                              key={latencyText}
+                              // Pop only when a result from this session
+                              // lands; cached values must not all pop on
+                              // first paint.
+                              className={
+                                endpointLatency !== undefined ||
+                                endpointFailure !== undefined ||
+                                currentExitTest?.name === server.name
+                                  ? 'tono-value-pop'
+                                  : undefined
+                              }
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                flexShrink: 0,
+                                padding: '6px 8px',
+                                borderRadius: 999,
+                                color: latencyTone,
+                                background: latencyHasTone
+                                  ? hex(latencyTone, 0.11)
+                                  : dark
+                                    ? 'rgba(255,255,255,0.06)'
+                                    : 'rgba(56,72,108,0.06)',
+                                fontSize: 11,
+                                fontWeight: 650,
+                                fontFamily: TONO_MONO_STACK,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              <span
+                                aria-hidden
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: '50%',
+                                  background: latencyTone,
+                                  boxShadow: latencyHasTone
+                                    ? `0 0 0 3px ${hex(latencyTone, 0.1)}`
+                                    : 'none',
+                                }}
+                              />
+                              {latencyText}
+                            </span>
+                          )}
                         </span>
                         <span
                           style={{
@@ -849,28 +989,6 @@ const ServersPage = () => {
                             }}
                           >
                             {nodeProtocol(server.name)}
-                          </span>
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            <span
-                              aria-hidden
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: TONO_COLORS.connected,
-                                flexShrink: 0,
-                              }}
-                            />
-                            {t('tono.dashboard.info.protection')}
                           </span>
                         </span>
                       </span>
@@ -938,20 +1056,6 @@ const ServersPage = () => {
                           </span>
                         )}
                       </span>
-                      {server.selected && (
-                        <span
-                          aria-hidden
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 18,
-                            right: 18,
-                            height: 2,
-                            borderRadius: 999,
-                            background: `linear-gradient(90deg, ${TONO_COLORS.accent}, ${TONO_COLORS.accentWarm})`,
-                          }}
-                        />
-                      )}
                     </button>
                   )
                 })}

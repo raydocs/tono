@@ -51,6 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Verify desktop product versions agree
+        run: |
+          python3 tooling/scripts/tests/test_desktop_version.py
+          python3 tooling/scripts/verify-desktop-version.py
+
       - name: Test tono-core
         # Run from the workspace root: the lockfile lives there, so `--locked`
         # from the crate directory would look for one that does not exist.
@@ -87,6 +92,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Packaging and pinned Core identity contracts
+        run: pnpm test:dev-control
 
   app-rust:
     # The `app` job above type-checks and unit-tests the frontend. Nothing ran
@@ -174,8 +182,19 @@ jobs:
       # this step is for.
       - name: Ask the real filtering engine
         working-directory: apps/windows/service
+        env:
+          TONO_REQUIRE_REAL_WFP: '1'
         # `--lib` because `tests/common.rs` reaches for helpers that only exist under the
         # `test` feature and is compiled whatever the integration files' own `cfg` says, so
         # the crate does not build its integration targets in this configuration at all.
         # Verified locally before pushing rather than by watching this step fail.
-        run: cargo test --locked --features standalone,client --lib core::wfp::real_engine_tests -- --nocapture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $test = 'core::wfp::real_engine_tests::the_kernel_accepts_a_filter_with_many_same_field_conditions'
+          $listed = cargo test --locked --features standalone,client --lib $test -- --list
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate real WFP tests' }
+          if (-not ($listed -match "^$([regex]::Escape($test)): test$")) {
+            throw 'Expected real WFP test is missing; zero executed tests is not qualification'
+          }
+          cargo test --locked --features standalone,client --lib $test -- --exact --nocapture

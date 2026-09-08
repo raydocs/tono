@@ -212,7 +212,7 @@ fn start_embedded_server(listener: tokio::net::TcpListener, token: String) {
                     .unwrap_or_default(),
             );
         }
-        let verge_config = Config::verge().await;
+        let verge_config = Config::preferences().await;
         let verge_data = verge_config.data_arc();
         let pac_content = verge_data.pac_file_content.as_deref().unwrap_or(DEFAULT_PAC);
         // Served per browser request, so this stays a configuration read rather than a

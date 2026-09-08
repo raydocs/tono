@@ -1,0 +1,64 @@
+name: Windows installer smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Windows candidate installer run (empty selects latest on this branch)
+        type: string
+        required: false
+  push:
+    branches: ['stability/desktop-0.0.72-20260908']
+    paths:
+      - .github/workflows/windows-installer-smoke.yml
+      - tooling/scripts/test-windows-candidate-install.ps1
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  install-repair-uninstall:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Fetch only a successful same-source candidate artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $id = $env:CANDIDATE_RUN_ID
+          if ([string]::IsNullOrWhiteSpace($id)) {
+            $runs = gh run list --workflow windows-candidate.yml --branch $env:GITHUB_REF_NAME --status success --limit 1 --json databaseId | ConvertFrom-Json
+            if ($runs.Count -ne 1) { throw 'No successful candidate installer exists on this branch.' }
+            $id = [string]$runs[0].databaseId
+          }
+          if ($id -notmatch '^\d+$') { throw 'Candidate run ID must be numeric.' }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$id" | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.head_branch -ne $env:GITHUB_REF_NAME -or $run.path -ne '.github/workflows/windows-candidate.yml' -or $run.head_repository.full_name -ne $env:GITHUB_REPOSITORY) { throw 'Candidate provenance does not match this branch/repository/workflow.' }
+          $source = $run.head_sha
+          git fetch --depth=1 origin $source
+          foreach ($path in @('apps/windows', 'tooling/scripts/build-mihomo-adaptive.sh', 'tooling/scripts/mihomo-adaptive', '.github/workflows/windows-candidate.yml', '.github/workflows/windows-core.yml')) {
+            $built = git rev-parse "${source}:$path"
+            $current = git rev-parse "HEAD:$path"
+            if ($built -ne $current) { throw "Candidate source differs from the tested tree: $path" }
+          }
+          $output = Join-Path $env:RUNNER_TEMP 'tono-candidate'
+          gh run download $id --name "tono-windows-0.0.72-candidate-$source" --dir $output
+          $manifest = Get-Content (Join-Path $output 'candidate-manifest.json') -Raw | ConvertFrom-Json
+          if ($manifest.source -ne $source) { throw 'Artifact manifest source does not match its workflow run.' }
+          "CANDIDATE_DIRECTORY=$output" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install, repair and uninstall on the ephemeral administrator runner
+        shell: pwsh
+        run: tooling/scripts/test-windows-candidate-install.ps1 -CandidateDirectory $env:CANDIDATE_DIRECTORY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: windows-installer-smoke-${{ github.sha }}
+          path: ${{ runner.temp }}/tono-installer-smoke.json
+          if-no-files-found: warn
+          retention-days: 7

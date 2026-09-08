@@ -83,7 +83,7 @@ fi
 
 # The daemon refuses an ad-hoc signed helper, so an unsigned or ad-hoc embedded
 # copy fails at install time rather than at run time.
-for embedded in Contents/Resources/liquidclash-helper Contents/Resources/mihomo; do
+for embedded in Contents/Resources/tono-core-helper Contents/Resources/mihomo; do
   path="$app/$embedded"
   if [ ! -f "$path" ]; then
     fail "missing embedded executable: $embedded"
