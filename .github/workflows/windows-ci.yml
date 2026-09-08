@@ -18,10 +18,14 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - apps/windows/Cargo.toml
+      - apps/windows/Cargo.lock
+      - apps/windows/vendor/**
       - apps/windows/crates/**
       - apps/windows/service/**
       - apps/windows/app/**
       - .github/workflows/windows-ci.yml
+      - tooling/scripts/tests/windows-ci-paths.test.cjs
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
   # Restricted to `main` and paired with a trigger that does not fire, this
@@ -30,10 +34,14 @@ on:
   # never executed once.
   push:
     paths:
+      - apps/windows/Cargo.toml
+      - apps/windows/Cargo.lock
+      - apps/windows/vendor/**
       - apps/windows/crates/**
       - apps/windows/service/**
       - apps/windows/app/**
       - .github/workflows/windows-ci.yml
+      - tooling/scripts/tests/windows-ci-paths.test.cjs
 
 permissions:
   contents: read
@@ -89,6 +97,10 @@ jobs:
 
       - name: Type-check
         run: pnpm typecheck
+
+      - name: Verify Windows CI trigger coverage
+        working-directory: apps/windows/app
+        run: node --test ../../../tooling/scripts/tests/windows-ci-paths.test.cjs
 
       - name: Test
         run: pnpm test
