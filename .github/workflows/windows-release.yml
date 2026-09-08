@@ -42,8 +42,12 @@ jobs:
           fi
           echo "running from $GITHUB_REF"
 
-  build-draft:
+  pinned-core:
     needs: branch
+    uses: ./.github/workflows/windows-core.yml
+
+  build-draft:
+    needs: [branch, pinned-core]
     environment: windows-release
     runs-on: windows-2025
     defaults:
@@ -138,6 +142,11 @@ jobs:
           pnpm tauri signer sign $payload
           node scripts/prepare-updater-config.mjs --verify $payload "$payload.sig"
           Remove-Item -Force $payload, "$payload.sig"
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: windows-core-${{ github.sha }}
+          path: apps/windows/app/src-tauri/sidecar
 
       - name: Prepare the exact stable Mihomo and Windows resources
         shell: pwsh

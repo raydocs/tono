@@ -93,6 +93,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Packaging and pinned Core identity contracts
+        run: pnpm test:dev-control
+
   app-rust:
     # The `app` job above type-checks and unit-tests the frontend. Nothing ran
     # the Tauri crate's own 357 Rust tests — not this workflow, not the release

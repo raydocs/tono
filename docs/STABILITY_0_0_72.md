@@ -209,3 +209,77 @@ no release/tag/feed is changed by candidate testing.
   restoring the old giant view. The merged source passed all five selected platform checks in
   `20260908T065052Z/report.json`, with unchanged source hashes (version gate,
   frontend types/tests, Mac umbrella, unsigned Release). Hosted CI follows.
+
+## Fourth stabilization slice: account lifecycle and installed-state ownership
+
+A dedicated `AccountLifecycleCoordinator` now owns login/restore/runtime work
+and serialized logout/direct-internet cleanup. Duplicate submits join, cancelled
+work drains before cleanup, and a new sign-in cannot cross the cleanup barrier.
+Cleanup survives a closing view. A cancelled, non-cooperative authentication
+response is checked before credential adoption; the API actor also refuses
+adoption by an already-cancelled task.
+
+Device inventory, revoke errors and policy refreshes now check their account
+context and latest request. Policy diagnostics report the revision actually kept
+by the install owner, not a stale response's advertised revision. Runtime-monitor
+cancellation drains before teardown; cancelled cloud fallback cannot re-arm
+protection. The home monitor starts after the ready-state context is established.
+
+Controlled red cases are retained in `authentication-cancel-red.log`,
+`device-policy-red.log`, and `fallback-cancel-red.log`. The account request suite
+has 39 tests and its new lifecycle coordinator has six: all 45 pass in
+`account-completion-final.log`. The complete local checkpoint
+`20260908T072743Z/report.json` passed 15/15 commands with unchanged source hashes.
+The subsequent home-monitor startup-order adjustment is checked in the next run,
+not retroactively attributed to that checkpoint.
+
+## Hosted qualification on the candidate branch
+
+- Normal upstream merge: `1c71b656775f8e65e382a4af3ae7a82a1fe52580`.
+- macOS CI passed: https://github.com/raydocs/tono/actions/runs/34196733366
+  including unsigned builds/tests and hosted privileged PF parse, helper
+  lifecycle, staging refusals and Core lifecycle. No owner-machine network was
+  changed. Signed installer and real protected data plane are still separate.
+- Services CI passed: https://github.com/raydocs/tono/actions/runs/34196733359
+- Native Windows CI initially found three cfg/import errors hidden by Mac model
+  tests. `b1862d133c03ab281120549767484db18c7bd6e3` fixes those imports without
+  weakening features. All four jobs then passed:
+  https://github.com/raydocs/tono/actions/runs/34197878122
+  Native App has 412 passing tests. The required real WFP engine test executed
+  and passed (one test, not a skip); it checks permit shape/cleanup, not leaks.
+  Full successful/failed hosted logs are retained under `artifacts/stability-0072/`.
+
+## Candidate packaging identity correction
+
+The old Windows prebuild fetched mutable upstream `latest`, or reused any cached
+Core, then copied the committed **patched** identity without checking the binary.
+Hash-pinning that arbitrary binary into Service did not prove its identity.
+Windows prebuild now requires the audited Core and verifies its executable
+version, Windows/amd64 platform, Go version and exact build tags. Stock releases,
+wrong patch/toolchain/platform/architecture, missing or extra tags are refused.
+Nine identity tests join the packaging suite (93 tests total).
+
+`windows-core.yml` uses the existing pinned upstream commit, Go version and
+reviewed adaptive patch, runs patch tests, cross-builds Windows Core and checks
+identity metadata is unchanged. Both release and non-publishing candidate
+workflows consume its same-run, same-SHA artifact. Other platforms' download
+behavior is unchanged. Native Windows prebuild now fails clearly when this
+required input is absent; it never substitutes upstream latest.
+
+`windows-candidate.yml` builds a real NSIS candidate, inspects its extracted
+payload and retains hashes/source identity as Actions artifacts only. It has
+read-only repository permission, no signing secret, no release environment, no
+release/tag action and no update-feed publication. The installer is explicitly
+**not updater-signed or Authenticode-qualified**. A successful candidate build
+will not by itself close Windows physical install/upgrade/network acceptance.
+
+The earlier “remaining” lifecycle/device/policy and native-compile items above
+are superseded by this evidence; architectural M1/W3 completion and physical
+installer/data-plane qualification are not being claimed.
+
+The next complete local run, `20260908T073309Z/report.json`, passes 15/15
+commands with unchanged source fingerprints, including the final home-monitor
+startup ordering, unsigned Release build, and 93 packaging tests. XCTest has
+238 total, 237 passed, one explicit script-emission skip, zero failures. The
+Windows CI frontend job now runs the packaging/identity contracts on every
+app change as well, not only during installer preparation.

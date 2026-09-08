@@ -11,6 +11,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { extract } from 'tar'
 
 import { resolveServiceRelease } from './service-release.mjs'
+import { verifyPinnedWindowsCore } from './pinned-core.mjs'
 import { log_debug, log_error, log_info, log_success } from './utils.mjs'
 
 /**
@@ -711,9 +712,10 @@ const tasks = [
   },
   {
     name: 'tono-core',
-    func: () =>
-      getLatestReleaseVersion().then(() => resolveSidecar(clashMeta())),
-    retry: 5,
+    func: () => platform === 'win32'
+      ? resolvePinnedWindowsCore()
+      : getLatestReleaseVersion().then(() => resolveSidecar(clashMeta())),
+    retry: platform === 'win32' ? 1 : 5,
   },
   {
     name: 'service',
@@ -806,6 +808,19 @@ async function assertWindowsPackagingConfig() {
   log_success(
     'Windows packaging config: stable-only Tono Core + resource whitelist',
   )
+}
+
+// Never silently replace the audited patch with a mutable upstream latest.
+// A fresh Windows checkout must receive the pinned build from windows-core.yml.
+async function resolvePinnedWindowsCore() {
+  const binary = path.join(SIDECAR_DIR, `tono-core-${SIDECAR_HOST}.exe`)
+  if (!fs.existsSync(binary)) {
+    throw new Error('Pinned Windows Core is missing. Build with tooling/scripts/build-mihomo-adaptive.sh --install-adaptive-windows or download the same-commit windows-core CI artifact; upstream latest is not a substitute.')
+  }
+  if (process.platform !== 'win32') {
+    throw new Error('Verify Windows prebuild on Windows; use build-windows-release.sh for cross-compilation.')
+  }
+  log_success(verifyPinnedWindowsCore(binary, path.join(cwd, 'src-tauri', 'core-identity.json')))
 }
 
 async function writeCoreDigestPin() {
