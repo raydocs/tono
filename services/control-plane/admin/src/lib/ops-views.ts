@@ -270,6 +270,20 @@ export function assembleOpsNodes(input: {
     }
   }
 
+  // Retired machines may remain in collector history indefinitely. Retirement
+  // must override that union, not just skip adding the profile's own name.
+  // Keep contradictory/live evidence visible: a relisted or occupied retired
+  // node still needs intervention, and unavailable sources prove no absence.
+  if (catalogNames !== null && ready(input.profileSource) && ready(input.activitySource)) {
+    for (const profile of input.profiles ?? []) {
+      if (profile.status === 'retired'
+        && !catalogNames.includes(profile.catalogName)
+        && !occupants.has(profile.catalogName)) {
+        names.delete(profile.catalogName);
+      }
+    }
+  }
+
   const views: OpsNodeView[] = [...names].map((name) => {
     const quality = qualityBy.get(name) ?? null;
     const agent = agentBy.get(name) ?? null;
