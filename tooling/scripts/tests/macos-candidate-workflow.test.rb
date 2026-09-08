@@ -32,3 +32,12 @@ expected_guard = "${{ !(github.event_name == 'workflow_dispatch' && inputs.candi
 abort 'candidate must not enter the Sparkle-key environment' unless appcast['if'] == expected_guard
 abort 'appcast environment must retain its existing gate' unless appcast['environment'] == 'macos-appcast'
 puts "macOS candidate workflow: #{cases.length} branch cases and update-authority guards passed"
+
+steps = appcast.fetch('steps')
+export_step = steps.find { |step| step['name'] == 'Export public signature and provenance for physical acceptance' }
+abort 'public release proof must be exported, not signing material' unless export_step && export_step.fetch('with').fetch('path').lines.map(&:strip) == [
+  '${{ runner.temp }}/enclosure.sig', '${{ runner.temp }}/release-receipt.json'
+]
+validation_index = steps.index { |step| step['name'] == 'Validate the appcast entry against the exact bytes users download' }
+abort 'proof export must follow actual signature validation without always()' unless validation_index && steps.index(export_step) > validation_index && !export_step.key?('if')
+puts 'macOS release proof: only public signature/receipt, after validation, under existing environment gate'

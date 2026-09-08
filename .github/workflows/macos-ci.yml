@@ -85,6 +85,12 @@ jobs:
       - name: Install lifecycle recovery safety (no root)
         run: python3 tooling/scripts/tests/test_helper_install_recovery.py
 
+      - name: Release archive installs as Tono.app
+        run: python3 tooling/scripts/tests/test_macos_archive_layout.py
+
+      - name: Helper signing timestamp and offline test boundary
+        run: python3 tooling/scripts/tests/test_helper_signing_timestamp.py
+
       - name: Notarization refusal and diagnostic privacy
         run: python3 tooling/scripts/tests/test_notarize_macos.py
 

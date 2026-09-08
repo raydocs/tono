@@ -139,6 +139,10 @@ verify_signed_executable() {
     executable=$1
     metadata=$(/usr/bin/codesign --display --verbose=2 "$executable" 2>&1)
     printf '%s\n' "$metadata" | /usr/bin/grep -F "TeamIdentifier=$team_id" >/dev/null
+    if ! printf '%s\n' "$metadata" | /usr/bin/grep -q '^Timestamp='; then
+        echo "Missing secure signing timestamp: $executable" >&2
+        exit 1
+    fi
 }
 
 # HelperManager.verifyEmbeddedExecutable pins the signing identifier as well as
@@ -170,8 +174,17 @@ verify_embedded_requirement "$source_app/Contents/Resources/mihomo" mihomo
 
 /usr/bin/ditto "$source_app" "$artifact_app"
 /usr/bin/codesign --verify --deep --strict --all-architectures "$artifact_app"
-/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$artifact_app" "$artifact_zip"
-/usr/bin/unzip -tq "$artifact_zip"
+# The version belongs to the ZIP filename, never the installed .app name.
+# Match release-macos.sh: extracting a versioned .app beside an existing Tono.app
+# leaves two applications sharing one helper and account directory.
+archive_app() {
+    /bin/rm -rf "$build_root/zip-staging"
+    /bin/mkdir -p "$build_root/zip-staging"
+    /usr/bin/ditto "$artifact_app" "$build_root/zip-staging/Tono.app"
+    /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$build_root/zip-staging/Tono.app" "$artifact_zip"
+    /usr/bin/unzip -tq "$artifact_zip"
+}
+archive_app
 
 if [ "$notarize" = 1 ]; then
     if [ -z "$notary_profile" ]; then
@@ -184,8 +197,7 @@ if [ "$notarize" = 1 ]; then
     DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun stapler validate "$artifact_app"
     /usr/sbin/spctl -a -t exec -vv "$artifact_app"
     /bin/rm -f "$artifact_zip"
-    /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$artifact_app" "$artifact_zip"
-    /usr/bin/unzip -tq "$artifact_zip"
+    archive_app
 else
     echo "WARNING: artifact is Developer ID signed but not notarized; do not distribute it outside this Mac." >&2
 fi
