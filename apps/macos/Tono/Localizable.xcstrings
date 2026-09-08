@@ -5603,6 +5603,16 @@
         }
       }
     },
+    "Tono account setup was interrupted. Retry to continue.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tono 账户设置已中断，请重试以继续。"
+          }
+        }
+      }
+    },
     "Tono account suspended": {
       "localizations": {
         "zh-Hans": {

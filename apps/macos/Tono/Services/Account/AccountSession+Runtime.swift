@@ -47,10 +47,23 @@ extension AccountSession {
             await self.cancelRuntimeMonitor()
             await self.releaseNetworkProtection()
             self.shouldResumeProtection = false
-            if self.user == nil, self.state == .authenticating || self.state == .restoring {
-                self.state = .signedOut
-            }
+            self.finishInterruptedAccountWorkAfterProtectionRelease()
         }.value
+    }
+
+    func finishInterruptedAccountWorkAfterProtectionRelease() {
+        switch state {
+        case .restoring, .authenticating, .enrolling:
+            // Cleanup cancelled the task that could finish this presentation.
+            // An adopted account is not necessarily fully initialized: offer
+            // retry rather than leave a permanent spinner or claim readiness.
+            hasStartedRestore = false
+            state = user == nil ? .signedOut : .error(
+                String(localized: "Tono account setup was interrupted. Retry to continue.")
+            )
+        default:
+            break
+        }
     }
 
     func cancelRuntimeMonitor() async {

@@ -704,6 +704,40 @@ final class AccountSessionRequestTests: XCTestCase {
         XCTAssertFalse(account.accountLifecycle.isBusy)
     }
 
+    func testProtectionReleaseMakesInterruptedAuthenticatedStartupRetryable() throws {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        account.user = try JSONDecoder().decode(TonoUser.self, from: Data(Self.originalUser.utf8))
+        for interrupted: AccountSession.State in [.restoring, .authenticating, .enrolling] {
+            account.state = interrupted
+            account.finishInterruptedAccountWorkAfterProtectionRelease()
+            guard case .error = account.state else {
+                XCTFail("Interrupted account startup must offer retry, not remain busy or claim ready")
+                continue
+            }
+        }
+    }
+
+    func testProtectionReleaseReturnsAnUnownedInterruptedStartupToSignIn() {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        for interrupted: AccountSession.State in [.restoring, .authenticating, .enrolling] {
+            account.state = interrupted
+            account.finishInterruptedAccountWorkAfterProtectionRelease()
+            XCTAssertEqual(account.state, .signedOut)
+        }
+    }
+
+    func testProtectionReleasePreservesEstablishedAccountPresentations() {
+        let (account, transport, host, _) = fixture()
+        defer { transport.invalidateAndCancel(); HeldAccountProtocol.remove(host) }
+        for stable: AccountSession.State in [.ready, .signedOut, .suspended, .error("existing error")] {
+            account.state = stable
+            account.finishInterruptedAccountWorkAfterProtectionRelease()
+            XCTAssertEqual(account.state, stable)
+        }
+    }
+
     private static let originalUser = #"{"id":"original","email":"old@example.test"}"#
 
     private static let enabledMethods = #"{"email":{"enabled":true},"apple":{"enabled":false},"google":{"enabled":false}}"#
