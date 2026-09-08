@@ -17,7 +17,7 @@ final class ProtectedFailureCodeProducerTests: XCTestCase {
         var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         for _ in 0..<4 {
             let candidate = dir.appendingPathComponent("Tono")
-            let marker = candidate.appendingPathComponent("LiquidClashApp.swift")
+            let marker = candidate.appendingPathComponent("TonoApp.swift")
             if FileManager.default.fileExists(atPath: marker.path) { return candidate }
             dir = dir.deletingLastPathComponent()
         }

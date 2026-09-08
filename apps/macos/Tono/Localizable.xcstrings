@@ -4641,12 +4641,12 @@
         }
       }
     },
-    "Subscription source refused access. Import nodes via \"Import from Clash Verge\" or \"Import File\" first, then update the subscription after connecting the proxy.": {
+    "Subscription source refused access. Import a subscription file first, then update the subscription after connecting.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "订阅源拒绝访问。请先通过「从 Clash Verge 导入」或「文件导入」获取节点，连接代理后再更新订阅。"
+            "value": "订阅源拒绝访问。请先导入订阅文件，连上后再更新订阅。"
           }
         }
       }

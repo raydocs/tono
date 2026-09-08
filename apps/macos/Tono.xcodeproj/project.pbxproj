@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		C0D000012F80000000000001 /* mihomo in Embed Executables */ = {isa = PBXBuildFile; fileRef = C0D000052F80000000000001 /* mihomo */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		C0D000042F80000000000001 /* liquidclash-helper in Embed Executables */ = {isa = PBXBuildFile; fileRef = C0D000082F80000000000001 /* liquidclash-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		C0D000042F80000000000001 /* tono-core-helper in Embed Executables */ = {isa = PBXBuildFile; fileRef = C0D000082F80000000000001 /* tono-core-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C0D0000B2F80000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = C0D0000D2F80000000000001 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -20,12 +20,36 @@
 			dstSubfolderSpec = 7;
 			files = (
 				C0D000012F80000000000001 /* mihomo in Embed Executables */,
-				C0D000042F80000000000001 /* liquidclash-helper in Embed Executables */,
+				C0D000042F80000000000001 /* tono-core-helper in Embed Executables */,
 			);
 			name = "Embed Executables";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C0D0000E2F80000000000001 /* Pin helper codesign identifier */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/tono-core-helper",
+			);
+			name = "Pin helper codesign identifier";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "HELPER=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/tono-core-helper\"\nif [ ! -f \"$HELPER\" ]; then\n  echo \"missing embedded helper: $HELPER\" >&2\n  exit 1\nfi\n# CodeSignOnCopy has derived Identifier from the filename. Runtime\n# requirement is always com.raydocs.tono.helper.\nif [ \"${CODE_SIGNING_ALLOWED}\" = \"NO\" ] || [ -z \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] || [ \"${EXPANDED_CODE_SIGN_IDENTITY}\" = \"-\" ]; then\n  codesign --force --sign - --identifier com.raydocs.tono.helper \"$HELPER\"\n  exit 0\nfi\ncodesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --identifier com.raydocs.tono.helper --options runtime --timestamp=none \"$HELPER\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXContainerItemProxy section */
 		D0E0000B0000000000000000 /* PBXContainerItemProxy */ = {
@@ -33,7 +57,7 @@
 			containerPortal = 14F0D2002F78C04F000C4896 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 14F0D2072F78C04F000C4896;
-			remoteInfo = LiquidClash;
+			remoteInfo = Tono;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -41,33 +65,26 @@
 		14F0D2082F78C04F000C4896 /* Tono.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tono.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0E000020000000000000000 /* TonoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TonoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0D000052F80000000000001 /* mihomo */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = Tono/Resources/mihomo; sourceTree = "<group>"; };
-		C0D000082F80000000000001 /* liquidclash-helper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = Tono/Resources/liquidclash-helper; sourceTree = "<group>"; };
+		C0D000082F80000000000001 /* tono-core-helper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; path = Tono/Resources/tono-core-helper; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		14F0D20B2F78C04F000C4896 /* Exceptions for "Tono" folder in "LiquidClash" target */ = {
+		14F0D20B2F78C04F000C4896 /* Exceptions for "Tono" folder in "Tono" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 				membershipExceptions = (
 					":-",
 					Info.plist,
-					Resources/clash-fetcher,
 					Resources/country.mmdb,
 					Resources/geoip.dat,
 					Resources/geosite.dat,
-					Resources/liquidclash-helper,
-					Resources/liquidclash.helper.plist,
+					Resources/tono-core-helper,
+					Resources/tono-core-helper.plist,
 					Resources/mihomo,
 					Resources/tailscale,
 					Resources/tailscaled,
-					Services/WebViewDownloader.swift,
 					reports,
-					Tools,
-					Tools/.cargo/config.toml,
-					Tools/Cargo.lock,
-					Tools/Cargo.toml,
-					Tools/src/main.rs,
 				);
-			target = 14F0D2072F78C04F000C4896 /* LiquidClash */;
+			target = 14F0D2072F78C04F000C4896 /* Tono */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -75,7 +92,7 @@
 		14F0D20A2F78C04F000C4896 /* Tono */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				14F0D20B2F78C04F000C4896 /* Exceptions for "Tono" folder in "LiquidClash" target */,
+				14F0D20B2F78C04F000C4896 /* Exceptions for "Tono" folder in "Tono" target */,
 			);
 			path = Tono;
 			sourceTree = "<group>";
@@ -120,7 +137,7 @@
 			isa = PBXGroup;
 				children = (
 					C0D000052F80000000000001 /* mihomo */,
-					C0D000082F80000000000001 /* liquidclash-helper */,
+					C0D000082F80000000000001 /* tono-core-helper */,
 				);
 			name = "Embedded Executables";
 			sourceTree = "<group>";
@@ -137,14 +154,15 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		14F0D2072F78C04F000C4896 /* LiquidClash */ = {
+		14F0D2072F78C04F000C4896 /* Tono */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 14F0D2152F78C050000C4896 /* Build configuration list for PBXNativeTarget "LiquidClash" */;
+			buildConfigurationList = 14F0D2152F78C050000C4896 /* Build configuration list for PBXNativeTarget "Tono" */;
 			buildPhases = (
 				14F0D2042F78C04F000C4896 /* Sources */,
 				14F0D2052F78C04F000C4896 /* Frameworks */,
 				14F0D2062F78C04F000C4896 /* Resources */,
 				C0D0000A2F80000000000001 /* Embed Executables */,
+				C0D0000E2F80000000000001 /* Pin helper codesign identifier */,
 			);
 			buildRules = (
 			);
@@ -153,11 +171,11 @@
 			fileSystemSynchronizedGroups = (
 				14F0D20A2F78C04F000C4896 /* Tono */,
 			);
-			name = LiquidClash;
+			name = Tono;
 			packageProductDependencies = (
 				C0D0000D2F80000000000001 /* Sparkle */,
 			);
-			productName = LiquidClash;
+			productName = Tono;
 			productReference = 14F0D2082F78C04F000C4896 /* Tono.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -203,7 +221,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 14F0D2032F78C04F000C4896 /* Build configuration list for PBXProject "LiquidClash" */;
+			buildConfigurationList = 14F0D2032F78C04F000C4896 /* Build configuration list for PBXProject "Tono" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -220,7 +238,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				14F0D2072F78C04F000C4896 /* LiquidClash */,
+				14F0D2072F78C04F000C4896 /* Tono */,
 				D0E000010000000000000000 /* TonoTests */,
 			);
 		};
@@ -263,7 +281,7 @@
 /* Begin PBXTargetDependency section */
 		D0E0000A0000000000000000 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 14F0D2072F78C04F000C4896 /* LiquidClash */;
+			target = 14F0D2072F78C04F000C4896 /* Tono */;
 			targetProxy = D0E0000B0000000000000000 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -392,7 +410,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = Tono/LiquidClash.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Tono/Tono.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 72;
@@ -511,7 +529,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		14F0D2032F78C04F000C4896 /* Build configuration list for PBXProject "LiquidClash" */ = {
+		14F0D2032F78C04F000C4896 /* Build configuration list for PBXProject "Tono" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				14F0D2132F78C050000C4896 /* Debug */,
@@ -520,7 +538,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		14F0D2152F78C050000C4896 /* Build configuration list for PBXNativeTarget "LiquidClash" */ = {
+		14F0D2152F78C050000C4896 /* Build configuration list for PBXNativeTarget "Tono" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				14F0D2162F78C050000C4896 /* Debug */,

@@ -5,7 +5,7 @@ import SwiftUI
 /// sidebar. The source is the app icon asset, which is also the same artwork
 /// shipped by the Windows shell; state is communicated by the surrounding
 /// glow rather than by swapping the brand colors.
-struct LiquidClashLogo: View {
+struct TonoLogo: View {
     var compact: Bool = false
     var isConnected: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,7 +46,7 @@ struct LiquidClashLogo: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-        LiquidClashLogo()
+        TonoLogo()
             .frame(width: 220, height: 220)
     }
     .frame(width: 360, height: 360)

@@ -16,8 +16,8 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "14F0D2072F78C04F000C4896"
                BuildableName = "Tono.app"
-               BlueprintName = "LiquidClash"
-               ReferencedContainer = "container:LiquidClash.xcodeproj">
+               BlueprintName = "Tono"
+               ReferencedContainer = "container:Tono.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -36,7 +36,7 @@
                BlueprintIdentifier = "D0E000010000000000000000"
                BuildableName = "TonoTests.xctest"
                BlueprintName = "TonoTests"
-               ReferencedContainer = "container:LiquidClash.xcodeproj">
+               ReferencedContainer = "container:Tono.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -57,8 +57,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "14F0D2072F78C04F000C4896"
             BuildableName = "Tono.app"
-            BlueprintName = "LiquidClash"
-            ReferencedContainer = "container:LiquidClash.xcodeproj">
+            BlueprintName = "Tono"
+            ReferencedContainer = "container:Tono.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -74,8 +74,8 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "14F0D2072F78C04F000C4896"
             BuildableName = "Tono.app"
-            BlueprintName = "LiquidClash"
-            ReferencedContainer = "container:LiquidClash.xcodeproj">
+            BlueprintName = "Tono"
+            ReferencedContainer = "container:Tono.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

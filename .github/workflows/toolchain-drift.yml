@@ -65,7 +65,7 @@ jobs:
             | awk '/^\[pkg.rust\]/{f=1} f && /^version = /{gsub(/"/,"",$3); print $3; f=0}')
           row "Rust (rust-toolchain.toml)" "$rust_pin" "$rust_latest"
 
-          sparkle_pin=$(python3 -c 'import json;d=json.load(open("apps/macos/LiquidClash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"));print(next(p["state"]["version"] for p in d["pins"] if p["identity"]=="sparkle"))')
+          sparkle_pin=$(python3 -c 'import json;d=json.load(open("apps/macos/Tono.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"));print(next(p["state"]["version"] for p in d["pins"] if p["identity"]=="sparkle"))')
           row "Sparkle (Package.resolved)" "$sparkle_pin" "$(latest_release sparkle-project/Sparkle)"
 
           xray_pin=$(sed -n 's/^XRAY_VERSION = "\([^"]*\)".*/\1/p' tooling/scripts/provision-tono-node.py)

@@ -33,7 +33,7 @@ final class ToastCenter {
 }
 
 /// Top-center glass capsule hosting the current toast. Mounted once as an
-/// overlay on the window root (LiquidClashApp). Text stays a plain `Text` so
+/// overlay on the window root (TonoApp). Text stays a plain `Text` so
 /// VoiceOver announces it.
 struct TonoToastHost: View {
     @Environment(\.colorScheme) private var colorScheme

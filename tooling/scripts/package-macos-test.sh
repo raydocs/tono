@@ -47,7 +47,7 @@ if [ -x "$helper_builder" ]; then
 fi
 
 for executable in \
-    "$repo_root/apps/macos/Tono/Resources/liquidclash-helper" \
+    "$repo_root/apps/macos/Tono/Resources/tono-core-helper" \
     "$repo_root/apps/macos/Tono/Resources/mihomo"; do
     if [ ! -x "$executable" ]; then
         echo "Missing embedded executable: $executable" >&2
@@ -76,8 +76,8 @@ if [ -e "$artifact_app" ] || [ -e "$artifact_zip" ]; then
 fi
 
 DEVELOPER_DIR="$developer_dir" /usr/bin/xcodebuild \
-    -project "$repo_root/apps/macos/LiquidClash.xcodeproj" \
-    -scheme LiquidClash \
+    -project "$repo_root/apps/macos/Tono.xcodeproj" \
+    -scheme Tono \
     -configuration Release \
     -derivedDataPath "$derived_data_path" \
     -archivePath "$archive_path" \
@@ -142,11 +142,10 @@ verify_signed_executable() {
 }
 
 # HelperManager.verifyEmbeddedExecutable pins the signing identifier as well as
-# the team, and CodeSignOnCopy has been observed deriving the identifier from the
-# filename instead of preserving it. That produced shipped builds whose embedded
-# helper read `liquidclash-helper`, so every administrator repair failed with a
-# misleading "not signed with the Tono Developer ID identity" and the app sat in
-# Protected Offline. Fail the build here instead of at a user's first launch.
+# the team. CodeSignOnCopy has derived Identifier from the resource filename
+# (historically `liquidclash-helper`). The Xcode "Pin helper codesign identifier"
+# phase re-signs the embedded binary as com.raydocs.tono.helper. Fail the build
+# here if that pin did not stick, instead of at a user's first launch.
 verify_embedded_requirement() {
     executable=$1
     expected_identifier=$2
@@ -163,10 +162,10 @@ verify_embedded_requirement() {
 
 /usr/bin/codesign --verify --deep --strict --all-architectures "$source_app"
 verify_signed_executable "$source_app/Contents/MacOS/Tono"
-verify_signed_executable "$source_app/Contents/Resources/liquidclash-helper"
+verify_signed_executable "$source_app/Contents/Resources/tono-core-helper"
 verify_signed_executable "$source_app/Contents/Resources/mihomo"
 verify_embedded_requirement \
-    "$source_app/Contents/Resources/liquidclash-helper" com.raydocs.tono.helper
+    "$source_app/Contents/Resources/tono-core-helper" com.raydocs.tono.helper
 verify_embedded_requirement "$source_app/Contents/Resources/mihomo" mihomo
 
 /usr/bin/ditto "$source_app" "$artifact_app"

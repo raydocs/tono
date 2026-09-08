@@ -7,7 +7,7 @@ kill_switch_source="$repo_dir/tooling/scripts/core-helper/KillSwitchManager.swif
 protected_dns_source="$repo_dir/tooling/scripts/core-helper/ProtectedDNSManager.swift"
 peer_authorization_source="$repo_dir/tooling/scripts/helper-shared/PeerAuthorization.swift"
 protocol_version_source="$repo_dir/apps/macos/Tono/Core/HelperProtocolVersion.swift"
-output_file="$repo_dir/apps/macos/Tono/Resources/liquidclash-helper"
+output_file="$repo_dir/apps/macos/Tono/Resources/tono-core-helper"
 temporary_file="$output_file.new"
 contract_file="$repo_dir/tooling/scripts/core-helper/CONTRACT.sha256"
 

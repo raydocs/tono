@@ -787,7 +787,7 @@ nonisolated enum SubscriptionError: LocalizedError {
         case .downloadHTTPError(let code): String(localized: "Subscription server returned HTTP \(code)")
         case .invalidContent: String(localized: "Subscription content is not valid text")
         case .noNodesFound: String(localized: "No proxy nodes found in subscription")
-        case .blockedByServer: String(localized: "Subscription source refused access. Import nodes via \"Import from Clash Verge\" or \"Import File\" first, then update the subscription after connecting the proxy.")
+        case .blockedByServer: String(localized: "Subscription source refused access. Import a subscription file first, then update the subscription after connecting.")
         case .serverReturnedHTML: String(localized: "Subscription server returned an HTML page instead of a config file. Please check the link.")
         case .parseFailed: String(localized: "Could not parse subscription content. Please check the subscription format.")
         }

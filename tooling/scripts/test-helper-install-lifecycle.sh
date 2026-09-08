@@ -31,7 +31,7 @@ usage() {
   print "    TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT=/tmp/i.sh \\" >&2
   print "    TEST_RUNNER_TONO_EMIT_INSTALL_APP=<app> \\" >&2
   print "    TEST_RUNNER_TONO_EMIT_INSTALL_UID=\$(id -u) \\" >&2
-  print "    xcodebuild test -project apps/macos/LiquidClash.xcodeproj -scheme LiquidClash \\" >&2
+  print "    xcodebuild test -project apps/macos/Tono.xcodeproj -scheme Tono \\" >&2
   print "      -destination 'platform=macOS,arch=arm64' \\" >&2
   print "      -only-testing:TonoTests/HelperInstallScriptTests/testEmitInstallScriptWhenRequested" >&2
   print "  The TEST_RUNNER_ prefix is required: xcodebuild forwards only prefixed" >&2
@@ -228,8 +228,8 @@ print "" >&2
 print "  TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT=/tmp/tono-install.sh \\" >&2
 print "  TEST_RUNNER_TONO_EMIT_INSTALL_APP=$app \\" >&2
 print "  TEST_RUNNER_TONO_EMIT_INSTALL_UID=$trusted_uid \\" >&2
-print "  xcodebuild test -project ${script_path:h:h:h}/apps/macos/LiquidClash.xcodeproj \\" >&2
-print "    -scheme LiquidClash -destination 'platform=macOS,arch=arm64' \\" >&2
+print "  xcodebuild test -project ${script_path:h:h:h}/apps/macos/Tono.xcodeproj \\" >&2
+print "    -scheme Tono -destination 'platform=macOS,arch=arm64' \\" >&2
 print "    -only-testing:TonoTests/HelperInstallScriptTests/testEmitInstallScriptWhenRequested" >&2
 print "" >&2
 print "  sudo $script_path --app $app --script /tmp/tono-install.sh" >&2
@@ -246,8 +246,8 @@ if ! TEST_RUNNER_TONO_EMIT_INSTALL_SCRIPT=$script \
      TEST_RUNNER_TONO_EMIT_INSTALL_UID=$trusted_uid \
      DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} \
      /usr/bin/xcodebuild test \
-       -project "${script_path:h:h:h}/apps/macos/LiquidClash.xcodeproj" \
-       -scheme LiquidClash \
+       -project "${script_path:h:h:h}/apps/macos/Tono.xcodeproj" \
+       -scheme Tono \
        -destination 'platform=macOS,arch=arm64' \
        -only-testing:TonoTests/HelperInstallScriptTests/testEmitInstallScriptWhenRequested \
        > "$backup/emit.log" 2>&1; then
@@ -343,7 +343,7 @@ fi
 # stands between the daemon and an arbitrary binary, so it is asserted against a
 # real ad-hoc-signed file rather than trusted.
 adhoc=$backup/adhoc-helper
-/bin/cp "$app/Contents/Resources/liquidclash-helper" "$adhoc"
+/bin/cp "$app/Contents/Resources/tono-core-helper" "$adhoc"
 /usr/bin/codesign --force --sign - --identifier com.raydocs.tono.helper "$adhoc" 2>/dev/null
 refute "ad-hoc signature is refused by the install requirement" \
   /usr/bin/codesign --verify --strict --all-architectures \
