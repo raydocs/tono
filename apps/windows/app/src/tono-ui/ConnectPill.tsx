@@ -83,6 +83,7 @@ const hex = (color: string, alpha: number) =>
 
 interface ConnectPillProps {
   uiState: TonoUiState
+  protectionConfirmed?: boolean
   /** Connect FSM stage key (`startingKillSwitch`). Translated in the pill. */
   stage?: string | null
   onConnect: () => void
@@ -91,6 +92,7 @@ interface ConnectPillProps {
 
 export const ConnectPill = ({
   uiState,
+  protectionConfirmed = false,
   stage,
   onConnect,
   onDisconnect,
@@ -99,6 +101,9 @@ export const ConnectPill = ({
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const spec = STATE_SPECS[uiState]
+  const titleKey = uiState === 'protectedOffline' && !protectionConfirmed
+    ? 'tono.pill.title.protectionUnknown'
+    : spec.titleKey
   const stageKey = stage ? CONNECT_STAGE_LABEL_KEYS[stage] : undefined
 
   const subtitle =
@@ -134,7 +139,7 @@ export const ConnectPill = ({
       className="tono-pill"
       aria-disabled={spec.disabled || undefined}
       onClick={handleClick}
-      aria-label={`${t(spec.titleKey)} — ${subtitle}`}
+      aria-label={`${t(titleKey)} — ${subtitle}`}
       style={{
         position: 'relative',
         display: 'flex',
@@ -210,7 +215,7 @@ export const ConnectPill = ({
             transition: `color ${transition}`,
           }}
         >
-          {t(spec.titleKey)}
+          {t(titleKey)}
         </span>
         <span
           style={{

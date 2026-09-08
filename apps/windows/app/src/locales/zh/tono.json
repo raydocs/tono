@@ -169,6 +169,7 @@
       "connecting": "连接中…",
       "connected": "已连接",
       "protectedOffline": "保护中，未连上",
+      "protectionUnknown": "保护状态未确认",
       "disconnecting": "断开中…"
     },
     "subtitle": {
@@ -293,7 +294,8 @@
     "failedAt": "失败于 {{stage}}",
     "unknownStage": "未知阶段",
     "statusTitle": "当前线路未通过检查",
-    "statusBody": "已拦住直连，正在换线重试。",
+    "statusBody": "当前连接不可用，直连流量仍被拦截。可以重试，或恢复正常网络。",
+    "protectionUnknownBody": "Tono 无法确认网络保护状态。如有提示，请修复服务；也可以选择「恢复正常网络」。",
     "completedCount": "已完成 {{count}} 项",
     "technicalDetails": "技术详情",
     "switchRoute": "选择其他线路",

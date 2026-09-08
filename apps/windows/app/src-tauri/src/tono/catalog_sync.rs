@@ -41,8 +41,8 @@ pub fn seed_from_cache(inner: &mut TonoInner) {
 }
 
 /// Sanitize the catalog's split-routing directives against the admitted
-/// nodes, warning on every dropped name. A bad directive never fails the
-/// sync — the catalog itself was already fully verified.
+/// nodes, warning on dropped selection hints. Catalog/cache admission has
+/// already rejected any unusable declared home hop before this projection.
 fn sanitized_routing(
     routing: Option<&tono_core::CatalogRouting>,
     nodes: &[ValidatedNode],
@@ -747,6 +747,31 @@ mod tests {
         let effect = install_and_persist(&effect.tracker, &cache, &catalog(3)).unwrap();
         assert!(!effect.installed, "same revision + digest is idempotent");
         assert_eq!(effect.tracker.current_revision(), 3);
+    }
+
+    #[test]
+    fn invalid_home_keeps_verified_cache_and_tracker_unchanged() {
+        let dir = TempDir::new("persist-invalid-home");
+        let cache = CatalogCache::new(dir.path(), Box::new(NoopCheck));
+        let accepted = install_and_persist(&CatalogTracker::new(), &cache, &catalog(5)).unwrap();
+        let verified_bytes = std::fs::read(cache.path()).unwrap();
+
+        let mut rejected = catalog(6);
+        rejected.routing = Some(tono_core::CatalogRouting {
+            home_proxy: Some("missing required residential node".into()),
+            ..Default::default()
+        });
+        let err = install_and_persist(&accepted.tracker, &cache, &rejected).unwrap_err();
+        assert_eq!(err, CatalogError::InvalidResponse);
+        assert_eq!(accepted.tracker.current_revision(), 5);
+        assert_eq!(std::fs::read(cache.path()).unwrap(), verified_bytes);
+        assert_eq!(cache.load().unwrap().response.revision, 5);
+
+        // A corrected redelivery is still installable; rejection did not
+        // consume the next revision or poison the previous verified cache.
+        let corrected = install_and_persist(&accepted.tracker, &cache, &catalog(6)).unwrap();
+        assert!(corrected.installed);
+        assert_eq!(corrected.tracker.current_revision(), 6);
     }
 
     #[test]

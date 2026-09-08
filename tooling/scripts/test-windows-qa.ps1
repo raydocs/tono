@@ -197,7 +197,7 @@ function Get-QaSnapshot {
     [ordered]@{
         service = Get-ServiceSnapshot
         processes = @(
-            Get-Process Tono, mihomo, verge-mihomo -ErrorAction SilentlyContinue |
+            Get-Process Tono, tono-core, mihomo, verge-mihomo -ErrorAction SilentlyContinue |
                 Sort-Object ProcessName, Id |
                 ForEach-Object { [ordered]@{ name = $_.ProcessName; process_id = $_.Id } }
         )
@@ -387,13 +387,22 @@ function Stop-PacketCapture {
 }
 
 function Invoke-CoreCrash {
-    $corePid = [uint32]$script:baselineDiagnosis.report.service.data.core_pid
+    # The Core may have restarted since the baseline. Never inject into a stale PID.
+    $diagnosis = Get-TonoDiagnosis
+    if (-not $diagnosis.available -or $diagnosis.error -or
+        $diagnosis.report.service.code -ne 0 -or
+        $diagnosis.report.service.data.is_active -ne $true) {
+        throw 'could not prove the current Service-owned Core before fault injection'
+    }
+    $corePid = [uint32]$diagnosis.report.service.data.core_pid
+    if ($corePid -eq 0) { throw 'the Service did not report a live Core PID' }
     $core = Get-Process -Id $corePid -ErrorAction SilentlyContinue
-    if (-not $core -or $core.ProcessName -notmatch '(?i)mihomo') {
-        throw "the Service-owned Core PID $corePid is not a live Mihomo process"
+    # Match exact shipped names, not arbitrary executables containing "mihomo".
+    if (-not $core -or $core.ProcessName -notin @('tono-core', 'mihomo', 'verge-mihomo')) {
+        throw "the Service-owned Core PID $corePid is not a recognized live Core process"
     }
     Write-QaEvent -Kind 'fault' -Stage 'CoreCrash' -Data @{ process_id = $corePid }
-    Stop-Process -Id $corePid -Force
+    Stop-Process -InputObject $core -Force
 }
 
 function Invoke-ServiceCrash {

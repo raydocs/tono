@@ -109,14 +109,14 @@ nonisolated struct TonoExitCatalogHomeSocks5: Codable, Sendable, Equatable {
         self.password = password
     }
 
-    /// Keep a malformed optional routing directive from rejecting the whole
-    /// verified catalog. Validation happens again before runtime generation.
+    /// A present residential directive is an egress requirement. Malformed
+    /// credentials cannot be decoded as an absent route and sent via cloud.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        host = (try? container.decode(String.self, forKey: .host)) ?? ""
-        port = (try? container.decode(Int.self, forKey: .port)) ?? 0
-        username = (try? container.decode(String.self, forKey: .username)) ?? ""
-        password = (try? container.decode(String.self, forKey: .password)) ?? ""
+        host = try container.decode(String.self, forKey: .host)
+        port = try container.decode(Int.self, forKey: .port)
+        username = try container.decode(String.self, forKey: .username)
+        password = try container.decode(String.self, forKey: .password)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -139,13 +139,13 @@ nonisolated struct TonoExitCatalogRouting: Codable, Sendable, Equatable {
         self.homeSocks5 = homeSocks5
     }
 
-    /// Routing is additive server input. Ignore malformed individual fields
-    /// while allowing revision/YAML integrity validation to continue.
+    /// An invalid default selection hint may be ignored; an invalid declared
+    /// home route may not. Absence still supports ordinary cloud-only users.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        homeProxy = try? container.decodeIfPresent(String.self, forKey: .homeProxy)
+        homeProxy = try container.decodeIfPresent(String.self, forKey: .homeProxy)
         defaultProxy = try? container.decodeIfPresent(String.self, forKey: .defaultProxy)
-        homeSocks5 = try? container.decodeIfPresent(
+        homeSocks5 = try container.decodeIfPresent(
             TonoExitCatalogHomeSocks5.self,
             forKey: .homeSocks5
         )
@@ -168,7 +168,7 @@ nonisolated struct TonoExitCatalogResponse: Codable, Sendable, Equatable {
         yaml = try container.decode(String.self, forKey: .yaml)
         sha256 = try container.decode(String.self, forKey: .sha256)
         updatedAt = try container.decodeIfPresent(Int.self, forKey: .updatedAt)
-        routing = try? container.decodeIfPresent(
+        routing = try container.decodeIfPresent(
             TonoExitCatalogRouting.self,
             forKey: .routing
         )

@@ -27,7 +27,7 @@ export type MihomoGroupDelay = Record<string, number>;
 export async function updateController(controller: string): Promise<void> {
   const [host, portStr] = controller.trim().split(":");
   const port = parseInt(portStr);
-  await invoke<void>("plugin:mihomo|update_controller", { host, port });
+  await invoke<void>("plugin:tono-plugin-core|update_controller", { host, port });
 }
 
 /**
@@ -35,28 +35,28 @@ export async function updateController(controller: string): Promise<void> {
  * @param secret 控制器的密钥
  */
 export async function updateSecret(secret: string): Promise<void> {
-  await invoke<void>("plugin:mihomo|update_secret", { secret });
+  await invoke<void>("plugin:tono-plugin-core|update_secret", { secret });
 }
 
 /**
  * 获取 Mihomo 版本信息
  */
 export async function getVersion(): Promise<MihomoVersion> {
-  return await invoke<MihomoVersion>("plugin:mihomo|get_version");
+  return await invoke<MihomoVersion>("plugin:tono-plugin-core|get_version");
 }
 
 /**
  * 清除 FakeIP 缓存
  */
 export async function flushFakeIp(): Promise<void> {
-  await invoke<void>("plugin:mihomo|flush_fakeip");
+  await invoke<void>("plugin:tono-plugin-core|flush_fakeip");
 }
 
 /**
  * 清除 DNS 缓存
  */
 export async function flushDNS(): Promise<void> {
-  await invoke<void>("plugin:mihomo|flush_dns");
+  await invoke<void>("plugin:tono-plugin-core|flush_dns");
 }
 
 // connections
@@ -65,14 +65,14 @@ export async function flushDNS(): Promise<void> {
  * @returns 所有连接信息
  */
 export async function getConnections(): Promise<Connections> {
-  return await invoke<Connections>("plugin:mihomo|get_connections");
+  return await invoke<Connections>("plugin:tono-plugin-core|get_connections");
 }
 
 /**
  * 关闭所有连接
  */
 export async function closeAllConnections(): Promise<void> {
-  await invoke<void>("plugin:mihomo|close_all_connections");
+  await invoke<void>("plugin:tono-plugin-core|close_all_connections");
 }
 
 /**
@@ -80,7 +80,7 @@ export async function closeAllConnections(): Promise<void> {
  * @param connectionId 连接 ID
  */
 export async function closeConnection(connectionId: string): Promise<void> {
-  await invoke<void>("plugin:mihomo|close_connection", { connectionId });
+  await invoke<void>("plugin:tono-plugin-core|close_connection", { connectionId });
 }
 
 // groups
@@ -89,7 +89,7 @@ export async function closeConnection(connectionId: string): Promise<void> {
  * @returns 所有代理组信息
  */
 export async function getGroups(): Promise<Groups> {
-  return await invoke<Groups>("plugin:mihomo|get_groups");
+  return await invoke<Groups>("plugin:tono-plugin-core|get_groups");
 }
 
 /**
@@ -98,7 +98,7 @@ export async function getGroups(): Promise<Groups> {
  * @returns 指定代理组信息
  */
 export async function getGroupByName(groupName: string): Promise<Proxy> {
-  return await invoke<Proxy>("plugin:mihomo|get_group_by_name", {
+  return await invoke<Proxy>("plugin:tono-plugin-core|get_group_by_name", {
     groupName,
   });
 }
@@ -119,7 +119,7 @@ export async function delayGroup(
   timeout: number,
   keepFixed = false,
 ): Promise<MihomoGroupDelay> {
-  return await invoke<MihomoGroupDelay>("plugin:mihomo|delay_group", {
+  return await invoke<MihomoGroupDelay>("plugin:tono-plugin-core|delay_group", {
     groupName,
     testUrl,
     timeout,
@@ -133,7 +133,7 @@ export async function delayGroup(
  * @returns 所有代理提供者信息
  */
 export async function getProxyProviders(): Promise<ProxyProviders> {
-  return await invoke<ProxyProviders>("plugin:mihomo|get_proxy_providers");
+  return await invoke<ProxyProviders>("plugin:tono-plugin-core|get_proxy_providers");
 }
 
 /**
@@ -145,7 +145,7 @@ export async function getProxyProviderByName(
   providerName: string,
 ): Promise<ProxyProvider> {
   return await invoke<ProxyProvider>(
-    "plugin:mihomo|get_proxy_provider_by_name",
+    "plugin:tono-plugin-core|get_proxy_provider_by_name",
     { providerName },
   );
 }
@@ -155,7 +155,7 @@ export async function getProxyProviderByName(
  * @param providerName 代理提供者名称
  */
 export async function updateProxyProvider(providerName: string): Promise<void> {
-  await invoke<void>("plugin:mihomo|update_proxy_provider", {
+  await invoke<void>("plugin:tono-plugin-core|update_proxy_provider", {
     providerName,
   });
 }
@@ -167,7 +167,7 @@ export async function updateProxyProvider(providerName: string): Promise<void> {
 export async function healthcheckProxyProvider(
   providerName: string,
 ): Promise<void> {
-  await invoke<void>("plugin:mihomo|healthcheck_proxy_provider", {
+  await invoke<void>("plugin:tono-plugin-core|healthcheck_proxy_provider", {
     providerName,
   });
 }
@@ -187,7 +187,7 @@ export async function healthcheckNodeInProvider(
   timeout: number,
 ): Promise<ProxyDelay> {
   return await invoke<ProxyDelay>(
-    "plugin:mihomo|healthcheck_node_in_provider",
+    "plugin:tono-plugin-core|healthcheck_node_in_provider",
     {
       providerName,
       proxyName,
@@ -203,7 +203,7 @@ export async function healthcheckNodeInProvider(
  * @returns 所有代理信息
  */
 export async function getProxies(): Promise<Proxies> {
-  return await invoke<Proxies>("plugin:mihomo|get_proxies");
+  return await invoke<Proxies>("plugin:tono-plugin-core|get_proxies");
 }
 
 /**
@@ -212,7 +212,7 @@ export async function getProxies(): Promise<Proxies> {
  * @returns 代理信息
  */
 export async function getProxyByName(proxyName: string): Promise<Proxy | null> {
-  return await invoke<Proxy>("plugin:mihomo|get_proxy_by_name", {
+  return await invoke<Proxy>("plugin:tono-plugin-core|get_proxy_by_name", {
     proxiesName: proxyName,
   });
 }
@@ -228,7 +228,7 @@ export async function selectNodeForGroup(
   groupName: string,
   node: string,
 ): Promise<void> {
-  await invoke<void>("plugin:mihomo|select_node_for_group", {
+  await invoke<void>("plugin:tono-plugin-core|select_node_for_group", {
     groupName,
     node,
   });
@@ -241,7 +241,7 @@ export async function selectNodeForGroup(
  * @param groupName 代理组名称
  */
 export async function unfixedProxy(groupName: string): Promise<void> {
-  await invoke<void>("plugin:mihomo|unfixed_proxy", {
+  await invoke<void>("plugin:tono-plugin-core|unfixed_proxy", {
     groupName,
   });
 }
@@ -260,7 +260,7 @@ export async function delayProxyByName(
   testUrl: string,
   timeout: number,
 ): Promise<ProxyDelay> {
-  return await invoke<ProxyDelay>("plugin:mihomo|delay_proxy_by_name", {
+  return await invoke<ProxyDelay>("plugin:tono-plugin-core|delay_proxy_by_name", {
     proxyName,
     testUrl,
     timeout,
@@ -273,7 +273,7 @@ export async function delayProxyByName(
  * @returns 所有规则信息
  */
 export async function getRules(): Promise<Rules> {
-  return await invoke<Rules>("plugin:mihomo|get_rules");
+  return await invoke<Rules>("plugin:tono-plugin-core|get_rules");
 }
 
 /**
@@ -281,7 +281,7 @@ export async function getRules(): Promise<Rules> {
  * @returns 所有规则提供者信息
  */
 export async function getRuleProviders(): Promise<RuleProviders> {
-  return await invoke<RuleProviders>("plugin:mihomo|get_rule_providers");
+  return await invoke<RuleProviders>("plugin:tono-plugin-core|get_rule_providers");
 }
 
 /**
@@ -289,7 +289,7 @@ export async function getRuleProviders(): Promise<RuleProviders> {
  * @param providerName 规则提供者名称
  */
 export async function updateRuleProvider(providerName: string): Promise<void> {
-  await invoke<void>("plugin:mihomo|update_rule_provider", {
+  await invoke<void>("plugin:tono-plugin-core|update_rule_provider", {
     providerName,
   });
 }
@@ -300,7 +300,7 @@ export async function updateRuleProvider(providerName: string): Promise<void> {
  * @returns 基础配置
  */
 export async function getBaseConfig(): Promise<BaseConfig> {
-  return await invoke<BaseConfig>("plugin:mihomo|get_base_config");
+  return await invoke<BaseConfig>("plugin:tono-plugin-core|get_base_config");
 }
 
 /**
@@ -312,7 +312,7 @@ export async function reloadConfig(
   force: boolean,
   configPath: string,
 ): Promise<void> {
-  await invoke<void>("plugin:mihomo|reload_config", {
+  await invoke<void>("plugin:tono-plugin-core|reload_config", {
     force,
     configPath,
   });
@@ -325,7 +325,7 @@ export async function reloadConfig(
 export async function patchBaseConfig(
   data: Record<string, any>,
 ): Promise<void> {
-  await invoke<void>("plugin:mihomo|patch_base_config", {
+  await invoke<void>("plugin:tono-plugin-core|patch_base_config", {
     data,
   });
 }
@@ -334,14 +334,14 @@ export async function patchBaseConfig(
  * 更新 Geo
  */
 export async function updateGeo(): Promise<void> {
-  await invoke<void>("plugin:mihomo|update_geo");
+  await invoke<void>("plugin:tono-plugin-core|update_geo");
 }
 
 /**
  * 重启核心
  */
 export async function restart(): Promise<void> {
-  await invoke<void>("plugin:mihomo|restart");
+  await invoke<void>("plugin:tono-plugin-core|restart");
 }
 
 // upgrade
@@ -359,28 +359,28 @@ export async function upgradeCore(
   channel: CoreUpdaterChannel = "auto",
   force = false,
 ): Promise<void> {
-  await invoke<void>("plugin:mihomo|upgrade_core", { channel, force });
+  await invoke<void>("plugin:tono-plugin-core|upgrade_core", { channel, force });
 }
 
 /**
  * 更新 UI
  */
 export async function upgradeUi(): Promise<void> {
-  await invoke<void>("plugin:mihomo|upgrade_ui");
+  await invoke<void>("plugin:tono-plugin-core|upgrade_ui");
 }
 
 /**
  * 更新 Geo
  */
 export async function upgradeGeo(): Promise<void> {
-  await invoke<void>("plugin:mihomo|upgrade_geo");
+  await invoke<void>("plugin:tono-plugin-core|upgrade_geo");
 }
 
 /**
  * 清除 Rust 侧中所有的 WebSocket 连接
  */
 export async function clearAllWsConnections(): Promise<void> {
-  await invoke<void>("plugin:mihomo|clear_all_ws_connections");
+  await invoke<void>("plugin:tono-plugin-core|clear_all_ws_connections");
 }
 
 export interface MessageKind<T, D> {
@@ -439,7 +439,7 @@ async function openWebSocketCommand(
     dispatchWebSocketMessage(listeners, message);
   };
 
-  const id = await invoke<number>(`plugin:mihomo|${command}`, {
+  const id = await invoke<number>(`plugin:tono-plugin-core|${command}`, {
     ...args,
     onMessage,
   });
@@ -513,7 +513,7 @@ export class MihomoWebSocket {
    */
   async close(): Promise<void> {
     try {
-      await invoke("plugin:mihomo|ws_disconnect", {
+      await invoke("plugin:tono-plugin-core|ws_disconnect", {
         id: this.id,
         forceTimeout: 0,
       });

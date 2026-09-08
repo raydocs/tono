@@ -34,6 +34,8 @@ pub(crate) struct SampledMetadata {
     pub(crate) destination_port: String,
     #[serde(default)]
     pub(crate) network: String,
+    #[serde(default)]
+    pub(crate) process: String,
     #[serde(default, rename = "processPath")]
     pub(crate) process_path: String,
 }
@@ -64,6 +66,7 @@ pub(crate) struct DirectSample {
 pub(crate) enum ProtectedDestination {
     Anthropic,
     Turnstile,
+    Payment,
     Update,
     Telemetry,
 }
@@ -73,6 +76,7 @@ impl ProtectedDestination {
         match self {
             Self::Anthropic => "ANTHROPIC",
             Self::Turnstile => "TURNSTILE",
+            Self::Payment => "PAYMENT",
             Self::Update => "UPDATE",
             Self::Telemetry => "TELEMETRY",
         }
@@ -145,9 +149,15 @@ pub(crate) const ANTHROPIC_DESTINATIONS: &[&str] = &[
     "claudeusercontent.com",
     "servd-anthropic-website.b-cdn.net",
 ];
-pub(crate) const TURNSTILE_DESTINATIONS: &[&str] = &[
-    "challenges.cloudflare.com",
-    "cf-assets.www.cloudflare.com",
+pub(crate) const TURNSTILE_DESTINATIONS: &[&str] = &["challenges.cloudflare.com", "cf-assets.www.cloudflare.com"];
+// Stripe's published browser/API/CDN/challenge set plus Link; these are
+// routing dependencies, not evidence that every matching request is Claude.
+pub(crate) const PAYMENT_DESTINATIONS: &[&str] = &[
+    "stripe.com",
+    "stripecdn.com",
+    "stripe.network",
+    "link.com",
+    "hcaptcha.com",
 ];
 pub(crate) const UPDATE_DESTINATIONS: &[&str] = &[
     "storage.googleapis.com",
@@ -165,18 +175,15 @@ pub(crate) const TELEMETRY_DESTINATIONS: &[&str] = &[
     "browser-intake-datadoghq.eu",
     "browser-intake-ddog-gov.com",
     "datadoghq.com",
+    "statsig.com",
     "statsigapi.net",
     "featuregates.org",
     "growthbook.io",
-    "stripe.network",
     "sentry.io",
 ];
 
 pub(crate) fn host_matches_suffix(host: &str, suffix: &str) -> bool {
-    host == suffix
-        || host
-            .strip_suffix(suffix)
-            .is_some_and(|prefix| prefix.ends_with('.'))
+    host == suffix || host.strip_suffix(suffix).is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 pub(crate) fn protected_destination(connection: &SampledConnection) -> Option<ProtectedDestination> {
@@ -189,6 +196,7 @@ pub(crate) fn protected_destination(connection: &SampledConnection) -> Option<Pr
     for (category, suffixes) in [
         (ProtectedDestination::Anthropic, ANTHROPIC_DESTINATIONS),
         (ProtectedDestination::Turnstile, TURNSTILE_DESTINATIONS),
+        (ProtectedDestination::Payment, PAYMENT_DESTINATIONS),
         (ProtectedDestination::Update, UPDATE_DESTINATIONS),
         (ProtectedDestination::Telemetry, TELEMETRY_DESTINATIONS),
     ] {
@@ -238,7 +246,12 @@ pub(crate) fn classify_protected_route(connection: &SampledConnection, residenti
     {
         return ProtectedRoute::Blocked;
     }
-    let Some(terminal) = connection.chains.first().map(|hop| hop.trim()).filter(|hop| !hop.is_empty()) else {
+    let Some(terminal) = connection
+        .chains
+        .first()
+        .map(|hop| hop.trim())
+        .filter(|hop| !hop.is_empty())
+    else {
         return ProtectedRoute::Unknown;
     };
     if terminal == residential_target {
@@ -306,9 +319,14 @@ pub(crate) fn new_direct_samples(
 ) -> Vec<DirectSample> {
     let mut fresh = Vec::new();
     for connection in &payload.connections {
-        let direct = connection.chains.iter().any(|hop| {
-            hop == config::DIRECT_GROUP_NAME || hop == config::WEB_DIRECT_GROUP_NAME
-        });
+        // Enforce the bound inside the batch, not only before the controller read.
+        if seen.len() >= MAX_DIRECT_SAMPLES {
+            break;
+        }
+        let direct = connection
+            .chains
+            .iter()
+            .any(|hop| hop == config::DIRECT_GROUP_NAME || hop == config::WEB_DIRECT_GROUP_NAME);
         if !direct {
             continue;
         }
@@ -327,19 +345,22 @@ pub(crate) fn new_direct_samples(
             continue;
         };
         let udp = connection.metadata.network.eq_ignore_ascii_case("udp");
-        let process = connection
-            .metadata
-            .process_path
-            .rsplit(['\\', '/'])
-            .next()
-            .unwrap_or_default()
-            .to_owned();
+        let process_source = if connection.metadata.process_path.trim().is_empty() {
+            &connection.metadata.process
+        } else {
+            &connection.metadata.process_path
+        };
+        let process = process_source.rsplit(['\\', '/']).next().unwrap_or_default().to_owned();
         // The process belongs in the key. Without it, the second process to reach an address
         // some other process already reached is silently dropped — and "a process that is not
         // WeChat went direct" is an alarm, not a statistic, so suppressing it is the one
         // deduplication this must not do.
         let key = (
-            if address.is_empty() { host.to_owned() } else { address.to_owned() },
+            if address.is_empty() {
+                host.to_owned()
+            } else {
+                address.to_owned()
+            },
             port,
             udp,
         );
@@ -363,3 +384,73 @@ pub(crate) fn new_direct_samples(
     fresh
 }
 
+#[cfg(test)]
+mod observation_regressions {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn payment_dependencies_are_observed_without_guessing_the_application() {
+        for host in [
+            "js.stripe.com",
+            "m.stripe.network",
+            "a.stripecdn.com",
+            "checkout.link.com",
+            "newassets.hcaptcha.com",
+            "API.STRIPE.COM.",
+        ] {
+            let payload: SampledConnections = serde_json::from_value(serde_json::json!({
+                "connections":[{"metadata":{"host":host, "process":"any-browser.exe"}}]
+            }))
+            .unwrap();
+            assert_eq!(
+                protected_destination(&payload.connections[0]),
+                Some(ProtectedDestination::Payment),
+                "{host}"
+            );
+        }
+        for host in ["notstripe.com", "stripe.com.example.org", "hcaptcha.com.example.org"] {
+            let payload: SampledConnections = serde_json::from_value(serde_json::json!({
+                "connections":[{"metadata":{"host":host}}]
+            }))
+            .unwrap();
+            assert_eq!(protected_destination(&payload.connections[0]), None, "{host}");
+        }
+    }
+
+    #[test]
+    fn direct_sample_uses_process_name_when_core_has_no_process_path() {
+        let payload: SampledConnections = serde_json::from_value(serde_json::json!({
+            "connections": [
+                {"id":"one", "metadata":{"host":"example.com", "destinationPort":"443", "process":"first.exe"}, "chains":[config::WEB_DIRECT_GROUP_NAME]},
+                {"id":"two", "metadata":{"host":"example.com", "destinationPort":"443", "process":"second.exe"}, "chains":[config::WEB_DIRECT_GROUP_NAME]}
+            ]
+        })).unwrap();
+        let samples = new_direct_samples(&payload, &mut HashSet::new());
+        assert_eq!(
+            samples.len(),
+            2,
+            "different owners must not collapse into one unknown owner"
+        );
+        assert_eq!(samples[0].process, "first.exe");
+        assert_eq!(samples[1].process, "second.exe");
+    }
+
+    #[test]
+    fn a_single_large_controller_snapshot_cannot_overrun_direct_sample_cap() {
+        let connections: Vec<_> = (0..MAX_DIRECT_SAMPLES + 20)
+            .map(|i| {
+                serde_json::json!({
+                    "id":i.to_string(), "metadata":{"host":format!("{i}.example.com"), "destinationPort":"443"},
+                    "chains":[config::WEB_DIRECT_GROUP_NAME]
+                })
+            })
+            .collect();
+        let payload: SampledConnections =
+            serde_json::from_value(serde_json::json!({"connections":connections})).unwrap();
+        let mut seen = HashSet::new();
+        assert_eq!(new_direct_samples(&payload, &mut seen).len(), MAX_DIRECT_SAMPLES);
+        assert_eq!(seen.len(), MAX_DIRECT_SAMPLES);
+        assert!(new_direct_samples(&payload, &mut seen).is_empty());
+    }
+}
