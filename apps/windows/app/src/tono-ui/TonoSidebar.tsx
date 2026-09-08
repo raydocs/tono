@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate, useNavigation } from 'react-router'
 
@@ -16,6 +17,85 @@ import { TonoLogo } from './TonoLogo'
 const SIDEBAR_MAIN_PATHS = ['/', '/servers', '/activity', '/account']
 const SIDEBAR_FOOTER_PATHS = ['/support', '/settings']
 
+type NavItem = (typeof navItems)[number]
+
+const TonoNavGroup = ({
+  items,
+  activePath,
+  renderItem,
+}: {
+  items: NavItem[]
+  activePath: string | undefined
+  renderItem: (
+    item: NavItem,
+    ref: (el: HTMLButtonElement | null) => void,
+  ) => ReactNode
+}) => {
+  const itemsRef = useRef(new Map<string, HTMLButtonElement>())
+  const [indicator, setIndicator] = useState({
+    y: 0,
+    height: 42,
+    visible: false,
+  })
+
+  const setItemRef = (path: string) => (el: HTMLButtonElement | null) => {
+    if (el) itemsRef.current.set(path, el)
+    else itemsRef.current.delete(path)
+  }
+
+  /* eslint-disable @eslint-react/set-state-in-effect -- indicator tracks offsetTop after layout */
+  useLayoutEffect(() => {
+    const hide = () =>
+      setIndicator((prev) =>
+        prev.visible ? { ...prev, visible: false } : prev,
+      )
+    const measure = () => {
+      if (!activePath) {
+        hide()
+        return
+      }
+      const el = itemsRef.current.get(activePath)
+      if (!el) {
+        hide()
+        return
+      }
+      const y = el.offsetTop
+      const height = el.offsetHeight || 42
+      setIndicator((prev) =>
+        prev.y === y && prev.height === height && prev.visible
+          ? prev
+          : { y, height, visible: true },
+      )
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [activePath])
+  /* eslint-enable @eslint-react/set-state-in-effect */
+
+  return (
+    <div className="tono-nav">
+      <div className="tono-nav__track" style={{ position: 'relative' }}>
+        <span
+          className="tono-nav__indicator"
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: indicator.height,
+            transform: `translateY(${indicator.y}px)`,
+            opacity: indicator.visible ? 1 : 0,
+            pointerEvents: 'none',
+          }}
+        />
+        {items.map((item) => renderItem(item, setItemRef(item.path)))}
+      </div>
+    </div>
+  )
+}
+
 export const TonoSidebar = () => {
   const { t } = useTranslation()
   const dark = useThemeMode() !== 'light'
@@ -27,10 +107,10 @@ export const TonoSidebar = () => {
   const itemByPath = (path: string) =>
     navItems.find((item) => item.path === path)
   const mainItems = SIDEBAR_MAIN_PATHS.map(itemByPath).filter(
-    (item): item is (typeof navItems)[number] => Boolean(item),
+    (item): item is NavItem => Boolean(item),
   )
   const footerItems = SIDEBAR_FOOTER_PATHS.map(itemByPath).filter(
-    (item): item is (typeof navItems)[number] => Boolean(item),
+    (item): item is NavItem => Boolean(item),
   )
 
   const isActive = (path: string) =>
@@ -38,11 +118,15 @@ export const TonoSidebar = () => {
       ? location.pathname === '/'
       : location.pathname.startsWith(path)
 
-  const navButton = (item: (typeof navItems)[number], key?: string) => {
+  const navButton = (
+    item: NavItem,
+    ref: (el: HTMLButtonElement | null) => void,
+  ) => {
     const active = isActive(item.path)
     return (
       <button
-        key={key ?? item.path}
+        key={item.path}
+        ref={ref}
         type="button"
         className="tono-nav__item"
         aria-current={active ? 'page' : undefined}
@@ -65,10 +149,11 @@ export const TonoSidebar = () => {
           cursor: 'pointer',
           fontFamily: 'inherit',
           fontSize: 13,
-          background: active ? 'var(--tono-surface-nav-active)' : 'transparent',
+          position: 'relative',
+          zIndex: 1,
+          background: 'transparent',
           color: text.primary,
           fontWeight: active ? 600 : 400,
-          boxShadow: active ? 'var(--tono-shadow-nav-active)' : 'none',
         }}
       >
         <span
@@ -117,7 +202,11 @@ export const TonoSidebar = () => {
         </span>
       </div>
 
-      <div className="tono-nav">{mainItems.map((item) => navButton(item))}</div>
+      <TonoNavGroup
+        items={mainItems}
+        activePath={mainItems.find((item) => isActive(item.path))?.path}
+        renderItem={navButton}
+      />
 
       <div className="tono-nav__spacer" />
 
@@ -127,9 +216,11 @@ export const TonoSidebar = () => {
           background: dark ? 'rgba(255,255,255,0.14)' : 'rgba(20,22,30,0.12)',
         }}
       />
-      <div className="tono-nav">
-        {footerItems.map((item) => navButton(item))}
-      </div>
+      <TonoNavGroup
+        items={footerItems}
+        activePath={footerItems.find((item) => isActive(item.path))?.path}
+        renderItem={navButton}
+      />
     </nav>
   )
 }

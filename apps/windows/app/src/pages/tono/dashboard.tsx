@@ -1,5 +1,5 @@
 import { useLockFn } from 'ahooks'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 
@@ -58,6 +58,8 @@ const hex = (color: string, alpha: number) =>
 
 const CHECKLIST_STORAGE_KEY = 'tono.connectChecklistDismissed'
 const catalogStatusQueryKey = ['tono', 'catalog-status'] as const
+/** Ignore a cancel click this long after entering connecting (macOS parity). */
+const CANCEL_GRACE_MS = 1200
 
 const ConnectChecklist = ({ dark }: { dark: boolean }) => {
   const { t } = useTranslation()
@@ -528,6 +530,11 @@ const DashboardPage = () => {
 
   const uiState = status?.uiState ?? 'notConnected'
   const connected = uiState === 'connected'
+  const connectingSinceRef = useRef<number | null>(null)
+  const connecting = uiState === 'connecting'
+  useEffect(() => {
+    connectingSinceRef.current = connecting ? Date.now() : null
+  }, [connecting])
   const busy =
     uiState === 'connecting' ||
     uiState === 'disconnecting' ||
@@ -564,11 +571,13 @@ const DashboardPage = () => {
   if (trafficWaited && (!connected || trafficLive)) {
     setTrafficWaited(false)
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the controller generation is a deliberate extra dependency — a controller restart must restart the wait.
   useEffect(() => {
     if (!connected || trafficLive) return
     const timer = window.setTimeout(() => setTrafficWaited(true), 4_000)
     return () => window.clearTimeout(timer)
   }, [connected, trafficLive, status?.controllerGeneration])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: same — the backoff poll is rebuilt on a controller restart, see the comment below.
   useEffect(() => {
     if (!trafficWaited || trafficLive) return
     // Back off rather than polling at 4s forever, and rebuild on a controller
@@ -794,6 +803,14 @@ const DashboardPage = () => {
             stage={status?.stage}
             onConnect={handleConnect}
             onDisconnect={() => {
+              if (uiState === 'connecting') {
+                const since = connectingSinceRef.current
+                if (since == null || Date.now() - since < CANCEL_GRACE_MS) {
+                  return
+                }
+                void handleDisconnect()
+                return
+              }
               if (uiState === 'protectedOffline') {
                 requestRelease()
               } else {

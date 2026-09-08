@@ -18,6 +18,7 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     if appState.isProtectionBlocked {
                         ProtectedOfflineBanner()
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     }
                     ZStack(alignment: .topTrailing) {
                         Group {
@@ -38,6 +39,10 @@ struct ContentView: View {
                                 SettingsView()
                             }
                         }
+                        // Pages crossfade with a 4 pt rise; the old page
+                        // leaves along the same path.
+                        .id(appState.selectedPage)
+                        .transition(TonoMotion.pageTransition)
 
                         if let error = appState.errorMessage {
                             ErrorBanner(message: error) {
@@ -52,7 +57,15 @@ struct ContentView: View {
                         TonoMotion.easeOut(0.18, reduceMotion: reduceMotion),
                         value: appState.errorMessage != nil
                     )
+                    .animation(
+                        TonoMotion.pageSwitch(reduceMotion: reduceMotion),
+                        value: appState.selectedPage
+                    )
                 }
+                .animation(
+                    TonoMotion.banner(reduceMotion: reduceMotion),
+                    value: appState.isProtectionBlocked
+                )
             }
             .navigationSplitViewStyle(.balanced)
         }

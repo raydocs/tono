@@ -44,28 +44,26 @@ describe('ConnectPill five states', () => {
     expect(onDisconnect).not.toHaveBeenCalled()
   })
 
-  it('connecting: title, translated stage key as subtitle, aria-disabled and focusable', () => {
+  it('connecting: cancel title, translated stage subtitle, clickable and calls onDisconnect', () => {
     const { onConnect, onDisconnect } = renderPill(
       'connecting',
       'lockingTraffic',
     )
 
-    expect(screen.getByText('tono.pill.title.connecting')).toBeDefined()
+    expect(screen.getByText('shared.actions.cancel')).toBeDefined()
     expect(screen.getByText('tono.progress.steps.lockingTraffic')).toBeDefined()
     const button = pillButton() as HTMLButtonElement
     expect(button.disabled).toBe(false)
-    expect(button.getAttribute('aria-disabled')).toBe('true')
-    expect(
-      screen
-        .getByText('tono.progress.steps.lockingTraffic')
-        .getAttribute('aria-live'),
-    ).toBe('polite')
+    expect(button.getAttribute('aria-disabled')).toBeNull()
+    const stage = screen.getByText('tono.progress.steps.lockingTraffic')
+    expect(stage.getAttribute('aria-live')).toBe('polite')
+    expect(stage.className).toContain('tono-text-in')
     button.focus()
     expect(document.activeElement).toBe(button)
 
     fireEvent.click(button)
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
     expect(onConnect).not.toHaveBeenCalled()
-    expect(onDisconnect).not.toHaveBeenCalled()
   })
 
   it('connecting without a stage label falls back to the starting subtitle', () => {

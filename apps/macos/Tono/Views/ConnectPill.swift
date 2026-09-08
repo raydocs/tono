@@ -48,7 +48,7 @@ struct ConnectPill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var accentColor: Color {
-        if isConnecting || isDisconnecting || isRecovering { return TonoStatus.connecting }
+        if isConnecting || isDisconnecting || isRecovering { return TonoBrand.accent }
         if isProtectionBlocked { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : TonoStatus.standby
     }
@@ -75,17 +75,29 @@ struct ConnectPill: View {
                     )
                     .accessibilityHidden(true)
 
+                // Live text replacing live text: each new string crossfades
+                // in over the old one (ZStack so the height never jumps).
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(statusText)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(statusColor)
-                        .lineLimit(1)
-                    Text(contextText)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    ZStack(alignment: .leading) {
+                        Text(statusText)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(statusColor)
+                            .lineLimit(1)
+                            .id(statusID)
+                            .transition(TonoMotion.textSwapTransition)
+                    }
+                    ZStack(alignment: .leading) {
+                        Text(contextText)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .id(contextText)
+                            .transition(TonoMotion.textSwapTransition)
+                    }
                 }
+                .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: statusID)
+                .animation(TonoMotion.textSwap(reduceMotion: reduceMotion), value: contextText)
 
                 Spacer(minLength: 10)
 
@@ -151,9 +163,19 @@ struct ConnectPill: View {
             isConnecting: isConnecting,
             isDisconnecting: isDisconnecting
         ))
-        .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isConnected)
-        .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isConnecting)
-        .animation(TonoMotion.easeOut(0.25, reduceMotion: reduceMotion), value: isDisconnecting)
+        // The tunnel coming up is the one overshoot in the app: the mark
+        // saturates and its green glow rises with a little bounce. Every
+        // other state change is a plain 220 ms color transition.
+        .animation(TonoMotion.arrival(reduceMotion: reduceMotion), value: isConnected)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isConnecting)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isDisconnecting)
+        .animation(TonoMotion.stateChange(reduceMotion: reduceMotion), value: isProtectionBlocked)
+    }
+
+    /// Identity for the headline crossfade; `LocalizedStringKey` is not
+    /// `Equatable`, so the state tuple stands in for it.
+    private var statusID: String {
+        "\(isConnecting)-\(isDisconnecting)-\(isRecovering)-\(isProtectionBlocked)-\(isConnected)"
     }
 
     // MARK: - Copy
@@ -193,7 +215,7 @@ struct ConnectPill: View {
     }
 
     private var statusColor: Color {
-        if isConnecting || isDisconnecting { return TonoStatus.connecting }
+        if isConnecting || isDisconnecting { return TonoBrand.accent }
         if isProtectionBlocked { return TonoStatus.blocked }
         return isConnected ? TonoStatus.connected : Color.primary
     }

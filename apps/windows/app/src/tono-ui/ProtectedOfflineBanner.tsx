@@ -39,10 +39,8 @@ export const ProtectedOfflineBanner = () => {
     }
   })
 
-  // Dashboard already presents this state on ConnectProgressCard + ConnectPill.
-  if (status?.uiState !== 'protectedOffline' || location.pathname === '/') {
-    return releaseDialog
-  }
+  const shouldShow =
+    status?.uiState === 'protectedOffline' && location.pathname !== '/'
 
   const button = {
     minHeight: 30,
@@ -55,102 +53,114 @@ export const ProtectedOfflineBanner = () => {
     fontFamily: 'inherit',
   }
 
+  // Keep the grid in the tree so height animates 0fr ↔ 1fr. Hidden from
+  // assistive tech (and Testing Library roles) when collapsed.
+
   return (
     <>
       <div
-        role="alert"
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: 10,
-          margin: '10px 16px 0',
-          padding: '10px 12px',
-          borderRadius: 12,
-          background: hex(TONO_COLORS.protectedOffline, dark ? 0.18 : 0.14),
-          border: `1px solid ${hex(TONO_COLORS.protectedOffline, 0.35)}`,
-          color: text.primary,
-        }}
+        className={shouldShow ? 'tono-banner tono-banner--open' : 'tono-banner'}
+        aria-hidden={shouldShow ? undefined : true}
       >
-        <span
-          aria-hidden
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: TONO_COLORS.protectedOffline,
-            flexShrink: 0,
-          }}
-        />
-        <span style={{ flex: 1, minWidth: 160, fontSize: 13, fontWeight: 650 }}>
-          {t('tono.dashboard.status.offline')}
-          <span
+        <div className="tono-banner__clip">
+          <div
+            role="alert"
             style={{
-              display: 'block',
-              marginTop: 2,
-              fontSize: 12,
-              fontWeight: 500,
-              color: text.secondary,
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 10,
+              margin: '10px 16px 0',
+              padding: '10px 12px',
+              borderRadius: 12,
+              background: hex(TONO_COLORS.protectedOffline, dark ? 0.18 : 0.14),
+              border: `1px solid ${hex(TONO_COLORS.protectedOffline, 0.35)}`,
+              color: text.primary,
             }}
           >
-            {t('tono.dashboard.protectedOfflineDescription')}
-          </span>
-          {actionError && (
             <span
+              aria-hidden
               style={{
-                display: 'block',
-                marginTop: 4,
-                fontSize: 12,
-                fontWeight: 500,
-                color: 'var(--tono-text-error)',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: TONO_COLORS.protectedOffline,
+                flexShrink: 0,
               }}
+            />
+            <span
+              style={{ flex: 1, minWidth: 160, fontSize: 13, fontWeight: 650 }}
             >
-              {actionError}
+              {t('tono.dashboard.status.offline')}
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 2,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: text.secondary,
+                }}
+              >
+                {t('tono.dashboard.protectedOfflineDescription')}
+              </span>
+              {actionError && (
+                <span
+                  style={{
+                    display: 'block',
+                    marginTop: 4,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: 'var(--tono-text-error)',
+                  }}
+                >
+                  {actionError}
+                </span>
+              )}
             </span>
-          )}
-        </span>
-        <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={() => void retry()}
-            style={{
-              ...button,
-              color: '#fff',
-              background: TONO_COLORS.protectedOffline,
-            }}
-          >
-            {t('tono.tray.retry')}
-          </button>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={requestRelease}
-            style={{
-              ...button,
-              color: text.primary,
-              background: dark
-                ? 'rgba(255,255,255,0.1)'
-                : 'rgba(20,22,30,0.08)',
-            }}
-          >
-            {t('tono.progress.restore')}
-          </button>
-          <button
-            type="button"
-            className="tono-button"
-            onClick={() => navigate('/servers')}
-            style={{
-              ...button,
-              color: text.primary,
-              background: dark
-                ? 'rgba(255,255,255,0.1)'
-                : 'rgba(20,22,30,0.08)',
-            }}
-          >
-            {t('tono.dashboard.errorSwitchServer')}
-          </button>
-        </span>
+            <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <button
+                type="button"
+                className="tono-button"
+                onClick={() => void retry()}
+                style={{
+                  ...button,
+                  color: '#fff',
+                  background: TONO_COLORS.protectedOffline,
+                }}
+              >
+                {t('tono.tray.retry')}
+              </button>
+              <button
+                type="button"
+                className="tono-button"
+                onClick={requestRelease}
+                style={{
+                  ...button,
+                  color: text.primary,
+                  background: dark
+                    ? 'rgba(255,255,255,0.1)'
+                    : 'rgba(20,22,30,0.08)',
+                }}
+              >
+                {t('tono.progress.restore')}
+              </button>
+              <button
+                type="button"
+                className="tono-button"
+                onClick={() => navigate('/servers')}
+                style={{
+                  ...button,
+                  color: text.primary,
+                  background: dark
+                    ? 'rgba(255,255,255,0.1)'
+                    : 'rgba(20,22,30,0.08)',
+                }}
+              >
+                {t('tono.dashboard.errorSwitchServer')}
+              </button>
+            </span>
+          </div>
+        </div>
       </div>
       {releaseDialog}
     </>
