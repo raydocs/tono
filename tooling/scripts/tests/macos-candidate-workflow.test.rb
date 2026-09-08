@@ -41,3 +41,19 @@ abort 'public release proof must be exported, not signing material' unless expor
 validation_index = steps.index { |step| step['name'] == 'Validate the appcast entry against the exact bytes users download' }
 abort 'proof export must follow actual signature validation without always()' unless validation_index && steps.index(export_step) > validation_index && !export_step.key?('if')
 puts 'macOS release proof: only public signature/receipt, after validation, under existing environment gate'
+
+require 'tmpdir'
+validation = steps.fetch(validation_index).fetch('run')
+pipeline = validation[/node tooling\/scripts\/publish-macos-appcast\.mjs.*?\| tee [^\n]+/m]
+abort 'missing actual appcast validation pipeline' unless pipeline
+Dir.mktmpdir('tono-appcast-failure-test-') do |directory|
+  variables = pipeline.scan(/\$([A-Za-z_][A-Za-z0-9_]*)/).flatten.uniq.to_h { |name| [name, 'fixture'] }
+  variables['RUNNER_TEMP'] = directory
+  [0, 42].each do |exit_code|
+    script = validation.lines.first + "node() { return #{exit_code}; };\n" + pipeline
+    _, result = Open3.capture2e(variables, '/bin/bash', '-c', script)
+    abort "appcast validation failure was masked by tee: #{exit_code} => #{result.exitstatus}" unless result.exitstatus == exit_code
+  end
+end
+abort 'release URL must use the publisher default download host' unless File.read(File.join(root, '.github/workflows/macos-release.yml')).include?('enclosure_url=https://releases.afk.ccwu.cc/download/')
+puts 'macOS appcast pipeline: success and failure exit codes propagate; canonical download host'
