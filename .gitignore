@@ -55,7 +55,8 @@ FETCH_HEAD
 artifacts/
 
 # Node — the workspaces keep their own; a stray root one is a tool artefact
-node_modules/
+# Also ignore local dependency-cache symlinks used by isolated worktrees.
+node_modules
 
 # Local development environments
 .venv/
