@@ -8,32 +8,32 @@ import { invoke, Channel } from '@tauri-apps/api/core';
 async function updateController(controller) {
     const [host, portStr] = controller.trim().split(":");
     const port = parseInt(portStr);
-    await invoke("plugin:mihomo|update_controller", { host, port });
+    await invoke("plugin:tono-plugin-core|update_controller", { host, port });
 }
 /**
  * 更新控制器的密钥
  * @param secret 控制器的密钥
  */
 async function updateSecret(secret) {
-    await invoke("plugin:mihomo|update_secret", { secret });
+    await invoke("plugin:tono-plugin-core|update_secret", { secret });
 }
 /**
  * 获取 Mihomo 版本信息
  */
 async function getVersion() {
-    return await invoke("plugin:mihomo|get_version");
+    return await invoke("plugin:tono-plugin-core|get_version");
 }
 /**
  * 清除 FakeIP 缓存
  */
 async function flushFakeIp() {
-    await invoke("plugin:mihomo|flush_fakeip");
+    await invoke("plugin:tono-plugin-core|flush_fakeip");
 }
 /**
  * 清除 DNS 缓存
  */
 async function flushDNS() {
-    await invoke("plugin:mihomo|flush_dns");
+    await invoke("plugin:tono-plugin-core|flush_dns");
 }
 // connections
 /**
@@ -41,20 +41,20 @@ async function flushDNS() {
  * @returns 所有连接信息
  */
 async function getConnections() {
-    return await invoke("plugin:mihomo|get_connections");
+    return await invoke("plugin:tono-plugin-core|get_connections");
 }
 /**
  * 关闭所有连接
  */
 async function closeAllConnections() {
-    await invoke("plugin:mihomo|close_all_connections");
+    await invoke("plugin:tono-plugin-core|close_all_connections");
 }
 /**
  * 关闭指定连接
  * @param connectionId 连接 ID
  */
 async function closeConnection(connectionId) {
-    await invoke("plugin:mihomo|close_connection", { connectionId });
+    await invoke("plugin:tono-plugin-core|close_connection", { connectionId });
 }
 // groups
 /**
@@ -62,7 +62,7 @@ async function closeConnection(connectionId) {
  * @returns 所有代理组信息
  */
 async function getGroups() {
-    return await invoke("plugin:mihomo|get_groups");
+    return await invoke("plugin:tono-plugin-core|get_groups");
 }
 /**
  * 获取指定代理组信息
@@ -70,7 +70,7 @@ async function getGroups() {
  * @returns 指定代理组信息
  */
 async function getGroupByName(groupName) {
-    return await invoke("plugin:mihomo|get_group_by_name", {
+    return await invoke("plugin:tono-plugin-core|get_group_by_name", {
         groupName,
     });
 }
@@ -85,7 +85,7 @@ async function getGroupByName(groupName) {
  * @returns 代理组中代理节点的延迟，返回数据中无超时节点的数据
  */
 async function delayGroup(groupName, testUrl, timeout, keepFixed = false) {
-    return await invoke("plugin:mihomo|delay_group", {
+    return await invoke("plugin:tono-plugin-core|delay_group", {
         groupName,
         testUrl,
         timeout,
@@ -98,7 +98,7 @@ async function delayGroup(groupName, testUrl, timeout, keepFixed = false) {
  * @returns 所有代理提供者信息
  */
 async function getProxyProviders() {
-    return await invoke("plugin:mihomo|get_proxy_providers");
+    return await invoke("plugin:tono-plugin-core|get_proxy_providers");
 }
 /**
  * 获取指定的代理提供者信息
@@ -106,14 +106,14 @@ async function getProxyProviders() {
  * @returns 代理提供者信息
  */
 async function getProxyProviderByName(providerName) {
-    return await invoke("plugin:mihomo|get_proxy_provider_by_name", { providerName });
+    return await invoke("plugin:tono-plugin-core|get_proxy_provider_by_name", { providerName });
 }
 /**
  * 更新代理提供者信息
  * @param providerName 代理提供者名称
  */
 async function updateProxyProvider(providerName) {
-    await invoke("plugin:mihomo|update_proxy_provider", {
+    await invoke("plugin:tono-plugin-core|update_proxy_provider", {
         providerName,
     });
 }
@@ -122,7 +122,7 @@ async function updateProxyProvider(providerName) {
  * @param providerName 代理提供者名称
  */
 async function healthcheckProxyProvider(providerName) {
-    await invoke("plugin:mihomo|healthcheck_proxy_provider", {
+    await invoke("plugin:tono-plugin-core|healthcheck_proxy_provider", {
         providerName,
     });
 }
@@ -135,7 +135,7 @@ async function healthcheckProxyProvider(providerName) {
  * @returns 该代理节点的延迟
  */
 async function healthcheckNodeInProvider(providerName, proxyName, testUrl, timeout) {
-    return await invoke("plugin:mihomo|healthcheck_node_in_provider", {
+    return await invoke("plugin:tono-plugin-core|healthcheck_node_in_provider", {
         providerName,
         proxyName,
         testUrl,
@@ -148,7 +148,7 @@ async function healthcheckNodeInProvider(providerName, proxyName, testUrl, timeo
  * @returns 所有代理信息
  */
 async function getProxies() {
-    return await invoke("plugin:mihomo|get_proxies");
+    return await invoke("plugin:tono-plugin-core|get_proxies");
 }
 /**
  * 获取指定代理信息
@@ -156,7 +156,7 @@ async function getProxies() {
  * @returns 代理信息
  */
 async function getProxyByName(proxyName) {
-    return await invoke("plugin:mihomo|get_proxy_by_name", {
+    return await invoke("plugin:tono-plugin-core|get_proxy_by_name", {
         proxiesName: proxyName,
     });
 }
@@ -168,7 +168,7 @@ async function getProxyByName(proxyName) {
  * @param node 代理节点
  */
 async function selectNodeForGroup(groupName, node) {
-    await invoke("plugin:mihomo|select_node_for_group", {
+    await invoke("plugin:tono-plugin-core|select_node_for_group", {
         groupName,
         node,
     });
@@ -180,7 +180,7 @@ async function selectNodeForGroup(groupName, node) {
  * @param groupName 代理组名称
  */
 async function unfixedProxy(groupName) {
-    await invoke("plugin:mihomo|unfixed_proxy", {
+    await invoke("plugin:tono-plugin-core|unfixed_proxy", {
         groupName,
     });
 }
@@ -194,7 +194,7 @@ async function unfixedProxy(groupName) {
  * @returns 该代理节点的延迟信息
  */
 async function delayProxyByName(proxyName, testUrl, timeout) {
-    return await invoke("plugin:mihomo|delay_proxy_by_name", {
+    return await invoke("plugin:tono-plugin-core|delay_proxy_by_name", {
         proxyName,
         testUrl,
         timeout,
@@ -206,21 +206,21 @@ async function delayProxyByName(proxyName, testUrl, timeout) {
  * @returns 所有规则信息
  */
 async function getRules() {
-    return await invoke("plugin:mihomo|get_rules");
+    return await invoke("plugin:tono-plugin-core|get_rules");
 }
 /**
  * 获取所有规则提供者信息
  * @returns 所有规则提供者信息
  */
 async function getRuleProviders() {
-    return await invoke("plugin:mihomo|get_rule_providers");
+    return await invoke("plugin:tono-plugin-core|get_rule_providers");
 }
 /**
  * 更新规则提供者信息
  * @param providerName 规则提供者名称
  */
 async function updateRuleProvider(providerName) {
-    await invoke("plugin:mihomo|update_rule_provider", {
+    await invoke("plugin:tono-plugin-core|update_rule_provider", {
         providerName,
     });
 }
@@ -230,7 +230,7 @@ async function updateRuleProvider(providerName) {
  * @returns 基础配置
  */
 async function getBaseConfig() {
-    return await invoke("plugin:mihomo|get_base_config");
+    return await invoke("plugin:tono-plugin-core|get_base_config");
 }
 /**
  * 重新加载配置
@@ -238,7 +238,7 @@ async function getBaseConfig() {
  * @param configPath 配置文件路径
  */
 async function reloadConfig(force, configPath) {
-    await invoke("plugin:mihomo|reload_config", {
+    await invoke("plugin:tono-plugin-core|reload_config", {
         force,
         configPath,
     });
@@ -248,7 +248,7 @@ async function reloadConfig(force, configPath) {
  * @param data 基础配置更改后的内容, 例如：{"tun": {"enabled": true}}
  */
 async function patchBaseConfig(data) {
-    await invoke("plugin:mihomo|patch_base_config", {
+    await invoke("plugin:tono-plugin-core|patch_base_config", {
         data,
     });
 }
@@ -256,13 +256,13 @@ async function patchBaseConfig(data) {
  * 更新 Geo
  */
 async function updateGeo() {
-    await invoke("plugin:mihomo|update_geo");
+    await invoke("plugin:tono-plugin-core|update_geo");
 }
 /**
  * 重启核心
  */
 async function restart() {
-    await invoke("plugin:mihomo|restart");
+    await invoke("plugin:tono-plugin-core|restart");
 }
 // upgrade
 /**
@@ -276,25 +276,25 @@ async function restart() {
  *    - true: 直接下载最新版，强制覆盖升级
  */
 async function upgradeCore(channel = "auto", force = false) {
-    await invoke("plugin:mihomo|upgrade_core", { channel, force });
+    await invoke("plugin:tono-plugin-core|upgrade_core", { channel, force });
 }
 /**
  * 更新 UI
  */
 async function upgradeUi() {
-    await invoke("plugin:mihomo|upgrade_ui");
+    await invoke("plugin:tono-plugin-core|upgrade_ui");
 }
 /**
  * 更新 Geo
  */
 async function upgradeGeo() {
-    await invoke("plugin:mihomo|upgrade_geo");
+    await invoke("plugin:tono-plugin-core|upgrade_geo");
 }
 /**
  * 清除 Rust 侧中所有的 WebSocket 连接
  */
 async function clearAllWsConnections() {
-    await invoke("plugin:mihomo|clear_all_ws_connections");
+    await invoke("plugin:tono-plugin-core|clear_all_ws_connections");
 }
 const textDecoder = new TextDecoder();
 function isMessageKind(message) {
@@ -329,7 +329,7 @@ async function openWebSocketCommand(command, args = {}) {
     onMessage.onmessage = (message) => {
         dispatchWebSocketMessage(listeners, message);
     };
-    const id = await invoke(`plugin:mihomo|${command}`, {
+    const id = await invoke(`plugin:tono-plugin-core|${command}`, {
         ...args,
         onMessage,
     });
@@ -392,7 +392,7 @@ class MihomoWebSocket {
      */
     async close() {
         try {
-            await invoke("plugin:mihomo|ws_disconnect", {
+            await invoke("plugin:tono-plugin-core|ws_disconnect", {
                 id: this.id,
                 forceTimeout: 0,
             });

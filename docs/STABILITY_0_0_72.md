@@ -459,3 +459,30 @@ This closes false completion/deletion at the Mac connection/store boundary, not
 the entire upgrade lifecycle. Preparation/install ownership, new-attempt
 archival, signed installation and power-loss/device acceptance remain separate;
 the incomplete Windows phase-owner sequence in #26 is not changed by this fix.
+
+
+## Physical Windows upgrade checkpoint (2026-09-08)
+
+Normal verified release-line merges reached main `a7f4544`; its macOS CI
+`34207994027`, Windows CI `34207993895` and Services CI `34207993703` all passed.
+No publication, signing, tag, feed or production deployment was performed.
+
+The owner-authorized Windows 11 build 26200 disconnected upgrade from 0.0.41 to
+0.0.72 succeeded with the previously documented candidate hash: installer exit 0,
+exact Core/active Service identities, running Service, unchanged DNS, preserved
+configuration, successful interactive launch and no reboot. Connect reached the
+connected UI and a new HTTPS egress request succeeded. Explicit disconnect stopped
+Core and restored baseline DNS/direct access. This does not qualify every protected
+route, connected update, or crash-time no-leak property.
+
+Real hardware also exposed a **release blocker** missed by component CI: traffic
+and Activity remained in controller retry. Cargo `links = "tono-plugin-core"`
+generates that ACL namespace, while the plugin registered `mihomo` and the guest
+package invoked `plugin:mihomo|...`. The correction aligns runtime/guest/generated
+ESM+CJS invocation names with existing capabilities; no capability is broadened.
+Four new namespace contracts failed before correction; all 97 packaging checks
+and 204 frontend tests (including three actual packaged guest invocation checks)
+pass locally after correction. **Physical verification of a rebuilt package is
+still pending**, as are the protected update lifecycle #26 and remaining device gates.
+See [the device runbook](WINDOWS_0_0_72_DEVICE_ACCEPTANCE.md). Raw owner-device
+network evidence and backups remain private and must not be uploaded to this public repo.

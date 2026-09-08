@@ -1,11 +1,33 @@
 # Windows 0.0.72: authorized device acceptance
 
-Status: **not executed on the owner's device**. Hosted compilation, real WFP
+Status: **first authorized device pass executed; qualification incomplete**. Hosted compilation, real WFP
 filter acceptance, candidate packaging and isolated install/repair/uninstall
 evidence are in [STABILITY_0_0_72.md](STABILITY_0_0_72.md). They do not substitute
 for the following device scenarios. Do not publish until the applicable release
 gates have evidence; in particular the full protected update journal lifecycle
 in issue #26 is still incomplete.
+
+## Device checkpoint — 2026-09-08
+
+- Windows 11 x64 build 26200: authorized disconnected **0.0.41 → 0.0.72**
+  upgrade with the exact candidate hash below. Existing app and user configuration
+  were backed up under a private ACL on the device; sensitive backups stay there.
+- Installer returned 0; active Service and Core hashes match the candidate manifest.
+  Service is running automatically, GUI did not silently launch, DNS was unchanged,
+  and no reboot occurred. Interactive launch displayed 0.0.72 and restored the catalog.
+- First UI connect reached Connected; a fresh HTTPS egress request succeeded.
+  This is not proof of all residential/protected destinations or fault-time isolation.
+  Explicit disconnect stopped Core, restored baseline DNS, and restored direct egress.
+- **FAIL: dashboard traffic and Activity both remained in controller retry.**
+  Source audit found the plugin runtime/guest IPC namespace `mihomo` disagreed with
+  Cargo-generated ACL namespace `tono-plugin-core`. The pending correction aligns
+  runtime and packaged guest calls without broadening desktop permissions.
+  Four packaging regressions reproduced the mismatch; three actual guest-package
+  invocation tests also cover version, traffic and Activity socket open/close.
+- A rebuilt candidate and another physical pass are required before accepting that
+  fix. The connected update journal lifecycle (#26), fault/sleep/reboot/browser
+  matrix and signed package qualification remain **not passed**. Device is left
+  disconnected with TonoService running; no uninstall/fault injection was performed.
 
 ## 1. Establish a private execution channel
 
@@ -76,8 +98,8 @@ and installation evidence, not a reuse of this hash's acceptance.
 | Scenario | Required observation | Current device status |
 | --- | --- | --- |
 | Fresh installation | Exact app/Core/Service identities, Service start, no silent GUI start, functional interactive launch | Not run |
-| Existing-version upgrade | Exact previous version, real connected/disconnected states, durable handoff phases, replacement and first-launch recovery; no false journal commit | Not run; #26 incomplete |
-| Login/connect/disconnect | Approved test account, correct catalog/policy and observed protected egress, truthful UI; explicit disconnect restores intended direct access | Not run |
+| Existing-version upgrade | Exact previous version, real connected/disconnected states, durable handoff phases, replacement and first-launch recovery; no false journal commit | Disconnected 0.0.41 upgrade passed; connected handoff not qualified (#26) |
+| Login/connect/disconnect | Approved test account, correct catalog/policy and observed protected egress, truthful UI; explicit disconnect restores intended direct access | Basic connect/HTTPS/disconnect observed; telemetry failed, full routing not qualified |
 | Core/GUI/Service crash | Protected traffic remains blocked or uses the approved exit, never direct fallback; recovery ownership and diagnostics agree | Not run |
 | Sleep/wake, adapter change, reboot | Re-proven current-owner protection after each transition; failed recovery remains explicit and recoverable | Not run |
 | Browser DNS | Chrome/Edge standard channels, two profiles, managed-policy precedence, live Secure DNS change and bounded detection/restart behavior | Not run |
