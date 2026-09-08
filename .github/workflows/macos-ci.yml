@@ -82,6 +82,9 @@ jobs:
       - name: Reload preserves established connections
         run: tooling/scripts/test-reload-preserves-connections.sh
 
+      - name: Sparkle signing tool selection
+        run: python3 tooling/scripts/tests/test_sparkle_tool.py
+
       - name: Appcast publisher validation
         run: node --test tooling/scripts/tests/publish-macos-appcast.test.mjs
 

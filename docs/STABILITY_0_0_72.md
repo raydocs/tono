@@ -283,3 +283,47 @@ startup ordering, unsigned Release build, and 93 packaging tests. XCTest has
 238 total, 237 passed, one explicit script-emission skip, zero failures. The
 Windows CI frontend job now runs the packaging/identity contracts on every
 app change as well, not only during installer preparation.
+
+## CI failure audit and final recovery checks
+
+The owner's CI-error report was checked against both current and failed runs:
+
+- `34196733304`: the three native Windows imports fixed in `b1862d1`;
+  the succeeding run and its raw log are linked above.
+- `34156921190`: old macOS release line still looked for LiquidClash and
+  Sparkle 2.9.4. The candidate already uses Tono and pinned Sparkle 2.9.6.
+- Dependabot `34126874163` / `34125079759`: nested Cargo lockfiles would change
+  under `--locked`; `34125861503`: upgraded Monaco removed createWebWorker;
+  `34125734238`: Worker Vitest peer-dependency conflict. These are separate
+  upgrade branches, not failures of the candidate's frozen dependency set.
+  No `--force`, `--legacy-peer-deps` or removal of `--locked` was used.
+
+Review also found Sparkle ships **two** files named `sign_update`: its modern
+`bin/sign_update` and `bin/old_dsa_scripts/sign_update`. The local publisher
+refused this ambiguity; the hosted publisher silently picked traversal order.
+Both now use one read-only selector that accepts only executable modern
+`bin/sign_update`, including owner-only permissions, and rejects zero/multiple
+modern tools. Six tests pass, real cached 2.9.6 artifacts select the modern tool,
+and all 25 appcast publisher tests pass. No signing key or release dispatch was
+used during this audit.
+
+A final cancellation review reproduced a stuck startup presentation after the
+user requests direct-internet recovery: cleanup drained the startup task, but an
+already-adopted account could remain restoring/authenticating/enrolling forever.
+Two failing tests are retained in `interrupted-startup-red.log`. Cleanup now
+returns an unowned account to sign-in and an incompletely initialized account to
+an explicit retryable state; it never claims that partial startup is ready.
+A third test preserves existing ready/suspended/error states. These presentation
+checks invoke no real helper, DNS or firewall operation.
+
+The first final recovery run (`20260908T074235Z/report.json`) correctly failed
+the localization coverage test: the new retry message lacked Chinese text. Its
+241-test xcresult (one failure) is retained. The translated zh-Hans unit is now
+added; do not describe that failed checkpoint as a pass.
+
+The corrected recovery checkpoint `20260908T074456Z/report.json` passes all
+three affected checks (Mac umbrella, unsigned Release, policy contract), with
+unchanged source fingerprints. macOS now executes 241 tests: 240 pass, one
+script-emission skip, zero failures. The extra three account presentation tests
+pass alongside all previous cancellation/credential tests. Sparkle selection's
+six tests and appcast publisher's 25 tests were separately retained as green logs.

@@ -364,17 +364,8 @@ jobs:
             -scheme Tono \
             -resolvePackageDependencies \
             -derivedDataPath "$RUNNER_TEMP/DerivedData-sparkle" > /dev/null
-          sign_update=$(
-            find "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts" \
-              -type f -name sign_update -perm -111 2>/dev/null | head -n 1
-          )
-          if [ -z "$sign_update" ]; then
-            echo "::error title=Sparkle sign_update not found::the resolved Sparkle artifact bundle has no bin/sign_update"
-            echo "FATAL: cannot sign the enclosure without Sparkle's own sign_update tool." >&2
-            echo "This workflow never implements EdDSA signing itself; install the Sparkle 2.9.6" >&2
-            echo "distribution's bin/sign_update on the runner and re-run." >&2
-            exit 1
-          fi
+          sign_update=$(python3 tooling/scripts/find-sparkle-sign-update.py \
+            "$RUNNER_TEMP/DerivedData-sparkle/SourcePackages/artifacts")
           echo "SIGN_UPDATE=$sign_update" >> "$GITHUB_ENV"
 
       - name: Sign the enclosure with Sparkle and verify the signature round-trips

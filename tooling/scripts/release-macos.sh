@@ -258,16 +258,8 @@ sparkle_tools="$out/.sparkle-$sparkle_version"
 # -u+x, not -111: an artifact bundle extracted under a restrictive umask leaves
 # the tool executable only by its owner, and -111 would report no sign_update at
 # all in a directory that holds one.
-sign_update_candidates=(${(f)"$(/usr/bin/find "$sparkle_tools/SourcePackages/artifacts" \
-  -type f -name sign_update -perm -u+x 2>/dev/null)"})
-sign_update_candidates=(${sign_update_candidates:#})
-(( ${#sign_update_candidates} > 0 )) \
-  || fail "the resolved Sparkle $sparkle_version artifacts hold no sign_update; remove $sparkle_tools and run again"
-if (( ${#sign_update_candidates} > 1 )); then
-  for candidate in $sign_update_candidates; do print -r -- "  $candidate" >&2; done
-  fail "several sign_update tools resolved under $sparkle_tools; remove that directory and run again rather than signing with whichever one is listed first"
-fi
-sign_update=$sign_update_candidates[1]
+sign_update=$(python3 "$repo_root/tooling/scripts/find-sparkle-sign-update.py" \
+  "$sparkle_tools/SourcePackages/artifacts")
 print "  signing with sign_update from Sparkle $sparkle_version"
 named="$out/$archive_name"
 # Repackaged, not copied. `package-macos-test.sh` renames the bundle to the
