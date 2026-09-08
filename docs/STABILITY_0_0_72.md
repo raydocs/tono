@@ -423,3 +423,39 @@ installer smoke: failed journal bytes are now retained by earlier fixes, but the
 full owner-observed protected upgrade phase sequence is still incomplete. A
 same-version installer repair without a connected GUI does not exercise that
 sequence. Do not label #26 resolved or an installed older-version upgrade proven.
+
+## macOS recovery journal: reject false completion and retain evidence
+
+Reviewing #26's cross-platform analogue found a reproducible Mac defect: the
+successful connection path ignored refused phase transitions and write failures,
+unconditionally deleted the journal, then emitted `updateResumeOk`. The store
+also deleted expired failed journals. The former nominal atomic-write test only
+tested hand-written JSON/file operations, not the production store.
+
+The connection completion path now calls a single store operation. It requires
+the journal's target app version to equal the running app, a legitimately reached
+recovery/verified phase (or an unprotected first launch), separately saves
+`Verified` and `Committed`, and removes the journal only after those writes
+succeed. Failed, incomplete, wrong-version, expired and corrupt evidence is not
+erased by a later successful connection. Write errors propagate to a bounded
+`updateResumeJournalFailed` telemetry stage, never `updateResumeOk`. Temporary
+files are synchronized before replacement and cleaned up on failure.
+
+Nine additional tests use private temporary URLs through the real store, not the
+owner's application-support directory. They include injected failures at both
+save boundaries, byte-preservation checks, wrong-version refusal, an unprotected
+first launch, retry from Verified, and absent/corrupt journals. The original
+round-trip test now exercises production store operations. The red run preserves
+the old caller's extracted behavior and records five failing test cases; after
+the fix the focused suite passed, followed by complete local Mac validation.
+
+`20260908T084708Z/report.json`: all five affected checks pass, source fingerprints
+unchanged (version regressions, product version gate, policy contract, Mac
+umbrella, unsigned Release). The retained xcresult summary executes **250 tests:
+249 pass, one script-emission skip, zero failures**. The umbrella separately
+reports 12 passed suites and six explicit privileged/real-network skips.
+
+This closes false completion/deletion at the Mac connection/store boundary, not
+the entire upgrade lifecycle. Preparation/install ownership, new-attempt
+archival, signed installation and power-loss/device acceptance remain separate;
+the incomplete Windows phase-owner sequence in #26 is not changed by this fix.

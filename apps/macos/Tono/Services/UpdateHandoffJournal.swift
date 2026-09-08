@@ -221,15 +221,18 @@ enum UpdateHandoffStore {
             .appendingPathComponent("update-handoff.json")
     }
 
-    static func load() -> UpdateHandoffJournal? {
-        let url = fileURL
+    static func load(at location: URL? = nil) -> UpdateHandoffJournal? {
+        let url = location ?? fileURL
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let journal = try decoder.decode(UpdateHandoffJournal.self, from: data)
-            if journal.isExpired || journal.phase == .committed || journal.phase == .idle {
+            // Expiry forbids resume; it does not prove recovery succeeded.
+            // Retain even expired Failed bytes for diagnosis or an archived retry.
+            if journal.isExpired { return nil }
+            if journal.phase == .committed || journal.phase == .idle {
                 try? FileManager.default.removeItem(at: url)
                 return nil
             }
@@ -239,8 +242,8 @@ enum UpdateHandoffStore {
         }
     }
 
-    static func write(_ journal: UpdateHandoffJournal) throws {
-        let url = fileURL
+    static func write(_ journal: UpdateHandoffJournal, at location: URL? = nil) throws {
+        let url = location ?? fileURL
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -251,7 +254,12 @@ enum UpdateHandoffStore {
         let data = try encoder.encode(journal)
         let temp = url.deletingLastPathComponent()
             .appendingPathComponent("update-handoff.\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: temp) }
         try data.write(to: temp, options: .atomic)
+        let handle = try FileHandle(forWritingTo: temp)
+        defer { try? handle.close() }
+        try handle.synchronize()
+        try handle.close()
         if FileManager.default.fileExists(atPath: url.path) {
             _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
         } else {
@@ -259,7 +267,31 @@ enum UpdateHandoffStore {
         }
     }
 
-    static func clear() {
-        try? FileManager.default.removeItem(at: fileURL)
+    /// Called only after this process has verified its live connection. Journal
+    /// completion additionally requires the expected new version and the actual
+    /// recovery phase. In particular a normal later connect cannot erase Failed.
+    /// Never hide persistence failure or skip the separately persisted Verified
+    /// phase. The caller emits updateResumeOk only after this returns true.
+    static func commitVerifiedRecovery(
+        currentAppVersion: String,
+        at location: URL? = nil,
+        persist: ((UpdateHandoffJournal, URL) throws -> Void)? = nil
+    ) throws -> Bool {
+        let url = location ?? fileURL
+        guard var journal = load(at: url),
+              journal.nextAppVersion == currentAppVersion else { return false }
+        let unprotectedFirstLaunch = journal.phase == .firstLaunchMigration
+            && !journal.wasConnected && !journal.keepKillSwitchArmed
+        guard journal.phase == .protectionResuming || journal.phase == .verified
+            || unprotectedFirstLaunch else { return false }
+        let save = persist ?? { try write($0, at: $1) }
+        if journal.phase != .verified {
+            journal = journal.advancing(to: .verified)
+            try save(journal, url)
+        }
+        journal = journal.advancing(to: .committed)
+        try save(journal, url)
+        try FileManager.default.removeItem(at: url)
+        return true
     }
 }

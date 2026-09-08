@@ -904,13 +904,24 @@ extension AppState {
             node: selectedExitNode()?.id,
             generation: Int(self.connectionCoordinator.protectionOperationGeneration)
         )
-        if var journal = UpdateHandoffStore.load(),
-           journal.phase != .committed {
-            journal = journal.advancing(to: .verified)
-            try? UpdateHandoffStore.write(journal.advancing(to: .committed))
-            UpdateHandoffStore.clear()
+        do {
+            if try UpdateHandoffStore.commitVerifiedRecovery(
+                currentAppVersion: Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString"
+                ) as? String ?? "unknown"
+            ) {
+                ConnectionTelemetryBuffer.shared.record(
+                    "updateResumeOk",
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    updateResume: true
+                )
+            }
+        } catch {
+            // A healthy connection is not proof that update recovery evidence
+            // committed. Preserve the journal and report only a bounded stage.
             ConnectionTelemetryBuffer.shared.record(
-                "updateResumeOk",
+                "updateResumeJournalFailed",
+                stage: "journalPersistence",
                 generation: Int(self.connectionCoordinator.protectionOperationGeneration),
                 updateResume: true
             )
