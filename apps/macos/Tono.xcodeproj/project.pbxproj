@@ -46,7 +46,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "HELPER=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/tono-core-helper\"\nif [ ! -f \"$HELPER\" ]; then\n  echo \"missing embedded helper: $HELPER\" >&2\n  exit 1\nfi\n# CodeSignOnCopy has derived Identifier from the filename. Runtime\n# requirement is always com.raydocs.tono.helper.\nif [ \"${CODE_SIGNING_ALLOWED}\" = \"NO\" ] || [ -z \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] || [ \"${EXPANDED_CODE_SIGN_IDENTITY}\" = \"-\" ]; then\n  codesign --force --sign - --identifier com.raydocs.tono.helper \"$HELPER\"\n  exit 0\nfi\ncodesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --identifier com.raydocs.tono.helper --options runtime --timestamp=none \"$HELPER\"\n";
+			shellScript = "HELPER=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/tono-core-helper\"\nif [ ! -f \"$HELPER\" ]; then\n  echo \"missing embedded helper: $HELPER\" >&2\n  exit 1\nfi\n# CodeSignOnCopy has derived Identifier from the filename. Runtime\n# requirement is always com.raydocs.tono.helper.\nif [ \"${CODE_SIGNING_ALLOWED}\" = \"NO\" ] || [ -z \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] || [ \"${EXPANDED_CODE_SIGN_IDENTITY}\" = \"-\" ]; then\n  codesign --force --sign - --identifier com.raydocs.tono.helper \"$HELPER\"\n  exit 0\nfi\ncodesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --identifier com.raydocs.tono.helper --options runtime --timestamp \"$HELPER\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

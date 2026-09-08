@@ -139,6 +139,10 @@ verify_signed_executable() {
     executable=$1
     metadata=$(/usr/bin/codesign --display --verbose=2 "$executable" 2>&1)
     printf '%s\n' "$metadata" | /usr/bin/grep -F "TeamIdentifier=$team_id" >/dev/null
+    if ! printf '%s\n' "$metadata" | /usr/bin/grep -q '^Timestamp='; then
+        echo "Missing secure signing timestamp: $executable" >&2
+        exit 1
+    fi
 }
 
 # HelperManager.verifyEmbeddedExecutable pins the signing identifier as well as
