@@ -207,7 +207,7 @@ Generated locally for every connect, identical in spirit to
 `ConfigPipeline.buildOwnedTonoRuntime` on macOS:
 
 - `allow-lan: false`, `ipv6: false`, `mode: rule`, `profile.store-selected:
-  false`, `find-process-mode: strict`
+  false`, `find-process-mode: always`
 - `external-controller: 127.0.0.1:9090` with a per-start random secret that
   is never written to the on-disk copy
 - TUN enabled, fixed WinTUN device name, `auto-route`, `strict-route`,
