@@ -81,6 +81,7 @@ export function App() {
                   <TodayPage
                     incidents={incidents}
                     customers={customers}
+                    releases={releases}
                     nodes={nodes}
                     selected={route.incident}
                     onChanged={incidents.reload}

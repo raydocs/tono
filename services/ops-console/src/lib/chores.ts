@@ -1,7 +1,8 @@
-import type { CustomerSummaryDto } from '@contract';
+import type { CustomerSummaryDto, Platform } from '@contract';
 import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 import { formatDate, formatPercent } from './display';
+import { compareVersions } from './releases';
 import type { FleetNodeDto } from './types';
 
 export type ChoreKind = keyof typeof copy.choreKind;
@@ -65,10 +66,20 @@ export function fleetChores(nodes: readonly FleetNodeDto[]): Chore[] {
   return sortChores(out);
 }
 
-/** 到期、额度、缺资料 for the people. `mask` is the privacy toggle's email masker. */
+/**
+ * 到期、额度、版本过旧、缺资料 for the people.
+ *
+ * `mask` is the privacy toggle's email masker. `minSupported` is the floor
+ * each platform's newest published release still serves: a client below it is
+ * a thing to do, not an incident — nothing is broken, and nobody gets cut off
+ * for being old. A customer on several platforms is listed once, against the
+ * first floor their oldest version falls under, because the chore is about
+ * the person and one row per platform would triple the list for one problem.
+ */
 export function customerChores(
   rows: readonly CustomerSummaryDto[],
   mask: (email: string) => string,
+  minSupported: Partial<Record<Platform, string>> = {},
 ): Chore[] {
   const out: Chore[] = [];
   for (const row of rows) {
@@ -91,6 +102,15 @@ export function customerChores(
         dueAt: row.expiresAt,
       });
     }
+    const stale = tooOld(row, minSupported);
+    if (stale !== null) {
+      out.push({
+        id: `user-version-${row.userId}`,
+        kind: 'version',
+        summary: copy.chore.customerVersion(who, stale),
+        dueAt: null,
+      });
+    }
     if (row.platforms.length === 0 || row.minAppVersion === null) {
       out.push({
         id: `user-profile-${row.userId}`,
@@ -101,6 +121,24 @@ export function customerChores(
     }
   }
   return sortChores(out);
+}
+
+/**
+ * The version this customer is running, if it is under a floor one of their
+ * platforms has set. Null when nothing is too old — or when nothing has been
+ * reported, which is 缺资料 rather than 版本过旧.
+ */
+function tooOld(
+  row: CustomerSummaryDto,
+  minSupported: Partial<Record<Platform, string>>,
+): string | null {
+  const running = row.minAppVersion;
+  if (running === null) return null;
+  for (const platform of row.platforms) {
+    const floor = minSupported[platform];
+    if (floor && compareVersions(running, floor) < 0) return running;
+  }
+  return null;
 }
 
 /** Dated chores first, soonest at the top; the undated ones sink to the bottom. */

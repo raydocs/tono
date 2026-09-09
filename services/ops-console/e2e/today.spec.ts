@@ -29,6 +29,22 @@ test.describe('today page', () => {
     await expect(page.locator('.ops-tag.tone-rem').first()).toBeVisible();
   });
 
+  /**
+   * The floor on the newest macOS release is 1.8.0, and five customers are
+   * still on 1.7.9 — so the chore exists now that the release data does. It is
+   * a chore and not an incident: nothing is broken and nobody gets cut off.
+   */
+  test('客户 below the supported floor become a 版本过旧 chore, not an incident', async ({ page }) => {
+    await open(page, '/today');
+    await page.getByRole('tab', { name: /待办/ }).click();
+    await settle(page);
+
+    const stale = page.locator('li').filter({ hasText: '版本过旧' });
+    await expect(stale).toHaveCount(5);
+    await expect(stale.first()).toContainText('还在跑 1.7.9');
+    await expect(page.locator('.incident-row')).toHaveCount(0);
+  });
+
   test('drawer', async ({ page }) => {
     await open(page, '/today');
     await page.locator('.incident-row').first().click();
