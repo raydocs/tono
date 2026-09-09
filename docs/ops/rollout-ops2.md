@@ -6,7 +6,7 @@
 
 - 分支 `ops/platform`（worktree `~/orca/workspaces/tono/spookfish`），未推送。
 - Worker：`services/control-plane` 27 个测试文件 / 664 个测试、typecheck、`check:contract`、`check:budgets` 全绿；`src/index.ts` 4900 行并有只减不增的棘轮。
-- 控制台：`services/ops-console` 130 个单测、148 个截图基线（本机跑全套请加 `--workers=4`）、首屏包体约 150 KB gz；五个入口（今天 / 节点 + 节点详情 / 客户 + 客户 360 / 客户端 / 设置）全部就位，目录 YAML 编辑仍在 `/ops/`。
+- 控制台：`services/ops-console` 130 个单测、148 个截图基线（本机跑全套请加 `--workers=4`）、首屏包体 172 KB gz；五个入口（今天 / 节点 + 节点详情 / 客户 + 客户 360 / 客户端 / 设置）全部就位，目录 YAML 编辑仍在 `/ops/`。
 - 迁移 0039–0049 全部只增不改，每张新表的写入都有缺表守卫，所以 **先迁移后部署** 与 **先部署后迁移** 两种顺序都不会让客户端上传失败。
 
 ## 1. 在 preview D1 上演练迁移
