@@ -23,6 +23,7 @@ import {
 import { snapshotUserUsageHours } from './ops-usage-hours';
 import { runOpsCron } from './ops/cron';
 import { afterLogSegment, afterSnapshot, afterTelemetryWindow, ingestConnectFailure } from './ops/ingest-hooks';
+import { opsIngestRoutes } from './ops/ingest';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
 import {
@@ -3613,6 +3614,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     const device = await confirmDevice(e, a, mt[1], b);
     return Response.json({ device });
   }
+
+  const ingest = await opsIngestRoutes(req, e, p, m);
+  if (ingest) return ingest;
 
   if (p === '/api/v1/ops-ingest/home-targets' && m === 'GET') {
     if (typeof e.OPS_COLLECTOR_TOKEN !== 'string' || e.OPS_COLLECTOR_TOKEN.length < 32) {
