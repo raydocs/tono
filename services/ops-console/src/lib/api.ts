@@ -1,5 +1,6 @@
 import type {
   ActivityHourDto,
+  AdoptionMatrixDto,
   ConnectionEventDto,
   CustomerDetailDto,
   CustomerSummaryDto,
@@ -8,6 +9,7 @@ import type {
   IncidentDto,
   ListDto,
   RangeKey,
+  ReleaseDto,
   ServiceUsageDto,
 } from '@contract';
 import { copy } from '@/copy/copy';
@@ -99,16 +101,22 @@ async function getJson<T>(
 }
 
 /**
- * The write half. The console never patches its own copy of an incident after
- * one of these: the Worker owns the state machine (an ack on an already
- * resolved incident is a no-op there), so the page refetches and shows what
- * actually happened rather than what it hoped would.
+ * The write half. The console never patches its own copy of a row after one
+ * of these: the Worker owns the state machine (an ack on an already resolved
+ * incident is a no-op there, and so is publishing an already published
+ * release), so the page refetches and shows what actually happened rather
+ * than what it hoped would.
  */
-async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+async function writeJson<T>(
+  method: 'POST' | 'PATCH',
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(urlFor(path), {
-      method: 'POST',
+      method,
       credentials: 'same-origin',
       signal: requestSignal(signal),
       headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -131,6 +139,11 @@ async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): P
   }
   return response.json() as Promise<T>;
 }
+
+const postJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
+  writeJson<T>('POST', path, body, signal);
+const patchJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
+  writeJson<T>('PATCH', path, body, signal);
 
 const SNOOZE_SECONDS = 4 * 60 * 60;
 
@@ -159,4 +172,19 @@ export const opsApi = {
   resolveIncident: (id: string) => postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/resolve`, {}),
   noteIncident: (id: string, note: string) =>
     postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/notes`, { note }),
+
+  releases: (signal?: AbortSignal) => getJson<ListDto<ReleaseDto>>('releases', signal),
+  releaseAdoption: (signal?: AbortSignal) => getJson<AdoptionMatrixDto>('releases/adoption', signal),
+  /**
+   * All three of the 客户端 page's actions are edits to a release that already
+   * exists, so all three are the PATCH. `POST releases` creates a new row from
+   * a build, which is the release pipeline's job and not something the console
+   * has a form for; it is deliberately not wired up here.
+   */
+  publishRelease: (id: string) =>
+    patchJson<ReleaseDto>(`releases/${encodeURIComponent(id)}`, { publish: true }),
+  withdrawRelease: (id: string) =>
+    patchJson<ReleaseDto>(`releases/${encodeURIComponent(id)}`, { withdraw: true }),
+  setMinSupported: (id: string, version: string) =>
+    patchJson<ReleaseDto>(`releases/${encodeURIComponent(id)}`, { minSupportedVersion: version }),
 };
