@@ -24,6 +24,11 @@ beforeEach(async () => {
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_diagnostics_audit').run();
   await env.DB.prepare('DROP TRIGGER IF EXISTS test_fail_metering_audit').run();
   await env.DB.prepare('DELETE FROM ops_audit').run();
+  await env.DB.prepare('DELETE FROM ops_incident_events').run();
+  await env.DB.prepare('UPDATE ops_incidents SET parent_incident_id = NULL').run();
+  await env.DB.prepare('DELETE FROM ops_incidents').run();
+  await env.DB.prepare('DELETE FROM ops_node_status_history').run();
+  await env.DB.prepare('DELETE FROM ops_node_status').run();
   await env.DB.prepare('DELETE FROM ops_node_profiles').run();
   await env.DB.prepare('DELETE FROM product_account_events').run();
   await env.DB.prepare('DELETE FROM product_accounts').run();
