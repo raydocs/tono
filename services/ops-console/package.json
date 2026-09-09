@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "dev:fixtures": "vite --mode fixtures",
-    "build": "vite build --base /ops2/ --outDir ../control-plane/public/ops2 --emptyOutDir",
+    "build": "vite build --base /ops2/ --outDir ../control-plane/public/ops2 --emptyOutDir && node scripts/check-budgets.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src --max-warnings=0"
+    "lint": "eslint src --max-warnings=0",
+    "budgets": "node scripts/check-budgets.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
