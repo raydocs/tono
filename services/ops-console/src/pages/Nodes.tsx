@@ -8,7 +8,7 @@ import { StatusWord } from '@/components/ops/StatusWord';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { formatCount, formatDate, formatPercent, splitBytes } from '@/lib/display';
-import { closeNode, openNode } from '@/lib/hash-route';
+import { closeNode, openNode, openNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { countLine, NODE_FILTERS, selectNodes, type NodeFilter, type NodeFilterId } from '@/lib/selectors';
 import { cn } from '@/lib/utils';
@@ -123,6 +123,15 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
       <DetailDrawer
         open={Boolean(selectedView)}
         title={selectedView?.node.name ?? ''}
+        action={selectedView ? (
+          <button
+            type="button"
+            className="text-micro text-[var(--accent)] hover:underline"
+            onClick={() => openNodePage(selectedView.node.name)}
+          >
+            {copy.nodeOpenPage}
+          </button>
+        ) : null}
         onClose={closeNode}
       >
         {selectedView ? (

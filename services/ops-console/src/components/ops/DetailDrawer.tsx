@@ -12,11 +12,14 @@ import {
 export function DetailDrawer({
   open,
   title,
+  action,
   onClose,
   children,
 }: {
   open: boolean;
   title: string;
+  /** One link beside the title — where the drawer's subject has a page of its own. */
+  action?: ReactNode;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -24,7 +27,10 @@ export function DetailDrawer({
     <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <SheetContent side="right" className="w-[420px] sm:max-w-[420px] border-l border-[var(--hairline)] bg-[var(--surface)] p-0">
         <SheetHeader className="border-b border-[var(--hairline)] px-5 py-4">
-          <SheetTitle className="text-row font-medium">{title}</SheetTitle>
+          <div className="flex items-baseline gap-3">
+            <SheetTitle className="min-w-0 truncate text-row font-medium">{title}</SheetTitle>
+            {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+          </div>
         </SheetHeader>
         <div className="flex flex-col gap-5 p-5">{children}</div>
         <div className="px-5 pb-5">

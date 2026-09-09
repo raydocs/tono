@@ -53,12 +53,19 @@ export function QuotaGauge({
   used,
   quota,
   cycleStartSec,
+  exhaustAtSec,
   series,
   className,
 }: {
   used: Measured<number | null>;
   quota: number | null;
   cycleStartSec?: number | null;
+  /**
+   * The forecast, when the side that owns the meter already made one. Passing
+   * it keeps the gauge, the card and the chore quoting one exhaustion date
+   * (R4); leaving it out falls back to the straight-line guess below.
+   */
+  exhaustAtSec?: number | null;
   series?: MetricSeries | null;
   className?: string;
 }) {
@@ -80,7 +87,9 @@ export function QuotaGauge({
   const remaining = quota - used.value;
   const remainRatio = quota === 0 ? null : remaining / quota;
   const ratio = usedRatio(used.value, quota);
-  const eta = exhaustAt(used.value, quota, used.asOfSec, cycleStartSec);
+  const eta = exhaustAtSec === undefined
+    ? exhaustAt(used.value, quota, used.asOfSec, cycleStartSec)
+    : exhaustAtSec;
   const usedSplit = splitBytes(used.value);
   const quotaSplit = splitBytes(quota);
   const tone = quotaTone(used.value, quota);

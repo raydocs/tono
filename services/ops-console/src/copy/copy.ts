@@ -1,3 +1,5 @@
+import { nodeDetailCopy } from './node-detail';
+
 export const copy = {
   brand: 'Tono',
   brandSub: '运维',
@@ -385,6 +387,10 @@ export const copy = {
   },
   commandCustomers: '客户',
   commandIncidents: '事故',
+
+  /* -------------------------------------------------------------- 节点详情 */
+
+  ...nodeDetailCopy,
 } as const;
 
 export type PageId = keyof typeof copy.pages;

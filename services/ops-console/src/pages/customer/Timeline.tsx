@@ -18,14 +18,20 @@ type Day = { key: number; label: string; rows: ConnectionEventDto[] };
 
 export function Timeline({
   events,
-  devices,
+  devices = [],
   state,
   message,
+  title = copy.customerSections.timeline,
+  emptyMessage = copy.emptyTimeline,
 }: {
   events: readonly ConnectionEventDto[];
-  devices: readonly CustomerDeviceDto[];
+  /** Absent on the node page: the rows there belong to many people, not one. */
+  devices?: readonly CustomerDeviceDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  /** The node page asks the same question of one machine, so it renames the block. */
+  title?: string;
+  emptyMessage?: string;
 }) {
   const [failedOnly, setFailedOnly] = useState(false);
   const [week, setWeek] = useState(true);
@@ -44,7 +50,7 @@ export function Timeline({
 
   return (
     <Section
-      title={copy.customerSections.timeline}
+      title={title}
       aside={
         <div className="flex flex-wrap items-center gap-2">
           <Chip
@@ -59,23 +65,25 @@ export function Timeline({
           <Chip active={week} onClick={() => setWeek((v) => !v)}>
             {copy.timelineFilters.week}
           </Chip>
-          <select
-            aria-label={copy.timelineFilters.device}
-            className="ops-chip"
-            value={device}
-            onChange={(event) => setDevice(event.target.value)}
-          >
-            <option value="">{copy.timelineFilters.device}</option>
-            {devices.map((row) => (
-              <option key={row.id} value={row.id}>{row.name}</option>
-            ))}
-          </select>
+          {devices.length === 0 ? null : (
+            <select
+              aria-label={copy.timelineFilters.device}
+              className="ops-chip"
+              value={device}
+              onChange={(event) => setDevice(event.target.value)}
+            >
+              <option value="">{copy.timelineFilters.device}</option>
+              {devices.map((row) => (
+                <option key={row.id} value={row.id}>{row.name}</option>
+              ))}
+            </select>
+          )}
         </div>
       }
     >
       {state === 'loading' ? <Empty message={copy.loading} />
         : state === 'error' ? <Empty message={message || copy.loadError} />
-          : days.length === 0 ? <Empty message={copy.emptyTimeline} />
+          : days.length === 0 ? <Empty message={emptyMessage} />
             : (
               <div className="overflow-x-auto">
                 <div className="min-w-[860px]">

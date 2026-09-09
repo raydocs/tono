@@ -23,7 +23,9 @@ export function Section({
   return (
     <section className={cn('flex flex-col gap-3', className)}>
       <div className="flex items-baseline gap-3 border-b border-[var(--hairline)] pb-2">
-        <h2 className="text-section">{title}</h2>
+        {/* The heading keeps its line: on a phone an aside with two chips in
+            it was breaking a four-character title across two rows. */}
+        <h2 className="shrink-0 text-section">{title}</h2>
         <div className="ml-auto flex min-w-0 items-baseline gap-2">{aside}</div>
       </div>
       {children}

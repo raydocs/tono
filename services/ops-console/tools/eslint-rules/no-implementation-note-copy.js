@@ -34,20 +34,22 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description: 'Keep Chinese copy in src/copy/copy.ts and keep implementation notes out of operator copy.',
+      description: 'Keep Chinese copy in src/copy and keep implementation notes out of operator copy.',
     },
     schema: [],
     messages: {
-      cjkOutsideCopy: 'Chinese copy belongs in src/copy/copy.ts, not in {{file}}.',
+      cjkOutsideCopy: 'Chinese copy belongs in src/copy, not in {{file}}.',
       bannedWord: '"{{word}}" is an implementation note, not operator copy.',
     },
   },
   create(context) {
     const filename = filenameOf(context);
     const base = path.posix.basename(filename);
-    const isCopy = filename.endsWith('/src/copy/copy.ts');
-    const isSrcTs = /\/src\/.+\.tsx?$/.test(filename);
     const isTest = base.endsWith('.test.ts') || base.endsWith('.test.tsx');
+    // Any module under src/copy is copy: the vocabulary outgrew one file, and
+    // splitting it must not turn every string in the new half into an error.
+    const isCopy = !isTest && /\/src\/copy\/[^/]+\.ts$/.test(filename);
+    const isSrcTs = /\/src\/.+\.tsx?$/.test(filename);
 
     function checkCjk(node, text) {
       if (typeof text !== 'string' || !CJK.test(text)) return;
