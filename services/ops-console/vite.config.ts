@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
+import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
 import fleetDenseRaw from './fixtures/fleet-nodes.dense.json';
@@ -164,6 +165,9 @@ function fixturesPlugin(): Plugin {
         }
         const route = pathOnly.slice('/api/v1/ops/'.length);
         const set = pickSet(url);
+        // 节点详情 owns its own reads, its two writes and the mutable store
+        // behind them; everything else falls through to the branches below.
+        if (serveNodeRoutes({ req, res, url, route, set, session: pickSession(url, set === 'error' ? 'default' : set) })) return;
         if (req.method === 'POST') {
           if (set === 'error') {
             res.statusCode = 500;
@@ -258,5 +262,18 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5174,
+    fs: {
+      /**
+       * `node_modules` is a symlink into the primary checkout in every git
+       * worktree here, and the webfonts live behind it. Without its real path
+       * on the allow list Vite refuses to serve them, the pages render in a
+       * fallback face, and every screenshot baseline captured in a worktree
+       * disagrees with every one captured in the main checkout.
+       */
+      allow: [
+        path.resolve(rootDir, '..', '..'),
+        realpathSync(path.resolve(rootDir, 'node_modules')),
+      ],
+    },
   },
 }));
