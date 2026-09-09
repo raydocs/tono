@@ -105,6 +105,23 @@ const connection = (
   ...overrides,
 })
 
+const localDnsConnection = (
+  id: string,
+  overrides: Partial<IConnectionsItem> = {},
+): IConnectionsItem =>
+  connection(id, {
+    metadata: {
+      ...connection(id).metadata,
+      host: '',
+      destinationIP: '127.0.0.1',
+      destinationPort: '53',
+    },
+    chains: ['DIRECT'],
+    rule: 'IPCIDR',
+    rulePayload: '127.0.0.0/8',
+    ...overrides,
+  })
+
 beforeEach(() => {
   closeConnectionMock.mockReset().mockResolvedValue(undefined)
   closeAllConnectionsMock.mockReset().mockResolvedValue(undefined)
@@ -451,6 +468,108 @@ describe('ActivityPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
     expect(
       screen.getByText('Only local DNS lookups are open; those stay hidden.'),
+    ).toBeDefined()
+  })
+})
+
+describe('Activity apps view filters out hidden local DNS', () => {
+  it('hides local-only DNS in the default apps view so the hidden-DNS message replaces ghost rows', () => {
+    connectionDataMock.activeConnections = [localDnsConnection('dns')]
+    render(<ActivityPage />)
+    // Default view is 'apps' — local-only DNS must NOT aggregate into a ghost app row,
+    // so the apps view falls into the only-local-DNS empty state instead of a row.
+    expect(
+      screen.getByText('Only local DNS lookups are open; those stay hidden.'),
+    ).toBeDefined()
+    expect(screen.queryByText('dns.exe')).toBeNull()
+    expect(screen.getByText('0 apps this session')).toBeDefined()
+    // Switching to the connections view reaches the same message (unchanged behavior).
+    fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
+    expect(
+      screen.getByText('Only local DNS lookups are open; those stay hidden.'),
+    ).toBeDefined()
+  })
+
+  it('excludes local DNS from app counts so the count equals the visible split breakdown', () => {
+    connectionDataMock.activeConnections = [
+      connection('proxy', {
+        metadata: {
+          ...connection('proxy').metadata,
+          process: 'shared.exe',
+          processPath: 'C:\\Users\\private-user\\shared.exe',
+        },
+      }),
+      localDnsConnection('dns', {
+        metadata: {
+          ...localDnsConnection('dns').metadata,
+          process: 'shared.exe',
+          processPath: 'C:\\Users\\private-user\\shared.exe',
+        },
+      }),
+    ]
+    render(<ActivityPage />)
+    // One proxied flow aggregates into total = 1 — the loopback DNS row is hidden,
+    // so the count column must read 1 (not 2 as it did before the fix).
+    expect(screen.getByText('1')).toBeDefined()
+    expect(screen.queryByText('2')).toBeNull()
+    // The split bar's title covers only the proxied flow; the count and the bar sum agree.
+    expect(
+      screen.getByTitle('0 direct · 0 home · 1 cloud · 0 rejected'),
+    ).toBeDefined()
+    expect(screen.getByText('1 apps this session')).toBeDefined()
+  })
+
+  it('keeps the apps aggregated total independent of the selected route filter', () => {
+    const shared = (overrides: Partial<IConnectionsItem> = {}) =>
+      connection('shared', {
+        metadata: {
+          ...connection('shared').metadata,
+          process: 'shared.exe',
+          processPath: 'C:\\Users\\private-user\\shared.exe',
+        },
+        ...overrides,
+      })
+    connectionDataMock.activeConnections = [
+      shared({ chains: ['DIRECT'] }),
+      shared(),
+      localDnsConnection('local', {
+        metadata: {
+          ...localDnsConnection('local').metadata,
+          process: 'shared.exe',
+          processPath: 'C:\\Users\\private-user\\shared.exe',
+        },
+      }),
+    ]
+    render(<ActivityPage />)
+    // Default 'All': aggregation already excludes local — count is direct + proxied = 2,
+    // and the split bar covers both routes.
+    expect(screen.getByText('2')).toBeDefined()
+    expect(
+      screen.getByTitle('1 direct · 0 home · 1 cloud · 0 rejected'),
+    ).toBeDefined()
+
+    // Switching to 'Cloud' admits the app (its proxied > 0) but the count and the split
+    // bar are unchanged. Aggregating the connection list by the route filter (visibleRows)
+    // would zero out `direct` here, diverging apps-view behavior from connections-view.
+    fireEvent.click(screen.getByRole('button', { name: 'Cloud' }))
+    expect(screen.getByText('2')).toBeDefined()
+    expect(screen.queryByText('1')).toBeNull()
+    expect(
+      screen.getByTitle('1 direct · 0 home · 1 cloud · 0 rejected'),
+    ).toBeDefined()
+
+    // Switching to 'Direct' admits the same app; the proxied bar segment survives.
+    fireEvent.click(screen.getByRole('button', { name: 'Direct' }))
+    expect(screen.getByText('2')).toBeDefined()
+    expect(
+      screen.getByTitle('1 direct · 0 home · 1 cloud · 0 rejected'),
+    ).toBeDefined()
+
+    // 'Rejected' admits no apps (the rejected segment is zero) and lands on the no-matches
+    // empty state without changing what was aggregated in any other filter state.
+    fireEvent.click(screen.getByRole('button', { name: 'Rejected' }))
+    expect(
+      screen.getByText('No connections match these filters.'),
     ).toBeDefined()
   })
 })

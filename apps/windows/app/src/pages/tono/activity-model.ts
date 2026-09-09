@@ -220,7 +220,6 @@ export interface ActivityAppRow {
   home: number
   proxied: number
   rejected: number
-  local: number
   searchText: string
 }
 
@@ -232,6 +231,14 @@ export const aggregateActivityApps = (
   // Retain only the already-sanitized presentation terms, deduplicated per process.
   const searchTerms = new Map<string, Set<string>>()
   for (const row of rows) {
+    // Loopback rows (`route: 'local'`) are pure DNS noise the apps split bar never
+    // visualises — the connections list view hides them too (`row.route !== 'local'`).
+    // Counting them here would inflate `total` past `direct + home + proxied + rejected`
+    // and let local-only apps show up as ghost rows with empty bars. Pre-aggregation
+    // filtering is intentionally only `route !== 'local'`: the route filter and search
+    // query still apply solely at `visibleApps`/`visibleRows`, preserving the apps-view
+    // invariant that an app's total is independent of the selected route filter.
+    if (row.route === 'local') continue
     const current = byProcess.get(row.process) ?? {
       process: row.process,
       total: 0,
@@ -239,7 +246,6 @@ export const aggregateActivityApps = (
       home: 0,
       proxied: 0,
       rejected: 0,
-      local: 0,
       searchText: row.process.toLowerCase(),
     }
     const terms = searchTerms.get(row.process) ?? new Set<string>()
