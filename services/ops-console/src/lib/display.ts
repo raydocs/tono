@@ -49,6 +49,21 @@ export function formatWhenAgo(value: number | null | undefined): string {
   return copy.ago.days(Math.floor(hours / 24));
 }
 
+/**
+ * How long something has been going on, counted from the frozen clock like
+ * every other relative time on these pages.
+ */
+export function formatDurationSince(value: number | null | undefined): string {
+  if (value === null || value === undefined) return copy.missing;
+  const seconds = Math.max(0, nowSec() - value);
+  if (seconds < 60) return copy.lasting.now;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return copy.lasting.minutes(minutes);
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return copy.lasting.hours(hours);
+  return copy.lasting.days(Math.floor(hours / 24));
+}
+
 export function formatClock(value: number | null | undefined): string {
   if (value === null || value === undefined) return copy.missing;
   const date = new Date(value * 1_000);

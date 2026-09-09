@@ -3,10 +3,11 @@ import { Monitor, Server, Settings, SunMoon, Users } from 'lucide-react';
 import { copy, type PageId } from '@/copy/copy';
 import { cn } from '@/lib/utils';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
-import { goPage, readRoute, type OpsRoute } from '@/lib/hash-route';
+import { BLANK_ROUTE, goPage, readRoute, type OpsRoute } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useTheme, type ThemeChoice } from '@/lib/theme';
 import { sourceStamp, type FleetState } from '@/lib/use-fleet';
+import type { CustomerSummaryDto, IncidentDto } from '@contract';
 import type { FleetNodeDto } from '@/lib/types';
 import { CommandPalette } from './CommandPalette';
 import { Enter } from './Enter';
@@ -25,13 +26,17 @@ export function Shell({
   children,
   fleet,
   nodes,
+  customers,
+  incidents,
 }: {
   children: ReactNode;
   fleet: FleetState;
   nodes: FleetNodeDto[];
+  customers: CustomerSummaryDto[];
+  incidents: IncidentDto[];
 }) {
   const [route, setRoute] = useState<OpsRoute>(() => (
-    typeof window === 'undefined' ? { page: 'today', node: null } : readRoute()
+    typeof window === 'undefined' ? BLANK_ROUTE : readRoute()
   ));
   const privacy = usePrivacy();
   const theme = useTheme();
@@ -144,7 +149,7 @@ export function Shell({
           </Enter>
         </main>
       </div>
-      <CommandPalette nodes={nodes} />
+      <CommandPalette nodes={nodes} customers={customers} incidents={incidents} />
     </div>
   );
 }
