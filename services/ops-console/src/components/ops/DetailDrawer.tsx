@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { copy } from '@/copy/copy';
 import type { Measured } from './measured';
-import { Value } from './Value';
+import { Value, type Tier } from './Value';
 import {
   Sheet,
   SheetContent,
@@ -46,10 +46,12 @@ export function Fact({
   label,
   measured,
   render,
+  tier,
 }: {
   label: string;
   measured: Measured<string | null>;
   render?: (value: string) => string;
+  tier?: Tier;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-[var(--hairline)] py-2 last:border-b-0">
@@ -58,6 +60,7 @@ export function Fact({
         value={measured.value === null ? null : (render ? render(measured.value) : measured.value)}
         source={measured.source}
         mono
+        tier={tier}
         className="text-right"
       />
     </div>

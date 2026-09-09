@@ -48,7 +48,7 @@ export function NodeCardGrid({
               <span className="min-w-0 shrink truncate text-micro text-[var(--muted-foreground)]">
                 {view.region}
               </span>
-              <StatusWord word={view.health} className="ml-auto shrink-0 self-center" />
+              <StatusWord word={view.health} size="row" className="ml-auto shrink-0 self-center" />
             </header>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3">
@@ -56,10 +56,11 @@ export function NodeCardGrid({
                 icon={<Users size={13} strokeWidth={1.75} />}
                 label={copy.occupancy}
                 value={view.occupancy}
+                tier="body"
                 format={(n) => ({ number: formatCount(n), unit: copy.occupancyUnit })}
               />
               <Cell label={copy.customerPath}>
-                <Value value={null} source={view.path.source} />
+                <Value value={null} source={view.path.source} tier="body" />
               </Cell>
 
               <div className="col-span-2 min-w-0">
@@ -74,12 +75,13 @@ export function NodeCardGrid({
               </div>
 
               <Cell label={copy.mainlandReturn}>
-                <Value value={view.mainland.value} source={view.mainland.source} mono />
+                <Value value={view.mainland.value} source={view.mainland.source} tier="body" mono />
               </Cell>
               <Cell label={copy.renew}>
                 <Value
                   value={view.renew.value == null ? null : formatDate(view.renew.value)}
                   source={view.renew.source}
+                  tier="fine"
                   mono
                 />
               </Cell>

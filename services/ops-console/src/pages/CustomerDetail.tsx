@@ -16,6 +16,7 @@ import { usePrivacy } from '@/lib/privacy';
 import { shown } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
 import { measured, type Measured } from '@/components/ops/measured';
+import type { Tier } from '@/components/ops/Value';
 import { CarrierMatrix } from './customer/CarrierMatrix';
 import { Destinations } from './customer/Destinations';
 import { Devices } from './customer/Devices';
@@ -85,7 +86,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
       <Section title={copy.customerSections.now}>
         <div className="grid gap-x-8 sm:grid-cols-2">
           {nowFacts(row.now).map((fact) => (
-            <Fact key={fact.label} label={fact.label} measured={fact.measured} />
+            <Fact key={fact.label} label={fact.label} measured={fact.measured} tier={fact.tier} />
           ))}
         </div>
       </Section>
@@ -220,22 +221,34 @@ function Quota({ billing }: { billing: CustomerBillingDto }) {
 }
 
 /**
- * The "now" block, as six measured facts.
+ * The "now" block, as six measured facts on the card's three tiers.
  *
  * They all hang off the same stamp — `now.connected.asOfSec` — because they
  * are one read of one client's state, and dating "which node" differently
  * from "connected at all" would invite the reading that the node is current
  * while the connection is stale.
+ *
+ * The tiers are the answer's shape: whether they are on and where, then the
+ * facts that qualify it, then the device id — an opaque token nobody reads
+ * unless they are about to type it somewhere.
  */
-function nowFacts(now: CustomerNowDto): Array<{ label: string; measured: Measured<string | null> }> {
+function nowFacts(now: CustomerNowDto): Array<{
+  label: string;
+  measured: Measured<string | null>;
+  tier: Tier;
+}> {
   const at = now.connected.asOfSec;
   const stamp = (value: string | null): Measured<string | null> =>
     measured(at === null ? null : value, at, copy.sourceWord.telemetry);
   const version = [now.appVersion, now.osVersion].filter(Boolean).join(' · ');
   const carrier = [now.carrier, now.region].filter(Boolean).join(' · ');
   return [
-    { label: copy.now.connected, measured: stamp(now.connected.value ? copy.now.yes : copy.now.no) },
-    { label: copy.now.node, measured: stamp(now.node) },
+    {
+      label: copy.now.connected,
+      measured: stamp(now.connected.value ? copy.now.yes : copy.now.no),
+      tier: 'row',
+    },
+    { label: copy.now.node, measured: stamp(now.node), tier: 'row' },
     {
       label: copy.now.since,
       measured: measured(
@@ -243,10 +256,11 @@ function nowFacts(now: CustomerNowDto): Array<{ label: string; measured: Measure
         now.connectedSince,
         copy.sourceWord.telemetry,
       ),
+      tier: 'body',
     },
-    { label: copy.now.device, measured: stamp(now.deviceId) },
-    { label: copy.now.version, measured: stamp(version || null) },
-    { label: copy.now.carrier, measured: stamp(carrier || null) },
+    { label: copy.now.version, measured: stamp(version || null), tier: 'body' },
+    { label: copy.now.carrier, measured: stamp(carrier || null), tier: 'body' },
+    { label: copy.now.device, measured: stamp(now.deviceId), tier: 'fine' },
   ];
 }
 

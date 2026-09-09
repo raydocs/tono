@@ -2,7 +2,13 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import type { Measured, MetricSeries } from './measured';
 import { Sparkline } from './Sparkline';
-import { Value } from './Value';
+import { Value, type Tier } from './Value';
+
+const TIER_CLASS: Record<Tier, string> = {
+  row: 'text-[20px] font-medium leading-none',
+  body: 'text-body',
+  fine: 'text-fine',
+};
 
 /**
  * One measured number with its label. The icon tile is deliberately grey:
@@ -18,6 +24,7 @@ export function MetricCard({
   unit,
   delta,
   series,
+  tier = 'row',
   className,
 }: {
   icon?: ReactNode;
@@ -27,6 +34,7 @@ export function MetricCard({
   unit?: string;
   delta?: string | null;
   series?: MetricSeries | null;
+  tier?: Tier;
   className?: string;
 }) {
   const raw = value.value;
@@ -46,10 +54,10 @@ export function MetricCard({
       </div>
       <div className="mt-0.5 truncate">
         {missing ? (
-          <Value value={null} source={value.source} />
+          <Value value={null} source={value.source} tier={tier} />
         ) : (
           <span className="flex items-baseline gap-1.5">
-            <span className="font-mono text-[20px] font-medium leading-none">{shown?.number}</span>
+            <span className={cn('font-mono', TIER_CLASS[tier])}>{shown?.number}</span>
             <span className="text-micro font-normal normal-case tracking-normal text-[var(--muted-foreground)]">
               {shown?.unit || unit || ''}
             </span>
