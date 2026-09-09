@@ -32,7 +32,7 @@ export function NodeCardGrid({
             whileHover={reduce ? undefined : { y: -2 }}
             transition={{ duration: 0.16 }}
             className={cn(
-              'node-card cursor-pointer rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)]',
+              'node-card raised cursor-pointer rounded-[10px] bg-[var(--surface)]',
               selected === view.node.name && 'outline outline-1 outline-[var(--accent)]',
             )}
             role="button"

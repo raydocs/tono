@@ -225,14 +225,14 @@ function PreferencesMenu({
 function SourcePill({ ok, at }: { ok: boolean; at: number | null }) {
   if (!ok || at == null) {
     return (
-      <span className="rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1 text-micro text-[var(--muted-foreground)]">
+      <span className="raised rounded-[999px] bg-[var(--background)] px-2.5 py-1 text-micro text-[var(--muted-foreground)]">
         {copy.sourceUnknown}
       </span>
     );
   }
   return (
     <span
-      className="rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1 text-micro"
+      className="raised rounded-[999px] bg-[var(--background)] px-2.5 py-1 text-micro"
       title={formatWhen(at)}
     >
       {copy.sourceOk} · <span className="font-mono normal-case tracking-normal">{formatWhenAgo(at)}</span>

@@ -219,6 +219,21 @@ a { color: inherit; text-decoration: none; }
   gap: 8px;
 }
 
+/* A surface that is meant to sit above the page.
+   In the light theme the page is warm white and the card is white, so a 8%
+   hairline is enough to separate them. In the dark theme both are near-black
+   and a darker line only digs a groove: the edge has to come from light. A 6%
+   white hairline plus a one-pixel highlight along the top is what makes the
+   surface read as lifted rather than as a rectangle somebody drew. */
+.raised { border: 1px solid var(--hairline); }
+.dark .raised {
+  border-color: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+/* The header band of a table is the same idea one level in: it lifts off the
+   rows below it rather than being ruled off from them. */
+.dark .data-head { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06); }
+
 .card-pad { padding: 20px; }
 
 /* Named `data-row` rather than `table-row`, which Tailwind already owns as a
