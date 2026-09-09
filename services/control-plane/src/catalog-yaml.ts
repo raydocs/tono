@@ -209,6 +209,96 @@ function catalogGroupName(line: string): string | null {
   return (match[1] ?? match[2] ?? match[3] ?? '').trim() || null;
 }
 
+/**
+ * Find the bounds of the first single-line YAML flow sequence `[...]` in
+ * `value`, respecting nested `[...]`/`{...}` and quoted strings. Returns
+ * `null` when `value` has no complete flow array on a single line.
+ */
+function findFlowArrayBounds(value: string): { start: number; end: number } | null {
+  const start = value.indexOf('[');
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr: '"' | "'" | null = null;
+  for (let i = start; i < value.length; i++) {
+    const ch = value[i];
+    if (inStr) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = ch; continue; }
+    if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0 && ch === ']') return { start, end: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse a single-line YAML flow sequence `[A, B, C]` into its raw member
+ * tokens (each token keeps its original quoting) plus the index of the
+ * closing `]`. Returns `null` when `value` has no complete single-line flow
+ * array, so callers can fall back to block-style handling.
+ */
+function parseFlowArrayMembers(value: string): { tokens: string[]; end: number } | null {
+  const bounds = findFlowArrayBounds(value);
+  if (!bounds) return null;
+  const inner = value.slice(bounds.start + 1, bounds.end);
+  const tokens: string[] = [];
+  let depth = 0;
+  let inStr: '"' | "'" | null = null;
+  let tokenStart = 0;
+  for (let i = 0; i <= inner.length; i++) {
+    const ch = i < inner.length ? inner[i] : ',';
+    if (inStr) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inStr = ch; continue; }
+    if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') depth--;
+    else if (ch === ',' && depth === 0) {
+      const token = inner.slice(tokenStart, i).trim();
+      if (token !== '') tokens.push(token);
+      tokenStart = i + 1;
+    }
+  }
+  return { tokens, end: bounds.end };
+}
+
+/** Unquote a single flow scalar (`"a"`/`'a'` -> `a`) for member comparison. */
+function unquoteFlowScalar(token: string): string {
+  if (
+    token.length >= 2 &&
+    ((token[0] === '"' && token[token.length - 1] === '"') ||
+      (token[0] === "'" && token[token.length - 1] === "'"))
+  ) {
+    return token.slice(1, -1).replace(/\\(["'\\])/g, '$1');
+  }
+  return token;
+}
+
+/**
+ * If `line` is a `proxies:` key under `proxy-groups:` carrying a single-line
+ * flow array that lists `name` as a member, return the line with that member
+ * removed (preserving the surviving members' original quoting). Otherwise
+ * return `null` so the caller keeps the line unchanged.
+ */
+function removeNameFromFlowArrayMemberLine(line: string, name: string): string | null {
+  const keyMatch = line.match(/^(\s*proxies\s*:\s*)(.*)$/);
+  if (!keyMatch) return null;
+  const head = keyMatch[1];
+  const rest = keyMatch[2];
+  const flow = parseFlowArrayMembers(rest);
+  if (!flow) return null;
+  const survivors = flow.tokens.filter((token) => unquoteFlowScalar(token) !== name);
+  if (survivors.length === flow.tokens.length) return null;
+  return `${head}[${survivors.join(', ')}]${rest.slice(flow.end + 1)}`;
+}
+
 function emptyProxyGroupNames(yaml: string): string[] {
   const empty: string[] = [];
   let inGroups = false;
@@ -238,8 +328,18 @@ function emptyProxyGroupNames(yaml: string): string[] {
       continue;
     }
     if (/^\s+proxies\s*:/.test(line)) {
-      awaitingMembers = true;
-      members = 0;
+      const flow = parseFlowArrayMembers(line.slice(line.indexOf(':') + 1));
+      if (flow) {
+        // Flow-style inline array (`proxies: [A, B]`): members live entirely on
+        // this same line, so decide emptiness now instead of awaiting
+        // subsequent block-style `  - ` member lines.
+        finish();
+        if (flow.tokens.length === 0 && group) empty.push(group);
+      } else {
+        // Empty value or block-style list: count following `  - ` member lines.
+        awaitingMembers = true;
+        members = 0;
+      }
       continue;
     }
     if (awaitingMembers) {
@@ -328,6 +428,13 @@ export function retirementCatalogPlan(yaml: string, name: string): {
       if (memberLine.test(line)) {
         const groupName = currentGroup ?? '未命名';
         if (!groupsChanged.includes(groupName)) groupsChanged.push(groupName);
+        continue;
+      }
+      const rewritten = removeNameFromFlowArrayMemberLine(line, name);
+      if (rewritten !== null) {
+        const groupName = currentGroup ?? '未命名';
+        if (!groupsChanged.includes(groupName)) groupsChanged.push(groupName);
+        keptLines.push(rewritten);
         continue;
       }
     }

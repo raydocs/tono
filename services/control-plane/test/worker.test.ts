@@ -7305,6 +7305,157 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     expect(plan.warnings.some((warning) => warning.includes('清空代理组'))).toBe(true);
   });
 
+  it('allows retirement when a flow-style proxy-group list keeps another member', () => {
+    // Reproduction 1 from the bug report: the group is written `proxies: [A]`
+    // (flow style) and does not reference the retired node, so retirement must
+    // not be blocked by the block-style-only emptiness latch.
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Fuji]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.catalogEntryRemoved).toBe(true);
+    // The group never referenced Sakura, so no proxy-group rewrite is recorded.
+    expect(plan.changes.proxyGroupReferencesRemoved).toEqual([]);
+    expect(plan.warnings).toEqual([]);
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    // The flow-style group survives intact with its single remaining member.
+    expect(plan.yaml).toContain('proxies: [Tokyo · Fuji]');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+  });
+
+  it('strips a retired node from a flow-style proxy-group list and stays safe', () => {
+    // Reproduction 2 from the bug report: the flow-style list references the
+    // retired node, so the member-line remover must rewrite the inline array
+    // (not leave a dangling ref) and the latch must see the surviving member.
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Sakura, Tokyo · Fuji]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(true);
+    expect(plan.changes.proxyGroupReferencesRemoved).toEqual(['Tono-Exit']);
+    expect(plan.yaml).not.toContain('Tokyo · Sakura');
+    expect(plan.yaml).toContain('Tokyo · Fuji');
+    // The flow array is rewritten in place rather than leaving a dangling ref.
+    expect(plan.yaml).toContain('proxies: [Tokyo · Fuji]');
+    expect(plan.yaml).not.toContain('proxies: [Tokyo · Sakura');
+    expect(plan.yaml.match(/\{\{TONO_CLIENT_UUID\}\}/g)).toHaveLength(1);
+  });
+
+  it('refuses retirement that would empty a flow-style proxy-group list', () => {
+    // The safety latch must still fire when removing the only flow-style
+    // member would actually empty the group — fixing the latch must not turn
+    // a genuinely unsafe retire into a safe one.
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Sakura]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const plan = retirementCatalogPlan(yaml, 'Tokyo · Sakura');
+    expect(plan.safe).toBe(false);
+    // safe === false returns the original catalog untouched.
+    expect(plan.yaml).toBe(yaml);
+    expect(plan.yaml).toContain('Tokyo · Sakura');
+    expect(plan.warnings.some((w) => w.includes('退役会清空代理组 Tono-Exit'))).toBe(true);
+  });
+
+  it('retires a fleet node whose exit group uses a flow-style member list over HTTP', async () => {
+    // End-to-end: the publish path accepts flow-style proxy-group catalogs, and
+    // the retire path must not turn that into a permanent 422 RETIRE_UNSAFE.
+    const accessHeaders = async () => ({
+      'content-type': 'application/json',
+      'cf-access-jwt-assertion': await accessAssertion(ACCESS_ADMIN_EMAIL),
+    });
+    const yaml = [
+      'proxies:',
+      '  - name: Tokyo · Sakura',
+      '    type: vless',
+      '    server: 203.0.113.60',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      '  - name: Tokyo · Fuji',
+      '    type: vless',
+      '    server: 203.0.113.61',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies: [Tokyo · Sakura, Tokyo · Fuji]',
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const putCatalog = await api('ops/exit-catalog', {
+      method: 'PUT',
+      headers: await accessHeaders(),
+      body: JSON.stringify({ yaml, expectedRevision: 0 }),
+    });
+    expect(putCatalog.status).toBe(200);
+    expect((await putCatalog.json() as any).revision).toBe(1);
+
+    const sakura = encodeURIComponent('Tokyo · Sakura');
+    const previewResponse = await operations(`fleet-nodes/${sakura}/retire-preview`);
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as any;
+    expect(preview.canRetire).toBe(true);
+    expect(preview.warnings).toEqual([]);
+    expect(preview.changes.proxyGroupReferencesRemoved).toEqual(['Tono-Exit']);
+
+    const retired = await accessHeaders().then((base) => api(`ops/fleet-nodes/${sakura}/retire`, {
+      method: 'POST',
+      headers: base,
+      body: JSON.stringify({ expectedRevision: preview.expectedRevision, confirmation: 'Tokyo · Sakura', reason: '机房到期' }),
+    }));
+    expect(retired.status).toBe(200);
+    const outcome = await retired.json() as any;
+    expect(outcome.node.catalogListed).toBe(false);
+
+    const served = await api('ops/exit-catalog', {
+      method: 'GET',
+      headers: await accessHeaders(),
+    });
+    const servedBody = await served.json() as any;
+    expect(servedBody.yaml).not.toContain('Tokyo · Sakura');
+    expect(servedBody.yaml).toContain('Tokyo · Fuji');
+    // The flow-style member list is rewritten in place, not dropped to block style.
+    expect(servedBody.yaml).toContain('proxies: [Tokyo · Fuji]');
+  });
+
   it('previews and retires a fleet node over HTTP, leaving an audit row', async () => {
     const accessHeaders = async () => ({
       'content-type': 'application/json',
