@@ -19,7 +19,6 @@ const CONTROL_PLANE = 'services/control-plane';
 
 /** Files already over 500 when the ratchet landed. Values are wc -l counts. */
 const FROZEN = new Map([
-  [`${CONTROL_PLANE}/src/ops/shared-admin.ts`, 1553],
   [`${CONTROL_PLANE}/src/ops/reads.ts`, 620],
   [`${CONTROL_PLANE}/src/ops/router.ts`, 535],
 ]);
