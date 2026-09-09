@@ -118,7 +118,14 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 export const JOB_EXECUTORS = ['hub', 'exit_agent', 'worker'] as const;
 export type JobExecutor = (typeof JOB_EXECUTORS)[number];
 
-export const RELEASE_CHANNELS = ['stable', 'beta', 'canary'] as const;
+/**
+ * The channels that exist today: CI qualifies a `candidate` build and
+ * `windows-update-promote` promotes it to `stable`. Named after what the
+ * release pipeline already does rather than a generic beta/canary ladder —
+ * a channel nothing publishes to would be a column of zeros on the adoption
+ * matrix, which is exactly the reading 未发布 exists to prevent.
+ */
+export const RELEASE_CHANNELS = ['stable', 'candidate'] as const;
 export type ReleaseChannel = (typeof RELEASE_CHANNELS)[number];
 
 /** Where an alert goes. The rendering template is a separate axis. */
