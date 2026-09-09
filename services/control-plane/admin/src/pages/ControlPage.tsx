@@ -3,6 +3,7 @@ import { operationsApi } from '../api';
 import { useRefresh, useResource } from '../hooks';
 import { createExclusiveGate } from '../lib/exclusive';
 import { timestamp } from '../lib/format';
+import { hasUnpublishedDraft } from '../lib/draft-guard';
 import { publishGate } from '../lib/revision';
 import { lineDiff } from '../lib/textdiff';
 import {
@@ -162,15 +163,19 @@ export function ControlPage() {
     }
   }, [policyPhase, policyDraft, policyBaseText, policyBase]);
 
+  // The guard tracks unpublished work, not the phase label: a failed
+  // publish/reload moves the phase to 'publishing'/'conflict'/'error' while
+  // the divergent draft still sits in the editor and sessionStorage, so the
+  // label would silently disarm the net precisely when it is needed.
   useEffect(() => {
-    if (yamlPhase !== 'editing-dirty' && policyPhase !== 'editing-dirty') return undefined;
+    if (!hasUnpublishedDraft(yamlDraft, yamlBaseText, policyDraft, policyBaseText)) return undefined;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [yamlPhase, policyPhase]);
+  }, [yamlDraft, yamlBaseText, policyDraft, policyBaseText]);
 
   const catalogRevision = catalog.state === 'ready' ? catalog.data.revision : null;
   const policyRevision = policy.state === 'ready' ? policy.data.revision : null;
