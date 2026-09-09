@@ -20,7 +20,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@legacy-lib/*": ["../control-plane/admin/src/lib/*"]
+      "@legacy-lib/*": ["../control-plane/admin/src/lib/*"],
+      "@contract": ["../control-plane/src/ops/contract.ts"]
     },
     "types": ["vite/client", "vitest/globals"]
   },
