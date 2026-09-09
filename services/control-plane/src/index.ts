@@ -22,6 +22,7 @@ import {
 } from './ops-timeseries';
 import { snapshotUserUsageHours } from './ops-usage-hours';
 import { runOpsCron } from './ops/cron';
+import { afterTelemetryWindow } from './ops/ingest-hooks';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
 import {
@@ -3398,19 +3399,28 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     rejectUnexpectedKeys(b, ['window']);
     const parsed = canonicalTelemetryWindow(b.window);
     await rateLimitTelemetry(e, req, a.userId);
-    return Response.json(
-      await storeTelemetryWindow(
-        e,
-        a.userId,
-        a.deviceId,
-        parsed.appVersion,
-        parsed.osVersion,
-        parsed.windowStartMs,
-        parsed.windowEndMs,
-        parsed.json,
-      ),
-      { status: 201 },
+    const stored = await storeTelemetryWindow(
+      e,
+      a.userId,
+      a.deviceId,
+      parsed.appVersion,
+      parsed.osVersion,
+      parsed.windowStartMs,
+      parsed.windowEndMs,
+      parsed.json,
     );
+    await afterTelemetryWindow(e, req, {
+      id: stored.id,
+      user_id: a.userId,
+      device_id: a.deviceId,
+      received_at: stored.receivedAt,
+      client_version: parsed.appVersion,
+      os_version: parsed.osVersion,
+      payload_json: parsed.json,
+      window_start_ms: parsed.windowStartMs,
+      window_end_ms: parsed.windowEndMs,
+    });
+    return Response.json(stored, { status: 201 });
   }
 
   if (p === '/api/v1/routing-research/snapshots' && m === 'POST') {
