@@ -345,13 +345,16 @@ export async function rollupClientVersionsDaily(
       await db.prepare('DELETE FROM ops_client_version_daily WHERE day_at = ?').bind(day).run();
     }
     const windows = await db.prepare(
-      `SELECT os_version, client_version, device_id, user_id
+      `SELECT os_version, client_version, device_id, user_id,
+              json_extract(payload_json, '$.platform') AS platform
        FROM telemetry_windows
        WHERE received_at >= ? AND received_at < ?`,
     ).bind(day, day + DAY).all<Row>();
     const groups = new Map<string, { platform: Platform; version: string; devices: Set<string>; users: Set<string> }>();
     for (const row of windows.results ?? []) {
-      const platform = sniffPlatform(String(row.os_version ?? ''));
+      const platform = typeof row.platform === 'string' && isPlatform(row.platform)
+        ? row.platform
+        : sniffPlatform(String(row.os_version ?? ''));
       if (!platform) continue;
       const version = String(row.client_version ?? '');
       if (!version) continue;

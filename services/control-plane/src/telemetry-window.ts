@@ -2,6 +2,7 @@ import { ApiError } from './errors';
 import { type Row, str } from './env';
 import { DIAGNOSTICS_MAX_REPORTED_AT_MS } from './diagnostics-limits';
 import { diagnosticsInt, rejectUnexpectedKeys } from './request';
+import { isPlatform } from './ops/platform';
 
 export const TELEMETRY_MAX_EVENTS = 200;
 const TELEMETRY_PAYLOAD_MAX_BYTES = 64 * 1024;
@@ -14,7 +15,12 @@ const telemetryWindowKeys = [
   'killSwitchMode', 'killSwitchWanted', 'killSwitchLive',
   'dnsEnabled', 'exitDelayMs', 'tcpDelayMs', 'exitDelayAtMs', 'tcpDelayAtMs',
   'eventCount', 'eventsDropped', 'events',
+  'platform', 'bytesByRoute',
 ];
+
+/** Bytes the client itself attributed to each route over the window. */
+const BYTES_BY_ROUTE_KEYS = ['cloud', 'residential', 'direct'];
+const BYTES_BY_ROUTE_MAX = 1_000_000_000_000_000;
 
 const telemetryEventStringKeys = [
   'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
@@ -141,6 +147,20 @@ export function canonicalTelemetryWindow(value: unknown) {
   if (exitDelayAtMs !== undefined) window.exitDelayAtMs = exitDelayAtMs;
   const tcpDelayAtMs = diagnosticsInt(source, 'tcpDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS, true);
   if (tcpDelayAtMs !== undefined) window.tcpDelayAtMs = tcpDelayAtMs;
+  if (source.platform !== undefined && source.platform !== null) {
+    const platform = str(source.platform, 'platform', 1, 20);
+    if (!isPlatform(platform)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid platform');
+    window.platform = platform;
+  }
+  if (source.bytesByRoute !== undefined && source.bytesByRoute !== null) {
+    rejectUnexpectedKeys(source.bytesByRoute, BYTES_BY_ROUTE_KEYS);
+    const routes: Row = {};
+    for (const key of BYTES_BY_ROUTE_KEYS) {
+      const bytes = diagnosticsInt(source.bytesByRoute, key, 0, BYTES_BY_ROUTE_MAX, true);
+      if (bytes !== undefined) routes[key] = bytes;
+    }
+    window.bytesByRoute = routes;
+  }
 
   const json = JSON.stringify(window);
   if (new TextEncoder().encode(json).byteLength > TELEMETRY_PAYLOAD_MAX_BYTES) {

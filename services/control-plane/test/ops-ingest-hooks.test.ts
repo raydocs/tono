@@ -122,6 +122,53 @@ describe('ops ingest hooks', () => {
     expect(typeof row?.verdict).toBe('string');
   });
 
+  it('a window that names its platform is flattened under that platform, not the os_version guess', async () => {
+    const account = await seedAccount('plat');
+    const body = telemetryWindow();
+    body.window.osVersion = '14.4 (23E214)';
+    (body.window as Record<string, unknown>).platform = 'macos';
+    (body.window as Record<string, unknown>).bytesByRoute = { cloud: 1_500, residential: 0, direct: 42 };
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const stored = await db().prepare(
+      'SELECT payload_json FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 1',
+    ).bind(account.userId).first<{ payload_json: string }>();
+    const payload = JSON.parse(stored?.payload_json ?? '{}');
+    expect(payload.platform).toBe('macos');
+    expect(payload.bytesByRoute).toEqual({ cloud: 1_500, residential: 0, direct: 42 });
+    const rows = await db().prepare(
+      'SELECT DISTINCT platform FROM connection_events WHERE user_id = ?',
+    ).bind(account.userId).all<{ platform: string }>();
+    expect(rows.results.map((row) => row.platform)).toEqual(['macos']);
+
+    const badPlatform = telemetryWindow();
+    (badPlatform.window as Record<string, unknown>).platform = 'amiga';
+    expect((await api('telemetry/windows', json(badPlatform, account.token))).status).toBe(400);
+    const badRoute = telemetryWindow();
+    (badRoute.window as Record<string, unknown>).bytesByRoute = { cloud: 1, tunnel: 2 };
+    expect((await api('telemetry/windows', json(badRoute, account.token))).status).toBe(400);
+    const negative = telemetryWindow();
+    (negative.window as Record<string, unknown>).bytesByRoute = { direct: -1 };
+    expect((await api('telemetry/windows', json(negative, account.token))).status).toBe(400);
+  });
+
+  it('failure reports spend their own rate-limit bucket, not the heartbeat one', async () => {
+    const account = await seedAccount('bucket');
+    const limits = env as unknown as Env;
+    limits.RATE_LIMIT_TELEMETRY_USER_HOUR = '1';
+    try {
+      expect((await api('telemetry/windows', json(telemetryWindow(), account.token))).status).toBe(201);
+      expect((await api('telemetry/windows', json(telemetryWindow(), account.token))).status).toBe(429);
+      const failure = await api('telemetry/failures', json({
+        ts: Date.now(), stage: 'handshake', code: 'ETIMEDOUT', node: 'Tokyo · Kite',
+        appVersion: '0.0.72', osVersion: 'macOS 14.4', osArch: 'arm64', platform: 'macos',
+      }, account.token));
+      expect(failure.status).toBe(202);
+    } finally {
+      limits.RATE_LIMIT_TELEMETRY_USER_HOUR = undefined;
+    }
+  });
+
   it('POST telemetry/failures validates and records a connectFail', async () => {
     const account = await seedAccount('fail');
     const extra = await api('telemetry/failures', json({

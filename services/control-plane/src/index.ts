@@ -1159,25 +1159,18 @@ const TELEMETRY_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
 const OPS_AUDIT_RETENTION_SECONDS = 180 * 86_400;
 
 
-async function rateLimitTelemetry(e: Env, req: Request, uid: string) {
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`telemetry:ip:${clientIp(req)}`)}`,
-    envInt(e, 'RATE_LIMIT_TELEMETRY_IP_HOUR', 30),
-    DIAGNOSTICS_HOUR_SECONDS,
-  );
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`telemetry:user-hour:${uid}`)}`,
-    envInt(e, 'RATE_LIMIT_TELEMETRY_USER_HOUR', 6),
-    DIAGNOSTICS_HOUR_SECONDS,
-  );
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`telemetry:user-day:${uid}`)}`,
-    envInt(e, 'RATE_LIMIT_TELEMETRY_USER_DAY', 80),
-    DIAGNOSTICS_DAY_SECONDS,
-  );
+// Failure reports keep their own bucket, or a burst of them starves the heartbeat.
+async function rateLimitTelemetry(e: Env, req: Request, uid: string, kind: 'TELEMETRY' | 'FAILURE' = 'TELEMETRY') {
+  const defaults = kind === 'FAILURE' ? [60, 12, 60] : [30, 6, 80];
+  const scopes = [
+    ['IP_HOUR', `ip:${clientIp(req)}`, DIAGNOSTICS_HOUR_SECONDS],
+    ['USER_HOUR', `user-hour:${uid}`, DIAGNOSTICS_HOUR_SECONDS],
+    ['USER_DAY', `user-day:${uid}`, DIAGNOSTICS_DAY_SECONDS],
+  ] as const;
+  for (const [i, [scope, subject, seconds]] of scopes.entries()) {
+    const key = `rl:${await sha256(`${kind.toLowerCase()}:${subject}`)}`;
+    await consumeRateLimit(e, key, envInt(e, `RATE_LIMIT_${kind}_${scope}`, defaults[i]), seconds);
+  }
 }
 
 async function storeTelemetryWindow(
@@ -3244,7 +3237,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/telemetry/failures' && m === 'POST') {
     const a = await auth(req, e);
-    await rateLimitTelemetry(e, req, a.userId);
+    await rateLimitTelemetry(e, req, a.userId, 'FAILURE');
     return ingestConnectFailure(req, e, a);
   }
 

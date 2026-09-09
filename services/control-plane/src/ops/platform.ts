@@ -2,7 +2,25 @@
 // projections. HarmonyOS / Hongmeng are recognised so they do not fall through
 // to linux/android; they are not a catalog platform yet.
 
-export type Platform = 'windows' | 'macos' | 'linux' | 'android' | 'ios';
+export const PLATFORMS = ['windows', 'macos', 'linux', 'android', 'ios'] as const;
+export type Platform = (typeof PLATFORMS)[number];
+
+export function isPlatform(value: unknown): value is Platform {
+  return typeof value === 'string' && (PLATFORMS as readonly string[]).includes(value);
+}
+
+/**
+ * A client that names its platform wins over a guess from `os_version`: the
+ * guess exists for windows written before the field did, and for clients that
+ * have not shipped it yet.
+ */
+export function windowPlatform(
+  payload: Record<string, unknown> | null | undefined,
+  osVersion: string | null | undefined,
+): Platform | null {
+  const declared = payload?.platform;
+  return isPlatform(declared) ? declared : sniffPlatform(osVersion);
+}
 
 export function sniffPlatform(osVersion: string | null | undefined): Platform | null {
   if (typeof osVersion !== 'string') return null;

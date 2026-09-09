@@ -16,7 +16,7 @@ import {
   retainSessions,
   type SessionKind,
 } from './customers-sessions';
-import { sniffPlatform } from './platform';
+import { sniffPlatform, windowPlatform } from './platform';
 
 export {
   sniffPlatform,
@@ -294,7 +294,7 @@ export async function accrueActivityHours(
   const deviceId = text(window.device_id) ?? '';
   const node = text(payload.selectedServer);
   const appVersion = text(window.client_version);
-  const platform = sniffPlatform(text(window.os_version));
+  const platform = windowPlatform(payload, text(window.os_version));
   const statements = slices.map((slice) => db.prepare(
     `INSERT INTO customer_activity_hours (
        user_id, device_id, hour_at, online_minutes, connected_minutes,
