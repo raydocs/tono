@@ -25,10 +25,22 @@ interface ErrorEnvelope {
   error?: { code?: string; message?: string };
 }
 
+/**
+ * The fixture dev server picks its data set from `?fixtures=`; forwarding it
+ * lets one server serve the ready, empty, dense and failing cases to the
+ * screenshot suite. `MODE` is replaced at build time, so this whole branch is
+ * dropped from the production bundle.
+ */
+function fixtureQuery(): string {
+  if (import.meta.env.MODE !== 'fixtures') return '';
+  const set = new URLSearchParams(window.location.search).get('fixtures');
+  return set ? `?fixtures=${encodeURIComponent(set)}` : '';
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api/v1/ops/${path}`, {
+    response = await fetch(`/api/v1/ops/${path}${fixtureQuery()}`, {
       credentials: 'same-origin',
       signal: requestSignal(signal),
       headers: { accept: 'application/json' },

@@ -323,7 +323,48 @@ const live = {
   },
 };
 
+// The dense variant is what the console has to survive rather than what it
+// usually sees: long Chinese names that want to push every column open, and
+// enough rows that the card grid has to scroll.
+const LONG_SUFFIXES = [
+  ' \u00b7 \u5927\u9646\u4f18\u5316\u5907\u7528\u51fa\u53e3 \u00b7 CN2 GIA \u00b7 \u7b2c\u4e8c\u6279',
+  ' \u00b7 \u5bb6\u5bbd\u56de\u6e90 \u00b7 \u6bcf\u6708 1 TB \u9650\u989d \u00b7 \u591c\u95f4\u9650\u901f',
+  ' \u00b7 \u9999\u6e2f\u4e2d\u8f6c \u00b7 \u79fb\u52a8\u4f18\u5148 \u00b7 \u5907\u7528\u89c2\u6d4b\u70b9 07',
+];
+
+const denseSpecs = specs.map((spec, index) => ({
+  ...spec,
+  name: `${spec.name}${LONG_SUFFIXES[index % LONG_SUFFIXES.length]}`,
+}));
+for (let extra = 0; extra < 8; extra += 1) {
+  const base = specs[extra % specs.length];
+  denseSpecs.push({
+    ...base,
+    i: specs.length + extra,
+    name: `${base.name} \u00b7 \u526f\u672c ${extra + 1}${LONG_SUFFIXES[extra % LONG_SUFFIXES.length]}`,
+  });
+}
+
+const denseNodes = denseSpecs.map(fleetNode);
+const denseFleet = { clock: CLOCK, nodes: denseNodes, sources: fleet.sources };
+const denseLive = {
+  clock: CLOCK,
+  live: {
+    ...live.live,
+    agents: denseNodes.map((node) => node.agent).filter(Boolean),
+    quality: {
+      ...live.live.quality,
+      nodes: denseNodes.map((node) => node.quality).filter(Boolean),
+    },
+  },
+};
+
+const emptyFleet = { clock: CLOCK, nodes: [], sources: fleet.sources };
+
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 writeFileSync(join(dir, 'fleet-nodes.json'), `${JSON.stringify(fleet, null, 2)}\n`);
 writeFileSync(join(dir, 'live.json'), `${JSON.stringify(live, null, 2)}\n`);
-console.log(`wrote ${nodes.length} fleet nodes`);
+writeFileSync(join(dir, 'fleet-nodes.dense.json'), `${JSON.stringify(denseFleet, null, 2)}\n`);
+writeFileSync(join(dir, 'live.dense.json'), `${JSON.stringify(denseLive, null, 2)}\n`);
+writeFileSync(join(dir, 'fleet-nodes.empty.json'), `${JSON.stringify(emptyFleet, null, 2)}\n`);
+console.log(`wrote ${nodes.length} fleet nodes, ${denseNodes.length} dense`);
