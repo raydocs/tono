@@ -9,7 +9,10 @@ export type DataColumn<T> = {
   header: string;
   sortValue?: (row: T) => string | number | null;
   cell: (row: T) => ReactNode;
+  /** Numbers are read by their last digit: right-align them and set them in Geist Mono. */
+  align?: 'left' | 'right';
   mono?: boolean;
+  width?: string;
   className?: string;
 };
 
@@ -109,20 +112,30 @@ export function DataTable<T>({
 
   return (
     <div className={cn('overflow-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)]', className)}>
-      <table className="w-full border-collapse text-body">
+      {/* Fixed layout: with `auto`, a long CJK node name takes the width the
+          numeric columns need and every other cell wraps to five lines. */}
+      <table className="w-full table-fixed border-collapse text-body">
         <thead className="sticky top-0 z-10 bg-[var(--surface)]">
-          <tr className="table-row border-b border-[var(--hairline)]">
+          <tr className="data-row border-b border-[var(--hairline)]">
             {columns.map((col) => (
               <th
                 key={col.id}
+                style={col.width ? { width: col.width } : undefined}
                 className={cn(
-                  'px-3 text-left text-micro font-medium text-[var(--muted-foreground)]',
-                  col.mono && 'font-mono',
+                  'overflow-hidden px-3 whitespace-nowrap text-micro font-medium text-[var(--muted-foreground)]',
+                  col.align === 'right' ? 'text-right' : 'text-left',
                   col.className,
                 )}
               >
                 {col.sortValue ? (
-                  <button type="button" className="inline-flex items-center gap-1" onClick={() => toggleSort(col.id)}>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex items-center gap-1',
+                      col.align === 'right' && 'flex-row-reverse',
+                    )}
+                    onClick={() => toggleSort(col.id)}
+                  >
                     {col.header}
                     {sortId === col.id ? <span className="font-mono">{sortDir === 'asc' ? '↑' : '↓'}</span> : null}
                   </button>
@@ -142,7 +155,7 @@ export function DataTable<T>({
                 tabIndex={0}
                 data-selected={selected ? 'true' : 'false'}
                 className={cn(
-                  'table-row cursor-pointer border-b border-[var(--hairline)] last:border-b-0',
+                  'data-row cursor-pointer border-b border-[var(--hairline)] last:border-b-0',
                   selected && 'row-selected',
                   focused && 'outline outline-1 outline-[var(--accent)]',
                 )}
@@ -154,7 +167,12 @@ export function DataTable<T>({
                   <td
                     key={col.id}
                     tabIndex={-1}
-                    className={cn('px-3 align-middle', col.mono && 'font-mono', col.className)}
+                    className={cn(
+                      'overflow-hidden px-3 align-middle whitespace-nowrap',
+                      col.align === 'right' ? 'text-right' : 'text-left',
+                      col.mono && 'font-mono',
+                      col.className,
+                    )}
                   >
                     {col.cell(row)}
                   </td>

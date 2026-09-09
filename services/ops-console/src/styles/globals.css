@@ -194,7 +194,11 @@ a { color: inherit; text-decoration: none; }
 }
 
 .card-pad { padding: 20px; }
-.table-row { height: 36px; }
+
+/* Named `data-row` rather than `table-row`, which Tailwind already owns as a
+   `display` utility — the old class was silently losing to it. */
+.data-row { height: 36px; }
+.data-row:hover { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
 
 /* Neutral tile behind a metric icon. Colour on these pages belongs to the
    status word, the quota bar and the primary action; a tinted tile behind a

@@ -3,9 +3,11 @@ import { LayoutGrid, Table as TableIcon } from 'lucide-react';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
+import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { StatusWord } from '@/components/ops/StatusWord';
+import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
-import { formatCount, formatDate, splitBytes } from '@/lib/display';
+import { formatCount, formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { closeNode, openNode } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { countLine, NODE_FILTERS, selectNodes, type NodeFilter, type NodeFilterId } from '@/lib/selectors';
@@ -176,6 +178,7 @@ function nodeColumns(): DataColumn<NodeView>[] {
     {
       id: 'status',
       header: copy.status,
+      width: '74px',
       sortValue: (row) => row.health,
       cell: (row) => <StatusWord word={row.health} />,
     },
@@ -184,63 +187,87 @@ function nodeColumns(): DataColumn<NodeView>[] {
       header: copy.node,
       sortValue: (row) => row.node.name,
       cell: (row) => (
-        <div>
-          <div className="text-row">{row.node.name}</div>
-          <div className="text-micro text-[var(--muted-foreground)]">{row.region}</div>
+        <div className="flex items-baseline gap-2">
+          <span className="min-w-0 truncate text-row">{row.node.name}</span>
+          <span className="min-w-0 shrink truncate text-micro text-[var(--muted-foreground)]">{row.region}</span>
         </div>
       ),
     },
     {
       id: 'listed',
       header: copy.listed,
+      width: '64px',
       sortValue: (row) => (row.node.catalogListed === true ? 1 : 0),
       cell: (row) => (row.node.catalogListed === true ? copy.listed : copy.unlisted),
     },
     {
       id: 'occupancy',
       header: copy.inUse,
-      sortValue: (row) => row.occupancy.value,
+      width: '64px',
+      align: 'right',
       mono: true,
+      sortValue: (row) => row.occupancy.value,
       cell: (row) => `${formatCount(row.occupancy.value)} ${copy.occupancyUnit}`,
     },
     {
       id: 'traffic',
       header: copy.periodTraffic,
-      sortValue: (row) => row.used.value ?? -1,
+      width: '224px',
+      align: 'right',
       mono: true,
-      cell: (row) => {
-        if (row.quota == null) return copy.noQuota;
-        if (row.used.value == null) return `${copy.missing} ${row.used.source}`;
-        const used = splitBytes(row.used.value);
-        const cap = splitBytes(row.quota);
-        return `${used.number} ${used.unit} / ${cap.number} ${cap.unit}`;
-      },
+      sortValue: (row) => row.used.value ?? -1,
+      cell: (row) => <TrafficCell row={row} />,
     },
     {
       id: 'path',
       header: copy.customerPath,
-      cell: (row) => (
-        <span>
-          {copy.missing}
-          <span className="ml-1 text-micro text-[var(--muted-foreground)]">{row.path.source}</span>
-        </span>
-      ),
+      width: '96px',
+      cell: (row) => <Value value={null} source={row.path.source} />,
     },
     {
       id: 'mainland',
       header: copy.mainlandReturn,
-      sortValue: (row) => row.mainland.value ?? '',
+      width: '150px',
       mono: true,
-      cell: (row) => (row.mainland.value == null ? (
-        <span>{copy.missing} <span className="text-micro">{row.mainland.source}</span></span>
-      ) : row.mainland.value),
+      sortValue: (row) => row.mainland.value ?? '',
+      cell: (row) => <Value value={row.mainland.value} source={row.mainland.source} mono />,
     },
     {
       id: 'renew',
       header: copy.renew,
-      sortValue: (row) => row.renew.value ?? 0,
+      width: '112px',
+      align: 'right',
       mono: true,
-      cell: (row) => (row.renew.value == null ? copy.missing : formatDate(row.renew.value)),
+      sortValue: (row) => row.renew.value ?? 0,
+      cell: (row) => (
+        <Value
+          value={row.renew.value == null ? null : formatDate(row.renew.value)}
+          source={row.renew.source}
+          mono
+        />
+      ),
     },
   ];
+}
+
+/** Used, quota and the remaining share, over the same 2 px bar the card uses. */
+function TrafficCell({ row }: { row: NodeView }) {
+  if (row.quota == null) {
+    return <span className="text-micro text-[var(--muted-foreground)]">{copy.noQuota}</span>;
+  }
+  if (row.used.value == null) {
+    return <Value value={null} source={row.used.source} mono />;
+  }
+  const used = splitBytes(row.used.value);
+  const cap = splitBytes(row.quota);
+  const remain = formatPercent((row.quota - row.used.value) / row.quota);
+  return (
+    <span className="inline-flex w-full flex-col items-end gap-1">
+      <span className="truncate">
+        {used.number} {used.unit} / {cap.number} {cap.unit}
+        <span className="text-[var(--muted-foreground)]"> · {copy.remaining} {remain}</span>
+      </span>
+      <QuotaBar used={row.used.value} quota={row.quota} />
+    </span>
+  );
 }
