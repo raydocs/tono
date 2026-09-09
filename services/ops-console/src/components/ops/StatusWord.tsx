@@ -6,7 +6,7 @@ export type Tone = 'sev' | 'warn' | 'rem' | 'info' | 'ok' | 'unk';
 
 const WORD_TONE: Record<HealthWord, Tone> = {
   [copy.health.lost]: 'sev',
-  [copy.health.blocked]: 'rem',
+  [copy.health.blocked]: 'sev',
   [copy.health.degraded]: 'warn',
   [copy.health.ok]: 'ok',
   [copy.health.unmeasured]: 'unk',
