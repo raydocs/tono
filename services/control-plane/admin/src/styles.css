@@ -1509,6 +1509,18 @@ a.chip-link:hover { background: var(--hover-bg); color: hsl(var(--foreground)); 
 /* Devices, home lines and the onboarding checklist all needed the same shape:
    a heading row that can hold a status, then dimmer metadata, then actions. */
 .device-list { display: grid; gap: var(--s2); }
+.hop-list { display: grid; gap: var(--s2); }
+.hop-row {
+  display: grid;
+  gap: 2px;
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--l2-border);
+  font-size: var(--t-sm);
+}
+.hop-row:last-child { border-bottom: 0; }
+.hop-path { overflow-wrap: anywhere; }
+.hop-path strong { font-weight: 650; }
+.hop-meta { color: hsl(var(--faint-foreground)); font-size: var(--t-xs); }
 .device-card {
   display: grid;
   gap: var(--s2);

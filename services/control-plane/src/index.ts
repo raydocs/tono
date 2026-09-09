@@ -100,6 +100,7 @@ import {
   canonicalTrafficPolicy,
   publicTrafficPolicy,
 } from './traffic-policy';
+import { nodeSwitchHistory } from './node-switch-history';
 
 export { parseBytesRange } from './http';
 export { retirementCatalogPlan } from './catalog-yaml';
@@ -4030,6 +4031,22 @@ const publicTelemetryWindow = (r: Row) => ({
   window: JSON.parse(r.payload_json),
 });
 
+async function nodeSwitchesForUser(e: Env, userId: string) {
+  const rows = await e.DB.prepare(
+    `SELECT device_id, payload_json
+     FROM telemetry_windows
+     WHERE user_id = ?
+       AND EXISTS (
+         SELECT 1
+         FROM json_each(telemetry_windows.payload_json, '$.events') event
+         WHERE json_extract(event.value, '$.kind') IN ('nodeSwitch', 'connectCatalogFailover')
+       )
+     ORDER BY received_at DESC
+     LIMIT 200`,
+  ).bind(userId).all<Row>();
+  return nodeSwitchHistory(rows.results, Date.now());
+}
+
 // --- Passwordless authentication ---------------------------------------------
 
 function challengeID(value: unknown): string {
@@ -6617,6 +6634,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
             replaceCount: await replaceCountForUser(e, mt[1]),
           },
           heartbeat,
+          nodeSwitches: await nodeSwitchesForUser(e, mt[1]),
           protectedRouteProof: freshestProtectedRouteProof(
             protectedRouteAction,
             protectedRouteTelemetry,

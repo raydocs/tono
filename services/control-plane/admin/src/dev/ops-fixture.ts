@@ -635,6 +635,28 @@ export function matchDevOps(
         replaceCount: 0,
       },
       heartbeat: null,
+      nodeSwitches: id === 'u-blocked'
+        ? {
+          hops: [
+            { ts: (clock - 1 * 3600) * 1000, from: 'Tokyo · Fuji', to: 'Los Angeles · Pacific', kind: 'nodeSwitch', deviceId: `dev-${id}` },
+            { ts: (clock - 2 * 3600) * 1000, from: 'Los Angeles · Pacific', to: 'Tokyo · Sakura', kind: 'nodeSwitch', deviceId: `dev-${id}` },
+            { ts: (clock - 3 * 3600) * 1000, from: 'Tokyo · Sakura', to: 'Singapore · Merlion', kind: 'nodeSwitch', deviceId: `dev-${id}` },
+            { ts: (clock - 4 * 3600) * 1000, from: 'Singapore · Merlion', to: 'Tokyo · Fuji', kind: 'nodeSwitch', deviceId: `dev-${id}` },
+          ],
+          last24h: 4,
+          last7d: 4,
+          uniqueNodes: 4,
+          frequent: true,
+        }
+        : {
+          hops: id === 'u-fast'
+            ? [{ ts: (clock - 2 * 3600) * 1000, from: 'Tokyo · Fuji', to: 'Los Angeles · Pacific', kind: 'nodeSwitch', deviceId: `dev-${id}` }]
+            : [],
+          last24h: id === 'u-fast' ? 1 : 0,
+          last7d: id === 'u-fast' ? 1 : 0,
+          uniqueNodes: id === 'u-fast' ? 2 : 0,
+          frequent: false,
+        },
       protectedRouteProof: id === 'u-fast' ? {
         source: 'device_action',
         status: 'succeeded',

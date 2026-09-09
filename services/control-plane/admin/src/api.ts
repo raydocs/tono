@@ -181,7 +181,24 @@ export interface UserDetailDto {
     nodeHealth: string | null;
     nodeHealthLabel: string | null;
   } | null;
+  nodeSwitches: NodeSwitchHistoryDto;
   protectedRouteProof: ProtectedRouteProofDto | null;
+}
+
+export interface NodeSwitchHopDto {
+  ts: number;
+  from: string;
+  to: string;
+  kind: 'nodeSwitch' | 'connectCatalogFailover';
+  deviceId: string | null;
+}
+
+export interface NodeSwitchHistoryDto {
+  hops: NodeSwitchHopDto[];
+  last24h: number;
+  last7d: number;
+  uniqueNodes: number;
+  frequent: boolean;
 }
 
 export interface HomeExitDto {

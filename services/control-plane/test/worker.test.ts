@@ -7063,6 +7063,91 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     });
   });
 
+  it('surfaces node hops from telemetry windows on the customer detail drawer', async () => {
+    const account = await createAccount('node-hops');
+    const nowMs = Date.now();
+    const hop = {
+      ts: nowMs - 30 * 60_000,
+      kind: 'nodeSwitch',
+      from: 'Tokyo · Fuji',
+      to: 'Los Angeles · Pacific',
+    };
+    const failover = {
+      ts: nowMs - 10 * 60_000,
+      kind: 'connectCatalogFailover',
+      from: 'Los Angeles · Pacific',
+      to: 'Tokyo · Sakura',
+    };
+    const events = [
+      hop,
+      failover,
+      { ts: nowMs - 5 * 60_000, kind: 'connectOk', node: 'Tokyo · Sakura', elapsedMs: 900 },
+    ];
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      selectedServer: 'Tokyo · Sakura',
+      eventCount: events.length,
+      events,
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+
+    // Overlapping windows replay the same hop; the drawer must not double-count.
+    const replay = await api('telemetry/windows', json(telemetryWindowPayload({
+      windowStartMs: nowMs - 10 * 60 * 1000,
+      windowEndMs: nowMs + 1_000,
+      selectedServer: 'Tokyo · Sakura',
+      eventCount: 1,
+      events: [hop],
+    }), account.accessToken));
+    expect(replay.status).toBe(201);
+
+    const detail = await operations(`users/${account.user.id}/detail`);
+    expect(detail.status).toBe(200);
+    const body = await detail.json() as any;
+    expect(body.nodeSwitches.last24h).toBe(2);
+    expect(body.nodeSwitches.last7d).toBe(2);
+    expect(body.nodeSwitches.uniqueNodes).toBe(3);
+    expect(body.nodeSwitches.frequent).toBe(false);
+    expect(body.nodeSwitches.hops).toEqual([
+      {
+        ts: failover.ts,
+        from: 'Los Angeles · Pacific',
+        to: 'Tokyo · Sakura',
+        kind: 'connectCatalogFailover',
+        deviceId: account.device.id,
+      },
+      {
+        ts: hop.ts,
+        from: 'Tokyo · Fuji',
+        to: 'Los Angeles · Pacific',
+        kind: 'nodeSwitch',
+        deviceId: account.device.id,
+      },
+    ]);
+  });
+
+  it('flags a customer who hops four times in 24h as frequent for 风控', async () => {
+    const account = await createAccount('node-hops-frequent');
+    const nowMs = Date.now();
+    const events = Array.from({ length: 4 }, (_, index) => ({
+      ts: nowMs - (index + 1) * 60 * 60_000,
+      kind: 'nodeSwitch',
+      from: `City ${index}`,
+      to: `City ${index + 1}`,
+    }));
+    const posted = await api('telemetry/windows', json(telemetryWindowPayload({
+      eventCount: events.length,
+      events,
+    }), account.accessToken));
+    expect(posted.status).toBe(201);
+
+    const detail = await operations(`users/${account.user.id}/detail`);
+    const body = await detail.json() as any;
+    expect(body.nodeSwitches.last24h).toBe(4);
+    expect(body.nodeSwitches.frequent).toBe(true);
+    expect(body.nodeSwitches.hops).toHaveLength(4);
+  });
+
+
   it('reports per-user online activity with device attribution to Access admins', async () => {
     const account = await createAccount('activity');
     const posted = await api('telemetry/windows', json(telemetryWindowPayload(), account.accessToken));

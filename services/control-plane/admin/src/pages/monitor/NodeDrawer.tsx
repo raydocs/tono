@@ -410,6 +410,13 @@ export function NodeDrawer({
           </span>
           <span className="drawer-hero-ip mono">{privacy.ip(ip)}{agent?.os ? ` · ${agent.os}` : ''}</span>
         </div>
+        {node.catalogState === 'known-listed'
+          && (node.blockStatus === 'LIKELY_BLOCKED' || node.blockStatus === 'DOWN') && (
+          <Banner
+            tone="error"
+            message="这台还在客户目录里，但大陆探测已经判死。请下架，不要留着让客户连。"
+          />
+        )}
         <StatGrid columns={3}>
           <Stat label="目录" value={catalogLabel(node)} />
           <Stat label="占用" value={occupancyLabel(node)} tone={node.occupancyState === 'known' ? undefined : 'unknown'} />

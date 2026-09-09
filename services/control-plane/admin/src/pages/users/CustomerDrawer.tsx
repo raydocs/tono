@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { operationsApi, type HomeExitDto, type ProductAccountDto, type ProtectedRouteProofDto, type UserDetailDto, type UserDto } from '../../api';
+import { operationsApi, type HomeExitDto, type NodeSwitchHistoryDto, type ProductAccountDto, type ProtectedRouteProofDto, type UserDetailDto, type UserDto } from '../../api';
 import { useResource, type Live } from '../../hooks';
 import { acceptIfCurrent, bindDetail } from '../../lib/bound-detail';
 import { formatBytes, formatHomeEgress, timestamp } from '../../lib/format';
@@ -174,6 +174,12 @@ function CustomerAccountBody({
 
   return (
     <>
+      <CustomerNodeSwitches
+        history={bound?.nodeSwitches ?? null}
+        loading={detailPending}
+        error={detail.state === 'error' ? detail.message : null}
+      />
+
       <CustomerOperations
         user={user}
         detail={bound}
@@ -256,6 +262,70 @@ function CustomerAccountBody({
         >{user.status === 'active' ? '注销账号' : '恢复账号'}</button>
       </DrawerSection>
     </>
+  );
+}
+
+export function CustomerNodeSwitches({
+  history,
+  loading = false,
+  error = null,
+}: {
+  history: NodeSwitchHistoryDto | null;
+  loading?: boolean;
+  error?: string | null;
+}) {
+  const hops = history?.hops ?? [];
+  const frequent = history?.frequent === true;
+  const aside = history
+    ? frequent
+      ? `频繁 · 24h ${history.last24h} 次`
+      : `24h ${history.last24h} 次`
+    : undefined;
+  return (
+    <DrawerSection title="节点切换" aside={aside}>
+      {loading && <Skeleton label="加载节点切换" />}
+      {error && <Unavailable title="节点切换没加载上来" detail={error} />}
+      {!loading && !error && history && hops.length === 0 && (
+        <Note>
+          还没有节点切换记录。客户端大约每 20 分钟上报一次；刚换节点的话再等一轮。
+        </Note>
+      )}
+      {history && hops.length > 0 && (
+        <div className="stack">
+          {frequent && (
+            <Banner
+              tone="error"
+              message={`24 小时内切换 ${history.last24h} 次。出口 IP 跳变容易触发风控（验证码、封号）。`}
+            />
+          )}
+          <StatGrid columns={3}>
+            <Stat
+              label="24 小时"
+              value={`${history.last24h} 次`}
+              tone={frequent ? 'severe' : undefined}
+            />
+            <Stat label="7 天" value={`${history.last7d} 次`} />
+            <Stat label="去过的节点" value={`${history.uniqueNodes} 个`} />
+          </StatGrid>
+          <div className="hop-list">
+            {hops.map((hop) => (
+              <article className="hop-row" key={`${hop.ts}|${hop.kind}|${hop.from}|${hop.to}|${hop.deviceId ?? ''}`}>
+                <div className="hop-path">
+                  <strong>{hop.from || '未选节点'}</strong>
+                  {' → '}
+                  <strong>{hop.to}</strong>
+                </div>
+                <div className="hop-meta">
+                  {timestamp(Math.floor(hop.ts / 1000))}
+                  {' · '}
+                  {hop.kind === 'connectCatalogFailover' ? '自动换城' : '用户切换'}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+    </DrawerSection>
   );
 }
 

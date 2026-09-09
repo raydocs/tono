@@ -1,6 +1,60 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ProtectedRouteProofSection } from './CustomerDrawer';
+import { CustomerNodeSwitches, ProtectedRouteProofSection } from './CustomerDrawer';
+
+describe('customer node switches', () => {
+  const history = {
+    hops: [
+      {
+        ts: 1_800_000_000_000,
+        from: 'Tokyo · Fuji',
+        to: 'Los Angeles · Pacific',
+        kind: 'nodeSwitch' as const,
+        deviceId: 'dev-1',
+      },
+      {
+        ts: 1_799_999_000_000,
+        from: 'Los Angeles · Pacific',
+        to: 'Tokyo · Sakura',
+        kind: 'connectCatalogFailover' as const,
+        deviceId: 'dev-1',
+      },
+    ],
+    last24h: 2,
+    last7d: 2,
+    uniqueNodes: 3,
+    frequent: false,
+  };
+
+  it('renders the hop path and whether the user or catalog moved', () => {
+    const html = renderToStaticMarkup(<CustomerNodeSwitches history={history} />);
+    expect(html).toContain('Tokyo · Fuji');
+    expect(html).toContain('Los Angeles · Pacific');
+    expect(html).toContain('用户切换');
+    expect(html).toContain('自动换城');
+    expect(html).not.toContain('容易触发风控');
+  });
+
+  it('warns when 24h hops are frequent enough to trip 风控', () => {
+    const html = renderToStaticMarkup(
+      <CustomerNodeSwitches history={{ ...history, last24h: 4, frequent: true }} />,
+    );
+    expect(html).toContain('24 小时内切换 4 次');
+    expect(html).toContain('容易触发风控');
+    expect(html).toContain('频繁 · 24h 4 次');
+  });
+
+  it('says the next telemetry window still has to arrive when there are no hops', () => {
+    const html = renderToStaticMarkup(
+      <CustomerNodeSwitches
+        history={{ hops: [], last24h: 0, last7d: 0, uniqueNodes: 0, frequent: false }}
+      />,
+    );
+    expect(html).toContain('还没有节点切换记录');
+    expect(html).toContain('每 20 分钟');
+  });
+});
+
 
 describe('protected route proof', () => {
   const proof = {
