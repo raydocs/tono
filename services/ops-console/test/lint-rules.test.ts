@@ -30,6 +30,11 @@ tester.run('no-implementation-note-copy', noImplementationNoteCopy, {
       code: "export const clientCopy = { unreleased: '\u672a\u53d1\u5e03' };",
     },
     {
+      name: 'CJK is allowed in a sibling copy module',
+      filename: '/repo/src/copy/settings.ts',
+      code: "export const settingsCopy = { alerts: '告警' };",
+    },
+    {
       name: 'test files may name CJK words',
       filename: '/repo/src/pages/Nodes.test.tsx',
       code: "expect(label).toBe('\u8282\u70b9');",

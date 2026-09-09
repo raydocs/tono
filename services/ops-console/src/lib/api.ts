@@ -63,7 +63,7 @@ function urlFor(path: string, query?: Record<string, string>): string {
   return `/api/v1/ops/${path}${search ? `?${search}` : ''}`;
 }
 
-async function getJson<T>(
+export async function getJson<T>(
   path: string,
   signal?: AbortSignal,
   query?: Record<string, string>,
@@ -108,7 +108,7 @@ async function getJson<T>(
  * than what it hoped would.
  */
 async function writeJson<T>(
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PATCH' | 'DELETE',
   path: string,
   body: unknown,
   signal?: AbortSignal,
@@ -120,7 +120,7 @@ async function writeJson<T>(
       credentials: 'same-origin',
       signal: requestSignal(signal),
       headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (error) {
     if (isAbortError(error)) throw error;
@@ -137,13 +137,18 @@ async function writeJson<T>(
     }
     throw new Error(message);
   }
+  // A delete that succeeded answers 204: there is nothing to parse, and
+  // asking anyway turns a working write into "动作没做成".
+  if (response.status === 204) return null as T;
   return response.json() as Promise<T>;
 }
 
-const postJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
+export const postJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
   writeJson<T>('POST', path, body, signal);
-const patchJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
+export const patchJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
   writeJson<T>('PATCH', path, body, signal);
+export const deleteJson = <T>(path: string, signal?: AbortSignal) =>
+  writeJson<T>('DELETE', path, undefined, signal);
 
 const SNOOZE_SECONDS = 4 * 60 * 60;
 

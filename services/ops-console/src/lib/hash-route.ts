@@ -21,6 +21,8 @@ export type OpsRoute = {
    */
   platform: Platform | null;
   bucket: AdoptionBucket | null;
+  /** `#/settings/alerts` — the six 设置 sections are pages, not tabs, so each has a link. */
+  section: string | null;
 };
 
 /** What the route is before a window exists, and the base every jump starts from. */
@@ -31,6 +33,7 @@ export const BLANK_ROUTE: OpsRoute = {
   incident: null,
   platform: null,
   bucket: null,
+  section: null,
 };
 const EMPTY = BLANK_ROUTE;
 
@@ -57,13 +60,15 @@ export function readRoute(): OpsRoute {
     incident: read('incident'),
     platform: pair ? platform as Platform : null,
     bucket: pair && bucket !== null && BUCKETS.includes(bucket) ? bucket as AdoptionBucket : null,
+    section: page === 'settings' && segments[1] ? decodeURIComponent(segments[1]) : null,
   };
 }
 
 export function writeRoute(next: OpsRoute, replace = false) {
   const url = new URL(window.location.href);
-  url.hash = next.customerId
-    ? `#/${next.page}/${encodeURIComponent(next.customerId)}`
+  const segment = next.customerId ?? (next.page === 'settings' ? next.section : null);
+  url.hash = segment
+    ? `#/${next.page}/${encodeURIComponent(segment)}`
     : `#/${next.page}`;
   const params = [
     ['node', next.node],
@@ -93,6 +98,11 @@ export function goPage(page: PageId) {
     node: page === 'nodes' ? current.node : null,
     incident: page === 'today' ? current.incident : null,
   });
+}
+
+/** The rail inside 设置; the page falls back to 告警 when the hash names none. */
+export function openSettings(section: string) {
+  writeRoute({ ...EMPTY, page: 'settings', section });
 }
 
 export function openNode(name: string) {

@@ -24,6 +24,7 @@ export function DataTable<T>({
   selectedId,
   state,
   errorMessage,
+  emptyMessage,
   className,
 }: {
   rows: T[];
@@ -33,6 +34,8 @@ export function DataTable<T>({
   selectedId?: string | null;
   state: TableState;
   errorMessage?: string;
+  /** What an empty table is empty *of*; the fleet's wording is the default. */
+  emptyMessage?: string;
   className?: string;
 }) {
   const [sortId, setSortId] = useState<string | null>(null);
@@ -105,7 +108,7 @@ export function DataTable<T>({
   if (state === 'empty' || sorted.length === 0) {
     return (
       <div className="rounded-[10px] border border-dashed border-[var(--hairline)] bg-[var(--surface)] px-5 py-10 text-center text-[var(--muted-foreground)]" role="status">
-        {copy.emptyList}
+        {emptyMessage ?? copy.emptyList}
       </div>
     );
   }

@@ -76,7 +76,7 @@ export function App() {
           )
             : route.page === 'clients'
               ? <ClientsPage releases={releases} onChanged={releases.reload} />
-              : route.page === 'settings' ? <SettingsPage />
+              : route.page === 'settings' ? <SettingsPage section={route.section} />
                 : (
                   <TodayPage
                     incidents={incidents}

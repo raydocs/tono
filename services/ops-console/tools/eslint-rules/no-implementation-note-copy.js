@@ -45,11 +45,11 @@ export default {
   create(context) {
     const filename = filenameOf(context);
     const base = path.posix.basename(filename);
-    // The whole directory: the words live in four files, one per page's
-    // vocabulary, and `copy.ts` is only the barrel that joins them.
-    const isCopy = filename.includes('/src/copy/') && !filename.endsWith('.test.ts');
+    // The whole directory: the words live in one file per page's vocabulary,
+    // and `copy.ts` is only the barrel that joins them.
     const isSrcTs = /\/src\/.+\.tsx?$/.test(filename);
     const isTest = base.endsWith('.test.ts') || base.endsWith('.test.tsx');
+    const isCopy = !isTest && /\/src\/copy\/[^/]+\.ts$/.test(filename);
 
     function checkCjk(node, text) {
       if (typeof text !== 'string' || !CJK.test(text)) return;

@@ -10,6 +10,7 @@
  * the directory itself.
  */
 import { clientCopy } from './clients';
+import { settingsCopy } from './settings';
 import { customerCopy } from './customers';
 import { shellCopy } from './shell';
 import { todayCopy } from './today';
@@ -19,6 +20,7 @@ export const copy = {
   ...customerCopy,
   ...todayCopy,
   ...clientCopy,
+  settings: settingsCopy,
 } as const;
 
 export type PageId = keyof typeof copy.pages;
