@@ -310,6 +310,8 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
     var tcpDelayMs: Int64? = nil
     var exitDelayAtMs: Int64? = nil
     var tcpDelayAtMs: Int64? = nil
+    /// Named rather than guessed from `osVersion` on the Worker: the guess is for clients that predate the field.
+    var platform: String? = "macos"
     let eventCount: Int
     let eventsDropped: Int
     let events: [TonoTelemetryEvent]
@@ -318,7 +320,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         case schemaVersion, kind, windowStartMs, windowEndMs, appVersion, osVersion
         case osArch, uiState, accountState, selectedServer, catalogRevision
         case killSwitchMode, killSwitchWanted, killSwitchLive, dnsEnabled
-        case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs
+        case exitDelayMs, tcpDelayMs, exitDelayAtMs, tcpDelayAtMs, platform
         case eventCount, eventsDropped, events
     }
 
@@ -343,6 +345,7 @@ nonisolated struct TonoTelemetryWindowReport: Encodable, Sendable {
         if let tcpDelayMs { try container.encode(tcpDelayMs, forKey: .tcpDelayMs) }
         if let exitDelayAtMs { try container.encode(exitDelayAtMs, forKey: .exitDelayAtMs) }
         if let tcpDelayAtMs { try container.encode(tcpDelayAtMs, forKey: .tcpDelayAtMs) }
+        if let platform { try container.encode(platform, forKey: .platform) }
         try container.encode(eventCount, forKey: .eventCount)
         try container.encode(eventsDropped, forKey: .eventsDropped)
         try container.encode(events, forKey: .events)
@@ -434,6 +437,29 @@ nonisolated struct TonoTelemetryEvent: Encodable, Sendable {
 
 nonisolated struct TonoTelemetryWindowRequest: Encodable, Sendable {
     let window: TonoTelemetryWindowReport
+}
+
+/// One failed connect attempt, sent the moment it happens, in the shape
+/// `telemetry/failures` accepts. The window would carry the same event twenty
+/// minutes later; the operator asking "why can't this person connect" needs it
+/// now. Nothing here is typed by a person, and the Worker bounds every field.
+nonisolated struct TonoConnectFailureReport: Encodable, Sendable {
+    let ts: Int64
+    let stage: String
+    let code: String
+    var error: String? = nil
+    let node: String
+    let appVersion: String
+    let osVersion: String
+    let osArch: String
+    var platform: String = "macos"
+    var coreErrors: [String]? = nil
+    var tcpDelayMs: Int64? = nil
+    var exitDelayMs: Int64? = nil
+}
+
+nonisolated struct TonoConnectFailureReceipt: Decodable, Sendable {
+    let accepted: Bool
 }
 
 nonisolated struct TonoPathLatency: Sendable {
