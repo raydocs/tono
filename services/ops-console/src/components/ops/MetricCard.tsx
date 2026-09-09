@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import type { Measured } from './measured';
+import type { Measured, MetricSeries } from './measured';
+import { Sparkline } from './Sparkline';
 import { Value } from './Value';
 
 /**
@@ -16,6 +17,7 @@ export function MetricCard({
   format,
   unit,
   delta,
+  series,
   className,
 }: {
   icon?: ReactNode;
@@ -24,6 +26,7 @@ export function MetricCard({
   format: (value: number) => { number: string; unit?: string };
   unit?: string;
   delta?: string | null;
+  series?: MetricSeries | null;
   className?: string;
 }) {
   const raw = value.value;
@@ -41,7 +44,7 @@ export function MetricCard({
           </span>
         ) : null}
       </div>
-      <div className="mt-1 truncate">
+      <div className="mt-0.5 truncate">
         {missing ? (
           <Value value={null} source={value.source} />
         ) : (
@@ -53,6 +56,7 @@ export function MetricCard({
           </span>
         )}
       </div>
+      {missing ? null : <Sparkline series={series} className="mt-2" />}
     </div>
   );
 }

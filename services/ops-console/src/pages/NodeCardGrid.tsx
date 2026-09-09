@@ -51,7 +51,7 @@ export function NodeCardGrid({
               <StatusWord word={view.health} className="ml-auto shrink-0 self-center" />
             </header>
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3 p-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3">
               <MetricCard
                 icon={<Users size={13} strokeWidth={1.75} />}
                 label={copy.occupancy}
@@ -68,7 +68,8 @@ export function NodeCardGrid({
                   used={view.used}
                   quota={view.quota}
                   cycleStartSec={view.cycleStart}
-                  className="mt-1"
+                  series={view.trafficSeries}
+                  className="mt-0.5"
                 />
               </div>
 
@@ -104,7 +105,7 @@ function Cell({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
       <div className="text-micro text-[var(--muted-foreground)]">{label}</div>
-      <div className="mt-1 truncate">{children}</div>
+      <div className="mt-0.5 truncate">{children}</div>
     </div>
   );
 }

@@ -107,7 +107,20 @@ function quality(name, i, { blocked = false, down = false, degraded = false, mis
   };
 }
 
+// Seven days of daily bytes that add up to roughly the cycle total, with a
+// deterministic wobble so the sparklines differ between nodes. Every seventh
+// node loses a day to a missed measurement, which must render as a gap.
+function dailyBytes(i, total) {
+  const weights = [0.9, 1.15, 1.0, 0.75, 1.35, 1.05, 0.8];
+  return weights.map((w, day) => {
+    if (i % 7 === 3 && day === 2) return null;
+    const wobble = 1 + (((i * 7 + day * 13) % 9) - 4) / 25;
+    return Math.round((total / 7) * w * wobble);
+  });
+}
+
 function profile(name, i, { used = true, quota = true } = {}) {
+  const usedBytes = used ? (20 + (i % 9) * 8) * GiB : null;
   return {
     id: `p${i}`,
     catalogName: name,
@@ -118,7 +131,8 @@ function profile(name, i, { used = true, quota = true } = {}) {
     currency: '$',
     billingCycle: 30,
     trafficQuotaBytes: quota ? TiB : null,
-    trafficUsedBytes: used ? (20 + (i % 9) * 8) * GiB : null,
+    trafficUsedBytes: usedBytes,
+    trafficDailyBytes: usedBytes === null ? null : dailyBytes(i, usedBytes),
     trafficCycleStart: CLOCK - 12 * 86400,
     trafficCycleEnd: CLOCK + 18 * 86400,
     cycleNetIn: used ? 1_000 : null,

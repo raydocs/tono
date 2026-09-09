@@ -1,14 +1,15 @@
 import { copy } from '@/copy/copy';
 import { formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { cn } from '@/lib/utils';
-import type { Measured } from './measured';
+import type { Measured, MetricSeries } from './measured';
+import { Sparkline } from './Sparkline';
 import type { Tone } from './StatusWord';
 import { Value } from './Value';
 
 /**
  * The three quota thresholds from the plan (70 / 90 / 100 %) are the only
- * thing that decides this component's colour, so the bar here and any inline
- * bar elsewhere shade the same way for the same node.
+ * thing that decides this component's colour, so the bar, the sparkline and
+ * any inline bar elsewhere all shade the same way for the same node.
  */
 export function quotaTone(used: number | null, quota: number | null): Tone {
   if (used == null || quota == null || quota <= 0) return 'unk';
@@ -52,11 +53,13 @@ export function QuotaGauge({
   used,
   quota,
   cycleStartSec,
+  series,
   className,
 }: {
   used: Measured<number | null>;
   quota: number | null;
   cycleStartSec?: number | null;
+  series?: MetricSeries | null;
   className?: string;
 }) {
   if (quota == null) {
@@ -83,7 +86,7 @@ export function QuotaGauge({
   const tone = quotaTone(used.value, quota);
 
   return (
-    <div className={cn('flex flex-col gap-1.5', `tone-${tone}`, className)}>
+    <div className={cn('flex flex-col gap-1', `tone-${tone}`, className)}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate font-mono text-row">
           {usedSplit.number}
@@ -104,6 +107,7 @@ export function QuotaGauge({
           }}
         />
       </div>
+      <Sparkline series={series} />
       <div className="flex justify-between gap-2 text-micro text-[var(--muted-foreground)]">
         <span>{copy.exhaustEta}</span>
         <span className="font-mono">{eta == null ? copy.missing : formatDate(eta)}</span>

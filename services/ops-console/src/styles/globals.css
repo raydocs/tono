@@ -159,12 +159,21 @@ a { color: inherit; text-decoration: none; }
   line-height: 1.2;
 }
 
-.tone-sev  { --tone-fg: var(--sev-fg);  --tone-line: var(--sev-line);  --tone-bg: var(--sev-bg); }
-.tone-warn { --tone-fg: var(--warn-fg); --tone-line: var(--warn-line); --tone-bg: var(--warn-bg); }
-.tone-rem  { --tone-fg: var(--rem-fg);  --tone-line: var(--rem-line);  --tone-bg: var(--rem-bg); }
-.tone-info { --tone-fg: var(--info-fg); --tone-line: var(--info-line); --tone-bg: var(--info-bg); }
-.tone-ok   { --tone-fg: var(--ok-fg);   --tone-line: var(--ok-line);   --tone-bg: var(--ok-bg); }
-.tone-unk  { --tone-fg: var(--unk-fg); --tone-line: var(--unk-line); --tone-bg: var(--unk-bg); }
+/* `--tone-wash` and `--tone-ink` are spelled out per tone rather than derived
+   once, because a custom property that references `var()` is substituted where
+   it is declared: hoisting them to `:root` would freeze every tone to unk. */
+.tone-sev  { --tone-fg: var(--sev-fg);  --tone-line: var(--sev-line);  --tone-bg: var(--sev-bg);
+             --tone-ink: hsl(var(--sev-line));  --tone-wash: hsl(var(--sev-line) / 0.4); }
+.tone-warn { --tone-fg: var(--warn-fg); --tone-line: var(--warn-line); --tone-bg: var(--warn-bg);
+             --tone-ink: hsl(var(--warn-line)); --tone-wash: hsl(var(--warn-line) / 0.4); }
+.tone-rem  { --tone-fg: var(--rem-fg);  --tone-line: var(--rem-line);  --tone-bg: var(--rem-bg);
+             --tone-ink: hsl(var(--rem-line));  --tone-wash: hsl(var(--rem-line) / 0.4); }
+.tone-info { --tone-fg: var(--info-fg); --tone-line: var(--info-line); --tone-bg: var(--info-bg);
+             --tone-ink: hsl(var(--info-line)); --tone-wash: hsl(var(--info-line) / 0.4); }
+.tone-ok   { --tone-fg: var(--ok-fg);   --tone-line: var(--ok-line);   --tone-bg: var(--ok-bg);
+             --tone-ink: hsl(var(--ok-line));   --tone-wash: hsl(var(--ok-line) / 0.4); }
+.tone-unk  { --tone-fg: var(--unk-fg);  --tone-line: var(--unk-line);  --tone-bg: var(--unk-bg);
+             --tone-ink: hsl(var(--unk-line));  --tone-wash: hsl(var(--unk-line) / 0.4); }
 
 .tone-fg { color: hsl(var(--tone-fg)); }
 .tone-bg { background: hsl(var(--tone-bg)); }

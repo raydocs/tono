@@ -96,6 +96,8 @@ export interface NodeProfileDto {
   billingCycle: number | null;
   trafficQuotaBytes: number | null;
   trafficUsedBytes: number | null;
+  /** Daily bytes for the current cycle, oldest first; `null` marks a day with no measurement. */
+  trafficDailyBytes?: Array<number | null> | null;
   trafficCycleStart: number | null;
   trafficCycleEnd: number | null;
   cycleNetIn: number | null;

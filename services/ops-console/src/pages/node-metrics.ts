@@ -1,5 +1,5 @@
 import { copy } from '@/copy/copy';
-import { absent, measured, type Measured } from '@/components/ops/measured';
+import { absent, measured, type Measured, type MetricSeries } from '@/components/ops/measured';
 import { carriersFor, mainlandReturnText } from '@/lib/carriers';
 import { mapFleetHealth, type HealthWord } from '@/lib/health';
 import { nodeRegion } from '@/lib/selectors';
@@ -11,6 +11,7 @@ export type NodeView = {
   health: HealthWord;
   occupancy: Measured<number>;
   used: Measured<number | null>;
+  trafficSeries: MetricSeries | null;
   quota: number | null;
   cycleStart: number | null;
   path: Measured<null>;
@@ -39,6 +40,7 @@ export function toNodeView(node: FleetNodeDto, liveAgents: LiveAgentDto[] | null
     used: usedBytes == null
       ? absent(copy.sources.profile)
       : measured(usedBytes, node.profile?.updatedAt ?? asOf, copy.sources.profile),
+    trafficSeries: trafficSeries(node),
     quota,
     cycleStart: node.profile?.trafficCycleStart ?? null,
     path: absent(copy.sources.none),
@@ -55,6 +57,13 @@ export function toNodeView(node: FleetNodeDto, liveAgents: LiveAgentDto[] | null
     tags: node.quality?.routeKeywords ?? [],
     ports,
   };
+}
+
+/** Seven days of daily bytes, or nothing — an absent trend draws nothing at all. */
+function trafficSeries(node: FleetNodeDto): MetricSeries | null {
+  const daily = node.profile?.trafficDailyBytes;
+  if (!daily || daily.length < 2) return null;
+  return { points: daily.slice(-7), source: copy.sources.profile };
 }
 
 function collectPorts(node: FleetNodeDto): number[] {
