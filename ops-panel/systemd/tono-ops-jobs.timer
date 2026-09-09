@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Tono ops hub jobs every minute
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=tono-ops-jobs.service
+
+[Install]
+WantedBy=timers.target

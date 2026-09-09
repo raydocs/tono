@@ -14,7 +14,8 @@
     "dev": "wrangler dev",
     "deploy": "../../tooling/scripts/deploy-control-plane-main.sh",
     "typecheck": "tsc --noEmit && tsc -p admin/tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:contract": "node ../../tooling/scripts/check-ops-contract-purity.mjs"
   },
   "dependencies": {
     "react": "19.2.8",

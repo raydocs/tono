@@ -123,6 +123,24 @@ export function publicNodeProfile(row: Row) {
   };
 }
 
+export const OPS_ACTOR_TYPES = ['access_admin', 'token_admin', 'collector', 'exit_node', 'system'] as const;
+export type OpsActorType = (typeof OPS_ACTOR_TYPES)[number];
+
+export type OpsAuditMeta = {
+  actorType?: OpsActorType;
+  actorRole?: string;
+  requestId?: string | null;
+};
+
+function resolveActorType(actorEmail: string | undefined, meta?: OpsAuditMeta): OpsActorType {
+  if (meta?.actorType) return meta.actorType;
+  const email = (actorEmail || '').toLowerCase();
+  if (email === 'system') return 'system';
+  if (email === 'collector') return 'collector';
+  if (email === 'token-admin') return 'token_admin';
+  return 'access_admin';
+}
+
 export function opsAuditStatement(
   e: Env,
   actorEmail: string | undefined,
@@ -131,10 +149,14 @@ export function opsAuditStatement(
   targetId: string | null,
   summary: string,
   onlyIfPreviousStatementChanged = false,
+  meta?: OpsAuditMeta,
 ) {
   return e.DB.prepare(
-    `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
-     SELECT ?, ?, ?, ?, ?, ?, ?
+    `INSERT INTO ops_audit(
+       id, at, actor_email, action, target_type, target_id, summary,
+       actor_type, actor_role, request_id
+     )
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
      ${onlyIfPreviousStatementChanged ? 'WHERE changes() > 0' : ''}`,
   ).bind(
     id(),
@@ -144,6 +166,9 @@ export function opsAuditStatement(
     targetType.slice(0, 80),
     targetId,
     summary.slice(0, 500),
+    resolveActorType(actorEmail, meta),
+    (meta?.actorRole ?? 'owner').slice(0, 40),
+    meta?.requestId ?? null,
   );
 }
 
@@ -154,9 +179,10 @@ export async function writeOpsAudit(
   targetType: string,
   targetId: string | null,
   summary: string,
+  meta?: OpsAuditMeta,
 ) {
   try {
-    await opsAuditStatement(e, actorEmail, action, targetType, targetId, summary).run();
+    await opsAuditStatement(e, actorEmail, action, targetType, targetId, summary, false, meta).run();
   } catch {
     // Audit must never fail the operator action; the table may be mid-migration.
   }
