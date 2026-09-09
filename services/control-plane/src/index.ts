@@ -1,11 +1,8 @@
 import {
-  encryptTrafficPolicy,
   hmacSha256,
   jwtSign,
   randomToken,
   sha256,
-  TRAFFIC_POLICY_SIGNATURE_CONTEXT,
-  verifyTrafficPolicySignature,
 } from './crypto';
 import {
   OidcVerificationError,
@@ -14,7 +11,6 @@ import {
 } from './oidc';
 import { AccessVerificationError, verifyAccessRequest } from './access';
 import {
-  queryHomeProbeHistory,
   recordAgentSamples,
   recordHomeProbeSamples,
   recordQualitySamples,
@@ -26,10 +22,6 @@ import { afterLogSegment, afterSnapshot, afterTelemetryWindow, ingestConnectFail
 import { opsIngestRoutes } from './ops/ingest';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
-import {
-  CLIENT_UUID_PLACEHOLDER,
-  managedCatalogYAML,
-} from './catalog-yaml';
 import {
   type Env,
   type Row,
@@ -52,31 +44,7 @@ import {
   exitCredentialRolloutPhase,
 } from './catalog';
 import {
-  optionalIpv4,
-  proxyNameField,
-  defaultProxyNameField,
-  socks5HostField,
-  socks5PortField,
-  validateHomeSocks5,
-  publicHomeExit,
-  parseHomeLine,
-  findSocks5Home,
-  insertSocks5HomeExit,
-} from './home';
-import {
-  httpsUrlField,
-  optionalByteCount,
-  optionalMoney,
-  optionalCurrency,
-  optionalBillingCycle,
-  opsAuditStatement,
-  recordProductEvent,
-  banProductAccount,
-  replaceProductAccount,
-} from './product-account';
-import {
   exactKeys,
-  canonicalTrafficPolicy,
   publicTrafficPolicy,
 } from './traffic-policy';
 import {

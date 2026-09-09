@@ -4,7 +4,7 @@
 // what happens when those minutes age out — which is where the history that the
 // 7-day and 90-day views are built from actually comes from.
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   queryAgentMetrics,
   queryHomeProbeHistory,
@@ -37,11 +37,6 @@ const sample = (name: string, observedAt: number, cpu: number) => ({
 });
 
 describe('operations timeseries retention', () => {
-  beforeEach(async () => {
-    await db().prepare('DELETE FROM operations_agent_samples').run();
-    await db().prepare('DELETE FROM operations_agent_rollups').run();
-  });
-
   it('fences the pre-migration rollup writer before it can update or delete source rows', async () => {
     const bucket = 1_800_000_000;
     await recordAgentSamples(db(), [

@@ -308,6 +308,31 @@ describe('ops v1 api', () => {
     const health = assertSystemHealth(await (await ops('system/health')).json());
     expect(health.contractVersion).toBe(1);
     expect(health.sources.length).toBeGreaterThan(0);
+    expect(health.cronLastRunAt).toBeNull();
+    expect(health.cronLastDurationMs).toBeNull();
+    expect(health.cronLastError).toBeNull();
+    expect(health.cronSteps).toBeNull();
+  });
+
+  it('system/health surfaces persisted cron step durations', async () => {
+    const steps = {
+      flatten: { ok: true, ms: 10, error: null },
+      project: { ok: true, ms: 20, error: null },
+      verdicts: { ok: false, ms: 5, error: 'verdict boom' },
+      alerts: { ok: true, ms: 1, error: null },
+      jobs: { ok: true, ms: 2, error: null },
+      quota: { ok: true, ms: 3, error: null },
+      daily: { ok: true, ms: 4, error: null },
+      retention: { ok: true, ms: 6, error: null },
+    };
+    await db().prepare(
+      `INSERT INTO ops_cron_state(key, ran_at, payload) VALUES('last_report', ?, ?)`,
+    ).bind(NOW, JSON.stringify(steps)).run();
+    const health = assertSystemHealth(await (await ops('system/health')).json());
+    expect(health.cronLastRunAt).toBe(NOW);
+    expect(health.cronLastDurationMs).toBe(51);
+    expect(health.cronLastError).toBe('verdict boom');
+    expect(health.cronSteps).toEqual(steps);
   });
 
   it('existing ops routes still respond', async () => {

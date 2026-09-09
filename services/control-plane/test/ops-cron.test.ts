@@ -121,6 +121,14 @@ describe('runOpsCron', () => {
       'SELECT status FROM ops_node_jobs WHERE id = ?',
     ).bind(job.id).first<{ status: string }>();
     expect(expired?.status).toBe('expired');
+
+    const stored = await db().prepare(
+      "SELECT ran_at, payload FROM ops_cron_state WHERE key = 'last_report'",
+    ).first<{ ran_at: number; payload: string }>();
+    expect(Number(stored?.ran_at)).toBe(NOW);
+    const parsed = JSON.parse(stored?.payload ?? '{}') as { flatten: { ok: boolean; ms: number } };
+    expect(parsed.flatten.ok).toBe(true);
+    expect(parsed.flatten.ms).toBe(report.flatten.ms);
   });
 
   it('keeps running later steps when one step throws', async () => {

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   attributeClientRouteBytes,
   homeLineChores,
@@ -47,14 +47,6 @@ async function usageRow(homeExitId: string, dayAt: number, source: string) {
 async function expectRejected(run: () => Promise<unknown>, status = 400, code = 'VALIDATION_ERROR') {
   await expect(run()).rejects.toMatchObject({ status, code });
 }
-
-beforeEach(async () => {
-  await db().prepare('DELETE FROM home_line_usage_daily').run();
-  await db().prepare('DELETE FROM operations_home_probe_samples').run();
-  await db().prepare('DELETE FROM user_home_bindings').run();
-  await db().prepare('DELETE FROM home_exits').run();
-  await db().prepare('DELETE FROM users').run();
-});
 
 describe('patchHomeLine', () => {
   it('writes commercial fields and rejects the validation matrix', async () => {

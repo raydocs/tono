@@ -17,5 +17,21 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0039` at the
+schema changes continue from the highest existing number (`0049` at the
 time this note was written).
+
+## 0039–0049
+
+Ops tables after the sequence was unique. Applied in numeric order:
+
+- `0039_ops_connection_events.sql` — flattened connection events, flatten cursor, daily rollup
+- `0040_ops_verdicts_and_incidents.sql` — node verdicts, status history, incidents
+- `0041_ops_alerts.sql` — alert rules, cooldown state, delivery outbox
+- `0042_ops_node_jobs.sql` — operator-asked node jobs
+- `0043_client_releases.sql` — client release registry and version-adoption rollup
+- `0044_ops_customer_projections.sql` — customer status, activity hours, sessions
+- `0045_ops_traffic_destinations.sql` — destination/service-family rollups and direct candidates
+- `0046_ops_assets_and_quota.sql` — provider accounts, traffic cycles, daily errors
+- `0047_ops_home_lines.sql` — residential line commercial attributes and metering
+- `0048_ops_cron_state.sql` — cron watermarks and customer path-slow hysteresis
+- `0049_ops_cron_report.sql` — last cron report payload on `ops_cron_state`

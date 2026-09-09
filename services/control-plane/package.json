@@ -15,7 +15,8 @@
     "deploy": "../../tooling/scripts/deploy-control-plane-main.sh",
     "typecheck": "tsc --noEmit && tsc -p admin/tsconfig.json --noEmit",
     "test": "vitest run",
-    "check:contract": "node ../../tooling/scripts/check-ops-contract-purity.mjs"
+    "check:contract": "node ../../tooling/scripts/check-ops-contract-purity.mjs",
+    "check:budgets": "node ../../tooling/scripts/check-ops-budgets.mjs"
   },
   "dependencies": {
     "react": "19.2.8",

@@ -18,14 +18,13 @@ import {
 } from '../env';
 import { publicNodeProfile } from '../product-account';
 import { rejectUnexpectedKeys } from '../request';
+import { TELEMETRY_MAX_REPORTED_AT_MS } from '../limits';
 import {
   fleetQualityStatus,
   operationsLive,
   nodeHealthFromQuality,
 } from './live';
 import type { OpsRequestCache } from './cache';
-
-const TELEMETRY_MAX_REPORTED_AT_MS = 4_102_444_800_000;
 
 async function managedCatalogTemplate(e: Env) {
   const row = await e.DB.prepare(

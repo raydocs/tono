@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
 import {
   closeProviderAccount,
@@ -12,10 +12,6 @@ import {
 } from '../src/ops/assets';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
-
-beforeEach(async () => {
-  await db().prepare('DELETE FROM provider_accounts').run();
-});
 
 describe('maskEmail', () => {
   it('keeps two local characters and the domain', () => {

@@ -1,4 +1,6 @@
 import { ApiError } from '../errors';
+import { sniffPlatform } from './platform';
+export { sniffPlatform };
 
 const DAY = 86400;
 const PLATFORMS = ['windows', 'macos', 'linux', 'android', 'ios'] as const;
@@ -157,16 +159,6 @@ export function publicRelease(row: Row): ClientRelease {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
-}
-
-export function sniffPlatform(osVersion: string): Platform | null {
-  if (typeof osVersion !== 'string' || !osVersion) return null;
-  if (/Windows/i.test(osVersion)) return 'windows';
-  if (/Android/i.test(osVersion)) return 'android';
-  if (/iPadOS|iOS/i.test(osVersion)) return 'ios';
-  if (/macOS|Mac OS/i.test(osVersion)) return 'macos';
-  if (/Linux/i.test(osVersion)) return 'linux';
-  return null;
 }
 
 function parseVersion(value: string): { core: number[]; pre: string | null } {

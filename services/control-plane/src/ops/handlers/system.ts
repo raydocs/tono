@@ -1,5 +1,6 @@
-import { CONTRACT_VERSION, SOURCE_IDS, assertSystemHealth, type SourceHealthDto, type SourceId, type SourceState, type SystemHealthDto } from '../contract';
+import { CONTRACT_VERSION, SOURCE_IDS, assertSystemHealth, type CronStepsHealthDto, type SourceHealthDto, type SourceId, type SourceState, type SystemHealthDto } from '../contract';
 import { storedLiveSnapshot } from '../live';
+import { OPS_CRON_STEPS, parseLastReport } from '../cron';
 import {
   Env,
   Row,
@@ -79,14 +80,24 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
   let cronLastRunAt: number | null = null;
   let cronLastDurationMs: number | null = null;
   let cronLastError: string | null = null;
+  let cronSteps: CronStepsHealthDto | null = null;
   try {
     const cron = await e.DB.prepare(
-      'SELECT MAX(ran_at) AS ran_at FROM ops_cron_state',
+      "SELECT ran_at, payload FROM ops_cron_state WHERE key = 'last_report'",
     ).first<Row>();
     cronLastRunAt = nullInt(cron?.ran_at);
-    // 0048 only stores (key, ran_at); duration and last error stay null.
+    const parsed = parseLastReport(cron?.payload);
+    if (parsed) {
+      cronSteps = parsed;
+      let total = 0;
+      for (const name of OPS_CRON_STEPS) {
+        total += parsed[name].ms;
+        if (cronLastError == null && parsed[name].error) cronLastError = parsed[name].error;
+      }
+      cronLastDurationMs = total;
+    }
   } catch (error) {
-    if (!missingTable(error)) {
+    if (!missingTable(error) && !String(error).includes('no such column')) {
       // Table is optional; any missing-object error is treated as "no cron yet".
     }
   }
@@ -98,6 +109,7 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
     cronLastRunAt,
     cronLastDurationMs,
     cronLastError,
+    cronSteps,
     updatedAt: t,
   };
   // A missing source is not ok — the 死人开关.

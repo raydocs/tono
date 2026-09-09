@@ -137,7 +137,7 @@ jobs:
 
       - name: Contract purity
         working-directory: services/control-plane
-        run: npm run check:contract
+        run: npm run check:contract && npm run check:budgets
 
       - name: Route coverage
         working-directory: services/control-plane
