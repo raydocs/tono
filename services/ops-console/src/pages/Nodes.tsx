@@ -49,53 +49,55 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
 
   return (
     <div className="page-wrap">
-      {/* R2 reaches the headline too: a fleet that failed to load has no counts,
-          and a zero count would be a measurement the console never took. */}
-      {fleet.status === 'ready' ? (
-        <p className="text-verdict">
-          {NODE_FILTERS.map((id, index) => (
-            <span key={id}>
-              {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-              <CountBit
-                id={id}
-                active={filter === id}
-                label={copy.count[id](counts[id])}
-                onClick={() => setFilter((current) => (current === id ? null : id))}
-              />
-            </span>
-          ))}
-        </p>
-      ) : (
-        <p className="text-verdict text-[var(--muted-foreground)]">
-          {fleet.status === 'loading' ? copy.loading : copy.loadError}
-        </p>
-      )}
+      <div className="page-head">
+        {/* R2 reaches the headline too: a fleet that failed to load has no counts,
+            and a zero count would be a measurement the console never took. */}
+        {fleet.status === 'ready' ? (
+          <p className="text-verdict">
+            {NODE_FILTERS.map((id, index) => (
+              <span key={id}>
+                {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                <CountBit
+                  id={id}
+                  active={filter === id}
+                  label={copy.count[id](counts[id])}
+                  onClick={() => setFilter((current) => (current === id ? null : id))}
+                />
+              </span>
+            ))}
+          </p>
+        ) : (
+          <p className="text-verdict text-[var(--muted-foreground)]">
+            {fleet.status === 'loading' ? copy.loading : copy.loadError}
+          </p>
+        )}
 
-      <div className="flex items-center justify-end gap-1">
-        <button
-          type="button"
-          aria-pressed={view === 'cards'}
-          className={cn(
-            'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-            view === 'cards' && 'bg-[var(--accent)] text-white',
-          )}
-          onClick={() => setView('cards')}
-        >
-          <LayoutGrid size={12} />
-          {copy.viewCards}
-        </button>
-        <button
-          type="button"
-          aria-pressed={view === 'table'}
-          className={cn(
-            'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-            view === 'table' && 'bg-[var(--accent)] text-white',
-          )}
-          onClick={() => setView('table')}
-        >
-          <TableIcon size={12} />
-          {copy.viewTable}
-        </button>
+        <div className="toolbar-row">
+          <button
+            type="button"
+            aria-pressed={view === 'cards'}
+            className={cn(
+              'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
+              view === 'cards' && 'bg-[var(--accent)] text-white',
+            )}
+            onClick={() => setView('cards')}
+          >
+            <LayoutGrid size={12} />
+            {copy.viewCards}
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === 'table'}
+            className={cn(
+              'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
+              view === 'table' && 'bg-[var(--accent)] text-white',
+            )}
+            onClick={() => setView('table')}
+          >
+            <TableIcon size={12} />
+            {copy.viewTable}
+          </button>
+        </div>
       </div>
 
       {fleet.status === 'error' && !fleet.sessionExpired ? (

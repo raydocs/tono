@@ -196,6 +196,21 @@ a { color: inherit; text-decoration: none; }
   .page-wrap { padding: 32px; gap: 40px; }
 }
 
+/* The count sentence and the controls that filter it are one block: 40 px of
+   page rhythm between them left a void the eye read as a section break, and
+   the toggle drifted to the right margin where nothing else on the page is. */
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .card-pad { padding: 20px; }
 
 /* Named `data-row` rather than `table-row`, which Tailwind already owns as a

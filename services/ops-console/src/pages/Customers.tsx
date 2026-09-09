@@ -67,45 +67,47 @@ export default function CustomersPage({
 
   return (
     <div className="page-wrap">
-      {customers.status === 'ready' ? (
-        <p className="text-verdict">
-          {CUSTOMER_FILTERS.map((id, index) => (
-            <span key={id}>
-              {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-              <button
-                type="button"
-                aria-pressed={filter === id}
-                className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                onClick={() => setFilter((current) => (current === id ? null : id))}
-              >
-                {copy.customerCount[id](counts[id])}
-              </button>
-            </span>
-          ))}
-        </p>
-      ) : (
-        <p className="text-verdict text-[var(--muted-foreground)]">
-          {customers.status === 'loading' ? copy.loading : copy.loadError}
-        </p>
-      )}
+      <div className="page-head">
+        {customers.status === 'ready' ? (
+          <p className="text-verdict">
+            {CUSTOMER_FILTERS.map((id, index) => (
+              <span key={id}>
+                {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                <button
+                  type="button"
+                  aria-pressed={filter === id}
+                  className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
+                  onClick={() => setFilter((current) => (current === id ? null : id))}
+                >
+                  {copy.customerCount[id](counts[id])}
+                </button>
+              </span>
+            ))}
+          </p>
+        ) : (
+          <p className="text-verdict text-[var(--muted-foreground)]">
+            {customers.status === 'loading' ? copy.loading : copy.loadError}
+          </p>
+        )}
 
-      {/* All five platforms, always. The ones nothing has shipped for say so. */}
-      <div className="flex flex-wrap items-center gap-2">
-        {PLATFORM_CHIPS.map((id) => {
-          const live = released.has(id);
-          return (
-            <Chip
-              key={id}
-              muted={!live}
-              active={platform === id}
-              count={live ? perPlatform[id] : null}
-              title={live ? undefined : copy.unreleased}
-              onClick={() => setPlatform((current) => (current === id ? null : id))}
-            >
-              {live ? copy.platform[id] : `${copy.platform[id]} ${copy.unreleased}`}
-            </Chip>
-          );
-        })}
+        {/* All five platforms, always. The ones nothing has shipped for say so. */}
+        <div className="toolbar-row">
+          {PLATFORM_CHIPS.map((id) => {
+            const live = released.has(id);
+            return (
+              <Chip
+                key={id}
+                muted={!live}
+                active={platform === id}
+                count={live ? perPlatform[id] : null}
+                title={live ? undefined : copy.unreleased}
+                onClick={() => setPlatform((current) => (current === id ? null : id))}
+              >
+                {live ? copy.platform[id] : `${copy.platform[id]} ${copy.unreleased}`}
+              </Chip>
+            );
+          })}
+        </div>
       </div>
 
       <DataTable
