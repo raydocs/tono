@@ -146,6 +146,11 @@ export const classifyActivityRoute = (
   // Tono direct groups (mirrors DIRECT_GROUP_NAME/WEB_DIRECT_GROUP_NAME in tono-core config.rs)
   // terminate on the physical interface — that IS a direct route, not a proxy hop.
   const hops = connection.chains.map((hop) => hop.trim())
+  // An empty chain is an unrecognized shape, not a proxied one. macOS routeClass
+  // guards `chains.isEmpty` alongside DIRECT and the direct groups before its
+  // `.tunnel` fallthrough; match that here so a transient empty-chain frame (or
+  // a connection Mihomo reports with no chain) is badged direct, not proxied.
+  if (hops.length === 0) return 'direct'
   const terminal = hops[0]
   if (terminal === 'REJECT' || terminal === 'REJECT-DROP') return 'rejected'
   if (

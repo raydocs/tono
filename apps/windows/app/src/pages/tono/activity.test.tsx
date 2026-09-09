@@ -137,6 +137,13 @@ describe('Activity connection presentation', () => {
     expect(
       classifyActivityRoute(connection('lower', { chains: ['direct'] })),
     ).toBe('proxied')
+    // An empty chain is an unrecognized shape, not a proxied one: match macOS
+    // routeClass, which guards `chains.isEmpty` alongside DIRECT before its
+    // `.tunnel` fallthrough. Without this guard the empty case falls through to
+    // the proxied default and mislabels the per-app split for one frame.
+    expect(
+      classifyActivityRoute(connection('empty', { chains: [], rule: '' })),
+    ).toBe('direct')
   })
 
   it('only badges a flow as home when it really left through home broadband', () => {
@@ -161,6 +168,34 @@ describe('Activity connection presentation', () => {
         }),
       ),
     ).toBe('proxied')
+  })
+
+  it('badges an empty chain as direct on a public host and as local on loopback', () => {
+    // Regression: an empty chain on a non-loopback destination used to fall
+    // through to the proxied default. It is now badged direct, matching macOS
+    // routeClass, and is reachable end-to-end through toActivityRow (not swept
+    // into the loopback `local` short-circuit, since the host is public).
+    expect(
+      toActivityRow(connection('empty-public', { chains: [], rule: '' })).route,
+    ).toBe('direct')
+    // The loopback regex short-circuit in toActivityRow still wins over the
+    // empty-chain case, so DNS to 127.0.0.1:53 is badged local regardless of a
+    // missing chain — the dominant loopback traffic never reaches the bug path.
+    expect(
+      toActivityRow(
+        connection('empty-loopback', {
+          metadata: {
+            ...connection('empty-loopback').metadata,
+            host: '',
+            destinationIP: '127.0.0.1',
+            destinationPort: '53',
+          },
+          chains: [],
+          rule: 'IPCIDR',
+          rulePayload: '127.0.0.0/8',
+        }),
+      ).route,
+    ).toBe('local')
   })
 
   it('classifies loopback targets as local, never as direct', () => {
