@@ -1,0 +1,70 @@
+import { copy } from '@/copy/copy';
+import { absent, measured, type Measured } from '@/components/ops/measured';
+import { carriersFor, mainlandReturnText } from '@/lib/carriers';
+import { mapFleetHealth, type HealthWord } from '@/lib/health';
+import { nodeRegion } from '@/lib/selectors';
+import type { FleetNodeDto, LiveAgentDto } from '@/lib/types';
+
+export type NodeView = {
+  node: FleetNodeDto;
+  region: string;
+  health: HealthWord;
+  occupancy: Measured<number>;
+  used: Measured<number | null>;
+  quota: number | null;
+  cycleStart: number | null;
+  path: Measured<null>;
+  mainland: Measured<string | null>;
+  renew: Measured<number | null>;
+  last: Measured<number | null>;
+  ip: string | null;
+  os: string | null;
+  provider: string | null;
+  tags: string[];
+  ports: number[];
+};
+
+export function toNodeView(node: FleetNodeDto, liveAgents: LiveAgentDto[] | null | undefined): NodeView {
+  const asOf = node.agentObservedAt;
+  const usedBytes = node.profile?.trafficUsedBytes ?? null;
+  const quota = node.profile?.trafficQuotaBytes ?? null;
+  const carriers = carriersFor(node, liveAgents);
+  const mainland = mainlandReturnText(carriers);
+  const ports = collectPorts(node);
+  return {
+    node,
+    region: nodeRegion(node.name),
+    health: mapFleetHealth(node),
+    occupancy: measured(node.occupancy, asOf, copy.sources.agent),
+    used: usedBytes == null
+      ? absent(copy.sources.profile)
+      : measured(usedBytes, node.profile?.updatedAt ?? asOf, copy.sources.profile),
+    quota,
+    cycleStart: node.profile?.trafficCycleStart ?? null,
+    path: absent(copy.sources.none),
+    mainland: mainland.text === copy.missing
+      ? absent(copy.sources.live)
+      : measured(mainland.text, asOf, copy.sources.live),
+    renew: node.profile?.renewsAt == null
+      ? absent(copy.sources.profile)
+      : measured(node.profile.renewsAt, node.profile.updatedAt, copy.sources.profile),
+    last: asOf == null ? absent(copy.sources.agent) : measured(asOf, asOf, copy.sources.agent),
+    ip: node.quality?.publicIp || node.profile?.publicIp || null,
+    os: node.agent?.os ?? null,
+    provider: node.profile?.provider ?? null,
+    tags: node.quality?.routeKeywords ?? [],
+    ports,
+  };
+}
+
+function collectPorts(node: FleetNodeDto): number[] {
+  const exposure = node.quality?.exposure;
+  if (!exposure) return [];
+  const all = [
+    ...exposure.sshPorts,
+    ...exposure.expected.map((row) => row.port),
+    ...exposure.unexpected.map((row) => row.port),
+    ...exposure.acknowledged.map((row) => row.port),
+  ];
+  return [...new Set(all)].sort((a, b) => a - b);
+}
