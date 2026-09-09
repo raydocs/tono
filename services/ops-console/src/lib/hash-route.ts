@@ -9,6 +9,8 @@ export type OpsRoute = {
   page: PageId;
   /** `#/nodes` opens its detail in a drawer, so the node travels beside the page. */
   node: string | null;
+  /** `#/nodes/:name` is the full page behind that drawer, so the name is a segment. */
+  nodeName: string | null;
   /** `#/customers/:id` is a full page, so the id is a path segment, not a parameter. */
   customerId: string | null;
   /** `#/today?incident=` — the drawer has to survive a reload and a pasted link. */
@@ -29,6 +31,7 @@ export type OpsRoute = {
 export const BLANK_ROUTE: OpsRoute = {
   page: 'today',
   node: null,
+  nodeName: null,
   customerId: null,
   incident: null,
   platform: null,
@@ -53,10 +56,12 @@ export function readRoute(): OpsRoute {
   const platform = read('platform');
   const bucket = read('bucket');
   const pair = platform !== null && PLATFORMS.includes(platform);
+  const segment = segments[1] ? decodeURIComponent(segments[1]) : null;
   return {
     page,
     node: read('node'),
-    customerId: page === 'customers' && segments[1] ? decodeURIComponent(segments[1]) : null,
+    nodeName: page === 'nodes' ? segment : null,
+    customerId: page === 'customers' ? segment : null,
     incident: read('incident'),
     platform: pair ? platform as Platform : null,
     bucket: pair && bucket !== null && BUCKETS.includes(bucket) ? bucket as AdoptionBucket : null,
@@ -64,9 +69,17 @@ export function readRoute(): OpsRoute {
   };
 }
 
+/** The one path segment a page may carry: a customer id, or a node name. */
+function segmentOf(route: OpsRoute): string | null {
+  if (route.page === 'customers') return route.customerId;
+  if (route.page === 'nodes') return route.nodeName;
+  if (route.page === 'settings') return route.section;
+  return null;
+}
+
 export function writeRoute(next: OpsRoute, replace = false) {
   const url = new URL(window.location.href);
-  const segment = next.customerId ?? (next.page === 'settings' ? next.section : null);
+  const segment = segmentOf(next);
   url.hash = segment
     ? `#/${next.page}/${encodeURIComponent(segment)}`
     : `#/${next.page}`;
@@ -107,6 +120,19 @@ export function openSettings(section: string) {
 
 export function openNode(name: string) {
   writeRoute({ ...EMPTY, page: 'nodes', node: name });
+}
+
+/**
+ * The drawer answers "which machine is this"; the page answers "what do I do
+ * about it". Opening the page drops the drawer selection rather than keeping
+ * both, so going back lands on the list instead of on the list plus a sheet.
+ */
+export function openNodePage(name: string) {
+  writeRoute({ ...EMPTY, page: 'nodes', nodeName: name });
+}
+
+export function closeNodePage() {
+  writeRoute({ ...EMPTY, page: 'nodes' });
 }
 
 export function closeNode() {

@@ -32,12 +32,15 @@ import {
 export function DetailDrawer({
   open,
   title,
+  action,
   onClose,
   footer,
   children,
 }: {
   open: boolean;
   title: string;
+  /** One link beside the title — where the drawer's subject has a page of its own. */
+  action?: ReactNode;
   onClose: () => void;
   /** Pinned to the bottom edge; on a phone that is where the thumb is. */
   footer?: ReactNode;
@@ -80,7 +83,10 @@ export function DetailDrawer({
           )}
         >
           <SheetHeader className="shrink-0 border-b border-[var(--hairline)] px-5 py-4">
-            <SheetTitle className="text-row font-medium">{title}</SheetTitle>
+            <div className="flex items-baseline gap-3">
+              <SheetTitle className="min-w-0 truncate text-row font-medium">{title}</SheetTitle>
+              {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+            </div>
           </SheetHeader>
           {/* On a wide screen the actions stay where they were written, at the
               end of the panel: pinning them there would leave a 400 px void

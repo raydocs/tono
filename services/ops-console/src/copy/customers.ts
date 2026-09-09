@@ -84,6 +84,7 @@ export const customerCopy = {
     at: '时间',
     outcome: '结果',
     node: '节点',
+    who: '客户',
     stage: '阶段',
     code: '代码',
     elapsed: '耗时',

@@ -7,6 +7,7 @@ import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
+import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
 import fleetDenseRaw from './fixtures/fleet-nodes.dense.json';
@@ -209,6 +210,9 @@ function fixturesPlugin(): Plugin {
         }
         const route = pathOnly.slice('/api/v1/ops/'.length);
         const set = pickSet(url);
+        // 节点详情 owns its own reads, its two writes and the mutable store
+        // behind them; everything else falls through to the branches below.
+        if (serveNodeRoutes({ req, res, url, route, set, session: pickSession(url, set === 'error' ? 'default' : set) })) return;
         if (set !== 'error' && settingsFixtures({
           req, res, route, url, session: pickSession(url, set), empty: set === 'empty',
         })) return;
@@ -346,14 +350,18 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5174,
-    /**
-     * The webfonts live in `node_modules`, which is a symlink in every review
-     * worktree. Vite resolves the real path before its allow-list check and
-     * refuses to serve anything outside the project root, so Geist silently
-     * fails to load and every screenshot baseline is captured in the fallback
-     * face. Allowing the resolved target is what makes a baseline taken in a
-     * worktree comparable to one taken in the main checkout.
-     */
-    fs: { allow: [rootDir, realpathSync(path.resolve(rootDir, 'node_modules'))] },
+    fs: {
+      /**
+       * `node_modules` is a symlink into the primary checkout in every git
+       * worktree here, and the webfonts live behind it. Without its real path
+       * on the allow list Vite refuses to serve them, the pages render in a
+       * fallback face, and every screenshot baseline captured in a worktree
+       * disagrees with every one captured in the main checkout.
+       */
+      allow: [
+        path.resolve(rootDir, '..', '..'),
+        realpathSync(path.resolve(rootDir, 'node_modules')),
+      ],
+    },
   },
 }));

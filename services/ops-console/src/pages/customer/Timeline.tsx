@@ -18,14 +18,26 @@ type Day = { key: number; label: string; rows: ConnectionEventDto[] };
 
 export function Timeline({
   events,
-  devices,
+  devices = [],
   state,
   message,
+  title = copy.customerSections.timeline,
+  emptyMessage = copy.emptyTimeline,
+  who,
 }: {
   events: readonly ConnectionEventDto[];
-  devices: readonly CustomerDeviceDto[];
+  /** Absent on the node page: the rows there belong to many people, not one. */
+  devices?: readonly CustomerDeviceDto[];
   state: 'loading' | 'error' | 'ready';
   message?: string;
+  /** The node page asks the same question of one machine, so it renames the block. */
+  title?: string;
+  emptyMessage?: string;
+  /**
+   * On the node page every row is on the same machine, so the node column
+   * answers nothing; it becomes the person instead, named by this lookup.
+   */
+  who?: (userId: string) => string | null;
 }) {
   const [failedOnly, setFailedOnly] = useState(false);
   const [week, setWeek] = useState(true);
@@ -44,7 +56,7 @@ export function Timeline({
 
   return (
     <Section
-      title={copy.customerSections.timeline}
+      title={title}
       aside={
         <div className="flex flex-wrap items-center gap-2">
           <Chip
@@ -59,30 +71,32 @@ export function Timeline({
           <Chip active={week} onClick={() => setWeek((v) => !v)}>
             {copy.timelineFilters.week}
           </Chip>
-          <select
-            aria-label={copy.timelineFilters.device}
-            className="ops-chip"
-            value={device}
-            onChange={(event) => setDevice(event.target.value)}
-          >
-            <option value="">{copy.timelineFilters.device}</option>
-            {devices.map((row) => (
-              <option key={row.id} value={row.id}>{row.name}</option>
-            ))}
-          </select>
+          {devices.length === 0 ? null : (
+            <select
+              aria-label={copy.timelineFilters.device}
+              className="ops-chip"
+              value={device}
+              onChange={(event) => setDevice(event.target.value)}
+            >
+              <option value="">{copy.timelineFilters.device}</option>
+              {devices.map((row) => (
+                <option key={row.id} value={row.id}>{row.name}</option>
+              ))}
+            </select>
+          )}
         </div>
       }
     >
       {state === 'loading' ? <Empty message={copy.loading} />
         : state === 'error' ? <Empty message={message || copy.loadError} />
-          : days.length === 0 ? <Empty message={copy.emptyTimeline} />
+          : days.length === 0 ? <Empty message={emptyMessage} />
             : (
               <div className="overflow-x-auto">
                 <div className="min-w-[860px]">
                   <div className={cn(GRID, 'pb-1 text-micro text-[var(--muted-foreground)]')}>
                     <span>{copy.timelineColumns.at}</span>
                     <span>{copy.timelineColumns.outcome}</span>
-                    <span>{copy.timelineColumns.node}</span>
+                    <span>{who ? copy.timelineColumns.who : copy.timelineColumns.node}</span>
                     <span>{copy.timelineColumns.stage}</span>
                     <span>{copy.timelineColumns.code}</span>
                     <span className="text-right">{copy.timelineColumns.elapsed}</span>
@@ -95,7 +109,7 @@ export function Timeline({
                         <span className="font-mono text-row">{day.label}</span>
                         <span className="text-micro text-[var(--muted-foreground)]">{summaryOf(day.rows)}</span>
                       </div>
-                      {day.rows.map((row) => <Row key={row.id} row={row} />)}
+                      {day.rows.map((row) => <Row key={row.id} row={row} who={who} />)}
                     </div>
                   ))}
                 </div>
@@ -105,7 +119,8 @@ export function Timeline({
   );
 }
 
-function Row({ row }: { row: ConnectionEventDto }) {
+function Row({ row, who }: { row: ConnectionEventDto; who?: (userId: string) => string | null }) {
+  const subject = who ? (who(row.userId) ?? row.userId) : row.node;
   const explanation = explainCode(row.code);
   const client = [row.appVersion, row.osVersion].filter(Boolean).join(' · ');
   return (
@@ -114,8 +129,8 @@ function Row({ row }: { row: ConnectionEventDto }) {
         {formatClock(Math.floor(row.atMs / 1_000))}
       </span>
       <span className={cn('tone-fg text-body', `tone-${eventTone(row.kind)}`)}>{eventWord(row.kind)}</span>
-      <span className="truncate text-body" title={row.node ?? undefined}>
-        {row.node ?? copy.missing}
+      <span className="truncate text-body" title={subject ?? undefined}>
+        {subject ?? copy.missing}
       </span>
       <span className="text-body text-[var(--muted-foreground)]">
         {stageWord(row.stage) ?? copy.missing}

@@ -1,0 +1,277 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { materializeOps } from '../../src/lib/ops-fixtures';
+
+/**
+ * The 节点详情 endpoints, served by the fixture dev server.
+ *
+ * Everything the page writes has to be visible to the next read, or the
+ * confirmation dialog and the 任务 table below it are testing nothing: an
+ * enqueued job lands in a per-`?session=` copy of the store, so the screenshot
+ * suite and the test that actually presses 拉取报错 can share one dev server
+ * without editing each other's data.
+ *
+ * The normal and dense sets are hand-written like the 客户 and 今天 fixtures —
+ * a page whose every block reads `—` cannot be reviewed. The empty set is the
+ * captured shape of a node the Worker knows nothing about, which is exactly
+ * what the empty states are for.
+ */
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+export type FixtureSetName = 'default' | 'dense' | 'empty' | 'error';
+
+type ListFile<T> = { items: T[]; nextCursor: string | null; updatedAt: number };
+type Measured<T> = { value: T; asOfSec: number | null; source: string };
+type Job = Record<string, unknown> & { id: string; status: string };
+
+type NodeFile = {
+  clock: number;
+  detail: Record<string, unknown>;
+  connections: ListFile<Record<string, unknown>>;
+  errors: Record<string, Measured<unknown[]>>;
+  history: ListFile<Record<string, unknown>>;
+  jobs: ListFile<Job>;
+  retirePreview: Record<string, unknown>;
+};
+
+const FILES: Record<'default' | 'dense', string> = {
+  default: 'fixtures/node-detail.json',
+  dense: 'fixtures/node-detail.dense.json',
+};
+
+const CAPTURED_EMPTY = 'fixtures/captured/normal';
+
+const FIXTURE_ERROR = '节点没拿到';
+
+/** Which job types the Worker refuses without the node's name typed back. */
+const DESTRUCTIVE = new Set([
+  'xray_restart',
+  'identity_sync',
+  'agent_reinstall',
+  'catalog_retire',
+  'catalog_relist',
+]);
+
+const WORKER_TYPES = new Set(['catalog_retire', 'catalog_relist']);
+
+function readJson<T>(relative: string): T {
+  return JSON.parse(readFileSync(path.resolve(rootDir, relative), 'utf8')) as T;
+}
+
+/**
+ * The empty set is assembled from the captured files rather than written by
+ * hand: a node with nothing behind it is the one shape the capture already
+ * has, and copying it keeps the empty page honest about what a real one looks
+ * like.
+ */
+function emptyFile(): NodeFile {
+  const detail = readJson<Record<string, unknown>>(`${CAPTURED_EMPTY}/nodes-name.json`);
+  const errors = readJson<Measured<unknown[]>>(`${CAPTURED_EMPTY}/nodes-name-errors.json`);
+  return {
+    clock: 1_725_000_000,
+    detail,
+    connections: readJson(`${CAPTURED_EMPTY}/nodes-name-connections.json`),
+    errors: { '7d': errors, '30d': errors },
+    history: readJson(`${CAPTURED_EMPTY}/nodes-name-history.json`),
+    jobs: readJson(`${CAPTURED_EMPTY}/nodes-name-jobs.json`),
+    retirePreview: {
+      expectedRevision: 1,
+      currentRevision: 1,
+      affectedUsers: [],
+      warnings: [],
+      canRetire: false,
+    },
+  };
+}
+
+/** One mutable copy per `?session=`, thrown away when the dev server restarts. */
+const store = new Map<string, NodeFile>();
+
+function fileFor(set: FixtureSetName, session: string): NodeFile {
+  const key = `${session}/${set}`;
+  const cached = store.get(key);
+  if (cached) return cached;
+  const fresh = set === 'empty' ? emptyFile() : readJson<NodeFile>(FILES[set === 'dense' ? 'dense' : 'default']);
+  store.set(key, fresh);
+  return fresh;
+}
+
+function send(res: ServerResponse, body: unknown, status = 200) {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.setHeader('cache-control', 'no-store');
+  res.end(JSON.stringify(body));
+}
+
+function fail(res: ServerResponse, status: number, code: string, message: string) {
+  send(res, { error: { code, message } }, status);
+}
+
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((done) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += String(chunk); });
+    req.on('end', () => {
+      try {
+        done(JSON.parse(raw || '{}') as Record<string, unknown>);
+      } catch {
+        done({});
+      }
+    });
+  });
+}
+
+let made = 0;
+
+function newJob(file: NodeFile, name: string, type: string): Job {
+  made += 1;
+  const at = file.clock;
+  return {
+    id: `job-new-${made}`,
+    type,
+    executor: WORKER_TYPES.has(type) ? 'worker' : 'hub',
+    status: 'queued',
+    subjectType: 'node',
+    subjectId: name,
+    params: {},
+    attempts: 0,
+    maxAttempts: 3,
+    idempotencyKey: `idem-new-${made}`,
+    requestedBy: 'owner@tono.example',
+    incidentId: null,
+    notBefore: at,
+    expiresAt: at + 900,
+    leasedUntil: null,
+    resultSummary: null,
+    createdAt: at,
+    updatedAt: at,
+    finishedAt: null,
+  };
+}
+
+/**
+ * The whole node surface, in one call site: `nodes/{name}` and its five
+ * sections, the two writes, and the legacy retire pair 退役 still runs on.
+ * Returns false for anything it does not own, so the caller can carry on.
+ */
+export function serveNodeRoutes(options: {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: string;
+  route: string;
+  set: FixtureSetName;
+  session: string;
+}): boolean {
+  const { req, res, url, route, set, session } = options;
+  const parts = route.split('/').map(decodeURIComponent);
+  const method = req.method ?? 'GET';
+  const owned = (parts[0] === 'nodes' && parts.length >= 2)
+    || (parts[0] === 'jobs' && parts.length === 3 && parts[2] === 'cancel')
+    || (parts[0] === 'fleet-nodes' && parts.length === 3 && (parts[2] === 'retire-preview' || parts[2] === 'retire'));
+  if (!owned) return false;
+
+  if (set === 'error') {
+    fail(res, 500, 'UPSTREAM', FIXTURE_ERROR);
+    return true;
+  }
+
+  const file = fileFor(set, session);
+  const name = parts[0] === 'jobs' ? String(file.detail.name) : parts[1];
+
+  if (method === 'POST') {
+    void handleWrite(req, res, file, parts, name);
+    return true;
+  }
+  if (method !== 'GET' && method !== 'HEAD') {
+    res.statusCode = 405;
+    res.end();
+    return true;
+  }
+
+  const range = new URLSearchParams(url.split('?')[1] ?? '').get('range') ?? '7d';
+  const body = readFor(file, parts, name, range);
+  if (body === null) {
+    fail(res, 404, 'NOT_FOUND', route);
+    return true;
+  }
+  send(res, materializeOps(body, file.clock));
+  return true;
+}
+
+function readFor(file: NodeFile, parts: string[], name: string, range: string): unknown {
+  if (parts[0] === 'fleet-nodes') {
+    return parts[2] === 'retire-preview' ? file.retirePreview : null;
+  }
+  const section = parts[2];
+  if (parts.length === 2) {
+    // The name in the URL wins: one committed machine stands in for the whole
+    // fleet here, and a page whose heading disagrees with its own address
+    // would be the first thing anyone reported as a bug.
+    return { ...file.detail, name, jobs: file.jobs.items };
+  }
+  if (section === 'connections') return file.connections;
+  if (section === 'history') return file.history;
+  if (section === 'jobs') return file.jobs;
+  if (section === 'bindings') return file.detail.bindings;
+  // `?range=` is honoured rather than ignored: 最近 30 天 is the only reason
+  // this endpoint is called at all — the seven-day view rides along with the
+  // detail — and serving the week's rows under the month's label would make
+  // the toggle look broken.
+  if (section === 'errors') return file.errors[range] ?? file.errors['30d'] ?? file.errors['7d'] ?? null;
+  return null;
+}
+
+async function handleWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  file: NodeFile,
+  parts: string[],
+  name: string,
+) {
+  const body = await readBody(req);
+
+  if (parts[0] === 'jobs') {
+    const row = file.jobs.items.find((item) => item.id === parts[1]);
+    if (!row) {
+      fail(res, 404, 'NOT_FOUND', parts[1]);
+      return;
+    }
+    if (row.status !== 'queued' && row.status !== 'leased') {
+      fail(res, 409, 'JOB_NOT_CANCELLABLE', FIXTURE_ERROR);
+      return;
+    }
+    row.status = 'cancelled';
+    row.finishedAt = file.clock;
+    row.updatedAt = file.clock;
+    send(res, materializeOps(row, file.clock));
+    return;
+  }
+
+  if (parts[0] === 'fleet-nodes') {
+    if (body.confirmation !== name) {
+      fail(res, 400, 'RETIRE_CONFIRMATION_REQUIRED', FIXTURE_ERROR);
+      return;
+    }
+    file.detail.lifecycle = 'retired';
+    file.detail.catalogListed = false;
+    send(res, { ok: true });
+    return;
+  }
+
+  if (parts[2] !== 'jobs') {
+    fail(res, 404, 'NOT_FOUND', parts.join('/'));
+    return;
+  }
+  const type = String(body.type ?? '');
+  if (DESTRUCTIVE.has(type) && body.confirmName !== name) {
+    fail(res, 400, 'JOB_CONFIRMATION_REQUIRED', FIXTURE_ERROR);
+    return;
+  }
+  const job = newJob(file, name, type);
+  file.jobs.items.unshift(job);
+  file.jobs.updatedAt = file.clock;
+  send(res, materializeOps(job, file.clock));
+}

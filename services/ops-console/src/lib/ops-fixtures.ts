@@ -34,6 +34,11 @@ const SEC_KEYS = new Set([
   'notBefore',
   'snoozedUntil',
   'leasedUntil',
+  // The quota cycle's two ends. They are epochs like the rest and have to
+  // travel with them, or a node's 本周期 reads two years before its own
+  // 预计耗尽日.
+  'cycleStart',
+  'cycleEnd',
 ]);
 
 function isSecondsKey(key: string): boolean {

@@ -13,6 +13,7 @@ import { Shell } from './Shell';
  * pages from now.
  */
 const NodesPage = lazy(() => import('@/pages/Nodes'));
+const NodeDetailPage = lazy(() => import('@/pages/NodeDetail'));
 const TodayPage = lazy(() => import('@/pages/Today'));
 const CustomersPage = lazy(() => import('@/pages/Customers'));
 const CustomerDetailPage = lazy(() => import('@/pages/CustomerDetail'));
@@ -61,7 +62,11 @@ export function App() {
   return (
     <Shell fleet={fleet} nodes={nodes} customers={people} incidents={open}>
       <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
-        {route.page === 'nodes' ? <NodesPage fleet={fleet} selected={route.node} />
+        {route.page === 'nodes' ? (
+          route.nodeName
+            ? <NodeDetailPage name={route.nodeName} />
+            : <NodesPage fleet={fleet} selected={route.node} />
+        )
           : route.page === 'customers' ? (
             route.customerId
               ? <CustomerDetailPage userId={route.customerId} />

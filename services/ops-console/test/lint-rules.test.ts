@@ -35,6 +35,11 @@ tester.run('no-implementation-note-copy', noImplementationNoteCopy, {
       code: "export const settingsCopy = { alerts: '告警' };",
     },
     {
+      name: 'CJK is allowed in the rest of src/copy too',
+      filename: '/repo/src/copy/node-detail.ts',
+      code: "export const nodeDetailCopy = { nodeOpenPage: '打开详情' };",
+    },
+    {
       name: 'test files may name CJK words',
       filename: '/repo/src/pages/Nodes.test.tsx',
       code: "expect(label).toBe('\u8282\u70b9');",
