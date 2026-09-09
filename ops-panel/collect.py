@@ -180,8 +180,44 @@ def check_host_tcp_nodes(ip: str, nodes: list[str], port: int = 443, waits: int 
     }
 
 
-def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None:
-    """Authoritative mainland probe: SSH to CT/CU/CM hosts and TCP-connect to target:port."""
+def mainland_agent_probe_script(ip: str, port: int, sni: str) -> str:
+    """TCP connect plus TLS to the Reality SNI. SYN-only is not enough: a GFW
+    RST after SYN-ACK still looks like /dev/tcp success."""
+    return (
+        "python3 -c "
+        + json.dumps(
+            "import socket,ssl,sys\n"
+            f"ip={ip!r}; port={int(port)}; sni={sni!r}\n"
+            "try:\n"
+            "    raw=socket.create_connection((ip,port),5)\n"
+            "    print('TCP:0')\n"
+            "except Exception:\n"
+            "    print('TCP:1'); print('TLS:1'); sys.exit(0)\n"
+            "try:\n"
+            "    ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)\n"
+            "    ctx.check_hostname=False\n"
+            "    ctx.verify_mode=ssl.CERT_NONE\n"
+            "    ctx.wrap_socket(raw, server_hostname=sni)\n"
+            "    print('TLS:0')\n"
+            "except Exception:\n"
+            "    print('TLS:1')\n"
+        )
+    )
+
+
+def parse_mainland_agent_output(text: str) -> tuple[bool, bool]:
+    tcp_ok = bool(re.search(r"TCP:0\b", text or ""))
+    tls_ok = bool(re.search(r"TLS:0\b", text or ""))
+    return tcp_ok, tls_ok
+
+
+def probe_cn_agents(
+    ip: str,
+    agents: list[dict],
+    port: int = 443,
+    sni: str = "www.microsoft.com",
+) -> dict | None:
+    """Authoritative mainland probe: SSH to CT/CU/CM hosts, TCP then TLS to target:port."""
     if not agents:
         return None
     detail = {}
@@ -193,10 +229,7 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
         password = str(agent.get("password") or "")
         if not host or not password:
             continue
-        # Bash /dev/tcp is enough; no extra packages on agent.
-        remote = (
-            f"timeout 5 bash -c 'echo >/dev/tcp/{ip}/{port}' >/dev/null 2>&1; echo EXIT:$?"
-        )
+        remote = mainland_agent_probe_script(ip, port, sni)
         env = os.environ.copy()
         env["SSHPASS"] = password
         cmd = [
@@ -217,14 +250,23 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=25, env=env)
             text = (p.stdout or "") + (p.stderr or "")
-            m = re.search(r"EXIT:(\d+)", text)
-            code = int(m.group(1)) if m else p.returncode
-            success = code == 0
+            tcp_ok, tls_ok = parse_mainland_agent_output(text)
+            success = tcp_ok and tls_ok
+            code = 0 if success else 1
         except Exception as e:
             success = False
+            tcp_ok = False
+            tls_ok = False
             code = -1
             text = type(e).__name__
-        detail[name] = {"ok": success, "code": code, "host": host}
+        detail[name] = {
+            "ok": success,
+            "tcp": tcp_ok,
+            "tls": tls_ok,
+            "echo": tls_ok,
+            "code": code,
+            "host": host,
+        }
         if success:
             ok_n += 1
         else:
@@ -248,8 +290,8 @@ def probe_cn_agents(ip: str, agents: list[dict], port: int = 443) -> dict | None
         "fail": fail_n,
         "total": total,
         "detail": detail,
-        "source": "cn_agents_tcp443",
-        "note": "大陆 agent TCP :443；≥2/3 失败=疑似被墙",
+        "source": "cn_agents_tcp_tls",
+        "note": "大陆 agent TCP+TLS :443（Reality SNI）；≥2/3 失败=疑似被墙",
         "authoritative": True,
     }
 
@@ -689,7 +731,8 @@ def main() -> None:
         time.sleep(1.0)
         asia = check_host_tcp_nodes(ip, ASIA_EDGE_NODES, port=443)
         time.sleep(0.5)
-        cn = probe_cn_agents(ip, cn_agents, port=443)
+        sni = str(node.get("sni") or node.get("servername") or "www.microsoft.com")
+        cn = probe_cn_agents(ip, cn_agents, port=443, sni=sni)
         block = classify_block(cn, asia, overseas)
         q["block"] = block
         # Keep legacy field for older UI: status is still the machine-readable code.
@@ -704,7 +747,7 @@ def main() -> None:
         "sources": {
             "securityCheck": "oneclickvirt/securityCheck",
             "backtrace": "oneclickvirt/backtrace",
-            "block_authoritative": "mainland_probes (SSH TCP :443 from CT/CU/CM hosts)",
+            "block_authoritative": "mainland_probes (SSH TCP+TLS :443 from CT/CU/CM hosts)",
             "block_edge": "check-host HK/JP/SG TCP :443",
             "block_overseas": "check-host US/EU TCP :443",
             "ecs_ref": "https://github.com/spiritLHLS/ecs",
