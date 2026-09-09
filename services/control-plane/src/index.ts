@@ -22,7 +22,7 @@ import {
 } from './ops-timeseries';
 import { snapshotUserUsageHours } from './ops-usage-hours';
 import { runOpsCron } from './ops/cron';
-import { afterLogSegment, afterSnapshot, afterTelemetryWindow } from './ops/ingest-hooks';
+import { afterLogSegment, afterSnapshot, afterTelemetryWindow, ingestConnectFailure } from './ops/ingest-hooks';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
 import {
@@ -3429,6 +3429,12 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       window_end_ms: parsed.windowEndMs,
     });
     return Response.json(stored, { status: 201 });
+  }
+
+  if (p === '/api/v1/telemetry/failures' && m === 'POST') {
+    const a = await auth(req, e);
+    await rateLimitTelemetry(e, req, a.userId);
+    return ingestConnectFailure(req, e, a);
   }
 
   if (p === '/api/v1/routing-research/snapshots' && m === 'POST') {
