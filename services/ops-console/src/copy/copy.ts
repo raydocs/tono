@@ -19,6 +19,9 @@ export const copy = {
     dark: '深色',
   } as const,
   privacy: '隐私',
+  /** The avatar menu: everything that is a preference rather than a fact. */
+  preferences: '偏好',
+  appearance: '外观',
   sourceOk: '数据源 正常',
   sourceUnknown: '数据源 未知',
   sessionExpired: '登录已过期',
