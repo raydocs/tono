@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "id_c99ab2b903ebfd3a",
+      "platform": "macos",
+      "channel": "stable",
+      "version": "0.0.72",
+      "build": "72",
+      "r2Key": null,
+      "sha256": null,
+      "notes": "Synthetic preview build",
+      "minSupportedVersion": null,
+      "publishedAt": 1724913537,
+      "withdrawnAt": null,
+      "createdAt": 1724913537,
+      "updatedAt": 1724999970
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000001,
+  "total": 1
+}

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   cycleBounds,
   detectCounterReset,
@@ -39,12 +39,6 @@ async function insertProfile(name: string, extra: Record<string, unknown> = {}) 
     `INSERT INTO ops_node_profiles(${columns.join(', ')}) VALUES(${columns.map(() => '?').join(', ')})`,
   ).bind(...values).run();
 }
-
-beforeEach(async () => {
-  await db().prepare('DELETE FROM node_traffic_cycle_samples').run();
-  await db().prepare('DELETE FROM node_traffic_cycles').run();
-  await db().prepare('DELETE FROM node_error_daily').run();
-});
 
 describe('cycleBounds', () => {
   it('clamps calendar_day 30 in February and splits on the anchor', () => {

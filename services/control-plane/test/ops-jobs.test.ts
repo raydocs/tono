@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { type Row } from '../src/env';
 import { ApiError } from '../src/errors';
 import {
@@ -44,11 +44,6 @@ async function enqueue(
 }
 
 describe('ops node jobs', () => {
-  beforeEach(async () => {
-    await db().prepare('DELETE FROM ops_node_jobs').run();
-    await db().prepare('DELETE FROM ops_audit').run();
-  });
-
   it('validates type and params', () => {
     expect(() => validateJobRequest('not_a_job', {})).toThrow(ApiError);
     expect(() => validateJobRequest('xray_restart', { extra: true })).toThrow(ApiError);

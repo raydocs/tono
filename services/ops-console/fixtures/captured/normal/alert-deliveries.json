@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "id_5e5e0325e046cccb",
+      "ruleId": "id_90751b11e6c6844a",
+      "incidentId": "id_0d63732b05911258",
+      "dedupeKey": "id_2be2ec870589a9d5",
+      "transition": "open",
+      "status": "sent",
+      "channel": "webhook",
+      "target": "https://hooks.example.test/preview",
+      "attempts": 1,
+      "error": null,
+      "at": 1724996948,
+      "deliveredAt": 1724996958
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724996948,
+  "total": 1
+}

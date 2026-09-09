@@ -32,3 +32,4 @@ export * from './contract/nodes';
 export * from './contract/customers';
 export * from './contract/operations';
 export * from './contract/assets';
+export * from './contract/route-table';

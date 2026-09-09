@@ -67,6 +67,19 @@ export interface SourceHealthDto {
  * of it. `ok` is false as soon as any source is not ready, because a green dot
  * over a dead collector is the failure mode the 死人开关 exists to catch.
  */
+export const CRON_STEP_NAMES = [
+  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'retention',
+] as const;
+export type CronStepName = (typeof CRON_STEP_NAMES)[number];
+
+export interface CronStepHealthDto {
+  ok: boolean;
+  ms: number;
+  error: string | null;
+}
+
+export type CronStepsHealthDto = Record<CronStepName, CronStepHealthDto>;
+
 export interface SystemHealthDto {
   ok: boolean;
   buildSha: string | null;
@@ -75,6 +88,7 @@ export interface SystemHealthDto {
   cronLastRunAt: number | null;
   cronLastDurationMs: number | null;
   cronLastError: string | null;
+  cronSteps: CronStepsHealthDto | null;
   updatedAt: number;
 }
 
@@ -217,11 +231,34 @@ export function assertSourceHealth(value: unknown, path = 'sourceHealth'): Sourc
 
 const SYSTEM_HEALTH_KEYS = [
   'ok', 'buildSha', 'contractVersion', 'sources',
-  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'updatedAt',
+  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'cronSteps', 'updatedAt',
 ];
+
+const CRON_STEP_HEALTH_KEYS = ['ok', 'ms', 'error'];
+
+export function assertCronStepHealth(value: unknown, path = 'cronStep'): CronStepHealthDto {
+  const row = fields(value, path, CRON_STEP_HEALTH_KEYS);
+  return {
+    ok: bool(row, path, 'ok'),
+    ms: int(row, path, 'ms'),
+    error: optText(row, path, 'error'),
+  };
+}
+
+export function assertCronStepsHealth(value: unknown, path = 'cronSteps'): CronStepsHealthDto {
+  const row = fields(value, path, CRON_STEP_NAMES);
+  const steps = {} as CronStepsHealthDto;
+  for (const name of CRON_STEP_NAMES) {
+    steps[name] = assertCronStepHealth(row[name], `${path}.${name}`);
+  }
+  return steps;
+}
 
 export function assertSystemHealth(value: unknown, path = 'systemHealth'): SystemHealthDto {
   const row = fields(value, path, SYSTEM_HEALTH_KEYS);
+  const cronSteps = row.cronSteps === undefined || row.cronSteps === null
+    ? null
+    : assertCronStepsHealth(row.cronSteps, `${path}.cronSteps`);
   return {
     ok: bool(row, path, 'ok'),
     buildSha: optText(row, path, 'buildSha'),
@@ -230,6 +267,7 @@ export function assertSystemHealth(value: unknown, path = 'systemHealth'): Syste
     cronLastRunAt: optInt(row, path, 'cronLastRunAt'),
     cronLastDurationMs: optInt(row, path, 'cronLastDurationMs'),
     cronLastError: optText(row, path, 'cronLastError'),
+    cronSteps,
     updatedAt: int(row, path, 'updatedAt'),
   };
 }

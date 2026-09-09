@@ -16,8 +16,10 @@ import {
   retainSessions,
   type SessionKind,
 } from './customers-sessions';
+import { sniffPlatform } from './platform';
 
 export {
+  sniffPlatform,
   activityHours,
   backfillSessionsFromTables,
   customerStatus,
@@ -78,18 +80,6 @@ async function runBatches(db: D1Database, statements: D1PreparedStatement[]): Pr
   for (let i = 0; i < statements.length; i += BATCH) {
     await db.batch(statements.slice(i, i + BATCH));
   }
-}
-
-/** Local copy: do not import from ../index. */
-export function sniffPlatform(osVersion: string | null | undefined): string | null {
-  if (!osVersion) return null;
-  const v = osVersion.toLowerCase();
-  if (v.includes('android')) return 'android';
-  if (/\bios\b/.test(v) || v.includes('iphone') || v.includes('ipad')) return 'ios';
-  if (v.includes('windows') || v.includes('win32')) return 'windows';
-  if (v.includes('mac') || v.includes('darwin')) return 'macos';
-  if (v.includes('linux')) return 'linux';
-  return null;
 }
 
 function payloadOf(window: TelemetryWindowInput): Row {

@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "dayAt": 1724961644,
+      "bytesUp": 1048576,
+      "bytesDown": 8388608,
+      "users": 1,
+      "source": "client_route"
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724961644,
+  "total": 1
+}

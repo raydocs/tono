@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "dayAt": 1724961633,
+      "etld1": "youtube.com",
+      "route": "cloud",
+      "node": "Preview Tokyo",
+      "connections": 12,
+      "bytesUp": 2048,
+      "bytesDown": 65536,
+      "topProcesses": [
+        "Tono"
+      ]
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724961633,
+  "total": 1
+}

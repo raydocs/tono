@@ -1,0 +1,61 @@
+{
+  "userId": "id_5b6bdccf68a113fe",
+  "email": "user2@example.test",
+  "verdict": "ok",
+  "health": "正常",
+  "tone": "ok",
+  "reason": null,
+  "lifecycle": "active",
+  "now": {
+    "connected": {
+      "value": true,
+      "asOfSec": 1724999918,
+      "source": "telemetry"
+    },
+    "node": "Preview Tokyo",
+    "connectedSince": null,
+    "deviceId": "id_3106ef2ff5dba30f",
+    "platform": "macos",
+    "appVersion": "0.0.72",
+    "osVersion": "macOS 15",
+    "carrier": "China Mobile",
+    "asn": 9808,
+    "region": null
+  },
+  "devices": [
+    {
+      "id": "id_3106ef2ff5dba30f",
+      "name": "Preview Mac",
+      "platform": "macos",
+      "appVersion": "0.0.72",
+      "osVersion": "macOS 15",
+      "status": "active",
+      "selectedServer": "Preview Tokyo",
+      "lastSeenAt": 1724999918,
+      "createdAt": 1722407948
+    }
+  ],
+  "chores": [
+    {
+      "id": "id_bf1926d8d368bcc8",
+      "kind": "version",
+      "summary": "客户端版本 0.0.72",
+      "dueAt": null,
+      "createdAt": 1724999918
+    }
+  ],
+  "billing": {
+    "plan": "preview",
+    "deviceLimit": 3,
+    "quotaBytes": 214748364800,
+    "usageBytes": {
+      "value": 42949672960,
+      "asOfSec": 1724999918,
+      "source": "manual"
+    },
+    "expiresAt": 1727591948,
+    "firstEntitledAt": 1722407948,
+    "createdAt": 1722407948
+  },
+  "updatedAt": 1724999918
+}

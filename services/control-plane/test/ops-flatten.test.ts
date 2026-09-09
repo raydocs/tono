@@ -118,9 +118,6 @@ describe('edgeAttribution', () => {
 
 describe('telemetry flatten', () => {
   beforeEach(async () => {
-    await db().prepare('DELETE FROM connection_events').run();
-    await db().prepare('DELETE FROM ops_flatten_cursor').run();
-    await db().prepare('DELETE FROM ops_connection_daily').run();
     await db().prepare(
       `INSERT INTO users (id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
        VALUES (?, 'flatten@example.com', 'x', 'y', 'active', 0, 1, 1)`,

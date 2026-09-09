@@ -1,0 +1,161 @@
+{
+  "scenario": "normal",
+  "freezeNow": 1725000000,
+  "routes": [
+    {
+      "route": "GET /api/v1/ops/fleet-nodes",
+      "file": "fleet-nodes.json",
+      "checker": "passthrough"
+    },
+    {
+      "route": "GET /api/v1/ops/live",
+      "file": "live.json",
+      "checker": "passthrough"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes",
+      "file": "nodes.json",
+      "checker": "assertNodeSummaryList"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes/{name}",
+      "file": "nodes-name.json",
+      "checker": "assertNodeDetail"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes/{name}/history",
+      "file": "nodes-name-history.json",
+      "checker": "assertNodeHistoryList"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes/{name}/connections",
+      "file": "nodes-name-connections.json",
+      "checker": "assertNodeConnectionsList"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes/{name}/errors",
+      "file": "nodes-name-errors.json",
+      "checker": "assertNodeErrorsMeasured"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes/{name}/bindings",
+      "file": "nodes-name-bindings.json",
+      "checker": "assertNodeBindings"
+    },
+    {
+      "route": "GET /api/v1/ops/nodes/{name}/jobs",
+      "file": "nodes-name-jobs.json",
+      "checker": "assertNodeJobsList"
+    },
+    {
+      "route": "GET /api/v1/ops/customers",
+      "file": "customers.json",
+      "checker": "assertCustomerSummaryList"
+    },
+    {
+      "route": "GET /api/v1/ops/customers/{id}",
+      "file": "customers-id.json",
+      "checker": "assertCustomerDetail"
+    },
+    {
+      "route": "GET /api/v1/ops/customers/{id}/connections",
+      "file": "customers-id-connections.json",
+      "checker": "assertCustomerConnectionsList"
+    },
+    {
+      "route": "GET /api/v1/ops/customers/{id}/activity",
+      "file": "customers-id-activity.json",
+      "checker": "assertCustomerActivityList"
+    },
+    {
+      "route": "GET /api/v1/ops/customers/{id}/destinations",
+      "file": "customers-id-destinations.json",
+      "checker": "assertCustomerDestinationsList"
+    },
+    {
+      "route": "GET /api/v1/ops/customers/{id}/services",
+      "file": "customers-id-services.json",
+      "checker": "assertCustomerServicesList"
+    },
+    {
+      "route": "GET /api/v1/ops/incidents",
+      "file": "incidents.json",
+      "checker": "assertIncidentList"
+    },
+    {
+      "route": "GET /api/v1/ops/incidents/{id}",
+      "file": "incidents-id.json",
+      "checker": "assertIncidentDetail"
+    },
+    {
+      "route": "GET /api/v1/ops/jobs",
+      "file": "jobs.json",
+      "checker": "assertJobList"
+    },
+    {
+      "route": "GET /api/v1/ops/releases",
+      "file": "releases.json",
+      "checker": "assertReleaseList"
+    },
+    {
+      "route": "GET /api/v1/ops/releases/adoption",
+      "file": "releases-adoption.json",
+      "checker": "assertAdoptionMatrix"
+    },
+    {
+      "route": "GET /api/v1/ops/direct-candidates",
+      "file": "direct-candidates.json",
+      "checker": "assertDirectCandidateList"
+    },
+    {
+      "route": "GET /api/v1/ops/provider-accounts",
+      "file": "provider-accounts.json",
+      "checker": "assertProviderAccountList"
+    },
+    {
+      "route": "GET /api/v1/ops/provider-accounts/{id}",
+      "file": "provider-accounts-id.json",
+      "checker": "assertProviderAccount"
+    },
+    {
+      "route": "GET /api/v1/ops/home-lines",
+      "file": "home-lines.json",
+      "checker": "assertHomeLineList"
+    },
+    {
+      "route": "GET /api/v1/ops/home-lines/{id}",
+      "file": "home-lines-id.json",
+      "checker": "assertHomeLine"
+    },
+    {
+      "route": "GET /api/v1/ops/home-lines/{id}/usage",
+      "file": "home-lines-id-usage.json",
+      "checker": "assertHomeLineUsageList"
+    },
+    {
+      "route": "GET /api/v1/ops/alert-rules",
+      "file": "alert-rules.json",
+      "checker": "assertAlertRuleList"
+    },
+    {
+      "route": "GET /api/v1/ops/alert-rules/{id}",
+      "file": "alert-rules-id.json",
+      "checker": "assertAlertRule"
+    },
+    {
+      "route": "GET /api/v1/ops/alert-deliveries",
+      "file": "alert-deliveries.json",
+      "checker": "assertAlertDeliveryList"
+    },
+    {
+      "route": "GET /api/v1/ops/audit",
+      "file": "audit.json",
+      "checker": "assertAuditList"
+    },
+    {
+      "route": "GET /api/v1/ops/system/health",
+      "file": "system-health.json",
+      "checker": "assertSystemHealth"
+    }
+  ]
+}

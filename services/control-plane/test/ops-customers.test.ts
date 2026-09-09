@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   accrueActivityHours,
   activityHours,
@@ -72,13 +72,6 @@ async function insertTelemetry(input: TelemetryWindowInput) {
     body,
   ).run();
 }
-
-beforeEach(async () => {
-  await db().prepare('DELETE FROM ops_customer_status').run();
-  await db().prepare('DELETE FROM customer_activity_hours').run();
-  await db().prepare('DELETE FROM customer_sessions').run();
-  await db().prepare('DELETE FROM ops_customer_projection_cursor').run();
-});
 
 describe('sniffPlatform', () => {
   it('maps os_version strings to windows/macos/linux/android/ios', () => {

@@ -1,0 +1,262 @@
+{
+  "nodes": [
+    {
+      "name": "Preview Catalog-only",
+      "catalogListed": false,
+      "qualityStatus": "UNKNOWN",
+      "qualityLabel": "未测",
+      "agentStatus": "missing",
+      "agentObservedAt": null,
+      "profile": {
+        "id": "id_a509d39cccd5c2db",
+        "catalogName": "Preview Catalog-only",
+        "publicIp": "203.0.113.1",
+        "provider": "synthetic",
+        "price": null,
+        "currency": null,
+        "billingCycle": null,
+        "trafficQuotaBytes": null,
+        "trafficUsedBytes": null,
+        "trafficCycleStart": null,
+        "trafficCycleEnd": null,
+        "cycleNetIn": null,
+        "cycleNetOut": null,
+        "renewsAt": null,
+        "notes": "Synthetic union-only profile",
+        "status": "retired",
+        "createdAt": 1722407948,
+        "updatedAt": 1724999918
+      },
+      "agent": null,
+      "quality": null,
+      "occupancy": 0,
+      "affectedUsers": [],
+      "needsAttention": false,
+      "reasons": []
+    },
+    {
+      "name": "Preview Seoul",
+      "catalogListed": false,
+      "qualityStatus": "LIKELY_BLOCKED",
+      "qualityLabel": "疑似被墙",
+      "agentStatus": "online",
+      "agentObservedAt": 1788950304,
+      "profile": {
+        "id": "id_bb033f14970a526d",
+        "catalogName": "Preview Seoul",
+        "publicIp": "203.0.113.2",
+        "provider": "synthetic",
+        "billingUrl": "https://billing.example.test/preview-seoul",
+        "price": 5,
+        "currency": "USD",
+        "billingCycle": 30,
+        "trafficQuotaBytes": 536870912000,
+        "trafficUsedBytes": 515396075520,
+        "trafficCycleStart": 1787740704,
+        "trafficCycleEnd": 1790332704,
+        "cycleNetIn": 343597383680,
+        "cycleNetOut": 68719476736,
+        "renewsAt": 1725172748,
+        "notes": "Synthetic incident profile",
+        "status": "active",
+        "createdAt": 1722407948,
+        "updatedAt": 1724999918
+      },
+      "agent": {
+        "name": "Preview Seoul",
+        "os": "linux",
+        "arch": "x64",
+        "cpuName": "Synthetic CPU",
+        "cpu": 93,
+        "memTotal": 2147483648,
+        "memUsed": 1932735283,
+        "diskTotal": 42949672960,
+        "diskUsed": 38654705664,
+        "netIn": 68719476736,
+        "netOut": 17179869184,
+        "uptime": 172800,
+        "cpuCores": 2,
+        "load1": 3.8,
+        "load5": 2.9,
+        "load15": 2.2,
+        "swapTotal": 536870912,
+        "swapUsed": 268435456,
+        "tcpConnections": 390,
+        "processes": 260,
+        "observedAt": 1788950304,
+        "price": null,
+        "currency": null,
+        "billingCycle": null,
+        "expiredAt": null,
+        "trafficLimit": null,
+        "trafficLimitType": null,
+        "carriers": null
+      },
+      "quality": {
+        "name": "Preview Seoul",
+        "host": "seoul-preview.example.test",
+        "publicIp": "203.0.113.2",
+        "ok": false,
+        "quality": "poor",
+        "riskKeywords": [
+          "synthetic"
+        ],
+        "routeKeywords": [],
+        "block": {
+          "status": "LIKELY_BLOCKED",
+          "label": "Synthetic incident",
+          "rule": null,
+          "mainland": null,
+          "asiaEdge": null,
+          "overseas": null
+        },
+        "riskSignals": [],
+        "exposure": null
+      },
+      "occupancy": 1,
+      "affectedUsers": [
+        {
+          "userId": "id_8e1683bf76af8037",
+          "deviceId": "id_cb7f871a15f45453",
+          "email": "user1@example.test",
+          "lastSeenAt": 1724999933,
+          "online": true,
+          "clientVersion": "preview",
+          "osVersion": "Windows preview",
+          "selectedServer": "Preview Seoul",
+          "uiState": "connected",
+          "catalogRevision": 0,
+          "exitDelayMs": 920,
+          "tcpDelayMs": 40,
+          "exitDelayAtMs": null,
+          "tcpDelayAtMs": null,
+          "nodeHealth": "down",
+          "nodeHealthLabel": "整机失联"
+        }
+      ],
+      "needsAttention": false,
+      "reasons": []
+    },
+    {
+      "name": "Preview Tokyo",
+      "catalogListed": false,
+      "qualityStatus": "OK",
+      "qualityLabel": "Synthetic healthy",
+      "agentStatus": "online",
+      "agentObservedAt": 1788950304,
+      "profile": {
+        "id": "id_f39255d7fece4f07",
+        "catalogName": "Preview Tokyo",
+        "publicIp": "203.0.113.3",
+        "provider": "synthetic",
+        "billingUrl": "https://billing.example.test/preview-tokyo",
+        "price": 5,
+        "currency": "USD",
+        "billingCycle": 30,
+        "trafficQuotaBytes": 1099511627776,
+        "trafficUsedBytes": 109951162777,
+        "trafficCycleStart": 1787740704,
+        "trafficCycleEnd": 1790332704,
+        "cycleNetIn": 42949672960,
+        "cycleNetOut": 8589934592,
+        "renewsAt": 1725863948,
+        "notes": "Synthetic healthy profile",
+        "status": "active",
+        "createdAt": 1722407948,
+        "updatedAt": 1724999918
+      },
+      "agent": {
+        "name": "Preview Tokyo",
+        "os": "linux",
+        "arch": "x64",
+        "cpuName": "Synthetic CPU",
+        "cpu": 22,
+        "memTotal": 2147483648,
+        "memUsed": 805306368,
+        "diskTotal": 42949672960,
+        "diskUsed": 8589934592,
+        "netIn": 42949672960,
+        "netOut": 8589934592,
+        "uptime": 864000,
+        "cpuCores": 2,
+        "load1": 0.4,
+        "load5": 0.3,
+        "load15": 0.2,
+        "swapTotal": 0,
+        "swapUsed": 0,
+        "tcpConnections": 42,
+        "processes": 120,
+        "observedAt": 1788950304,
+        "price": null,
+        "currency": null,
+        "billingCycle": null,
+        "expiredAt": null,
+        "trafficLimit": null,
+        "trafficLimitType": null,
+        "carriers": null
+      },
+      "quality": {
+        "name": "Preview Tokyo",
+        "host": "tokyo-preview.example.test",
+        "publicIp": "203.0.113.3",
+        "ok": true,
+        "quality": "ok",
+        "riskKeywords": [],
+        "routeKeywords": [
+          "synthetic"
+        ],
+        "block": {
+          "status": "OK",
+          "label": "Synthetic healthy",
+          "rule": null,
+          "mainland": null,
+          "asiaEdge": null,
+          "overseas": null
+        },
+        "riskSignals": [],
+        "exposure": null
+      },
+      "occupancy": 1,
+      "affectedUsers": [
+        {
+          "userId": "id_5b6bdccf68a113fe",
+          "deviceId": "id_3106ef2ff5dba30f",
+          "email": "user2@example.test",
+          "lastSeenAt": 1724999918,
+          "online": true,
+          "clientVersion": "preview",
+          "osVersion": "macOS preview",
+          "selectedServer": "Preview Tokyo",
+          "uiState": "connected",
+          "catalogRevision": 0,
+          "exitDelayMs": 80,
+          "tcpDelayMs": 35,
+          "exitDelayAtMs": null,
+          "tcpDelayAtMs": null,
+          "nodeHealth": "ok",
+          "nodeHealthLabel": "大陆正常"
+        }
+      ],
+      "needsAttention": false,
+      "reasons": []
+    }
+  ],
+  "catalogRevision": 0,
+  "sources": {
+    "catalog": {
+      "state": "ready",
+      "revision": 0
+    },
+    "quality": {
+      "state": "ready",
+      "message": null
+    },
+    "agents": {
+      "state": "ready",
+      "message": null
+    },
+    "profiles": {
+      "state": "ready"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
 import {
   adoptionMatrix,
@@ -46,11 +46,6 @@ async function seedWindow(input: {
     input.version, input.os,
   ).run();
 }
-
-beforeEach(async () => {
-  await db().prepare('DELETE FROM ops_client_version_daily').run();
-  await db().prepare('DELETE FROM client_releases').run();
-});
 
 describe('sniffPlatform', () => {
   it.each([

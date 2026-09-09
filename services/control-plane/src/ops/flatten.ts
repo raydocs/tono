@@ -3,6 +3,9 @@
 // a watermark column on the source table. One INSERT…SELECT per window keeps
 // the bound-parameter count fixed no matter how many events the payload holds.
 
+import { sniffPlatform } from './platform';
+export { sniffPlatform, type Platform } from './platform';
+
 export const FLATTEN_KINDS = [
   'connectBegin',
   'connectOk',
@@ -20,7 +23,6 @@ export const FLATTEN_KINDS = [
 ] as const;
 
 export type FlattenKind = (typeof FLATTEN_KINDS)[number];
-export type Platform = 'windows' | 'macos' | 'linux' | 'android' | 'ios';
 
 export type FlattenWindowRow = {
   id: string;
@@ -124,18 +126,6 @@ function textOrNull(value: unknown, max?: number): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return max != null && trimmed.length > max ? trimmed.slice(0, max) : trimmed;
-}
-
-export function sniffPlatform(osVersion: string | null | undefined): Platform | null {
-  if (typeof osVersion !== 'string') return null;
-  const value = osVersion.trim().toLowerCase();
-  if (!value) return null;
-  if (value.startsWith('windows')) return 'windows';
-  if (value.startsWith('macos') || value.startsWith('mac os')) return 'macos';
-  if (value.startsWith('linux')) return 'linux';
-  if (value.startsWith('android')) return 'android';
-  if (value.startsWith('ios') || value.startsWith('ipados')) return 'ios';
-  return null;
 }
 
 export function edgeAttribution(

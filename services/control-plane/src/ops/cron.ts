@@ -34,6 +34,17 @@ export type OpsCronReport = {
   retention: OpsCronStep;
 };
 
+export const OPS_CRON_STEPS = [
+  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'retention',
+] as const;
+export type OpsCronStepName = (typeof OPS_CRON_STEPS)[number];
+
+export type OpsCronPersistedStep = { ok: boolean; ms: number; error: string | null };
+export type OpsCronPersistedReport = Record<OpsCronStepName, OpsCronPersistedStep>;
+
+const LAST_REPORT_KEY = 'last_report';
+const LAST_REPORT_MAX = 4096;
+
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
 }
@@ -64,6 +75,59 @@ async function lastRun(db: D1Database, key: string): Promise<number | null> {
   } catch (error) {
     if (missingTable(error)) return null;
     throw error;
+  }
+}
+
+function compactReport(report: OpsCronReport): OpsCronPersistedReport {
+  const compact = {} as OpsCronPersistedReport;
+  for (const name of OPS_CRON_STEPS) {
+    const step = report[name];
+    compact[name] = { ok: step.ok, ms: step.ms, error: step.error ?? null };
+  }
+  return compact;
+}
+
+function encodeLastReport(report: OpsCronReport): string {
+  const compact = compactReport(report);
+  let payload = JSON.stringify(compact);
+  if (payload.length <= LAST_REPORT_MAX) return payload;
+  for (const name of OPS_CRON_STEPS) compact[name].error = null;
+  payload = JSON.stringify(compact);
+  return payload.length <= LAST_REPORT_MAX ? payload : payload.slice(0, LAST_REPORT_MAX);
+}
+
+export function parseLastReport(raw: unknown): OpsCronPersistedReport | null {
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    const out = {} as OpsCronPersistedReport;
+    for (const name of OPS_CRON_STEPS) {
+      const step = row[name];
+      if (!step || typeof step !== 'object' || Array.isArray(step)) return null;
+      const rec = step as Record<string, unknown>;
+      if (typeof rec.ok !== 'boolean' || typeof rec.ms !== 'number' || !Number.isSafeInteger(rec.ms)) {
+        return null;
+      }
+      const error = rec.error == null ? null : typeof rec.error === 'string' ? rec.error : null;
+      out[name] = { ok: rec.ok, ms: rec.ms, error };
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+async function persistLastReport(db: D1Database, nowSec: number, report: OpsCronReport): Promise<void> {
+  try {
+    await db.prepare(
+      `INSERT INTO ops_cron_state(key, ran_at, payload) VALUES(?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET ran_at = excluded.ran_at, payload = excluded.payload`,
+    ).bind(LAST_REPORT_KEY, nowSec, encodeLastReport(report)).run();
+  } catch (error) {
+    if (missingTable(error) || String(error).includes('no such column')) return;
+    console.error('ops cron: persist last_report failed', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -156,5 +220,7 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
     return {};
   });
 
-  return { flatten, project, verdicts, alerts, jobs, quota, daily, retention };
+  const report = { flatten, project, verdicts, alerts, jobs, quota, daily, retention };
+  await persistLastReport(e.DB, nowSec, report);
+  return report;
 }

@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   type AlertRule,
   type AlertSendEnv,
@@ -214,12 +214,6 @@ async function countDeliveries(): Promise<number> {
 }
 
 describe('ops alert deliveries (d1)', () => {
-  beforeEach(async () => {
-    await db().prepare('DELETE FROM ops_alert_deliveries').run();
-    await db().prepare('DELETE FROM ops_alert_rule_state').run();
-    await db().prepare('DELETE FROM ops_alert_rules').run();
-  });
-
   it('defers until delay_seconds have elapsed', async () => {
     const rule = baseRule({ delaySeconds: 60 });
     const t = baseTransition({ openedAt: NOW - 30 });

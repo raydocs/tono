@@ -475,6 +475,7 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     cronLastRunAt: 1_757_000_000,
     cronLastDurationMs: 812,
     cronLastError: null,
+    cronSteps: null,
     updatedAt: 1_757_000_000,
   })],
   ['directCandidate', assertDirectCandidate, () => ({

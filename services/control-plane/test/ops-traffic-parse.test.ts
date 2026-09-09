@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   etld1,
   familyForHost,
@@ -38,12 +38,6 @@ const gzip = async (text: string): Promise<Uint8Array<ArrayBuffer>> =>
   );
 
 const ctx = { userId: 'u-parse', deviceId: 'd-parse', receivedAt: RECEIVED };
-
-beforeEach(async () => {
-  await db().prepare('DELETE FROM traffic_destination_daily').run();
-  await db().prepare('DELETE FROM service_usage_daily').run();
-  await db().prepare('DELETE FROM direct_candidates').run();
-});
 
 describe('etld1 and familyForHost', () => {
   it('splits compound ccTLDs and generic last-two-labels', () => {
