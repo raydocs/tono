@@ -83,3 +83,6 @@ export const email = (v: any) => {
   }
   return x;
 };
+
+export const optionalText = (value: unknown) => value === null || value === undefined ? null : String(value);
+export const optionalNumber = (value: unknown) => value === null || value === undefined ? null : Number(value);
