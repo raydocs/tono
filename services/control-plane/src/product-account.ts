@@ -282,6 +282,12 @@ export async function replaceProductAccount(
     throw new ApiError(409, 'ACCOUNT_NOT_ASSIGNED', 'Only an assigned account can be replaced');
   }
   const userId = String(current.user_id);
+  const clash = await e.DB.prepare(
+    'SELECT id, status FROM product_accounts WHERE account_ref = ?',
+  ).bind(nextRef).first<Row>();
+  if (clash && String(clash.status) !== 'pooled') {
+    throw new ApiError(409, 'ACCOUNT_REF_IN_USE', 'This Claude account is already registered');
+  }
   const t = now();
   await e.DB.prepare(
     `UPDATE product_accounts
