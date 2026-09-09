@@ -28,14 +28,24 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
     [fleet],
   );
   const counts = useMemo(() => countLine(all), [all]);
-  const filtered = useMemo(() => selectNodes(all, filter), [all, filter]);
-  const views = useMemo(
-    () => filtered.map((node) => toNodeView(node, liveAgents)),
-    [filtered, liveAgents],
+  const allViews = useMemo(
+    () => all.map((node) => toNodeView(node, liveAgents)),
+    [all, liveAgents],
   );
-  const selectedView = views.find((row) => row.node.name === selected)
-    ?? all.map((node) => toNodeView(node, liveAgents)).find((row) => row.node.name === selected)
-    ?? null;
+  const kept = useMemo(
+    () => new Set(selectNodes(all, filter).map((node) => node.name)),
+    [all, filter],
+  );
+  const views = useMemo(() => allViews.filter((row) => kept.has(row.node.name)), [allViews, kept]);
+  /**
+   * The client-side leg of the path has no collector behind it yet, so every
+   * node answers "not wired" and the column is forty-five identical em dashes
+   * wide enough to push the mainland return leg off the card. It comes back on
+   * its own the moment one node has a measurement — the condition is the data,
+   * not a flag somebody has to remember to flip.
+   */
+  const pathWired = useMemo(() => allViews.some((row) => row.path.value !== null), [allViews]);
+  const selectedView = allViews.find((row) => row.node.name === selected) ?? null;
 
   const tableState: TableState = fleet.status === 'loading'
     ? 'loading'
@@ -45,7 +55,7 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
         ? 'empty'
         : 'ready';
 
-  const columns = useMemo(() => nodeColumns(), []);
+  const columns = useMemo(() => nodeColumns(pathWired), [pathWired]);
 
   return (
     <div className="page-wrap">
@@ -71,6 +81,10 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
             {fleet.status === 'loading' ? copy.loading : copy.loadError}
           </p>
         )}
+
+        {fleet.status === 'ready' && all.length > 0 && !pathWired ? (
+          <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
+        ) : null}
 
         <div className="toolbar-row">
           <button
@@ -108,7 +122,7 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
         ) : views.length === 0 ? (
           <Empty message={copy.emptyList} />
         ) : (
-          <NodeCardGrid views={views} selected={selected} onOpen={openNode} />
+          <NodeCardGrid views={views} selected={selected} showPath={pathWired} onOpen={openNode} />
         )
       ) : (
         <DataTable
@@ -177,7 +191,7 @@ function CountBit({
   );
 }
 
-function nodeColumns(): DataColumn<NodeView>[] {
+function nodeColumns(showPath: boolean): DataColumn<NodeView>[] {
   return [
     {
       id: 'status',
@@ -222,12 +236,12 @@ function nodeColumns(): DataColumn<NodeView>[] {
       sortValue: (row) => row.used.value ?? -1,
       cell: (row) => <TrafficCell row={row} />,
     },
-    {
+    ...(showPath ? [{
       id: 'path',
       header: copy.customerPath,
       width: '96px',
-      cell: (row) => <Value value={null} source={row.path.source} />,
-    },
+      cell: (row: NodeView) => <Value value={row.path.value} source={row.path.source} />,
+    }] : []),
     {
       id: 'mainland',
       header: copy.mainlandReturn,

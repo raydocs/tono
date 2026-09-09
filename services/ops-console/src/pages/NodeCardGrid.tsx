@@ -14,10 +14,13 @@ import type { NodeView } from './node-metrics';
 export function NodeCardGrid({
   views,
   selected,
+  showPath,
   onOpen,
 }: {
   views: NodeView[];
   selected: string | null;
+  /** False until one node has a measured client-side leg; see NodesPage. */
+  showPath: boolean;
   onOpen: (name: string) => void;
 }) {
   const reduce = useReducedMotion();
@@ -59,9 +62,11 @@ export function NodeCardGrid({
                 tier="body"
                 format={(n) => ({ number: formatCount(n), unit: copy.occupancyUnit })}
               />
-              <Cell label={copy.customerPath}>
-                <Value value={null} source={view.path.source} tier="body" />
-              </Cell>
+              {showPath ? (
+                <Cell label={copy.customerPath}>
+                  <Value value={view.path.value} source={view.path.source} tier="body" />
+                </Cell>
+              ) : null}
 
               <div className="col-span-2 min-w-0">
                 <div className="text-micro text-[var(--muted-foreground)]">{copy.periodTraffic}</div>

@@ -14,7 +14,7 @@ export type NodeView = {
   trafficSeries: MetricSeries | null;
   quota: number | null;
   cycleStart: number | null;
-  path: Measured<null>;
+  path: Measured<string | null>;
   mainland: Measured<string | null>;
   renew: Measured<number | null>;
   last: Measured<number | null>;

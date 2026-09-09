@@ -36,6 +36,7 @@ export const copy = {
   periodTraffic: '本周期流量',
   customerPath: '客户去程',
   notWired: '未接入',
+  pathNotWired: '客户去程数据尚未接入',
   mainlandReturn: '大陆回程',
   renew: '续费/到期',
   lastMeasured: '最后测量',
