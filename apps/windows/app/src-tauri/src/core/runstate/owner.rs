@@ -104,6 +104,7 @@ impl OwnerWatch {
             // cloud policy passes through twice. The handoff now also cancels the monitor; this
             // is the belt to that braces.
             OwnerSample::NotActive => {
+                self.unreadable_samples = 0;
                 self.displaced_samples = self.displaced_samples.saturating_add(1);
                 if self.displaced_samples >= SUSTAINED_SAMPLES {
                     OwnerStep::Recover(OwnerRecoveryReason::Displaced)
@@ -287,6 +288,25 @@ mod tests {
         assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
     }
 
+    #[test]
+    fn a_not_active_sample_breaks_an_unreadable_run() {
+        // `NotActive` is a readable Service reply, so it must clear the unreadable run just as
+        // a `Status` reply does. Without the reset in the `NotActive` arm, the sequence
+        // Unreadable, Unreadable, NotActive, Unreadable, Unreadable would reach
+        // `unreadable_samples == 3` on a single consecutive unreadable sample and fire a
+        // spurious `VerifyTransport`.
+        let mut watch = OwnerWatch::new();
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::NotActive), OwnerStep::Continue);
+
+        // The run restarted at the NotActive sample: only a fresh stretch of three
+        // consecutive unreadable samples may ask about the transport again.
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::VerifyTransport);
+    }
+
     const fn not_the_owner() -> OwnerSample {
         OwnerSample::Status {
             is_active: false,
@@ -417,6 +437,28 @@ mod tests {
         assert_eq!(
             watch.observe(core_gone(ServiceLifecycleState::Running)),
             OwnerStep::Continue
+        );
+    }
+
+    #[test]
+    fn a_not_active_sample_does_not_reset_a_missing_core_run() {
+        // `NotActive` carries no Core PID, so the fix that clears the unreadable run must NOT
+        // also clear the missing-core run. Here two missing-core samples are followed by a
+        // `NotActive`, then a third missing-core sample: the run must escalate exactly as it
+        // would without the `NotActive`.
+        let mut watch = OwnerWatch::new();
+        assert_eq!(
+            watch.observe(core_gone(ServiceLifecycleState::Running)),
+            OwnerStep::Continue
+        );
+        assert_eq!(
+            watch.observe(core_gone(ServiceLifecycleState::Running)),
+            OwnerStep::Continue
+        );
+        assert_eq!(watch.observe(OwnerSample::NotActive), OwnerStep::Continue);
+        assert_eq!(
+            watch.observe(core_gone(ServiceLifecycleState::Running)),
+            OwnerStep::Recover(OwnerRecoveryReason::SameOwnerFailure)
         );
     }
 }
