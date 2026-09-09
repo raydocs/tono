@@ -62,6 +62,9 @@ import {
   ACTIVITY_ONLINE_SECONDS,
   OPS_USERS_PAGE_LIMIT,
 } from './reads';
+import { dispatchOpsV1, OPS_V1_ROUTES } from './handlers/dispatch';
+
+export { OPS_V1_ROUTES };
 
 export type OpsRouterDeps = {
   buildSha: (e: Env) => string;
@@ -307,6 +310,8 @@ export async function opsRoutes(
         affected: await operationsNodeSelections(e, name, opsCache),
       });
     }
+    const v1Get = await dispatchOpsV1(req, e, p, m, actor);
+    if (v1Get) return v1Get;
     throw new ApiError(404, 'NOT_FOUND', 'Route not found');
   }
 
@@ -524,5 +529,7 @@ export async function opsRoutes(
     return Response.json({ ok: true });
   }
 
+  const v1Write = await dispatchOpsV1(req, e, p, m, actor);
+  if (v1Write) return v1Write;
   return null;
 }
