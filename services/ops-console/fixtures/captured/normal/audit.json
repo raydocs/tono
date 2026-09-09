@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "id": "id_30374d3b8b0efe72",
+      "at": 1724999828,
+      "actorEmail": "user4@example.test",
+      "actorType": "access_admin",
+      "actorRole": null,
+      "action": "node-job.create",
+      "targetType": "node_job",
+      "targetId": "id_c0f8137d6451bd44",
+      "summary": "queued collect_quality",
+      "requestId": null
+    }
+  ],
+  "hasMore": false,
+  "nextBefore": null,
+  "nextBeforeId": null
+}

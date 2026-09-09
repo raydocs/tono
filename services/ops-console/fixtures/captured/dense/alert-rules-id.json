@@ -1,0 +1,20 @@
+{
+  "id": "id_90751b11e6c6844a",
+  "name": "node down",
+  "enabled": true,
+  "matchKind": null,
+  "matchSubjectType": null,
+  "matchSubjectId": null,
+  "minSeverity": "warn",
+  "minImpact": 1,
+  "fireOn": "open",
+  "delaySeconds": 90,
+  "cooldownSeconds": 3600,
+  "channel": "webhook",
+  "target": "https://hooks.example.test/preview",
+  "template": "generic",
+  "secretRef": null,
+  "lastFiredAt": null,
+  "createdAt": 1724913537,
+  "updatedAt": 1724999970
+}

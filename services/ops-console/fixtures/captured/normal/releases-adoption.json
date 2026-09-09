@@ -1,0 +1,129 @@
+{
+  "range": "30d",
+  "released": [
+    "macos"
+  ],
+  "cells": [
+    {
+      "platform": "macos",
+      "bucket": "current",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "macos",
+      "bucket": "behind_one",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "macos",
+      "bucket": "behind_more",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "macos",
+      "bucket": "unreported",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "windows",
+      "bucket": "current",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "windows",
+      "bucket": "behind_one",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "windows",
+      "bucket": "behind_more",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "windows",
+      "bucket": "unreported",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "linux",
+      "bucket": "current",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "linux",
+      "bucket": "behind_one",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "linux",
+      "bucket": "behind_more",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "linux",
+      "bucket": "unreported",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "android",
+      "bucket": "current",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "android",
+      "bucket": "behind_one",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "android",
+      "bucket": "behind_more",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "android",
+      "bucket": "unreported",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "ios",
+      "bucket": "current",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "ios",
+      "bucket": "behind_one",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "ios",
+      "bucket": "behind_more",
+      "users": 0,
+      "devices": 0
+    },
+    {
+      "platform": "ios",
+      "bucket": "unreported",
+      "users": 0,
+      "devices": 0
+    }
+  ],
+  "updatedAt": 1725000000
+}

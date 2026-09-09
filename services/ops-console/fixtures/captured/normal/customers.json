@@ -1,0 +1,98 @@
+{
+  "items": [
+    {
+      "userId": "id_5b6bdccf68a113fe",
+      "email": "user2@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Preview Tokyo",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999918,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 42949672960,
+        "asOfSec": 1724999918,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [
+        "claude"
+      ],
+      "minAppVersion": "0.0.72",
+      "expiresAt": 1727591948,
+      "lastSeenAt": 1724999918,
+      "updatedAt": 1724999918
+    },
+    {
+      "userId": "id_8e1683bf76af8037",
+      "email": "user1@example.test",
+      "verdict": "unreported",
+      "health": "未上报",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [],
+      "selectedServer": null,
+      "connected": {
+        "value": false,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 100663296000,
+        "asOfSec": 1724999928,
+        "source": "manual"
+      },
+      "quotaBytes": 107374182400,
+      "services": [],
+      "minAppVersion": null,
+      "expiresAt": 1726209548,
+      "lastSeenAt": null,
+      "updatedAt": 1724999928
+    },
+    {
+      "userId": "id_4e5f351bb875c630",
+      "email": "user3@example.test",
+      "verdict": "unreported",
+      "health": "未上报",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "suspended",
+      "deviceCount": 0,
+      "platforms": [],
+      "selectedServer": null,
+      "connected": {
+        "value": false,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 0,
+        "asOfSec": 1724999938,
+        "source": "manual"
+      },
+      "quotaBytes": null,
+      "services": [],
+      "minAppVersion": null,
+      "expiresAt": 1724996348,
+      "lastSeenAt": null,
+      "updatedAt": 1724999938
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000000,
+  "total": 3
+}

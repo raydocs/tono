@@ -1,0 +1,59 @@
+{
+  "ok": false,
+  "buildSha": null,
+  "contractVersion": 1,
+  "sources": [
+    {
+      "source": "collector",
+      "state": "ready",
+      "asOfSec": 1725000000,
+      "message": null
+    },
+    {
+      "source": "komari",
+      "state": "ready",
+      "asOfSec": 1725000000,
+      "message": null
+    },
+    {
+      "source": "telemetry",
+      "state": "ready",
+      "asOfSec": 1724999985,
+      "message": null
+    },
+    {
+      "source": "catalog",
+      "state": "missing",
+      "asOfSec": null,
+      "message": null
+    },
+    {
+      "source": "profile",
+      "state": "ready",
+      "asOfSec": 1724999970,
+      "message": null
+    },
+    {
+      "source": "engine",
+      "state": "ready",
+      "asOfSec": 1724999970,
+      "message": null
+    },
+    {
+      "source": "jobs",
+      "state": "ready",
+      "asOfSec": 1724999880,
+      "message": null
+    },
+    {
+      "source": "manual",
+      "state": "ready",
+      "asOfSec": 1724999817,
+      "message": null
+    }
+  ],
+  "cronLastRunAt": null,
+  "cronLastDurationMs": null,
+  "cronLastError": null,
+  "updatedAt": 1725000001
+}

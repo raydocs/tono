@@ -1,0 +1,140 @@
+{
+  "name": "Amsterdam · Amstel（阿姆斯特丹阿姆斯特尔 · 大陆直连 · CN2）",
+  "verdict": "ok",
+  "health": "正常",
+  "tone": "ok",
+  "reason": "大陆正常",
+  "lifecycle": "unlisted",
+  "catalogListed": false,
+  "facts": {
+    "publicIp": "203.0.113.1",
+    "os": "linux",
+    "region": "Amsterdam",
+    "provider": "synthetic",
+    "providerAccountId": null,
+    "lineTags": [],
+    "port": null,
+    "price": 5,
+    "currency": "USD",
+    "billingCycle": 30,
+    "renewsAt": null,
+    "expiresAt": null,
+    "notes": null,
+    "createdAt": 1722408000,
+    "updatedAt": 1724999955
+  },
+  "bindings": {
+    "catalog": false,
+    "exitToken": false,
+    "komari": false,
+    "identitySync": false,
+    "metering": false,
+    "asOfSec": null
+  },
+  "forwardPath": {
+    "value": [
+      {
+        "carrier": "unicom",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      },
+      {
+        "carrier": "telecom",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      },
+      {
+        "carrier": "mobile",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      },
+      {
+        "carrier": "other",
+        "successRate": null,
+        "medianTcpMs": null,
+        "topFailure": null,
+        "attempts": 0,
+        "users": 0
+      }
+    ],
+    "asOfSec": null,
+    "source": "telemetry"
+  },
+  "returnPath": {
+    "value": [
+      {
+        "carrier": "unicom",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      },
+      {
+        "carrier": "telecom",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      },
+      {
+        "carrier": "mobile",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      },
+      {
+        "carrier": "other",
+        "latencyMs": null,
+        "lossPct": null,
+        "samples": 0
+      }
+    ],
+    "asOfSec": null,
+    "source": "komari"
+  },
+  "occupancy": {
+    "value": [
+      {
+        "userId": "id_a5f1247b72a306f7",
+        "email": "user3@example.test",
+        "deviceId": "id_28f951835807ba47",
+        "platform": "windows",
+        "appVersion": "0.0.72",
+        "online": true,
+        "lastSeenAt": 1724999984
+      }
+    ],
+    "asOfSec": 1724999984,
+    "source": "telemetry"
+  },
+  "quota": {
+    "value": {
+      "quota": null,
+      "used": null,
+      "pct": null,
+      "projectedExhaustAt": null,
+      "level": "ok",
+      "cycleKind": "manual",
+      "cycleStart": null,
+      "cycleEnd": null,
+      "counts": "in_out"
+    },
+    "asOfSec": null,
+    "source": "profile"
+  },
+  "recentErrors": {
+    "value": [],
+    "asOfSec": null,
+    "source": "jobs"
+  },
+  "jobs": [],
+  "history": [],
+  "updatedAt": 1724999955
+}
