@@ -122,7 +122,7 @@ describe('client release CRUD', () => {
       build: '34', notes: 'polish', publishedAt: null, yankedAt: null,
     });
     await createRelease(db(), {
-      platform: 'windows', channel: 'beta', version: '0.0.34',
+      platform: 'windows', channel: 'candidate', version: '0.0.34',
     }, NOW);
     await createRelease(db(), {
       platform: 'macos', channel: 'stable', version: '0.0.34',
@@ -139,7 +139,7 @@ describe('client release CRUD', () => {
 
     const listed = await listReleases(db(), { platform: 'windows' });
     expect(listed.map((row) => `${row.channel}:${row.version}`)).toEqual([
-      'beta:0.0.34', 'stable:0.0.34',
+      'candidate:0.0.34', 'stable:0.0.34',
     ]);
     expect(await currentRelease(db(), 'windows', 'stable')).toBeNull();
 

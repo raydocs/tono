@@ -2,7 +2,7 @@ import { ApiError } from '../errors';
 
 const DAY = 86400;
 const PLATFORMS = ['windows', 'macos', 'linux', 'android', 'ios'] as const;
-const CHANNELS = ['stable', 'beta', 'internal'] as const;
+const CHANNELS = ['stable', 'candidate', 'internal'] as const;
 
 export type Platform = (typeof PLATFORMS)[number];
 export type Channel = (typeof CHANNELS)[number];

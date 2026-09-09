@@ -5,7 +5,7 @@
 CREATE TABLE client_releases (
   id TEXT PRIMARY KEY,
   platform TEXT NOT NULL CHECK(platform IN ('windows','macos','linux','android','ios')),
-  channel TEXT NOT NULL CHECK(channel IN ('stable','beta','internal')),
+  channel TEXT NOT NULL CHECK(channel IN ('stable','candidate','internal')),
   version TEXT NOT NULL CHECK(length(version) BETWEEN 1 AND 40),
   build TEXT, r2_key TEXT, size_bytes INTEGER, sha256 TEXT,
   notes TEXT CHECK(notes IS NULL OR length(notes) <= 4000),

@@ -82,7 +82,7 @@ export type NodeLifecycle = (typeof NODE_LIFECYCLES)[number];
 export const CUSTOMER_LIFECYCLES = ['active', 'suspended', 'expired'] as const;
 export type CustomerLifecycle = (typeof CUSTOMER_LIFECYCLES)[number];
 
-export const SEVERITIES = ['severe', 'warning', 'notice'] as const;
+export const SEVERITIES = ['severe', 'warn', 'notice'] as const;
 export type Severity = (typeof SEVERITIES)[number];
 
 export const INCIDENT_STATUSES = ['open', 'acked', 'resolved'] as const;
@@ -125,7 +125,7 @@ export type JobExecutor = (typeof JOB_EXECUTORS)[number];
  * a channel nothing publishes to would be a column of zeros on the adoption
  * matrix, which is exactly the reading 未发布 exists to prevent.
  */
-export const RELEASE_CHANNELS = ['stable', 'candidate'] as const;
+export const RELEASE_CHANNELS = ['stable', 'candidate', 'internal'] as const;
 export type ReleaseChannel = (typeof RELEASE_CHANNELS)[number];
 
 /** Where an alert goes. The rendering template is a separate axis. */
