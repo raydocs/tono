@@ -187,6 +187,35 @@ a { color: inherit; text-decoration: none; }
 .card-pad { padding: 20px; }
 .table-row { height: 36px; }
 
+/* Neutral tile behind a metric icon. Colour on these pages belongs to the
+   status word, the quota bar and the primary action; a tinted tile behind a
+   plain fact only competes with them. */
+.metric-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  color: var(--muted-foreground);
+}
+
+/* Panels that carry a severity of their own live here so that no component
+   outside StatusWord and QuotaGauge has to name a severity token. */
+.panel-error {
+  border: 1px solid hsl(var(--sev-line) / 0.4);
+  background: hsl(var(--sev-bg));
+  color: hsl(var(--sev-fg));
+}
+.banner-alert {
+  border-bottom: 1px solid hsl(var(--sev-line) / 0.35);
+  background: hsl(var(--sev-bg));
+  color: hsl(var(--sev-fg));
+}
+.row-selected { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

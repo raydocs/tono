@@ -57,7 +57,6 @@ export function NodeCardGrid({
                 label={copy.occupancy}
                 value={view.occupancy}
                 format={(n) => ({ number: formatCount(n), unit: copy.occupancyUnit })}
-                tone="info"
               />
               <Cell label={copy.customerPath}>
                 <Value value={null} source={view.path.source} />

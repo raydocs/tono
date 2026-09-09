@@ -123,7 +123,7 @@ export function Shell({
         </header>
 
         {fleet.status === 'error' && fleet.sessionExpired ? (
-          <div className="flex items-center justify-between gap-4 border-b border-[hsl(var(--sev-line)/0.35)] bg-[hsl(var(--sev-bg))] px-6 py-3 text-[hsl(var(--sev-fg))]" role="alert">
+          <div className="banner-alert flex items-center justify-between gap-4 px-6 py-3" role="alert">
             <span>{copy.sessionExpiredBody}</span>
             <button
               type="button"

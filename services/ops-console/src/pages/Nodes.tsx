@@ -148,7 +148,7 @@ function CountBit({ active, label, onClick }: { active: boolean; label: string; 
       aria-pressed={active}
       className={cn(
         'rounded-[8px] px-1 transition-colors duration-150',
-        active ? 'bg-[hsl(var(--info-bg))] text-[hsl(var(--info-fg))]' : 'hover:bg-[var(--surface)]',
+        active ? 'text-[var(--foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
       )}
       onClick={onClick}
     >

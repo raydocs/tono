@@ -94,7 +94,7 @@ export function DataTable<T>({
   }
   if (state === 'error') {
     return (
-      <div className="rounded-[10px] border border-[hsl(var(--sev-line)/0.4)] bg-[hsl(var(--sev-bg))] px-5 py-10 text-center text-[hsl(var(--sev-fg))]" role="alert">
+      <div className="panel-error rounded-[10px] px-5 py-10 text-center" role="alert">
         {errorMessage || copy.tableError}
       </div>
     );
@@ -143,7 +143,7 @@ export function DataTable<T>({
                 data-selected={selected ? 'true' : 'false'}
                 className={cn(
                   'table-row cursor-pointer border-b border-[var(--hairline)] last:border-b-0',
-                  selected && 'bg-[hsl(var(--info-bg))]',
+                  selected && 'row-selected',
                   focused && 'outline outline-1 outline-[var(--accent)]',
                 )}
                 onClick={() => onRowClick?.(row)}

@@ -2,7 +2,51 @@ import { copy } from '@/copy/copy';
 import { formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { cn } from '@/lib/utils';
 import type { Measured } from './measured';
+import type { Tone } from './StatusWord';
 import { Value } from './Value';
+
+/**
+ * The three quota thresholds from the plan (70 / 90 / 100 %) are the only
+ * thing that decides this component's colour, so the bar here and any inline
+ * bar elsewhere shade the same way for the same node.
+ */
+export function quotaTone(used: number | null, quota: number | null): Tone {
+  if (used == null || quota == null || quota <= 0) return 'unk';
+  const ratio = used / quota;
+  if (ratio >= 1) return 'sev';
+  if (ratio >= 0.9) return 'warn';
+  if (ratio >= 0.7) return 'rem';
+  return 'ok';
+}
+
+export function usedRatio(used: number | null, quota: number | null): number {
+  if (used == null || quota == null || quota <= 0) return 0;
+  return Math.min(1, Math.max(0, used / quota));
+}
+
+/** The 2 px bar on its own, for table rows that have no room for the gauge. */
+export function QuotaBar({
+  used,
+  quota,
+  className,
+}: {
+  used: number | null;
+  quota: number | null;
+  className?: string;
+}) {
+  const ratio = usedRatio(used, quota);
+  return (
+    <div
+      className={cn('h-[2px] w-full overflow-hidden rounded-[999px] bg-[var(--hairline)]', className)}
+      aria-hidden
+    >
+      <div
+        className={cn('h-full rounded-[999px]', `tone-${quotaTone(used, quota)}`)}
+        style={{ width: `${Math.min(100, Math.max(2, ratio * 100))}%`, background: 'hsl(var(--tone-line))' }}
+      />
+    </div>
+  );
+}
 
 export function QuotaGauge({
   used,
@@ -32,14 +76,14 @@ export function QuotaGauge({
 
   const remaining = quota - used.value;
   const remainRatio = quota === 0 ? null : remaining / quota;
-  const ratio = quota === 0 ? 0 : Math.min(1, Math.max(0, used.value / quota));
+  const ratio = usedRatio(used.value, quota);
   const eta = exhaustAt(used.value, quota, used.asOfSec, cycleStartSec);
   const usedSplit = splitBytes(used.value);
   const quotaSplit = splitBytes(quota);
-  const over = remaining < 0;
+  const tone = quotaTone(used.value, quota);
 
   return (
-    <div className={cn('flex flex-col gap-1.5', className)}>
+    <div className={cn('flex flex-col gap-1.5', `tone-${tone}`, className)}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="truncate font-mono text-row">
           {usedSplit.number}
@@ -53,7 +97,7 @@ export function QuotaGauge({
       </div>
       <div className="h-[2px] overflow-hidden rounded-[999px] bg-[var(--hairline)]" aria-hidden>
         <div
-          className={cn('h-full rounded-[999px]', over ? 'tone-sev' : ratio >= 0.9 ? 'tone-warn' : 'tone-ok')}
+          className="h-full rounded-[999px]"
           style={{
             width: `${Math.min(100, Math.max(2, ratio * 100))}%`,
             background: 'hsl(var(--tone-line))',
