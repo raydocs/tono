@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { CustomerSummaryDto, Platform } from '@contract';
+import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto } from '@contract';
+import { ADOPTION_BUCKETS } from '@contract';
 import { Chip } from '@/components/ops/Chip';
 import { CountText } from '@/components/ops/CountText';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
@@ -9,19 +10,22 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { explainCode, stageWord } from '@/lib/codes';
 import {
+  bucketCounts,
   CUSTOMER_FILTERS,
   customerCounts,
   PLATFORM_CHIPS,
   platformCounts,
   releasedPlatforms,
+  selectByBucket,
   selectByPlatform,
   selectCustomers,
   type CustomerFilter,
   type CustomerFilterId,
 } from '@/lib/customers';
 import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
-import { openCustomer } from '@/lib/hash-route';
+import { openCustomer, setCustomerFilter } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
+import { publishedVersions } from '@/lib/releases';
 import { shown } from '@/lib/sources';
 import { cn } from '@/lib/utils';
 import type { Resource } from '@/lib/use-resource';
@@ -38,12 +42,18 @@ const FRAGMENT_TONE: Record<CustomerFilterId, Tone | 'none'> = {
 
 export default function CustomersPage({
   customers,
+  releases,
+  platform,
+  bucket,
 }: {
   customers: Resource<CustomerSummaryDto[]>;
+  releases: Resource<ReleaseDto[]>;
+  /** Both come from the URL: a clients-matrix cell is a link into this page. */
+  platform: Platform | null;
+  bucket: AdoptionBucket | null;
 }) {
   const privacy = usePrivacy();
   const [filter, setFilter] = useState<CustomerFilter>(null);
-  const [platform, setPlatform] = useState<Platform | null>(null);
 
   const all = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
@@ -52,9 +62,20 @@ export default function CustomersPage({
   const counts = useMemo(() => customerCounts(all), [all]);
   const perPlatform = useMemo(() => platformCounts(all), [all]);
   const released = useMemo(() => releasedPlatforms(all), [all]);
-  const rows = useMemo(
+  const published = useMemo(
+    () => (platform === null || releases.status !== 'ready'
+      ? []
+      : publishedVersions(releases.data, platform)),
+    [releases, platform],
+  );
+  const onPlatform = useMemo(
     () => selectByPlatform(selectCustomers(all, filter), platform),
     [all, filter, platform],
+  );
+  const perBucket = useMemo(() => bucketCounts(onPlatform, published), [onPlatform, published]);
+  const rows = useMemo(
+    () => selectByBucket(onPlatform, published, bucket),
+    [onPlatform, published, bucket],
   );
   const columns = useMemo(() => customerColumns(privacy.email), [privacy.email]);
 
@@ -102,13 +123,31 @@ export default function CustomersPage({
                 active={platform === id}
                 count={live ? perPlatform[id] : null}
                 title={live ? undefined : copy.unreleased}
-                onClick={() => setPlatform((current) => (current === id ? null : id))}
+                onClick={() => setCustomerFilter(platform === id ? null : id, bucket)}
               >
                 {live ? copy.platform[id] : `${copy.platform[id]} ${copy.unreleased}`}
               </Chip>
             );
           })}
         </div>
+
+        {/* The version bands only mean something once a platform is chosen:
+            "behind one version" of what, otherwise. They arrive already
+            pressed when the reader came from a cell of the clients matrix. */}
+        {platform === null ? null : (
+          <div className="toolbar-row">
+            {ADOPTION_BUCKETS.map((id) => (
+              <Chip
+                key={id}
+                active={bucket === id}
+                count={perBucket[id]}
+                onClick={() => setCustomerFilter(platform, bucket === id ? null : id)}
+              >
+                {copy.bucket[id]}
+              </Chip>
+            ))}
+          </div>
+        )}
       </div>
 
       <DataTable

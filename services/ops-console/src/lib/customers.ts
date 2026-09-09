@@ -1,4 +1,6 @@
-import type { CustomerSummaryDto, Platform } from '@contract';
+import type { AdoptionBucket, CustomerSummaryDto, Platform } from '@contract';
+import { ADOPTION_BUCKETS } from '@contract';
+import { bucketFor } from './releases';
 
 /**
  * Every fragment of the 客户 count sentence, and the predicate behind it.
@@ -68,5 +70,37 @@ export function platformCounts(
 ): Record<Platform, number> {
   const out = {} as Record<Platform, number>;
   for (const platform of PLATFORM_CHIPS) out[platform] = selectByPlatform(rows, platform).length;
+  return out;
+}
+
+/**
+ * The version band a customer falls in, decided here rather than asked for.
+ *
+ * A cell of the 客户端 matrix links to this filter, and the two have to agree
+ * (R4): the matrix is counted by the Worker over devices, this is counted in
+ * the browser over the rows already on screen, and both run the same rules
+ * from `releases.ts`. The figure a cell shows is users, which is what the
+ * filtered list then holds.
+ *
+ * `minAppVersion` is the oldest version any of the customer's devices reports,
+ * so a customer with one updated laptop and one forgotten desktop counts as
+ * behind — which is the answer that matters when the question is "who will
+ * break when the floor moves".
+ */
+export function selectByBucket(
+  rows: readonly CustomerSummaryDto[],
+  published: readonly string[],
+  bucket: AdoptionBucket | null,
+): CustomerSummaryDto[] {
+  if (bucket === null) return [...rows];
+  return rows.filter((row) => bucketFor(row.minAppVersion, published) === bucket);
+}
+
+export function bucketCounts(
+  rows: readonly CustomerSummaryDto[],
+  published: readonly string[],
+): Record<AdoptionBucket, number> {
+  const out = {} as Record<AdoptionBucket, number>;
+  for (const bucket of ADOPTION_BUCKETS) out[bucket] = selectByBucket(rows, published, bucket).length;
   return out;
 }
