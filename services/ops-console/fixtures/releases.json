@@ -1,0 +1,245 @@
+{
+  "clock": 1725000000,
+  "list": {
+    "items": [
+      {
+        "id": "rel-macos-181",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "1.8.1",
+        "build": "1810",
+        "r2Key": "clients/macos/1.8.1.zip",
+        "sha256": null,
+        "notes": "Reality 拨号重试，修掉江苏移动握手超时",
+        "minSupportedVersion": "1.8.0",
+        "publishedAt": 1724481600,
+        "withdrawnAt": null,
+        "createdAt": 1724395200,
+        "updatedAt": 1724481600
+      },
+      {
+        "id": "rel-macos-180",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "1.8.0",
+        "build": "1800",
+        "r2Key": "clients/macos/1.8.0.zip",
+        "sha256": null,
+        "notes": "节点目录改为增量拉取",
+        "minSupportedVersion": null,
+        "publishedAt": 1722667200,
+        "withdrawnAt": null,
+        "createdAt": 1722580800,
+        "updatedAt": 1722667200
+      },
+      {
+        "id": "rel-macos-179",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "1.7.9",
+        "build": "1790",
+        "r2Key": "clients/macos/1.7.9.zip",
+        "sha256": null,
+        "notes": "掉线保护",
+        "minSupportedVersion": null,
+        "publishedAt": 1720248000,
+        "withdrawnAt": null,
+        "createdAt": 1720161600,
+        "updatedAt": 1720248000
+      },
+      {
+        "id": "rel-macos-190rc",
+        "platform": "macos",
+        "channel": "candidate",
+        "version": "1.9.0-rc1",
+        "build": "1900",
+        "r2Key": null,
+        "sha256": null,
+        "notes": "连接日志分段上传，等 CI 通过后发布",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724827200,
+        "updatedAt": 1725000000
+      },
+      {
+        "id": "rel-win-180",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "1.8.0",
+        "build": "1800",
+        "r2Key": "clients/windows/1.8.0.zip",
+        "sha256": null,
+        "notes": "登录请求不再走隧道",
+        "minSupportedVersion": null,
+        "publishedAt": 1723272000,
+        "withdrawnAt": null,
+        "createdAt": 1723185600,
+        "updatedAt": 1723272000
+      },
+      {
+        "id": "rel-win-179",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "1.7.9",
+        "build": "1790",
+        "r2Key": "clients/windows/1.7.9.zip",
+        "sha256": null,
+        "notes": "服务器选择失败后自动重选",
+        "minSupportedVersion": null,
+        "publishedAt": 1720852800,
+        "withdrawnAt": null,
+        "createdAt": 1720766400,
+        "updatedAt": 1720852800
+      },
+      {
+        "id": "rel-win-178",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "1.7.8",
+        "build": "1780",
+        "r2Key": "clients/windows/1.7.8.zip",
+        "sha256": null,
+        "notes": "自动更新会卡在校验，已撤回",
+        "minSupportedVersion": null,
+        "publishedAt": 1718952000,
+        "withdrawnAt": 1719297600,
+        "createdAt": 1718865600,
+        "updatedAt": 1719297600
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1725000000,
+    "total": 7
+  },
+  "adoption": {
+    "range": "30d",
+    "released": [
+      "macos",
+      "windows"
+    ],
+    "cells": [
+      {
+        "platform": "macos",
+        "bucket": "current",
+        "users": 5,
+        "devices": 9
+      },
+      {
+        "platform": "macos",
+        "bucket": "behind_one",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "macos",
+        "bucket": "behind_more",
+        "users": 5,
+        "devices": 5
+      },
+      {
+        "platform": "macos",
+        "bucket": "unreported",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "windows",
+        "bucket": "current",
+        "users": 6,
+        "devices": 8
+      },
+      {
+        "platform": "windows",
+        "bucket": "behind_one",
+        "users": 5,
+        "devices": 5
+      },
+      {
+        "platform": "windows",
+        "bucket": "behind_more",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "windows",
+        "bucket": "unreported",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "linux",
+        "bucket": "current",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "linux",
+        "bucket": "behind_one",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "linux",
+        "bucket": "behind_more",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "linux",
+        "bucket": "unreported",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "android",
+        "bucket": "current",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "android",
+        "bucket": "behind_one",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "android",
+        "bucket": "behind_more",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "android",
+        "bucket": "unreported",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "ios",
+        "bucket": "current",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "ios",
+        "bucket": "behind_one",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "ios",
+        "bucket": "behind_more",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "ios",
+        "bucket": "unreported",
+        "users": 0,
+        "devices": 0
+      }
+    ],
+    "updatedAt": 1725000000
+  }
+}
