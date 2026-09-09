@@ -6,6 +6,7 @@
   "scripts": {
     "admin:dev": "vite admin --base /ops/",
     "admin:build": "vite build admin --base /ops/ --outDir ../public/ops --emptyOutDir",
+    "console:build": "npm --prefix ../ops-console ci && npm --prefix ../ops-console run build",
     "admin:worker:deploy": "npm run deploy",
     "preview:render-config": "node preview/render-config.mjs",
     "preview:seed": "node preview/write-seed.mjs",

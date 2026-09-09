@@ -37,6 +37,7 @@ cd "$control_plane"
 /usr/bin/env npm test
 "$repo_root/tooling/scripts/test-policy-signing-contract.sh"
 /usr/bin/env npm run admin:build
+/usr/bin/env npm run console:build
 
 # The release centre is served from public/ by this very deploy, so a stale page
 # would go live here and nowhere else would catch it.
