@@ -30,3 +30,38 @@ test('dense fleet: long names truncate rather than reflow', async ({ page }) => 
   await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
   await expect(page).toHaveScreenshot('dense-table.png');
 });
+
+test('an empty customer list says so instead of showing a zero table', async ({ page }) => {
+  await open(page, '/customers', 'empty');
+
+  await expect(page.locator('tbody tr')).toHaveCount(0);
+  // R2 reaches the headline: no customers measured means no count sentence.
+  await expect(page.getByRole('button', { name: /位客户$/ })).toHaveCount(1);
+  await expect(page.getByRole('status')).toBeVisible();
+  await expect(page).toHaveScreenshot('customers-empty.png');
+});
+
+test('a failing hub gives the customer table an error, not an empty state', async ({ page }) => {
+  await open(page, '/customers', 'error');
+
+  await expect(page.getByRole('alert').first()).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('0 位客户');
+  await expect(page).toHaveScreenshot('customers-error.png');
+});
+
+test('a failing hub gives 今天 an error, not a clear sky', async ({ page }) => {
+  await open(page, '/today', 'error');
+
+  // The one thing this page must never do is report calm it could not measure.
+  await expect(page.locator('body')).not.toContainText('现在没有事故');
+  await expect(page.locator('.incident-row')).toHaveCount(0);
+  await expect(page).toHaveScreenshot('today-error.png');
+});
+
+test('the dense customer table truncates rather than reflows', async ({ page }) => {
+  await open(page, '/customers', 'dense');
+
+  expect(await page.locator('tbody tr').count()).toBeGreaterThan(40);
+  await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
+  await expect(page).toHaveScreenshot('customers-dense.png');
+});
