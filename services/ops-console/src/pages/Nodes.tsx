@@ -11,6 +11,7 @@ import { copy } from '@/copy/copy';
 import { formatCount, formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { closeNode, openNode } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
+import { useIsPhone } from '@/lib/use-phone';
 import { countLine, NODE_FILTERS, selectNodes, type NodeFilter, type NodeFilterId } from '@/lib/selectors';
 import { cn } from '@/lib/utils';
 import type { Tone } from '@/components/ops/StatusWord';
@@ -20,8 +21,16 @@ import { toNodeView, type NodeView } from './node-metrics';
 
 export default function NodesPage({ fleet, selected }: { fleet: FleetState; selected: string | null }) {
   const privacy = usePrivacy();
+  const phone = useIsPhone();
   const [filter, setFilter] = useState<NodeFilter>(null);
-  const [view, setView] = useState<'cards' | 'table'>('cards');
+  const [chosen, setChosen] = useState<'cards' | 'table'>('cards');
+  /**
+   * One card per screen at 390 px is a scroll through forty-five screens to
+   * find the one that is broken. Three columns of the table — the word, the
+   * name, the quota — fit and answer the same question in one screen, so the
+   * phone gets the table whatever the toggle says, and the toggle goes.
+   */
+  const view = phone ? 'table' : chosen;
 
   const liveAgents = fleet.status === 'ready' ? fleet.live?.agents ?? null : null;
   const all = useMemo(
@@ -56,7 +65,7 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
         ? 'empty'
         : 'ready';
 
-  const columns = useMemo(() => nodeColumns(pathWired), [pathWired]);
+  const columns = useMemo(() => nodeColumns(pathWired, phone), [pathWired, phone]);
 
   return (
     <div className="page-wrap">
@@ -88,32 +97,34 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
           <p className="text-body text-[var(--muted-foreground)]">{copy.pathNotWired}</p>
         ) : null}
 
-        <div className="toolbar-row">
-          <button
-            type="button"
-            aria-pressed={view === 'cards'}
-            className={cn(
-              'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-              view === 'cards' && 'bg-[var(--accent)] text-white',
-            )}
-            onClick={() => setView('cards')}
-          >
-            <LayoutGrid size={12} />
-            {copy.viewCards}
-          </button>
-          <button
-            type="button"
-            aria-pressed={view === 'table'}
-            className={cn(
-              'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
-              view === 'table' && 'bg-[var(--accent)] text-white',
-            )}
-            onClick={() => setView('table')}
-          >
-            <TableIcon size={12} />
-            {copy.viewTable}
-          </button>
-        </div>
+        {phone ? null : (
+          <div className="toolbar-row">
+            <button
+              type="button"
+              aria-pressed={view === 'cards'}
+              className={cn(
+                'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
+                view === 'cards' && 'bg-[var(--accent)] text-white',
+              )}
+              onClick={() => setChosen('cards')}
+            >
+              <LayoutGrid size={12} />
+              {copy.viewCards}
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === 'table'}
+              className={cn(
+                'flex h-8 items-center gap-1 rounded-[999px] border border-[var(--hairline)] px-3 text-micro',
+                view === 'table' && 'bg-[var(--accent)] text-white',
+              )}
+              onClick={() => setChosen('table')}
+            >
+              <TableIcon size={12} />
+              {copy.viewTable}
+            </button>
+          </div>
+        )}
       </div>
 
       {fleet.status === 'error' && !fleet.sessionExpired ? (
@@ -195,7 +206,8 @@ function CountBit({
   );
 }
 
-function nodeColumns(showPath: boolean): DataColumn<NodeView>[] {
+function nodeColumns(showPath: boolean, phone: boolean): DataColumn<NodeView>[] {
+  if (phone) return phoneColumns();
   return [
     {
       id: 'status',
@@ -270,6 +282,61 @@ function nodeColumns(showPath: boolean): DataColumn<NodeView>[] {
       ),
     },
   ];
+}
+
+/** The three the fleet is judged on, at 390 px: the word, the name, the quota. */
+function phoneColumns(): DataColumn<NodeView>[] {
+  return [
+    {
+      id: 'status',
+      header: copy.status,
+      width: '68px',
+      sortValue: (row) => row.health,
+      cell: (row) => <StatusWord word={row.health} />,
+    },
+    {
+      id: 'name',
+      header: copy.node,
+      sortValue: (row) => row.node.name,
+      cell: (row) => <span className="block truncate text-body">{row.node.name}</span>,
+    },
+    {
+      id: 'traffic',
+      header: copy.periodTraffic,
+      width: '104px',
+      align: 'right',
+      mono: true,
+      sortValue: (row) => row.used.value ?? -1,
+      cell: (row) => <CompactTrafficCell row={row} />,
+    },
+  ];
+}
+
+/**
+ * Used and the bar, with the arithmetic in the title.
+ *
+ * Used, the cap and the remaining share spelled out needs about 200 px and a phone column
+ * has a hundred; right-aligned, the overflow is clipped from the left, which
+ * turns the used figure — the only part anybody reads — into "· TB". The bar
+ * already carries the ratio.
+ */
+function CompactTrafficCell({ row }: { row: NodeView }) {
+  if (row.used.value == null) return <Value value={null} source={row.used.source} mono />;
+  const used = splitBytes(row.used.value);
+  const quota = row.quota;
+  const full = quota == null
+    ? copy.usageNoQuota(`${used.number} ${used.unit}`)
+    : copy.usageTitle(
+      `${used.number} ${used.unit}`,
+      `${splitBytes(quota).number} ${splitBytes(quota).unit}`,
+      formatPercent((quota - row.used.value) / quota),
+    );
+  return (
+    <span className="inline-flex w-full flex-col items-end gap-1" title={full}>
+      <span className="truncate">{used.number} {used.unit}</span>
+      {quota == null ? null : <QuotaBar used={row.used.value} quota={quota} />}
+    </span>
+  );
 }
 
 /** Used, quota and the remaining share, over the same 2 px bar the card uses. */

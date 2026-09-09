@@ -431,6 +431,27 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 .incident-row:last-child { border-bottom: 0; }
 .incident-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
 
+/* At 390 px a row with a rail down its left edge, a paragraph in the middle
+   and a button on the right is three columns in 350 px: the sentence wraps to
+   five lines and the action ends up level with the fourth of them. Each row
+   becomes its own card instead — the rail across the top, the sentence, the
+   facts, and the action full width at the bottom where the thumb is. */
+@media (max-width: 640px) {
+  .incident-row {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .incident-row:last-child { margin-bottom: 0; border-bottom: 1px solid var(--hairline); }
+  .incident-row .sev-rail { width: 100%; height: 3px; align-self: stretch; }
+  .incident-row .ops-action { width: 100%; justify-content: center; }
+  .incident-row > [role="presentation"] { width: 100%; }
+}
+
 /* The connection timeline: a day heading that sticks while its rows scroll. */
 .day-head {
   position: sticky;

@@ -59,8 +59,46 @@ export function IncidentDrawer({
   const incident = detail.status === 'ready' ? detail.data.incident : null;
   const children = id === null ? [] : childrenOf(incidents, id);
 
+  /**
+   * The actions are the reason the drawer was opened, and on a phone they
+   * were four screens down past the timeline. Pinned to the bottom edge they
+   * are where the thumb already is, on every width.
+   */
+  const actions = !incident ? null : (
+    <Block title={copy.incidentDrawer.actions}>
+      <ActionRow>
+        <Action pending={pending} onClick={() => run(() => opsApi.snoozeIncident(incident.id))}>
+          {copy.incidentPrimary.snooze}
+        </Action>
+        <Action primary pending={pending} onClick={() => run(() => opsApi.resolveIncident(incident.id))}>
+          {copy.incidentPrimary.resolve}
+        </Action>
+      </ActionRow>
+      <div className="mt-2 flex gap-2">
+        <input
+          className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)]"
+          placeholder={copy.incidentDrawer.notePrompt}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+        <Action
+          pending={pending || note.trim() === ''}
+          onClick={() => run(() => opsApi.noteIncident(incident.id, note.trim()))}
+        >
+          {copy.incidentDrawer.noteSend}
+        </Action>
+      </div>
+      {failure ? <p className="panel-error mt-2 rounded-[10px] px-3 py-2 text-body">{failure}</p> : null}
+    </Block>
+  );
+
   return (
-    <DetailDrawer open={id !== null} title={incident?.title ?? copy.pages.today} onClose={closeIncident}>
+    <DetailDrawer
+      open={id !== null}
+      title={incident?.title ?? copy.pages.today}
+      onClose={closeIncident}
+      footer={actions}
+    >
       {detail.status !== 'ready' || !incident ? (
         <Empty message={detail.status === 'error' ? detail.message : copy.loading} />
       ) : (
@@ -145,31 +183,6 @@ export function IncidentDrawer({
             ))}
           </Block>
 
-          <Block title={copy.incidentDrawer.actions}>
-            <ActionRow>
-              <Action pending={pending} onClick={() => run(() => opsApi.snoozeIncident(incident.id))}>
-                {copy.incidentPrimary.snooze}
-              </Action>
-              <Action primary pending={pending} onClick={() => run(() => opsApi.resolveIncident(incident.id))}>
-                {copy.incidentPrimary.resolve}
-              </Action>
-            </ActionRow>
-            <div className="mt-2 flex gap-2">
-              <input
-                className="h-8 min-w-0 flex-1 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)]"
-                placeholder={copy.incidentDrawer.notePrompt}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-              />
-              <Action
-                pending={pending || note.trim() === ''}
-                onClick={() => run(() => opsApi.noteIncident(incident.id, note.trim()))}
-              >
-                {copy.incidentDrawer.noteSend}
-              </Action>
-            </div>
-            {failure ? <p className="panel-error mt-2 rounded-[10px] px-3 py-2 text-body">{failure}</p> : null}
-          </Block>
         </>
       )}
     </DetailDrawer>
