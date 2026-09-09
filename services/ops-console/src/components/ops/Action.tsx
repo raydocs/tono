@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
  * A button, and — when it cannot be pressed — the reason in words.
  *
  * Every disabled action on these pages is disabled for a reason the operator
- * can act on ("接口未接入", "Windows 客户端还没有这个动作"), so the reason
+ * can act on — no endpoint yet, no such action on this platform — so the reason
  * travels with the button as its title and its `aria-describedby` text rather
  * than living in a comment. A greyed control with no explanation is the thing
  * that makes people reload the page.

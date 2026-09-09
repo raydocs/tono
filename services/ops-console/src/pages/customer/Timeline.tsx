@@ -11,7 +11,7 @@ import { formatClock, formatDate, formatLatency } from '@/lib/display';
 import { cn } from '@/lib/utils';
 
 /** time · outcome · node · stage · code+explanation · elapsed · client · carrier */
-const GRID = 'grid grid-cols-[68px_64px_140px_52px_minmax(160px,1fr)_60px_116px_104px] gap-x-3 items-baseline';
+const GRID = 'grid grid-cols-[62px_62px_146px_52px_minmax(140px,1fr)_74px_124px_140px] gap-x-3 items-baseline';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1_000;
 
 type Day = { key: number; label: string; rows: ConnectionEventDto[] };
@@ -128,7 +128,7 @@ function Row({ row }: { row: ConnectionEventDto }) {
           </>
         ) : copy.missing}
       </span>
-      <span className="text-right font-mono text-body">
+      <span className="text-right font-mono text-body whitespace-nowrap">
         {row.elapsedMs === null ? copy.missing : formatLatency(row.elapsedMs)}
       </span>
       <span className="truncate text-body text-[var(--muted-foreground)]" title={client || undefined}>

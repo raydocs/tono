@@ -11,8 +11,9 @@ export type AnyHealthWord = HealthWord | CustomerWord;
  * The one table of word → tone, for both axes.
  *
  * Nodes and customers share it because they share the palette and because
- * 正常 has to look the same on both pages; they do not share a vocabulary,
- * which is why the two lists stay separate in the contract and only meet here.
+ * the healthy word has to look the same on both pages; they do not share a
+ * vocabulary, which is why the two lists stay separate in the contract and
+ * only meet here.
  */
 const WORD_TONE: Record<AnyHealthWord, Tone> = {
   [copy.health.lost]: 'sev',

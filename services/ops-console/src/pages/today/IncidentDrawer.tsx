@@ -10,7 +10,7 @@ import { opsApi } from '@/lib/api';
 import { severityTone } from '@/lib/codes';
 import { formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { closeIncident, openCustomer } from '@/lib/hash-route';
-import { childrenOf } from '@/lib/incidents';
+import { childrenOf, incidentSubject } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
 import { sourceWord } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
@@ -69,7 +69,7 @@ export function IncidentDrawer({
             <span className={cn('ops-tag tone-fg', `tone-${severityTone(incident.severity)}`)}>
               {copy.severity[incident.severity]}
             </span>
-            <span className="ops-tag">{incident.subjectId ?? copy.missing}</span>
+            <span className="ops-tag">{subject(incident, customers, privacy.email)}</span>
             <span className="text-micro text-[var(--muted-foreground)]">
               {copy.incidentOpenFor}{' '}
               <span className="font-mono normal-case tracking-normal">
@@ -87,7 +87,7 @@ export function IncidentDrawer({
                 <span className="text-micro text-[var(--muted-foreground)]">{row.label}</span>
                 <span className="text-right">
                   <span className="font-mono text-body">{row.value}</span>
-                  <span className="ml-2 text-micro text-[var(--muted-foreground)]">
+                  <span className="ml-2 text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
                     {formatWhenAgo(row.asOfSec)} · {sourceWord(row.source)}
                   </span>
                 </span>
@@ -125,7 +125,7 @@ export function IncidentDrawer({
                   {formatWhenAgo(row.at)}
                 </span>
                 <span className="shrink-0 text-body">{copy.incidentEvent[row.type]}</span>
-                <span className="min-w-0 truncate text-micro text-[var(--muted-foreground)]">
+                <span className="min-w-0 truncate text-body text-[var(--muted-foreground)]">
                   {row.note ?? row.actor ?? ''}
                 </span>
               </div>
@@ -137,7 +137,7 @@ export function IncidentDrawer({
               <Value value={null} source={sourceWord('jobs')} />
             ) : detail.data.deliveries.items.map((row) => (
               <div key={row.id} className="flex items-baseline justify-between gap-3 py-1">
-                <span className="min-w-0 truncate font-mono text-micro">{row.target}</span>
+                <span className="min-w-0 truncate font-mono text-body normal-case">{row.target}</span>
                 <span className="shrink-0 text-micro text-[var(--muted-foreground)]">
                   {copy.deliveryStatus[row.status]} · {formatWhenAgo(row.at)}
                 </span>
@@ -174,6 +174,14 @@ export function IncidentDrawer({
       )}
     </DetailDrawer>
   );
+}
+
+function subject(
+  incident: IncidentDto,
+  customers: readonly CustomerSummaryDto[],
+  mask: (email: string) => string,
+): string {
+  return incidentSubject(incident, customers, mask) ?? copy.missing;
 }
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {

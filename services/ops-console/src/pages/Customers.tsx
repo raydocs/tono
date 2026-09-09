@@ -28,7 +28,7 @@ import type { Tone } from '@/components/ops/StatusWord';
 
 type Mask = (email: string) => string;
 
-/** 在线 is the only fragment that carries a tone; the other two are prose. */
+/** Only the online fragment carries a tone; the other two are prose. */
 const FRAGMENT_TONE: Record<CustomerFilterId, Tone | 'none'> = {
   all: 'none',
   online: 'ok',
@@ -154,21 +154,21 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '140px',
+      width: '156px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '170px',
+      width: '150px',
       sortValue: (row) => row.lastFailure?.at ?? 0,
       cell: (row) => <FailureCell row={row} />,
     },
     {
       id: 'usage',
       header: copy.customerColumns.usage,
-      width: '140px',
+      width: '136px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.usageBytes.value,
@@ -177,17 +177,17 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'services',
       header: copy.customerColumns.services,
-      width: '110px',
+      width: '100px',
       cell: (row) => (
         row.services.length === 0
           ? <Value value={null} source={copy.sourceWord.telemetry} />
-          : <span className="truncate">{row.services.map((f) => copy.serviceName[f]).join(' · ')}</span>
+          : <ServicesCell families={row.services} />
       ),
     },
     {
       id: 'version',
       header: copy.customerColumns.minVersion,
-      width: '80px',
+      width: '76px',
       mono: true,
       sortValue: (row) => row.minAppVersion ?? '',
       cell: (row) => <Value value={row.minAppVersion} source={copy.sourceWord.telemetry} mono />,
@@ -195,7 +195,7 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'expires',
       header: copy.customerColumns.expires,
-      width: '90px',
+      width: '104px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.expiresAt ?? 0,
@@ -225,22 +225,61 @@ function FailureCell({ row }: { row: CustomerSummaryDto }) {
   );
 }
 
+/**
+ * Bytes on the line, the share on the bar, the arithmetic in the tooltip.
+ *
+ * Spelling out the used figure and the remaining share together needs about
+ * 180 px and this column has 136; right-aligned, the overflow is clipped from
+ * the left, which turns "55.0 GB" into ".0 GB" — a number that is not wrong so
+ * much as unreadable. The bar already carries the ratio, and its tone carries
+ * the 70 / 90 / 100 steps.
+ *
+ * A customer past their quota gets the over-quota word rather than a negative
+ * percentage: minus ten percent remaining is arithmetic nobody asked for, and
+ * the bar is already red.
+ */
 function UsageCell({ row }: { row: CustomerSummaryDto }) {
   const usage = shown(row.usageBytes);
   if (usage.value === null) return <Value value={null} source={usage.source} mono />;
   const used = splitBytes(usage.value);
-  if (row.quotaBytes === null) {
-    return <span className="truncate">{used.number} {used.unit}</span>;
-  }
-  return (
-    <span className="inline-flex w-full flex-col items-end gap-1">
-      <span className="truncate">
+  const quota = row.quotaBytes;
+  if (quota === null || quota <= 0) {
+    return (
+      <span className="truncate" title={copy.usageNoQuota(`${used.number} ${used.unit}`)}>
         {used.number} {used.unit}
-        <span className="text-[var(--muted-foreground)]">
-          {' '}· {copy.remaining} {formatPercent((row.quotaBytes - usage.value) / row.quotaBytes)}
-        </span>
       </span>
-      <QuotaBar used={usage.value} quota={row.quotaBytes} />
+    );
+  }
+  const left = quota - usage.value;
+  const cap = splitBytes(quota);
+  return (
+    <span
+      className="inline-flex w-full flex-col items-end gap-1"
+      title={copy.usageTitle(
+        `${used.number} ${used.unit}`,
+        `${cap.number} ${cap.unit}`,
+        left < 0 ? copy.overQuota : formatPercent(left / quota),
+      )}
+    >
+      <span className="truncate">{used.number} {used.unit}</span>
+      <QuotaBar used={usage.value} quota={quota} />
+    </span>
+  );
+}
+
+/**
+ * The busiest family, and how many others there are.
+ *
+ * Two names do not fit in a hundred pixels and a truncated "Claude · ChatG"
+ * is a worse answer than "Claude +2" — the count is exact, and the full list
+ * is one hover or one click away.
+ */
+function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
+  const rest = families.length - 1;
+  return (
+    <span className="truncate" title={families.map((f) => copy.serviceName[f]).join(' · ')}>
+      {copy.serviceName[families[0]]}
+      {rest > 0 ? <span className="text-[var(--muted-foreground)]"> +{rest}</span> : null}
     </span>
   );
 }

@@ -21,8 +21,8 @@ type Merged = {
  * The rows arrive per day per destination per route; the question the block
  * answers is "where did this person's traffic go this week", so they are
  * folded on destination × route before anything is rendered. Folding on
- * destination alone would hide the one column that makes the 直连候选 button
- * meaningful — a domestic site currently going out through a paid exit.
+ * destination alone would hide the one column that makes the direct-route
+ * button meaningful — a domestic site currently going out through a paid exit.
  */
 function merge(rows: readonly DestinationRowDto[]): Merged[] {
   const byKey = new Map<string, Merged>();
@@ -91,7 +91,7 @@ function destinationColumns(): DataColumn<Merged>[] {
         <span className="flex min-w-0 flex-col leading-tight">
           <span className="truncate font-mono text-body">{row.etld1}</span>
           {row.topProcesses.length === 0 ? null : (
-            <span className="truncate text-micro text-[var(--muted-foreground)]">
+            <span className="truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
               {row.topProcesses.join(' · ')}
             </span>
           )}

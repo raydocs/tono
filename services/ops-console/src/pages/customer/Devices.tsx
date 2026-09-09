@@ -10,11 +10,11 @@ import { formatWhenAgo } from '@/lib/display';
 /**
  * Which platforms have a device action at all.
  *
- * Empty today: 发起远程诊断 and friends need write endpoints nobody has wired
- * yet, so every button on every row is disabled with its own reason. When the
- * first platform gets one, it goes in here and only that platform's buttons
- * come alive — which is the point of keeping the capability on the platform
- * rather than on the button.
+ * Empty today: remote diagnostics and its neighbours need write endpoints
+ * nobody has wired yet, so every button on every row is disabled with its own
+ * reason. When the first platform gets one it goes in here, and only that
+ * platform's buttons come alive — which is the point of keeping the capability
+ * on the platform rather than on the button.
  */
 const PLATFORMS_WITH_ACTIONS: Platform[] = [];
 
@@ -62,7 +62,7 @@ function deviceColumns(): DataColumn<CustomerDeviceDto>[] {
     {
       id: 'os',
       header: copy.deviceColumns.os,
-      width: '150px',
+      width: '140px',
       sortValue: (row) => row.osVersion ?? '',
       cell: (row) => <Value value={row.osVersion} source={copy.sourceWord.telemetry} />,
     },
@@ -84,7 +84,7 @@ function deviceColumns(): DataColumn<CustomerDeviceDto>[] {
     {
       id: 'node',
       header: copy.deviceColumns.node,
-      width: '140px',
+      width: '152px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },

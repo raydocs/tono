@@ -145,6 +145,9 @@ export const copy = {
     expires: '到期',
   } as const,
   deviceUnit: '台',
+  overQuota: '超额',
+  usageTitle: (used: string, quota: string, remain: string) => `已用 ${used} / 额度 ${quota} · 剩余 ${remain}`,
+  usageNoQuota: (used: string) => `已用 ${used} · 未设额度`,
   emptyCustomers: '没有客户',
 
   customerActions: {

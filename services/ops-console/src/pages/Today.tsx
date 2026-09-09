@@ -8,7 +8,7 @@ import { customerChores, fleetChores, sortChores, type Chore } from '@/lib/chore
 import { severityTone } from '@/lib/codes';
 import { formatDate, formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { openIncident } from '@/lib/hash-route';
-import { impactedCustomers, lastResolvedAt, openIncidents, resolvedIncidents } from '@/lib/incidents';
+import { impactedCustomers, incidentSubject, lastResolvedAt, openIncidents, resolvedIncidents } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
 import type { Resource } from '@/lib/use-resource';
@@ -94,6 +94,7 @@ export default function TodayPage({
           rows={tab === 'open' ? open : resolved}
           resolvedTab={tab === 'resolved'}
           emptyMessage={tab === 'open' ? copy.emptyIncidents : copy.emptyResolved}
+          subjectOf={(row) => incidentSubject(row, people, privacy.email) ?? copy.missing}
           onChanged={onChanged}
         />
       )}
@@ -117,18 +118,26 @@ function IncidentList({
   rows,
   resolvedTab,
   emptyMessage,
+  subjectOf,
   onChanged,
 }: {
   rows: readonly IncidentDto[];
   resolvedTab: boolean;
   emptyMessage: string;
+  subjectOf: (row: IncidentDto) => string;
   onChanged: () => void;
 }) {
   if (rows.length === 0) return <Empty message={emptyMessage} />;
   return (
     <div className="flex flex-col">
       {rows.map((row) => (
-        <IncidentRow key={row.id} row={row} resolvedTab={resolvedTab} onChanged={onChanged} />
+        <IncidentRow
+          key={row.id}
+          row={row}
+          subject={subjectOf(row)}
+          resolvedTab={resolvedTab}
+          onChanged={onChanged}
+        />
       ))}
     </div>
   );
@@ -144,10 +153,12 @@ function IncidentList({
  */
 function IncidentRow({
   row,
+  subject,
   resolvedTab,
   onChanged,
 }: {
   row: IncidentDto;
+  subject: string;
   resolvedTab: boolean;
   onChanged: () => void;
 }) {
@@ -182,8 +193,8 @@ function IncidentRow({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-micro text-[var(--muted-foreground)]">{copy.severity[row.severity]}</span>
-          <span className="min-w-0 font-mono text-body text-[var(--muted-foreground)]">
-            {row.subjectId ?? copy.missing}
+          <span className="min-w-0 truncate font-mono text-body text-[var(--muted-foreground)]">
+            {subject}
           </span>
         </div>
         <p className="text-row">{row.title}</p>

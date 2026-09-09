@@ -14,7 +14,7 @@ type Family = {
 };
 
 /**
- * One row per family, not per family per day: 服务使用 answers "what are they
+ * One row per family, not per family per day: the block answers "what are they
  * using and which way does it go", and a Claude row split over six days is
  * six answers to a question with one.
  */

@@ -31,7 +31,7 @@ export function Section({
   );
 }
 
-/** The same block, folded shut until asked — 诊断报告 / 待办 / 账务与用量. */
+/** The same block, folded shut until asked: diagnostics, chores, billing. */
 export function FoldedSection({
   title,
   count,

@@ -23,8 +23,8 @@ export function App() {
   const fleet = useFleet();
   /**
    * Both lists are fetched once for the whole shell rather than per page:
-   * ⌘K searches customers and open incidents from anywhere, and 今天 needs
-   * the customer list to name the people behind a node fault. Two requests
+   * the incident page needs the customer list to name the people behind a
+   * node fault, and Command-K searches both from anywhere. Two requests
    * on load beats four requests every time someone changes page.
    */
   const customers = useResource('customers', async (signal) => (await opsApi.customers(signal)).items);

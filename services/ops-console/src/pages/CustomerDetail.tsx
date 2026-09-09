@@ -1,15 +1,16 @@
 import { ArrowLeft } from 'lucide-react';
-import type { CustomerNowDto } from '@contract';
+import type { CustomerBillingDto, CustomerNowDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { Fact } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
 import { HeatStrip } from '@/components/ops/HeatStrip';
-import { QuotaGauge } from '@/components/ops/QuotaGauge';
+import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { FoldedSection, Section } from '@/components/ops/Section';
 import { StatusWord } from '@/components/ops/StatusWord';
+import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
-import { formatDate, formatWhenAgo } from '@/lib/display';
+import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
 import { closeCustomer } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { shown } from '@/lib/sources';
@@ -72,14 +73,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
               copy.sourceWord.profile,
             )}
           />
-          <div className="flex flex-col gap-1">
-            <span className="text-micro text-[var(--muted-foreground)]">{copy.quota}</span>
-            <QuotaGauge
-              used={shown(row.billing.usageBytes)}
-              quota={row.billing.quotaBytes}
-              cycleStartSec={row.billing.firstEntitledAt}
-            />
-          </div>
+          <Quota billing={row.billing} />
         </div>
         <ActionRow>
           {HEADER_ACTIONS.map((label) => (
@@ -188,12 +182,50 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
 }
 
 /**
- * 现在, as six measured facts.
+ * Used, capped, and how much is left — without the node page's exhaustion
+ * forecast. That forecast needs a cycle start, a customer record has none, and
+ * feeding it the first-entitlement date produced a confident exhaustion date
+ * two years out: a projection with nothing behind it is worse than none.
+ */
+function Quota({ billing }: { billing: CustomerBillingDto }) {
+  const usage = shown(billing.usageBytes);
+  const quota = billing.quotaBytes;
+  const used = usage.value === null ? null : splitBytes(usage.value);
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-micro text-[var(--muted-foreground)]">{copy.quota}</span>
+      {used === null || quota === null || quota <= 0 ? (
+        <Value value={used === null ? null : `${used.number} ${used.unit}`} source={usage.source} mono />
+      ) : (
+        <>
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="font-mono text-row">
+              {used.number}
+              <span className="ml-1 text-micro font-normal normal-case tracking-normal text-[var(--muted-foreground)]">
+                {used.unit} / {splitBytes(quota).number} {splitBytes(quota).unit}
+              </span>
+            </span>
+            <span className="font-mono text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+              {copy.remaining}{' '}
+              {quota - (usage.value ?? 0) < 0
+                ? copy.overQuota
+                : formatPercent((quota - (usage.value ?? 0)) / quota)}
+            </span>
+          </div>
+          <QuotaBar used={usage.value} quota={quota} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The "now" block, as six measured facts.
  *
  * They all hang off the same stamp — `now.connected.asOfSec` — because they
- * are one read of one client's state, and dating "连在哪台" differently from
- * "是否在连" would invite the reading that the node is current while the
- * connection is stale.
+ * are one read of one client's state, and dating "which node" differently
+ * from "connected at all" would invite the reading that the node is current
+ * while the connection is stale.
  */
 function nowFacts(now: CustomerNowDto): Array<{ label: string; measured: Measured<string | null> }> {
   const at = now.connected.asOfSec;
@@ -218,7 +250,7 @@ function nowFacts(now: CustomerNowDto): Array<{ label: string; measured: Measure
   ];
 }
 
-/** The kind is a free string on the wire; anything unmapped reads as 待办. */
+/** The kind is a free string on the wire; anything unmapped reads as a plain chore. */
 function choreWord(kind: string): string {
   const known = copy.choreKind as Record<string, string>;
   return known[kind] ?? copy.choreKindOther;

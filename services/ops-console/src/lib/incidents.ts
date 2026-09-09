@@ -1,4 +1,4 @@
-import type { IncidentDto, Severity } from '@contract';
+import type { CustomerSummaryDto, IncidentDto, Severity } from '@contract';
 
 const SEVERITY_RANK: Record<Severity, number> = { severe: 0, warn: 1, notice: 2 };
 
@@ -49,4 +49,22 @@ export function lastResolvedAt(rows: readonly IncidentDto[]): number | null {
 /** The children of an open node incident — the 受影响客户 list in the drawer. */
 export function childrenOf(rows: readonly IncidentDto[], id: string): IncidentDto[] {
   return sortIncidents(rows.filter((row) => row.parentIncidentId === id));
+}
+
+/**
+ * What the row is about, in the words the operator uses for it.
+ *
+ * A node incident is about a node and its name is already the name; a customer
+ * incident carries the internal user id, which nobody recognises. Resolving it
+ * to the address — through the same masker the privacy toggle uses — is the
+ * difference between "u-04 连不上" and a sentence someone can act on.
+ */
+export function incidentSubject(
+  incident: IncidentDto,
+  customers: readonly CustomerSummaryDto[],
+  mask: (email: string) => string,
+): string | null {
+  if (incident.subjectType !== 'user' || !incident.subjectId) return incident.subjectId;
+  const person = customers.find((row) => row.userId === incident.subjectId);
+  return person ? mask(person.email) : incident.subjectId;
 }

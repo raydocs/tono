@@ -11,7 +11,7 @@ type Cell = { ok: number; fail: number; elapsed: number[] };
 const MIN_SAMPLES = 1;
 
 /**
- * 运营商 × 地区, derived from the timeline rather than fetched.
+ * Carrier by region, derived from the timeline rather than fetched.
  *
  * There is no endpoint for this matrix and there should not be: it is the
  * same events the timeline already loaded, counted two ways. Asking the
@@ -117,7 +117,7 @@ function MatrixCell({ cell }: { cell: Cell | undefined }) {
       title={`${copy.carrierMatrix.samples} ${formatCount(total)}`}
     >
       <span className="font-mono">{formatPercent(cell.ok / total)}</span>
-      <span className="font-mono text-micro text-[var(--muted-foreground)]">
+      <span className="font-mono text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
         {mid === null ? copy.missing : formatLatency(mid)}
       </span>
     </span>

@@ -4,6 +4,7 @@ import { formatBytesMeasured, formatClock } from '@/lib/display';
 import { Value } from './Value';
 
 const HOURS_IN_DAY = 24;
+const DAYS = 7;
 const MINUTES_IN_HOUR = 60;
 /** Only every sixth hour is labelled; 24 numbers under a 7-row grid is noise. */
 const LABEL_EVERY = 6;
@@ -32,12 +33,16 @@ function toDays(rows: readonly ActivityHourDto[]): Day[] {
     }
     day.hours[date.getHours()] = row;
   }
-  return [...byDay.values()].sort((a, b) => a.key - b.key);
+  // Seven days ending today. A window measured in hours never lines up with
+  // calendar days at both ends, and the oldest row is the ragged one — showing
+  // it would put a half-empty Tuesday next to six whole days and invite the
+  // reading that the customer went quiet that week.
+  return [...byDay.values()].sort((a, b) => a.key - b.key).slice(-DAYS);
 }
 
 /**
- * 使用时段: seven days of hours, greyscale for 在线 and the one accent for
- * 已连接. Two channels in one cell rather than two strips, because the
+ * Seven days of hours: greyscale for time online, the one accent for time
+ * connected. Two channels in one cell rather than two strips, because the
  * question the block answers — "were they online but not connected?" — is a
  * comparison, and a comparison across two grids is not one.
  */
