@@ -22,7 +22,7 @@ import {
 } from './ops-timeseries';
 import { snapshotUserUsageHours } from './ops-usage-hours';
 import { runOpsCron } from './ops/cron';
-import { afterSnapshot, afterTelemetryWindow } from './ops/ingest-hooks';
+import { afterLogSegment, afterSnapshot, afterTelemetryWindow } from './ops/ingest-hooks';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
 import {
@@ -3382,6 +3382,14 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
       meta,
       payload,
     );
+    if (!stored.duplicate) {
+      await afterLogSegment(e, {
+        userId: a.userId,
+        deviceId: a.deviceId ?? null,
+        bytes: payload,
+        receivedAt: stored.receivedAt,
+      });
+    }
     // 200 on a replay, 201 on a new segment: the client advances its cursor on
     // either, but the distinction is what makes a cursor bug visible in logs.
     return Response.json(
