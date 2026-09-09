@@ -61,7 +61,7 @@ function urlFor(path: string, query?: Record<string, string>): string {
   return `/api/v1/ops/${path}${search ? `?${search}` : ''}`;
 }
 
-async function getJson<T>(
+export async function getJson<T>(
   path: string,
   signal?: AbortSignal,
   query?: Record<string, string>,
@@ -104,7 +104,7 @@ async function getJson<T>(
  * resolved incident is a no-op there), so the page refetches and shows what
  * actually happened rather than what it hoped would.
  */
-async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+export async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(urlFor(path), {
