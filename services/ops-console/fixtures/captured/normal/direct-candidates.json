@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "etld1": "bilibili.com",
+      "status": "new",
+      "firstSeen": 1724913548,
+      "users": 3,
+      "bytes30d": 4096,
+      "countryHint": "CN",
+      "decidedBy": null,
+      "decidedAt": null
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000000,
+  "total": 1
+}

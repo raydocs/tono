@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "id": "id_c0f8137d6451bd44",
+      "type": "collect_quality",
+      "executor": "hub",
+      "status": "queued",
+      "subjectType": "node",
+      "subjectId": "Preview Tokyo",
+      "params": {},
+      "attempts": 0,
+      "maxAttempts": 3,
+      "idempotencyKey": "id_f6c59d90cbda9f3f",
+      "requestedBy": "user4@example.test",
+      "incidentId": null,
+      "notBefore": 1724999828,
+      "expiresAt": 1725000728,
+      "leasedUntil": null,
+      "resultSummary": null,
+      "createdAt": 1724999828,
+      "updatedAt": 1724999828,
+      "finishedAt": null
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724999828
+}

@@ -1,0 +1,27 @@
+{
+  "items": [
+    {
+      "id": "id_0d63732b05911258",
+      "dedupeKey": "id_ac21edfc20677ad4",
+      "kind": "node_blocked",
+      "subjectType": "node",
+      "subjectId": "Preview Seoul",
+      "severity": "warn",
+      "status": "open",
+      "tone": "warn",
+      "title": "Preview Seoul 被墙",
+      "summary": null,
+      "parentIncidentId": null,
+      "rulesVersion": 1,
+      "impactCount": 2,
+      "evidence": [],
+      "openedAt": 1724996348,
+      "lastSeenAt": 1724999888,
+      "ackedAt": null,
+      "snoozedUntil": null,
+      "resolvedAt": null
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1724999888
+}

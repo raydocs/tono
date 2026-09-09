@@ -11,6 +11,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(rootDir, 'src'),
       '@legacy-lib': path.resolve(rootDir, '../control-plane/admin/src/lib'),
+      '@contract': path.resolve(rootDir, '../control-plane/src/ops/contract.ts'),
     },
   },
   test: {

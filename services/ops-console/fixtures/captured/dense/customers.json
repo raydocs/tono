@@ -1,0 +1,1958 @@
+{
+  "items": [
+    {
+      "userId": "id_5b6bdccf68a113fe",
+      "email": "user2@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Preview Tokyo",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999970,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 42949672960,
+        "asOfSec": 1724999970,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [
+        "claude"
+      ],
+      "minAppVersion": "0.0.72",
+      "expiresAt": 1727592000,
+      "lastSeenAt": 1724999970,
+      "updatedAt": 1724999970
+    },
+    {
+      "userId": "id_8e1683bf76af8037",
+      "email": "user1@example.test",
+      "verdict": "unreported",
+      "health": "未上报",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [],
+      "selectedServer": null,
+      "connected": {
+        "value": false,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 100663296000,
+        "asOfSec": 1724999980,
+        "source": "manual"
+      },
+      "quotaBytes": 107374182400,
+      "services": [],
+      "minAppVersion": null,
+      "expiresAt": 1726209600,
+      "lastSeenAt": null,
+      "updatedAt": 1724999980
+    },
+    {
+      "userId": "id_9afcdd047d236222",
+      "email": "user4@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999999,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 1048576,
+        "asOfSec": 1724999999,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999999,
+      "updatedAt": 1724999999
+    },
+    {
+      "userId": "id_f5d2379503f8810c",
+      "email": "user5@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Tokyo · Shibuya（东京涩谷 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999998,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 2097152,
+        "asOfSec": 1724999998,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999998,
+      "updatedAt": 1724999998
+    },
+    {
+      "userId": "id_d6e5fecff8c847db",
+      "email": "user6@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Seoul · Han（首尔汉江 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999997,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 3145728,
+        "asOfSec": 1724999997,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999997,
+      "updatedAt": 1724999997
+    },
+    {
+      "userId": "id_1d4f08e690802366",
+      "email": "user7@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Osaka · Umeda（大阪梅田 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999996,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 4194304,
+        "asOfSec": 1724999996,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999996,
+      "updatedAt": 1724999996
+    },
+    {
+      "userId": "id_57ba8f6678c62a83",
+      "email": "user8@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Hong Kong · Victoria（香港维多利亚 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999995,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 5242880,
+        "asOfSec": 1724999995,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999995,
+      "updatedAt": 1724999995
+    },
+    {
+      "userId": "id_5c3e0a7542049e2f",
+      "email": "user9@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Taipei · Daan（台北大安 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999994,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 6291456,
+        "asOfSec": 1724999994,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999994,
+      "updatedAt": 1724999994
+    },
+    {
+      "userId": "id_5a487ab36f211b59",
+      "email": "user10@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Los Angeles · Echo（洛杉矶回声 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999993,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 7340032,
+        "asOfSec": 1724999993,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999993,
+      "updatedAt": 1724999993
+    },
+    {
+      "userId": "id_0ce88c3aade4a86e",
+      "email": "user11@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "San Jose · Mission（圣何塞使命 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999992,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 8388608,
+        "asOfSec": 1724999992,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999992,
+      "updatedAt": 1724999992
+    },
+    {
+      "userId": "id_774f83eb2d6ceaea",
+      "email": "user12@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Seattle · Rainier（西雅图雷尼尔 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999991,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 9437184,
+        "asOfSec": 1724999991,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999991,
+      "updatedAt": 1724999991
+    },
+    {
+      "userId": "id_003f170336733144",
+      "email": "user13@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Dallas · Trinity（达拉斯三一 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999990,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 10485760,
+        "asOfSec": 1724999990,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999990,
+      "updatedAt": 1724999990
+    },
+    {
+      "userId": "id_966e336c98e91b3d",
+      "email": "user14@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Chicago · Loop（芝加哥环线 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999989,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 11534336,
+        "asOfSec": 1724999989,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999989,
+      "updatedAt": 1724999989
+    },
+    {
+      "userId": "id_846a13f5e6721d80",
+      "email": "user15@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Ashburn · Potomac（阿什本波托马克 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999988,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 12582912,
+        "asOfSec": 1724999988,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999988,
+      "updatedAt": 1724999988
+    },
+    {
+      "userId": "id_036a66d8c180f161",
+      "email": "user16@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Miami · Biscayne（迈阿密比斯坎 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999987,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 13631488,
+        "asOfSec": 1724999987,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999987,
+      "updatedAt": 1724999987
+    },
+    {
+      "userId": "id_f0974db2d860cc71",
+      "email": "user17@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "London · Thames（伦敦泰晤士 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999986,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 14680064,
+        "asOfSec": 1724999986,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999986,
+      "updatedAt": 1724999986
+    },
+    {
+      "userId": "id_2d76371b20515a21",
+      "email": "user18@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Frankfurt · Main（法兰克福美因 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999985,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 15728640,
+        "asOfSec": 1724999985,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999985,
+      "updatedAt": 1724999985
+    },
+    {
+      "userId": "id_a5f1247b72a306f7",
+      "email": "user3@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Amsterdam · Amstel（阿姆斯特丹阿姆斯特尔 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999984,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 16777216,
+        "asOfSec": 1724999984,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999984,
+      "updatedAt": 1724999984
+    },
+    {
+      "userId": "id_dff88b608551cbf2",
+      "email": "user19@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Paris · Seine（巴黎塞纳 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999983,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 17825792,
+        "asOfSec": 1724999983,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999983,
+      "updatedAt": 1724999983
+    },
+    {
+      "userId": "id_53b56bec5547020d",
+      "email": "user20@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Zurich · Limmat（苏黎世利马特 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999982,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 18874368,
+        "asOfSec": 1724999982,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999982,
+      "updatedAt": 1724999982
+    },
+    {
+      "userId": "id_8d8092d82aa2e6b6",
+      "email": "user21@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Stockholm · Malaren（斯德哥尔摩梅拉伦 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999981,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 19922944,
+        "asOfSec": 1724999981,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999981,
+      "updatedAt": 1724999981
+    },
+    {
+      "userId": "id_018bd9fa52f85d12",
+      "email": "user22@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Helsinki · Baltic（赫尔辛基波罗的海 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999980,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 20971520,
+        "asOfSec": 1724999980,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999980,
+      "updatedAt": 1724999980
+    },
+    {
+      "userId": "id_59bccad21d6967f1",
+      "email": "user23@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Warsaw · Vistula（华沙维斯瓦 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999979,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 22020096,
+        "asOfSec": 1724999979,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999979,
+      "updatedAt": 1724999979
+    },
+    {
+      "userId": "id_26120279d3099dc6",
+      "email": "user24@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Madrid · Manzanares（马德里曼萨纳雷斯 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999978,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 23068672,
+        "asOfSec": 1724999978,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999978,
+      "updatedAt": 1724999978
+    },
+    {
+      "userId": "id_9aa988e320e71f06",
+      "email": "user25@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Milan · Naviglio（米兰纳维利 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999977,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 24117248,
+        "asOfSec": 1724999977,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999977,
+      "updatedAt": 1724999977
+    },
+    {
+      "userId": "id_fb323ac612325fe9",
+      "email": "user26@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Vienna · Danube（维也纳多瑙 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999976,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 25165824,
+        "asOfSec": 1724999976,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999976,
+      "updatedAt": 1724999976
+    },
+    {
+      "userId": "id_4bcba4f2fe072b61",
+      "email": "user27@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Istanbul · Bosphorus（伊斯坦布尔博斯普鲁斯 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999975,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 26214400,
+        "asOfSec": 1724999975,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999975,
+      "updatedAt": 1724999975
+    },
+    {
+      "userId": "id_e2d66457d009eac7",
+      "email": "user28@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Dubai · Creek（迪拜河 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999974,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 27262976,
+        "asOfSec": 1724999974,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999974,
+      "updatedAt": 1724999974
+    },
+    {
+      "userId": "id_0c8c73f47b72e4dc",
+      "email": "user29@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Mumbai · Harbour（孟买海港 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999973,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 28311552,
+        "asOfSec": 1724999973,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999973,
+      "updatedAt": 1724999973
+    },
+    {
+      "userId": "id_e8ba41cb425b0712",
+      "email": "user30@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Delhi · Yamuna（德里亚穆纳 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999972,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 29360128,
+        "asOfSec": 1724999972,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999972,
+      "updatedAt": 1724999972
+    },
+    {
+      "userId": "id_d575234849aa0fbc",
+      "email": "user31@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Bangkok · Chao Phraya（曼谷湄南 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999971,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 30408704,
+        "asOfSec": 1724999971,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999971,
+      "updatedAt": 1724999971
+    },
+    {
+      "userId": "id_d384d7628ec427d7",
+      "email": "user32@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Jakarta · Ciliwung（雅加达芝利翁 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999970,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 31457280,
+        "asOfSec": 1724999970,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999970,
+      "updatedAt": 1724999970
+    },
+    {
+      "userId": "id_128a6e3ce3cb929c",
+      "email": "user33@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Manila · Pasig（马尼拉帕西格 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999969,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 32505856,
+        "asOfSec": 1724999969,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999969,
+      "updatedAt": 1724999969
+    },
+    {
+      "userId": "id_1860f70b18a5f4c8",
+      "email": "user34@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Kuala Lumpur · Klang（吉隆坡巴生 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999968,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 33554432,
+        "asOfSec": 1724999968,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999968,
+      "updatedAt": 1724999968
+    },
+    {
+      "userId": "id_8fc1d5e9ffbe0739",
+      "email": "user35@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Sydney · Harbour（悉尼海港 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999967,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 34603008,
+        "asOfSec": 1724999967,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999967,
+      "updatedAt": 1724999967
+    },
+    {
+      "userId": "id_971ebe6e24237c2c",
+      "email": "user36@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Melbourne · Yarra（墨尔本亚拉 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999966,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 35651584,
+        "asOfSec": 1724999966,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999966,
+      "updatedAt": 1724999966
+    },
+    {
+      "userId": "id_b8a1b5576b025f0a",
+      "email": "user37@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Auckland · Waitemata（奥克兰怀提马塔 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999965,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 36700160,
+        "asOfSec": 1724999965,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999965,
+      "updatedAt": 1724999965
+    },
+    {
+      "userId": "id_29cb468b1b1c16c9",
+      "email": "user38@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Toronto · Ontario（多伦多安大略 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999964,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 37748736,
+        "asOfSec": 1724999964,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999964,
+      "updatedAt": 1724999964
+    },
+    {
+      "userId": "id_ec7e1daead351b42",
+      "email": "user39@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Vancouver · Burrard（温哥华布勒 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999963,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 38797312,
+        "asOfSec": 1724999963,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999963,
+      "updatedAt": 1724999963
+    },
+    {
+      "userId": "id_563ba1eac414601a",
+      "email": "user40@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Montreal · Saint Laurent（蒙特利尔圣劳伦斯 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999962,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 39845888,
+        "asOfSec": 1724999962,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999962,
+      "updatedAt": 1724999962
+    },
+    {
+      "userId": "id_0c30e9195f45d971",
+      "email": "user41@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Sao Paulo · Pinheiros（圣保罗皮涅伊罗斯 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999961,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 40894464,
+        "asOfSec": 1724999961,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999961,
+      "updatedAt": 1724999961
+    },
+    {
+      "userId": "id_b99cb966bdd2b3f3",
+      "email": "user42@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Mexico City · Chapultepec（墨西哥城查普尔特佩克 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999960,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 41943040,
+        "asOfSec": 1724999960,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999960,
+      "updatedAt": 1724999960
+    },
+    {
+      "userId": "id_70af2b2d42db4afc",
+      "email": "user43@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Santiago · Mapocho（圣地亚哥马波乔 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999959,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 42991616,
+        "asOfSec": 1724999959,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999959,
+      "updatedAt": 1724999959
+    },
+    {
+      "userId": "id_03964cb0f298fd35",
+      "email": "user44@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Johannesburg · Highveld（约翰内斯堡高地 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999958,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 44040192,
+        "asOfSec": 1724999958,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999958,
+      "updatedAt": 1724999958
+    },
+    {
+      "userId": "id_70cb31830f50dc10",
+      "email": "user45@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Cairo · Nile（开罗尼罗 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999957,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 45088768,
+        "asOfSec": 1724999957,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999957,
+      "updatedAt": 1724999957
+    },
+    {
+      "userId": "id_9063a55c7c55d40e",
+      "email": "user46@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Tel Aviv · Yarkon（特拉维夫雅孔 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999956,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 46137344,
+        "asOfSec": 1724999956,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999956,
+      "updatedAt": 1724999956
+    },
+    {
+      "userId": "id_73636ff3f35202cd",
+      "email": "user47@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Riyadh · Wadi（利雅得谷地 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999955,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 47185920,
+        "asOfSec": 1724999955,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999955,
+      "updatedAt": 1724999955
+    },
+    {
+      "userId": "id_dcf8bc9c30f770fc",
+      "email": "user48@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Singapore · Harbour（新加坡海港 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999954,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 48234496,
+        "asOfSec": 1724999954,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999954,
+      "updatedAt": 1724999954
+    },
+    {
+      "userId": "id_713ca6fe35265d9c",
+      "email": "user49@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Tokyo · Shibuya（东京涩谷 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999953,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 49283072,
+        "asOfSec": 1724999953,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999953,
+      "updatedAt": 1724999953
+    },
+    {
+      "userId": "id_612343faccc4196b",
+      "email": "user50@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Seoul · Han（首尔汉江 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999952,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 50331648,
+        "asOfSec": 1724999952,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999952,
+      "updatedAt": 1724999952
+    },
+    {
+      "userId": "id_ef62e0779111e4ba",
+      "email": "user51@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Osaka · Umeda（大阪梅田 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999951,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 51380224,
+        "asOfSec": 1724999951,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999951,
+      "updatedAt": 1724999951
+    },
+    {
+      "userId": "id_99bff630fd471764",
+      "email": "user52@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Hong Kong · Victoria（香港维多利亚 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999950,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 52428800,
+        "asOfSec": 1724999950,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999950,
+      "updatedAt": 1724999950
+    },
+    {
+      "userId": "id_6f27563e27175f66",
+      "email": "user53@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Taipei · Daan（台北大安 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999949,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 53477376,
+        "asOfSec": 1724999949,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999949,
+      "updatedAt": 1724999949
+    },
+    {
+      "userId": "id_f6b860ffc8ff2799",
+      "email": "user54@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Los Angeles · Echo（洛杉矶回声 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999948,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 54525952,
+        "asOfSec": 1724999948,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999948,
+      "updatedAt": 1724999948
+    },
+    {
+      "userId": "id_fdcf2ca367c5cb45",
+      "email": "user55@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "San Jose · Mission（圣何塞使命 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999947,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 55574528,
+        "asOfSec": 1724999947,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999947,
+      "updatedAt": 1724999947
+    },
+    {
+      "userId": "id_17c20328fef60632",
+      "email": "user56@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Seattle · Rainier（西雅图雷尼尔 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999946,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 56623104,
+        "asOfSec": 1724999946,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999946,
+      "updatedAt": 1724999946
+    },
+    {
+      "userId": "id_2e5cdac0b39b21c9",
+      "email": "user57@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Dallas · Trinity（达拉斯三一 · 大陆直连 · 9929）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999945,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 57671680,
+        "asOfSec": 1724999945,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999945,
+      "updatedAt": 1724999945
+    },
+    {
+      "userId": "id_d0471805f0c81b8e",
+      "email": "user58@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Chicago · Loop（芝加哥环线 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999944,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 58720256,
+        "asOfSec": 1724999944,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999944,
+      "updatedAt": 1724999944
+    },
+    {
+      "userId": "id_451fb1160d8c2cce",
+      "email": "user59@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "Ashburn · Potomac（阿什本波托马克 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999943,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 59768832,
+        "asOfSec": 1724999943,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999943,
+      "updatedAt": 1724999943
+    },
+    {
+      "userId": "id_35c5492d27014605",
+      "email": "user60@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Miami · Biscayne（迈阿密比斯坎 · 大陆直连 · CN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999942,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 60817408,
+        "asOfSec": 1724999942,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999942,
+      "updatedAt": 1724999942
+    },
+    {
+      "userId": "id_905a0c992add674b",
+      "email": "user61@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "macos"
+      ],
+      "selectedServer": "London · Thames（伦敦泰晤士 · 大陆直连 · CN2GIA）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999941,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 61865984,
+        "asOfSec": 1724999941,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999941,
+      "updatedAt": 1724999941
+    },
+    {
+      "userId": "id_29fd7b525012dc09",
+      "email": "user62@example.test",
+      "verdict": "ok",
+      "health": "正常",
+      "tone": "ok",
+      "reason": null,
+      "lifecycle": "active",
+      "deviceCount": 1,
+      "platforms": [
+        "windows"
+      ],
+      "selectedServer": "Frankfurt · Main（法兰克福美因 · 大陆直连 · CMIN2）",
+      "connected": {
+        "value": true,
+        "asOfSec": 1724999940,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 62914560,
+        "asOfSec": 1724999940,
+        "source": "manual"
+      },
+      "quotaBytes": 214748364800,
+      "services": [],
+      "minAppVersion": "0.0.72",
+      "expiresAt": null,
+      "lastSeenAt": 1724999940,
+      "updatedAt": 1724999940
+    },
+    {
+      "userId": "id_4e5f351bb875c630",
+      "email": "user63@example.test",
+      "verdict": "unreported",
+      "health": "未上报",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "suspended",
+      "deviceCount": 0,
+      "platforms": [],
+      "selectedServer": null,
+      "connected": {
+        "value": false,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "lastFailure": null,
+      "usageBytes": {
+        "value": 0,
+        "asOfSec": 1724999990,
+        "source": "manual"
+      },
+      "quotaBytes": null,
+      "services": [],
+      "minAppVersion": null,
+      "expiresAt": 1724996400,
+      "lastSeenAt": null,
+      "updatedAt": 1724999990
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000000,
+  "total": 63
+}
