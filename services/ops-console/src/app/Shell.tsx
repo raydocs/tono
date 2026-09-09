@@ -89,7 +89,7 @@ export function Shell({
                 aria-current={active ? 'page' : undefined}
                 title={copy.pages[item.id]}
                 className={cn(
-                  'flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-body transition-transform duration-150 min-[960px]:px-3',
+                  'nav-item flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-body transition-transform duration-150 min-[960px]:px-3',
                   active ? 'bg-[var(--background)] font-medium' : 'text-[var(--muted-foreground)] hover:-translate-y-px',
                 )}
                 onClick={(event) => {

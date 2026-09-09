@@ -219,6 +219,23 @@ a { color: inherit; text-decoration: none; }
   gap: 8px;
 }
 
+/* The rail. The active entry had a filled background and nothing else, which
+   at the icon-only width below 960 px is a grey square that could as easily be
+   a hover state. A 2 px accent bar on the rail's own edge says "you are here"
+   at both widths, and is the only place the accent appears outside a primary
+   action. */
+.nav-item { position: relative; }
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
 /* A surface that is meant to sit above the page.
    In the light theme the page is warm white and the card is white, so a 8%
    hairline is enough to separate them. In the dark theme both are near-black
