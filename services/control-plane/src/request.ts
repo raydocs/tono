@@ -86,3 +86,12 @@ export const email = (v: any) => {
 
 export const optionalText = (value: unknown) => value === null || value === undefined ? null : String(value);
 export const optionalNumber = (value: unknown) => value === null || value === undefined ? null : Number(value);
+
+export function diagnosticsInt(source: Row, key: string, min: number, max: number, nullable: boolean) {
+  const raw = source[key];
+  if (nullable && (raw === undefined || raw === null)) return undefined;
+  if (!Number.isSafeInteger(raw) || (raw as number) < min || (raw as number) > max) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
+  }
+  return raw as number;
+}

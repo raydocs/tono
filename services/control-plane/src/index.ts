@@ -49,12 +49,14 @@ import {
 } from './traffic-policy';
 import {
   rejectUnexpectedKeys,
+  diagnosticsInt,
   body,
   error,
   email,
   optionalText,
 } from './request';
-import { DIAGNOSTICS_DAY_SECONDS } from './diagnostics-limits';
+import { DIAGNOSTICS_DAY_SECONDS, DIAGNOSTICS_MAX_REPORTED_AT_MS } from './diagnostics-limits';
+import { canonicalTelemetryWindow } from './telemetry-window';
 import {
   sharedAdministrativeResource,
   backfillDeviceExitCredentials,
@@ -861,7 +863,6 @@ const DIAGNOSTICS_MAX_ELAPSED_MS = 24 * 60 * 60 * 1000;
 /** 2100-01-01 in epoch ms. `reportedAtMs` is the *client* clock, and a skewed
  *  clock is itself a failure this report exists to capture, so it is bounded
  *  for storage sanity rather than checked against the server's clock. */
-const DIAGNOSTICS_MAX_REPORTED_AT_MS = 4_102_444_800_000;
 /** Required strings: [key, minLength, maxLength]. Only the two that are
  *  promoted to columns must be non-empty (the column CHECKs say so); an empty
  *  state name from a degraded client should not cost the whole upload. */
@@ -904,15 +905,6 @@ const diagnosticsKeys = [
   'retryAttempt', 'totalElapsedMs', 'steps', 'virtualAdapters',
   'auditLogPath', 'serviceLogPath',
 ];
-
-function diagnosticsInt(source: Row, key: string, min: number, max: number, nullable: boolean) {
-  const raw = source[key];
-  if (nullable && (raw === undefined || raw === null)) return undefined;
-  if (!Number.isSafeInteger(raw) || (raw as number) < min || (raw as number) > max) {
-    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
-  }
-  return raw as number;
-}
 
 /**
  * Whitelist the structured report. Nothing outside the schema is stored, the
@@ -1163,159 +1155,9 @@ const publicDiagnosticsReport = (r: Row) => ({
 // Worker still rejects unknown keys and free-text email-like fields.
 
 const TELEMETRY_BODY_MAX_BYTES = 72 * 1024;
-const TELEMETRY_PAYLOAD_MAX_BYTES = 64 * 1024;
-const TELEMETRY_MAX_EVENTS = 200;
 const TELEMETRY_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
 const OPS_AUDIT_RETENTION_SECONDS = 180 * 86_400;
-const TELEMETRY_MAX_REPORTED_AT_MS = DIAGNOSTICS_MAX_REPORTED_AT_MS;
 
-const telemetryWindowKeys = [
-  'schemaVersion', 'kind', 'windowStartMs', 'windowEndMs',
-  'appVersion', 'osVersion', 'osArch',
-  'uiState', 'accountState', 'selectedServer', 'catalogRevision',
-  'killSwitchMode', 'killSwitchWanted', 'killSwitchLive',
-  'dnsEnabled', 'exitDelayMs', 'tcpDelayMs', 'exitDelayAtMs', 'tcpDelayAtMs',
-  'eventCount', 'eventsDropped', 'events',
-];
-
-const telemetryEventStringKeys = [
-  'kind', 'stage', 'error', 'node', 'action', 'reason', 'probe',
-  'from', 'to', 'mode', 'reference', 'outcome', 'code',
-];
-const telemetryEventNumberKeys = [
-  'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
-  'revision', 'domains', 'media', 'webDomains', 'wechatTcp', 'webTcp', 'udp',
-  'endpoints', 'eventCount', 'bytes', 'generation',
-];
-const telemetryEventBoolKeys = ['wanted', 'live', 'updateResume'];
-const telemetryEventKeys = [
-  ...telemetryEventStringKeys,
-  ...telemetryEventNumberKeys,
-  ...telemetryEventBoolKeys,
-];
-
-function canonicalTelemetryWindow(value: unknown) {
-  rejectUnexpectedKeys(value, telemetryWindowKeys);
-  const source = value as Row;
-  const kind = str(source.kind, 'kind', 1, 40);
-  if (kind !== 'periodic_window') {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid telemetry kind');
-  }
-  const schemaVersion = diagnosticsInt(source, 'schemaVersion', 1, 1_000, false)!;
-  const windowStartMs = diagnosticsInt(source, 'windowStartMs', 0, TELEMETRY_MAX_REPORTED_AT_MS, false)!;
-  const windowEndMs = diagnosticsInt(source, 'windowEndMs', 0, TELEMETRY_MAX_REPORTED_AT_MS, false)!;
-  if (windowEndMs < windowStartMs) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid telemetry window range');
-  }
-  if (windowEndMs - windowStartMs > 6 * 60 * 60 * 1000) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Telemetry window too wide');
-  }
-  const appVersion = str(source.appVersion, 'appVersion', 1, 40);
-  const osVersion = str(source.osVersion, 'osVersion', 1, 80);
-  const osArch = str(source.osArch ?? '', 'osArch', 0, 32);
-  const uiState = str(source.uiState ?? '', 'uiState', 0, 40);
-  const accountState = str(source.accountState ?? '', 'accountState', 0, 40);
-  if (typeof source.eventCount !== 'number' || !Number.isSafeInteger(source.eventCount)
-      || source.eventCount < 0 || source.eventCount > TELEMETRY_MAX_EVENTS) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid eventCount');
-  }
-  if (typeof source.eventsDropped !== 'number' || !Number.isSafeInteger(source.eventsDropped)
-      || source.eventsDropped < 0 || source.eventsDropped > 1_000_000) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid eventsDropped');
-  }
-  if (!Array.isArray(source.events) || source.events.length > TELEMETRY_MAX_EVENTS) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid events');
-  }
-  if (source.events.length !== source.eventCount) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'eventCount mismatch');
-  }
-
-  const events = source.events.map((raw: unknown) => {
-    rejectUnexpectedKeys(raw, telemetryEventKeys);
-    const entry = raw as Row;
-    if (typeof entry.ts !== 'number' || !Number.isSafeInteger(entry.ts)
-        || entry.ts < 0 || entry.ts > TELEMETRY_MAX_REPORTED_AT_MS) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid event ts');
-    }
-    const eventKind = str(entry.kind, 'event kind', 1, 40);
-    // Never accept account identity fields on the wire.
-    if (eventKind === 'signInStart' || eventKind === 'signInOk' || 'email' in entry) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Telemetry must not include account identity events');
-    }
-    const event: Row = { ts: entry.ts, kind: eventKind };
-    for (const key of telemetryEventStringKeys) {
-      if (key === 'kind') continue;
-      if (entry[key] === undefined || entry[key] === null) continue;
-      event[key] = str(entry[key], key, 0, 500);
-    }
-    for (const key of telemetryEventNumberKeys) {
-      if (key === 'ts') continue;
-      if (entry[key] === undefined || entry[key] === null) continue;
-      if (typeof entry[key] !== 'number' || !Number.isSafeInteger(entry[key])) {
-        throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
-      }
-      event[key] = entry[key];
-    }
-    for (const key of telemetryEventBoolKeys) {
-      if (entry[key] === undefined || entry[key] === null) continue;
-      if (typeof entry[key] !== 'boolean') {
-        throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
-      }
-      event[key] = entry[key];
-    }
-    return event;
-  });
-
-  const window: Row = {
-    schemaVersion,
-    kind,
-    windowStartMs,
-    windowEndMs,
-    appVersion,
-    osVersion,
-    osArch,
-    uiState,
-    accountState,
-    eventCount: source.eventCount,
-    eventsDropped: source.eventsDropped,
-    events,
-  };
-  if (source.selectedServer !== undefined && source.selectedServer !== null) {
-    window.selectedServer = str(source.selectedServer, 'selectedServer', 0, 100);
-  }
-  const catalogRevision = diagnosticsInt(source, 'catalogRevision', 0, 1_000_000_000_000, true);
-  if (catalogRevision !== undefined) window.catalogRevision = catalogRevision;
-  if (source.killSwitchMode !== undefined && source.killSwitchMode !== null) {
-    window.killSwitchMode = str(source.killSwitchMode, 'killSwitchMode', 0, 40);
-  }
-  for (const key of ['killSwitchWanted', 'killSwitchLive', 'dnsEnabled'] as const) {
-    if (source[key] === undefined || source[key] === null) continue;
-    if (typeof source[key] !== 'boolean') {
-      throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${key}`);
-    }
-    window[key] = source[key];
-  }
-  const exitDelayMs = diagnosticsInt(source, 'exitDelayMs', 1, 120_000, true);
-  if (exitDelayMs !== undefined) window.exitDelayMs = exitDelayMs;
-  const tcpDelayMs = diagnosticsInt(source, 'tcpDelayMs', 1, 120_000, true);
-  if (tcpDelayMs !== undefined) window.tcpDelayMs = tcpDelayMs;
-  const exitDelayAtMs = diagnosticsInt(source, 'exitDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS, true);
-  if (exitDelayAtMs !== undefined) window.exitDelayAtMs = exitDelayAtMs;
-  const tcpDelayAtMs = diagnosticsInt(source, 'tcpDelayAtMs', 1, TELEMETRY_MAX_REPORTED_AT_MS, true);
-  if (tcpDelayAtMs !== undefined) window.tcpDelayAtMs = tcpDelayAtMs;
-
-  const json = JSON.stringify(window);
-  if (new TextEncoder().encode(json).byteLength > TELEMETRY_PAYLOAD_MAX_BYTES) {
-    throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Telemetry window is too large');
-  }
-  return {
-    json,
-    appVersion,
-    osVersion,
-    windowStartMs,
-    windowEndMs,
-  };
-}
 
 async function rateLimitTelemetry(e: Env, req: Request, uid: string) {
   await consumeRateLimit(
