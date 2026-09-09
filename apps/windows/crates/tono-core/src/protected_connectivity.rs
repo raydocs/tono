@@ -3,6 +3,8 @@
 //! Controller `/delay` is advisory. Real App HTTPS through system DNS and the
 //! locked TUN owns Connected. Mixed-proxy success is diagnostic only.
 
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,13 +83,45 @@ pub const TUN_PROBE_ORIGINS: [TunProbeOrigin; 3] = [
     },
 ];
 
+/// How often a still-unverified session retries the exit probe after the
+/// 120 s escalate window. Same cadence as the connected-lifetime monitor.
+pub const EXIT_PROBE_INTERVAL: Duration = Duration::from_secs(120);
+/// First *retry* after the Connected-time zero-delay probe fails.
+pub const UNVERIFIED_PROBE_INITIAL: Duration = Duration::from_secs(5);
+/// Cap of the pre-success doubling ladder.
+pub const UNVERIFIED_PROBE_MAX: Duration = Duration::from_secs(30);
+/// After this much time still unverified, fall back to [`EXIT_PROBE_INTERVAL`].
+pub const UNVERIFIED_PROBE_ESCALATE_AFTER: Duration = Duration::from_secs(120);
+
+/// Next wait before an unverified exit retest. `last_delay` is the delay that
+/// just elapsed (`None` before the Connected-time probe). Ladder is 0, 5, 10,
+/// 20, 30 s, then [`EXIT_PROBE_INTERVAL`] after [`UNVERIFIED_PROBE_ESCALATE_AFTER`].
+/// There is never a second concurrent probe: the caller must not start one
+/// while another is in flight.
+pub fn next_unverified_probe_delay(
+    unverified_for: Duration,
+    last_delay: Option<Duration>,
+) -> Duration {
+    if unverified_for >= UNVERIFIED_PROBE_ESCALATE_AFTER {
+        return EXIT_PROBE_INTERVAL;
+    }
+    match last_delay {
+        None => Duration::ZERO,
+        Some(previous) => previous
+            .saturating_mul(2)
+            .clamp(UNVERIFIED_PROBE_INITIAL, UNVERIFIED_PROBE_MAX),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PostLockDecision<T> {
     Connected {
         status: T,
         controller_advisory: Option<String>,
     },
-    Retry {
+    /// Lock is up; third-party exit probes did not prove egress.
+    /// Callers must keep the barrier and must not `plan_failure`.
+    ConnectedUnverified {
         code: ProtectedFailureCode,
         error: String,
     },
@@ -106,11 +140,11 @@ pub fn classify_post_lock<T>(
             status,
             controller_advisory: Some(error),
         },
-        (Ok(()), Err(error)) => PostLockDecision::Retry {
+        (Ok(()), Err(error)) => PostLockDecision::ConnectedUnverified {
             code: ProtectedFailureCode::TunRouteUnavailable,
             error,
         },
-        (Err(controller), Err(data_plane)) => PostLockDecision::Retry {
+        (Err(controller), Err(data_plane)) => PostLockDecision::ConnectedUnverified {
             code: ProtectedFailureCode::CoreExitUnreachable,
             error: format!(
                 "controller exit measurement failed: {controller}; real TUN data plane failed: {data_plane}"
@@ -172,14 +206,70 @@ mod tests {
     }
 
     #[test]
-    fn controller_success_without_tun_is_not_connected() {
+    fn controller_success_without_tun_is_connected_unverified() {
         let decision = classify_post_lock::<u8>(Ok(()), Err("all origins failed".into()));
         match decision {
-            PostLockDecision::Retry { code, .. } => {
+            PostLockDecision::ConnectedUnverified { code, error } => {
                 assert_eq!(code, ProtectedFailureCode::TunRouteUnavailable);
+                assert!(error.contains("all origins failed"));
             }
-            PostLockDecision::Connected { .. } => panic!("TUN failure must not connect"),
+            other => panic!("TUN failure after lock must stay connected unverified, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn controller_and_tun_failure_is_connected_unverified_core_exit() {
+        let decision = classify_post_lock::<u8>(
+            Err("delay 503".into()),
+            Err("tls handshake eof".into()),
+        );
+        match decision {
+            PostLockDecision::ConnectedUnverified { code, error } => {
+                assert_eq!(code, ProtectedFailureCode::CoreExitUnreachable);
+                assert!(error.contains("delay 503"));
+                assert!(error.contains("tls handshake eof"));
+            }
+            other => panic!("expected ConnectedUnverified, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unverified_probe_backoff_doubles_then_escalates() {
+        assert_eq!(
+            next_unverified_probe_delay(Duration::ZERO, None),
+            Duration::ZERO
+        );
+        assert_eq!(
+            next_unverified_probe_delay(Duration::ZERO, Some(Duration::ZERO)),
+            UNVERIFIED_PROBE_INITIAL
+        );
+        assert_eq!(
+            next_unverified_probe_delay(Duration::from_secs(5), Some(Duration::from_secs(5))),
+            Duration::from_secs(10)
+        );
+        assert_eq!(
+            next_unverified_probe_delay(Duration::from_secs(15), Some(Duration::from_secs(10))),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            next_unverified_probe_delay(Duration::from_secs(40), Some(Duration::from_secs(20))),
+            UNVERIFIED_PROBE_MAX
+        );
+        assert_eq!(
+            next_unverified_probe_delay(Duration::from_secs(40), Some(Duration::from_secs(30))),
+            UNVERIFIED_PROBE_MAX
+        );
+        assert_eq!(
+            next_unverified_probe_delay(UNVERIFIED_PROBE_ESCALATE_AFTER, Some(Duration::from_secs(30))),
+            EXIT_PROBE_INTERVAL
+        );
+        assert_eq!(
+            next_unverified_probe_delay(
+                UNVERIFIED_PROBE_ESCALATE_AFTER + Duration::from_secs(1),
+                None
+            ),
+            EXIT_PROBE_INTERVAL
+        );
     }
 
     #[test]

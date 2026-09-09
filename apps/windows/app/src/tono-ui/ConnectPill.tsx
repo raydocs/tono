@@ -84,8 +84,11 @@ const hex = (color: string, alpha: number) =>
 interface ConnectPillProps {
   uiState: TonoUiState
   protectionConfirmed?: boolean
+  exitVerified?: boolean
   /** Connect FSM stage key (`startingKillSwitch`). Translated in the pill. */
   stage?: string | null
+  /** Catalog display name to try. Suggestion only. */
+  suggestedServer?: string | null
   onConnect: () => void
   onDisconnect: () => void
 }
@@ -93,7 +96,9 @@ interface ConnectPillProps {
 export const ConnectPill = ({
   uiState,
   protectionConfirmed = false,
+  exitVerified = true,
   stage,
+  suggestedServer = null,
   onConnect,
   onDisconnect,
 }: ConnectPillProps) => {
@@ -103,7 +108,9 @@ export const ConnectPill = ({
   const spec = STATE_SPECS[uiState]
   const titleKey = uiState === 'protectedOffline' && !protectionConfirmed
     ? 'tono.pill.title.protectionUnknown'
-    : spec.titleKey
+    : uiState === 'connected' && !exitVerified
+      ? 'tono.pill.title.connectedUnverified'
+      : spec.titleKey
   const stageKey = stage ? CONNECT_STAGE_LABEL_KEYS[stage] : undefined
 
   const subtitle =
@@ -112,7 +119,13 @@ export const ConnectPill = ({
       : uiState === 'notConnected'
         ? t('tono.pill.subtitle.tapToConnect')
         : uiState === 'connected'
-          ? t('tono.pill.subtitle.tapToDisconnect')
+          ? exitVerified
+            ? t('tono.pill.subtitle.tapToDisconnect')
+            : suggestedServer
+              ? t('tono.pill.subtitle.connectedUnverifiedNamed', {
+                  node: suggestedServer,
+                })
+              : t('tono.pill.subtitle.connectedUnverified')
           : uiState === 'protectedOffline'
             ? t('tono.pill.subtitle.tapToRestore')
             : t('tono.pill.subtitle.restoringAccess')

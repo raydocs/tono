@@ -110,10 +110,12 @@ pub enum AuditEvent {
         stage: Option<&'static str>,
         error: String,
         action: &'static str,
+        elapsed_ms: u64,
     },
     ConnectOk {
         node: String,
         elapsed_ms: u64,
+        outcome: &'static str,
     },
     /// One destination the DIRECT overlay actually dialled, recorded once per distinct
     /// `(address, port, protocol)` per session.
@@ -284,14 +286,16 @@ impl AuditEvent {
             SyncFail { error } => SyncFail { error: redact(&error) },
             SelectionVanished { node } => SelectionVanished { node: redact(&node) },
             ConnectBegin { node } => ConnectBegin { node: redact(&node) },
-            ConnectFail { stage, error, action } => ConnectFail {
+            ConnectFail { stage, error, action, elapsed_ms } => ConnectFail {
                 stage,
                 error: redact(&error),
                 action,
+                elapsed_ms,
             },
-            ConnectOk { node, elapsed_ms } => ConnectOk {
+            ConnectOk { node, elapsed_ms, outcome } => ConnectOk {
                 node: redact(&node),
                 elapsed_ms,
+                outcome,
             },
             ReleaseFail { error } => ReleaseFail { error: redact(&error) },
             NodeSwitch { from, to } => NodeSwitch {
@@ -360,6 +364,14 @@ pub fn redact(input: &str) -> String {
         output = pattern.replace_all(&output, *replacement).into_owned();
     }
     output
+}
+
+static IPV4: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b").expect("ipv4 regex"));
+
+/// ConnectFail/diagnostics may name a class or ASN, never a node address.
+pub fn strip_ipv4(input: &str) -> String {
+    IPV4.replace_all(input, "x.x.x.x").into_owned()
 }
 
 // ---- Rotating writer ----
@@ -768,7 +780,7 @@ impl Audit {
 mod tests {
     use super::{
         Audit, AuditEvent, AuditRecord, MAX_AUDIT_FILE_BYTES, RotatingWriter, audit_enabled_from_settings,
-        periodic_telemetry_enabled_from_settings, redact, save_periodic_telemetry_enabled,
+        periodic_telemetry_enabled_from_settings, redact, save_periodic_telemetry_enabled, strip_ipv4,
     };
     use std::path::{Path, PathBuf};
 
@@ -795,6 +807,15 @@ mod tests {
     }
 
     // ---- redaction: one case per pattern group ----
+
+    #[test]
+    fn strip_ipv4_removes_node_addresses_from_connect_fail() {
+        assert_eq!(
+            strip_ipv4("tcp :443 RST from 203.0.113.9:443"),
+            "tcp :443 RST from x.x.x.x"
+        );
+        assert!(!strip_ipv4("Google (i/o timeout): 198.18.0.7").contains("198.18"));
+    }
 
     #[test]
     fn redact_authorization_header() {
@@ -900,10 +921,12 @@ mod tests {
                 stage: None,
                 error: "token=abc".to_string(),
                 action: "fullRelease",
+                elapsed_ms: 12,
             },
             AuditEvent::ConnectOk {
                 node: "n token=abc".to_string(),
                 elapsed_ms: 1,
+                outcome: "verified",
             },
             AuditEvent::ReleaseFail {
                 error: "token=abc".to_string(),

@@ -168,6 +168,7 @@
       "notConnected": "Standby",
       "connecting": "Connecting…",
       "connected": "Connected",
+      "connectedUnverified": "Connected, exit unverified",
       "protectedOffline": "Protected, not connected",
       "protectionUnknown": "Protection not verified",
       "disconnecting": "Disconnecting…"
@@ -175,6 +176,9 @@
     "subtitle": {
       "tapToConnect": "Click to connect",
       "tapToDisconnect": "Click to disconnect",
+      "connectedUnverified": "Try another node",
+      "connectedUnverifiedNamed": "Try {{node}}",
+      "verifyingExit": "Verifying exit…",
       "tapToRestore": "Click to restore internet",
       "restoringAccess": "Restoring network access",
       "starting": "Starting…"
@@ -239,6 +243,7 @@
       "serviceTooOld": "Service is too old. Reinstall from the latest package.",
       "browserDnsPreflight": "Claude residential protection cannot connect because Chrome or Edge Secure DNS could not be proven safe. Tono routes all Chrome and Edge profiles together; profile-level routing is unavailable. Set Secure DNS to Off or Automatic without a custom provider, fully restart the browser, then reconnect Tono.",
       "nodeUnreachable": "This node is unreachable. Retry or switch.",
+      "nodeUnreachableSuggest": "This node is unreachable. Try {{node}}.",
       "tunDataPlaneBroken": "The node answered, but Windows is not carrying the tunnel's traffic. Switching cities will not help — restart the PC and connect again, then send diagnostics to support if it persists.",
       "tunIngressBroken": "The node answered, but no traffic on this PC could enter the tunnel. Another VPN or security tool is usually holding the network — close it, then connect again.",
       "protectedHttpsFailed": "The protected connection could not complete. If every server fails the same way, switching cities will not help — send diagnostics to support.",
@@ -343,6 +348,7 @@
     "search": "Search servers",
     "noMatches": "No servers match this search.",
     "readyToConnect": "Available",
+    "recommended": "Recommended",
     "untested": "Not tested",
     "catalogSynced": "Node list synced",
     "testCurrent": "Test Current",

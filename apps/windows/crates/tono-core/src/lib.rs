@@ -27,8 +27,9 @@ pub use config::{
 };
 pub use connection::{ConnectStage, ConnectionStatus, ReconnectBackoff, UiState};
 pub use protected_connectivity::{
-    PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS, classify_exhausted_data_plane,
-    classify_post_lock,
+    EXIT_PROBE_INTERVAL, PostLockDecision, ProtectedFailureCode, TUN_PROBE_ORIGINS,
+    UNVERIFIED_PROBE_ESCALATE_AFTER, UNVERIFIED_PROBE_INITIAL, UNVERIFIED_PROBE_MAX,
+    classify_exhausted_data_plane, classify_post_lock, next_unverified_probe_delay,
 };
 pub use update_journal::{UpdateHandoffJournal, UpdateHandoffPhase};
 pub use credentials::{CredentialKey, CredentialStore};

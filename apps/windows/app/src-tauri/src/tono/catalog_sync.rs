@@ -313,6 +313,91 @@ pub fn names_equivalent(left: &str, right: &str) -> bool {
     left == right || compact_exit_name(left) == compact_exit_name(right)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IspLane {
+    Mobile,
+    Telecom,
+    Unicom,
+}
+
+/// Home-ISP lane for a *suggestion*. Never writes the selected node.
+pub fn isp_lane(org: &str) -> Option<IspLane> {
+    let text = org.to_ascii_lowercase();
+    if text.contains("mobile")
+        || text.contains("cmcc")
+        || text.contains("56046")
+        || org.contains("移动")
+    {
+        Some(IspLane::Mobile)
+    } else if text.contains("telecom")
+        || text.contains("chinanet")
+        || text.contains("4134")
+        || org.contains("电信")
+    {
+        Some(IspLane::Telecom)
+    } else if text.contains("unicom")
+        || text.contains("4837")
+        || text.contains("9929")
+        || org.contains("联通")
+    {
+        Some(IspLane::Unicom)
+    } else {
+        None
+    }
+}
+
+fn lane_match_rank(name: &str, lane: IspLane) -> Option<u8> {
+    let lower = name.to_ascii_lowercase();
+    match lane {
+        IspLane::Mobile => {
+            if lower.contains("tokyo") {
+                Some(0)
+            } else if lower.contains("osaka") || region_rank(name) == 1 {
+                Some(1)
+            } else {
+                None
+            }
+        }
+        IspLane::Telecom => {
+            if !lower.contains("los angeles") {
+                return None;
+            }
+            if lower.contains("cn2") || lower.contains("gia") {
+                Some(0)
+            } else {
+                Some(1)
+            }
+        }
+        IspLane::Unicom => {
+            if lower.contains("9929") {
+                Some(0)
+            } else if lower.contains("tokyo") {
+                Some(1)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Pick a real catalog display name for this ISP. Skips the current selection
+/// and blocked exits. Returns `None` if the catalog has no matching city.
+pub fn recommend_exit_for_isp(
+    org: &str,
+    nodes: &[ValidatedNode],
+    current: Option<&str>,
+) -> Option<String> {
+    let lane = isp_lane(org)?;
+    let mut ranked: Vec<(u8, String)> = nodes
+        .iter()
+        .filter(|node| !is_exit_blocked(&node.name))
+        .filter(|node| current.is_none_or(|cur| !names_equivalent(&node.name, cur)))
+        .filter_map(|node| lane_match_rank(&node.name, lane).map(|rank| (rank, node.name.clone())))
+        .collect();
+    ranked.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.to_lowercase().cmp(&right.1.to_lowercase())));
+    ranked.into_iter().next().map(|(_, name)| name)
+}
+
 fn node_named<'a>(nodes: &'a [ValidatedNode], name: &str) -> Option<&'a ValidatedNode> {
     nodes
         .iter()
@@ -478,8 +563,8 @@ pub fn region_rank(name: &str) -> u8 {
 mod tests {
     use super::{
         default_usable_exit, install_and_persist, is_exit_blocked, is_legacy_wire_name,
-        names_equivalent, next_catalog_exit, region_rank, replacement_for_selection,
-        sort_server_names,
+        names_equivalent, next_catalog_exit, recommend_exit_for_isp, region_rank,
+        replacement_for_selection, sort_server_names,
     };
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
@@ -500,6 +585,37 @@ mod tests {
             reality_public_key: "0123456789abcdef0123456789abcdef0123456789a".to_string(),
             reality_short_id: "0123456789abcdef".to_string(),
         }
+    }
+
+    #[test]
+    fn recommend_exit_for_isp_names_a_real_catalog_node_and_skips_the_current_one() {
+        let nodes = vec![
+            node("Los Angeles · Pacific"),
+            node("Los Angeles · Harbor CN2"),
+            node("Tokyo · Fuji"),
+            node("Tokyo · Sakura"),
+            node("Hong Kong · 9929"),
+        ];
+        assert_eq!(
+            recommend_exit_for_isp("AS56046 China Mobile", &nodes, Some("Tokyo · Fuji")).as_deref(),
+            Some("Tokyo · Sakura"),
+        );
+        assert_eq!(
+            recommend_exit_for_isp("Chinanet 电信", &nodes, Some("Los Angeles · Pacific")).as_deref(),
+            Some("Los Angeles · Harbor CN2"),
+        );
+        assert_eq!(
+            recommend_exit_for_isp("China Unicom 联通", &nodes, Some("Tokyo · Fuji")).as_deref(),
+            Some("Hong Kong · 9929"),
+        );
+        assert_eq!(
+            recommend_exit_for_isp("Cloudflare", &nodes, None),
+            None,
+        );
+        assert_eq!(
+            recommend_exit_for_isp("China Unicom", &[node("Tokyo · Fuji")], None).as_deref(),
+            Some("Tokyo · Fuji"),
+        );
     }
 
     #[test]

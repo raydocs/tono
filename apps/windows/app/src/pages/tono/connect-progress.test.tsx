@@ -445,6 +445,7 @@ describe('ConnectProgressCard', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     const copied = writeText.mock.calls[0][0] as string
     expect(copied).toContain('Tono v0.0.3 diagnostics')
+    expect(copied).toContain('Build: leak-closed')
     expect(copied).toContain('Server: US West 1')
     expect(copied).toContain(
       'Protection: inactive (reported mode=blocked, wanted=false, live=false)',

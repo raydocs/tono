@@ -5,12 +5,17 @@ use super::{
 use anyhow::{Context as _, Result, bail};
 use std::ffi::CStr;
 use windows_sys::Win32::Foundation::{
-    ERROR_BUFFER_OVERFLOW, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_NO_DATA,
+    ERROR_BUFFER_OVERFLOW, ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA,
+    ERROR_NO_DATA, ERROR_NOT_FOUND, ERROR_NOT_SUPPORTED,
 };
 use windows_sys::Win32::NetworkManagement::IpHelper::{
+    DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_IPV6,
+    DNS_SETTING_NAMESERVER, DNS_SETTING_PROFILE_NAMESERVER, FreeInterfaceDnsSettings,
     GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_FRIENDLY_NAME,
-    GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH,
+    GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses, GetInterfaceDnsSettings,
+    IP_ADAPTER_ADDRESSES_LH, SetInterfaceDnsSettings,
 };
+use windows_sys::core::GUID;
 use windows_sys::Win32::Networking::WinSock::AF_UNSPEC;
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, KEY_WRITE, REG_SZ, RegCloseKey,
@@ -310,39 +315,16 @@ pub(super) fn collect_adapters() -> Result<Vec<AdapterDnsSnapshot>> {
         .collect()
 }
 
-/// Live application, **per address family**, in ONE PowerShell process (cold start is the
-/// dominant cost). The registry writes are the authoritative record this module verifies
-/// against; the live apply is what makes the running resolver pick the change up without an
-/// interface bounce.
+/// Live application, **per address family**, through `iphlpapi` `SetInterfaceDnsSettings`.
+/// The registry writes are the authoritative record this module verifies against; the live
+/// apply is what makes the running resolver pick the change up without an interface bounce
+/// and without spawning `powershell.exe` (AMSI/AV image-load is why protecting used to
+/// take ~10 s or fail closed on Home/China machines).
 ///
-/// * IPv4 goes through CIM
-///   (`Win32_NetworkAdapterConfiguration.SetDNSServerSearchOrder`, the architecture doc's
-///   primary mechanism: it handles static and DHCP adapters without touching leases) and
-///   every `Invoke-CimMethod` checks its `ReturnValue` — piping to `Out-Null` would report
-///   success for a rejected call.
-/// * IPv6 goes through `netsh interface ipv6 set/add dnsservers`, keyed by the IPv6
-///   interface index, in three shapes: `source=dhcp` (`$null`, restore a family that had no
-///   saved value), `source=static address=none` (an empty list — the protected state, since
-///   the core has no `[::1]:53` listener to point at), and `source=static` plus one `add`
-///   per extra server when restoring saved ones. The CIM method is documented for IPv4
-///   addresses only: handing it an IPv6 address is how an older version could either fail on
-///   every adapter forever or, worse, have the address silently dropped and leave an IPv6
-///   resolver pointing at the ISP while the registry read-back still said "protected".
-/// * The script then *reads the live list back per family* (`Get-DnsClientServerAddress`)
-///   and only reports success when what it reads matches what it applied — exactly the
-///   TUN DNS address for IPv4 and exactly *nothing* for IPv6 when protecting, and "no
-///   unsaved Tono-owned DNS address remains" when restoring
-///   (a restored family's servers may legitimately come back from DHCP in another order).
-///   A family with no live DNS instance, an interface index of 0, or a CIM `ReturnValue` of
-///   84 ("IP not enabled on adapter") is a non-participant: there is no resolver on it to
-///   leak, and recording it as a failure is what used to pin `live_apply_failed` on forever.
-///
-/// The script prints `fails|skips`; results are recorded per adapter and required for any
-/// restore proof (see the module docs). An adapter that reports *no* configurable family at
-/// all is a skip, not a failure — that is the difference between ignoring a Hyper-V/WSL
-/// pseudo adapter and bricking the machine on it.
-///
-/// 注意:运行时尚未实测 — wrapped so any failure is logged, never fatal.
+/// Each family is a separate call (`DNS_SETTING_IPV6` for IPv6). A family with interface
+/// index 0, or `ERROR_NOT_FOUND` / `ERROR_FILE_NOT_FOUND` / `ERROR_NOT_SUPPORTED`, is a
+/// non-participant — there is no resolver on it to leak. Proof uses
+/// [`super::live_family_matches`] against `GetInterfaceDnsSettings`.
 struct LiveApplyEntry {
     guid: String,
     /// Live IPv4/IPv6 interface indices; 0 means the family is not bound here.
@@ -373,8 +355,6 @@ enum ApplyMode {
     /// Exactness for IPv6 is enforced where it is unambiguous: the registry read-back.
     Restore,
 }
-
-const POWERSHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn remaining(deadline: std::time::Instant) -> std::time::Duration {
     deadline.saturating_duration_since(std::time::Instant::now())
@@ -494,170 +474,158 @@ fn run_with_timeout(
     Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
-/// Only these characters ever reach the generated script. GUIDs come from registry subkey
-/// names and server strings from our own snapshot writes; anything else fails closed.
-fn script_safe(value: &str, extra: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || extra.contains(byte as char))
+fn family_is_non_participant(status: u32) -> bool {
+    matches!(
+        status,
+        ERROR_FILE_NOT_FOUND | ERROR_NOT_FOUND | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER
+    )
 }
 
-/// The per-family apply and the per-family live read-back, shared by every entry in the
-/// batch. Kept as one prelude so the generated script stays one short line per adapter:
-/// the `-Command` argument has a hard length limit and a machine can carry many adapters.
-const PROTECTED_DNS_V4_TOKEN: &str = "__TONO_PROTECTED_DNS_V4__";
-const SCRIPT_PRELUDE: &str = r#"$global:fails = @()
-$global:skips = @()
-function Test-Family($index, $family, $want, $restoring) {
-  if ($index -eq 0) { return $true }
-  $entry = Get-DnsClientServerAddress -InterfaceIndex $index -AddressFamily $family -ErrorAction SilentlyContinue
-  if ($null -eq $entry) { return $true }
-  $have = @($entry.ServerAddresses)
-  $owned = if ($family -eq 'IPv4') { @('__TONO_PROTECTED_DNS_V4__', '127.0.0.1') } else { @('::1') }
-  if ($restoring) {
-foreach ($s in $have) {
-  if (($owned -contains $s) -and ($null -eq $want -or -not ($want -contains $s))) { return $false }
+fn parse_interface_guid(guid: &str) -> Result<GUID> {
+    let hex: String = guid.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+    if hex.len() != 32 {
+        bail!("adapter GUID {guid} is not a Windows GUID");
+    }
+    let n = u128::from_str_radix(&hex, 16)
+        .with_context(|| format!("adapter GUID {guid} is not hex"))?;
+    Ok(GUID::from_u128(n))
 }
-return $true
-  }
-  if ($null -eq $want) { return $true }
-  if ($have.Count -ne $want.Count) { return $false }
-  for ($k = 0; $k -lt $want.Count; $k++) { if ($have[$k] -ne $want[$k]) { return $false } }
-  return $true
-}
-function Set-AdapterDns($g, $i4, $i6, $v4, $v6, $restoring) {
-  $touched = $false
-  if ($i4 -ne 0) {
-$c = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "SettingID='$g'" -ErrorAction SilentlyContinue
-if ($null -eq $c) { $global:fails += $g; return }
-$r = Invoke-CimMethod -InputObject $c -MethodName SetDNSServerSearchOrder -Arguments @{ DNSServerSearchOrder = $v4 } -ErrorAction SilentlyContinue
-if ($r -and $r.ReturnValue -eq 84) { $global:skips += $g; return }
-if (-not $r -or $r.ReturnValue -ne 0) { $global:fails += $g; return }
-$touched = $true
-  }
-  if ($i6 -ne 0) {
-$e = 0
-if ($null -eq $v6) {
-  netsh interface ipv6 set dnsservers "name=$i6" source=dhcp | Out-Null
-  $e = $e + $LASTEXITCODE
-} elseif ($v6.Count -eq 0) {
-  netsh interface ipv6 set dnsservers "name=$i6" source=static address=none | Out-Null
-  $e = $e + $LASTEXITCODE
-} else {
-  netsh interface ipv6 set dnsservers "name=$i6" source=static "address=$($v6[0])" register=none validate=no | Out-Null
-  $e = $e + $LASTEXITCODE
-  for ($k = 1; $k -lt $v6.Count; $k++) {
-    netsh interface ipv6 add dnsservers "name=$i6" "address=$($v6[$k])" "index=$($k + 1)" validate=no | Out-Null
-    $e = $e + $LASTEXITCODE
-  }
-}
-if ($e -ne 0) { $global:fails += $g; return }
-$touched = $true
-  }
-  if (-not $touched) { $global:skips += $g; return }
-  if (-not (Test-Family $i4 'IPv4' $v4 $restoring)) { $global:fails += $g; return }
-  if (-not (Test-Family $i6 'IPv6' $v6 $restoring)) { $global:fails += $g; return }
-}
-"#;
 
-/// The result marker the batch must print. Its presence is what distinguishes "the script
-/// ran and found no failures" from "the script produced nothing useful"; without it the
-/// batch is treated as a total failure.
-const RESULT_SEPARATOR: char = '|';
+fn pwstr_list(ptr: windows_sys::core::PWSTR) -> Vec<String> {
+    if ptr.is_null() {
+        return Vec::new();
+    }
+    // SAFETY: `GetInterfaceDnsSettings` documents NameServer as a NUL-terminated
+    // comma-separated UTF-16 list owned by the settings struct until Free.
+    let wide = unsafe { std::slice::from_raw_parts(ptr, libc_wcslen(ptr)) };
+    let raw = String::from_utf16_lossy(wide);
+    super::parse_name_server_list(&raw)
+}
 
-fn powershell_list(servers: &Option<Vec<String>>) -> String {
-    match servers {
-        None => "$null".to_owned(),
-        Some(servers) => format!(
-            "@({})",
-            servers
-                .iter()
-                .map(|server| format!("'{server}'"))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+fn libc_wcslen(ptr: windows_sys::core::PWSTR) -> usize {
+    let mut n = 0;
+    // SAFETY: caller guarantees a NUL-terminated PWSTR.
+    unsafe {
+        while *ptr.add(n) != 0 {
+            n += 1;
+        }
+    }
+    n
+}
+
+fn set_family_dns(interface: GUID, ipv6: bool, servers: &Option<Vec<String>>) -> Result<()> {
+    let joined = servers
+        .as_ref()
+        .map(|list| list.join(","))
+        .unwrap_or_default();
+    let mut name = super_wide(&joined);
+    let mut profile = name.clone();
+    let settings = DNS_INTERFACE_SETTINGS {
+        Version: DNS_INTERFACE_SETTINGS_VERSION1,
+        Flags: u64::from(DNS_SETTING_NAMESERVER)
+            | u64::from(DNS_SETTING_PROFILE_NAMESERVER)
+            | if ipv6 { u64::from(DNS_SETTING_IPV6) } else { 0 },
+        NameServer: name.as_mut_ptr(),
+        ProfileNameServer: profile.as_mut_ptr(),
+        ..Default::default()
+    };
+    // SAFETY: `settings` pointers alias live NUL-terminated buffers for the call.
+    let status = unsafe { SetInterfaceDnsSettings(interface, &settings) };
+    if status == 0 || family_is_non_participant(status) {
+        return Ok(());
+    }
+    Err(std::io::Error::from_raw_os_error(status as i32))
+        .with_context(|| format!("SetInterfaceDnsSettings failed (ipv6={ipv6})"))
+}
+
+fn get_family_dns(interface: GUID, ipv6: bool) -> Result<Option<Vec<String>>> {
+    let mut settings = DNS_INTERFACE_SETTINGS {
+        Version: DNS_INTERFACE_SETTINGS_VERSION1,
+        Flags: u64::from(DNS_SETTING_NAMESERVER)
+            | if ipv6 { u64::from(DNS_SETTING_IPV6) } else { 0 },
+        ..Default::default()
+    };
+    // SAFETY: Version is set; Windows fills and owns string pointers until Free.
+    let status = unsafe { GetInterfaceDnsSettings(interface, &mut settings) };
+    if family_is_non_participant(status) {
+        return Ok(None);
+    }
+    if status != 0 {
+        return Err(std::io::Error::from_raw_os_error(status as i32))
+            .context("GetInterfaceDnsSettings failed");
+    }
+    let servers = pwstr_list(settings.NameServer);
+    // SAFETY: `settings` came from a successful GetInterfaceDnsSettings.
+    unsafe { FreeInterfaceDnsSettings(&mut settings) };
+    Ok(Some(servers))
+}
+
+fn apply_and_prove_family(
+    interface: GUID,
+    ipv6: bool,
+    index: u32,
+    want: &Option<Vec<String>>,
+    mode: ApplyMode,
+    owned: &[&str],
+) -> Result<()> {
+    if index == 0 {
+        return Ok(());
+    }
+    set_family_dns(interface, ipv6, want)?;
+    let have = get_family_dns(interface, ipv6)?;
+    if super::live_family_matches(
+        index,
+        have.as_deref(),
+        want.as_deref(),
+        mode == ApplyMode::Restore,
+        owned,
+    ) {
+        Ok(())
+    } else {
+        bail!(
+            "live DNS read-back did not match the applied {} list",
+            if ipv6 { "IPv6" } else { "IPv4" }
+        )
     }
 }
 
-fn parse_guid_list(value: &str) -> std::collections::BTreeSet<String> {
-    value
-        .split(',')
-        .map(str::trim)
-        .filter(|guid| !guid.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
+fn live_apply_entry(entry: &LiveApplyEntry, mode: ApplyMode) -> bool {
+    let interface = match parse_interface_guid(&entry.guid) {
+        Ok(guid) => guid,
+        Err(error) => {
+            tracing::warn!("dns: {error:#}");
+            return false;
+        }
+    };
+    let v4 = apply_and_prove_family(
+        interface,
+        false,
+        entry.ipv4_index,
+        &entry.ipv4_servers,
+        mode,
+        &[super::PROTECTED_DNS_V4, "127.0.0.1"],
+    );
+    let v6 = apply_and_prove_family(
+        interface,
+        true,
+        entry.ipv6_index,
+        &entry.ipv6_servers,
+        mode,
+        &["::1"],
+    );
+    match (v4, v6) {
+        (Ok(()), Ok(())) => true,
+        (Err(error), _) | (_, Err(error)) => {
+            tracing::warn!("dns: live apply failed for {}: {error:#}", entry.guid);
+            false
+        }
+    }
 }
 
 fn live_apply_batch(entries: &[LiveApplyEntry], mode: ApplyMode) -> Vec<(String, bool)> {
-    let restoring = mode == ApplyMode::Restore;
-    let mut script = SCRIPT_PRELUDE.replace(PROTECTED_DNS_V4_TOKEN, super::PROTECTED_DNS_V4);
-    let mut rejected: std::collections::BTreeSet<String> = Default::default();
-    for entry in entries {
-        let servers_ok =
-            [&entry.ipv4_servers, &entry.ipv6_servers]
-                .into_iter()
-                .all(|servers| {
-                    servers.as_ref().is_none_or(|servers| {
-                        servers.iter().all(|server| script_safe(server, ".:"))
-                    })
-                });
-        if !script_safe(&entry.guid, "{}-") || !servers_ok {
-            rejected.insert(entry.guid.clone());
-            continue;
-        }
-        script.push_str(&format!(
-            "Set-AdapterDns '{}' {} {} {} {} ${restoring}\n",
-            entry.guid,
-            entry.ipv4_index,
-            entry.ipv6_index,
-            powershell_list(&entry.ipv4_servers),
-            powershell_list(&entry.ipv6_servers),
-        ));
-    }
-    script.push_str(
-        "[Console]::Out.Write(($global:fails -join ',') + '|' + ($global:skips -join ','))",
-    );
-    let run = run_with_timeout(
-        "powershell.exe",
-        &["-NoProfile", "-NonInteractive", "-Command", &script],
-        POWERSHELL_TIMEOUT,
-    );
-    let reported = match run {
-        Ok(stdout) => stdout
-            .lines()
-            .rev()
-            .find_map(|line| line.split_once(RESULT_SEPARATOR))
-            .map(|(failed, skipped)| (parse_guid_list(failed), parse_guid_list(skipped))),
-        Err(error) => {
-            tracing::warn!("dns: live batch apply failed: {error:#}");
-            None
-        }
-    };
-    // The whole batch failed (timeout, spawn error, non-zero exit, or output without the
-    // result marker — a script that died half way through): every entry is a failure. The
-    // proof path stays closed and the DNS lock is never held hostage.
-    let Some((failed, skipped)) = reported else {
-        tracing::warn!(
-            "dns: live batch apply produced no result marker; all {} adapter(s) are recorded \
-             as failed",
-            entries.len()
-        );
-        return entries
-            .iter()
-            .map(|entry| (entry.guid.clone(), false))
-            .collect();
-    };
-    if !skipped.is_empty() {
-        // Not a failure: these adapters have no configurable resolver on either family, so
-        // there is nothing on them that could leak.
-        tracing::debug!("dns: adapters without a configurable live resolver: {skipped:?}");
-    }
     entries
         .iter()
-        .map(|entry| {
-            let ok = !failed.contains(&entry.guid) && !rejected.contains(&entry.guid);
-            (entry.guid.clone(), ok)
-        })
+        .map(|entry| (entry.guid.clone(), live_apply_entry(entry, mode)))
         .collect()
 }
 

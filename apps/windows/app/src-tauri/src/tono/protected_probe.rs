@@ -348,6 +348,29 @@ async fn probe_one(
     }
 }
 
+/// Support-facing dial class. These tokens are what diagnostics copy should
+/// show: `i/o timeout`, `RST`, `REALITY`. They must never include an address.
+pub fn probe_dial_token(failure: &ProbeOriginResult) -> &'static str {
+    let detail = failure.redacted_detail.to_ascii_lowercase();
+    match failure.category {
+        ProbeCategory::Timeout => "i/o timeout",
+        ProbeCategory::Tls => "REALITY",
+        ProbeCategory::Tcp
+            if detail.contains("reset")
+                || detail.contains("rst")
+                || detail.contains("forcibly closed")
+                || detail.contains("refused") =>
+        {
+            "RST"
+        }
+        ProbeCategory::Tcp => "RST",
+        ProbeCategory::Dns => "dns",
+        ProbeCategory::Http => "http",
+        ProbeCategory::Cancelled => "cancelled",
+        ProbeCategory::Unknown => "unknown",
+    }
+}
+
 pub fn format_failures(failures: &[ProbeOriginResult]) -> String {
     format!(
         "all {} independent protected TUN probes failed: {}",
@@ -357,12 +380,24 @@ pub fn format_failures(failures: &[ProbeOriginResult]) -> String {
             .map(|failure| format!(
                 "{} ({}): {}",
                 failure.origin,
-                failure.category.as_str(),
+                probe_dial_token(failure),
                 failure.redacted_detail
             ))
             .collect::<Vec<_>>()
             .join(" | ")
     )
+}
+
+/// Admit may retry the three-origin race once, and only once, when every origin
+/// timed out and the overlapping controller `/delay` already succeeded. RST,
+/// refused, TLS, DNS, or HTTP failures are a hard no — those are the node or
+/// the path, not a slow first Reality dial.
+pub fn tun_admit_allows_timeout_retry(failures: &[ProbeOriginResult], delay_succeeded: bool) -> bool {
+    delay_succeeded
+        && failures.len() == PROBE_ORIGINS.len()
+        && failures
+            .iter()
+            .all(|failure| failure.category == ProbeCategory::Timeout)
 }
 
 pub async fn verify_protected_origins(
@@ -446,5 +481,77 @@ mod tests {
         assert_eq!(ProbeCategory::Timeout.as_str(), "timeout");
         assert_eq!(ProbeCategory::Dns.as_str(), "dns");
         assert_eq!(ProbeCategory::Tls.as_str(), "tls");
+    }
+
+    fn failure(origin: &str, category: ProbeCategory, detail: &str) -> ProbeOriginResult {
+        ProbeOriginResult {
+            origin: origin.to_string(),
+            expected_status: 204,
+            actual_status: None,
+            category,
+            elapsed_ms: 12_000,
+            redacted_detail: detail.to_string(),
+        }
+    }
+
+    #[test]
+    fn admit_retries_only_when_every_origin_timed_out_and_delay_succeeded() {
+        let timeouts = [
+            failure("Google", ProbeCategory::Timeout, "timed out"),
+            failure("Cloudflare", ProbeCategory::Timeout, "timed out"),
+            failure("Apple", ProbeCategory::Timeout, "timed out"),
+        ];
+        assert!(tun_admit_allows_timeout_retry(&timeouts, true));
+        assert!(
+            !tun_admit_allows_timeout_retry(&timeouts, false),
+            "no retry when parallel /delay did not succeed"
+        );
+    }
+
+    #[test]
+    fn admit_does_not_retry_an_rst_or_mixed_failure() {
+        let rst = [
+            failure("Google", ProbeCategory::Tcp, "connection reset by peer"),
+            failure("Cloudflare", ProbeCategory::Timeout, "timed out"),
+            failure("Apple", ProbeCategory::Timeout, "timed out"),
+        ];
+        assert!(!tun_admit_allows_timeout_retry(&rst, true));
+
+        let all_rst = [
+            failure("Google", ProbeCategory::Tcp, "connection reset by peer"),
+            failure("Cloudflare", ProbeCategory::Tcp, "connection reset by peer"),
+            failure("Apple", ProbeCategory::Tcp, "connection reset by peer"),
+        ];
+        assert!(!tun_admit_allows_timeout_retry(&all_rst, true));
+    }
+
+    #[test]
+    fn dial_tokens_are_timeout_rst_or_reality_without_addresses() {
+        assert_eq!(
+            probe_dial_token(&failure("Google", ProbeCategory::Timeout, "timed out")),
+            "i/o timeout"
+        );
+        assert_eq!(
+            probe_dial_token(&failure(
+                "Cloudflare",
+                ProbeCategory::Tcp,
+                "connection reset by peer"
+            )),
+            "RST"
+        );
+        assert_eq!(
+            probe_dial_token(&failure("Apple", ProbeCategory::Tls, "tls handshake eof")),
+            "REALITY"
+        );
+        let text = format_failures(&[
+            failure("Google", ProbeCategory::Timeout, "timed out"),
+            failure("Cloudflare", ProbeCategory::Tcp, "connection reset by peer"),
+            failure("Apple", ProbeCategory::Tls, "tls handshake eof"),
+        ]);
+        assert!(text.contains("i/o timeout"));
+        assert!(text.contains("RST"));
+        assert!(text.contains("REALITY"));
+        assert!(!text.contains("198.18"));
+        assert!(!text.contains("203.0.113"));
     }
 }

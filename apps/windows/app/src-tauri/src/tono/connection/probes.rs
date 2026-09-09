@@ -1,30 +1,20 @@
 //! Fake-IP, post-lock, and TUN/data-plane proofs used by the connect stage sequence.
 
-use std::error::Error as _;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use futures::{StreamExt as _, stream::FuturesUnordered};
 use tauri::AppHandle;
 use tono_core::EXIT_GROUP_NAME;
-use tono_core::connection::ConnectStage;
 use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchStatus, KillSwitchStatusMode};
 
 use crate::core::service;
-use crate::tono::{audit::{self, AuditEvent}, state::TonoState};
-use super::cleanup::stale_after_arm;
-use super::controller::{
-    CONTROLLER_HTTP_TIMEOUT, CONTROLLER_READY_TIMEOUT, VERSION_POLL_ATTEMPTS, VERSION_POLL_FAST_ATTEMPTS,
-    VERSION_POLL_FAST_INTERVAL, VERSION_POLL_INTERVAL, controller_client, controller_url,
-};
-use super::controller_error_detail;
+use crate::tono::state::TonoState;
+use super::controller::{controller_client, controller_url};
 use super::failure::{
-    NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX, StageFailure,
+    NODE_OR_CORE_UNREACHABLE_PREFIX, TUN_DATA_PLANE_BROKEN_PREFIX, TUN_INGRESS_BROKEN_PREFIX,
 };
-use super::status::set_stage;
-use super::transaction::ConnectTransaction;
 
 /// §6.8 exit probe target.
 pub(super) const EXIT_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
@@ -118,183 +108,14 @@ pub(super) const VERIFY_LOCK_ATTEMPTS: u32 = 4;
 
 pub(super) const VERIFY_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(700);
 
-/// C3 — `checkingExit` + `verifyingTraffic` form one retryable *verification* group.
-///
-/// At that point the barrier is locked and the tunnel is proven up, but `session_verified` is
-/// still false (it is committed only after both stages pass), so `plan_failure(armed = true,
-/// session_verified = false, ..)` resolves to `FullRelease` — and `next_reconnect_delay()`
-/// then requires `is_protection_blocked && session_verified`, both false, so nothing retries.
-/// A controller delay result is only advisory; the real App data-plane request below owns the
-/// verdict. A transient failure of that authoritative check still gets one full in-place retry.
-///
-/// The retry therefore belongs **before** the full release, inside the still-live transaction:
-/// the decision table, the verification latch, and the release rules are untouched, and an
-/// exhausted group still falls through to exactly the old `FullRelease`.
-pub(super) const POST_LOCK_VERIFY_ROUNDS: u32 = 2;
-
-pub(super) const POST_LOCK_VERIFY_ROUND_DELAY: Duration = Duration::from_millis(500);
-
-/// C3 — the post-lock verification group: an advisory controller delay check followed by the
-/// authoritative real App data-plane check, retried up to [`POST_LOCK_VERIFY_ROUNDS`] times
-/// inside the still-live transaction.
-///
-/// Why here and not in the failure path: by this point WFP is armed *and* locked and the tunnel
-/// is proven up, but `session_verified` is committed only after both stages pass. A failure
-/// therefore reaches `plan_failure(armed = true, session_verified = false, ..)` → `FullRelease`,
-/// which destroys the tunnel — and `next_reconnect_delay()` then requires
-/// `is_protection_blocked && session_verified`, both false afterwards, so nothing retries. A
-/// single transient 504 on the exit probe took a working tunnel to NotConnected with no recovery.
-///
-/// Fail-closed is untouched: a controller `/delay` 504 is tolerated only if a fresh HTTPS request
-/// from this App succeeds while WFP is locked and system DNS points into WinTUN. That is stronger
-/// proof of user traffic than Mihomo's doubled synthetic measurement. Nothing here marks a
-/// session verified until that proof passes, releases or weakens the barrier, or shortens any
-/// release; an exhausted real-data-plane check still reaches the same `FullRelease`.
-#[allow(clippy::too_many_arguments, reason = "stage helper mirrors run_stages' own context")]
-pub(super) async fn verify_post_lock(
-    state: &Arc<TonoState>,
-    app: &AppHandle,
-    secret: &str,
-    controller_port: u16,
-    mixed_port: u16,
-    generation: u64,
-    started: std::time::Instant,
-    transaction: &ConnectTransaction,
-) -> Result<KillSwitchStatus, StageFailure> {
-    // §6.8 is deliberately one advisory measurement for the whole verification group. Repeating
-    // Mihomo's doubled `unified-delay` request on every TUN retry used to spend another full
-    // cross-border round without adding any connection proof.
-    // CheckingExit is only a UI label. The real TUN race starts immediately;
-    // controller /delay may finish later and is never required for Connected.
-    set_stage(state, app, ConnectStage::CheckingExit, generation, true, started).await?;
-    let controller_secret = secret.to_string();
-    let mut controller_task = Some(tokio::spawn(async move {
-        probe_exit_once(&controller_secret, controller_port).await
-    }));
-    set_stage(state, app, ConnectStage::VerifyingTraffic, generation, true, started).await?;
-    let mut last = String::from("post-lock verification did not run");
-    for round in 0..POST_LOCK_VERIFY_ROUNDS {
-        if round > 0 && state.lock().await.connect_generation != generation {
-            if let Some(task) = controller_task.take() {
-                task.abort();
-            }
-            return Err(stale_after_arm(state, generation).await);
-        }
-        let final_round = round + 1 == POST_LOCK_VERIFY_ROUNDS;
-        let (data_plane, proxy_cross_check) = if final_round {
-            let (data_plane, proxy) = transaction
-                .wait("real TUN verification with proxy cross-check", async {
-                    tokio::join!(verify_locked_data_plane(), verify_mixed_proxy_data_plane(mixed_port))
-                })
-                .await?;
-            (data_plane, Some(proxy))
-        } else {
-            (
-                transaction
-                    .wait("real TUN data-plane verification", verify_locked_data_plane())
-                    .await?,
-                None,
-            )
-        };
-        let data_plane_error = data_plane.as_ref().err().cloned();
-        let controller_probe = if data_plane.is_ok() {
-            match controller_task.as_ref() {
-                Some(task) if task.is_finished() => match controller_task.take().unwrap().await {
-                    Ok(result) => match result {
-                        Ok(delay) => {
-                            if delay > 0 {
-                                let mut inner = state.lock().await;
-                                inner.record_exit_delay(delay);
-                            }
-                            Ok(())
-                        }
-                        Err(error) => Err(error),
-                    },
-                    Err(_) => Ok(()),
-                },
-                _ => Ok(()),
-            }
-        } else if final_round {
-            let task = controller_task.take();
-            transaction
-                .wait("advisory exit measurement", async {
-                    match task {
-                        Some(task) => match task.await {
-                            Ok(result) => match result {
-                                Ok(delay) => {
-                                    if delay > 0 {
-                                        let mut inner = state.lock().await;
-                                        inner.record_exit_delay(delay);
-                                    }
-                                    Ok(())
-                                }
-                                Err(error) => Err(error),
-                            },
-                            Err(_) => Err("controller probe cancelled".to_string()),
-                        },
-                        None => Ok(()),
-                    }
-                })
-                .await?
-        } else {
-            Ok(())
-        };
-
-        match classify_post_lock_verification(controller_probe.clone(), data_plane) {
-            PostLockVerification::Verified {
-                status,
-                controller_warning,
-            } => {
-                if let Some(error) = controller_warning {
-                    let error = audit::redact(&error);
-                    logging!(
-                        warn,
-                        Type::Service,
-                        "Tono: controller exit measurement degraded; real TUN data plane passed: {error}"
-                    );
-                    state.audit().log(AuditEvent::HealthProbeFail {
-                        probe: "controllerExitAdvisory",
-                        error,
-                    });
-                }
-                return Ok(status);
-            }
-            PostLockVerification::Retry { error } => {
-                last = match (proxy_cross_check, data_plane_error) {
-                    (Some(proxy), Some(data_plane)) => {
-                        classify_exhausted_data_plane(controller_probe, data_plane, proxy)
-                    }
-                    _ => error,
-                };
-            }
-        }
-        if final_round {
-            break;
-        }
-        logging!(
-            warn,
-            Type::Service,
-            "Tono: 隧道已锁定但验证未通过，重试验证阶段 ({}/{}): {last}",
-            round + 1,
-            POST_LOCK_VERIFY_ROUNDS
-        );
-        transaction
-            .wait(
-                "post-lock verification retry",
-                tokio::time::sleep(POST_LOCK_VERIFY_ROUND_DELAY),
-            )
-            .await?;
-    }
-    Err(StageFailure::error(last))
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum PostLockVerification<T> {
     Verified {
         status: T,
         controller_warning: Option<String>,
     },
-    Retry {
+    Unverified {
+        code: tono_core::ProtectedFailureCode,
         error: String,
     },
 }
@@ -311,7 +132,9 @@ pub(super) fn classify_post_lock_verification<T>(
             status,
             controller_warning: controller_advisory,
         },
-        tono_core::PostLockDecision::Retry { error, .. } => PostLockVerification::Retry { error },
+        tono_core::PostLockDecision::ConnectedUnverified { code, error } => {
+            PostLockVerification::Unverified { code, error }
+        }
     }
 }
 
@@ -515,16 +338,7 @@ pub(super) async fn verify_locked() -> Result<KillSwitchStatus, String> {
     ))
 }
 
-/// The authoritative connection verdict: an ordinary fresh App flow must traverse the protected
-/// Windows data plane. With WFP locked, a physical-interface fallback is blocked and only the
-/// recorded WinTUN LUID is permitted, so a valid HTTPS 204 is positive evidence of tunnel traffic.
-pub(super) async fn verify_locked_data_plane() -> Result<KillSwitchStatus, String> {
-    let status = verify_locked().await?;
-    verify_tun_data_plane().await?;
-    Ok(status)
-}
-
-pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
+async fn run_tun_race() -> Result<(), Vec<crate::tono::protected_probe::ProbeOriginResult>> {
     crate::tono::integration_profile::delay_remote_operation().await;
     crate::tono::protected_probe::verify_protected_origins(
         TUN_DATA_PLANE_CONNECT_TIMEOUT,
@@ -533,102 +347,58 @@ pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
     )
     .await
     .map(|_| ())
-    .map_err(|failures| crate::tono::protected_probe::format_failures(&failures))
 }
 
-/// Diagnostic-only App ingress through Mihomo's ephemeral loopback mixed listener. This bypasses
-/// WinTUN but still uses the exact owned runtime, selected exit group, staged core, WFP endpoint
-/// permit, and remote node. A success therefore isolates a Windows TUN/route failure; it is never
-/// returned as a successful connection verdict.
-pub(super) async fn verify_mixed_proxy_data_plane(mixed_port: u16) -> Result<(), String> {
-    let proxy_url = format!("http://127.0.0.1:{mixed_port}");
-    let proxy = reqwest::Proxy::all(&proxy_url)
-        .map_err(|error| format!("cannot configure loopback diagnostic proxy: {error}"))?;
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .proxy(proxy)
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(TUN_DATA_PLANE_CONNECT_TIMEOUT)
-        .timeout(TUN_DATA_PLANE_TIMEOUT)
-        .build()
-        .map_err(|error| format!("cannot create loopback diagnostic proxy probe: {error}"))?;
-    crate::tono::integration_profile::delay_remote_operation().await;
+pub(super) async fn verify_tun_data_plane() -> Result<(), String> {
+    run_tun_race()
+        .await
+        .map_err(|failures| crate::tono::protected_probe::format_failures(&failures))
+}
 
-    race_data_plane_probes(&client).await.map_err(|failures| {
-        format!(
-            "all {} independent loopback-proxy probes failed: {}",
-            TUN_DATA_PLANE_PROBES.len(),
-            failures.join(" | ")
-        )
-    })
+pub(super) const NODE_TCP_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// TCP connect to the selected node's port. The returned token never includes
+/// the address — ConnectFail/diagnostics must show ASN/class, not IP.
+/// After WFP lock, the App's direct TCP to the node is often just dropped
+/// (`tcp`). That is not a GFW/node verdict. Only RST/timeout (or a measured
+/// RTT) belong on the TUN failure string.
+pub(super) fn admit_tcp_probe_note(tcp: Result<u64, &'static str>) -> Option<String> {
+    match tcp {
+        Ok(delay_ms) => Some(format!("tcp :443 {delay_ms}ms")),
+        Err(token @ "RST") | Err(token @ "i/o timeout") => Some(format!("tcp :443 {token}")),
+        Err(_) => None,
+    }
+}
+
+pub(super) fn classify_tcp_connect_error(error: &str) -> &'static str {
+    let detail = error.to_ascii_lowercase();
+    if detail.contains("reset")
+        || detail.contains("rst")
+        || detail.contains("forcibly closed")
+        || detail.contains("refused")
+    {
+        "RST"
+    } else if detail.contains("timed out") || detail.contains("timeout") {
+        "i/o timeout"
+    } else {
+        "tcp"
+    }
+}
+
+pub(super) async fn probe_node_tcp(addr: SocketAddr) -> Result<u64, &'static str> {
+    let started = Instant::now();
+    match tokio::time::timeout(NODE_TCP_PROBE_TIMEOUT, tokio::net::TcpStream::connect(addr)).await {
+        Ok(Ok(stream)) => {
+            drop(stream);
+            Ok(started.elapsed().as_millis().max(1) as u64)
+        }
+        Ok(Err(error)) => Err(classify_tcp_connect_error(&error.to_string())),
+        Err(_) => Err("i/o timeout"),
+    }
 }
 
 pub(super) fn tun_probe_stagger(index: usize) -> Duration {
     TUN_PROBE_STAGGER * (index as u32)
-}
-
-pub(super) async fn race_data_plane_probes(client: &reqwest::Client) -> Result<(), Vec<String>> {
-    let mut in_flight = FuturesUnordered::new();
-    for (index, probe) in TUN_DATA_PLANE_PROBES.into_iter().enumerate() {
-        let client = client.clone();
-        in_flight.push(async move {
-            let delay = tun_probe_stagger(index);
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-            probe_tun_endpoint(&client, probe).await
-        });
-    }
-
-    let mut failures = Vec::with_capacity(TUN_DATA_PLANE_PROBES.len());
-    while let Some(result) = in_flight.next().await {
-        match result {
-            Ok(()) => return Ok(()),
-            Err(error) => failures.push(error),
-        }
-    }
-    Err(failures)
-}
-
-pub(super) async fn probe_tun_endpoint(client: &reqwest::Client, probe: TunDataPlaneProbe) -> Result<(), String> {
-    let response = client
-        .get(probe.url)
-        .send()
-        .await
-        .map_err(|error| format!("{} ({}): {}", probe.label, probe.url, describe_reqwest_error(&error)))?;
-    let actual = response.status().as_u16();
-    if actual == probe.expected_status {
-        Ok(())
-    } else {
-        Err(format!(
-            "{} ({}) answered {}, expected {}",
-            probe.label, probe.url, actual, probe.expected_status
-        ))
-    }
-}
-
-pub(super) fn describe_reqwest_error(error: &reqwest::Error) -> String {
-    let category = if error.is_timeout() {
-        "timeout"
-    } else if error.is_connect() {
-        "connect"
-    } else {
-        "request"
-    };
-    let mut parts = vec![format!("{category}: {error}")];
-    let mut source = error.source();
-    while let Some(cause) = source {
-        let detail = cause.to_string();
-        if !detail.is_empty() && parts.last().is_none_or(|last| last != &detail) {
-            parts.push(detail);
-        }
-        if parts.len() == 5 {
-            break;
-        }
-        source = cause.source();
-    }
-    let joined = parts.join(" -> ");
-    controller_error_detail(&joined).unwrap_or_else(|| category.to_string())
 }
 
 pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
@@ -637,4 +407,39 @@ pub(super) fn format_tun_probe_failures(failures: &[String]) -> String {
         TUN_DATA_PLANE_PROBES.len(),
         failures.join(" | ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{admit_tcp_probe_note, classify_tcp_connect_error};
+
+    #[test]
+    fn locked_path_generic_tcp_is_not_a_node_death() {
+        assert_eq!(admit_tcp_probe_note(Ok(42)), Some("tcp :443 42ms".into()));
+        assert_eq!(
+            admit_tcp_probe_note(Err("RST")),
+            Some("tcp :443 RST".into())
+        );
+        assert_eq!(
+            admit_tcp_probe_note(Err("i/o timeout")),
+            Some("tcp :443 i/o timeout".into())
+        );
+        assert_eq!(
+            admit_tcp_probe_note(Err("tcp")),
+            None,
+            "WFP-denied direct dial after lock must not look like a dead node"
+        );
+    }
+
+    #[test]
+    fn tcp_connect_errors_are_rst_or_timeout_without_an_address() {
+        assert_eq!(
+            classify_tcp_connect_error("connection reset by peer 203.0.113.9:443"),
+            "RST"
+        );
+        assert_eq!(classify_tcp_connect_error("timed out"), "i/o timeout");
+        let token = classify_tcp_connect_error("connection reset by peer 203.0.113.9:443");
+        assert!(!token.contains("203.0.113"));
+        assert!(!token.contains(':'));
+    }
 }

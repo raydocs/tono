@@ -1097,14 +1097,15 @@ pub(crate) async fn arm_bootstrap(
     }
     let api_host_ips = admit_api_host_ips(&config.bootstrap_api_hosts);
     let _operation = WFP_OPERATION.lock().await;
-    let inherited_verified = armed_guard().as_ref().is_some_and(|armed| {
-        armed.intent.owner_key.as_deref() == Some(owner_key) && armed.intent.is_verified()
-    });
+    // A new StartClash is a new admit. Inheriting `verified` from the previous
+    // node left fail_connect treating TUN failure as KeepBlocking (protected
+    // offline, domestic DNS dead). In-place reconnect still fail-closes via the
+    // App FSM `protection_committed` latch; MarkVerified runs again after TUN.
     let armed = Armed {
         intent: IntentRecord {
             wanted: true,
             mode: KillSwitchStatusMode::Bootstrap,
-            verified: Some(inherited_verified),
+            verified: Some(false),
             tunnel_interface: config.tunnel_interface.trim().to_owned(),
             app_path: app_path.to_owned(),
             endpoints: config.proxy_endpoints.clone(),

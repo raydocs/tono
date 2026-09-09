@@ -698,7 +698,9 @@ const DashboardPage = () => {
     ? t('tono.progress.protectionUnknownBody')
     : connected
       ? status?.directOverlay === 'skipped'
-        ? t('tono.dashboard.directSkipped')
+        ? status.directOverlaySkip
+          ? `${t('tono.dashboard.directSkipped')} ${status.directOverlaySkip}`
+          : t('tono.dashboard.directSkipped')
         : t('tono.dashboard.directOn')
       : t('tono.dashboard.taglineIdle')
   const selectedCity = status?.selectedServer
@@ -805,7 +807,9 @@ const DashboardPage = () => {
           <ConnectPill
             uiState={uiState}
             protectionConfirmed={protectionConfirmed}
+            exitVerified={status?.exitVerified !== false}
             stage={status?.stage}
+            suggestedServer={status?.suggestedServer}
             onConnect={handleConnect}
             onDisconnect={() => {
               if (uiState === 'connecting') {

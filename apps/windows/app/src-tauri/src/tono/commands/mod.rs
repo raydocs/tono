@@ -87,6 +87,9 @@ pub struct TonoStatus {
     /// Backend stage text shown on the connect pill.
     pub stage_label: Option<String>,
     pub selected_server: Option<String>,
+    /// Catalog name to try next. Suggestion only — never the live selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_server: Option<String>,
     pub protection_blocked: bool,
     pub kill_switch: Option<KillSwitchStatus>,
     pub catalog_revision: Option<i64>,
@@ -102,6 +105,9 @@ pub struct TonoStatus {
     /// `off` | `on` | `skipped` — whether the optional WeChat/web DIRECT overlay
     /// is live. `skipped` means the tunnel is up but China-direct was not installed.
     pub direct_overlay: String,
+    /// Redacted reason when `direct_overlay` is `skipped`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_overlay_skip: Option<String>,
     /// HTTP generate_204 through the selected exit. Not TCP to the node.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_delay_ms: Option<u64>,
@@ -116,6 +122,10 @@ pub struct TonoStatus {
     pub claude_home_active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_home_host: Option<String>,
+    /// Third-party exit HTTPS proven for this session. False means Connected with unverified exit.
+    pub exit_verified: bool,
+    /// True from Connected until the first background TUN probe returns.
+    pub exit_probe_pending: bool,
 }
 
 /// Last published immutable UI snapshot. The status command reads this without joining the large
@@ -250,6 +260,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         stage: stage.map(stage_key).map(str::to_string),
         stage_label: stage.map(|stage| stage.label().to_string()),
         selected_server: inner.selected_node.clone(),
+        suggested_server: inner.suggested_server.clone(),
         protection_blocked: status.is_protection_blocked,
         kill_switch: inner.kill_switch.clone(),
         catalog_revision: (revision >= 0).then_some(revision),
@@ -265,6 +276,7 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             "off".to_string()
         },
+        direct_overlay_skip: inner.optional_direct_skip.clone(),
         exit_delay_ms: inner.selected_exit_delay_ms(),
         exit_delay_at_ms: inner.selected_exit_delay_at_ms(),
         tcp_delay_ms: inner.selected_tcp_delay_ms(),
@@ -274,6 +286,8 @@ pub(crate) fn status_of(inner: &TonoInner) -> TonoStatus {
         } else {
             None
         },
+        exit_verified: inner.fsm.exit_verified(),
+        exit_probe_pending: inner.exit_probe_pending,
         claude_home_host: if status.is_connected {
             inner.routing.as_ref().and_then(|r| {
                 r.home_socks5.as_ref().map(|s| s.host.clone())

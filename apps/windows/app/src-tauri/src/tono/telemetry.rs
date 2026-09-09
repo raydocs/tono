@@ -94,6 +94,7 @@ const INCLUDE_KINDS: &[&str] = &[
     "releaseFail",
     "reconnectScheduled",
     "nodeSwitch",
+    "connectCatalogFailover",
     "protectedOffline",
     "killSwitchSnapshot",
     "networkChange",
@@ -585,6 +586,34 @@ mod tests {
         assert!(events.iter().all(|e| e.kind != "signInOk"));
         assert_eq!(events[0].kind, "networkChange");
         assert_eq!(events[0].counter, Some(3));
+    }
+
+    #[test]
+    fn collect_events_keeps_user_and_catalog_node_hops() {
+        let dir = TempDir::new("hops");
+        let path = dir.path().join("traffic-audit.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let now = epoch_ms();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"nodeSwitch","from":"Tokyo · Fuji","to":"Los Angeles · Pacific"}}"#,
+            now - 500
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"ts":{},"kind":"connectCatalogFailover","from":"Los Angeles · Pacific","to":"Tokyo · Sakura"}}"#,
+            now - 100
+        )
+        .unwrap();
+        let (events, _) = collect_events(&path, now - 60_000, now).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "nodeSwitch");
+        assert_eq!(events[0].from.as_deref(), Some("Tokyo · Fuji"));
+        assert_eq!(events[0].to.as_deref(), Some("Los Angeles · Pacific"));
+        assert_eq!(events[1].kind, "connectCatalogFailover");
+        assert_eq!(events[1].from.as_deref(), Some("Los Angeles · Pacific"));
+        assert_eq!(events[1].to.as_deref(), Some("Tokyo · Sakura"));
     }
 
     #[test]

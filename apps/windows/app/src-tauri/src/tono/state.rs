@@ -295,6 +295,14 @@ pub struct TonoInner {
     pub exit_ip: Option<String>,
     pub exit_org: Option<String>,
     pub exit_location: Option<String>,
+    /// Home-ISP org from a DIRECT (no-proxy) lookup before WFP lock. Used only
+    /// to *suggest* a city on connect fail. Never written into the selected node.
+    pub isp_org: Option<String>,
+    /// Catalog display name recommended after a connect fail. Never auto-selected.
+    pub suggested_server: Option<String>,
+    /// Node that last passed admit. A user connect to any other name is a
+    /// fresh admit and must not inherit the previous commit latch.
+    pub last_admitted_node: Option<String>,
     /// Last successful HTTP generate_204 through the selected exit. Display and
     /// heartbeat only — never a connection verdict.
     pub last_exit_delay_ms: Option<u64>,
@@ -304,6 +312,12 @@ pub struct TonoInner {
     pub last_tcp_delay_ms: Option<u64>,
     pub last_tcp_delay_at_ms: Option<i64>,
     pub last_tcp_delay_node: Option<String>,
+    /// When a verified session degraded after sustained probe failure.
+    pub unverified_since: Option<std::time::Instant>,
+    pub last_unverified_probe_delay: Option<std::time::Duration>,
+    /// Unused after handshake-admit (admit is already verified). Kept on the
+    /// status JSON so older UI readers do not break.
+    pub exit_probe_pending: bool,
     pub tasks: TaskRegistry,
 }
 
@@ -528,12 +542,18 @@ impl TonoState {
                 exit_ip: None,
                 exit_org: None,
                 exit_location: None,
+                isp_org: None,
+                suggested_server: None,
+                last_admitted_node: None,
                 last_exit_delay_ms: None,
                 last_exit_delay_at_ms: None,
                 last_exit_delay_node: None,
                 last_tcp_delay_ms: None,
                 last_tcp_delay_at_ms: None,
                 last_tcp_delay_node: None,
+                unverified_since: None,
+                last_unverified_probe_delay: None,
+                exit_probe_pending: false,
                 tasks: TaskRegistry::default(),
             }),
             audit,

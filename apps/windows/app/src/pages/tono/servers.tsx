@@ -64,6 +64,7 @@ const ServersPage = () => {
   const dark = useThemeMode() !== 'light'
   const text = tonoText(dark)
   const { status, mutateTonoStatus } = useTonoStatus()
+  const recommendedName = status?.suggestedServer ?? null
   const showToast = useTonoToast()
   const [selectError, setSelectError] = useState<string | null>(null)
   const [switchingName, setSwitchingName] = useState<string | null>(null)
@@ -204,7 +205,7 @@ const ServersPage = () => {
   const selected = (servers ?? []).find((server) => server.selected)
   const query = searchText.trim().toLowerCase()
   const visibleServers = useMemo(() => {
-    return (servers ?? []).filter((server) => {
+    const filtered = (servers ?? []).filter((server) => {
       const display = nodeDisplayName(server.name)
       const parts = nodeCityParts(server.name)
       const matchesQuery =
@@ -217,7 +218,12 @@ const ServersPage = () => {
         !regionFilter || nodeCode(server.name) === regionFilter
       return matchesQuery && matchesRegion
     })
-  }, [query, regionFilter, servers])
+    return filtered.sort((left, right) => {
+      if (left.name === recommendedName) return -1
+      if (right.name === recommendedName) return 1
+      return 0
+    })
+  }, [query, regionFilter, recommendedName, servers])
   const regionOptions = useMemo(() => {
     return Array.from(
       new Set((servers ?? []).map((server) => nodeCode(server.name))),
@@ -236,9 +242,17 @@ const ServersPage = () => {
   )
   const serverGroups = useMemo(() => {
     const usable = visibleServers.filter((server) => server.available !== false)
+    const recommendedCode = recommendedName
+      ? usable.find((server) => server.name === recommendedName)
+      : undefined
     const codes = Array.from(
       new Set(usable.map((server) => nodeCode(server.name))),
-    ).sort()
+    ).sort((left, right) => {
+      const rec = recommendedCode ? nodeCode(recommendedCode.name) : null
+      if (rec && left === rec) return -1
+      if (rec && right === rec) return 1
+      return left.localeCompare(right)
+    })
     return [
       ...codes.map((code) => ({
         key: code,
@@ -251,7 +265,7 @@ const ServersPage = () => {
         servers: visibleServers.filter((server) => server.available === false),
       },
     ].filter((group) => group.servers.length > 0)
-  }, [t, regionLabel, visibleServers])
+  }, [t, regionLabel, recommendedName, visibleServers])
   const canTestAll =
     status?.uiState === 'notConnected' &&
     catalog?.revision !== null &&
@@ -842,6 +856,22 @@ const ServersPage = () => {
                           >
                             {cityTitle}
                           </span>
+                          {recommendedName === server.name && (
+                            <span
+                              style={{
+                                flexShrink: 0,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                letterSpacing: 0.3,
+                                color: TONO_COLORS.accent,
+                                border: `1px solid ${hex(TONO_COLORS.accent, 0.45)}`,
+                                borderRadius: 999,
+                                padding: '2px 7px',
+                              }}
+                            >
+                              {t('tono.nodes.recommended')}
+                            </span>
+                          )}
                           {nodeCityParts(server.name).codename && (
                             <span
                               style={{

@@ -238,6 +238,7 @@ pub struct DiagnosticsSources<'a> {
     pub dns: Option<&'a DnsProtectionStatus>,
     pub failed_stage: Option<&'a str>,
     pub connect_error: Option<&'a str>,
+    pub overlay_skip: Option<&'a str>,
     pub retry_attempt: u32,
     pub steps: &'a [StepRecord],
     /// Raw adapter names in; only class tokens come out.
@@ -270,6 +271,11 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
         .collect();
     let total_elapsed_ms = crate::tono::steps::total_elapsed_ms(sources.steps);
     let known = sources.known_secrets;
+    let overlay_error = sources
+        .overlay_skip
+        .filter(|_| sources.connect_error.is_none())
+        .map(|reason| format!("overlay skipped: {reason}"));
+    let error_source = sources.connect_error.or(overlay_error.as_deref());
 
     DiagnosticsReport {
         schema_version: DIAGNOSTICS_SCHEMA_VERSION,
@@ -298,7 +304,7 @@ pub fn build_report(sources: &DiagnosticsSources<'_>) -> DiagnosticsReport {
             .dns
             .and_then(|status| scrub_opt_text(status.last_error.as_deref(), known)),
         failed_stage: sources.failed_stage.map(str::to_string),
-        error: scrub_opt_text(sources.connect_error, known),
+        error: scrub_opt_text(error_source, known),
         retry_attempt: sources.retry_attempt,
         total_elapsed_ms,
         steps,
@@ -468,6 +474,7 @@ mod tests {
                 dns: Some(&self.dns),
                 failed_stage: Some("securingDNS"),
                 connect_error: Some(&self.connect_error),
+                overlay_skip: None,
                 retry_attempt: 2,
                 steps: &self.steps,
                 adapter_names: &self.adapters,

@@ -15,7 +15,7 @@ use crate::tono::{
     connection_health::{
         CoreSample, HealthLegs, NetworkChangeOutcome, classify_core_sample, connection_loop_continues,
         core_change_fires, health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect,
-        network_event_fires, protected_dns_unhealthy,
+        network_change_uses_probe_veto, network_event_fires, protected_dns_unhealthy,
     },
     connection_plan::{guard_rejection_is_transient, reconnect_allowed},
     state::TonoState,
@@ -28,7 +28,7 @@ use super::{
 use super::direct::dns_query_a;
 use super::reconnect::schedule_reconnect;
 use super::controller::{CONTROLLER_HTTP_TIMEOUT, controller_client, controller_url};
-use super::probes::{verify_locked, verify_tun_data_plane};
+use super::probes::{probe_exit_once, verify_tun_data_plane};
 
 /// `lookup_host` delegates to the OS resolver and has no Tokio timeout of its own. Bound every
 /// lookup so a broken adapter/resolver cannot strand Connecting forever.
@@ -381,6 +381,90 @@ pub(super) async fn signed_wechat_paths_require_reconnect(state: &Arc<TonoState>
     }
 }
 
+/// Advisory controller `/delay`, started at controller-ready so it overlaps
+/// DNS and the admit TUN race. Not a gate and not an `exit_verified` input —
+/// persistent 504s on distant Reality exits do not prove user traffic is dead.
+/// Generation-only: `is_connected` is still false when this is spawned.
+pub(super) fn spawn_advisory_exit_delay(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    AsyncHandler::spawn(move || async move {
+        let (secret, controller_port) = {
+            let inner = state.lock().await;
+            if inner.connect_generation != generation {
+                return;
+            }
+            match (
+                inner.controller_secret.clone(),
+                inner.controller_port,
+            ) {
+                (Some(secret), Some(port)) => (secret, port),
+                _ => return,
+            }
+        };
+        let Ok(delay) = probe_exit_once(&secret, controller_port).await else {
+            return;
+        };
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return;
+        }
+        inner.record_exit_delay(delay);
+        commands::emit_status(&app, &commands::status_of(&inner));
+    });
+}
+
+pub(super) fn asn_org_from_ipapi(json: &serde_json::Value) -> Option<String> {
+    let nested_asn = json.get("asn").and_then(|value| value.as_object());
+    let org = json
+        .get("asn_org")
+        .and_then(|value| value.as_str())
+        .or_else(|| json.get("company_name").and_then(|value| value.as_str()))
+        .or_else(|| {
+            nested_asn
+                .and_then(|asn| asn.get("org"))
+                .and_then(|value| value.as_str())
+        })
+        .unwrap_or("")
+        .trim();
+    (!org.is_empty()).then(|| org.to_string())
+}
+
+/// DIRECT lookup of the home ISP, started before WFP lock so it can finish
+/// during StartClash. Stored org is suggestion-only.
+pub(super) fn spawn_isp_lookup(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
+    let state = Arc::clone(state);
+    let app = app.clone();
+    AsyncHandler::spawn(move || async move {
+        let Ok(client) = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(4))
+            .build()
+        else {
+            return;
+        };
+        let Ok(response) = client.get("https://api.ipapi.is").send().await else {
+            return;
+        };
+        let Ok(json) = response.json::<serde_json::Value>().await else {
+            return;
+        };
+        if json.get("error").is_some() {
+            return;
+        }
+        let Some(org) = asn_org_from_ipapi(&json) else {
+            return;
+        };
+        let mut inner = state.lock().await;
+        if inner.connect_generation != generation {
+            return;
+        }
+        inner.isp_org = Some(org);
+        commands::emit_status(&app, &commands::status_of(&inner));
+    });
+}
+
 pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle, generation: u64) {
     let state = Arc::clone(state);
     let app = app.clone();
@@ -407,7 +491,6 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
             return;
         }
         let nested_location = json.get("location").and_then(|value| value.as_object());
-        let nested_asn = json.get("asn").and_then(|value| value.as_object());
         let country = json
             .get("cc")
             .and_then(|value| value.as_str())
@@ -417,16 +500,7 @@ pub(super) fn spawn_exit_identity_lookup(state: &Arc<TonoState>, app: &AppHandle
                     .and_then(|value| value.as_str())
             })
             .unwrap_or("");
-        let org = json
-            .get("asn_org")
-            .and_then(|value| value.as_str())
-            .or_else(|| json.get("company_name").and_then(|value| value.as_str()))
-            .or_else(|| {
-                nested_asn
-                    .and_then(|asn| asn.get("org"))
-                    .and_then(|value| value.as_str())
-            })
-            .unwrap_or("");
+        let org = asn_org_from_ipapi(&json).unwrap_or_default();
         let location = if country.is_empty() {
             None
         } else {
@@ -482,6 +556,7 @@ pub(super) async fn periodic_data_plane_probe_failed(state: &Arc<TonoState>) -> 
 /// reuse a Service that never answers again would probe every other tick for the whole session.
 pub(super) async fn in_place_hold_still_proven(
     state: &Arc<TonoState>,
+    app: &AppHandle,
     legs: &mut HealthLegs,
     last_proof: &mut Option<std::time::Instant>,
 ) -> bool {
@@ -491,7 +566,60 @@ pub(super) async fn in_place_hold_still_proven(
     let failed = periodic_data_plane_probe_failed(state).await;
     *last_proof = if failed { None } else { Some(std::time::Instant::now()) };
     legs.observe_probe(failed);
+    apply_exit_probe_result(state, app, failed, legs.probe).await;
     !failed
+}
+
+/// Promote a successful probe to `exit_verified`, or degrade after sustained
+/// failure. One blip must not flip the pill; `HEALTH_FAILURE_THRESHOLD`
+/// consecutive failures (already counted on `HealthLegs.probe`) do.
+async fn apply_exit_probe_result(
+    state: &Arc<TonoState>,
+    app: &AppHandle,
+    failed: bool,
+    consecutive_probe_failures: u32,
+) {
+    let mut inner = state.lock().await;
+    if !inner.fsm.status().is_connected {
+        return;
+    }
+    inner.exit_probe_pending = false;
+    if !failed {
+        let was_unverified = !inner.fsm.exit_verified();
+        inner.fsm.mark_exit_verified();
+        inner.unverified_since = None;
+        inner.last_unverified_probe_delay = None;
+        inner.suggested_server = None;
+        if was_unverified {
+            commands::emit_status(app, &commands::status_of(&inner));
+        }
+        return;
+    }
+    if inner.fsm.exit_verified() {
+        if health_threshold_reached(consecutive_probe_failures) {
+            inner.fsm.clear_exit_verified();
+            inner.unverified_since = Some(std::time::Instant::now());
+            inner.last_unverified_probe_delay = None;
+            inner.suggested_server = inner.isp_org.as_deref().and_then(|org| {
+                crate::tono::catalog_sync::recommend_exit_for_isp(
+                    org,
+                    &inner.nodes,
+                    inner.selected_node.as_deref(),
+                )
+            });
+            commands::emit_status(app, &commands::status_of(&inner));
+        }
+        return;
+    }
+    let elapsed = inner
+        .unverified_since
+        .map(|at| at.elapsed())
+        .unwrap_or(Duration::ZERO);
+    let wait = tono_core::next_unverified_probe_delay(
+        elapsed,
+        inner.last_unverified_probe_delay,
+    );
+    inner.last_unverified_probe_delay = Some(wait);
 }
 
 pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) {
@@ -510,6 +638,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
     // The last recovered-in-place verdict, so a leg that stays failed while the tunnel keeps
     // working re-proves the data plane at the exit-probe cadence rather than every two ticks.
     let mut last_in_place_recovery: Option<std::time::Instant> = None;
+
     loop {
         interval.tick().await;
         {
@@ -544,7 +673,7 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                         // Elapsed time on its own is not evidence: this path continues before
                         // the periodic probe below, so nothing watches the tunnel while the hold
                         // runs.
-                        if in_place_hold_still_proven(&state, &mut legs, &mut last_event_probe_ok).await {
+                        if in_place_hold_still_proven(&state, &app, &mut legs, &mut last_event_probe_ok).await {
                             continue;
                         }
                     }
@@ -574,9 +703,32 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         legs.observe_protected_dns(protected_dns_unhealthy(protected_dns.as_ref()));
 
         // F2 leg 2: periodic real App data-plane probe through the tunnel.
-        if last_probe.elapsed() >= EXIT_PROBE_INTERVAL {
+        // Unverified sessions use a short doubling ladder, then the 120 s cadence.
+        // Probe failures mark exit health only — they do not tear the tunnel down.
+        let due = {
+            let inner = state.lock().await;
+            if !inner.fsm.exit_verified() {
+                let elapsed = inner
+                    .unverified_since
+                    .map(|at| at.elapsed())
+                    .unwrap_or(Duration::ZERO);
+                let wait = tono_core::next_unverified_probe_delay(
+                    elapsed,
+                    inner.last_unverified_probe_delay,
+                );
+                last_probe.elapsed() >= wait
+            } else {
+                last_probe.elapsed() >= EXIT_PROBE_INTERVAL
+            }
+        };
+        if due {
             last_probe = std::time::Instant::now();
-            legs.observe_probe(periodic_data_plane_probe_failed(&state).await);
+            let failed = periodic_data_plane_probe_failed(&state).await;
+            legs.observe_probe(failed);
+            apply_exit_probe_result(&state, &app, failed, legs.probe).await;
+            if !failed {
+                last_event_probe_ok = Some(std::time::Instant::now());
+            }
         }
         let health_invalid = legs.invalid();
         let protection_invalid = legs.protection_invalid();
@@ -669,8 +821,16 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
         // reconnect loop. Do not trust the event either way: under the still-locked barrier,
         // repeat the same multi-origin HTTPS proof that admitted Connected. Success proves the
         // current tunnel still carries user traffic; failure corroborates the event and keeps the
-        // existing fail-closed reconnect. Core identity and health failures remain unconditional.
-        let event_probe_failed = if invalidate && network_changed && !core_changed && !health_invalid {
+        // existing fail-closed reconnect. Core identity and protection-leg failures remain
+        // unconditional. Unverified sessions skip the probe veto: those probes fail for the
+        // life of the session and would reconnect on every hotspot / Wi-Fi flap.
+        let exit_verified = state.lock().await.fsm.exit_verified();
+        let event_probe_failed = if invalidate
+            && network_changed
+            && !core_changed
+            && !health_invalid
+            && network_change_uses_probe_veto(exit_verified)
+        {
             let recently_proven = last_event_probe_ok
                 .is_some_and(|at| at.elapsed() < NETWORK_EVENT_PROBE_COOLDOWN);
             if recently_proven {
@@ -687,18 +847,29 @@ pub(super) async fn network_monitor_loop(state: Arc<TonoState>, app: AppHandle) 
                 } else {
                     Some(std::time::Instant::now())
                 };
+                if !failed {
+                    apply_exit_probe_result(&state, &app, false, 0).await;
+                }
                 failed
             }
         } else {
             false
         };
         if invalidate && network_changed && !core_changed && !health_invalid && !event_probe_failed {
-            logging!(
-                info,
-                Type::Service,
-                "Tono: Windows reported a network change, but the locked TUN data plane remains healthy; keeping Connected"
-            );
-            legs.observe_probe(false);
+            if exit_verified {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: Windows reported a network change, but the locked TUN data plane remains healthy; keeping Connected"
+                );
+                legs.observe_probe(false);
+            } else {
+                logging!(
+                    info,
+                    Type::Service,
+                    "Tono: Windows reported a network change while the exit is unverified; keeping Connected without a probe veto"
+                );
+            }
             let generation = state.lock().await.connect_generation;
             let _ = refresh_control_plane_pins_once(&state, generation).await;
         }
@@ -850,4 +1021,21 @@ pub(super) async fn bootstrap_hosts() -> Vec<String> {
             Ok(Err(_)) | Err(_) => Vec::new(),
         };
     bootstrap::merge_bootstrap_hosts(&dynamic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::asn_org_from_ipapi;
+
+    #[test]
+    fn isp_org_comes_from_ipapi_without_storing_an_address() {
+        let json = serde_json::json!({
+            "ip": "183.212.182.34",
+            "asn": { "org": "AS56046 China Mobile" },
+        });
+        assert_eq!(
+            asn_org_from_ipapi(&json).as_deref(),
+            Some("AS56046 China Mobile")
+        );
+    }
 }

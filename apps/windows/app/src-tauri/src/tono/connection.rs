@@ -77,12 +77,14 @@ use crate::{
 pub use crate::tono::connection_health::{
     CORE_MISSING_SUSTAINED_SAMPLES, CoreSample, HEALTH_FAILURE_THRESHOLD, HealthLegs, NETWORK_EVENT_DEBOUNCE,
     NetworkChangeOutcome, classify_core_sample, connection_loop_continues, core_change_fires,
-    health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect, network_event_fires,
-    protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
+    health_threshold_reached, kill_switch_unhealthy, monitor_requires_reconnect, network_change_uses_probe_veto,
+    network_event_fires, protected_dns_unhealthy, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
+    unique_adapter_dns_apply_failed,
 };
 pub use crate::tono::connection_plan::{
     FailurePlan, SelectAction, guard_rejection_is_transient, plan_failure, reconnect_allowed, retry_now_is_noop,
-    select_action, sign_out_needs_release, single_flight_begin, stale_exit_needs_release,
+    select_action, session_verified_for_failure, sign_out_needs_release, single_flight_begin,
+    stale_exit_needs_release,
 };
 #[cfg(any(not(windows), test))]
 pub use crate::tono::connection_plan::stop_core_before_release;
@@ -107,11 +109,11 @@ pub(crate) use monitor::handle_network_change;
 #[cfg(test)]
 use probes::EXIT_PROBE_ADVISORY_BUDGET;
 use probes::{
-    EXIT_PROBE_CLIENT_TIMEOUT, EXIT_PROBE_CORE_TIMEOUT_MS, FAKE_IP_LOOKUP_TIMEOUT, POST_LOCK_VERIFY_ROUND_DELAY,
-    POST_LOCK_VERIFY_ROUNDS, PostLockVerification, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES,
-    TUN_DATA_PLANE_TIMEOUT, TUN_PROBE_STAGGER, VERIFY_LOCK_ATTEMPTS, classify_exhausted_data_plane,
-    classify_post_lock_verification, connect_failure_is_dead_exit, fake_ip_attempt_timeout,
-    fake_ip_verification_error, format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
+    EXIT_PROBE_CLIENT_TIMEOUT, EXIT_PROBE_CORE_TIMEOUT_MS, FAKE_IP_LOOKUP_TIMEOUT, PostLockVerification,
+    TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT, TUN_PROBE_STAGGER,
+    VERIFY_LOCK_ATTEMPTS, classify_exhausted_data_plane, classify_post_lock_verification,
+    connect_failure_is_dead_exit, fake_ip_attempt_timeout, fake_ip_verification_error,
+    format_tun_probe_failures, tun_probe_stagger, verify_tun_data_plane,
 };
 pub use probes::{is_fake_ip, test_current_server, verify_lock_retry_window};
 
@@ -257,6 +259,15 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         inner.next_retry_at_ms = None;
         inner.optional_direct_active = false;
         inner.optional_direct_skip = None;
+        // Admit timeout-retry must not treat a previous session's /delay as this
+        // attempt's parallel success.
+        inner.last_exit_delay_ms = None;
+        inner.last_exit_delay_at_ms = None;
+        inner.last_exit_delay_node = None;
+        inner.suggested_server = None;
+        if inner.last_admitted_node.as_deref() != Some(node.name.as_str()) {
+            inner.fsm.begin_fresh_admit();
+        }
         commands::emit_status(app, &commands::status_of(&inner));
     }
 
@@ -401,8 +412,9 @@ async fn guard_snapshot(
 /// Protected Offline. Before arm: full release.
 async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> String {
     logging!(error, Type::Service, "Tono: 连接事务失败: {err}");
+    let err = crate::tono::audit::strip_ipv4(&err);
     let observed = service::tono_kill_switch_status().await.ok();
-    let (plan, stage, action, armed) = {
+    let (plan, stage, action, armed, step_elapsed, err) = {
         let mut inner = state.lock().await;
         if let Some(status) = &observed {
             inner.kill_switch = Some(status.clone());
@@ -413,12 +425,11 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
             .map(|status| status.wanted)
             .unwrap_or(inner.fsm.kill_switch_armed());
         let was_disconnecting = inner.fsm.status().is_disconnecting;
-        let session_verified = observed
-            .as_ref()
-            .map(|status| status.verified)
-            .unwrap_or(inner.fsm.session_verified());
-        if session_verified {
-            inner.fsm.mark_session_verified();
+        let service_verified = observed.as_ref().is_some_and(|status| status.verified);
+        let session_verified =
+            session_verified_for_failure(inner.fsm.protection_committed(), service_verified);
+        if !session_verified {
+            inner.last_admitted_node = None;
         }
         let plan = plan_failure(armed, session_verified, was_disconnecting);
         let action: &'static str = if was_disconnecting {
@@ -458,17 +469,27 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
             .unwrap_or(0);
         crate::tono::steps::fail_current(&mut inner.connect_steps, step_elapsed);
         inner.failed_stage = stage.map(commands::stage_key);
+        let suggestion = inner.isp_org.as_deref().and_then(|org| {
+            catalog_sync::recommend_exit_for_isp(org, &inner.nodes, inner.selected_node.as_deref())
+        });
+        inner.suggested_server = suggestion.clone();
+        let err = if let Some(name) = suggestion {
+            format!("{err}; suggest={name}")
+        } else {
+            err
+        };
         inner.connect_error = Some(crate::tono::audit::redact(&err));
         inner.connect_error_at_ms = Some(commands::epoch_millis());
         if plan.mark_armed {
             inner.retry_attempt += 1;
         }
-        (plan, stage, action, armed)
+        (plan, stage, action, armed, step_elapsed, err)
     };
     state.audit().log(AuditEvent::ConnectFail {
         stage: stage.map(commands::stage_key),
         error: err.clone(),
         action,
+        elapsed_ms: step_elapsed,
     });
     if plan.mark_armed {
         state
@@ -664,7 +685,7 @@ mod tests {
         EXIT_PROBE_CORE_TIMEOUT_MS, EXPLICIT_RELEASE_TIMEOUT, FailurePlan, HEALTH_FAILURE_THRESHOLD, HealthLegs,
         IN_PLACE_RECOVERY_COOLDOWN,
         LOCK_ATTEMPTS, LOCK_RETRY_INTERVAL, MAX_DIRECT_ENDPOINTS, NETWORK_EVENT_DEBOUNCE, NETWORK_MONITOR_INTERVAL,
-        POST_LOCK_VERIFY_ROUND_DELAY, POST_LOCK_VERIFY_ROUNDS, RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
+        RELEASE_RECONCILING_PREFIX, SERVICE_BUSY_PREFIX,
         NetworkChangeOutcome, SERVICE_LIFECYCLE_TIMEOUT, SERVICE_TOO_OLD_PREFIX, SelectAction,
         TRANSITION_IN_FLIGHT_REJECTION,
         FAKE_IP_LOOKUP_TIMEOUT, TUN_DATA_PLANE_CONNECT_TIMEOUT, TUN_DATA_PLANE_PROBES, TUN_DATA_PLANE_TIMEOUT,
@@ -675,8 +696,10 @@ mod tests {
         core_change_fires,
         dns_listener_conflict_message, expected_controller_direct_rules, format_tun_probe_failures, guard_rejection_is_transient,
         health_threshold_reached, is_fake_ip, is_retryable_lock_error, kill_switch_unhealthy, map_service_ready_error,
-        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_event_fires, plan_failure,
+        map_wfp_engine_error, monitor_interval, monitor_requires_reconnect, network_change_uses_probe_veto,
+        network_event_fires, plan_failure, session_verified_for_failure,
         protected_dns_unhealthy, prove_service_endpoint_digest, prove_service_reload_mode, proxy_endpoint_of,
+        unique_adapter_dns_apply_failed,
         unique_proxy_endpoints,
         reconnect_allowed, retry_now_is_noop, select_action, sign_out_needs_release, single_flight_begin,
         stale_exit_needs_release, startup_resume_guards_hold, startup_runtime_is_resume_candidate,
@@ -812,7 +835,6 @@ mod tests {
             ("protected dns", |legs: &mut HealthLegs| {
                 legs.observe_protected_dns(true)
             }),
-            ("probe", |legs: &mut HealthLegs| legs.observe_probe(true)),
             ("service", |legs: &mut HealthLegs| legs.observe_service_failure()),
         ] {
             let mut legs = HealthLegs::default();
@@ -829,7 +851,7 @@ mod tests {
         for _ in 0..HEALTH_FAILURE_THRESHOLD {
             probe.observe_probe(true);
         }
-        assert!(probe.invalid());
+        assert!(!probe.invalid(), "exit-probe failures must not tear the tunnel down");
         assert!(!probe.protection_invalid());
 
         let mut kill_switch = HealthLegs::default();
@@ -926,6 +948,31 @@ mod tests {
             !monitor_requires_reconnect(false, false, false, true),
             "an event-only probe result has no meaning when debounce did not emit an event"
         );
+        assert!(
+            network_change_uses_probe_veto(true),
+            "a verified session still corroborates adapter events with a data-plane probe"
+        );
+        assert!(
+            !network_change_uses_probe_veto(false),
+            "an unverified session must not use a probe that will fail forever"
+        );
+        assert!(
+            !monitor_requires_reconnect(
+                true,
+                false,
+                false,
+                network_change_uses_probe_veto(false) && true
+            ),
+            "a hotspot / Wi-Fi flap on an unverified session must not force reconnect"
+        );
+        assert!(
+            monitor_requires_reconnect(true, true, false, false),
+            "a changed Core identity still rebuilds even while the exit is unverified"
+        );
+        assert!(
+            monitor_requires_reconnect(false, false, true, false),
+            "a broken protection or Service leg still rebuilds while unverified"
+        );
     }
 
     // ---- V1/H1: verify_locked must not decide on one sample of a decaying cache ----
@@ -965,8 +1012,8 @@ mod tests {
 
     #[test]
     fn advisory_exit_probe_is_one_bounded_attempt() {
-        // 11 s of HTTP + at most 5 s from the mainland integration profile. Connect performs
-        // exactly one such advisory request before the authoritative data-plane check.
+        // 11 s of HTTP + at most 5 s from the mainland integration profile. The advisory
+        // /delay runs after Connected and is not a gate.
         assert_eq!(
             EXIT_PROBE_ADVISORY_BUDGET,
             EXIT_PROBE_CLIENT_TIMEOUT + Duration::from_secs(5)
@@ -975,49 +1022,71 @@ mod tests {
 
     // ---- C3: a transient verification failure is not "the tunnel never came up" ----
 
-    /// Why the retry has to live inside the transaction: at `checkingExit`/`verifyingTraffic`
-    /// the barrier is armed and locked but `session_verified` is still false, so the failure
-    /// decision table resolves to a full release — and the reconnect gate then refuses to hand
-    /// out a delay, because it requires the very latch the release just cleared.
     #[test]
-    fn a_post_lock_failure_would_otherwise_be_a_dead_end() {
+    fn a_post_lock_failure_keeps_protection_once_committed() {
         assert_eq!(
             plan_failure(true, false, false),
             FailurePlan {
                 mark_armed: false,
                 stop_core: Some(true),
                 restrict_bootstrap: false,
+            },
+            "lock/DNS/first-probe failure before admit must FullRelease"
+        );
+        assert!(
+            !session_verified_for_failure(false, true),
+            "a leftover Service verified bit must not invent an admit"
+        );
+        assert_eq!(
+            plan_failure(true, session_verified_for_failure(false, true), false),
+            FailurePlan {
+                mark_armed: false,
+                stop_core: Some(true),
+                restrict_bootstrap: false,
             }
         );
-        // ...and the FSM confirms the dead end: after that release neither
-        // `is_protection_blocked` nor `session_verified` holds, and `next_reconnect_delay`
-        // requires both — so the user lands on NotConnected with nothing scheduled.
+        assert!(session_verified_for_failure(true, false));
+        assert_eq!(
+            plan_failure(true, true, false),
+            FailurePlan {
+                mark_armed: true,
+                stop_core: Some(false),
+                restrict_bootstrap: true,
+            }
+        );
         let mut fsm = tono_core::connection::ConnectionFsm::new();
         fsm.begin_connect();
         fsm.mark_kill_switch_armed();
-        assert!(!fsm.session_verified(), "the latch is committed after these stages");
+        fsm.mark_protection_committed();
         fsm.connect_failed();
-        assert!(!fsm.status().is_protection_blocked);
-        assert_eq!(
-            fsm.next_reconnect_delay(),
-            None,
-            "nothing retries after a post-lock failure — so the retry must happen before it"
-        );
+        assert!(fsm.status().is_protection_blocked);
+        assert!(fsm.next_reconnect_delay().is_some());
     }
 
     #[test]
-    #[allow(clippy::assertions_on_constants, reason = "these tests exist to pin the constants")]
-    fn the_post_lock_group_retries_before_giving_up() {
-        assert!(
-            POST_LOCK_VERIFY_ROUNDS >= 2,
-            "one transient real TUN failure must not destroy a working tunnel"
+    fn unverified_exit_retries_live_on_the_monitor_ladder_not_the_connect_clock() {
+        assert_eq!(
+            tono_core::next_unverified_probe_delay(Duration::ZERO, None),
+            Duration::ZERO,
+            "degraded retests start with no extra delay"
         );
-        // ...but the group stays bounded: it can never outlive the transaction budget.
-        let real_data_plane_budget = verify_lock_retry_window() + TUN_DATA_PLANE_TIMEOUT + Duration::from_secs(5);
-        let worst = EXIT_PROBE_ADVISORY_BUDGET
-            + real_data_plane_budget * POST_LOCK_VERIFY_ROUNDS
-            + POST_LOCK_VERIFY_ROUND_DELAY;
-        assert!(worst < CONNECT_TRANSACTION_TIMEOUT);
+        let ladder = [
+            Duration::ZERO,
+            Duration::from_secs(5),
+            Duration::from_secs(10),
+            Duration::from_secs(20),
+            Duration::from_secs(30),
+        ];
+        let mut last = None;
+        for expected in ladder {
+            let wait = tono_core::next_unverified_probe_delay(Duration::from_secs(1), last);
+            assert_eq!(wait, expected);
+            last = Some(wait);
+        }
+        assert!(
+            TUN_DATA_PLANE_TIMEOUT < CONNECT_TRANSACTION_TIMEOUT,
+            "a background probe must not be able to outlive the connect budget it left"
+        );
     }
 
     #[test]
@@ -1071,7 +1140,8 @@ mod tests {
         );
         assert_eq!(
             classify_post_lock_verification::<u8>(Ok(()), Err("real request timed out".to_string())),
-            PostLockVerification::Retry {
+            PostLockVerification::Unverified {
+                code: tono_core::ProtectedFailureCode::TunRouteUnavailable,
                 error: "real request timed out".to_string(),
             }
         );
@@ -1081,7 +1151,8 @@ mod tests {
         );
         assert_eq!(
             both_failed,
-            PostLockVerification::Retry {
+            PostLockVerification::Unverified {
+                code: tono_core::ProtectedFailureCode::CoreExitUnreachable,
                 error: "controller exit measurement failed: delay probe answered 504 Gateway Timeout; real TUN data plane failed: HTTPS 204 failed".to_string(),
             }
         );
@@ -1107,7 +1178,6 @@ mod tests {
             tun_probe_stagger(TUN_DATA_PLANE_PROBES.len() - 1) < TUN_DATA_PLANE_CONNECT_TIMEOUT,
             "stagger is only spacing, not a second timeout"
         );
-        assert!(POST_LOCK_VERIFY_ROUND_DELAY <= Duration::from_millis(500));
     }
 
     #[test]
@@ -1173,7 +1243,7 @@ mod tests {
     #[test]
     fn connect_budget_covers_a_cold_first_connect() {
         let accounted: u64 = CONNECT_BUDGET_LEGS.iter().map(|(_, secs)| secs).sum();
-        assert_eq!(accounted, 208, "the table in the doc comment must stay in sync");
+        assert_eq!(accounted, 142, "the table in the doc comment must stay in sync");
         assert!(
             Duration::from_secs(accounted) <= CONNECT_TRANSACTION_TIMEOUT,
             "the accounted cold-connect worst case ({accounted} s) must fit the budget"
@@ -1188,10 +1258,54 @@ mod tests {
         };
         assert!(leg("controller readiness") >= CONTROLLER_READY_TIMEOUT);
         assert!(leg("lock ladder") >= LOCK_RETRY_INTERVAL * LOCK_ATTEMPTS);
-        assert!(leg("checkingExit") >= EXIT_PROBE_ADVISORY_BUDGET);
         assert!(
-            leg("verifyingTraffic") >= verify_lock_retry_window() + TUN_DATA_PLANE_TIMEOUT,
-            "the final stage must budget both WFP status and one real App data-plane request"
+            leg("lock verify") >= verify_lock_retry_window(),
+            "the Connected gate must still outlive the decaying WFP liveness cache"
+        );
+        assert!(
+            leg("fake-ip verification") > Duration::ZERO,
+            "fake-ip proof stays on the Connected gate"
+        );
+        assert_eq!(
+            CONNECT_BUDGET_LEGS
+                .iter()
+                .find(|(key, _)| *key == "TUN data-plane probe"),
+            None,
+            "third-party TUN HTTPS is not on the Connected clock"
+        );
+        for gone in [
+            "checkingExit",
+            "C3 second verification round",
+            "/delay",
+            "TUN data-plane probe",
+            "verifyingTraffic",
+        ] {
+            assert_eq!(
+                CONNECT_BUDGET_LEGS.iter().find(|(key, _)| *key == gone),
+                None,
+                "controller /delay and TUN HTTPS must not sit on the connect clock ({gone})"
+            );
+        }
+    }
+
+    #[test]
+    fn admit_source_does_not_wait_on_third_party_tun_https() {
+        let stages = include_str!("connection/stages.rs");
+        assert!(
+            !stages.contains("verify_tun_data_plane_for_admit"),
+            "admit must not FullRelease on gstatic/Cloudflare/Apple TLS"
+        );
+        assert!(
+            !stages.contains("verify_tun_data_plane()"),
+            "admit must not call the health TUN race"
+        );
+        assert!(
+            stages.contains("verify_fake_ip()"),
+            "DNS leak rejection (fake-ip) stays on the Connected gate"
+        );
+        assert!(
+            stages.contains("verify_locked()"),
+            "real-IP leak rejection (WFP lock) stays on the Connected gate"
         );
     }
 
@@ -1333,6 +1447,34 @@ mod tests {
             ..healthy
         };
         assert!(protected_dns_unhealthy(Some(&off)));
+    }
+
+    #[test]
+    fn unique_adapter_live_apply_failure_is_not_usable() {
+        let status = DnsProtectionStatus {
+            enabled: true,
+            snapshot_present: true,
+            adapters: 1,
+            last_error: Some(
+                "TONO_DNS_UNVERIFIED: protected DNS was applied but could not be verified on 1 of 1 adapter(s)"
+                    .into(),
+            ),
+        };
+        assert!(unique_adapter_dns_apply_failed(&status));
+        let five = DnsProtectionStatus {
+            adapters: 5,
+            last_error: Some("TONO_DNS_UNVERIFIED: applied but unverified on 2 of 5 adapter(s)".into()),
+            ..status.clone()
+        };
+        assert!(
+            !unique_adapter_dns_apply_failed(&five),
+            "a minority unverified adapter is still the health-warning path"
+        );
+        let clean = DnsProtectionStatus {
+            last_error: None,
+            ..status
+        };
+        assert!(!unique_adapter_dns_apply_failed(&clean));
     }
 
     fn resumable_startup_runtime() -> (ServiceStatusSnapshot, DnsProtectionStatus) {
@@ -2610,10 +2752,10 @@ mod tests {
         // One row per *permitted* endpoint. This fixture has no signed native
         // path, so its Bilibili suffix remains tunnelled and contributes no
         // controller row.
-        let process_rows = if plan.tcp_wechat_rules.is_empty() {
-            0
-        } else {
+        let process_rows = if plan.wechat_process_direct_enabled() {
             plan.reviewed_direct_ports.len() * plan.wechat_process_path_regexes.len()
+        } else {
+            0
         };
         assert_eq!(
             controller_rules.len(),
@@ -2720,11 +2862,6 @@ mod tests {
         .unwrap();
         assert_eq!(plan.wechat_process_path_regexes, vec![prefix.clone()]);
         let controller = expected_controller_direct_rules(&plan);
-        // The reviewed regex is retained on the plan — it still governs UDP media, and
-        // reinstating TCP process scope is one block in `runtime_value` once WFP grows an
-        // app-scoped port permit — but it must not produce a TCP row today: that row would
-        // route every WeChat flow out the physical interface, where only the pins below
-        // have a permit and the rest is dropped.
         assert!(
             !controller.iter().any(|rule| {
                 rule.payload
@@ -2733,10 +2870,58 @@ mod tests {
                         super::MIHOMO_PROCESS_PATH_REGEX_TYPE
                     )
             }),
-            "a TCP path-regex row routes flows the WFP permit set cannot cover"
+            "an unconstrained TCP path-regex row would bypass the reviewed-port WFP permit"
         );
         assert!(controller.iter().any(|rule| {
+            rule.payload
+                == format!(
+                    "((Network,tcp) && (DstPort,443) && ({},{prefix}))",
+                    super::MIHOMO_PROCESS_PATH_REGEX_TYPE
+                )
+        }));
+        assert!(controller.iter().any(|rule| {
             rule.payload == "((Network,tcp) && (DstPort,443) && (Domain,wxs.qq.com) && (IPCIDR,9.0.0.10/32))"
+        }));
+    }
+
+    #[test]
+    fn signed_wechat_path_controller_proof_does_not_need_domain_pins() {
+        let node = node();
+        let prefix = tono_core::config::wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat")
+            .expect("reviewed prefix");
+        let (plan, endpoints) = build_direct_plan(
+            "Ethernet 2".to_string(),
+            &[],
+            &[],
+            &[],
+            &[],
+            &node,
+            vec![prefix.clone()],
+        )
+        .unwrap();
+        assert!(endpoints.is_empty());
+        assert!(plan.tcp_wechat_rules.is_empty());
+        assert!(plan.wechat_process_direct_enabled());
+        let controller = expected_controller_direct_rules(&plan);
+        let path_rows = controller
+            .iter()
+            .filter(|rule| {
+                rule.proxy == tono_core::config::DIRECT_GROUP_NAME
+                    && rule.payload.contains(super::MIHOMO_PROCESS_PATH_REGEX_TYPE)
+            })
+            .count();
+        assert_eq!(
+            path_rows,
+            plan.reviewed_direct_ports.len(),
+            "each reviewed port must have one signed-path controller row"
+        );
+        assert!(controller.iter().any(|rule| {
+            rule.proxy == tono_core::config::DIRECT_GROUP_NAME
+                && rule.payload
+                    == format!(
+                        "((Network,tcp) && (DstPort,443) && ({},{prefix}))",
+                        super::MIHOMO_PROCESS_PATH_REGEX_TYPE
+                    )
         }));
     }
 

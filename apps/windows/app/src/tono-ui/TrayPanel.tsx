@@ -236,9 +236,18 @@ export const TrayPanel = () => {
 
       {picking && (
         <div className="tono-tray-picker">
-          {(servers ?? []).map((server) => {
+          {(servers ?? [])
+            .slice()
+            .sort((left, right) => {
+              const rec = status?.suggestedServer
+              if (rec && left.name === rec) return -1
+              if (rec && right.name === rec) return 1
+              return 0
+            })
+            .map((server) => {
             const key = nodeCityTitleKey(server.name)
             const label = key ? t(key) : nodeDisplayName(server.name)
+            const recommended = status?.suggestedServer === server.name
             const active = server.selected || server.name === serverName
             return (
               <button
@@ -269,9 +278,9 @@ export const TrayPanel = () => {
                   {label}
                 </span>
                 <span
-                  style={{ flexShrink: 0, fontSize: 10, color: text.tertiary }}
+                  style={{ flexShrink: 0, fontSize: 10, color: recommended ? TONO_COLORS.accent : text.tertiary }}
                 >
-                  {nodeCode(server.name) ?? ''}
+                  {recommended ? t('tono.nodes.recommended') : nodeCode(server.name) ?? ''}
                 </span>
               </button>
             )

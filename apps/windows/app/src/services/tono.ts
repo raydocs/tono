@@ -88,6 +88,8 @@ export interface TonoStatus {
   stage: string | null
   stageLabel: string | null
   selectedServer: string | null
+  /** Catalog name to try next after a connect fail. Suggestion only. */
+  suggestedServer?: string | null
   protectionBlocked: boolean
   killSwitch: TonoKillSwitch | null
   catalogRevision: number | null
@@ -99,6 +101,8 @@ export interface TonoStatus {
   exitLocation?: string | null
   /** `off` | `on` | `skipped` — optional WeChat/web DIRECT overlay. */
   directOverlay?: string
+  /** Redacted reason when `directOverlay` is `skipped`. */
+  directOverlaySkip?: string | null
   /** HTTP generate_204 through the selected exit. Not TCP to the node. */
   exitDelayMs?: number | null
   exitDelayAtMs?: number | null
@@ -107,6 +111,10 @@ export interface TonoStatus {
   tcpDelayAtMs?: number | null
   claudeHomeActive?: boolean | null
   claudeHomeHost?: string | null
+  /** False when Connected without a proven third-party exit. */
+  exitVerified?: boolean
+  /** True from Connected until the first background TUN probe returns. */
+  exitProbePending?: boolean
 }
 
 export const TONO_STATUS_EVENT = 'tono://status'
@@ -259,6 +267,13 @@ const mappedTonoActionErrorKey = (raw: string): string | null => {
   ) {
     return 'tono.dashboard.errors.protectedHttpsFailed'
   }
+  if (
+    (raw.includes('TONO_NODE_OR_CORE_UNREACHABLE') ||
+      raw.includes('CORE_EXIT_UNREACHABLE')) &&
+    /;\s*suggest=.+/i.test(raw)
+  ) {
+    return 'tono.dashboard.errors.nodeUnreachableSuggest'
+  }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
       return key
@@ -282,13 +297,23 @@ export type TonoActionErrorDescription = {
   detail?: string
 }
 
+export const parseSuggestedNode = (raw: string): string | null => {
+  const match = /;\s*suggest=(.+)$/i.exec(raw.trim())
+  const name = match?.[1]?.trim()
+  return name ? name : null
+}
+
 export const describeTonoActionError = (
   error: unknown,
-  t?: (key: string) => string,
+  t?: (key: string, options?: Record<string, string>) => string,
 ): TonoActionErrorDescription => {
   const raw = actionErrorRaw(error)
   const key = mappedTonoActionErrorKey(raw)
   if (key) {
+    if (key === 'tono.dashboard.errors.nodeUnreachableSuggest') {
+      const node = parseSuggestedNode(raw)
+      if (node && t) return { message: t(key, { node }) }
+    }
     return { message: t ? t(key) : raw }
   }
   if (t) {
@@ -302,7 +327,7 @@ export const describeTonoActionError = (
 
 export const formatTonoActionError = (
   error: unknown,
-  t?: (key: string) => string,
+  t?: (key: string, options?: Record<string, string>) => string,
 ): string => describeTonoActionError(error, t).message
 
 /**
@@ -530,6 +555,8 @@ export const tonoUploadDiagnostics = () =>
  * Deliberately the *same object* the upload sends, so what the user can read
  * and what leaves the machine can never drift apart.
  */
+export const TONO_BUILD_ID = 'leak-closed'
+
 export const formatTonoDiagnostics = (
   report: TonoDiagnosticsReport,
 ): string => {
@@ -541,6 +568,7 @@ export const formatTonoDiagnostics = (
         : `${report.killSwitchMode} (wanted=${report.killSwitchWanted}, live=${report.killSwitchLive})`
   return [
     `Tono v${report.appVersion} diagnostics`,
+    `Build: ${TONO_BUILD_ID}`,
     `OS: ${report.osVersion} (${report.osArch})`,
     `Service protocol: ${report.serviceProtocol ?? '(unknown)'}${
       report.serviceBuild ? ` (build ${report.serviceBuild})` : ''

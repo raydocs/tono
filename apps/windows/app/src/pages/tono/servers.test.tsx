@@ -16,11 +16,12 @@ import enShared from '@/locales/en/shared.json'
 import enTono from '@/locales/en/tono.json'
 import type { TonoServer } from '@/services/tono'
 
-const { serversMock, selectServerMock, mutateTonoStatusMock } = vi.hoisted(
+const { serversMock, selectServerMock, mutateTonoStatusMock, statusHolder } = vi.hoisted(
   () => ({
     serversMock: vi.fn(),
     selectServerMock: vi.fn(),
     mutateTonoStatusMock: vi.fn(),
+    statusHolder: { suggestedServer: null as string | null },
   }),
 )
 vi.mock('@/services/tono', async (original) => ({
@@ -39,7 +40,11 @@ vi.mock('@/services/states', () => ({ useThemeMode: () => 'dark' }))
 vi.mock('@/hooks/use-tono', () => ({
   tonoServersQueryKey: ['tono', 'servers'],
   useTonoStatus: () => ({
-    status: { uiState: 'notConnected', accountState: 'ready' },
+    status: {
+      uiState: 'notConnected',
+      accountState: 'ready',
+      suggestedServer: statusHolder.suggestedServer,
+    },
     mutateTonoStatus: mutateTonoStatusMock,
   }),
 }))
@@ -54,6 +59,7 @@ void i18n.use(initReactI18next).init({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  statusHolder.suggestedServer = null
   selectServerMock.mockResolvedValue(undefined)
   mutateTonoStatusMock.mockResolvedValue(undefined)
 })
@@ -151,6 +157,34 @@ it('keeps cached servers visible when revalidation fails', async () => {
   expect(screen.getByRole('button', { name: /US West 1/ })).toBeDefined()
   expect(screen.queryByRole('status')).toBeNull()
   expect(screen.queryByText('No servers available')).toBeNull()
+})
+
+it('marks the suggested catalog node as recommended without selecting it', async () => {
+  statusHolder.suggestedServer = 'Tokyo · Fuji'
+  serversMock.mockResolvedValue([
+    {
+      name: 'Los Angeles · Pacific',
+      server: 'example.test',
+      port: 443,
+      selected: true,
+      available: true,
+    },
+    {
+      name: 'Tokyo · Fuji',
+      server: 'example.test',
+      port: 443,
+      selected: false,
+      available: true,
+    },
+  ])
+  renderPage()
+  expect(await screen.findByText('Recommended')).toBeDefined()
+  const tokyo = screen.getByRole('button', { name: /Tokyo/ })
+  expect(tokyo.textContent).toContain('Recommended')
+  const la = screen.getByRole('button', { name: /Los Angeles/ })
+  expect(la.textContent).not.toContain('Recommended')
+  const cards = screen.getAllByRole('button', { name: /Tokyo|Los Angeles/ })
+  expect(cards[0].textContent).toContain('Tokyo')
 })
 
 it('shows an in-flight spinner on the chosen card and disables the others until select resolves', async () => {

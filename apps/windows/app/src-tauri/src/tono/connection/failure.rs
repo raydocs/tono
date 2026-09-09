@@ -112,3 +112,5 @@ impl StageFailure {
         StageFailure::Error(map_wfp_engine_error(&text).unwrap_or(text))
     }
 }
+
+

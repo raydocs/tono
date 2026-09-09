@@ -168,6 +168,7 @@
       "notConnected": "待机",
       "connecting": "连接中…",
       "connected": "已连接",
+      "connectedUnverified": "已连接，出口未验证",
       "protectedOffline": "保护中，未连上",
       "protectionUnknown": "保护状态未确认",
       "disconnecting": "断开中…"
@@ -175,6 +176,9 @@
     "subtitle": {
       "tapToConnect": "点击连接",
       "tapToDisconnect": "点击断开",
+      "connectedUnverified": "建议切换节点",
+      "connectedUnverifiedNamed": "建议改连 {{node}}",
+      "verifyingExit": "正在验证出口…",
       "tapToRestore": "点击恢复网络",
       "restoringAccess": "正在恢复网络访问",
       "starting": "正在启动…"
@@ -239,6 +243,7 @@
       "serviceTooOld": "服务版本过旧，请用最新安装包重装。",
       "browserDnsPreflight": "无法连接 Claude 住宅专线，因为不能确认 Chrome / Edge 的「安全 DNS」配置安全。Tono 会统一路由 Chrome / Edge 的所有用户资料，不支持按资料单独路由。请将「安全 DNS」设为关闭，或自动且不指定自定义提供商；然后彻底重启浏览器，再重新连接 Tono。",
       "nodeUnreachable": "连不上这个节点。请重试或换节点。",
+      "nodeUnreachableSuggest": "连不上这个节点。建议改连 {{node}}。",
       "tunDataPlaneBroken": "节点是通的，但 Windows 没有转发隧道流量。换节点没用——请重启电脑后再连；若还是这样，请发诊断。",
       "tunIngressBroken": "节点是通的，但本机流量进不了隧道。通常是别的 VPN 或安全软件占住了网络，请先关掉再连。",
       "protectedHttpsFailed": "受保护的 HTTPS 失败。多个节点都这样时，换节点没用，请发诊断。",
@@ -343,6 +348,7 @@
     "search": "搜索节点",
     "noMatches": "没有符合条件的节点。",
     "readyToConnect": "可选",
+    "recommended": "推荐",
     "untested": "未测速",
     "catalogSynced": "节点列表已同步",
     "testCurrent": "测试当前节点",

@@ -198,6 +198,17 @@ describe('connectErrorSuggestsServerSwitch', () => {
     ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
   })
 
+  it('names the catalog node in the one-line suggestion', () => {
+    const t = (key: string, options?: Record<string, string>) =>
+      options?.node ? `${key}:${options.node}` : key
+    expect(
+      formatTonoActionError(
+        new Error('TONO_NODE_OR_CORE_UNREACHABLE: i/o timeout; suggest=Tokyo · Fuji'),
+        t,
+      ),
+    ).toBe('tono.dashboard.errors.nodeUnreachableSuggest:Tokyo · Fuji')
+  })
+
   it('does not tell the user to switch cities when every probe dies at TLS', () => {
     const error = new Error(
       'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',

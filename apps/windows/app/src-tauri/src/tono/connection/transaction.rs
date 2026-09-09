@@ -17,29 +17,25 @@ use super::failure::StageFailure;
 /// | StartClash #1 — cold WinTUN install + WFP arm             |  60 s | Service handler budget
 /// | controller readiness (`CONTROLLER_READY_TIMEOUT`)         |  15 s |
 /// | lock ladder (`LOCK_ATTEMPTS` × `LOCK_RETRY_INTERVAL`)     |  10 s |
-/// | securingDNS — PowerShell batches + read-back              |  30 s |
+/// | securingDNS — PowerShell/CIM live apply (shipped Service) |  30 s |
 /// | fake-ip verification (3 × (5 s + 0.5 s), cancellable)     |  16 s |
-/// | checkingExit (one advisory controller delay request)      |  16 s |
-/// | verifyingTraffic (WFP status + mainland App HTTP over TUN) |  26 s |
-/// | C3 second TUN round + concurrent proxy check + delay       |  27 s |
+/// | lock verify (4 samples of the decaying WFP cache)         |   3 s |
 /// | MarkVerified commit IPC                                   |   5 s |
-/// | **total**                                                 | 208 s |
+/// | **total**                                                 | 142 s |
 ///
-/// Optional DIRECT resolution runs after Connected and no longer sits on this clock.
-/// 240 s leaves margin over the remaining critical-path sum.
+/// Controller `/delay` and third-party TUN HTTPS (gstatic / Cloudflare / Apple)
+/// are not on this clock. Optional DIRECT resolution runs after Connected.
 pub(super) const CONNECT_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(240);
 /// The accounting table above, machine-checked by `connect_budget_covers_a_cold_first_connect`.
 #[cfg(test)]
-pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 10] = [
+pub(super) const CONNECT_BUDGET_LEGS: [(&str, u64); 8] = [
     ("service readiness", 3),
     ("StartClash #1 (cold WinTUN + WFP arm)", 60),
     ("controller readiness", 15),
     ("lock ladder", 10),
     ("securingDNS", 30),
     ("fake-ip verification", 16),
-    ("checkingExit", 16),
-    ("verifyingTraffic", 26),
-    ("C3 second verification round", 27),
+    ("lock verify", 3),
     ("MarkVerified commit", 5),
 ];
 #[derive(Clone)]

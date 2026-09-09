@@ -30,6 +30,14 @@ pub struct FailurePlan {
     pub restrict_bootstrap: bool,
 }
 
+/// Reconnect latch for `fail_connect`. The Service `verified` bit can still
+/// be true from a previous node or an inherited arm; it must not invent an
+/// admit. Only the App FSM commit counts.
+pub fn session_verified_for_failure(protection_committed: bool, service_verified: bool) -> bool {
+    let _ = service_verified;
+    protection_committed
+}
+
 pub fn plan_failure(armed: bool, session_verified: bool, was_disconnecting: bool) -> FailurePlan {
     if was_disconnecting {
         // A disconnect is in flight and owns the release sequence end to

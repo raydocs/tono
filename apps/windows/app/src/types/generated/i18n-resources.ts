@@ -1049,6 +1049,7 @@ export interface TranslationResources {
           dnsPortBusy: string
           encryptedDns: string
           nodeUnreachable: string
+          nodeUnreachableSuggest: string
           protectedHttpsFailed: string
           protectionReleaseFailed: string
           releaseReconciling: string
@@ -1224,6 +1225,7 @@ export interface TranslationResources {
         lastSynced: string
         noMatches: string
         readyToConnect: string
+        recommended: string
         refresh: string
         refreshing: string
         refreshSuccess: string
@@ -1255,14 +1257,18 @@ export interface TranslationResources {
         statusProtectedOffline: string
         statusReality: string
         subtitle: {
+          connectedUnverified: string
+          connectedUnverifiedNamed: string
           restoringAccess: string
           starting: string
           tapToConnect: string
           tapToDisconnect: string
           tapToRestore: string
+          verifyingExit: string
         }
         title: {
           connected: string
+          connectedUnverified: string
           connecting: string
           disconnecting: string
           notConnected: string

@@ -32,7 +32,7 @@
 //! **The enable-time read-back is evidence, not a gate.** Applying protected DNS is a *write*;
 //! proving it from Windows is not reliably possible. The registry stores "static, no servers"
 //! and "use DHCP" identically (which is why the IPv6 leg of the read-back was already removed),
-//! and the live apply runs through PowerShell/CIM/netsh, which fails on real machines for
+//! and the live apply used to run through PowerShell/CIM/netsh, which fails on real machines for
 //! reasons that have nothing to do with whether DNS works: pseudo-adapters, constrained language
 //! mode, EDR hooks, a damaged WMI repository. Gating `enable` on that weak proof killed connects
 //! on machines whose DNS was fine — the last one bailed with "protected DNS could not be verified
@@ -75,18 +75,16 @@
 //! that cannot be obtained is *unproven*, never proven — fail-closed for the normal disarm,
 //! while the emergency path stays the documented escape hatch (it logs and proceeds).
 //!
-//! **The live apply is per address family.** IPv4 goes through CIM
-//! (`SetDNSServerSearchOrder`, an IPv4-only method), IPv6 through `netsh interface ipv6 set
-//! dnsservers`, and each family is proven by its own live read-back. Merging both families into
-//! one CIM call either fails on every adapter or silently drops the IPv6 address, which leaves
+//! **The live apply is per address family.** IPv4 and IPv6 each call
+//! `SetInterfaceDnsSettings` (IPv6 with `DNS_SETTING_IPV6`). Merging both families into
+//! one CIM call used to fail on every adapter or silently drop the IPv6 address, which left
 //! an IPv6 resolver leaking while the registry still reads "protected".
 //!
 //! **Degraded exit:** a registry-only match is not accepted as a
 //! normal restore — but it *is* accepted, once, after the live apply has failed
 //! `DEGRADED_RESTORE_STREAK` rounds in a row and the registry read-back matches the snapshot
-//! exactly. On a machine where PowerShell/CIM is structurally unavailable (constrained-language
-//! mode, AppLocker, a broken WMI repository, an EDR blocking
-//! `Win32_NetworkAdapterConfiguration`) the live proof can never succeed, and without this exit
+//! exactly. On a machine where live apply still cannot be proven the live proof can never
+//! succeed, and without this exit
 //! Disconnect, Sign Out and Quit are refused forever — the Protected-Offline deadlock this
 //! design explicitly prevents. The acceptance is never silent: it carries
 //! `DNS_RESTORE_DEGRADED_PREFIX` in `last_error` and in the status payload. Everything short
@@ -105,7 +103,7 @@
 //! the user's original DNS (`DNS_SNAPSHOT_MISSING_PREFIX`).
 //!
 //! The pure snapshot/merge/restore-decision logic in this file is platform-independent and
-//! unit-tested on any host; the registry/CIM/netsh engine is compiled only on Windows.
+//! unit-tested on any host; the registry + `SetInterfaceDnsSettings` engine is compiled only on Windows.
 
 use crate::core::structure::DnsProtectionStatus;
 use anyhow::{Context as _, Result, bail};
@@ -411,6 +409,38 @@ fn restored_live_servers_v6(adapter: &AdapterDnsSnapshot) -> Option<Vec<String>>
         adapter.ipv6_profile_name_server.as_deref(),
         adapter.ipv6_name_server.as_deref(),
     )
+}
+
+/// Live read-back for one address family after `SetInterfaceDnsSettings`.
+///
+/// `interface_index == 0` or no live DNS instance (`have == None`) is a
+/// non-participant, not a failure. Protect requires an exact list match.
+/// Restore only fails when a Tono-owned address is still live and was not
+/// itself part of the saved resolver list.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn live_family_matches(
+    interface_index: u32,
+    have: Option<&[String]>,
+    want: Option<&[String]>,
+    restoring: bool,
+    owned: &[&str],
+) -> bool {
+    if interface_index == 0 {
+        return true;
+    }
+    let Some(have) = have else {
+        return true;
+    };
+    if restoring {
+        return !have.iter().any(|server| {
+            owned.iter().any(|owned| *owned == server.as_str())
+                && want.is_none_or(|want| !want.iter().any(|saved| saved == server))
+        });
+    }
+    let Some(want) = want else {
+        return true;
+    };
+    have == want
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -2522,7 +2552,7 @@ fn is_active_dns_adapter(oper_status: i32, if_type: u32, has_bound_ip: bool) -> 
     oper_status == IF_OPER_STATUS_UP && if_type != IF_TYPE_SOFTWARE_LOOPBACK && has_bound_ip
 }
 
-// --- Windows engine: registry snapshot/set + best-effort CIM live-apply ---
+// --- Windows engine: registry snapshot/set + iphlpapi live-apply ---
 
 #[cfg(all(windows, not(feature = "test")))]
 mod engine;

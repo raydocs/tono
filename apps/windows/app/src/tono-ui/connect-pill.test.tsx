@@ -33,6 +33,50 @@ const pillButton = () => screen.getByRole('button')
 afterEach(() => cleanup())
 
 describe('ConnectPill five states', () => {
+  it('connecting verifyingTraffic is not the unverified connected title', () => {
+    renderPill('connecting', 'verifyingTraffic')
+    expect(screen.getByText('shared.actions.cancel')).toBeDefined()
+    expect(screen.getByText('tono.progress.steps.verifyingTraffic')).toBeDefined()
+    expect(screen.queryByText('tono.pill.title.connectedUnverified')).toBeNull()
+  })
+
+  it('degraded connected without exit proof offers restore', () => {
+    const onConnect = vi.fn()
+    const onDisconnect = vi.fn()
+    render(
+      <ConnectPill
+        uiState="connected"
+        protectionConfirmed
+        exitVerified={false}
+        onConnect={onConnect}
+        onDisconnect={onDisconnect}
+      />,
+    )
+    expect(screen.getByText('tono.pill.title.connectedUnverified')).toBeDefined()
+    expect(screen.getByText('tono.pill.subtitle.connectedUnverified')).toBeDefined()
+    expect(screen.queryByText('tono.pill.subtitle.tapToRestore')).toBeNull()
+    fireEvent.click(pillButton())
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('names the recommended catalog node when the exit is unverified', () => {
+    const onDisconnect = vi.fn()
+    render(
+      <ConnectPill
+        uiState="connected"
+        protectionConfirmed
+        exitVerified={false}
+        suggestedServer="Tokyo · Fuji"
+        onConnect={() => {}}
+        onDisconnect={onDisconnect}
+      />,
+    )
+    expect(screen.getByText('tono.pill.subtitle.connectedUnverifiedNamed')).toBeDefined()
+    expect(screen.queryByText('tono.pill.subtitle.connectedUnverified')).toBeNull()
+    fireEvent.click(pillButton())
+    expect(onDisconnect).toHaveBeenCalledTimes(1)
+  })
+
   it('notConnected: title, tap-to-connect subtitle, click connects', () => {
     const { onConnect, onDisconnect } = renderPill('notConnected')
 

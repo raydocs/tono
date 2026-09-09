@@ -79,11 +79,11 @@ impl HealthLegs {
         self.probe = if failed { self.probe.saturating_add(1) } else { 0 };
     }
 
-    /// Any leg that reached the threshold invalidates Connected.
+    /// Any protection or Service leg that reached the threshold invalidates Connected.
+    /// Exit-probe failures mark exit health only; they do not tear the tunnel down.
     pub const fn invalid(&self) -> bool {
         health_threshold_reached(self.kill_switch)
             || health_threshold_reached(self.protected_dns)
-            || health_threshold_reached(self.probe)
             || health_threshold_reached(self.service)
     }
 
@@ -159,6 +159,10 @@ pub fn network_event_fires(changed: bool, since_last_event: Option<Duration>) ->
 /// already committed. Keep the fail-closed response for a changed Core identity or a failed
 /// health leg, but require a fresh locked data-plane failure before a notification by itself
 /// tears down a tunnel that is still carrying authenticated HTTPS traffic.
+///
+/// Callers must not pass a probe failure for an unverified session
+/// ([`network_change_uses_probe_veto`]): those third-party probes fail for the
+/// life of the session and would reconnect on every adapter flap.
 pub fn monitor_requires_reconnect(
     event_invalidated: bool,
     core_changed: bool,
@@ -166,6 +170,13 @@ pub fn monitor_requires_reconnect(
     event_probe_failed: bool,
 ) -> bool {
     health_invalid || (event_invalidated && (core_changed || event_probe_failed))
+}
+
+/// Whether a network-change data-plane probe may corroborate a teardown.
+/// Unverified sessions fail those probes for the whole session; using them as
+/// a veto reconnects on every Wi-Fi jitter or hotspot switch.
+pub const fn network_change_uses_probe_veto(exit_verified: bool) -> bool {
+    exit_verified
 }
 
 /// What one [`handle_network_change`] call did to the session.
@@ -241,6 +252,17 @@ fn dns_error_is_a_failure(last_error: Option<&str>) -> bool {
 /// protected DNS endpoint.
 /// The Service status deliberately includes adapters that appeared after the original snapshot,
 /// closing the first-netmon-sample race and covering a failed Windows notification registration.
+/// Win11 Home often has one adapter. If that unique adapter's live apply
+/// failed, fake-ip probes (which talk to 198.18.0.2 directly) can still pass
+/// while Chrome/WeChat cannot resolve. That is not a usable connect.
+pub fn unique_adapter_dns_apply_failed(status: &DnsProtectionStatus) -> bool {
+    status.adapters == 1
+        && status
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("TONO_DNS_UNVERIFIED"))
+}
+
 pub fn protected_dns_unhealthy(status: Option<&DnsProtectionStatus>) -> bool {
     match status {
         Some(status) => {

@@ -178,6 +178,7 @@ async fn collect_diagnostics_report(
         dns: dns.as_ref(),
         failed_stage: inner.failed_stage,
         connect_error: inner.connect_error.as_deref(),
+        overlay_skip: inner.optional_direct_skip.as_deref(),
         retry_attempt: inner.retry_attempt,
         steps: &steps,
         adapter_names: &adapters,

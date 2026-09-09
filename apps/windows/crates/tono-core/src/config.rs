@@ -290,6 +290,13 @@ pub struct DirectPlan {
 }
 
 impl DirectPlan {
+    /// Signed native-app DIRECT that the kill switch can actually cover: path regexes plus the
+    /// reviewed port table. IP pins are optional — WeChat HTTPDNS dials raw addresses, and
+    /// controller `/dns/query` through a dead exit often cannot produce pins.
+    pub fn wechat_process_direct_enabled(&self) -> bool {
+        !self.wechat_process_path_regexes.is_empty() && !self.reviewed_direct_ports.is_empty()
+    }
+
     /// Accept a Windows interface alias exactly as returned by `MIB_IF_ROW2::Alias`. Aliases are
     /// user-visible Unicode and commonly contain localized text, dots, parentheses, or trademark
     /// characters. The runtime is serialized through `serde_yaml`, so validation needs to reject
@@ -830,13 +837,14 @@ fn runtime_value(
         proxies.push(home_socks5_outbound(socks5));
     }
     if let Some(plan) = direct {
-        let has_wechat = !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty();
+        let has_wechat = !plan.tcp_wechat_rules.is_empty()
+            || !plan.udp_wechat_rules.is_empty()
+            || plan.wechat_process_direct_enabled();
         // Address-free suffix routes are enabled only alongside the signed
         // native-app path permit. That permit is what gives the staged core a
         // bounded TCP port escape through WFP; without it, a suffix route
         // would match in Mihomo and then be dropped by the kill switch.
-        let has_address_free_web = !plan.tcp_wechat_rules.is_empty()
-            && !plan.wechat_process_path_regexes.is_empty()
+        let has_address_free_web = plan.wechat_process_direct_enabled()
             && plan
                 .web_suffix_rules
                 .iter()
@@ -943,6 +951,7 @@ fn runtime_value(
             || !plan.tcp_web_rules.is_empty()
             || !plan.web_suffix_rules.is_empty()
             || !plan.udp_wechat_rules.is_empty()
+            || plan.wechat_process_direct_enabled()
         {
             for process in HOME_PROCESS_NAMES {
                 rules.push(format!(
@@ -994,7 +1003,11 @@ fn runtime_value(
         //
         // The pinned-domain rules above still use no process condition at all, unchanged: they
         // are bounded by an exact address instead.
-        if !plan.tcp_wechat_rules.is_empty() {
+        //
+        // Do not require `tcp_wechat_rules`. Those pins come from controller DNS through the
+        // exit; an unverified exit skips them and used to skip this permit too, which blocked
+        // WeChat even though the signed path and port table were already known.
+        if plan.wechat_process_direct_enabled() {
             for port in &plan.reviewed_direct_ports {
                 for regex in &plan.wechat_process_path_regexes {
                     rules.push(format!(
@@ -1022,7 +1035,7 @@ fn runtime_value(
         }
         // Address-free path: Bilibili family plus product China suffixes.
         // The signed native-app path permit above is the WFP boundary.
-        if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
+        if plan.wechat_process_direct_enabled() {
             for (suffix, port) in &plan.web_suffix_rules {
                 if !is_address_free_web_suffix(suffix) {
                     continue;
@@ -2206,18 +2219,57 @@ reality-opts:
         assert!(
             !rules.iter().any(|rule| rule.starts_with("AND,((NETWORK,TCP),(PROCESS-NAME,")
                 && rule.ends_with(DIRECT_GROUP_NAME)),
-            "a TCP process rule routes flows the WFP permit set cannot cover"
+            "a TCP process-name rule matches any WeChat.exe, which is not an identity"
         );
-        assert!(
-            !rules.iter().any(|rule| rule
-                .starts_with("AND,((NETWORK,TCP),(PROCESS-PATH-REGEX,")
-                && rule.ends_with(DIRECT_GROUP_NAME)),
-            "a TCP path-regex rule routes flows the WFP permit set cannot cover"
-        );
+        for port in [80_u16, 443, 8000, 8080] {
+            let expected = format!(
+                "AND,((NETWORK,TCP),(DST-PORT,{port}),(PROCESS-PATH-REGEX,{prefix})),{DIRECT_GROUP_NAME}"
+            );
+            assert!(
+                rules.contains(&expected.as_str()),
+                "signed path + reviewed port must DIRECT even when HTTPDNS skips domain pins: {expected}"
+            );
+        }
         // WeChat still accelerates for everything that does have a permit.
         assert!(rules.contains(
             &"AND,((NETWORK,TCP),(DST-PORT,443),(DOMAIN,wxs.qq.com),(IP-CIDR,9.0.0.10/32,no-resolve)),Tono-China-Direct"
         ));
+    }
+
+    #[test]
+    fn signed_wechat_path_directs_without_domain_pins() {
+        let mut plan = direct_plan();
+        plan.hosts.clear();
+        plan.tcp_wechat_rules.clear();
+        plan.tcp_web_rules.clear();
+        plan.web_suffix_rules.clear();
+        plan.udp_wechat_rules.clear();
+        let prefix = wechat_prefix_path_regex(r"C:\Program Files\Tencent\WeChat").unwrap();
+        plan.wechat_process_path_regexes = vec![prefix.clone()];
+        assert!(plan.wechat_process_direct_enabled());
+        let runtime =
+            build_owned_runtime(&three_nodes(), "JP Reality 02", "test-secret", Some(&plan)).unwrap();
+        let parsed_runtime = parsed(&runtime);
+        let rules: Vec<&str> = get(&parsed_runtime, &["rules"])
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|rule| rule.as_str().unwrap())
+            .collect();
+        let expected = format!(
+            "AND,((NETWORK,TCP),(DST-PORT,443),(PROCESS-PATH-REGEX,{prefix})),{DIRECT_GROUP_NAME}"
+        );
+        assert!(
+            rules.contains(&expected.as_str()),
+            "exit-unverified overlay must still DIRECT signed WeChat on reviewed ports"
+        );
+        let proxies = get(&parsed_runtime, &["proxies"]).as_sequence().unwrap();
+        assert!(
+            proxies
+                .iter()
+                .any(|proxy| proxy[string("name")].as_str() == Some(DIRECT_GROUP_NAME)),
+            "WeChat DIRECT outbound must exist without domain pins"
+        );
     }
 
     #[test]

@@ -201,7 +201,7 @@ pub(super) fn expected_controller_direct_rules(plan: &tono_core::config::DirectP
             ),
         });
     }
-    if !plan.tcp_wechat_rules.is_empty() {
+    if plan.wechat_process_direct_enabled() {
         for port in &plan.reviewed_direct_ports {
             // Path regexes only: a `PROCESS-NAME` rule matches any binary with that filename,
             // which is not an identity worth pairing with an address-free port permit. See the
@@ -245,7 +245,7 @@ pub(super) fn expected_controller_direct_rules(plan: &tono_core::config::DirectP
     }
     // Address-free web suffixes are emitted only when the signed native-app
     // path permit is present; that is the WFP port boundary they share.
-    if !plan.tcp_wechat_rules.is_empty() && !plan.wechat_process_path_regexes.is_empty() {
+    if plan.wechat_process_direct_enabled() {
         for (suffix, port) in &plan.web_suffix_rules {
             if !tono_core::config::is_address_free_web_suffix(suffix) {
                 continue;
@@ -436,8 +436,16 @@ pub(super) async fn apply_cloud_policy(
     let (wechat_pins, web_pins) = match classify_optional_direct_resolution(resolution) {
         OptionalDirectResolution::Ready(pins) => pins,
         OptionalDirectResolution::Skip(reason) => {
-            skip_optional_direct_policy(state, reason).await;
-            return Ok(None);
+            // Controller DNS for these pins rides DoH through the exit. An unverified
+            // exit times that out; skipping the whole overlay then leaves WeChat on
+            // the kill-switch floor. Signed-app path permits do not need those pins.
+            logging!(
+                warn,
+                Type::Service,
+                "Tono: cloud DIRECT DNS did not resolve through the exit; continuing with signed-app path permits: {}",
+                audit::redact(&reason)
+            );
+            (Vec::new(), Vec::new())
         }
     };
     let wechat_path_regexes = wechat_path_regexes.await.unwrap_or_default();
@@ -461,6 +469,7 @@ pub(super) async fn apply_cloud_policy(
         && plan.tcp_web_rules.is_empty()
         && plan.web_suffix_rules.is_empty()
         && plan.udp_wechat_rules.is_empty()
+        && plan.wechat_process_path_regexes.is_empty()
     {
         return Ok(None);
     }
@@ -470,12 +479,10 @@ pub(super) async fn apply_cloud_policy(
     // `direct_endpoints` is the union of the WeChat, web and media pins and the Service cannot
     // tell them apart, so left to infer it would widen the boundary for a web-only or
     // media-only policy that routes nothing there.
-    let reviewed_direct_ports = if plan.tcp_wechat_rules.is_empty()
-        || plan.wechat_process_path_regexes.is_empty()
-    {
-        Vec::new()
-    } else {
+    let reviewed_direct_ports = if plan.wechat_process_direct_enabled() {
         plan.reviewed_direct_ports.clone()
+    } else {
+        Vec::new()
     };
     let direct_interface = plan.physical_interface.clone();
 
@@ -568,13 +575,14 @@ pub(super) async fn apply_cloud_policy(
         expected_controller_rules,
         reviewed_direct_ports,
         direct_interface,
-        !plan.tcp_wechat_rules.is_empty() || !plan.udp_wechat_rules.is_empty(),
+        !plan.tcp_wechat_rules.is_empty()
+            || !plan.udp_wechat_rules.is_empty()
+            || plan.wechat_process_direct_enabled(),
         // Suffix routes share the signed native-app WFP port permit; without
         // that permit they remain accepted policy but are intentionally
         // tunnelled.
         !plan.tcp_web_rules.is_empty()
-            || (!plan.tcp_wechat_rules.is_empty()
-                && !plan.wechat_process_path_regexes.is_empty()
+            || (plan.wechat_process_direct_enabled()
                 && plan
                     .web_suffix_rules
                     .iter()
@@ -1170,8 +1178,8 @@ pub(super) async fn activate_direct_runtime_cancellation_safe(
             // while the next connect stage has not yet moved Windows DNS to the protected TUN
             // resolver; a fresh reqwest client would therefore depend on the physical DNS path
             // that the fail-closed policy intentionally blocks. The authoritative TUN proof
-            // runs in verify_post_lock after protected DNS and again before finalizing DIRECT
-            // endpoints. Until those checks pass, exact physical permits remain absent.
+            // runs in the Connected-lifetime monitor after protected DNS. Until that check
+            // passes, exact physical permits remain absent.
             ensure_fresh(&task_state, generation).await?;
 
             Ok(PendingDirectCommit {
@@ -1580,6 +1588,13 @@ pub fn build_direct_plan(
     web_tcp.dedup();
     udp.sort_unstable();
     udp.dedup();
+    let mut wechat_process_path_regexes: Vec<String> = wechat_process_path_regexes
+        .into_iter()
+        .filter(|pattern| pattern.starts_with('^') && config::is_rule_payload_safe(pattern))
+        .collect();
+    wechat_process_path_regexes.sort();
+    wechat_process_path_regexes.dedup();
+    wechat_process_path_regexes.truncate(config::MAX_WECHAT_PROCESS_PATH_REGEXES);
     // One (suffix, port) row per entry port; validated ports are already a
     // [80, 443] subset, so this only normalizes order and duplicates.
     let mut web_suffix_rules: Vec<(String, u16)> = Vec::new();
@@ -1592,9 +1607,9 @@ pub fn build_direct_plan(
             web_suffix_rules.push((entry.host.clone(), *port));
         }
     }
-    // Product China suffixes whenever native-app DIRECT pins exist. Without
-    // those pins the WFP port permit is not installed and a suffix rule hangs.
-    if !wechat_tcp.is_empty() {
+    // Product China suffixes whenever the signed native-app WFP port permit
+    // will be installed. Domain pins are not required for that permit.
+    if !wechat_tcp.is_empty() || !wechat_process_path_regexes.is_empty() {
         for suffix in tono_core::config::ALWAYS_ADDRESS_FREE_WEB_SUFFIXES {
             for port in [80_u16, 443] {
                 web_suffix_rules.push((suffix.to_string(), port));
@@ -1624,14 +1639,6 @@ pub fn build_direct_plan(
             protocol: if is_udp { ProxyProtocol::Udp } else { ProxyProtocol::Tcp },
         })
         .collect();
-
-    let mut wechat_process_path_regexes: Vec<String> = wechat_process_path_regexes
-        .into_iter()
-        .filter(|pattern| pattern.starts_with('^') && config::is_rule_payload_safe(pattern))
-        .collect();
-    wechat_process_path_regexes.sort();
-    wechat_process_path_regexes.dedup();
-    wechat_process_path_regexes.truncate(config::MAX_WECHAT_PROCESS_PATH_REGEXES);
 
     let plan = tono_core::config::DirectPlan {
         physical_interface: interface,

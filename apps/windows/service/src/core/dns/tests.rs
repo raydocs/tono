@@ -357,6 +357,42 @@
     }
 
     #[test]
+    fn live_family_matches_protects_exactly_and_restores_without_tono_leftovers() {
+        let owned = [PROTECTED_DNS_V4, "127.0.0.1"];
+        assert!(live_family_matches(0, Some(&["1.1.1.1".into()]), Some(&["198.18.0.2".into()]), false, &owned));
+        assert!(live_family_matches(12, None, Some(&["198.18.0.2".into()]), false, &owned));
+        assert!(live_family_matches(
+            12,
+            Some(&["198.18.0.2".into()]),
+            Some(&["198.18.0.2".into()]),
+            false,
+            &owned,
+        ));
+        assert!(!live_family_matches(
+            12,
+            Some(&["1.1.1.1".into()]),
+            Some(&["198.18.0.2".into()]),
+            false,
+            &owned,
+        ));
+        assert!(live_family_matches(12, Some(&["8.8.8.8".into()]), None, true, &owned));
+        assert!(!live_family_matches(
+            12,
+            Some(&["198.18.0.2".into()]),
+            None,
+            true,
+            &owned,
+        ));
+        assert!(live_family_matches(
+            12,
+            Some(&["198.18.0.2".into()]),
+            Some(&["198.18.0.2".into()]),
+            true,
+            &owned,
+        ));
+    }
+
+    #[test]
     fn restore_proof_covers_v6_only_adapters() {
         let v6_only = AdapterDnsSnapshot {
             interface_guid: "{V6}".to_owned(),

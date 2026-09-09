@@ -20,6 +20,7 @@ import {
   tonoNetworkLogUploadEnabled,
   tonoSetNetworkLogUploadEnabled,
   formatTonoActionError,
+  TONO_BUILD_ID,
 } from '@/services/tono'
 import { TONO_UPDATES_CONFIGURED } from '@/services/update'
 import { GlassCard } from '@/tono-ui/GlassCard'
@@ -418,6 +419,9 @@ const AboutCard = () => {
         <TonoLogo connected compact={false} size={56} />
         <span style={{ fontSize: 15, fontWeight: 600, color: text.primary }}>
           Tono v{version}
+        </span>
+        <span style={{ fontSize: 11, color: text.tertiary }}>
+          Build {TONO_BUILD_ID}
         </span>
         <span style={{ fontSize: 12, fontWeight: 500, color: text.secondary }}>
           {t('tono.settings.about.tagline')}

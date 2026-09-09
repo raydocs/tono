@@ -8,6 +8,7 @@ use tono_logging::{Type, logging};
 use tono_service_protocol::{KillSwitchConfig, OwnerSessionProof, RuntimeBundle};
 
 use crate::core::service;
+use crate::tono::connection_health::unique_adapter_dns_apply_failed;
 use crate::tono::connection_plan::stale_exit_needs_release;
 use crate::tono::state::TonoState;
 
@@ -79,9 +80,16 @@ pub(super) async fn enable_dns_cancellation_safe(
     let task_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         let _mutation_guard = mutation_guard;
-        service::tono_enable_protected_dns_for_session(&service_session)
+        let status = service::tono_enable_protected_dns_for_session(&service_session)
             .await
             .map_err(StageFailure::error)?;
+        if unique_adapter_dns_apply_failed(&status) {
+            return Err(StageFailure::error(
+                status
+                    .last_error
+                    .unwrap_or_else(|| "TONO_DNS_UNVERIFIED: unique adapter live apply failed".into()),
+            ));
+        }
         if task_state.lock().await.connect_generation != generation {
             return Err(stale_after_dns(&task_state, generation).await);
         }

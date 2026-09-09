@@ -21,10 +21,11 @@ use super::controller::{
 };
 use super::endpoints::proxy_endpoint_of;
 use super::monitor::{
-    bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_control_plane_pin_refresh,
-    spawn_exit_identity_lookup, spawn_network_monitor,
+    bootstrap_hosts, refresh_control_plane_pins_from_service, spawn_advisory_exit_delay,
+    spawn_control_plane_pin_refresh, spawn_exit_identity_lookup, spawn_isp_lookup,
+    spawn_network_monitor,
 };
-use super::probes::{verify_fake_ip, verify_post_lock};
+use super::probes::{verify_fake_ip, verify_locked};
 use super::status::set_stage;
 use super::direct::{CapturedTrafficPolicy, WINDOWS_OPTIONAL_DIRECT_ENABLED, spawn_optional_direct_after_connected};
 use super::platform::{detect_physical_interface, write_redacted_copy};
@@ -72,6 +73,8 @@ pub(super) async fn run_stages(
 
     transaction.check("preparing service")?;
     set_stage(state, app, ConnectStage::PreparingService, generation, false, started).await?;
+    // Home ISP, before WFP. Fail copy may suggest a city; the selected node stays put.
+    spawn_isp_lookup(state, app, generation);
 
     // Revision 12 closes both DNS-owner ordering holes. Reconcile under the authenticated Service
     // lifecycle lock before the App's loopback:53 availability test: orphaned installed cores and
@@ -283,44 +286,39 @@ pub(super) async fn run_stages(
     controller_ready.map_err(StageFailure::error)?;
     lock_ready.map_err(StageFailure::error)?;
 
+    // Advisory only: `/delay` is display RTT, never the Connected verdict.
+    spawn_advisory_exit_delay(state, app, generation);
+
     // Optional DIRECT is applied only after Connected. The critical path stays full-tunnel.
 
-    // §6.7: securingDNS — snapshot + point resolvers at the protected TUN endpoint, then prove
-    // an ordinary lookup returns a fake-ip address.
+    // Connected gate is Proton-shaped: WFP lock (no real-IP leak) + fake-ip DNS
+    // (no resolver leak). Third-party TUN HTTPS (gstatic / Cloudflare / Apple)
+    // is not on this clock — the user opening a site is the usability check.
+    // Lock or DNS failure FullReleases; Google TLS failure must not.
     set_stage(state, app, ConnectStage::SecuringDns, generation, true, started).await?;
-    transaction
-        .wait(
-            "enabling protected DNS",
-            enable_dns_cancellation_safe(state, generation, service_session.clone()),
-        )
-        .await??;
-    if state.lock().await.connect_generation != generation {
-        return Err(stale_after_dns(state, generation).await);
-    }
-    transaction
-        .wait("fake-IP verification", verify_fake_ip())
-        .await?
-        .map_err(StageFailure::error)?;
+    let (dns_and_fake_ip, lock_status) = transaction
+        .wait("protected DNS, fake-ip, and lock verify", async {
+            tokio::join!(
+                async {
+                    enable_dns_cancellation_safe(state, generation, service_session.clone())
+                        .await?;
+                    if state.lock().await.connect_generation != generation {
+                        return Err(stale_after_dns(state, generation).await);
+                    }
+                    verify_fake_ip().await.map_err(StageFailure::error)
+                },
+                async { verify_locked().await.map_err(StageFailure::error) },
+            )
+        })
+        .await?;
+    dns_and_fake_ip?;
+    let mut kill_status = lock_status?;
 
-    // §6.8 + §6.9: checkingExit → verifyingTraffic, as one retryable verification group (C3).
-    let mut kill_status = verify_post_lock(
-        state,
-        app,
-        &secret,
-        controller_port,
-        mixed_port,
-        generation,
-        started,
-        transaction,
-    )
-    .await?;
-
-    // The durable logical-session latch is committed only after every existing check and a
-    // final generation guard. A failure remains an ordinary connect failure.
     ensure_fresh(state, generation).await?;
+
     transaction
         .wait(
-            "committing verified session",
+            "committing protection session",
             service::tono_mark_kill_switch_verified_for_session(&service_session),
         )
         .await?
@@ -342,8 +340,13 @@ pub(super) async fn run_stages(
         }
         inner.kill_switch = Some(kill_status);
         inner.controller_generation = inner.controller_generation.wrapping_add(1);
-        inner.fsm.mark_session_verified();
+        inner.fsm.mark_protection_committed();
+        inner.fsm.mark_exit_verified();
+        inner.last_admitted_node = Some(node.name.clone());
         inner.fsm.connect_succeeded().map_err(StageFailure::error)?;
+        inner.unverified_since = None;
+        inner.last_unverified_probe_delay = None;
+        inner.exit_probe_pending = false;
         crate::tono::update_handoff::mark_committed();
         inner.exit_ip = None;
         inner.exit_org = None;
@@ -375,6 +378,7 @@ pub(super) async fn run_stages(
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        outcome: "verified",
     });
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);

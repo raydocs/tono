@@ -1,9 +1,10 @@
 //! Connect state machine.
 //!
 //! Pure logic only: stages, UI state derivation, reconnect backoff, and the
-//! failure decision table. An initial, not-yet-verified attempt is released
-//! on failure; after a tunnel has been fully verified the logical session
-//! remains fail-closed until explicit Disconnect, Sign Out, or Quit.
+//! failure decision table. Failures before admit (including after WFP is
+//! armed) FullRelease. After protection is committed at admit — together with
+//! exit HTTPS proof — the session stays fail-closed until explicit Disconnect,
+//! Sign Out, or Quit. Reconnect reads that commit latch.
 
 use std::time::Duration;
 
@@ -157,9 +158,9 @@ pub enum FailureAction {
     FullRelease,
 }
 
-/// Initial attempts release on failure; only a verified armed session reconnects fail-closed.
-pub fn on_connect_failure(kill_switch_armed: bool, session_verified: bool) -> FailureAction {
-    if kill_switch_armed && session_verified {
+/// Initial attempts release on failure; only a protection-committed armed session reconnects fail-closed.
+pub fn on_connect_failure(kill_switch_armed: bool, protection_committed: bool) -> FailureAction {
+    if kill_switch_armed && protection_committed {
         FailureAction::KeepBlockingAndReconnect
     } else {
         FailureAction::FullRelease
@@ -218,7 +219,8 @@ impl std::error::Error for ConnectTransitionError {}
 pub struct ConnectionFsm {
     status: ConnectionStatus,
     kill_switch_armed: bool,
-    session_verified: bool,
+    protection_committed: bool,
+    exit_verified: bool,
     backoff: ReconnectBackoff,
 }
 
@@ -235,13 +237,45 @@ impl ConnectionFsm {
         self.kill_switch_armed
     }
 
-    pub fn session_verified(&self) -> bool {
-        self.session_verified
+    pub fn protection_committed(&self) -> bool {
+        self.protection_committed
     }
 
-    /// Record (or restore) that this logical protection session completed all checks.
+    pub fn exit_verified(&self) -> bool {
+        self.exit_verified
+    }
+
+    /// Protection session committed at admit (first TUN HTTPS success).
+    /// Reconnect and startup resume read this; it is set together with exit proof.
+    pub fn mark_protection_committed(&mut self) {
+        self.protection_committed = true;
+    }
+
+    /// Exit HTTPS proven. UI and telemetry read this. Set at admit; cleared
+    /// only after sustained post-admit probe failure.
+    pub fn mark_exit_verified(&mut self) {
+        self.exit_verified = true;
+    }
+
+    pub fn clear_exit_verified(&mut self) {
+        self.exit_verified = false;
+    }
+
+    /// Compatibility alias: reconnect latch is protection-committed, not exit proof.
+    pub fn session_verified(&self) -> bool {
+        self.protection_committed
+    }
+
+    /// Compatibility alias used by existing tests that mean "protection committed".
     pub fn mark_session_verified(&mut self) {
-        self.session_verified = true;
+        self.mark_protection_committed();
+    }
+
+    /// A user connect to a different node is a new admit. Keep WFP armed if it
+    /// already is; drop the previous node's commit so a TUN failure FullReleases.
+    pub fn begin_fresh_admit(&mut self) {
+        self.protection_committed = false;
+        self.exit_verified = false;
     }
 
     /// Step 1: begin a connect transaction.
@@ -271,7 +305,7 @@ impl ConnectionFsm {
     /// switch armed, and the Service verification commit durable — an
     /// unverified or unarmed `Connected` must never exist.
     pub fn connect_succeeded(&mut self) -> Result<(), ConnectTransitionError> {
-        if !self.status.is_connecting || !self.kill_switch_armed || !self.session_verified {
+        if !self.status.is_connecting || !self.kill_switch_armed || !self.protection_committed {
             return Err(ConnectTransitionError::InvalidSuccessPrecondition);
         }
         self.status.is_connected = true;
@@ -286,7 +320,7 @@ impl ConnectionFsm {
     /// Connect transaction failed. A verified armed session stays blocked
     /// and reconnects; an initial attempt receives a full release.
     pub fn connect_failed(&mut self) -> FailureAction {
-        match on_connect_failure(self.kill_switch_armed, self.session_verified) {
+        match on_connect_failure(self.kill_switch_armed, self.protection_committed) {
             FailureAction::KeepBlockingAndReconnect => {
                 self.status.is_connected = false;
                 self.status.is_connecting = false;
@@ -321,8 +355,8 @@ impl ConnectionFsm {
             "a live tunnel implies an armed kill switch"
         );
         debug_assert!(
-            self.session_verified,
-            "a live tunnel implies a verified session"
+            self.protection_committed,
+            "a live tunnel implies a committed protection session"
         );
         self.status.is_connected = false;
         self.status.is_connecting = false;
@@ -345,7 +379,7 @@ impl ConnectionFsm {
     /// Offline for as long as the user kept pressing it.
     pub fn reconnect_permitted_now(&self) -> bool {
         self.status.is_protection_blocked
-            && self.session_verified
+            && self.protection_committed
             && !self.status.is_connected
             && !self.status.is_disconnecting
             && !self.status.is_connecting
@@ -418,7 +452,8 @@ impl ConnectionFsm {
 
     fn release(&mut self) {
         self.kill_switch_armed = false;
-        self.session_verified = false;
+        self.protection_committed = false;
+        self.exit_verified = false;
         self.backoff.reset();
         self.status = ConnectionStatus::default();
     }
@@ -551,6 +586,77 @@ mod tests {
             on_connect_failure(true, true),
             FailureAction::KeepBlockingAndReconnect
         );
+    }
+
+    #[test]
+    fn connect_succeeds_only_after_protection_and_exit_proof() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_protection_committed();
+        fsm.mark_exit_verified();
+        fsm.connect_succeeded().unwrap();
+        assert_eq!(fsm.status().ui_state(), UiState::Connected);
+        assert!(fsm.exit_verified());
+        assert!(fsm.protection_committed());
+    }
+
+    #[test]
+    fn reconnect_uses_protection_committed_after_admit() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_protection_committed();
+        fsm.mark_exit_verified();
+        fsm.connect_succeeded().unwrap();
+        fsm.clear_exit_verified();
+        fsm.tunnel_died();
+        assert!(fsm.reconnect_permitted_now());
+        assert!(!fsm.exit_verified());
+        assert!(fsm.protection_committed());
+        assert_eq!(fsm.next_reconnect_delay(), Some(Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn switching_nodes_clears_the_previous_admit() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_protection_committed();
+        fsm.mark_exit_verified();
+        fsm.begin_fresh_admit();
+        assert!(!fsm.protection_committed());
+        assert!(!fsm.exit_verified());
+        assert!(fsm.kill_switch_armed());
+        assert_eq!(fsm.connect_failed(), FailureAction::FullRelease);
+        assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
+    }
+
+    #[test]
+    fn probe_failure_before_admit_full_releases() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        assert!(!fsm.protection_committed());
+        assert_eq!(fsm.connect_failed(), FailureAction::FullRelease);
+        assert_eq!(fsm.status().ui_state(), UiState::NotConnected);
+        assert_eq!(fsm.next_reconnect_delay(), None);
+    }
+
+    #[test]
+    fn post_admit_failure_keeps_blocking() {
+        let mut fsm = ConnectionFsm::new();
+        fsm.begin_connect();
+        fsm.mark_kill_switch_armed();
+        fsm.mark_protection_committed();
+        fsm.mark_exit_verified();
+        fsm.connect_succeeded().unwrap();
+        assert_eq!(
+            fsm.connect_failed(),
+            FailureAction::KeepBlockingAndReconnect
+        );
+        assert_eq!(fsm.status().ui_state(), UiState::ProtectedOffline);
+        assert!(fsm.next_reconnect_delay().is_some());
     }
 
     #[test]
