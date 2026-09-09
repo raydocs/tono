@@ -49,13 +49,6 @@ function releaseDto(row: ClientRelease): ReleaseDto {
   };
 }
 
-function bucketOf(value: string): AdoptionBucket {
-  if (value === 'latest') return 'current';
-  if (value === 'behind1') return 'behind_one';
-  if (value === 'behind2plus') return 'behind_more';
-  return 'unreported';
-}
-
 export async function getReleases(req: Request, e: Env): Promise<Response> {
   const url = new URL(req.url);
   const platform = url.searchParams.get('platform') ?? undefined;
@@ -125,7 +118,7 @@ export async function getReleaseAdoption(req: Request, e: Env): Promise<Response
   }
   for (const day of matrix.days) {
     for (const version of day.versions) {
-      const bucket = bucketOf(version.bucket);
+      const bucket = version.bucket;
       const key = `${day.platform}:${bucket}`;
       const cell = cells.get(key);
       if (!cell) continue;

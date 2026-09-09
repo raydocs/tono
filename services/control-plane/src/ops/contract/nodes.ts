@@ -64,14 +64,14 @@ export interface ReturnPathDto {
   samples: number;
 }
 
-export const QUOTA_LEVELS = ['ok', 'watch', 'warn', 'over', 'unknown'] as const;
+export const QUOTA_LEVELS = ['ok', 'chore', 'warn', 'severe'] as const;
 export type QuotaLevel = (typeof QUOTA_LEVELS)[number];
 
 export const QUOTA_CYCLE_KINDS = ['calendar_day', 'anniversary', 'rolling_30d', 'manual'] as const;
 export type QuotaCycleKind = (typeof QUOTA_CYCLE_KINDS)[number];
 
 /** Which counter the provider bills on; the three disagree by a factor of two. */
-export const QUOTA_COUNTS = ['in', 'out', 'both'] as const;
+export const QUOTA_COUNTS = ['in', 'out', 'in_out'] as const;
 export type QuotaCounts = (typeof QUOTA_COUNTS)[number];
 
 /**

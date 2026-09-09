@@ -45,7 +45,7 @@ import {
 } from './common';
 
 const ROUTE_MAP: Record<string, RouteKind> = {
-  cloud: 'cloud', residential: 'residential', direct: 'direct', blocked: 'blocked', reject: 'blocked',
+  cloud: 'cloud', residential: 'residential', direct: 'direct', reject: 'reject', unknown: 'unknown',
 };
 
 function customerVerdict(user: Row, status: Awaited<ReturnType<typeof customerStatus>>, t: number): {

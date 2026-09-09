@@ -1526,16 +1526,23 @@ export async function sharedAdministrativeResource(
     const hasMore = q.results.length > limit;
     const rows = hasMore ? q.results.slice(0, limit) : q.results;
     const last = rows.length ? rows[rows.length - 1] : null;
+    const actorTypes = new Set(['access_admin', 'token_admin', 'collector', 'exit_node', 'system']);
     return Response.json({
-      entries: rows.map((row) => ({
-        id: String(row.id),
-        at: Number(row.at),
-        actorEmail: String(row.actor_email),
-        action: String(row.action),
-        targetType: String(row.target_type),
-        targetId: row.target_id == null ? null : String(row.target_id),
-        summary: String(row.summary),
-      })),
+      entries: rows.map((row) => {
+        const actorType = row.actor_type == null || row.actor_type === '' ? null : String(row.actor_type);
+        return {
+          id: String(row.id),
+          at: Number(row.at),
+          actorEmail: String(row.actor_email),
+          actorType: actorType && actorTypes.has(actorType) ? actorType : null,
+          actorRole: row.actor_role == null || row.actor_role === '' ? null : String(row.actor_role),
+          action: String(row.action),
+          targetType: String(row.target_type),
+          targetId: row.target_id == null ? null : String(row.target_id),
+          summary: String(row.summary),
+          requestId: row.request_id == null || row.request_id === '' ? null : String(row.request_id),
+        };
+      }),
       hasMore,
       nextBefore: hasMore && last ? Number(last.at) : null,
       nextBeforeId: hasMore && last ? String(last.id) : null,

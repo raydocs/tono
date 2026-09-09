@@ -25,7 +25,6 @@ import {
   getAlertRules, getAlertRule, postAlertRule, patchAlertRule, deleteAlertRule,
   postAlertRuleTest, getAlertDeliveries,
 } from './alerts';
-import { getAudit } from './audit';
 import { getSystemHealth } from './system';
 import type { Actor } from './common';
 
@@ -133,7 +132,6 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'PATCH', re: /^\/api\/v1\/ops\/alert-rules\/([^/]+)$/, handle: (req, e, a, p) => patchAlertRule(req, e, p[0], a) },
   { method: 'DELETE', re: /^\/api\/v1\/ops\/alert-rules\/([^/]+)$/, handle: (req, e, a, p) => deleteAlertRule(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/alert-deliveries$/, handle: (req, e) => getAlertDeliveries(req, e) },
-  { method: 'GET', re: /^\/api\/v1\/ops\/audit$/, handle: (req, e) => getAudit(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/system\/health$/, handle: (req, e) => getSystemHealth(req, e) },
 ];
 

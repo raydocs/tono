@@ -39,7 +39,7 @@ import {
 } from './checkers';
 
 /** Where a flattened event came from. `failure` is the client's immediate report. */
-export const EVENT_SOURCES = ['window', 'failure', 'report'] as const;
+export const EVENT_SOURCES = ['window', 'direct', 'diagnostics', 'failure'] as const;
 export type EventSource = (typeof EVENT_SOURCES)[number];
 
 /**

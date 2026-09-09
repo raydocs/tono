@@ -6,7 +6,7 @@ const CHANNELS = ['stable', 'candidate', 'internal'] as const;
 
 export type Platform = (typeof PLATFORMS)[number];
 export type Channel = (typeof CHANNELS)[number];
-export type VersionBucket = 'latest' | 'behind1' | 'behind2plus' | 'unknown';
+export type VersionBucket = 'current' | 'behind_one' | 'behind_more' | 'unreported';
 
 type Row = Record<string, any>;
 
@@ -200,16 +200,16 @@ export function compareVersions(a: string, b: string): number {
 
 export function versionBucket(observed: string, latest: readonly string[]): VersionBucket {
   if (typeof observed !== 'string' || observed.length === 0 || latest.length === 0) {
-    return 'unknown';
+    return 'unreported';
   }
   const published = [...new Set(latest.filter((value) => typeof value === 'string' && value.length > 0))];
-  if (published.length === 0) return 'unknown';
+  if (published.length === 0) return 'unreported';
   published.sort((a, b) => compareVersions(b, a));
   const index = published.findIndex((value) => compareVersions(value, observed) === 0);
-  if (index === 0) return 'latest';
-  if (index === 1) return 'behind1';
-  if (index >= 2) return 'behind2plus';
-  return 'unknown';
+  if (index === 0) return 'current';
+  if (index === 1) return 'behind_one';
+  if (index >= 2) return 'behind_more';
+  return 'unreported';
 }
 
 export async function createRelease(

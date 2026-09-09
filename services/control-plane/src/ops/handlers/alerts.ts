@@ -2,18 +2,18 @@ import { ApiError } from '../../errors';
 import { body, rejectUnexpectedKeys } from '../../request';
 import {
   ALERT_CHANNELS,
+  ALERT_FIRE_ON,
   ALERT_TEMPLATES,
-  INCIDENT_TRANSITIONS,
+  DELIVERY_TRANSITIONS,
   SEVERITIES,
-  SUBJECT_TYPES,
   assertAlertDelivery,
   assertAlertRule,
   type AlertChannel,
+  type AlertFireOn,
   type AlertRuleDto,
   type AlertTemplate,
-  type IncidentTransition,
+  type DeliveryTransition,
   type Severity,
-  type SubjectType,
 } from '../contract';
 import { sendPending, type AlertSendEnv } from '../alerts';
 import {
@@ -33,32 +33,29 @@ import {
   weakEtag,
 } from './common';
 
-function fireOnToDb(fireOn: unknown): 'open' | 'open_resolve' {
-  if (Array.isArray(fireOn) && fireOn.includes('resolved')) return 'open_resolve';
-  if (fireOn === 'open_resolve') return 'open_resolve';
+function asFireOn(value: unknown): AlertFireOn {
+  const text = String(value ?? 'open');
+  if ((ALERT_FIRE_ON as readonly string[]).includes(text)) return text as AlertFireOn;
   return 'open';
 }
 
-function fireOnFromDb(value: unknown): IncidentTransition[] {
-  return String(value) === 'open_resolve'
-    ? ['opened', 'escalated', 'resolved']
-    : ['opened', 'escalated'];
+function asDeliveryTransition(value: unknown): DeliveryTransition {
+  const text = String(value ?? '');
+  if ((DELIVERY_TRANSITIONS as readonly string[]).includes(text)) return text as DeliveryTransition;
+  return 'open';
 }
 
 function ruleDto(row: Row, lastFiredAt: number | null): AlertRuleDto {
-  const matchKind = nullText(row.match_kind);
-  const subject = nullText(row.match_subject_type);
   return {
     id: String(row.id),
     name: String(row.name),
     enabled: Number(row.enabled) === 1,
-    matchKinds: matchKind ? [matchKind] : [],
-    subjectType: subject && (SUBJECT_TYPES as readonly string[]).includes(subject)
-      ? subject as SubjectType
-      : null,
+    matchKind: nullText(row.match_kind),
+    matchSubjectType: nullText(row.match_subject_type),
+    matchSubjectId: nullText(row.match_subject_id),
     minSeverity: String(row.min_severity) as Severity,
     minImpact: Number(row.min_impact) || 0,
-    fireOn: fireOnFromDb(row.fire_on),
+    fireOn: asFireOn(row.fire_on),
     delaySeconds: Number(row.delay_seconds) || 0,
     cooldownSeconds: Number(row.cooldown_seconds) || 0,
     channel: String(row.channel) as AlertChannel,
@@ -126,29 +123,34 @@ function validateRuleBody(b: Record<string, unknown>, partial: boolean): void {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid minSeverity');
     }
   }
+  if (!partial || b.fireOn !== undefined) {
+    if (b.fireOn != null && !(ALERT_FIRE_ON as readonly string[]).includes(String(b.fireOn))) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid fireOn');
+    }
+  }
 }
 
 export async function postAlertRule(req: Request, e: Env, actor: Actor): Promise<Response> {
   const b = await body(req, 8 * 1024);
   rejectUnexpectedKeys(b, [
-    'name', 'enabled', 'matchKinds', 'subjectType', 'minSeverity', 'minImpact', 'fireOn',
+    'name', 'enabled', 'matchKind', 'matchSubjectType', 'matchSubjectId',
+    'minSeverity', 'minImpact', 'fireOn',
     'delaySeconds', 'cooldownSeconds', 'channel', 'target', 'template', 'secretRef',
   ]);
   validateRuleBody(b, false);
   const t = now();
   const ruleId = id();
-  const matchKinds = Array.isArray(b.matchKinds) ? b.matchKinds.map(String) : [];
   await e.DB.prepare(
     `INSERT INTO ops_alert_rules(
        id, name, enabled, match_kind, match_subject_type, match_subject_id,
        min_severity, min_impact, fire_on, delay_seconds, cooldown_seconds,
        channel, target, template, secret_ref, created_at, updated_at
-     ) VALUES(?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     ruleId, String(b.name), b.enabled === false ? 0 : 1,
-    matchKinds[0] ?? null, b.subjectType ?? null,
+    b.matchKind ?? null, b.matchSubjectType ?? null, b.matchSubjectId ?? null,
     b.minSeverity ?? 'warn', Number(b.minImpact ?? 0),
-    fireOnToDb(b.fireOn), Number(b.delaySeconds ?? 0), Number(b.cooldownSeconds ?? 3600),
+    asFireOn(b.fireOn), Number(b.delaySeconds ?? 0), Number(b.cooldownSeconds ?? 3600),
     b.channel ?? 'webhook', String(b.target), b.template ?? 'generic',
     b.secretRef ?? null, t, t,
   ).run();
@@ -163,27 +165,26 @@ export async function patchAlertRule(req: Request, e: Env, rawId: string, actor:
   const existing = await loadRule(e, ruleId);
   const b = await body(req, 8 * 1024);
   rejectUnexpectedKeys(b, [
-    'name', 'enabled', 'matchKinds', 'subjectType', 'minSeverity', 'minImpact', 'fireOn',
+    'name', 'enabled', 'matchKind', 'matchSubjectType', 'matchSubjectId',
+    'minSeverity', 'minImpact', 'fireOn',
     'delaySeconds', 'cooldownSeconds', 'channel', 'target', 'template', 'secretRef',
   ]);
   validateRuleBody(b, true);
-  const matchKinds = b.matchKinds === undefined
-    ? nullText(existing.match_kind)
-    : (Array.isArray(b.matchKinds) ? (b.matchKinds.map(String)[0] ?? null) : null);
   await e.DB.prepare(
     `UPDATE ops_alert_rules SET
-       name = ?, enabled = ?, match_kind = ?, match_subject_type = ?,
+       name = ?, enabled = ?, match_kind = ?, match_subject_type = ?, match_subject_id = ?,
        min_severity = ?, min_impact = ?, fire_on = ?, delay_seconds = ?,
        cooldown_seconds = ?, channel = ?, target = ?, template = ?, secret_ref = ?, updated_at = ?
      WHERE id = ?`,
   ).bind(
     b.name === undefined ? String(existing.name) : String(b.name),
     b.enabled === undefined ? Number(existing.enabled) : (b.enabled ? 1 : 0),
-    matchKinds,
-    b.subjectType === undefined ? existing.match_subject_type : b.subjectType,
+    b.matchKind === undefined ? existing.match_kind : b.matchKind,
+    b.matchSubjectType === undefined ? existing.match_subject_type : b.matchSubjectType,
+    b.matchSubjectId === undefined ? existing.match_subject_id : b.matchSubjectId,
     b.minSeverity === undefined ? String(existing.min_severity) : String(b.minSeverity),
     b.minImpact === undefined ? Number(existing.min_impact) : Number(b.minImpact),
-    b.fireOn === undefined ? String(existing.fire_on) : fireOnToDb(b.fireOn),
+    b.fireOn === undefined ? String(existing.fire_on) : asFireOn(b.fireOn),
     b.delaySeconds === undefined ? Number(existing.delay_seconds) : Number(b.delaySeconds),
     b.cooldownSeconds === undefined ? Number(existing.cooldown_seconds) : Number(b.cooldownSeconds),
     b.channel === undefined ? String(existing.channel) : String(b.channel),
@@ -241,10 +242,6 @@ export async function postAlertRuleTest(req: Request, e: Env, rawId: string, act
   return jsonNoStore(dto);
 }
 
-const OPEN_MAP: Record<string, IncidentTransition> = {
-  open: 'opened', escalate: 'escalated', resolve: 'resolved', test: 'noted',
-};
-
 export async function getAlertDeliveries(req: Request, e: Env): Promise<Response> {
   let rows: Row[] = [];
   try {
@@ -263,7 +260,7 @@ export async function getAlertDeliveries(req: Request, e: Env): Promise<Response
     ruleId: String(row.rule_id),
     incidentId: nullText(row.incident_id),
     dedupeKey: String(row.dedupe_key),
-    transition: OPEN_MAP[String(row.transition)] ?? 'noted',
+    transition: asDeliveryTransition(row.transition),
     status: String(row.status) as 'pending' | 'sent' | 'failed' | 'suppressed',
     channel: (nullText(row.channel) ?? 'webhook') as AlertChannel,
     target: nullText(row.target) ?? '',
@@ -275,5 +272,3 @@ export async function getAlertDeliveries(req: Request, e: Env): Promise<Response
   const updatedAt = items[0]?.at ?? now();
   return listJson(e, req, items, null, updatedAt, weakEtag([updatedAt, items.length]), assertAlertDelivery, items.length);
 }
-
-void INCIDENT_TRANSITIONS;

@@ -95,14 +95,14 @@ describe('versionBucket', () => {
   const published = ['0.0.34', '0.0.33', '0.0.32'];
 
   it.each([
-    ['0.0.34', published, 'latest'],
-    ['0.0.33', published, 'behind1'],
-    ['0.0.32', published, 'behind2plus'],
-    ['0.0.31', published, 'unknown'],
-    ['0.0.34-beta', published, 'unknown'],
-    ['0.0.34', [], 'unknown'],
-    ['0.0.34', ['0.0.32', '0.0.34', '0.0.33'], 'latest'],
-    ['0.0.33', ['0.0.32', '0.0.34', '0.0.33'], 'behind1'],
+    ['0.0.34', published, 'current'],
+    ['0.0.33', published, 'behind_one'],
+    ['0.0.32', published, 'behind_more'],
+    ['0.0.31', published, 'unreported'],
+    ['0.0.34-beta', published, 'unreported'],
+    ['0.0.34', [], 'unreported'],
+    ['0.0.34', ['0.0.32', '0.0.34', '0.0.33'], 'current'],
+    ['0.0.33', ['0.0.32', '0.0.34', '0.0.33'], 'behind_one'],
   ] as const)('%s in %j → %s', (observed, latest, bucket) => {
     expect(versionBucket(observed, latest)).toBe(bucket);
   });
@@ -270,14 +270,14 @@ describe('adoption matrix', () => {
     const windows = matrix.days.find((row) => row.platform === 'windows');
     expect(windows?.unreleased).toBeUndefined();
     expect(windows?.versions).toEqual([
-      { version: '0.0.34', devices: 4, users: 3, bucket: 'latest' },
-      { version: '0.0.33', devices: 2, users: 2, bucket: 'behind1' },
-      { version: '0.0.31', devices: 1, users: 1, bucket: 'unknown' },
+      { version: '0.0.34', devices: 4, users: 3, bucket: 'current' },
+      { version: '0.0.33', devices: 2, users: 2, bucket: 'behind_one' },
+      { version: '0.0.31', devices: 1, users: 1, bucket: 'unreported' },
     ]);
     const macos = matrix.days.find((row) => row.platform === 'macos');
     expect(macos).toMatchObject({
       unreleased: true,
-      versions: [{ version: '0.0.67', devices: 5, users: 4, bucket: 'unknown' }],
+      versions: [{ version: '0.0.67', devices: 5, users: 4, bucket: 'unreported' }],
     });
     const linux = matrix.days.find((row) => row.platform === 'linux');
     expect(linux?.unreleased).toBe(true);

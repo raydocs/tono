@@ -31,8 +31,10 @@ import {
   SUBJECT_TYPES,
   TONES,
 } from './vocabulary';
+import type { ListDto } from './checkers';
 import {
   arrayOf,
+  assertList,
   bool,
   enumList,
   fields,
@@ -41,7 +43,6 @@ import {
   optInt,
   optText,
   text,
-  textList,
   violation,
 } from './checkers';
 
@@ -79,29 +80,39 @@ export interface IncidentDto {
   resolvedAt: number | null;
 }
 
-export const INCIDENT_TRANSITIONS = [
+export const INCIDENT_EVENT_TYPES = [
   'opened',
   'escalated',
+  'deescalated',
   'acked',
   'snoozed',
+  'note',
+  'job',
+  'alert',
   'resolved',
-  'reopened',
-  'noted',
 ] as const;
-export type IncidentTransition = (typeof INCIDENT_TRANSITIONS)[number];
+export type IncidentEventType = (typeof INCIDENT_EVENT_TYPES)[number];
 
 /** Written only on a state change, so the timeline is the history, not a re-derivation. */
 export interface IncidentEventDto {
   id: string;
   incidentId: string;
   at: number;
-  transition: IncidentTransition;
+  type: IncidentEventType;
   actor: string | null;
   note: string | null;
 }
 
-/** Job parameters stay scalar: the hub's handlers are hard-coded and take no structures. */
-export type JobParamsDto = Record<string, string | number | boolean | null>;
+export interface IncidentDetailDto {
+  incident: IncidentDto;
+  events: ListDto<IncidentEventDto>;
+  jobs: ListDto<JobDto>;
+  deliveries: ListDto<AlertDeliveryDto>;
+}
+
+/** Job parameters stay scalar (plus string lists): the hub's handlers take no nested objects. */
+export type JobParamValue = string | number | boolean | string[] | null;
+export type JobParamsDto = Record<string, JobParamValue>;
 
 export interface JobDto {
   id: string;
@@ -166,15 +177,19 @@ export interface AdoptionMatrixDto {
   updatedAt: number;
 }
 
+export const ALERT_FIRE_ON = ['open', 'open_resolve'] as const;
+export type AlertFireOn = (typeof ALERT_FIRE_ON)[number];
+
 export interface AlertRuleDto {
   id: string;
   name: string;
   enabled: boolean;
-  matchKinds: string[];
-  subjectType: SubjectType | null;
+  matchKind: string | null;
+  matchSubjectType: string | null;
+  matchSubjectId: string | null;
   minSeverity: Severity;
   minImpact: number;
-  fireOn: IncidentTransition[];
+  fireOn: AlertFireOn;
   /** 90 秒的抖动不推: nothing leaves before an incident has survived this long. */
   delaySeconds: number;
   cooldownSeconds: number;
@@ -191,13 +206,16 @@ export interface AlertRuleDto {
 export const DELIVERY_STATUSES = ['pending', 'sent', 'failed', 'suppressed'] as const;
 export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
 
+export const DELIVERY_TRANSITIONS = ['open', 'escalate', 'resolve', 'test'] as const;
+export type DeliveryTransition = (typeof DELIVERY_TRANSITIONS)[number];
+
 /** A cooled-down alert is recorded as `suppressed`, not dropped — silence must be explainable. */
 export interface AlertDeliveryDto {
   id: string;
   ruleId: string;
   incidentId: string | null;
   dedupeKey: string;
-  transition: IncidentTransition;
+  transition: DeliveryTransition;
   status: DeliveryStatus;
   channel: AlertChannel;
   target: string;
@@ -252,7 +270,7 @@ export function assertIncident(value: unknown, path = 'incident'): IncidentDto {
   };
 }
 
-const INCIDENT_EVENT_KEYS = ['id', 'incidentId', 'at', 'transition', 'actor', 'note'];
+const INCIDENT_EVENT_KEYS = ['id', 'incidentId', 'at', 'type', 'actor', 'note'];
 
 export function assertIncidentEvent(value: unknown, path = 'incidentEvent'): IncidentEventDto {
   const row = fields(value, path, INCIDENT_EVENT_KEYS);
@@ -260,9 +278,21 @@ export function assertIncidentEvent(value: unknown, path = 'incidentEvent'): Inc
     id: text(row, path, 'id'),
     incidentId: text(row, path, 'incidentId'),
     at: int(row, path, 'at'),
-    transition: oneOf<IncidentTransition>(row, path, 'transition', INCIDENT_TRANSITIONS),
+    type: oneOf<IncidentEventType>(row, path, 'type', INCIDENT_EVENT_TYPES),
     actor: optText(row, path, 'actor'),
     note: optText(row, path, 'note'),
+  };
+}
+
+const INCIDENT_DETAIL_KEYS = ['incident', 'events', 'jobs', 'deliveries'];
+
+export function assertIncidentDetail(value: unknown, path = 'incidentDetail'): IncidentDetailDto {
+  const row = fields(value, path, INCIDENT_DETAIL_KEYS);
+  return {
+    incident: assertIncident(row.incident, `${path}.incident`),
+    events: assertList(row.events, assertIncidentEvent, `${path}.events`),
+    jobs: assertList(row.jobs, assertJob, `${path}.jobs`),
+    deliveries: assertList(row.deliveries, assertAlertDelivery, `${path}.deliveries`),
   };
 }
 
@@ -276,12 +306,26 @@ function jobParams(value: unknown, path: string): JobParamsDto {
   if (!value || typeof value !== 'object' || Array.isArray(value)) violation(path);
   const params: JobParamsDto = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    const kind = typeof entry;
-    if (entry !== null && kind !== 'string' && kind !== 'number' && kind !== 'boolean') {
-      violation(`${path}.${key}`);
+    const at = `${path}.${key}`;
+    if (entry === null) {
+      params[key] = null;
+      continue;
     }
-    if (kind === 'number' && !Number.isFinite(entry as number)) violation(`${path}.${key}`);
-    params[key] = entry as string | number | boolean | null;
+    const kind = typeof entry;
+    if (kind === 'string' || kind === 'boolean') {
+      params[key] = entry as string | boolean;
+      continue;
+    }
+    if (kind === 'number') {
+      if (!Number.isFinite(entry as number)) violation(at);
+      params[key] = entry as number;
+      continue;
+    }
+    if (Array.isArray(entry) && entry.every((item) => typeof item === 'string')) {
+      params[key] = entry as string[];
+      continue;
+    }
+    violation(at);
   }
   return params;
 }
@@ -360,7 +404,8 @@ export function assertAdoptionMatrix(value: unknown, path = 'adoption'): Adoptio
 }
 
 const ALERT_RULE_KEYS = [
-  'id', 'name', 'enabled', 'matchKinds', 'subjectType', 'minSeverity', 'minImpact', 'fireOn',
+  'id', 'name', 'enabled', 'matchKind', 'matchSubjectType', 'matchSubjectId',
+  'minSeverity', 'minImpact', 'fireOn',
   'delaySeconds', 'cooldownSeconds', 'channel', 'target', 'template', 'secretRef',
   'lastFiredAt', 'createdAt', 'updatedAt',
 ];
@@ -371,13 +416,12 @@ export function assertAlertRule(value: unknown, path = 'alertRule'): AlertRuleDt
     id: text(row, path, 'id'),
     name: text(row, path, 'name'),
     enabled: bool(row, path, 'enabled'),
-    matchKinds: textList(row, path, 'matchKinds'),
-    subjectType: row.subjectType === null
-      ? null
-      : oneOf<SubjectType>(row, path, 'subjectType', SUBJECT_TYPES),
+    matchKind: optText(row, path, 'matchKind'),
+    matchSubjectType: optText(row, path, 'matchSubjectType'),
+    matchSubjectId: optText(row, path, 'matchSubjectId'),
     minSeverity: oneOf<Severity>(row, path, 'minSeverity', SEVERITIES),
     minImpact: int(row, path, 'minImpact'),
-    fireOn: enumList<IncidentTransition>(row, path, 'fireOn', INCIDENT_TRANSITIONS),
+    fireOn: oneOf<AlertFireOn>(row, path, 'fireOn', ALERT_FIRE_ON),
     delaySeconds: int(row, path, 'delaySeconds'),
     cooldownSeconds: int(row, path, 'cooldownSeconds'),
     channel: oneOf<AlertChannel>(row, path, 'channel', ALERT_CHANNELS),
@@ -402,7 +446,7 @@ export function assertAlertDelivery(value: unknown, path = 'alertDelivery'): Ale
     ruleId: text(row, path, 'ruleId'),
     incidentId: optText(row, path, 'incidentId'),
     dedupeKey: text(row, path, 'dedupeKey'),
-    transition: oneOf<IncidentTransition>(row, path, 'transition', INCIDENT_TRANSITIONS),
+    transition: oneOf<DeliveryTransition>(row, path, 'transition', DELIVERY_TRANSITIONS),
     status: oneOf<DeliveryStatus>(row, path, 'status', DELIVERY_STATUSES),
     channel: oneOf<AlertChannel>(row, path, 'channel', ALERT_CHANNELS),
     target: text(row, path, 'target'),

@@ -1,18 +1,20 @@
 import { ApiError } from '../../errors';
 import { body } from '../../request';
 import {
+  DELIVERY_TRANSITIONS,
+  INCIDENT_EVENT_TYPES,
   INCIDENT_STATUSES,
   SEVERITIES,
   SUBJECT_TYPES,
-  assertAlertDelivery,
   assertIncident,
-  assertIncidentEvent,
-  assertJob,
-  assertList,
+  assertIncidentDetail,
+  type AlertDeliveryDto,
+  type DeliveryTransition,
+  type IncidentDetailDto,
   type IncidentDto,
   type IncidentEventDto,
+  type IncidentEventType,
   type IncidentStatus,
-  type IncidentTransition,
   type Severity,
   type SubjectType,
   type Tone,
@@ -42,11 +44,17 @@ import {
   weakEtag,
 } from './common';
 
-const EVENT_MAP: Record<string, IncidentTransition> = {
-  opened: 'opened', escalated: 'escalated', acked: 'acked', snoozed: 'snoozed',
-  resolved: 'resolved', reopened: 'reopened', noted: 'noted', note: 'noted',
-  deescalated: 'noted', job: 'noted', alert: 'noted',
-};
+function asEventType(value: unknown): IncidentEventType {
+  const text = String(value ?? '');
+  if ((INCIDENT_EVENT_TYPES as readonly string[]).includes(text)) return text as IncidentEventType;
+  return 'note';
+}
+
+function asDeliveryTransition(value: unknown): DeliveryTransition {
+  const text = String(value ?? '');
+  if ((DELIVERY_TRANSITIONS as readonly string[]).includes(text)) return text as DeliveryTransition;
+  return 'open';
+}
 
 function toneForSeverity(severity: string): Tone {
   if (severity === 'severe') return 'sev';
@@ -111,12 +119,11 @@ export function incidentDto(row: Row): IncidentDto {
 }
 
 function eventDto(row: Row): IncidentEventDto {
-  const type = String(row.type);
   return {
     id: String(row.id),
     incidentId: String(row.incident_id),
     at: Number(row.at),
-    transition: EVENT_MAP[type] ?? 'noted',
+    type: asEventType(row.type),
     actor: nullText(row.actor),
     note: nullText(row.detail),
   };
@@ -176,20 +183,15 @@ export async function getIncidents(req: Request, e: Env): Promise<Response> {
   );
 }
 
-function deliveryDto(row: Row): unknown {
-  const transition = String(row.transition);
-  const mapped = EVENT_MAP[transition] ?? (transition === 'test' ? 'noted' : EVENT_MAP[transition] ?? 'noted');
-  const openMap: Record<string, IncidentTransition> = {
-    open: 'opened', escalate: 'escalated', resolve: 'resolved', test: 'noted',
-  };
+function deliveryDto(row: Row): AlertDeliveryDto {
   return {
     id: String(row.id),
     ruleId: String(row.rule_id),
     incidentId: nullText(row.incident_id),
     dedupeKey: String(row.dedupe_key),
-    transition: openMap[transition] ?? mapped,
-    status: String(row.status),
-    channel: nullText(row.channel) ?? 'webhook',
+    transition: asDeliveryTransition(row.transition),
+    status: String(row.status) as AlertDeliveryDto['status'],
+    channel: (nullText(row.channel) ?? 'webhook') as AlertDeliveryDto['channel'],
     target: nullText(row.target) ?? '',
     attempts: Number(row.attempts) || 0,
     error: nullText(row.error),
@@ -232,15 +234,9 @@ export async function getIncident(req: Request, e: Env, rawId: string): Promise<
   const deliveriesList = {
     items: deliveries.map(deliveryDto), nextCursor: null as string | null, updatedAt: t, total: deliveries.length,
   };
-  const body = { incident, events: eventsList, jobs: jobsList, deliveries: deliveriesList };
+  const detail: IncidentDetailDto = { incident, events: eventsList, jobs: jobsList, deliveries: deliveriesList };
   const etag = weakEtag([incidentId, Number(row.updated_at), events.length, jobItems.length]);
-  check(e, () => {
-    assertIncident(incident);
-    assertList(eventsList, assertIncidentEvent);
-    assertList(jobsList, assertJob);
-    assertList(deliveriesList, assertAlertDelivery);
-  });
-  return entityJson(e, req, body as unknown as typeof body, etag, () => body);
+  return entityJson(e, req, detail, etag, assertIncidentDetail);
 }
 
 async function writeEvent(

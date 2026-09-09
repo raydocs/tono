@@ -135,12 +135,12 @@ export type AlertChannel = (typeof ALERT_CHANNELS)[number];
 export const ALERT_TEMPLATES = ['telegram', 'feishu', 'slack', 'generic'] as const;
 export type AlertTemplate = (typeof ALERT_TEMPLATES)[number];
 
-/** The mainland carriers probed on both directions of the path. */
-export const CARRIER_KEYS = ['unicom', 'telecom', 'mobile'] as const;
+/** The mainland carriers probed on both directions of the path. Unmatched ASN orgs bucket into `other`. */
+export const CARRIER_KEYS = ['unicom', 'telecom', 'mobile', 'other'] as const;
 export type CarrierKey = (typeof CARRIER_KEYS)[number];
 
 /** Where a connection went. 云出口 / 家宽 / 直连 / 拒绝. */
-export const ROUTE_KINDS = ['cloud', 'residential', 'direct', 'blocked'] as const;
+export const ROUTE_KINDS = ['cloud', 'residential', 'direct', 'reject', 'unknown'] as const;
 export type RouteKind = (typeof ROUTE_KINDS)[number];
 
 /** Fixed service families. Facebook Muse counts as `meta`. */

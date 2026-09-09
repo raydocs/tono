@@ -40,7 +40,7 @@
 | `GET customers/{id}/destinations?range` | `ListDto<DestinationRowDto>` |
 | `GET customers/{id}/services?range` | `ListDto<ServiceUsageDto>` |
 | `GET incidents?status&severity&subjectType&since` | `ListDto<IncidentDto>` |
-| `GET incidents/{id}` | `IncidentDto` + `ListDto<IncidentEventDto>` |
+| `GET incidents/{id}` | `IncidentDetailDto` (`{ incident, events, jobs, deliveries }`) |
 | `POST incidents/{id}/ack\|snooze\|resolve\|notes` | `IncidentDto` |
 | `GET jobs?status&executor`、`POST jobs/{id}/cancel` | `ListDto<JobDto>` / `JobDto` |
 | `GET releases?platform&channel`、`POST releases`、`PATCH releases/{id}` | `ListDto<ReleaseDto>` / `ReleaseDto` |
@@ -53,11 +53,13 @@
 | `GET home-lines/{id}/usage?range` | `ListDto<HomeLineUsageDayDto>` |
 | `alert-rules`（CRUD）、`POST alert-rules/{id}/test` | `ListDto<AlertRuleDto>` / `AlertRuleDto` |
 | `GET alert-deliveries` | `ListDto<AlertDeliveryDto>` |
-| `GET audit?cursor&targetId&actorEmail&actorType&action` | `ListDto<AuditEntryDto>` |
+| `GET audit?before&beforeId&limit&targetId&actorEmail` | `AuditListDto` (`{ entries, hasMore, nextBefore, nextBeforeId }`) |
 | `GET system/health` | `SystemHealthDto` |
 
 采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。
 现有 `/ops/dashboard|fleet-nodes|activity|live|users|metrics|usage-hours` 在切换前保持不动。
+
+`GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；版本档 `current|behind_one|behind_more|unreported`。
 
 ## 加端点的规矩
 

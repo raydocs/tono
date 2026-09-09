@@ -14,8 +14,9 @@ import {
   assertDirectCandidate,
   assertHomeLine,
   assertHomeLineUsageDay,
+  assertAuditList,
   assertIncident,
-  assertIncidentEvent,
+  assertIncidentDetail,
   assertJob,
   assertList,
   assertNodeBindings,
@@ -206,9 +207,8 @@ describe('ops v1 api', () => {
     ).bind(NODE, NOW, NOW, NOW).run();
     const list = assertList(await (await ops('incidents?status=open&severity=warn&subjectType=node')).json(), assertIncident);
     expect(list.items[0]?.id).toBe('inc-1');
-    const detail = await (await ops('incidents/inc-1')).json() as { incident: unknown; events: unknown };
-    assertIncident(detail.incident);
-    assertList(detail.events, assertIncidentEvent);
+    const detail = assertIncidentDetail(await (await ops('incidents/inc-1')).json());
+    expect(detail.incident.id).toBe('inc-1');
     assertIncident(await (await ops('incidents/inc-1/ack', json({}))).json());
     assertIncident(await (await ops('incidents/inc-1/snooze', json({ until: NOW + 3600 }))).json());
     assertIncident(await (await ops('incidents/inc-1/notes', json({ note: 'watching' }))).json());
@@ -281,7 +281,7 @@ describe('ops v1 api', () => {
   it('alert-rules CRUD, test, deliveries', async () => {
     const created = await ops('alert-rules', json({
       name: 'down', channel: 'webhook', target: 'https://hooks.example.com/in',
-      template: 'generic', minSeverity: 'warn', fireOn: ['opened'],
+      template: 'generic', minSeverity: 'warn', fireOn: 'open',
     }));
     expect(created.status).toBe(201);
     const rule = assertAlertRule(await created.json());
@@ -303,8 +303,7 @@ describe('ops v1 api', () => {
     // there before opsRoutes). Shape is { entries, hasMore, nextBefore, nextBeforeId }.
     const auditRes = await ops('audit?targetId=' + encodeURIComponent(NODE));
     expect(auditRes.status).toBe(200);
-    const audit = await auditRes.json() as { entries: Array<{ action: string }> };
-    expect(Array.isArray(audit.entries)).toBe(true);
+    const audit = assertAuditList(await auditRes.json());
     expect(audit.entries.some((row) => row.action.includes('job'))).toBe(true);
     const health = assertSystemHealth(await (await ops('system/health')).json());
     expect(health.contractVersion).toBe(1);

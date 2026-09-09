@@ -38,27 +38,26 @@ import {
   TOKEN_FRESH_SEC,
 } from './common';
 
-const CARRIERS: CarrierKey[] = ['unicom', 'telecom', 'mobile'];
+const CARRIERS: CarrierKey[] = ['unicom', 'telecom', 'mobile', 'other'];
 const QUOTA_CYCLES: readonly QuotaCycleKind[] = ['calendar_day', 'anniversary', 'rolling_30d', 'manual'];
+const QUOTA_COUNT_VALUES: readonly QuotaCounts[] = ['in', 'out', 'in_out'];
+const QUOTA_LEVEL_VALUES: readonly QuotaLevel[] = ['ok', 'chore', 'warn', 'severe'];
 
 export function isVerdict(value: string): value is NodeVerdict {
   return (NODE_VERDICTS as readonly string[]).includes(value);
 }
 
-function mapQuotaLevel(level: string): QuotaLevel {
-  if (level === 'ok' || level === 'warn') return level;
-  if (level === 'chore') return 'watch';
-  if (level === 'severe') return 'over';
-  return 'unknown';
+function asQuotaLevel(level: string): QuotaLevel {
+  return (QUOTA_LEVEL_VALUES as readonly string[]).includes(level) ? level as QuotaLevel : 'ok';
 }
 
-function mapCounts(value: unknown): QuotaCounts {
+function asCounts(value: unknown): QuotaCounts {
   const text = nullText(value);
-  if (text === 'in' || text === 'out') return text;
-  return 'both';
+  if (text && (QUOTA_COUNT_VALUES as readonly string[]).includes(text)) return text as QuotaCounts;
+  return 'in_out';
 }
 
-function mapCycleKind(value: unknown): QuotaCycleKind {
+function asCycleKind(value: unknown): QuotaCycleKind {
   const text = nullText(value);
   if (text && (QUOTA_CYCLES as readonly string[]).includes(text)) return text as QuotaCycleKind;
   return 'manual';
@@ -70,7 +69,7 @@ function carrierFromOrg(org: string | null): CarrierKey | null {
   if (s.includes('mobile') || s.includes('cmcc') || s.includes('移动')) return 'mobile';
   if (s.includes('telecom') || s.includes('chinanet') || s.includes('电信')) return 'telecom';
   if (s.includes('unicom') || s.includes('联通')) return 'unicom';
-  return null;
+  return 'other';
 }
 
 function median(values: number[]): number | null {
@@ -81,20 +80,22 @@ function median(values: number[]): number | null {
 
 function eventSource(raw: unknown): EventSource {
   const text = nullText(raw);
-  if (text === 'window' || text === 'failure') return text;
-  return 'report';
+  if (text === 'window' || text === 'direct' || text === 'diagnostics' || text === 'failure') {
+    return text;
+  }
+  return 'window';
 }
 
 export function jobDto(job: NodeJob): JobDto {
-  const params: Record<string, string | number | boolean | null> = {};
+  const params: JobDto['params'] = {};
   for (const [key, value] of Object.entries(job.params)) {
     const kind = typeof value;
     if (value === null || kind === 'string' || kind === 'boolean') {
       params[key] = value as string | boolean | null;
     } else if (kind === 'number' && Number.isFinite(value as number)) {
       params[key] = value as number;
-    } else {
-      params[key] = JSON.stringify(value);
+    } else if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+      params[key] = value as string[];
     }
   }
   return {
@@ -164,8 +165,8 @@ export async function quotaDto(e: Env, name: string, profile: Row | null): Promi
     asOf: null as number | null,
     dto: {
       quota: null, used: null, pct: null, projectedExhaustAt: null,
-      level: 'unknown' as QuotaLevel, cycleKind: 'manual' as QuotaCycleKind,
-      cycleStart: null, cycleEnd: null, counts: 'both' as QuotaCounts,
+      level: 'ok' as QuotaLevel, cycleKind: 'manual' as QuotaCycleKind,
+      cycleStart: null, cycleEnd: null, counts: 'in_out' as QuotaCounts,
     },
   };
   try {
@@ -178,11 +179,11 @@ export async function quotaDto(e: Env, name: string, profile: Row | null): Promi
         used: has ? summary.used : null,
         pct: has ? summary.pct : null,
         projectedExhaustAt: summary.projectedExhaustAt,
-        level: mapQuotaLevel(summary.level),
-        cycleKind: mapCycleKind(profile?.cycle_kind),
+        level: has ? asQuotaLevel(summary.level) : 'ok',
+        cycleKind: asCycleKind(profile?.cycle_kind),
         cycleStart: summary.cycleStart,
         cycleEnd: summary.cycleEnd,
-        counts: mapCounts(profile?.quota_counts),
+        counts: asCounts(profile?.quota_counts),
       },
     };
   } catch (error) {
@@ -374,7 +375,7 @@ export function summaryChores(bindings: NodeBindingsDto, quota: NodeQuotaDto, fa
   if (!bindings.komari) n += 1;
   if (!bindings.identitySync) n += 1;
   if (!bindings.metering) n += 1;
-  if (quota.level === 'warn' || quota.level === 'over') n += 1;
+  if (quota.level === 'warn' || quota.level === 'severe') n += 1;
   if (facts.expiresAt != null && facts.expiresAt - t < 7 * 86_400) n += 1;
   return n;
 }

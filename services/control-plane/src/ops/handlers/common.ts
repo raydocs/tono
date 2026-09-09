@@ -156,21 +156,10 @@ export async function auditWrite(
   targetId: string | null,
   summary: string,
 ): Promise<void> {
-  await writeOpsAudit(e, actorEmail, action, targetType, targetId, summary);
-  try {
-    await e.DB.prepare(
-      `UPDATE ops_audit
-       SET actor_type = 'owner', actor_role = 'owner'
-       WHERE id = (
-         SELECT id FROM ops_audit
-         WHERE actor_email = ? AND action = ?
-         ORDER BY at DESC, id DESC
-         LIMIT 1
-       )`,
-    ).bind(actorEmail.slice(0, 254), action.slice(0, 80)).run();
-  } catch {
-    // actor_type/actor_role may be absent mid-migration; the insert still landed.
-  }
+  await writeOpsAudit(e, actorEmail, action, targetType, targetId, summary, {
+    actorType: 'access_admin',
+    actorRole: 'owner',
+  });
 }
 
 export function nextPageCursor<T>(

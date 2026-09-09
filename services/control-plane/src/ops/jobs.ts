@@ -261,6 +261,7 @@ export async function enqueueJob(
       opsAuditStatement(
         asEnv(db), requestedBy, 'node.job.enqueue', 'node', nodeName,
         truncate(`queued ${type} for ${nodeName}`, SUMMARY_MAX), true,
+        { actorType: requestedBy === 'system' ? 'system' : 'access_admin', actorRole: 'owner' },
       ),
     ]);
     const row = await db.prepare('SELECT * FROM ops_node_jobs WHERE idempotency_key = ?').bind(idempotencyKey).first<Row>();
@@ -368,6 +369,7 @@ export async function completeJob(
       opsAuditStatement(
         asEnv(db), 'system', 'node.job.result', 'node_job', jobId,
         truncate(`${status} ${result.status}: ${summary}`.trim(), SUMMARY_MAX), true,
+        { actorType: 'system', actorRole: 'owner' },
       ),
     ]);
     if (!Number(updated[0].meta.changes ?? 0)) {

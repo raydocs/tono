@@ -80,14 +80,13 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
   let cronLastDurationMs: number | null = null;
   let cronLastError: string | null = null;
   try {
-    const cron = await e.DB.prepare('SELECT * FROM ops_cron_state WHERE singleton_id = 1').first<Row>();
-    if (cron) {
-      cronLastRunAt = nullInt(cron.last_run_at ?? cron.updated_at);
-      cronLastDurationMs = nullInt(cron.last_duration_ms);
-      cronLastError = nullText(cron.last_error);
-    }
+    const cron = await e.DB.prepare(
+      'SELECT MAX(ran_at) AS ran_at FROM ops_cron_state',
+    ).first<Row>();
+    cronLastRunAt = nullInt(cron?.ran_at);
+    // 0048 only stores (key, ran_at); duration and last error stay null.
   } catch (error) {
-    if (!missingTable(error) && !String(error).includes('no such column')) {
+    if (!missingTable(error)) {
       // Table is optional; any missing-object error is treated as "no cron yet".
     }
   }

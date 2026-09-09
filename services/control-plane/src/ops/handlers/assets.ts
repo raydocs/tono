@@ -43,7 +43,6 @@ import {
 
 function cloudKind(value: unknown): CloudKind {
   const text = nullText(value) ?? 'vps';
-  if (text === 'residential') return 'other';
   if ((CLOUD_KINDS as readonly string[]).includes(text)) return text as CloudKind;
   return 'other';
 }

@@ -218,8 +218,11 @@ export async function retireFleetNode(e: Env, actorEmail: string, name: string, 
        ON CONFLICT(catalog_name) DO UPDATE SET status = 'retired', updated_at = excluded.updated_at`,
     ).bind(profileId, name, changedAt, changedAt, revision, digest),
     e.DB.prepare(
-      `INSERT INTO ops_audit(id, at, actor_email, action, target_type, target_id, summary)
-       SELECT ?, ?, ?, 'node.retire', 'fleet_node', ?, ?
+      `INSERT INTO ops_audit(
+         id, at, actor_email, action, target_type, target_id, summary,
+         actor_type, actor_role, request_id
+       )
+       SELECT ?, ?, ?, 'node.retire', 'fleet_node', ?, ?, 'access_admin', 'owner', NULL
        WHERE EXISTS (
          SELECT 1 FROM managed_exit_catalog
          WHERE singleton_id = 1 AND revision = ? AND content_sha256 = ?
