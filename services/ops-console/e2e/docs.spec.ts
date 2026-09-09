@@ -36,3 +36,17 @@ test('capture the 客户 360 page for docs', async ({ page }, testInfo) => {
     scale: 'css',
   });
 });
+
+/**
+ * 设置 is six pages behind one rail, so the docs get six shots rather than one.
+ * Light only: the plan's figures are printed, and a dark copy of each would
+ * double the bytes in every clone for a picture nobody puts in a document.
+ */
+for (const section of ['alerts', 'providers', 'homelines', 'candidates', 'audit', 'catalog']) {
+  test(`capture the 设置 ${section} section for docs`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'light', '设置 figures are light-only');
+    await open(page, `/settings/${section}`);
+    await expect(page.getByRole('navigation', { name: '设置' })).toBeVisible();
+    await page.screenshot({ path: `docs/screenshots/settings-${section}.png` });
+  });
+}
