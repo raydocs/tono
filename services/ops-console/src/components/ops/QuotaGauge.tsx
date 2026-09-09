@@ -20,6 +20,21 @@ export function quotaTone(used: number | null, quota: number | null): Tone {
   return 'ok';
 }
 
+/**
+ * Two tones, not four.
+ *
+ * The four-step scale is right on a node card, where one bar sits alone under
+ * one number and the steps are the quota engine's own thresholds. Down the
+ * edge of a table of twenty customers it becomes a column of green, orange,
+ * purple and red that reads as a ranking nobody asked for — and only one of
+ * those steps changes what the operator does. So the row bar knows one thing:
+ * whether this customer is about to run out.
+ */
+export function alarmTone(used: number | null, quota: number | null): Tone {
+  if (used == null || quota == null || quota <= 0) return 'unk';
+  return used / quota >= 0.9 ? 'sev' : 'unk';
+}
+
 export function usedRatio(used: number | null, quota: number | null): number {
   if (used == null || quota == null || quota <= 0) return 0;
   return Math.min(1, Math.max(0, used / quota));
@@ -29,20 +44,24 @@ export function usedRatio(used: number | null, quota: number | null): number {
 export function QuotaBar({
   used,
   quota,
+  alarmOnly,
   className,
 }: {
   used: number | null;
   quota: number | null;
+  /** One row among many: see `alarmTone`. */
+  alarmOnly?: boolean;
   className?: string;
 }) {
   const ratio = usedRatio(used, quota);
+  const tone = alarmOnly ? alarmTone(used, quota) : quotaTone(used, quota);
   return (
     <div
       className={cn('h-[2px] w-full overflow-hidden rounded-[999px] bg-[var(--hairline)]', className)}
       aria-hidden
     >
       <div
-        className={cn('h-full rounded-[999px]', `tone-${quotaTone(used, quota)}`)}
+        className={cn('h-full rounded-[999px]', `tone-${tone}`)}
         style={{ width: `${Math.min(100, Math.max(2, ratio * 100))}%`, background: 'hsl(var(--tone-line))' }}
       />
     </div>

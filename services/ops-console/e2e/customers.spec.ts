@@ -28,7 +28,9 @@ test.describe('customers page', () => {
   test('privacy masks the addresses without hiding the rows', async ({ page }) => {
     await open(page, '/customers');
     const before = await page.locator('tbody tr').count();
-    await page.getByRole('checkbox').check();
+    // The mask lives in the avatar menu now: it is a preference, not a fact.
+    await page.getByRole('button', { name: '偏好' }).click();
+    await page.getByRole('menuitemcheckbox', { name: '隐私' }).click();
     await settle(page);
     expect(await page.locator('tbody tr').count()).toBe(before);
     await expect(page.locator('tbody')).not.toContainText('wang.tao@example.com');

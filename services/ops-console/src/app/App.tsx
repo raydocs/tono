@@ -29,6 +29,14 @@ export function App() {
    */
   const customers = useResource('customers', async (signal) => (await opsApi.customers(signal)).items);
   const incidents = useResource('incidents', async (signal) => (await opsApi.incidents(signal)).items);
+  /**
+   * The release list is the third thing the whole console shares: the daily
+   * page needs it to know which clients are below the floor, the customer
+   * table to know what "behind one version" means, and the clients page to
+   * list what has shipped. One read here beats three definitions of "the
+   * current version".
+   */
+  const releases = useResource('releases', async (signal) => (await opsApi.releases(signal)).items);
   const [route, setRoute] = useState<OpsRoute>(() => (
     typeof window === 'undefined' ? BLANK_ROUTE : readRoute()
   ));
@@ -57,14 +65,23 @@ export function App() {
           : route.page === 'customers' ? (
             route.customerId
               ? <CustomerDetailPage userId={route.customerId} />
-              : <CustomersPage customers={customers} />
+              : (
+                <CustomersPage
+                  customers={customers}
+                  releases={releases}
+                  platform={route.platform}
+                  bucket={route.bucket}
+                />
+              )
           )
-            : route.page === 'clients' ? <ClientsPage />
+            : route.page === 'clients'
+              ? <ClientsPage releases={releases} onChanged={releases.reload} />
               : route.page === 'settings' ? <SettingsPage />
                 : (
                   <TodayPage
                     incidents={incidents}
                     customers={customers}
+                    releases={releases}
                     nodes={nodes}
                     selected={route.incident}
                     onChanged={incidents.reload}

@@ -1,183 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./tokens.css";
 
-@font-face {
-  font-family: "Geist";
-  src: url("../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Geist Mono";
-  src: url("../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-@custom-variant dark (&:is(.dark *));
-
-@theme inline {
-  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --radius-card: 10px;
-  --radius-pill: 999px;
-  --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-foreground: var(--foreground);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-hairline: var(--hairline);
-  --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
-  --color-primary: var(--accent);
-  --color-primary-foreground: #ffffff;
-  --color-border: var(--hairline);
-  --color-input: var(--hairline);
-  --color-ring: var(--accent);
-  --color-card: var(--surface);
-  --color-card-foreground: var(--foreground);
-  --color-popover: var(--surface);
-  --color-popover-foreground: var(--foreground);
-  --color-secondary: var(--surface);
-  --color-secondary-foreground: var(--foreground);
-  --color-muted: color-mix(in srgb, var(--foreground) 6%, var(--background));
-  --color-accent-foreground: #ffffff;
-  --color-destructive: hsl(var(--sev-line));
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
-}
-
-:root {
-  color-scheme: light;
-  --background: #f5f4f2;
-  --surface: #ffffff;
-  --foreground: #141413;
-  --muted-foreground: rgb(20 20 19 / 0.58);
-  --hairline: rgb(20 20 19 / 0.08);
-  --accent: #5b4cf5;
-  --accent-hover: #4a3ee0;
-
-  --sev-fg: 354 66% 37%;
-  --sev-line: 354 72% 50%;
-  --sev-bg: 354 84% 96%;
-  --warn-fg: 26 88% 30%;
-  --warn-line: 33 92% 48%;
-  --warn-bg: 40 92% 93%;
-  --rem-fg: 262 58% 42%;
-  --rem-line: 262 74% 58%;
-  --rem-bg: 264 80% 96%;
-  --info-fg: 212 76% 35%;
-  --info-line: 212 86% 50%;
-  --info-bg: 210 90% 95%;
-  --ok-fg: 154 62% 25%;
-  --ok-line: 152 60% 38%;
-  --ok-bg: 150 56% 94%;
-  --unk-fg: 220 12% 38%;
-  --unk-line: 220 12% 62%;
-  --unk-bg: 218 24% 93%;
-
-  --tone-fg: var(--unk-fg);
-  --tone-line: var(--unk-line);
-  --tone-bg: var(--unk-bg);
-
-  --radius: 10px;
-}
-
-.dark {
-  color-scheme: dark;
-  --background: #0b0c0f;
-  --surface: #131418;
-  --foreground: #f4f4f2;
-  --muted-foreground: rgb(244 244 242 / 0.58);
-  --hairline: rgb(255 255 255 / 0.08);
-  --accent: #5b4cf5;
-  --accent-hover: #4a3ee0;
-
-  --sev-fg: 3 92% 78%;
-  --sev-line: 3 76% 60%;
-  --sev-bg: 3 55% 20% / 0.5;
-  --warn-fg: 38 94% 70%;
-  --warn-line: 36 90% 56%;
-  --warn-bg: 34 58% 18% / 0.5;
-  --rem-fg: 266 92% 84%;
-  --rem-line: 264 72% 68%;
-  --rem-bg: 264 48% 22% / 0.45;
-  --info-fg: 206 92% 78%;
-  --info-line: 206 84% 60%;
-  --info-bg: 208 58% 20% / 0.5;
-  --ok-fg: 150 62% 68%;
-  --ok-line: 150 56% 46%;
-  --ok-bg: 152 42% 16% / 0.55;
-  --unk-fg: 216 16% 72%;
-  --unk-line: 216 12% 50%;
-  --unk-bg: 220 16% 24% / 0.55;
-}
-
-*, *::before, *::after { box-sizing: border-box; }
-html, body, #root { margin: 0; min-height: 100%; }
-html { background: var(--background); color: var(--foreground); }
-body {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.5;
-  background: var(--background);
-  color: var(--foreground);
-  -webkit-font-smoothing: antialiased;
-}
-button, input, select, textarea { font: inherit; color: inherit; }
-a { color: inherit; text-decoration: none; }
-
-.font-mono, .tabular, code, kbd {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.text-micro {
-  font-size: 11px;
-  line-height: 1.3;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-weight: 500;
-}
-.text-body { font-size: 13px; }
-.text-row { font-size: 15px; font-weight: 500; }
-.text-section { font-size: 20px; font-weight: 500; }
-.text-page {
-  font-size: 28px;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-.text-verdict {
-  font-size: 32px;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-/* `--tone-wash` and `--tone-ink` are spelled out per tone rather than derived
-   once, because a custom property that references `var()` is substituted where
-   it is declared: hoisting them to `:root` would freeze every tone to unk. */
-.tone-sev  { --tone-fg: var(--sev-fg);  --tone-line: var(--sev-line);  --tone-bg: var(--sev-bg);
-             --tone-ink: hsl(var(--sev-line));  --tone-wash: hsl(var(--sev-line) / 0.4); }
-.tone-warn { --tone-fg: var(--warn-fg); --tone-line: var(--warn-line); --tone-bg: var(--warn-bg);
-             --tone-ink: hsl(var(--warn-line)); --tone-wash: hsl(var(--warn-line) / 0.4); }
-.tone-rem  { --tone-fg: var(--rem-fg);  --tone-line: var(--rem-line);  --tone-bg: var(--rem-bg);
-             --tone-ink: hsl(var(--rem-line));  --tone-wash: hsl(var(--rem-line) / 0.4); }
-.tone-info { --tone-fg: var(--info-fg); --tone-line: var(--info-line); --tone-bg: var(--info-bg);
-             --tone-ink: hsl(var(--info-line)); --tone-wash: hsl(var(--info-line) / 0.4); }
-.tone-ok   { --tone-fg: var(--ok-fg);   --tone-line: var(--ok-line);   --tone-bg: var(--ok-bg);
-             --tone-ink: hsl(var(--ok-line));   --tone-wash: hsl(var(--ok-line) / 0.4); }
-.tone-unk  { --tone-fg: var(--unk-fg);  --tone-line: var(--unk-line);  --tone-bg: var(--unk-bg);
-             --tone-ink: hsl(var(--unk-line));  --tone-wash: hsl(var(--unk-line) / 0.4); }
-
-.tone-fg { color: hsl(var(--tone-fg)); }
-.tone-bg { background: hsl(var(--tone-bg)); }
-.tone-line { background: hsl(var(--tone-line)); }
 
 .hairline { border-color: var(--hairline); }
 .hairline-b { border-bottom: 1px solid var(--hairline); }
@@ -195,6 +19,58 @@ a { color: inherit; text-decoration: none; }
 @media (min-width: 960px) {
   .page-wrap { padding: 32px; gap: 40px; }
 }
+
+/* The count sentence and the controls that filter it are one block: 40 px of
+   page rhythm between them left a void the eye read as a section break, and
+   the toggle drifted to the right margin where nothing else on the page is. */
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Radix's sheet ships its own slide keyframes. The drawer animates on a
+   Motion spring instead, so the shell it positions must not move at all —
+   `!important` because both are utilities and neither wins on source order. */
+.drawer-shell, .drawer-shell[data-state] { animation: none !important; transition: none !important; }
+
+/* The rail. The active entry had a filled background and nothing else, which
+   at the icon-only width below 960 px is a grey square that could as easily be
+   a hover state. A 2 px accent bar on the rail's own edge says "you are here"
+   at both widths, and is the only place the accent appears outside a primary
+   action. */
+.nav-item { position: relative; }
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* A surface that is meant to sit above the page.
+   In the light theme the page is warm white and the card is white, so a 8%
+   hairline is enough to separate them. In the dark theme both are near-black
+   and a darker line only digs a groove: the edge has to come from light. A 6%
+   white hairline plus a one-pixel highlight along the top is what makes the
+   surface read as lifted rather than as a rectangle somebody drew. */
+.raised { border: 1px solid var(--hairline); }
+.dark .raised {
+  border-color: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+/* The header band of a table is the same idea one level in: it lifts off the
+   rows below it rather than being ruled off from them. */
+.dark .data-head { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06); }
 
 .card-pad { padding: 20px; }
 
@@ -312,6 +188,27 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   background: hsl(var(--tone-line));
 }
 
+/* Seven days of daily bytes. A bar above the week's mean carries whatever tone
+   the surrounding block is in (the quota tone, on a node card); the rest stay
+   grey, so the shape says which days were heavy rather than colouring the
+   whole week. An unmeasured day is hatched, never drawn at zero. */
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+}
+.spark-bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--foreground) 11%, transparent);
+}
+.spark-bar[data-high="true"] { background: hsl(var(--tone-line)); }
+.spark-bar[data-gap="true"] {
+  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hairline) 3px 4px);
+}
+
 /* 使用时段. Greys for 在线, the one accent for 已连接; `--heat` is the share of
    the hour, so an empty cell is genuinely empty rather than pale green. */
 .heat-cell {
@@ -349,6 +246,27 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
 }
 .incident-row:last-child { border-bottom: 0; }
 .incident-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
+
+/* At 390 px a row with a rail down its left edge, a paragraph in the middle
+   and a button on the right is three columns in 350 px: the sentence wraps to
+   five lines and the action ends up level with the fourth of them. Each row
+   becomes its own card instead — the rail across the top, the sentence, the
+   facts, and the action full width at the bottom where the thumb is. */
+@media (max-width: 640px) {
+  .incident-row {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .incident-row:last-child { margin-bottom: 0; border-bottom: 1px solid var(--hairline); }
+  .incident-row .sev-rail { width: 100%; height: 3px; align-self: stretch; }
+  .incident-row .ops-action { width: 100%; justify-content: center; }
+  .incident-row > [role="presentation"] { width: 100%; }
+}
 
 /* The connection timeline: a day heading that sticks while its rows scroll. */
 .day-head {

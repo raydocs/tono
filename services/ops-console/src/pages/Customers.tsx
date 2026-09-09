@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { CustomerSummaryDto, Platform } from '@contract';
+import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto } from '@contract';
+import { ADOPTION_BUCKETS } from '@contract';
 import { Chip } from '@/components/ops/Chip';
+import { CountText } from '@/components/ops/CountText';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { StatusWord } from '@/components/ops/StatusWord';
@@ -8,19 +10,22 @@ import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { explainCode, stageWord } from '@/lib/codes';
 import {
+  bucketCounts,
   CUSTOMER_FILTERS,
   customerCounts,
   PLATFORM_CHIPS,
   platformCounts,
   releasedPlatforms,
+  selectByBucket,
   selectByPlatform,
   selectCustomers,
   type CustomerFilter,
   type CustomerFilterId,
 } from '@/lib/customers';
 import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
-import { openCustomer } from '@/lib/hash-route';
+import { openCustomer, setCustomerFilter } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
+import { publishedVersions } from '@/lib/releases';
 import { shown } from '@/lib/sources';
 import { cn } from '@/lib/utils';
 import type { Resource } from '@/lib/use-resource';
@@ -37,12 +42,18 @@ const FRAGMENT_TONE: Record<CustomerFilterId, Tone | 'none'> = {
 
 export default function CustomersPage({
   customers,
+  releases,
+  platform,
+  bucket,
 }: {
   customers: Resource<CustomerSummaryDto[]>;
+  releases: Resource<ReleaseDto[]>;
+  /** Both come from the URL: a clients-matrix cell is a link into this page. */
+  platform: Platform | null;
+  bucket: AdoptionBucket | null;
 }) {
   const privacy = usePrivacy();
   const [filter, setFilter] = useState<CustomerFilter>(null);
-  const [platform, setPlatform] = useState<Platform | null>(null);
 
   const all = useMemo(
     () => (customers.status === 'ready' ? customers.data : []),
@@ -51,9 +62,20 @@ export default function CustomersPage({
   const counts = useMemo(() => customerCounts(all), [all]);
   const perPlatform = useMemo(() => platformCounts(all), [all]);
   const released = useMemo(() => releasedPlatforms(all), [all]);
-  const rows = useMemo(
+  const published = useMemo(
+    () => (platform === null || releases.status !== 'ready'
+      ? []
+      : publishedVersions(releases.data, platform)),
+    [releases, platform],
+  );
+  const onPlatform = useMemo(
     () => selectByPlatform(selectCustomers(all, filter), platform),
     [all, filter, platform],
+  );
+  const perBucket = useMemo(() => bucketCounts(onPlatform, published), [onPlatform, published]);
+  const rows = useMemo(
+    () => selectByBucket(onPlatform, published, bucket),
+    [onPlatform, published, bucket],
   );
   const columns = useMemo(() => customerColumns(privacy.email), [privacy.email]);
 
@@ -67,45 +89,65 @@ export default function CustomersPage({
 
   return (
     <div className="page-wrap">
-      {customers.status === 'ready' ? (
-        <p className="text-verdict">
-          {CUSTOMER_FILTERS.map((id, index) => (
-            <span key={id}>
-              {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-              <button
-                type="button"
-                aria-pressed={filter === id}
-                className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
-                onClick={() => setFilter((current) => (current === id ? null : id))}
-              >
-                {copy.customerCount[id](counts[id])}
-              </button>
-            </span>
-          ))}
-        </p>
-      ) : (
-        <p className="text-verdict text-[var(--muted-foreground)]">
-          {customers.status === 'loading' ? copy.loading : copy.loadError}
-        </p>
-      )}
+      <div className="page-head">
+        {customers.status === 'ready' ? (
+          <p className="text-verdict">
+            {CUSTOMER_FILTERS.map((id, index) => (
+              <span key={id}>
+                {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+                <button
+                  type="button"
+                  aria-pressed={filter === id}
+                  className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
+                  onClick={() => setFilter((current) => (current === id ? null : id))}
+                >
+                  <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
+                </button>
+              </span>
+            ))}
+          </p>
+        ) : (
+          <p className="text-verdict text-[var(--muted-foreground)]">
+            {customers.status === 'loading' ? copy.loading : copy.loadError}
+          </p>
+        )}
 
-      {/* All five platforms, always. The ones nothing has shipped for say so. */}
-      <div className="flex flex-wrap items-center gap-2">
-        {PLATFORM_CHIPS.map((id) => {
-          const live = released.has(id);
-          return (
-            <Chip
-              key={id}
-              muted={!live}
-              active={platform === id}
-              count={live ? perPlatform[id] : null}
-              title={live ? undefined : copy.unreleased}
-              onClick={() => setPlatform((current) => (current === id ? null : id))}
-            >
-              {live ? copy.platform[id] : `${copy.platform[id]} ${copy.unreleased}`}
-            </Chip>
-          );
-        })}
+        {/* All five platforms, always. The ones nothing has shipped for say so. */}
+        <div className="toolbar-row">
+          {PLATFORM_CHIPS.map((id) => {
+            const live = released.has(id);
+            return (
+              <Chip
+                key={id}
+                muted={!live}
+                active={platform === id}
+                count={live ? perPlatform[id] : null}
+                title={live ? undefined : copy.unreleased}
+                onClick={() => setCustomerFilter(platform === id ? null : id, bucket)}
+              >
+                {live ? copy.platform[id] : `${copy.platform[id]} ${copy.unreleased}`}
+              </Chip>
+            );
+          })}
+        </div>
+
+        {/* The version bands only mean something once a platform is chosen:
+            "behind one version" of what, otherwise. They arrive already
+            pressed when the reader came from a cell of the clients matrix. */}
+        {platform === null ? null : (
+          <div className="toolbar-row">
+            {ADOPTION_BUCKETS.map((id) => (
+              <Chip
+                key={id}
+                active={bucket === id}
+                count={perBucket[id]}
+                onClick={() => setCustomerFilter(platform, bucket === id ? null : id)}
+              >
+                {copy.bucket[id]}
+              </Chip>
+            ))}
+          </div>
+        )}
       </div>
 
       <DataTable
@@ -177,7 +219,7 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'services',
       header: copy.customerColumns.services,
-      width: '100px',
+      width: '150px',
       cell: (row) => (
         row.services.length === 0
           ? <Value value={null} source={copy.sourceWord.telemetry} />
@@ -210,16 +252,27 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
   ];
 }
 
-/** When, at which stage, and what the client called it — in that order. */
+/**
+ * When it happened, then what the client called it and what that means.
+ *
+ * `ETIMEDOUT` on its own tells an operator nothing an hour later, and the
+ * Chinese sentence on its own loses the token they will paste into a search.
+ * The column has 150 px, so the pair is truncated and the title carries the
+ * whole thing — including the stage, which is the least of the three and the
+ * first to go.
+ */
 function FailureCell({ row }: { row: CustomerSummaryDto }) {
   const failure = row.lastFailure;
   if (!failure) return <Value value={null} source={copy.sourceWord.telemetry} />;
-  const stage = stageWord(failure.stage);
+  const why = explainCode(failure.code);
+  const said = failure.code ? [failure.code, why].filter(Boolean).join(' · ') : why;
+  const line = said ?? stageWord(failure.stage) ?? copy.missing;
+  const full = [stageWord(failure.stage), said].filter(Boolean).join(' · ');
   return (
-    <span className="flex min-w-0 flex-col leading-tight" title={explainCode(failure.code) ?? undefined}>
+    <span className="flex min-w-0 flex-col leading-tight" title={full || undefined}>
       <span className="truncate font-mono text-body">{formatWhenAgo(failure.at)}</span>
-      <span className="truncate text-micro text-[var(--muted-foreground)]">
-        {[stage, failure.code].filter(Boolean).join(' · ')}
+      <span className="truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+        {line}
       </span>
     </span>
   );
@@ -262,24 +315,33 @@ function UsageCell({ row }: { row: CustomerSummaryDto }) {
       )}
     >
       <span className="truncate">{used.number} {used.unit}</span>
-      <QuotaBar used={usage.value} quota={quota} />
+      <QuotaBar used={usage.value} quota={quota} alarmOnly />
     </span>
   );
 }
 
 /**
- * The busiest family, and how many others there are.
+ * The two busiest families, and how many others there are.
  *
- * Two names do not fit in a hundred pixels and a truncated "Claude · ChatG"
- * is a worse answer than "Claude +2" — the count is exact, and the full list
- * is one hover or one click away.
+ * One name plus a count made every multi-service customer look the same;
+ * two names is what actually separates a Claude-and-ChatGPT account from a
+ * Claude-and-Meta one, which is the distinction this column exists for. Three
+ * does not fit, so the tail becomes an exact count and the full list stays one
+ * hover away.
  */
+const SERVICES_SHOWN = 2;
+
 function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
-  const rest = families.length - 1;
+  const rest = families.length - SERVICES_SHOWN;
   return (
-    <span className="truncate" title={families.map((f) => copy.serviceName[f]).join(' · ')}>
-      {copy.serviceName[families[0]]}
-      {rest > 0 ? <span className="text-[var(--muted-foreground)]"> +{rest}</span> : null}
+    <span
+      className="flex min-w-0 items-baseline gap-1"
+      title={families.map((f) => copy.serviceName[f]).join(' · ')}
+    >
+      <span className="min-w-0 truncate">
+        {families.slice(0, SERVICES_SHOWN).map((f) => copy.serviceName[f]).join(' · ')}
+      </span>
+      {rest > 0 ? <span className="shrink-0 text-[var(--muted-foreground)]">+{rest}</span> : null}
     </span>
   );
 }

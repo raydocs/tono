@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import type { CustomerSummaryDto, IncidentDto } from '@contract';
+import type { CustomerSummaryDto, IncidentDto, ReleaseDto } from '@contract';
 import { Action } from '@/components/ops/Action';
+import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
@@ -9,6 +10,7 @@ import { severityTone } from '@/lib/codes';
 import { formatDate, formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { openIncident } from '@/lib/hash-route';
 import { impactedCustomers, incidentSubject, lastResolvedAt, openIncidents, resolvedIncidents } from '@/lib/incidents';
+import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
 import type { Resource } from '@/lib/use-resource';
@@ -21,12 +23,14 @@ type TabId = (typeof TABS)[number];
 export default function TodayPage({
   incidents,
   customers,
+  releases,
   nodes,
   selected,
   onChanged,
 }: {
   incidents: Resource<IncidentDto[]>;
   customers: Resource<CustomerSummaryDto[]>;
+  releases: Resource<ReleaseDto[]>;
   nodes: FleetNodeDto[];
   selected: string | null;
   onChanged: () => void;
@@ -44,9 +48,13 @@ export default function TodayPage({
     () => (customers.status === 'ready' ? customers.data : []),
     [customers],
   );
+  const floors = useMemo(
+    () => (releases.status === 'ready' ? minSupportedVersions(releases.data) : {}),
+    [releases],
+  );
   const chores = useMemo(
-    () => sortChores([...fleetChores(nodes), ...customerChores(people, privacy.email)]),
-    [nodes, people, privacy],
+    () => sortChores([...fleetChores(nodes), ...customerChores(people, privacy.email, floors)]),
+    [nodes, people, privacy, floors],
   );
 
   const counts: Record<TabId, number> = {
@@ -59,9 +67,12 @@ export default function TodayPage({
     <div className="page-wrap">
       {incidents.status === 'ready' ? (
         <p className="text-verdict">
-          {open.length > 0
-            ? copy.todayVerdict(open.length, impactedCustomers(all))
-            : clearSentence(all)}
+          {open.length > 0 ? (
+            <CountText
+              values={[open.length, impactedCustomers(all)]}
+              render={(values) => copy.todayVerdict(values[0], values[1])}
+            />
+          ) : clearSentence(all)}
         </p>
       ) : (
         <p className="text-verdict text-[var(--muted-foreground)]">

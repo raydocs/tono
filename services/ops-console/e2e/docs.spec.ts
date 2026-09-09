@@ -24,6 +24,12 @@ test('capture the 客户 table for docs', async ({ page }, testInfo) => {
   await page.screenshot({ path: `docs/screenshots/customers-${testInfo.project.name}.png` });
 });
 
+test('capture the 客户端 page for docs', async ({ page }, testInfo) => {
+  await open(page, '/clients');
+  await expect(page.getByRole('heading', { name: '版本分布' })).toBeVisible();
+  await page.screenshot({ path: `docs/screenshots/clients-${testInfo.project.name}.png` });
+});
+
 test('capture the 客户 360 page for docs', async ({ page }, testInfo) => {
   await open(page, '/customers/u-04');
   await expect(page.getByRole('heading', { name: '连接时间线' })).toBeVisible();

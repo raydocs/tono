@@ -111,11 +111,11 @@ export function DataTable<T>({
   }
 
   return (
-    <div className={cn('overflow-auto rounded-[10px] border border-[var(--hairline)] bg-[var(--surface)]', className)}>
+    <div className={cn('raised overflow-auto rounded-[10px] bg-[var(--surface)]', className)}>
       {/* Fixed layout: with `auto`, a long CJK node name takes the width the
           numeric columns need and every other cell wraps to five lines. */}
       <table className="w-full table-fixed border-collapse text-body">
-        <thead className="sticky top-0 z-10 bg-[var(--surface)]">
+        <thead className="data-head sticky top-0 z-10 bg-[var(--surface)]">
           <tr className="data-row border-b border-[var(--hairline)]">
             {columns.map((col) => (
               <th

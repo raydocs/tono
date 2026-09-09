@@ -25,11 +25,11 @@ export async function open(
 
 /**
  * Wait for the things that would otherwise make a baseline flake: webfonts
- * swapping in, and Recharts laying out its areas after first paint.
+ * swapping in, and the day bars taking their height from the layout.
  */
 export async function settle(page: Page): Promise<void> {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  const sparks = page.locator('[data-spark] svg path');
+  const sparks = page.locator('[data-spark] .spark-bar');
   if (await sparks.count() > 0) await sparks.first().waitFor({ state: 'attached' });
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 }

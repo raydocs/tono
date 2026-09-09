@@ -22,10 +22,20 @@ test('the incident page survives a phone', async ({ page }) => {
   await expect(page).toHaveScreenshot('today.png');
 });
 
-test('the drawer is still readable at 390 px', async ({ page }) => {
+test('the drawer comes up from the bottom with its actions pinned there', async ({ page }) => {
   await open(page, '/today?incident=inc-node-la');
-  await expect(page.getByRole('dialog')).toBeVisible();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer).toBeVisible();
   await settle(page);
+
+  // It is a bottom sheet: the panel sits on the bottom edge, not the right one.
+  const sheet = await drawer.boundingBox();
+  const view = page.viewportSize()!;
+  expect(sheet!.x).toBeLessThanOrEqual(1);
+  expect(Math.round(sheet!.y + sheet!.height)).toBe(view.height);
+
+  // The reason anybody opened it is on screen without scrolling the timeline.
+  await expect(drawer.getByRole('button', { name: '标记已处理' })).toBeInViewport();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);

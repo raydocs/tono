@@ -1,0 +1,428 @@
+{
+  "clock": 1725000000,
+  "list": {
+    "items": [
+      {
+        "id": "rel-macos-210",
+        "platform": "macos",
+        "channel": "candidate",
+        "version": "2.1.0",
+        "build": null,
+        "r2Key": null,
+        "sha256": null,
+        "notes": "macos 2.1.0",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724913600,
+        "updatedAt": 1725000000
+      },
+      {
+        "id": "rel-macos-204",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "2.0.4",
+        "build": null,
+        "r2Key": "clients/macos/2.0.4.zip",
+        "sha256": null,
+        "notes": "macos 2.0.4",
+        "minSupportedVersion": "2.0.1",
+        "publishedAt": 1724222400,
+        "withdrawnAt": null,
+        "createdAt": 1724136000,
+        "updatedAt": 1724222400
+      },
+      {
+        "id": "rel-macos-203",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "2.0.3",
+        "build": null,
+        "r2Key": "clients/macos/2.0.3.zip",
+        "sha256": null,
+        "notes": "macos 2.0.3",
+        "minSupportedVersion": null,
+        "publishedAt": 1723444800,
+        "withdrawnAt": null,
+        "createdAt": 1723358400,
+        "updatedAt": 1723444800
+      },
+      {
+        "id": "rel-macos-202",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "2.0.2",
+        "build": null,
+        "r2Key": "clients/macos/2.0.2.zip",
+        "sha256": null,
+        "notes": "macos 2.0.2",
+        "minSupportedVersion": null,
+        "publishedAt": 1722667200,
+        "withdrawnAt": null,
+        "createdAt": 1722580800,
+        "updatedAt": 1722667200
+      },
+      {
+        "id": "rel-macos-201",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "2.0.1",
+        "build": null,
+        "r2Key": "clients/macos/2.0.1.zip",
+        "sha256": null,
+        "notes": "macos 2.0.1",
+        "minSupportedVersion": null,
+        "publishedAt": 1721889600,
+        "withdrawnAt": null,
+        "createdAt": 1721803200,
+        "updatedAt": 1721889600
+      },
+      {
+        "id": "rel-macos-200",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "2.0.0",
+        "build": null,
+        "r2Key": "clients/macos/2.0.0.zip",
+        "sha256": null,
+        "notes": "macos 2.0.0",
+        "minSupportedVersion": null,
+        "publishedAt": 1721112000,
+        "withdrawnAt": null,
+        "createdAt": 1721025600,
+        "updatedAt": 1721112000
+      },
+      {
+        "id": "rel-macos-197",
+        "platform": "macos",
+        "channel": "stable",
+        "version": "1.9.7",
+        "build": null,
+        "r2Key": "clients/macos/1.9.7.zip",
+        "sha256": null,
+        "notes": "macos 1.9.7",
+        "minSupportedVersion": null,
+        "publishedAt": 1720334400,
+        "withdrawnAt": null,
+        "createdAt": 1720248000,
+        "updatedAt": 1720334400
+      },
+      {
+        "id": "rel-windows-210",
+        "platform": "windows",
+        "channel": "candidate",
+        "version": "2.1.0",
+        "build": null,
+        "r2Key": null,
+        "sha256": null,
+        "notes": "windows 2.1.0",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724913600,
+        "updatedAt": 1725000000
+      },
+      {
+        "id": "rel-windows-204",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "2.0.4",
+        "build": null,
+        "r2Key": "clients/windows/2.0.4.zip",
+        "sha256": null,
+        "notes": "windows 2.0.4",
+        "minSupportedVersion": "1.9.7",
+        "publishedAt": 1724222400,
+        "withdrawnAt": null,
+        "createdAt": 1724136000,
+        "updatedAt": 1724222400
+      },
+      {
+        "id": "rel-windows-202",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "2.0.2",
+        "build": null,
+        "r2Key": "clients/windows/2.0.2.zip",
+        "sha256": null,
+        "notes": "windows 2.0.2",
+        "minSupportedVersion": null,
+        "publishedAt": 1723444800,
+        "withdrawnAt": null,
+        "createdAt": 1723358400,
+        "updatedAt": 1723444800
+      },
+      {
+        "id": "rel-windows-200",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "2.0.0",
+        "build": null,
+        "r2Key": "clients/windows/2.0.0.zip",
+        "sha256": null,
+        "notes": "windows 2.0.0",
+        "minSupportedVersion": null,
+        "publishedAt": 1722667200,
+        "withdrawnAt": null,
+        "createdAt": 1722580800,
+        "updatedAt": 1722667200
+      },
+      {
+        "id": "rel-windows-197",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "1.9.7",
+        "build": null,
+        "r2Key": "clients/windows/1.9.7.zip",
+        "sha256": null,
+        "notes": "windows 1.9.7",
+        "minSupportedVersion": null,
+        "publishedAt": 1721889600,
+        "withdrawnAt": null,
+        "createdAt": 1721803200,
+        "updatedAt": 1721889600
+      },
+      {
+        "id": "rel-windows-196",
+        "platform": "windows",
+        "channel": "stable",
+        "version": "1.9.6",
+        "build": null,
+        "r2Key": "clients/windows/1.9.6.zip",
+        "sha256": null,
+        "notes": "windows 1.9.6",
+        "minSupportedVersion": null,
+        "publishedAt": 1721112000,
+        "withdrawnAt": null,
+        "createdAt": 1721025600,
+        "updatedAt": 1721112000
+      },
+      {
+        "id": "rel-linux-042",
+        "platform": "linux",
+        "channel": "candidate",
+        "version": "0.4.2",
+        "build": null,
+        "r2Key": null,
+        "sha256": null,
+        "notes": "linux 0.4.2",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724913600,
+        "updatedAt": 1725000000
+      },
+      {
+        "id": "rel-linux-041",
+        "platform": "linux",
+        "channel": "stable",
+        "version": "0.4.1",
+        "build": null,
+        "r2Key": "clients/linux/0.4.1.zip",
+        "sha256": null,
+        "notes": "linux 0.4.1",
+        "minSupportedVersion": "0.4.0",
+        "publishedAt": 1724222400,
+        "withdrawnAt": null,
+        "createdAt": 1724136000,
+        "updatedAt": 1724222400
+      },
+      {
+        "id": "rel-linux-040",
+        "platform": "linux",
+        "channel": "stable",
+        "version": "0.4.0",
+        "build": null,
+        "r2Key": "clients/linux/0.4.0.zip",
+        "sha256": null,
+        "notes": "linux 0.4.0",
+        "minSupportedVersion": null,
+        "publishedAt": 1723444800,
+        "withdrawnAt": null,
+        "createdAt": 1723358400,
+        "updatedAt": 1723444800
+      },
+      {
+        "id": "rel-android-020",
+        "platform": "android",
+        "channel": "candidate",
+        "version": "0.2.0",
+        "build": null,
+        "r2Key": null,
+        "sha256": null,
+        "notes": "android 0.2.0",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724913600,
+        "updatedAt": 1725000000
+      },
+      {
+        "id": "rel-android-019",
+        "platform": "android",
+        "channel": "stable",
+        "version": "0.1.9",
+        "build": null,
+        "r2Key": "clients/android/0.1.9.zip",
+        "sha256": null,
+        "notes": "android 0.1.9",
+        "minSupportedVersion": "0.1.9",
+        "publishedAt": 1724222400,
+        "withdrawnAt": null,
+        "createdAt": 1724136000,
+        "updatedAt": 1724222400
+      },
+      {
+        "id": "rel-ios-011",
+        "platform": "ios",
+        "channel": "candidate",
+        "version": "0.1.1",
+        "build": null,
+        "r2Key": null,
+        "sha256": null,
+        "notes": "ios 0.1.1",
+        "minSupportedVersion": null,
+        "publishedAt": null,
+        "withdrawnAt": null,
+        "createdAt": 1724913600,
+        "updatedAt": 1725000000
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1725000000,
+    "total": 19
+  },
+  "adoption": {
+    "range": "30d",
+    "released": [
+      "macos",
+      "windows",
+      "linux",
+      "android",
+      "ios"
+    ],
+    "cells": [
+      {
+        "platform": "macos",
+        "bucket": "current",
+        "users": 86,
+        "devices": 131
+      },
+      {
+        "platform": "macos",
+        "bucket": "behind_one",
+        "users": 34,
+        "devices": 47
+      },
+      {
+        "platform": "macos",
+        "bucket": "behind_more",
+        "users": 19,
+        "devices": 22
+      },
+      {
+        "platform": "macos",
+        "bucket": "unreported",
+        "users": 7,
+        "devices": 9
+      },
+      {
+        "platform": "windows",
+        "bucket": "current",
+        "users": 112,
+        "devices": 168
+      },
+      {
+        "platform": "windows",
+        "bucket": "behind_one",
+        "users": 51,
+        "devices": 66
+      },
+      {
+        "platform": "windows",
+        "bucket": "behind_more",
+        "users": 28,
+        "devices": 33
+      },
+      {
+        "platform": "windows",
+        "bucket": "unreported",
+        "users": 12,
+        "devices": 14
+      },
+      {
+        "platform": "linux",
+        "bucket": "current",
+        "users": 9,
+        "devices": 11
+      },
+      {
+        "platform": "linux",
+        "bucket": "behind_one",
+        "users": 4,
+        "devices": 4
+      },
+      {
+        "platform": "linux",
+        "bucket": "behind_more",
+        "users": 2,
+        "devices": 2
+      },
+      {
+        "platform": "linux",
+        "bucket": "unreported",
+        "users": 1,
+        "devices": 1
+      },
+      {
+        "platform": "android",
+        "bucket": "current",
+        "users": 23,
+        "devices": 25
+      },
+      {
+        "platform": "android",
+        "bucket": "behind_one",
+        "users": 8,
+        "devices": 8
+      },
+      {
+        "platform": "android",
+        "bucket": "behind_more",
+        "users": 3,
+        "devices": 3
+      },
+      {
+        "platform": "android",
+        "bucket": "unreported",
+        "users": 5,
+        "devices": 5
+      },
+      {
+        "platform": "ios",
+        "bucket": "current",
+        "users": 6,
+        "devices": 6
+      },
+      {
+        "platform": "ios",
+        "bucket": "behind_one",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "ios",
+        "bucket": "behind_more",
+        "users": 0,
+        "devices": 0
+      },
+      {
+        "platform": "ios",
+        "bucket": "unreported",
+        "users": 2,
+        "devices": 2
+      }
+    ],
+    "updatedAt": 1725000000
+  }
+}

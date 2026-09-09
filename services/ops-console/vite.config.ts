@@ -52,7 +52,13 @@ function sendJson(res: import('http').ServerResponse, body: unknown) {
  * POST" is a test of nothing. The store below is that something — one mutable
  * copy per fixture set, thrown away when the dev server restarts.
  */
-type OpsFile = { clock: number; list: { items: Array<Record<string, unknown>> }; details: Record<string, unknown> };
+type OpsFile = {
+  clock: number;
+  list: { items: Array<Record<string, unknown>> };
+  details: Record<string, unknown>;
+  /** `releases.json` carries the adoption matrix beside the list it explains. */
+  adoption?: unknown;
+};
 
 const opsCache = new Map<string, OpsFile>();
 
@@ -74,10 +80,22 @@ function pickSession(url: string, set: FixtureSetName): string {
   return new URLSearchParams(url.split('?')[1] ?? '').get('session') ?? set;
 }
 
-function fileNames(set: FixtureSetName): { customers: string; incidents: string } {
-  if (set === 'dense') return { customers: 'customers.dense.json', incidents: 'incidents.dense.json' };
-  if (set === 'empty') return { customers: 'customers.empty.json', incidents: 'incidents.empty.json' };
-  return { customers: 'customers.json', incidents: 'incidents.json' };
+function fileNames(set: FixtureSetName): { customers: string; incidents: string; releases: string } {
+  if (set === 'dense') {
+    return {
+      customers: 'customers.dense.json',
+      incidents: 'incidents.dense.json',
+      releases: 'releases.dense.json',
+    };
+  }
+  if (set === 'empty') {
+    return {
+      customers: 'customers.empty.json',
+      incidents: 'incidents.empty.json',
+      releases: 'releases.empty.json',
+    };
+  }
+  return { customers: 'customers.json', incidents: 'incidents.json', releases: 'releases.json' };
 }
 
 type Incident = Record<string, unknown>;
@@ -116,6 +134,30 @@ function writeIncident(
       note: typeof body.note === 'string' ? body.note : null,
     });
   }
+  return row;
+}
+
+/**
+ * A release edit, in the same shape the Worker's PATCH accepts. It writes the
+ * store rather than answering from the file, because the 客户端 page's whole
+ * claim is that it shows what the server now believes: a 撤回 that the next
+ * GET does not agree with is a test of nothing.
+ */
+function writeRelease(
+  file: OpsFile,
+  id: string,
+  body: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const row = file.list.items.find((item) => item.id === id);
+  if (!row) return null;
+  const at = file.clock;
+  if (body.publish === true) row.publishedAt = row.publishedAt ?? at;
+  if (body.withdraw === true || body.yank === true) row.withdrawnAt = at;
+  if (typeof body.minSupportedVersion === 'string') {
+    row.minSupportedVersion = body.minSupportedVersion || null;
+  }
+  if (typeof body.notes === 'string') row.notes = body.notes;
+  row.updatedAt = at;
   return row;
 }
 
@@ -164,6 +206,28 @@ function fixturesPlugin(): Plugin {
         }
         const route = pathOnly.slice('/api/v1/ops/'.length);
         const set = pickSet(url);
+        if (req.method === 'PATCH') {
+          const parts = route.split('/').map(decodeURIComponent);
+          const file = set !== 'error' && parts[0] === 'releases' && parts.length === 2
+            ? opsFile(fileNames(set).releases, pickSession(url, set))
+            : null;
+          if (!file) {
+            res.statusCode = set === 'error' ? 500 : 404;
+            res.setHeader('content-type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({ error: { code: 'UPSTREAM', message: FIXTURE_ERROR } }));
+            return;
+          }
+          void readBody(req).then((body) => {
+            const row = writeRelease(file, parts[1], body);
+            if (!row) {
+              res.statusCode = 404;
+              res.end();
+              return;
+            }
+            sendJson(res, materializeOps(row, file.clock));
+          });
+          return;
+        }
         if (req.method === 'POST') {
           if (set === 'error') {
             res.statusCode = 500;
@@ -213,6 +277,24 @@ function fixturesPlugin(): Plugin {
         }
         const parts = route.split('/').map(decodeURIComponent);
         const names = fileNames(set);
+        if (parts[0] === 'releases') {
+          const file = opsFile(names.releases, pickSession(url, set));
+          const body = !file
+            ? null
+            : parts.length === 1
+              ? file.list
+              : parts[1] === 'adoption' && parts.length === 2
+                ? file.adoption
+                : null;
+          if (body == null) {
+            res.statusCode = file ? 404 : 500;
+            res.setHeader('content-type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: route } }));
+            return;
+          }
+          sendJson(res, materializeOps(body, file!.clock));
+          return;
+        }
         if (parts[0] === 'customers' || parts[0] === 'incidents') {
           const file = opsFile(
             parts[0] === 'customers' ? names.customers : names.incidents,
