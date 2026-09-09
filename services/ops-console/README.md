@@ -10,7 +10,7 @@ Vite + React 19 + Tailwind v4 + shadcn/ui。构建产物写进 `../control-plane
 | `#/nodes`、`#/nodes?node=` | 机器能不能卖、客户能不能连上？ | 已建：卡片 + 表格 + 抽屉 |
 | `#/customers` | 谁在用？用了多少？ | 已建：计数句 + 平台筛选 + 九列表格 |
 | `#/customers/:id` | 去了哪里？连不上为什么？ | 已建：整页 360，从"现在"到折叠的账务 |
-| `#/clients` | 各平台在跑什么版本？ | 未建 |
+| `#/clients` | 各平台在跑什么版本？该发什么？ | 已建：平台 × 版本档矩阵（每格点进客户列表）+ 每平台发布表与三个写动作 |
 | `#/settings` | 目录、分流、资产、告警 | 未建 |
 
 页面上的类型直接来自 Worker 的合同：tsconfig 的 `@contract` 指向
@@ -32,16 +32,19 @@ npm run dev            # 打真实 /api/v1/ops/*，需要已登录的 Cloudflare
 
 | 参数 | 看到什么 |
 |---|---|
-| 无 | 42 台节点、20 位客户、2 个进行中事故 |
-| `?fixtures=dense` | 50 台节点、60 位客户、24 个事故，超长中文名，压版式 |
-| `?fixtures=empty` | 一台都没有、一位客户都没有、没有进行中的事故（但留了两条恢复记录） |
+| 无 | 42 台节点、20 位客户、2 个进行中事故、macOS 与 Windows 各一条在跑的版本 |
+| `?fixtures=dense` | 50 台节点、60 位客户、24 个事故、五个平台 21 条发布记录，超长中文名，压版式 |
+| `?fixtures=empty` | 一台都没有、一位客户都没有、没有进行中的事故（但留了两条恢复记录）、一个客户端都没发过 |
 | `?fixtures=error` | 接口返回 500 |
 
-今天页的四个写动作（认领 / 静默 / 标记已处理 / 备注）真的会改中间件里的那份数据，动作之后页面重新拉取。
+今天页的四个写动作（认领 / 静默 / 标记已处理 / 备注）和客户端页的三个（发布 / 撤回 / 设最低支持版本）
+真的会改中间件里的那份数据，动作之后页面重新拉取。
 `?session=` 给出一份独立的可写副本，截图用例和写用例因此能共用一个 dev server。
 
-`test/ops-fixtures.test.ts` 拿 Worker 自己的 `assert*` 检查器把六个夹具文件逐条过一遍——平移前后各一次，
+`test/ops-fixtures.test.ts` 拿 Worker 自己的 `assert*` 检查器把九个夹具文件逐条过一遍——平移前后各一次，
 因为平移是对时间戳做算术，把 `asOfSec` 算成小数或 0 的那种错，单看哪一半都发现不了。
+同一个文件还断言版本分布矩阵的每一格和客户页按同样规则筛出来的人数相等：一格说 5 位、点进去只有 4 行，
+就是"高丢包 2 / 高丢包 8"隔了一页又出现一次。
 
 `VITE_FAKE_NOW`（秒、毫秒或 ISO 串）会把 `src/lib/clock.ts` 的时钟冻住，服务端和页面同时生效——所有相对时间都从这里取，截图基线才稳得住。
 
@@ -53,9 +56,10 @@ npm run test:e2e:update    # 重新拍基线
 ```
 
 只跑 chromium，明/暗两套，1440×900 @2x，时区 `Asia/Shanghai`，关动效，像素差容忍 0.2%。
-`today-phone.spec.ts` 另外在 390×844 下跑——今天页是从 Telegram 告警点进来的那一页，横向不许出现滚动条。
+`today-phone.spec.ts`、`nodes-phone.spec.ts`、`clients-phone.spec.ts` 另外在 390×844 下跑——今天页是从
+Telegram 告警点进来的那一页，横向不许出现滚动条。
 基线在 `e2e/__screenshots__/{light,dark}/`。改了版式就要连基线一起提交。
-`docs/screenshots/{nodes,today,customers,customer-detail}-{light,dark}.png` 是给人看的快照，由 `e2e/docs.spec.ts` 写出。
+`docs/screenshots/{nodes,today,customers,customer-detail,clients}-{light,dark}.png` 是给人看的快照，由 `e2e/docs.spec.ts` 写出。
 
 ## 三条 lint
 
@@ -63,7 +67,7 @@ npm run test:e2e:update    # 重新拍基线
 
 | 规则 | 管什么 |
 |---|---|
-| `no-implementation-note-copy` | 中文只能写在 `src/copy/copy.ts`（测试文件除外）；copy.ts 里不许出现 桶 / 差分 / payload / revision / schema / DTO / TODO / placeholder / undefined / NaN |
+| `no-implementation-note-copy` | 中文只能写在 `src/copy/`（测试文件除外）；那一层里不许出现 桶 / 差分 / payload / revision / schema / DTO / TODO / placeholder / undefined / NaN |
 | `no-number-without-freshness` | `src/pages/`、`src/app/` 里不许 `.toFixed(`、`.toLocaleString(` 和裸数字模板插值；格式化只在 `src/components/ops/` 和 `src/lib/display.ts` 做 |
 | `no-severity-literal` | 状态色令牌、十六进制色、`hsl(` 只能出现在 `src/styles/` 和 `StatusWord.tsx` / `QuotaGauge.tsx`；`tone-*` 类名和 `--tone-*` 变量不受限 |
 
@@ -75,7 +79,8 @@ npm run test:e2e:update    # 重新拍基线
 - 全部 JS ≤ 600 KB gzip
 - `src/**` 单文件 ≤ 400 行
 
-页面按路由用 `React.lazy` 拆包，Recharts 和 Motion 都在 节点 那个 chunk 里，不会拖累别的页。
+页面按路由用 `React.lazy` 拆包。文案按页拆成 `src/copy/{shell,customers,today,clients}.ts`，
+`copy.ts` 只负责拼起来；令牌与版式从 `src/styles/globals.css` 里分出 `tokens.css`——两处都是为了不撞 400 行。
 
 ## 硬规则
 
