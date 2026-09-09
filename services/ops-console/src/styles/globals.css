@@ -1,0 +1,197 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@font-face {
+  font-family: "Geist";
+  src: url("../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-border: var(--hairline);
+  --color-input: var(--hairline);
+  --color-ring: var(--accent);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--surface);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: color-mix(in srgb, var(--foreground) 6%, var(--background));
+  --color-accent-foreground: #ffffff;
+  --color-destructive: hsl(var(--sev-line));
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+:root {
+  color-scheme: light;
+  --background: #f5f4f2;
+  --surface: #ffffff;
+  --foreground: #141413;
+  --muted-foreground: rgb(20 20 19 / 0.58);
+  --hairline: rgb(20 20 19 / 0.08);
+  --accent: #5b4cf5;
+  --accent-hover: #4a3ee0;
+
+  --sev-fg: 354 66% 37%;
+  --sev-line: 354 72% 50%;
+  --sev-bg: 354 84% 96%;
+  --warn-fg: 26 88% 30%;
+  --warn-line: 33 92% 48%;
+  --warn-bg: 40 92% 93%;
+  --rem-fg: 262 58% 42%;
+  --rem-line: 262 74% 58%;
+  --rem-bg: 264 80% 96%;
+  --info-fg: 212 76% 35%;
+  --info-line: 212 86% 50%;
+  --info-bg: 210 90% 95%;
+  --ok-fg: 154 62% 25%;
+  --ok-line: 152 60% 38%;
+  --ok-bg: 150 56% 94%;
+  --unk-fg: 220 12% 38%;
+  --unk-line: 220 12% 62%;
+  --unk-bg: 218 24% 93%;
+
+  --tone-fg: var(--unk-fg);
+  --tone-line: var(--unk-line);
+  --tone-bg: var(--unk-bg);
+
+  --radius: 10px;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0b0c0f;
+  --surface: #131418;
+  --foreground: #f4f4f2;
+  --muted-foreground: rgb(244 244 242 / 0.58);
+  --hairline: rgb(255 255 255 / 0.08);
+  --accent: #5b4cf5;
+  --accent-hover: #4a3ee0;
+
+  --sev-fg: 3 92% 78%;
+  --sev-line: 3 76% 60%;
+  --sev-bg: 3 55% 20% / 0.5;
+  --warn-fg: 38 94% 70%;
+  --warn-line: 36 90% 56%;
+  --warn-bg: 34 58% 18% / 0.5;
+  --rem-fg: 266 92% 84%;
+  --rem-line: 264 72% 68%;
+  --rem-bg: 264 48% 22% / 0.45;
+  --info-fg: 206 92% 78%;
+  --info-line: 206 84% 60%;
+  --info-bg: 208 58% 20% / 0.5;
+  --ok-fg: 150 62% 68%;
+  --ok-line: 150 56% 46%;
+  --ok-bg: 152 42% 16% / 0.55;
+  --unk-fg: 216 16% 72%;
+  --unk-line: 216 12% 50%;
+  --unk-bg: 220 16% 24% / 0.55;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; }
+html { background: var(--background); color: var(--foreground); }
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: inherit; text-decoration: none; }
+
+.font-mono, .tabular, code, kbd {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.text-micro {
+  font-size: 11px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.text-body { font-size: 13px; }
+.text-row { font-size: 15px; font-weight: 500; }
+.text-section { font-size: 20px; font-weight: 500; }
+.text-page {
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.text-verdict {
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.tone-sev  { --tone-fg: var(--sev-fg);  --tone-line: var(--sev-line);  --tone-bg: var(--sev-bg); }
+.tone-warn { --tone-fg: var(--warn-fg); --tone-line: var(--warn-line); --tone-bg: var(--warn-bg); }
+.tone-rem  { --tone-fg: var(--rem-fg);  --tone-line: var(--rem-line);  --tone-bg: var(--rem-bg); }
+.tone-info { --tone-fg: var(--info-fg); --tone-line: var(--info-line); --tone-bg: var(--info-bg); }
+.tone-ok   { --tone-fg: var(--ok-fg);   --tone-line: var(--ok-line);   --tone-bg: var(--ok-bg); }
+.tone-unk  { --tone-fg: var(--unk-fg); --tone-line: var(--unk-line); --tone-bg: var(--unk-bg); }
+
+.tone-fg { color: hsl(var(--tone-fg)); }
+.tone-bg { background: hsl(var(--tone-bg)); }
+.tone-line { background: hsl(var(--tone-line)); }
+
+.hairline { border-color: var(--hairline); }
+.hairline-b { border-bottom: 1px solid var(--hairline); }
+.hairline-r { border-right: 1px solid var(--hairline); }
+.hairline-t { border-top: 1px solid var(--hairline); }
+
+.page-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.card-pad { padding: 20px; }
+.table-row { height: 36px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
