@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { copy } from '@/copy/copy';
+import type { Measured } from './measured';
+import { Value } from './Value';
 import {
   Sheet,
   SheetContent,
@@ -39,11 +41,25 @@ export function DetailDrawer({
   );
 }
 
-export function Fact({ label, value }: { label: string; value: ReactNode }) {
+/** One flat fact, obeying R2 through `Value` like every other number on screen. */
+export function Fact({
+  label,
+  measured,
+  render,
+}: {
+  label: string;
+  measured: Measured<string | null>;
+  render?: (value: string) => string;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-[var(--hairline)] py-2 last:border-b-0">
       <span className="text-micro text-[var(--muted-foreground)]">{label}</span>
-      <span className="font-mono text-body">{value}</span>
+      <Value
+        value={measured.value === null ? null : (render ? render(measured.value) : measured.value)}
+        source={measured.source}
+        mono
+        className="text-right"
+      />
     </div>
   );
 }

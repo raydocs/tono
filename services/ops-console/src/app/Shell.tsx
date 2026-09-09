@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Monitor, Server, Settings, SunMoon, Users } from 'lucide-react';
 import { copy, type PageId } from '@/copy/copy';
 import { cn } from '@/lib/utils';
-import { formatClock } from '@/lib/display';
+import { formatWhen, formatWhenAgo } from '@/lib/display';
 import { goPage, readRoute, type OpsRoute } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { useTheme, type ThemeChoice } from '@/lib/theme';
@@ -146,6 +146,13 @@ export function Shell({
   );
 }
 
+/**
+ * How stale the fleet is, in words. "03:23" told the operator the clock time
+ * of the last read but not whether that was a minute or a day ago, which is
+ * the only thing this pill exists to answer; the exact stamp moves to the
+ * tooltip. With no `sources` in the response there is nothing to be sure
+ * about, so the pill goes grey and says so rather than implying freshness.
+ */
 function SourcePill({ ok, at }: { ok: boolean; at: number | null }) {
   if (!ok || at == null) {
     return (
@@ -155,8 +162,11 @@ function SourcePill({ ok, at }: { ok: boolean; at: number | null }) {
     );
   }
   return (
-    <span className="rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1 text-micro">
-      {copy.sourceOk} · <span className="font-mono">{formatClock(at)}</span>
+    <span
+      className="rounded-[999px] border border-[var(--hairline)] bg-[var(--background)] px-2.5 py-1 text-micro"
+      title={formatWhen(at)}
+    >
+      {copy.sourceOk} · <span className="font-mono normal-case tracking-normal">{formatWhenAgo(at)}</span>
     </span>
   );
 }

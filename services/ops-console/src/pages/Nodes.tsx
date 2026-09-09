@@ -119,18 +119,12 @@ export function NodesPage({ fleet, selected }: { fleet: FleetState; selected: st
       >
         {selectedView ? (
           <>
-            <StatusWord word={selectedView.health} />
-            <Fact label={copy.facts.ip} value={privacy.ip(selectedView.ip)} />
-            <Fact label={copy.facts.os} value={selectedView.os || copy.missing} />
-            <Fact label={copy.facts.provider} value={selectedView.provider || copy.missing} />
-            <Fact
-              label={copy.facts.tags}
-              value={selectedView.tags.length ? selectedView.tags.join(' · ') : copy.missing}
-            />
-            <Fact
-              label={copy.facts.ports}
-              value={selectedView.ports.length ? selectedView.ports.join(' · ') : copy.missing}
-            />
+            <StatusWord word={selectedView.health} className="self-start" />
+            <Fact label={copy.facts.ip} measured={selectedView.ip} render={privacy.ip} />
+            <Fact label={copy.facts.os} measured={selectedView.os} />
+            <Fact label={copy.facts.provider} measured={selectedView.provider} />
+            <Fact label={copy.facts.tags} measured={selectedView.tags} />
+            <Fact label={copy.facts.ports} measured={selectedView.ports} />
           </>
         ) : null}
       </DetailDrawer>

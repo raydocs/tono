@@ -18,11 +18,11 @@ export type NodeView = {
   mainland: Measured<string | null>;
   renew: Measured<number | null>;
   last: Measured<number | null>;
-  ip: string | null;
-  os: string | null;
-  provider: string | null;
-  tags: string[];
-  ports: number[];
+  ip: Measured<string | null>;
+  os: Measured<string | null>;
+  provider: Measured<string | null>;
+  tags: Measured<string | null>;
+  ports: Measured<string | null>;
 };
 
 export function toNodeView(node: FleetNodeDto, liveAgents: LiveAgentDto[] | null | undefined): NodeView {
@@ -51,12 +51,22 @@ export function toNodeView(node: FleetNodeDto, liveAgents: LiveAgentDto[] | null
       ? absent(copy.sources.profile)
       : measured(node.profile.renewsAt, node.profile.updatedAt, copy.sources.profile),
     last: asOf == null ? absent(copy.sources.agent) : measured(asOf, asOf, copy.sources.agent),
-    ip: node.quality?.publicIp || node.profile?.publicIp || null,
-    os: node.agent?.os ?? null,
-    provider: node.profile?.provider ?? null,
-    tags: node.quality?.routeKeywords ?? [],
-    ports,
+    ip: fact(node.quality?.publicIp || node.profile?.publicIp, copy.sources.quality),
+    os: fact(node.agent?.os, copy.sources.agent),
+    provider: fact(node.profile?.provider, copy.sources.profile),
+    tags: fact(node.quality?.routeKeywords?.join(SEPARATOR), copy.sources.quality),
+    ports: fact(ports.length ? ports.join(SEPARATOR) : null, copy.sources.quality),
   };
+}
+
+const SEPARATOR = ' \u00b7 ';
+
+/**
+ * R2 for the flat facts in the drawer: an empty string is as absent as a
+ * missing key, and both have to say which source came up empty.
+ */
+function fact(value: string | null | undefined, source: string): Measured<string | null> {
+  return value ? measured(value, null, source) : absent(source);
 }
 
 /** Seven days of daily bytes, or nothing — an absent trend draws nothing at all. */
