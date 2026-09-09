@@ -9,8 +9,11 @@
  */
 
 function rawFakeNow(): string | undefined {
-  const meta = import.meta as unknown as { env?: Record<string, string | undefined> };
-  const fromVite = meta.env?.VITE_FAKE_NOW;
+  // Spelled out rather than aliased: Vite substitutes the literal text
+  // `import.meta.env`, and `const meta = import.meta` slips past the
+  // substitution, leaving the browser with a bare `import.meta` that has no
+  // `env` at all — the dev server froze and the page did not.
+  const fromVite = import.meta.env?.VITE_FAKE_NOW as string | undefined;
   if (fromVite) return fromVite;
   if (typeof process !== 'undefined' && process.env?.VITE_FAKE_NOW) return process.env.VITE_FAKE_NOW;
   return undefined;
