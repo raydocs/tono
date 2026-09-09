@@ -22,7 +22,7 @@ import {
 } from './ops-timeseries';
 import { snapshotUserUsageHours } from './ops-usage-hours';
 import { runOpsCron } from './ops/cron';
-import { afterTelemetryWindow } from './ops/ingest-hooks';
+import { afterSnapshot, afterTelemetryWindow } from './ops/ingest-hooks';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
 import {
@@ -3779,6 +3779,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         stored.updatedAt,
       );
     }
+    await afterSnapshot(e, stored.updatedAt);
     return Response.json({
       ok: true,
       qualityNodes: quality?.nodes.length ?? null,
