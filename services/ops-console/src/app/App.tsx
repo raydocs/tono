@@ -60,7 +60,7 @@ export function App() {
               : <CustomersPage customers={customers} />
           )
             : route.page === 'clients' ? <ClientsPage />
-              : route.page === 'settings' ? <SettingsPage />
+              : route.page === 'settings' ? <SettingsPage section={route.section} />
                 : (
                   <TodayPage
                     incidents={incidents}
