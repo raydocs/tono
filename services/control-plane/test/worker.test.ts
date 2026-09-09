@@ -2513,10 +2513,12 @@ describe('Worker routes with D1 and mocked Tailscale', () => {
     // The migration-0016 read endpoints are gone: nothing drove them (the
     // dashboard hardcodes deployments) and the seeded rows above must stay
     // unreachable rather than resurfacing as a forgotten API.
-    for (const retired of ['servers', 'nodes', 'deployments']) {
+    // `nodes` is now the contract list (`NodeSummaryDto`); it must not 404.
+    for (const retired of ['servers', 'deployments']) {
       const response = await operations(retired);
       expect(response.status).toBe(404);
     }
+    expect((await operations('nodes')).status).toBe(200);
 
     const revisions = await operations('catalog-revisions');
     expect((await revisions.json() as any).revisions).toEqual([{
