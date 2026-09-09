@@ -53,10 +53,12 @@ export function Shell({
 
   return (
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]">
-      <aside className="flex w-52 shrink-0 flex-col border-r border-[var(--hairline)] bg-[var(--surface)]">
-        <div className="flex items-center gap-2 border-b border-[var(--hairline)] px-5 py-4">
-          <span className="flex h-7 w-7 items-center justify-center rounded-[8px] bg-[var(--accent)] text-[11px] font-medium text-white">T</span>
-          <div>
+      {/* Below 960 the rail keeps the icons and drops the words: a 208 px
+          sidebar leaves nothing for the page on a 390 px screen. */}
+      <aside className="flex w-14 shrink-0 flex-col border-r border-[var(--hairline)] bg-[var(--surface)] min-[960px]:w-52">
+        <div className="flex items-center gap-2 border-b border-[var(--hairline)] px-3 py-4 min-[960px]:px-5">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-[var(--accent)] text-[11px] font-medium text-white">T</span>
+          <div className="hidden min-[960px]:block">
             <div className="text-row leading-none">{copy.brand}</div>
             <div className="text-micro text-[var(--muted-foreground)]">{copy.brandSub}</div>
           </div>
@@ -70,8 +72,9 @@ export function Shell({
                 key={item.id}
                 href={`#/${item.id}`}
                 aria-current={active ? 'page' : undefined}
+                title={copy.pages[item.id]}
                 className={cn(
-                  'flex items-center gap-2 rounded-[10px] px-3 py-2 text-body transition-transform duration-150',
+                  'flex items-center gap-2 rounded-[10px] px-2.5 py-2 text-body transition-transform duration-150 min-[960px]:px-3',
                   active ? 'bg-[var(--background)] font-medium' : 'text-[var(--muted-foreground)] hover:-translate-y-px',
                 )}
                 onClick={(event) => {
@@ -79,8 +82,8 @@ export function Shell({
                   goPage(item.id);
                 }}
               >
-                <Icon size={16} strokeWidth={1.75} />
-                {copy.pages[item.id]}
+                <Icon size={16} strokeWidth={1.75} className="shrink-0" />
+                <span className="hidden min-[960px]:inline">{copy.pages[item.id]}</span>
               </a>
             );
           })}
@@ -88,22 +91,22 @@ export function Shell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface)] px-6">
-          <h1 className="text-page mr-auto">{copy.pages[route.page]}</h1>
+        <header className="flex h-14 items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface)] px-4 min-[960px]:px-6">
+          <h1 className="text-page mr-auto truncate">{copy.pages[route.page]}</h1>
           <label className="sr-only" htmlFor="ops-search">{copy.searchPrompt}</label>
           <input
             id="ops-search"
-            className="h-8 w-56 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)]"
+            className="hidden h-8 w-56 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-3 text-body outline-none placeholder:text-[var(--muted-foreground)] min-[960px]:block"
             placeholder={copy.searchPrompt}
             onFocus={() => {
               const event = new KeyboardEvent('keydown', { key: 'k', metaKey: true });
               window.dispatchEvent(event);
             }}
           />
-          <kbd className="hidden rounded-[8px] border border-[var(--hairline)] px-1.5 py-0.5 font-mono text-micro text-[var(--muted-foreground)] sm:inline">⌘K</kbd>
+          <kbd className="hidden rounded-[8px] border border-[var(--hairline)] px-1.5 py-0.5 font-mono text-micro text-[var(--muted-foreground)] min-[960px]:inline">⌘K</kbd>
           <select
             aria-label={copy.theme.system}
-            className="h-8 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-2 text-body"
+            className="hidden h-8 rounded-[10px] border border-[var(--hairline)] bg-[var(--background)] px-2 text-body min-[960px]:block"
             value={theme.theme}
             onChange={(event) => theme.setTheme(event.target.value as ThemeChoice)}
           >
@@ -111,7 +114,7 @@ export function Shell({
               <option key={id} value={id}>{copy.theme[id]}</option>
             ))}
           </select>
-          <label className="flex items-center gap-1.5 text-body">
+          <label className="hidden items-center gap-1.5 text-body min-[960px]:flex">
             <input
               type="checkbox"
               checked={privacy.privacy}

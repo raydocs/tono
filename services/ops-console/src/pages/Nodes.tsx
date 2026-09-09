@@ -17,7 +17,7 @@ import type { FleetState } from '@/lib/use-fleet';
 import { NodeCardGrid } from './NodeCardGrid';
 import { toNodeView, type NodeView } from './node-metrics';
 
-export function NodesPage({ fleet, selected }: { fleet: FleetState; selected: string | null }) {
+export default function NodesPage({ fleet, selected }: { fleet: FleetState; selected: string | null }) {
   const privacy = usePrivacy();
   const [filter, setFilter] = useState<NodeFilter>(null);
   const [view, setView] = useState<'cards' | 'table'>('cards');
@@ -49,19 +49,27 @@ export function NodesPage({ fleet, selected }: { fleet: FleetState; selected: st
 
   return (
     <div className="page-wrap">
-      <p className="text-verdict">
-        {NODE_FILTERS.map((id, index) => (
-          <span key={id}>
-            {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
-            <CountBit
-              id={id}
-              active={filter === id}
-              label={copy.count[id](counts[id])}
-              onClick={() => setFilter((current) => (current === id ? null : id))}
-            />
-          </span>
-        ))}
-      </p>
+      {/* R2 reaches the headline too: a fleet that failed to load has no counts,
+          and "0 台在售" would be a measurement the console never took. */}
+      {fleet.status === 'ready' ? (
+        <p className="text-verdict">
+          {NODE_FILTERS.map((id, index) => (
+            <span key={id}>
+              {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+              <CountBit
+                id={id}
+                active={filter === id}
+                label={copy.count[id](counts[id])}
+                onClick={() => setFilter((current) => (current === id ? null : id))}
+              />
+            </span>
+          ))}
+        </p>
+      ) : (
+        <p className="text-verdict text-[var(--muted-foreground)]">
+          {fleet.status === 'loading' ? copy.loading : copy.loadError}
+        </p>
+      )}
 
       <div className="flex items-center justify-end gap-1">
         <button

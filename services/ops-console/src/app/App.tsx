@@ -1,10 +1,20 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Empty } from '@/components/ops/Empty';
 import { copy, type PageId } from '@/copy/copy';
 import { readRoute, type OpsRoute } from '@/lib/hash-route';
 import { useFleet } from '@/lib/use-fleet';
-import { NodesPage } from '@/pages/Nodes';
 import { Shell } from './Shell';
+
+/**
+ * One chunk per page. The nodes page alone pulls Recharts; loading that on
+ * the way to settings is how a console ends up over its size budget three
+ * pages from now.
+ */
+const NodesPage = lazy(() => import('@/pages/Nodes'));
+const TodayPage = lazy(() => import('@/pages/Today'));
+const CustomersPage = lazy(() => import('@/pages/Customers'));
+const ClientsPage = lazy(() => import('@/pages/Clients'));
+const SettingsPage = lazy(() => import('@/pages/Settings'));
 
 export function App() {
   const fleet = useFleet();
@@ -29,13 +39,13 @@ export function App() {
 
   return (
     <Shell fleet={fleet} nodes={nodes}>
-      {route.page === 'nodes' ? (
-        <NodesPage fleet={fleet} selected={route.node} />
-      ) : (
-        <div className="page-wrap">
-          <Empty message={copy.emptyMigrated} />
-        </div>
-      )}
+      <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
+        {route.page === 'nodes' ? <NodesPage fleet={fleet} selected={route.node} />
+          : route.page === 'customers' ? <CustomersPage />
+            : route.page === 'clients' ? <ClientsPage />
+              : route.page === 'settings' ? <SettingsPage />
+                : <TodayPage />}
+      </Suspense>
     </Shell>
   );
 }
