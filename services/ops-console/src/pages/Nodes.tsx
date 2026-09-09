@@ -50,7 +50,7 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
   return (
     <div className="page-wrap">
       {/* R2 reaches the headline too: a fleet that failed to load has no counts,
-          and "0 台在售" would be a measurement the console never took. */}
+          and a zero count would be a measurement the console never took. */}
       {fleet.status === 'ready' ? (
         <p className="text-verdict">
           {NODE_FILTERS.map((id, index) => (
