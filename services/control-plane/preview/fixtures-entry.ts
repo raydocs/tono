@@ -30,4 +30,18 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(input as RequestInfo, init);
 };
 
-export default worker;
+// This entry mints trust for a fixture-only JWKS. It must never answer for a
+// deployed hostname: refuse anything that is not plain local wrangler dev, so
+// a mistaken `wrangler deploy --config wrangler.fixtures.jsonc` serves nothing.
+const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '0.0.0.0']);
+
+export default {
+  ...worker,
+  async fetch(request: Request, env: unknown, ctx: ExecutionContext): Promise<Response> {
+    const host = new URL(request.url).hostname;
+    if (!LOCAL_HOSTS.has(host)) {
+      return new Response('fixtures worker only serves local wrangler dev', { status: 421 });
+    }
+    return (worker as { fetch: (r: Request, e: unknown, c: ExecutionContext) => Promise<Response> }).fetch(request, env, ctx);
+  },
+};
