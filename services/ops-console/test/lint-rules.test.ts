@@ -25,6 +25,11 @@ tester.run('no-implementation-note-copy', noImplementationNoteCopy, {
       code: "export const copy = { nodes: '\u8282\u70b9' };",
     },
     {
+      name: 'CJK is allowed anywhere in src/copy',
+      filename: '/repo/src/copy/clients.ts',
+      code: "export const clientCopy = { unreleased: '\u672a\u53d1\u5e03' };",
+    },
+    {
       name: 'test files may name CJK words',
       filename: '/repo/src/pages/Nodes.test.tsx',
       code: "expect(label).toBe('\u8282\u70b9');",
@@ -53,6 +58,12 @@ tester.run('no-implementation-note-copy', noImplementationNoteCopy, {
       name: 'banned implementation word in copy.ts',
       filename: '/repo/src/copy/copy.ts',
       code: "export const copy = { hint: 'payload' };",
+      errors: [{ messageId: 'bannedWord' }],
+    },
+    {
+      name: 'banned implementation word in a copy module',
+      filename: '/repo/src/copy/today.ts',
+      code: "export const todayCopy = { hint: 'payload' };",
       errors: [{ messageId: 'bannedWord' }],
     },
   ],

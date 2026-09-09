@@ -33,9 +33,15 @@ describe('copy', () => {
   });
 
   it('does not use internal jargon in operator copy', () => {
-    const text = readFileSync(join(import.meta.dirname, 'copy.ts'), 'utf8');
-    for (const word of FORBIDDEN) {
-      expect(text.includes(word), word).toBe(false);
+    // The whole directory, not just copy.ts: the words moved into four files
+    // when the list outgrew one, and a rule that only reads the barrel would
+    // have stopped checking them the day they moved.
+    for (const file of walk(import.meta.dirname)) {
+      if (extname(file) !== '.ts' || file.endsWith('.test.ts')) continue;
+      const text = readFileSync(file, 'utf8');
+      for (const word of FORBIDDEN) {
+        expect(text.includes(word), `${file} ${word}`).toBe(false);
+      }
     }
   });
 

@@ -34,18 +34,20 @@ export default {
   meta: {
     type: 'problem',
     docs: {
-      description: 'Keep Chinese copy in src/copy/copy.ts and keep implementation notes out of operator copy.',
+      description: 'Keep Chinese copy in src/copy and keep implementation notes out of operator copy.',
     },
     schema: [],
     messages: {
-      cjkOutsideCopy: 'Chinese copy belongs in src/copy/copy.ts, not in {{file}}.',
+      cjkOutsideCopy: 'Chinese copy belongs in src/copy, not in {{file}}.',
       bannedWord: '"{{word}}" is an implementation note, not operator copy.',
     },
   },
   create(context) {
     const filename = filenameOf(context);
     const base = path.posix.basename(filename);
-    const isCopy = filename.endsWith('/src/copy/copy.ts');
+    // The whole directory: the words live in four files, one per page's
+    // vocabulary, and `copy.ts` is only the barrel that joins them.
+    const isCopy = filename.includes('/src/copy/') && !filename.endsWith('.test.ts');
     const isSrcTs = /\/src\/.+\.tsx?$/.test(filename);
     const isTest = base.endsWith('.test.ts') || base.endsWith('.test.tsx');
 
