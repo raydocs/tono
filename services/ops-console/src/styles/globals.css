@@ -335,6 +335,27 @@ button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color
   background: hsl(var(--tone-line));
 }
 
+/* Seven days of daily bytes. A bar above the week's mean carries whatever tone
+   the surrounding block is in (the quota tone, on a node card); the rest stay
+   grey, so the shape says which days were heavy rather than colouring the
+   whole week. An unmeasured day is hatched, never drawn at zero. */
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+}
+.spark-bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--foreground) 11%, transparent);
+}
+.spark-bar[data-high="true"] { background: hsl(var(--tone-line)); }
+.spark-bar[data-gap="true"] {
+  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hairline) 3px 4px);
+}
+
 /* 使用时段. Greys for 在线, the one accent for 已连接; `--heat` is the share of
    the hour, so an empty cell is genuinely empty rather than pale green. */
 .heat-cell {

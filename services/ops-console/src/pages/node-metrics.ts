@@ -73,7 +73,11 @@ function fact(value: string | null | undefined, source: string): Measured<string
 function trafficSeries(node: FleetNodeDto): MetricSeries | null {
   const daily = node.profile?.trafficDailyBytes;
   if (!daily || daily.length < 2) return null;
-  return { points: daily.slice(-7), source: copy.sources.profile };
+  return {
+    points: daily.slice(-7),
+    source: copy.sources.profile,
+    lastDaySec: node.profile?.updatedAt ?? node.agentObservedAt ?? null,
+  };
 }
 
 function collectPorts(node: FleetNodeDto): number[] {

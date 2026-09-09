@@ -23,4 +23,10 @@ export function isPresent<T>(row: Measured<T | null>): row is Measured<T> {
 export type MetricSeries = {
   points: Array<number | null>;
   source: string;
+  /**
+   * The day the last point covers; every earlier point steps back one day.
+   * Without it a bar can say how much but not when, and "20 GB" on an
+   * unnamed day is the kind of number this console exists to stop printing.
+   */
+  lastDaySec?: number | null;
 };
