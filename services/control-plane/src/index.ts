@@ -4288,15 +4288,6 @@ async function completePasswordlessAuth(
   return authResult(e, user, await ensureDevice(e, user.id, deviceName, installationId));
 }
 
-async function recordChallengeFailure(e: Env, challenge: string, kind: string) {
-  await e.DB.prepare(
-    `UPDATE auth_challenges
-     SET attempts = attempts + 1
-     WHERE id = ? AND kind = ? AND consumed_at IS NULL
-       AND expires_at > ? AND attempts < max_attempts`,
-  ).bind(challenge, kind, now()).run();
-}
-
 // --- Tokens / devices ---------------------------------------------------------
 
 async function tokens(e: Env, user: string, device: string, installation: string) {
@@ -5768,12 +5759,14 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     }
     await rateLimitChallenge(e, req, 'oidc-verify', challenge);
     const t = now();
-    const pending = await e.DB.prepare(
-      `SELECT * FROM auth_challenges
+    const reserved = await e.DB.prepare(
+      `UPDATE auth_challenges
+       SET attempts = attempts + 1
        WHERE id = ? AND kind = ? AND consumed_at IS NULL
-         AND expires_at > ? AND attempts < max_attempts`,
+         AND expires_at > ? AND attempts < max_attempts
+       RETURNING *`,
     ).bind(challenge, provider, t).first<Row>();
-    if (!pending) {
+    if (!reserved) {
       throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
     }
 
@@ -5791,19 +5784,17 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
           'The identity provider is temporarily unavailable',
         );
       }
-      await recordChallengeFailure(e, challenge, provider);
       throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
     }
     const nonceHash = await sha256(identity.nonce);
-    if (nonceHash !== pending.secret_hash) {
-      await recordChallengeFailure(e, challenge, provider);
+    if (nonceHash !== reserved.secret_hash) {
       throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
     }
     const consumed = await e.DB.prepare(
       `UPDATE auth_challenges
-       SET attempts = attempts + 1, consumed_at = ?
+       SET consumed_at = ?
        WHERE id = ? AND kind = ? AND secret_hash = ?
-         AND consumed_at IS NULL AND expires_at > ? AND attempts < max_attempts`,
+         AND consumed_at IS NULL AND expires_at > ?`,
     ).bind(t, challenge, provider, nonceHash, t).run();
     if (!consumed.meta.changes) {
       throw new ApiError(401, 'OIDC_AUTHENTICATION_FAILED', 'Identity verification failed');
@@ -5812,8 +5803,8 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
     return Response.json(await completePasswordlessAuth(
       e,
       user,
-      String(pending.device_name),
-      String(pending.installation_id),
+      String(reserved.device_name),
+      String(reserved.installation_id),
     ));
   }
 
