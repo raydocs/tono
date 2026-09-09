@@ -1,5 +1,6 @@
-import { formatBytes, timeAgo, timestamp } from '@legacy-lib/format';
+import { formatBytes, timestamp } from '@legacy-lib/format';
 import { copy } from '@/copy/copy';
+import { nowSec } from './clock';
 
 export function formatCount(value: number | null | undefined): string {
   if (value === null || value === undefined) return copy.missing;
@@ -32,8 +33,20 @@ export function formatWhen(value: number | null | undefined): string {
   return timestamp(value);
 }
 
+/**
+ * Relative time reads off `nowSec()` rather than `Date.now()` so a frozen
+ * clock freezes the words too; the legacy `timeAgo` could not be reused for
+ * exactly that reason.
+ */
 export function formatWhenAgo(value: number | null | undefined): string {
-  return timeAgo(value);
+  if (value === null || value === undefined) return copy.missing;
+  const seconds = Math.max(0, nowSec() - value);
+  if (seconds < 90) return copy.ago.now;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return copy.ago.minutes(minutes);
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return copy.ago.hours(hours);
+  return copy.ago.days(Math.floor(hours / 24));
 }
 
 export function formatClock(value: number | null | undefined): string {

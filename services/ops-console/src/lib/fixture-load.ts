@@ -1,3 +1,4 @@
+import { nowSec } from './clock';
 import type { FleetDto, FleetFixtureFile, LiveDto, LiveFixtureFile } from './types';
 
 const TIME_KEYS = new Set([
@@ -41,12 +42,12 @@ function shiftUnknown(value: unknown, shiftSec: number, key = ''): unknown {
 }
 
 export function materializeFleet(raw: FleetFixtureFile): FleetDto {
-  const shiftSec = Math.floor(Date.now() / 1000) - raw.clock;
+  const shiftSec = nowSec() - raw.clock;
   const shifted = shiftUnknown({ nodes: raw.nodes, sources: raw.sources }, shiftSec) as FleetDto;
   return shifted;
 }
 
 export function materializeLive(raw: LiveFixtureFile): LiveDto {
-  const shiftSec = Math.floor(Date.now() / 1000) - raw.clock;
+  const shiftSec = nowSec() - raw.clock;
   return shiftUnknown(raw.live, shiftSec) as LiveDto;
 }

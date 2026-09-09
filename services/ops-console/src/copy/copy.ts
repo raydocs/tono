@@ -76,6 +76,12 @@ export const copy = {
     blocked: (n: number) => `${n} 台被墙`,
     unmeasured: (n: number) => `${n} 台未测`,
   },
+  ago: {
+    now: '刚刚',
+    minutes: (n: number) => `${n} 分钟前`,
+    hours: (n: number) => `${n} 小时前`,
+    days: (n: number) => `${n} 天前`,
+  },
   unit: {
     person: '人',
     ms: 'ms',
