@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Tono ops collector: securityCheck + backtrace + multi-source block probe.
 
-Two cadences, two timers:
+Three cadences:
 - full run (default): 12h serial SSH sweep — quality, block probes, report files.
 - --agents-only: fetches the Komari nodes list and PUTs a partial
   {"agents": ...} snapshot; fast, no SSH, no report files. Meant for a
   1-5 minute timer so the timeseries tier gets real rate samples.
+- --jobs: one pass of the control-plane job queue (see jobs.py); does not
+  change the two collector cadences above.
 
 Block sources (in priority order):
 1) mainland_probes in nodes.secrets.json — real CT/CU/CM TCP :443 agents (authoritative)
@@ -25,6 +27,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -549,7 +552,7 @@ def komari_nodes() -> list[dict] | None:
     return None
 
 
-def probe_home_lines(token: str) -> list[dict]:
+def probe_home_lines(token: str, home_exit_id: str | None = None) -> list[dict]:
     req = urllib.request.Request(
         f"{API_BASE}/api/v1/ops-ingest/home-targets",
         headers={
@@ -570,6 +573,8 @@ def probe_home_lines(token: str) -> list[dict]:
         port = target.get("port")
         target_id = target.get("id")
         if not host or not port or not target_id:
+            continue
+        if home_exit_id is not None and str(target_id) != str(home_exit_id):
             continue
         targets.append((target_id, host, port))
     if not targets:
@@ -727,7 +732,23 @@ if __name__ == "__main__":
         action="store_true",
         help="only fetch the Komari nodes list and push a partial snapshot (fast, no SSH); for a 1-5 min timer",
     )
+    parser.add_argument(
+        "--jobs",
+        action="store_true",
+        help="lease and execute queued hub jobs from the control plane (one pass)",
+    )
+    parser.add_argument(
+        "--max",
+        type=int,
+        default=5,
+        metavar="N",
+        help="with --jobs, maximum jobs to lease (default 5)",
+    )
     args = parser.parse_args()
+    if args.jobs:
+        from jobs import run_jobs
+
+        raise SystemExit(run_jobs(max_jobs=args.max, collector=sys.modules[__name__]))
     if args.agents_only:
         agents_only()
     else:
