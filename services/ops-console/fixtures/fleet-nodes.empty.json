@@ -1,0 +1,22 @@
+{
+  "clock": 1725000000,
+  "nodes": [],
+  "sources": {
+    "catalog": {
+      "state": "ready",
+      "updatedAt": 1724999880
+    },
+    "quality": {
+      "state": "ready",
+      "updatedAt": 1724999955
+    },
+    "agents": {
+      "state": "ready",
+      "updatedAt": 1724999980
+    },
+    "profiles": {
+      "state": "ready",
+      "updatedAt": 1724996400
+    }
+  }
+}
