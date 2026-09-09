@@ -213,7 +213,7 @@ function Quota({ billing }: { billing: CustomerBillingDto }) {
                 : formatPercent((quota - (usage.value ?? 0)) / quota)}
             </span>
           </div>
-          <QuotaBar used={usage.value} quota={quota} />
+          <QuotaBar used={usage.value} quota={quota} alarmOnly />
         </>
       )}
     </div>

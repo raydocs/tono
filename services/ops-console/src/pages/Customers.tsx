@@ -179,7 +179,7 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'services',
       header: copy.customerColumns.services,
-      width: '100px',
+      width: '150px',
       cell: (row) => (
         row.services.length === 0
           ? <Value value={null} source={copy.sourceWord.telemetry} />
@@ -212,16 +212,27 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
   ];
 }
 
-/** When, at which stage, and what the client called it — in that order. */
+/**
+ * When it happened, then what the client called it and what that means.
+ *
+ * `ETIMEDOUT` on its own tells an operator nothing an hour later, and the
+ * Chinese sentence on its own loses the token they will paste into a search.
+ * The column has 150 px, so the pair is truncated and the title carries the
+ * whole thing — including the stage, which is the least of the three and the
+ * first to go.
+ */
 function FailureCell({ row }: { row: CustomerSummaryDto }) {
   const failure = row.lastFailure;
   if (!failure) return <Value value={null} source={copy.sourceWord.telemetry} />;
-  const stage = stageWord(failure.stage);
+  const why = explainCode(failure.code);
+  const said = failure.code ? [failure.code, why].filter(Boolean).join(' · ') : why;
+  const line = said ?? stageWord(failure.stage) ?? copy.missing;
+  const full = [stageWord(failure.stage), said].filter(Boolean).join(' · ');
   return (
-    <span className="flex min-w-0 flex-col leading-tight" title={explainCode(failure.code) ?? undefined}>
+    <span className="flex min-w-0 flex-col leading-tight" title={full || undefined}>
       <span className="truncate font-mono text-body">{formatWhenAgo(failure.at)}</span>
-      <span className="truncate text-micro text-[var(--muted-foreground)]">
-        {[stage, failure.code].filter(Boolean).join(' · ')}
+      <span className="truncate text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+        {line}
       </span>
     </span>
   );
@@ -264,24 +275,33 @@ function UsageCell({ row }: { row: CustomerSummaryDto }) {
       )}
     >
       <span className="truncate">{used.number} {used.unit}</span>
-      <QuotaBar used={usage.value} quota={quota} />
+      <QuotaBar used={usage.value} quota={quota} alarmOnly />
     </span>
   );
 }
 
 /**
- * The busiest family, and how many others there are.
+ * The two busiest families, and how many others there are.
  *
- * Two names do not fit in a hundred pixels and a truncated "Claude · ChatG"
- * is a worse answer than "Claude +2" — the count is exact, and the full list
- * is one hover or one click away.
+ * One name plus a count made every multi-service customer look the same;
+ * two names is what actually separates a Claude-and-ChatGPT account from a
+ * Claude-and-Meta one, which is the distinction this column exists for. Three
+ * does not fit, so the tail becomes an exact count and the full list stays one
+ * hover away.
  */
+const SERVICES_SHOWN = 2;
+
 function ServicesCell({ families }: { families: CustomerSummaryDto['services'] }) {
-  const rest = families.length - 1;
+  const rest = families.length - SERVICES_SHOWN;
   return (
-    <span className="truncate" title={families.map((f) => copy.serviceName[f]).join(' · ')}>
-      {copy.serviceName[families[0]]}
-      {rest > 0 ? <span className="text-[var(--muted-foreground)]"> +{rest}</span> : null}
+    <span
+      className="flex min-w-0 items-baseline gap-1"
+      title={families.map((f) => copy.serviceName[f]).join(' · ')}
+    >
+      <span className="min-w-0 truncate">
+        {families.slice(0, SERVICES_SHOWN).map((f) => copy.serviceName[f]).join(' · ')}
+      </span>
+      {rest > 0 ? <span className="shrink-0 text-[var(--muted-foreground)]">+{rest}</span> : null}
     </span>
   );
 }
