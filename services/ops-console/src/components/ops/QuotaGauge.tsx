@@ -2,6 +2,7 @@ import { copy } from '@/copy/copy';
 import { formatDate, formatPercent, splitBytes } from '@/lib/display';
 import { cn } from '@/lib/utils';
 import type { Measured } from './measured';
+import { Value } from './Value';
 
 export function QuotaGauge({
   used,
@@ -24,15 +25,14 @@ export function QuotaGauge({
   if (used.value == null) {
     return (
       <div className={cn('flex flex-col gap-1', className)}>
-        <span className="font-mono text-row">{copy.missing}</span>
-        <span className="text-micro text-[var(--muted-foreground)]">{used.source}</span>
+        <Value value={null} source={used.source} />
       </div>
     );
   }
 
   const remaining = quota - used.value;
   const remainRatio = quota === 0 ? null : remaining / quota;
-  const usedRatio = quota === 0 ? 0 : Math.min(1, Math.max(0, used.value / quota));
+  const ratio = quota === 0 ? 0 : Math.min(1, Math.max(0, used.value / quota));
   const eta = exhaustAt(used.value, quota, used.asOfSec, cycleStartSec);
   const usedSplit = splitBytes(used.value);
   const quotaSplit = splitBytes(quota);
@@ -41,26 +41,26 @@ export function QuotaGauge({
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="font-mono text-row">
+        <span className="truncate font-mono text-row">
           {usedSplit.number}
           <span className="ml-1 text-micro font-normal normal-case tracking-normal text-[var(--muted-foreground)]">
             {usedSplit.unit} / {quotaSplit.number} {quotaSplit.unit}
           </span>
         </span>
-        <span className="font-mono text-micro text-[var(--muted-foreground)]">
+        <span className="shrink-0 font-mono text-micro text-[var(--muted-foreground)]">
           {copy.remaining} {formatPercent(remainRatio)}
         </span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded-[999px] bg-[var(--hairline)]" aria-hidden>
+      <div className="h-[2px] overflow-hidden rounded-[999px] bg-[var(--hairline)]" aria-hidden>
         <div
-          className={cn('h-full rounded-[999px]', over ? 'tone-sev' : usedRatio >= 0.9 ? 'tone-warn' : 'tone-ok')}
+          className={cn('h-full rounded-[999px]', over ? 'tone-sev' : ratio >= 0.9 ? 'tone-warn' : 'tone-ok')}
           style={{
-            width: `${Math.min(100, Math.max(2, usedRatio * 100))}%`,
+            width: `${Math.min(100, Math.max(2, ratio * 100))}%`,
             background: 'hsl(var(--tone-line))',
           }}
         />
       </div>
-      <div className="flex justify-between text-micro text-[var(--muted-foreground)]">
+      <div className="flex justify-between gap-2 text-micro text-[var(--muted-foreground)]">
         <span>{copy.exhaustEta}</span>
         <span className="font-mono">{eta == null ? copy.missing : formatDate(eta)}</span>
       </div>
