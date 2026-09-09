@@ -244,6 +244,125 @@ a { color: inherit; text-decoration: none; }
 .count-bit:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 .tone-none { --tone-ink: var(--foreground); --tone-wash: var(--muted-foreground); }
 
+/* A neutral label that is sometimes a filter: platform chips, route tags. */
+.ops-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.ops-chip[aria-pressed="true"] .font-mono { color: var(--accent); }
+/* 未发布: shown, greyed, with the reason in words — never dropped, never a 0. */
+.ops-chip-muted { color: var(--muted-foreground); background: transparent; border-style: dashed; cursor: default; }
+
+.ops-tag.tone-rem, .ops-tag.tone-sev, .ops-tag.tone-warn, .ops-tag.tone-info {
+  color: hsl(var(--tone-fg));
+  background: hsl(var(--tone-bg));
+}
+.ops-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Actions. Exactly one per view gets the accent; the rest are outlines, and a
+   disabled one keeps its reason in the title attribute. */
+.ops-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+.ops-action:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.ops-action:disabled { color: var(--muted-foreground); background: transparent; cursor: not-allowed; }
+.ops-action-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.ops-action-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ops-action-primary:disabled { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
+
+/* The severity rail on a 今天 row: the only colour an incident line carries. */
+.sev-rail {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: hsl(var(--tone-line));
+}
+
+/* 使用时段. Greys for 在线, the one accent for 已连接; `--heat` is the share of
+   the hour, so an empty cell is genuinely empty rather than pale green. */
+.heat-cell {
+  height: 14px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--foreground) calc(var(--heat, 0) * 30%), transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.heat-cell[data-connected="true"] {
+  background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 76% + 14%), transparent);
+}
+/* An hour nobody measured: hatched, not blank, so it cannot read as idle. */
+.heat-gap { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hairline) 3px 4px); }
+
+/* Tabs on 今天. A rule under the live one, nothing else. */
+.ops-tab {
+  padding: 0 2px 8px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.ops-tab:hover { color: var(--foreground); }
+.ops-tab[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--foreground); }
+.ops-tab-rem[aria-selected="true"] { border-bottom-color: hsl(var(--rem-line)); }
+
+/* One incident row. The rail, the sentence, the facts, one action. */
+.incident-row {
+  display: flex;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--hairline);
+  width: 100%;
+  text-align: left;
+  transition: background 150ms ease;
+}
+.incident-row:last-child { border-bottom: 0; }
+.incident-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
+
+/* The connection timeline: a day heading that sticks while its rows scroll. */
+.day-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  background: var(--background);
+  border-bottom: 1px solid var(--hairline);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
