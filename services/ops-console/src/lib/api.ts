@@ -48,8 +48,14 @@ interface ErrorEnvelope {
 function urlFor(path: string, query?: Record<string, string>): string {
   const params = new URLSearchParams(query);
   if (import.meta.env.MODE === 'fixtures') {
-    const set = new URLSearchParams(window.location.search).get('fixtures');
-    if (set) params.set('fixtures', set);
+    const asked = new URLSearchParams(window.location.search);
+    // `session` names an isolated copy of the mutable fixture store, so the
+    // screenshot suite and the test that actually acknowledges an incident can
+    // share one dev server without editing each other's data.
+    for (const key of ['fixtures', 'session']) {
+      const value = asked.get(key);
+      if (value) params.set(key, value);
+    }
   }
   const search = params.toString();
   return `/api/v1/ops/${path}${search ? `?${search}` : ''}`;

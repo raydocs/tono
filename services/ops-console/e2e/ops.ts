@@ -11,9 +11,15 @@ export async function open(
   page: Page,
   hash: string,
   fixtures: FixtureSet = 'default',
+  session?: string,
 ): Promise<void> {
-  const query = fixtures === 'default' ? '' : `?fixtures=${fixtures}`;
-  await page.goto(`/ops2/${query}#${hash}`, { waitUntil: 'networkidle' });
+  const params = new URLSearchParams();
+  if (fixtures !== 'default') params.set('fixtures', fixtures);
+  // A test that writes asks for its own copy of the mutable store, so an ack
+  // in the light project cannot change what the dark project screenshots.
+  if (session) params.set('session', session);
+  const query = params.toString();
+  await page.goto(`/ops2/${query ? `?${query}` : ''}#${hash}`, { waitUntil: 'networkidle' });
   await settle(page);
 }
 

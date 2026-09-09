@@ -12,6 +12,21 @@ import { nowSec } from './clock';
  */
 const MS_KEYS = new Set(['atMs', 'receivedAt']);
 
+/**
+ * Keys whose value is an aligned bucket, and the size of the bucket.
+ *
+ * The shift is `now - clock`, which is almost never a whole number of hours,
+ * so a plain addition moves every `hourAt` 43 minutes off the hour and the
+ * 7x24 strip ends up spanning eight ragged calendar days. Snapping the result
+ * back to its own grid keeps the buckets buckets; it costs under half a
+ * bucket of accuracy, on a value that is a bucket label rather than a
+ * measurement.
+ */
+const SNAP_KEYS: Record<string, number> = {
+  hourAt: 3_600,
+  dayAt: 86_400,
+};
+
 const SEC_KEYS = new Set([
   'at',
   'asOfSec',
@@ -38,8 +53,10 @@ function shift(value: unknown, key: string, seconds: number): unknown {
   }
   if (typeof value !== 'number' || !Number.isFinite(value)) return value;
   if (MS_KEYS.has(key)) return value + seconds * 1_000;
-  if (isSecondsKey(key)) return value + seconds;
-  return value;
+  if (!isSecondsKey(key)) return value;
+  const shifted = value + seconds;
+  const bucket = SNAP_KEYS[key];
+  return bucket ? Math.round(shifted / bucket) * bucket : shifted;
 }
 
 /** Move a whole fixture body from its recorded clock to now. */
