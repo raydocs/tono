@@ -21,6 +21,7 @@ import {
   retainOperationsTimeseries,
 } from './ops-timeseries';
 import { snapshotUserUsageHours } from './ops-usage-hours';
+import { runOpsCron } from './ops/cron';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
 import {
@@ -2608,6 +2609,7 @@ async function enforceAll(e: Env) {
   } catch (x) {
     console.error('user usage hour snapshot failed', x instanceof Error ? x.message : String(x));
   }
+  try { await runOpsCron(e, t); } catch (x) { console.error('ops cron failed', x instanceof Error ? x.message : String(x)); }
   const routingResearchRetention = Math.min(
     envInt(
       e,
