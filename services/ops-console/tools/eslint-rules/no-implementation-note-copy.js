@@ -45,9 +45,12 @@ export default {
   create(context) {
     const filename = filenameOf(context);
     const base = path.posix.basename(filename);
-    const isCopy = filename.endsWith('/src/copy/copy.ts');
+    // Every module under src/copy is a copy module: `copy.ts` grew past four
+    // hundred lines, and a page's worth of strings has to be allowed to live
+    // in a sibling file without the banned-word check moving off it.
     const isSrcTs = /\/src\/.+\.tsx?$/.test(filename);
     const isTest = base.endsWith('.test.ts') || base.endsWith('.test.tsx');
+    const isCopy = !isTest && /\/src\/copy\/[^/]+\.ts$/.test(filename);
 
     function checkCjk(node, text) {
       if (typeof text !== 'string' || !CJK.test(text)) return;

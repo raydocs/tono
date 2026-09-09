@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
+import { createSettingsFixtures } from './fixtures/routes/settings';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
 import fleetDenseRaw from './fixtures/fleet-nodes.dense.json';
@@ -152,6 +153,8 @@ function opsBody(file: OpsFile, parts: string[]): unknown {
 }
 
 function fixturesPlugin(): Plugin {
+  /** The six 设置 resources, mutable, with their own store per session. */
+  const settingsFixtures = createSettingsFixtures(rootDir);
   return {
     name: 'ops-fixtures',
     configureServer(server: ViteDevServer) {
@@ -164,6 +167,9 @@ function fixturesPlugin(): Plugin {
         }
         const route = pathOnly.slice('/api/v1/ops/'.length);
         const set = pickSet(url);
+        if (set !== 'error' && settingsFixtures({
+          req, res, route, url, session: pickSession(url, set), empty: set === 'empty',
+        })) return;
         if (req.method === 'POST') {
           if (set === 'error') {
             res.statusCode = 500;
@@ -258,5 +264,14 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     port: 5174,
+    /**
+     * The webfonts live in `node_modules`, which is a symlink in every review
+     * worktree. Vite resolves the real path before its allow-list check and
+     * refuses to serve anything outside the project root, so Geist silently
+     * fails to load and every screenshot baseline is captured in the fallback
+     * face. Allowing the resolved target is what makes a baseline taken in a
+     * worktree comparable to one taken in the main checkout.
+     */
+    fs: { allow: [rootDir, realpathSync(path.resolve(rootDir, 'node_modules'))] },
   },
 }));

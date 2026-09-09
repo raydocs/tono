@@ -26,7 +26,10 @@ export function DetailDrawer({
         <SheetHeader className="border-b border-[var(--hairline)] px-5 py-4">
           <SheetTitle className="text-row font-medium">{title}</SheetTitle>
         </SheetHeader>
-        <div className="flex flex-col gap-5 p-5">{children}</div>
+        {/* A form taller than the screen has to scroll, or its save button sits
+            below the fold with nothing to reach it: `min-h-0` is what lets the
+            flex child shrink far enough for its own overflow to take effect. */}
+        <div className="flex min-h-0 flex-col gap-5 overflow-y-auto p-5">{children}</div>
         <div className="px-5 pb-5">
           <button
             type="button"

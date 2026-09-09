@@ -1,4 +1,7 @@
+import { settingsCopy } from './settings';
+
 export const copy = {
+  settings: settingsCopy,
   brand: 'Tono',
   brandSub: '运维',
   pages: {

@@ -61,7 +61,7 @@ function urlFor(path: string, query?: Record<string, string>): string {
   return `/api/v1/ops/${path}${search ? `?${search}` : ''}`;
 }
 
-async function getJson<T>(
+export async function getJson<T>(
   path: string,
   signal?: AbortSignal,
   query?: Record<string, string>,
@@ -104,15 +104,15 @@ async function getJson<T>(
  * resolved incident is a no-op there), so the page refetches and shows what
  * actually happened rather than what it hoped would.
  */
-async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+async function writeJson<T>(method: string, path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(urlFor(path), {
-      method: 'POST',
+      method,
       credentials: 'same-origin',
       signal: requestSignal(signal),
       headers: { accept: 'application/json', 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (error) {
     if (isAbortError(error)) throw error;
@@ -129,8 +129,18 @@ async function postJson<T>(path: string, body: unknown, signal?: AbortSignal): P
     }
     throw new Error(message);
   }
+  // A delete that succeeded answers 204: there is nothing to parse, and
+  // asking anyway turns a working write into "动作没做成".
+  if (response.status === 204) return null as T;
   return response.json() as Promise<T>;
 }
+
+export const postJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
+  writeJson<T>('POST', path, body, signal);
+export const patchJson = <T>(path: string, body: unknown, signal?: AbortSignal) =>
+  writeJson<T>('PATCH', path, body, signal);
+export const deleteJson = <T>(path: string, signal?: AbortSignal) =>
+  writeJson<T>('DELETE', path, undefined, signal);
 
 const SNOOZE_SECONDS = 4 * 60 * 60;
 

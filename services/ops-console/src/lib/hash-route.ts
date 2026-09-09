@@ -10,10 +10,14 @@ export type OpsRoute = {
   customerId: string | null;
   /** `#/today?incident=` — the drawer has to survive a reload and a pasted link. */
   incident: string | null;
+  /** `#/settings/alerts` — the six 设置 sections are pages, not tabs, so each has a link. */
+  section: string | null;
 };
 
 /** What the route is before a window exists, and the base every jump starts from. */
-export const BLANK_ROUTE: OpsRoute = { page: 'today', node: null, customerId: null, incident: null };
+export const BLANK_ROUTE: OpsRoute = {
+  page: 'today', node: null, customerId: null, incident: null, section: null,
+};
 const EMPTY = BLANK_ROUTE;
 
 function pageFromPath(path: string): PageId {
@@ -34,13 +38,15 @@ export function readRoute(): OpsRoute {
     node: read('node'),
     customerId: page === 'customers' && segments[1] ? decodeURIComponent(segments[1]) : null,
     incident: read('incident'),
+    section: page === 'settings' && segments[1] ? decodeURIComponent(segments[1]) : null,
   };
 }
 
 export function writeRoute(next: OpsRoute, replace = false) {
   const url = new URL(window.location.href);
-  url.hash = next.customerId
-    ? `#/${next.page}/${encodeURIComponent(next.customerId)}`
+  const segment = next.customerId ?? (next.page === 'settings' ? next.section : null);
+  url.hash = segment
+    ? `#/${next.page}/${encodeURIComponent(segment)}`
     : `#/${next.page}`;
   for (const [key, value] of [['node', next.node], ['incident', next.incident]] as const) {
     if (value) url.searchParams.set(key, value);
@@ -64,6 +70,11 @@ export function goPage(page: PageId) {
     node: page === 'nodes' ? current.node : null,
     incident: page === 'today' ? current.incident : null,
   });
+}
+
+/** The rail inside 设置; the page falls back to 告警 when the hash names none. */
+export function openSettings(section: string) {
+  writeRoute({ ...EMPTY, page: 'settings', section });
 }
 
 export function openNode(name: string) {
