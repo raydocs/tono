@@ -8,8 +8,9 @@ import { copy } from '@/copy/copy';
 import { formatCount, formatDate, splitBytes } from '@/lib/display';
 import { closeNode, openNode } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
-import { countLine, selectNodes, type NodeFilter } from '@/lib/selectors';
+import { countLine, NODE_FILTERS, selectNodes, type NodeFilter, type NodeFilterId } from '@/lib/selectors';
 import { cn } from '@/lib/utils';
+import type { Tone } from '@/components/ops/StatusWord';
 import type { FleetState } from '@/lib/use-fleet';
 import { NodeCardGrid } from './NodeCardGrid';
 import { toNodeView, type NodeView } from './node-metrics';
@@ -47,23 +48,17 @@ export function NodesPage({ fleet, selected }: { fleet: FleetState; selected: st
   return (
     <div className="page-wrap">
       <p className="text-verdict">
-        <CountBit
-          active={filter === 'listed'}
-          label={copy.count.listed(counts.listed)}
-          onClick={() => setFilter((f) => (f === 'listed' ? null : 'listed'))}
-        />
-        <span className="mx-2 text-[var(--muted-foreground)]">·</span>
-        <CountBit
-          active={filter === 'blocked'}
-          label={copy.count.blocked(counts.blocked)}
-          onClick={() => setFilter((f) => (f === 'blocked' ? null : 'blocked'))}
-        />
-        <span className="mx-2 text-[var(--muted-foreground)]">·</span>
-        <CountBit
-          active={filter === 'unmeasured'}
-          label={copy.count.unmeasured(counts.unmeasured)}
-          onClick={() => setFilter((f) => (f === 'unmeasured' ? null : 'unmeasured'))}
-        />
+        {NODE_FILTERS.map((id, index) => (
+          <span key={id}>
+            {index === 0 ? null : <span className="mx-2 text-[var(--muted-foreground)]">·</span>}
+            <CountBit
+              id={id}
+              active={filter === id}
+              label={copy.count[id](counts[id])}
+              onClick={() => setFilter((current) => (current === id ? null : id))}
+            />
+          </span>
+        ))}
       </p>
 
       <div className="flex items-center justify-end gap-1">
@@ -141,15 +136,34 @@ export function NodesPage({ fleet, selected }: { fleet: FleetState; selected: st
   );
 }
 
-function CountBit({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+/**
+ * A fragment of the count sentence. It has to read as prose and behave as a
+ * control at once: a real button so the keyboard and screen readers get it,
+ * `aria-pressed` for the filter state, an underline on hover, and a 2 px rule
+ * in the fragment's own tone once it is on.
+ */
+const FRAGMENT_TONE: Record<NodeFilterId, Tone | 'none'> = {
+  listed: 'none',
+  blocked: 'sev',
+  unmeasured: 'unk',
+};
+
+function CountBit({
+  id,
+  active,
+  label,
+  onClick,
+}: {
+  id: NodeFilterId;
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       aria-pressed={active}
-      className={cn(
-        'rounded-[8px] px-1 transition-colors duration-150',
-        active ? 'text-[var(--foreground)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-      )}
+      className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
       onClick={onClick}
     >
       {label}

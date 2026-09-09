@@ -225,6 +225,18 @@ a { color: inherit; text-decoration: none; }
 }
 .row-selected { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
 
+/* A fragment of the page's count sentence: prose that is also a control. */
+.count-bit {
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
+  color: var(--muted-foreground);
+  transition: border-color 150ms ease, color 150ms ease;
+}
+.count-bit:hover { color: var(--foreground); text-decoration: underline; text-underline-offset: 8px; text-decoration-thickness: 1px; }
+.count-bit[aria-pressed="true"] { color: var(--foreground); border-bottom-color: var(--tone-ink); }
+.count-bit:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.tone-none { --tone-ink: var(--foreground); --tone-wash: var(--muted-foreground); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

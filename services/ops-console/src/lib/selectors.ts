@@ -2,7 +2,11 @@ import { copy } from '@/copy/copy';
 import { mapFleetHealth } from './health';
 import type { FleetNodeDto } from './types';
 
-export type NodeFilter = 'listed' | 'blocked' | 'unmeasured' | null;
+/** Every filter the 节点 page offers. R4: the count and the list share this list. */
+export const NODE_FILTERS = ['listed', 'blocked', 'unmeasured'] as const;
+
+export type NodeFilterId = (typeof NODE_FILTERS)[number];
+export type NodeFilter = NodeFilterId | null;
 
 export function selectNodes(nodes: readonly FleetNodeDto[], filter: NodeFilter): FleetNodeDto[] {
   if (filter === 'listed') return nodes.filter((node) => node.catalogListed === true);
@@ -11,7 +15,7 @@ export function selectNodes(nodes: readonly FleetNodeDto[], filter: NodeFilter):
   return [...nodes];
 }
 
-export function countLine(nodes: readonly FleetNodeDto[]) {
+export function countLine(nodes: readonly FleetNodeDto[]): Record<NodeFilterId, number> {
   return {
     listed: selectNodes(nodes, 'listed').length,
     blocked: selectNodes(nodes, 'blocked').length,
