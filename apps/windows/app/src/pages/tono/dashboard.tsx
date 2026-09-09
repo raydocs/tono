@@ -560,6 +560,22 @@ const DashboardPage = () => {
   ) {
     setActionError(null)
   }
+  // A protected-offline retry record is owned by `tono_retry_now`, which is a
+  // silent no-op once the user has released the fail-closed barrier and landed
+  // back in a clean notConnected state (the kill switch is disarmed and
+  // protection is no longer blocked, so `reconnect_allowed` is false). The
+  // release path goes through `useReleaseProtection` rather than
+  // `handleDisconnect`, so it does not clear `actionError`; retire the stale
+  // record here so "Try again" does not resurface and misfire. Scoped to
+  // `retry === 'retryNow'` — `retry === 'connect'` records are deliberately
+  // shown in notConnected so the user can retry the ordinary connect.
+  if (
+    uiState === 'notConnected' &&
+    actionError &&
+    actionError.retry === 'retryNow'
+  ) {
+    setActionError(null)
+  }
 
   const {
     response: { data: traffic },
