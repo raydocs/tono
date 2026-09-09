@@ -2,9 +2,7 @@
 // Line budgets for the control-plane ops extraction.
 //
 // src/index.ts may only shrink (ceiling in test/index-size.txt). Every file
-// under src/ops/ is capped at 500 lines, except the three modules that already
-// exceeded that when the ratchet landed — those are frozen at their then-current
-// size and may only shrink.
+// under src/ops/ is capped at 500 lines.
 //
 // Usage: node tooling/scripts/check-ops-budgets.mjs [--root <dir>]
 
@@ -16,11 +14,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(HERE, '..', '..');
 const OPS_MAX = 500;
 const CONTROL_PLANE = 'services/control-plane';
-
-/** Files already over 500 when the ratchet landed. Values are wc -l counts. */
-const FROZEN = new Map([
-  [`${CONTROL_PLANE}/src/ops/router.ts`, 535],
-]);
 
 function lineCount(source) {
   if (source.length === 0) return 0;
@@ -48,7 +41,7 @@ export function checkBudgets(root) {
   for (const full of files) {
     const relative = path.relative(root, full).split(path.sep).join('/');
     const lines = lineCount(readFileSync(full, 'utf8'));
-    const limit = FROZEN.get(relative) ?? OPS_MAX;
+    const limit = OPS_MAX;
     if (lines > limit) {
       findings.push({ file: relative, lines, limit });
     }
@@ -71,7 +64,7 @@ function main(argv) {
   const root = rootFlag === -1 ? DEFAULT_ROOT : path.resolve(argv[rootFlag + 1]);
   const findings = checkBudgets(root);
   if (findings.length === 0) {
-    console.log('ops budgets ok: src/ops ≤ 500 (frozen files may only shrink); index.ts ≤ test/index-size.txt');
+    console.log('ops budgets ok: src/ops ≤ 500; index.ts ≤ test/index-size.txt');
     return 0;
   }
   console.error('Ops line budget exceeded. Move code out of src/index.ts into src/ops; keep ops modules under 500 lines.');
