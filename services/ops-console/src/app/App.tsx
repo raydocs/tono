@@ -64,7 +64,7 @@ export function App() {
       <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
         {route.page === 'nodes' ? (
           route.nodeName
-            ? <NodeDetailPage name={route.nodeName} />
+            ? <NodeDetailPage name={route.nodeName} customers={people} />
             : <NodesPage fleet={fleet} selected={route.node} />
         )
           : route.page === 'customers' ? (

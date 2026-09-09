@@ -1,6 +1,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
+import type { CustomerSummaryDto } from '@contract';
 import { nodeApi } from '@/lib/api-node';
 import { closeNodePage } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
@@ -27,7 +28,11 @@ import { NodePaths } from './node/Paths';
  * allowed to fail on their own. A jobs table that could not load must not take
  * the quota gauge down with it.
  */
-export default function NodeDetailPage({ name }: { name: string }) {
+export default function NodeDetailPage({ name, customers }: {
+  name: string;
+  /** The shell's list, so a person who left this node is still named on its timeline. */
+  customers: readonly CustomerSummaryDto[];
+}) {
   const privacy = usePrivacy();
   const detail = useResource(name, (signal) => nodeApi.detail(name, signal));
   const connections = useResource(name, (signal) => nodeApi.connections(name, signal));
@@ -66,7 +71,8 @@ export default function NodeDetailPage({ name }: { name: string }) {
         emptyMessage={copy.nodeNoConnections}
         events={connections.status === 'ready' ? connections.data.items : []}
         who={(userId) => {
-          const hit = node.occupancy.value.find((row) => row.userId === userId);
+          const hit = node.occupancy.value.find((row) => row.userId === userId)
+            ?? customers.find((row) => row.userId === userId);
           return hit ? privacy.email(hit.email) : null;
         }}
         state={connections.status}

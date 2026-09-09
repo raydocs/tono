@@ -71,7 +71,9 @@ export function StatusWord({
     return (
       <span
         title={reason || undefined}
-        className={cn('inline-flex items-center gap-1.5', `tone-${tone}`, type, className)}
+        // Same vertical box as the pill (padding plus a transparent border),
+        // so a blocked card in a row of healthy ones does not stand a few px taller.
+        className={cn('inline-flex items-center gap-1.5 border border-transparent py-0.5', `tone-${tone}`, type, className)}
       >
         <span
           aria-hidden
