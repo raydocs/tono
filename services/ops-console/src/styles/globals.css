@@ -219,6 +219,11 @@ a { color: inherit; text-decoration: none; }
   gap: 8px;
 }
 
+/* Radix's sheet ships its own slide keyframes. The drawer animates on a
+   Motion spring instead, so the shell it positions must not move at all —
+   `!important` because both are utilities and neither wins on source order. */
+.drawer-shell, .drawer-shell[data-state] { animation: none !important; transition: none !important; }
+
 /* The rail. The active entry had a filled background and nothing else, which
    at the icon-only width below 960 px is a grey square that could as easily be
    a hover state. A 2 px accent bar on the rail's own edge says "you are here"

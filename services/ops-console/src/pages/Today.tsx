@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { CustomerSummaryDto, IncidentDto } from '@contract';
 import { Action } from '@/components/ops/Action';
+import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
@@ -59,9 +60,12 @@ export default function TodayPage({
     <div className="page-wrap">
       {incidents.status === 'ready' ? (
         <p className="text-verdict">
-          {open.length > 0
-            ? copy.todayVerdict(open.length, impactedCustomers(all))
-            : clearSentence(all)}
+          {open.length > 0 ? (
+            <CountText
+              values={[open.length, impactedCustomers(all)]}
+              render={(values) => copy.todayVerdict(values[0], values[1])}
+            />
+          ) : clearSentence(all)}
         </p>
       ) : (
         <p className="text-verdict text-[var(--muted-foreground)]">

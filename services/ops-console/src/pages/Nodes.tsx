@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { LayoutGrid, Table as TableIcon } from 'lucide-react';
+import { CountText } from '@/components/ops/CountText';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
@@ -70,7 +71,8 @@ export default function NodesPage({ fleet, selected }: { fleet: FleetState; sele
                 <CountBit
                   id={id}
                   active={filter === id}
-                  label={copy.count[id](counts[id])}
+                  count={counts[id]}
+                  render={(values) => copy.count[id](values[0])}
                   onClick={() => setFilter((current) => (current === id ? null : id))}
                 />
               </span>
@@ -171,12 +173,14 @@ const FRAGMENT_TONE: Record<NodeFilterId, Tone | 'none'> = {
 function CountBit({
   id,
   active,
-  label,
+  count,
+  render,
   onClick,
 }: {
   id: NodeFilterId;
   active: boolean;
-  label: string;
+  count: number;
+  render: (values: number[]) => string;
   onClick: () => void;
 }) {
   return (
@@ -186,7 +190,7 @@ function CountBit({
       className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
       onClick={onClick}
     >
-      {label}
+      <CountText values={[count]} render={render} />
     </button>
   );
 }

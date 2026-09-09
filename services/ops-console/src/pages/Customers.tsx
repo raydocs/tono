@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { CustomerSummaryDto, Platform } from '@contract';
 import { Chip } from '@/components/ops/Chip';
+import { CountText } from '@/components/ops/CountText';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { StatusWord } from '@/components/ops/StatusWord';
@@ -79,7 +80,7 @@ export default function CustomersPage({
                   className={cn('count-bit', `tone-${FRAGMENT_TONE[id]}`)}
                   onClick={() => setFilter((current) => (current === id ? null : id))}
                 >
-                  {copy.customerCount[id](counts[id])}
+                  <CountText values={[counts[id]]} render={(values) => copy.customerCount[id](values[0])} />
                 </button>
               </span>
             ))}
