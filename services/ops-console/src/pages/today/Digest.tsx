@@ -6,6 +6,7 @@ import { goPage, openCustomer, openIncident, openNodePage } from '@/lib/hash-rou
 import { beforeNoon, capNight, formatLife, groupNight, type NightGroup } from '@/lib/handling';
 import type { Tone } from '@/components/ops/StatusWord';
 import type { Resource } from '@/lib/use-resource';
+import { Worthwhile } from '../worthwhile/Worthwhile';
 import { cn } from '@/lib/utils';
 
 /**
@@ -109,6 +110,8 @@ export function Digest({
           </div>
         )}
       </Line>
+
+      <Worthwhile data={digest.data.worthwhile} />
     </section>
   );
 }

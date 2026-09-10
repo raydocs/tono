@@ -5,18 +5,18 @@ import { usePrivacy } from '@/lib/privacy';
 import { confidenceWord, payoffText, sentenceOf } from '@/lib/worthwhile';
 
 /**
- * 本周最值得做的三件事 — the last thing the morning read says.
+ * The week's three picks — the last thing the morning read says.
  *
  * Everything above it is a report: what broke, what recovered, what falls due.
  * This is the only block that has an opinion, and the opinion is deliberately
  * short. Three lines, each one a sentence, a number worth doing it for, how
  * much of that number to believe, and a way into the page where it is done.
  *
- * Two rules it does not bend. An estimate says 估算 out loud and carries the
- * ≈ in front, because a guessed yuan that reads like a measured one turns the
- * whole block into a lie the reader cannot see. And a pick with nothing to
- * claim says so, rather than printing a zero somebody would take for a
- * measurement.
+ * Two rules it does not bend. An estimate is marked as one, in front of the
+ * number and again after it, because a guessed yuan that reads like a measured
+ * one turns the whole block into a lie the reader cannot see. And a pick with
+ * nothing to claim says so, rather than printing a zero somebody would take
+ * for a measurement.
  *
  * A quiet week gets one sentence instead of an empty heading with nothing
  * under it: "nothing this week" is an answer, and a blank block is not.
@@ -73,7 +73,7 @@ function labelOf(pick: WorthwhilePickDto, mask: (value: string) => string): stri
 }
 
 /**
- * Where 去处理 lands.
+ * Where the action link lands.
  *
  * The pick names a page and, where the page has one, the thing on it: a node
  * opens its own page rather than the fleet, because the question "keep this
