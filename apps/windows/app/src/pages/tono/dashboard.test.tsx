@@ -220,6 +220,56 @@ describe('dashboard action-error ownership', () => {
     expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
   })
 
+  it('drops a stale retry-now banner after protection is released', async () => {
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    mocks.mutateTonoStatus.mockResolvedValue({
+      data: makeStatus({
+        uiState: 'protectedOffline',
+        selectedServer: 'US West 1',
+        protectionBlocked: true,
+      }),
+    })
+    mocks.tonoConnect.mockRejectedValue(
+      new Error('TONO_NODE_OR_CORE_UNREACHABLE: all probes failed'),
+    )
+    const view = renderDashboard()
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalled())
+
+    mocks.status = makeStatus({
+      uiState: 'protectedOffline',
+      selectedServer: 'US West 1',
+      protectionBlocked: true,
+    })
+    view.rerender(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    mocks.status = makeStatus({ selectedServer: 'US West 1' })
+    view.rerender(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Standby — Click to connect',
+      }),
+    )
+    await waitFor(() => expect(mocks.tonoConnect).toHaveBeenCalledTimes(2))
+    expect(mocks.tonoRetryNow).not.toHaveBeenCalled()
+  })
+
   it('keeps long action errors inside the narrow dashboard content area', async () => {
     mocks.status = makeStatus({ selectedServer: 'US West 1' })
     mocks.tonoConnect.mockRejectedValue(

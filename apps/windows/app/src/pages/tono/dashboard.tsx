@@ -553,10 +553,12 @@ const DashboardPage = () => {
   // error during render when that authoritative status arrives; the guarded
   // update runs once and avoids an extra effect render. A failed Disconnect is
   // deliberately retained because the status correctly remains connected.
+  // Releasing protection back to idle must also drop retryNow: that command
+  // is a silent no-op once the backend is no longer ProtectedOffline.
   if (
-    uiState === 'connected' &&
     actionError &&
-    actionError.retry !== 'disconnect'
+    ((uiState === 'connected' && actionError.retry !== 'disconnect') ||
+      (uiState === 'notConnected' && actionError.retry === 'retryNow'))
   ) {
     setActionError(null)
   }
@@ -685,9 +687,14 @@ const DashboardPage = () => {
     if (!actionError) return
     if (actionError.retry === 'disconnect') {
       void handleDisconnect()
-    } else if (actionError.retry === 'retryNow') {
+    } else if (
+      actionError.retry === 'retryNow' &&
+      uiState === 'protectedOffline'
+    ) {
       void handleRetryNow()
     } else {
+      // Idle again: protected-offline retry has no object. Connect, don't
+      // call tono_retry_now (that command is a silent no-op off that state).
       void handleConnect()
     }
   }
