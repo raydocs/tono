@@ -41,6 +41,26 @@
 4. 生产库的 `d1_migrations` 里有五条仓库里不存在的 0026–0030（早期编号被复用），对应的 `diagnostics_failure_index` 等四张表没有代码读写；从空库按 migrations 重建与从 dump 恢复会得到不同的库。要么补文件要么加一条迁移删表，让两条路径收敛。
 5. D1 之外没有备份：Worker 密钥（尤其 `CATALOG_ENCRYPTION_KEY` 与 `JWT_SECRET`）、R2 两个桶、DNS / 路由 / Access 应用、策略签名私钥都在恢复清单之外，且没有生产恢复流程。
 
+## 0.3 告警链路演练（2026-09-10 晚，preview 库，已做一次）
+
+结论：**采集器超过 20 分钟不上报 → 一个 cron tick 内事故打开 → 投递记录产生**，链路通到「发送」前一步；缺的只是老板的 `ALERT_TELEGRAM_BOT_TOKEN`。步骤（从 spookfish 目录跑，profile 绑定 `tono`）：
+
+```sh
+# 1. 一条规则：仅严重、私聊、Telegram（生产用 delay_seconds=900，演练用 0）
+npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-preview --remote --command \
+  "INSERT OR IGNORE INTO ops_alert_rules(id,name,enabled,min_severity,min_impact,fire_on,delay_seconds,cooldown_seconds,channel,target,template,secret_ref,created_at,updated_at) VALUES('drill-severe','演练：仅严重，私聊',1,'severe',0,'open_resolve',0,60,'webhook','<chat id>','telegram','ALERT_TELEGRAM_BOT_TOKEN',strftime('%s','now'),strftime('%s','now'))"
+# 2. 把采集器快照拨老（preview 里本来就旧于 20 分钟时可跳过）
+npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-preview --remote --command "UPDATE operations_live_snapshot SET updated_at = updated_at - 3000"
+# 3. 本地起远程 dev，暴露定时触发，打一个 tick
+npx --prefix services/control-plane wrangler dev --config services/control-plane/wrangler.preview.jsonc --remote --test-scheduled --port 8799 &
+curl "http://localhost:8799/__scheduled?cron=*/5+*+*+*+*"
+# 4. 看结果
+npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-preview --remote --json --command \
+  "SELECT dedupe_key, severity, status FROM ops_incidents WHERE dedupe_key LIKE 'fleet%'; SELECT status, error FROM ops_alert_deliveries"
+```
+
+2026-09-10 实测：tick 后 `fleet-collector-stale`（severe，open）与 `fleet-catalog-unavailable`（severe，open——preview 没有 `CATALOG_ENCRYPTION_KEY`，正是 0057 那条新规则该报的）都打开，两条投递记录 `pending`、错误 `secret ALERT_TELEGRAM_BOT_TOKEN is not available`。放上密钥后同一流程应看到 `sent`；恢复演练把 `updated_at` 设回当前时间再打一个 tick，事故应 resolved 且 `open_resolve` 规则再投一条。
+
 ## 1. 在 preview D1 上演练迁移
 
 **已于 2026-09-10 做过一次**：备份 `backups/control-plane-d1/2026-09-10T00:07:11Z.sql.gz` 灌进 `tono-control-plane-ops-preview`（新建，id `12c01ca6-d170-4fcf-9ee1-062256562c46`），`migrations apply` 一次通过，26 张新表齐全，20 个用户 / 7482 个遥测窗口完好。
