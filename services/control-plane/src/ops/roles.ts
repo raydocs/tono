@@ -42,6 +42,7 @@ const ROUTE_ACTIONS: Record<OpsV1Route, OpsAction> = {
   'POST /api/v1/ops/releases': 'releases.write',
   'PATCH /api/v1/ops/releases/{id}': 'releases.write',
   'GET /api/v1/ops/releases/adoption': 'releases.read',
+  'GET /api/v1/ops/releases/channels': 'releases.read',
   'GET /api/v1/ops/direct-candidates': 'settings.read',
   'POST /api/v1/ops/direct-candidates/{etld1}/accept': 'settings.publish',
   'POST /api/v1/ops/direct-candidates/{etld1}/reject': 'settings.publish',

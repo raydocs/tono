@@ -215,6 +215,7 @@ describe('parse-cost ceiling', () => {
     await afterLogSegment(env as unknown as Env, {
       userId: 'u-inflate',
       deviceId: 'd-inflate',
+      segmentId: 'seg-inflate',
       bytes,
       receivedAt: Math.floor(Date.now() / 1000),
     });
