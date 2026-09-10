@@ -13,17 +13,25 @@ import { NodeErrors } from './node/Errors';
 import { NodeHeader } from './node/Header';
 import { NodeHistory } from './node/History';
 import { NodeJobs } from './node/Jobs';
+import { NodeLoad } from './node/Load';
 import { NodeOccupants } from './node/Occupants';
 import { NodePaths } from './node/Paths';
 import { NodeProfileDrawer } from './node/ProfileDrawer';
+import { NodeQualityText } from './node/QualityText';
 
 /**
  * The node detail page, behind the fleet drawer.
  *
  * The order is the order the questions get asked: what is this machine and is
  * it being sold, what has been written down about it, how much of the month is
- * left, can customers reach it and can it reach home, who is on it right now,
- * what is it complaining about, and only then what has been done to it.
+ * left, how hard the box itself is working, can customers reach it and can it
+ * reach home — and, when the summary of that stops making sense, the sweep's
+ * own words — who is on it right now, what it is complaining about, and only
+ * then what has been done to it.
+ *
+ * The two folded blocks are folded requests: the load charts and the raw
+ * sweep mount their bodies when opened, so neither the metrics window nor the
+ * kilobytes of scan text are fetched by a visit that did not ask for them.
  *
  * Four requests rather than one: the detail carries the facts and this week's
  * errors, while connections, jobs and history are their own endpoints and are
@@ -65,7 +73,9 @@ export default function NodeDetailPage({ name, customers }: {
       <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
       <NodeBindings bindings={node.bindings} />
       <NodeQuota quota={node.quota} />
+      <NodeLoad name={name} />
       <NodePaths forward={node.forwardPath} back={node.returnPath} />
+      <NodeQualityText name={name} />
       <NodeOccupants occupancy={node.occupancy} />
       <NodeErrors name={name} recent={node.recentErrors} />
 

@@ -28,8 +28,10 @@ export const nodeDetailCopy = {
     facts: '这台机器',
     bindings: '五处登记',
     quota: '本周期流量',
+    load: '机器负载',
     forward: '客户连得上吗',
     back: '大陆回得来吗',
+    qualityText: '线路原文',
     occupancy: '现在谁在用',
     errors: '后台报错',
     connections: '最近连接',
@@ -268,4 +270,41 @@ export const nodeDetailCopy = {
   nodeRetireNoneAffected: '现在没有人用这台机器',
   nodeRetireUnsafe: '现在不能退役',
   nodeRetireLoading: '正在看退役会发生什么',
+
+  /* ----------------------------------------------------------- 机器负载 */
+
+  nodeLoadRange: {
+    '24h': '24 小时',
+    '7d': '7 天',
+  } as const,
+  nodeLoadCharts: {
+    cpu: 'CPU',
+    memory: '内存',
+    netIn: '下行',
+    netOut: '上行',
+  } as const,
+  nodeLoadPeak: (value: string) => `峰值 ${value}`,
+  /** 95 分位 is how transit is billed; 并发峰值 is what the box was holding. */
+  nodeLoadBandwidth: '95 分位带宽',
+  nodeLoadConnections: '并发峰值',
+  nodeLoadRate: (bytes: string) => `${bytes}/s`,
+  nodeLoadConnCount: (count: string) => `${count} 条`,
+  nodeLoadPoint: (when: string, value: string) => `${when} · ${value}`,
+  /**
+   * The one thing about these charts that is not obvious from looking at
+   * them: the machine reports totals since it booted, so a restart leaves a
+   * hole rather than a cliff, and the hole is the honest drawing.
+   */
+  nodeLoadNote: '上下行按两次上报之间的增量算，机器重启过的那一段不画',
+  nodeNoLoad: '这台机器最近没有报过负载',
+
+  /* ----------------------------------------------------------- 线路原文 */
+
+  nodeQualityParts: {
+    security: '端口与风险',
+    backtrace: '回程',
+  } as const,
+  nodeQualityCopy: '复制',
+  nodeQualityCopied: '已复制',
+  nodeNoQualityText: '中控机还没留下这台机器的扫描原文',
 } as const;
