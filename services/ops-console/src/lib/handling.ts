@@ -4,9 +4,10 @@ import type {
   IncidentEvidenceDto,
   JobType,
   NodeVerdict,
+  Severity,
 } from '@contract';
 import { copy } from '@/copy/copy';
-import { handlingOf, type IncidentClosure } from './api-followups';
+import { handlingOf, INCIDENT_CLOSURES, type IncidentClosure } from './api-followups';
 import type { Chore } from './chores';
 import { nowSec } from './clock';
 import { formatWhenAgo } from './display';
@@ -277,4 +278,121 @@ const NOON = 12;
 
 export function beforeNoon(now = nowSec()): boolean {
   return new Date(now * 1_000).getHours() < NOON;
+}
+
+/* --------------------------------------------------- 昨夜归组与抖动 */
+
+/** Worst first, the same three words the lists rank by. */
+const SEVERITY_RANK: Record<Severity, number> = { severe: 0, warn: 1, notice: 2 };
+
+/** Three openings in one night is the point where 抖动 stops being a coincidence. */
+const FLAP_TIMES = 3;
+
+/** Six lines a half, so a bad night still fits the screen it is read on. */
+export const NIGHT_CAP = 6;
+
+const MINUTE = 60;
+
+export type NightClosure = { closure: IncidentClosure; count: number };
+
+/**
+ * How often the same thing opened, and the shortest life among those openings —
+ * one that is still running has lasted until now, which is the honest floor.
+ */
+export type NightFlap = { times: number; shortest: number };
+
+export type NightGroup = {
+  /** kind + subject: the same fault on the same thing, however often it fired. */
+  key: string;
+  /** The newest of them — the sentence the line prints, and the drawer it opens. */
+  lead: IncidentDto;
+  count: number;
+  /** The worst of them, which is what a reader deciding where to look needs. */
+  severity: Severity;
+  /** How the closed ones ended, biggest count first. Empty while they are open. */
+  closures: NightClosure[];
+  flap: NightFlap | null;
+};
+
+export type NightHalf = { shown: NightGroup[]; hidden: number };
+
+function groupKey(row: IncidentDto): string {
+  return [kindOf(row), row.subjectType, row.subjectId ?? ''].join(' ');
+}
+
+function closuresOf(rows: readonly IncidentDto[]): NightClosure[] {
+  const counted = new Map<IncidentClosure, number>();
+  for (const row of rows) {
+    if (row.status !== 'resolved') continue;
+    const closure = handlingOf(row).closure ?? 'verified';
+    counted.set(closure, (counted.get(closure) ?? 0) + 1);
+  }
+  return [...counted]
+    .map(([closure, count]) => ({ closure, count }))
+    .sort((a, b) => (
+      b.count - a.count
+      || INCIDENT_CLOSURES.indexOf(a.closure) - INCIDENT_CLOSURES.indexOf(b.closure)
+    ));
+}
+
+function groupOf(key: string, members: readonly IncidentDto[], now: number): NightGroup {
+  const rows = [...members].sort((a, b) => b.openedAt - a.openedAt);
+  const severity = rows.reduce<Severity>(
+    (worst, row) => (SEVERITY_RANK[row.severity] < SEVERITY_RANK[worst] ? row.severity : worst),
+    'notice',
+  );
+  return {
+    key,
+    lead: rows[0],
+    count: rows.length,
+    severity,
+    closures: closuresOf(rows),
+    flap: rows.length < FLAP_TIMES ? null : {
+      times: rows.length,
+      shortest: Math.min(...rows.map((row) => Math.max(0, (row.resolvedAt ?? now) - row.openedAt))),
+    },
+  };
+}
+
+/**
+ * One night's half, said once per thing that happened rather than once per row.
+ *
+ * The morning the engine flapped, this block printed thirty-nine lines and the
+ * operator read none of them: 劣化 opening ten times on one machine is one
+ * sentence with a count after it, and the ten rows are still there behind the
+ * line for anybody who wants them. Worst first, then the ones that happened
+ * most, because that is the order somebody deciding where to look reads in.
+ */
+export function groupNight(rows: readonly IncidentDto[], now = nowSec()): NightGroup[] {
+  const byKey = new Map<string, IncidentDto[]>();
+  for (const row of rows) {
+    const found = byKey.get(groupKey(row));
+    if (found) found.push(row);
+    else byKey.set(groupKey(row), [row]);
+  }
+  return [...byKey]
+    .map(([key, members]) => groupOf(key, members, now))
+    .sort((a, b) => (
+      SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]
+      || b.count - a.count
+      || b.lead.openedAt - a.lead.openedAt
+    ));
+}
+
+/** What is printed and what is only counted: the rest live one tab away. */
+export function capNight(groups: readonly NightGroup[], cap = NIGHT_CAP): NightHalf {
+  return { shown: groups.slice(0, cap), hidden: Math.max(0, groups.length - cap) };
+}
+
+/**
+ * A life, counted in seconds where seconds are the point: the 抖动 line claims
+ * the openings were too short to be real, and 不到 1 分钟 is exactly what it
+ * must not round a 59-second life to.
+ */
+export function formatLife(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < MINUTE) return copy.digestLife.seconds(whole);
+  if (whole < HOUR) return copy.digestLife.minutes(Math.floor(whole / MINUTE));
+  if (whole < DAY) return copy.digestLife.hours(Math.floor(whole / HOUR));
+  return copy.digestLife.days(Math.floor(whole / DAY));
 }
