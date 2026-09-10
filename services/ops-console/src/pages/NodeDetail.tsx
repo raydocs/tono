@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Empty } from '@/components/ops/Empty';
 import { copy } from '@/copy/copy';
@@ -14,6 +15,7 @@ import { NodeHistory } from './node/History';
 import { NodeJobs } from './node/Jobs';
 import { NodeOccupants } from './node/Occupants';
 import { NodePaths } from './node/Paths';
+import { NodeProfileDrawer } from './node/ProfileDrawer';
 
 /**
  * The node detail page, behind the fleet drawer.
@@ -34,6 +36,7 @@ export default function NodeDetailPage({ name, customers }: {
   customers: readonly CustomerSummaryDto[];
 }) {
   const privacy = usePrivacy();
+  const [editing, setEditing] = useState(false);
   const detail = useResource(name, (signal) => nodeApi.detail(name, signal));
   const connections = useResource(name, (signal) => nodeApi.connections(name, signal));
   const jobs = useResource(name, (signal) => nodeApi.jobs(name, signal));
@@ -59,7 +62,7 @@ export default function NodeDetailPage({ name, customers }: {
         onChanged={() => { detail.reload(); jobs.reload(); history.reload(); }}
       />
 
-      <NodeFacts facts={node.facts} />
+      <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
       <NodeBindings bindings={node.bindings} />
       <NodeQuota quota={node.quota} />
       <NodePaths forward={node.forwardPath} back={node.returnPath} />
@@ -90,6 +93,16 @@ export default function NodeDetailPage({ name, customers }: {
         rows={history.status === 'ready' ? history.data.items : []}
         state={history.status}
         message={history.status === 'error' ? history.message : undefined}
+      />
+
+      {/* The write lands on the profile, and the profile is half of the page's
+          own facts and the whole of its quota — so the page re-reads rather
+          than patching the copy it is holding. */}
+      <NodeProfileDrawer
+        node={node}
+        open={editing}
+        onClose={() => setEditing(false)}
+        onSaved={detail.reload}
       />
     </div>
   );

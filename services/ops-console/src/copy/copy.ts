@@ -12,6 +12,7 @@
 import { clientCopy } from './clients';
 import { nodeDetailCopy } from './node-detail';
 import { settingsCopy } from './settings';
+import { settingsPublishCopy } from './settings-publish';
 import { customerCopy } from './customers';
 import { shellCopy } from './shell';
 import { todayCopy } from './today';
@@ -21,7 +22,7 @@ export const copy = {
   ...customerCopy,
   ...todayCopy,
   ...clientCopy,
-  settings: settingsCopy,
+  settings: { ...settingsCopy, ...settingsPublishCopy },
   ...nodeDetailCopy,
 } as const;
 

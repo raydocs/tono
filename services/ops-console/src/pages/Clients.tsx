@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
-import type { AdoptionMatrixDto, Platform, ReleaseDto } from '@contract';
+import type { AdoptionMatrixDto, Platform, ReleaseDto, SystemHealthDto } from '@contract';
 import { PLATFORMS } from '@contract';
 import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
+import { PageNote } from '@/components/ops/PageNote';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { releasedPlatformSet } from '@/lib/releases';
-import { useResource, type Resource } from '@/lib/use-resource';
+import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { AdoptionMatrix } from './clients/AdoptionMatrix';
 import { ReleaseTable } from './clients/ReleaseTable';
 
@@ -23,9 +24,11 @@ import { ReleaseTable } from './clients/ReleaseTable';
  */
 export default function ClientsPage({
   releases,
+  health,
   onChanged,
 }: {
   releases: Resource<ReleaseDto[]>;
+  health: Resource<SystemHealthDto>;
   onChanged: () => void;
 }) {
   const adoption = useResource('releases/adoption', (signal) => opsApi.releaseAdoption(signal));
@@ -60,6 +63,10 @@ export default function ClientsPage({
             />
           </p>
         )}
+        <PageNote
+          fetchedAt={newestFetch(releases, adoption, health)}
+          backfill={health.status === 'ready' ? health.data.backfill : null}
+        />
       </div>
 
       <Section title={copy.clientSections.adoption}>

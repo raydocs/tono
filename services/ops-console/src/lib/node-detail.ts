@@ -1,4 +1,11 @@
-import type { JobStatus, JobType, NodeBindingsDto, NodeErrorRowDto, NodeLifecycle } from '@contract';
+import type {
+  JobStatus,
+  JobType,
+  NodeBindingsDto,
+  NodeErrorRowDto,
+  NodeLifecycle,
+  NodeVerdict,
+} from '@contract';
 import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 import { formatWhenAgo } from './display';
@@ -180,6 +187,86 @@ export function formatDeadline(value: number | null): string | null {
   if (hours < 1) return copy.nodeAhead.soon;
   if (hours < 24) return copy.nodeAhead.hours(String(hours));
   return copy.nodeAhead.days(String(Math.floor(hours / 24)));
+}
+
+/* ------------------------------------------- 这台机器: typed in, not measured */
+
+/** An empty box means "there is none", which is a value and not a blank. */
+export function textOrNull(value: string): string | null {
+  const text = value.trim();
+  return text === '' ? null : text;
+}
+
+export function numberOrNull(value: string): number | null {
+  const text = value.trim();
+  if (text === '') return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+const GB = 1000 ** 3;
+
+/**
+ * The allowance is typed in GB because that is the number on the invoice, and
+ * in the 商家's GB — a terabyte plan is a thousand of these, not 1024.
+ */
+export function gbToBytes(value: string): number | null {
+  const parsed = numberOrNull(value);
+  return parsed === null ? null : Math.round(parsed * GB);
+}
+
+export function bytesToGb(value: number | null): string {
+  if (value === null) return '';
+  return String(Math.round(value / GB));
+}
+
+/**
+ * Line tags as they are read out loud, separated by whichever mark was to
+ * hand. Not whitespace: `CN2 GIA` is one tag, and splitting on the space in it
+ * turned one confirmed line into two labels that mean nothing.
+ */
+export function parseLineTags(value: string): string[] {
+  return value
+    .split(/[,，、·]/)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag !== '');
+}
+
+/**
+ * Which day of the month the counter turns over on, read back off the cycle
+ * the meter is already using. The contract carries the cycle's start rather
+ * than the anchor day, so the form recovers the day from it and falls back to
+ * the first — a machine with no cycle yet has no anchor to preserve.
+ */
+export function anchorDayOf(cycleStart: number | null): string {
+  if (cycleStart === null) return '1';
+  return String(new Date(cycleStart * 1_000).getDate());
+}
+
+/** A token the engine wrote, not a sentence a person did: `carrier_loss`, `ok`. */
+function isToken(reason: string): boolean {
+  return /^[a-z][a-z0-9_]*$/.test(reason);
+}
+
+const REASON_SENTENCES: Record<string, string> = copy.nodeReason;
+
+/**
+ * 凭什么, or nothing at all.
+ *
+ * Three cases, and the third is the one production got wrong. A healthy
+ * machine has no reason worth a line — the engine still writes `ok` there, and
+ * printing it put a raw token under the one word on the page that was already
+ * saying 正常. A non-ok verdict usually carries a sentence, which travels
+ * unchanged. And when it carries a bare token instead, it is translated here or
+ * dropped: an operator can act on "回程丢包偏高" and cannot act on
+ * `carrier_loss`.
+ */
+export function reasonSentence(verdict: NodeVerdict, reason: string | null): string | null {
+  if (verdict === 'ok' || !reason) return null;
+  const trimmed = reason.trim();
+  if (trimmed === '') return null;
+  if (!isToken(trimmed)) return trimmed;
+  return REASON_SENTENCES[trimmed] ?? null;
 }
 
 export type ErrorCategory = {

@@ -75,6 +75,39 @@ export const nodeDetailCopy = {
   nodeQuotaCycle: (from: string, to: string) => `本周期 ${from} 到 ${to}`,
   nodeQuotaNoCycle: '没登记周期起止',
 
+  /**
+   * The verdict as a word, for the places that show what was measured rather
+   * than how the machine is right now — the 证据 lines on 今天, mostly.
+   */
+  nodeVerdictWord: {
+    down: '整机失联',
+    blocked: '疑似被墙',
+    no_probe: '没有探针',
+    degraded: '回程丢包',
+    pressure: '高负载',
+    unknown: '还没测到',
+    ok: '大陆正常',
+  } as const,
+  /**
+   * 凭什么, when the engine hands over a bare token instead of a sentence.
+   *
+   * The engine writes one word — the rule that fired — and a page that prints
+   * it is a page that says `carrier_loss` to an operator. Every token it can
+   * write has a sentence here; anything unmapped shows nothing rather than the
+   * token, because a word nobody can read is worse than a quiet line.
+   */
+  nodeReason: {
+    unreachable: '整机连不上，探针也没有声音',
+    likely_blocked: '大陆三网都握不上手，像是被墙了',
+    agent_missing: '这台机器在售，但上面没有探针',
+    machine_pressure: '机器自己吃紧了：负载、内存或磁盘快满了',
+    snapshot_stale: '最近一轮没有测到这台机器',
+    carrier_loss: '回程丢包偏高',
+    customer_fail: '客户连这台机器反复失败',
+    error_spike: '后台报错突然变多',
+    collector_stale: '采集端最近没有送来新数据',
+  } as const,
+
   nodeCarrier: {
     unicom: '联通',
     telecom: '电信',
@@ -95,8 +128,8 @@ export const nodeDetailCopy = {
   } as const,
   nodePathNote: '回程好不代表客户连得上',
   nodeTries: (attempts: string, users: string) => `${attempts} / ${users}`,
-  nodeNoForward: '最近没有客户往这台机器上报过',
-  nodeNoReturn: '还没有从大陆测过这台机器',
+  nodeNoForward: '还没有客户从大陆连过这台机器',
+  nodeNoReturn: '中控机还没扫过这台机器',
 
   nodeOccupantColumns: {
     customer: '客户',
@@ -180,6 +213,54 @@ export const nodeDetailCopy = {
     alreadyListed: '这台机器已经在售',
     unknownListing: '还不知道这台机器在不在售',
   } as const,
+
+  /* ------------------------------------------------- 这台机器：手填的那部分 */
+
+  nodeEdit: '编辑',
+  nodeProfileTitle: (name: string) => `${name}：这台机器`,
+  nodeProfileLead: '这一页的价格、续费和额度没有别的来源，只有这里填过才有。',
+  nodeProfileFields: {
+    provider: '商家',
+    account: '商家账号',
+    region: '地区',
+    tags: '线路标签',
+    port: '端口',
+    price: '价格',
+    currency: '货币',
+    cycle: '账期',
+    renew: '续费日',
+    expires: '到期日',
+    notes: '备注',
+  } as const,
+  nodeProfileHints: {
+    tags: '手工确认过的线路，用顿号或者中点隔开',
+    cycle: '一期多少天，按账单上的写',
+    currency: '账单上的写法：$ 或者 USD',
+    quotaBytes: '按商家卖的数字填，单位 GB',
+    anchorDay: '每月第几天翻页，1 到 28',
+  } as const,
+  nodeProfileAccountNone: '还没挂到账号上',
+  nodeProfileQuota: '本周期流量',
+  nodeProfileQuotaOn: '登记了额度',
+  nodeProfileQuotaOff: '不登记额度',
+  nodeQuotaFields: {
+    bytes: '额度',
+    kind: '怎么翻页',
+    anchorDay: '每月第几天',
+    counts: '算哪个方向',
+  } as const,
+  nodeQuotaKind: {
+    calendar_day: '每月固定某天',
+    anniversary: '按开通日',
+    rolling_30d: '滚动 30 天',
+    manual: '自己手动清',
+  } as const,
+  nodeQuotaCounts: {
+    in: '只算下行',
+    out: '只算上行',
+    in_out: '上下行都算',
+  } as const,
+  nodeProfileSaved: '这台机器的资料已经改好了',
 
   nodeRetireReason: '为什么退役',
   nodeRetireReasonPrompt: '写一句原因',

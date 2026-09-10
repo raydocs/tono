@@ -11,8 +11,11 @@ import {
   assertIncident,
   assertIncidentDetail,
   assertList,
+  assertNodeSummary,
   assertRelease,
   assertServiceUsage,
+  assertSystemHealth,
+  healthWordForVerdict,
 } from '@contract';
 import { bucketFor, publishedVersions } from '@/lib/releases';
 import { materializeOps } from '@/lib/ops-fixtures';
@@ -57,9 +60,21 @@ function read<T>(name: string): T {
   return JSON.parse(readFileSync(join(FIXTURES, name), 'utf8')) as T;
 }
 
+type NodeListFile = {
+  clock: number;
+  list: unknown;
+};
+
+type HealthFile = {
+  clock: number;
+  health: unknown;
+};
+
 const CUSTOMER_FILES = ['customers.json', 'customers.dense.json', 'customers.empty.json'];
 const INCIDENT_FILES = ['incidents.json', 'incidents.dense.json', 'incidents.empty.json'];
 const RELEASE_FILES = ['releases.json', 'releases.dense.json', 'releases.empty.json'];
+const NODE_FILES = ['nodes.json', 'nodes.dense.json', 'nodes.empty.json'];
+const HEALTH_FILES = ['system-health.json', 'system-health.dense.json', 'system-health.empty.json'];
 
 /** One assertion per checker run, so a failure names the file and the section. */
 function checkCustomers(file: CustomerFile): number {
@@ -99,6 +114,21 @@ function checkIncidents(file: IncidentFile): number {
   return checks;
 }
 
+/**
+ * The engine is the only judge (R4), so a fixture that carried a word which
+ * does not follow from its own verdict would let the console render a
+ * disagreement the Worker cannot produce — and the page would look right.
+ */
+function checkNodes(file: NodeListFile): number {
+  const list = assertList(file.list, assertNodeSummary, 'nodes');
+  for (const row of list.items) {
+    const expected = healthWordForVerdict(row.verdict);
+    expect(row.health, row.name).toBe(expected.word);
+    expect(row.tone, row.name).toBe(expected.tone);
+  }
+  return 1 + list.items.length;
+}
+
 describe('every committed ops fixture satisfies the contract', () => {
   let total = 0;
 
@@ -126,8 +156,57 @@ describe('every committed ops fixture satisfies the contract', () => {
     });
   }
 
+  for (const name of NODE_FILES) {
+    it(name, () => {
+      const file = read<NodeListFile>(name);
+      total += checkNodes(file);
+      total += checkNodes(materializeOps(file, file.clock));
+    });
+  }
+
+  for (const name of HEALTH_FILES) {
+    it(name, () => {
+      const file = read<HealthFile>(name);
+      assertSystemHealth(file.health, name);
+      assertSystemHealth(materializeOps(file, file.clock).health, name);
+      total += 2;
+    });
+  }
+
   it('checked more than the six files it opened', () => {
     expect(total).toBeGreaterThan(6);
+  });
+});
+
+/**
+ * The 节点 page is written against the normal set, and three of its states only
+ * exist if the data has them: a machine taken out of service, a machine nobody
+ * has entered a cap for, and the client-side leg measured for some nodes and
+ * not others. A fixture that quietly lost one of those would turn the matching
+ * screenshot into a picture of nothing.
+ */
+describe('the normal node set carries the states the page has to render', () => {
+  const file = read<NodeListFile>('nodes.json');
+  const items = assertList(file.list, assertNodeSummary).items;
+
+  it('has retired machines, and they are hidden by default', () => {
+    const retired = items.filter((row) => row.lifecycle === 'retired');
+    expect(retired.length).toBeGreaterThan(0);
+    expect(items.length).toBeGreaterThan(retired.length);
+  });
+
+  it('has a machine with no quota entered, and machines with one', () => {
+    expect(items.some((row) => row.quota.value.quota === null)).toBe(true);
+    expect(items.some((row) => row.quota.value.quota !== null)).toBe(true);
+  });
+
+  it('measures the client-side leg for some machines and not others', () => {
+    expect(items.some((row) => row.forwardWorst.value !== null)).toBe(true);
+    expect(items.some((row) => row.forwardWorst.value === null)).toBe(true);
+  });
+
+  it('spreads the fleet across every health word', () => {
+    expect(new Set(items.map((row) => row.health)).size).toBe(5);
   });
 });
 

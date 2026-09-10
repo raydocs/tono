@@ -14,11 +14,22 @@ const words = copy.settings.candidates;
 /**
  * The generated routing draft, read-only.
  *
- * Read-only is the whole point: the console can propose what the direct list
- * should look like, and publishing it stays a deliberate act somewhere else.
- * A box you can edit here would imply that pressing something applies it.
+ * Read-only is still the point: nothing here changes live routing. What has
+ * changed is where the draft goes next. It used to leave only through the
+ * clipboard, into the old console's editor; now it can be carried straight to
+ * the rules editor, which is one deliberate step short of publishing rather
+ * than one paste short of a truncated document. The copy button stays for the
+ * times the draft is going into a note or a message instead.
  */
-export function DraftDialog({ text, onClose }: { text: string | null; onClose: () => void }) {
+export function DraftDialog({
+  text,
+  onClose,
+  onLoad,
+}: {
+  text: string | null;
+  onClose: () => void;
+  onLoad: (text: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -48,14 +59,18 @@ export function DraftDialog({ text, onClose }: { text: string | null; onClose: (
         )}
         <ActionRow>
           {empty ? null : (
-            <Action
-              primary
-              onClick={() => {
-                void navigator.clipboard?.writeText(text ?? '').then(() => setCopied(true));
-              }}
-            >
-              {copied ? copy.settings.copied : copy.settings.copyText}
-            </Action>
+            <>
+              <Action primary onClick={() => onLoad(text ?? '')}>
+                {copy.settings.policy.loadDraft}
+              </Action>
+              <Action
+                onClick={() => {
+                  void navigator.clipboard?.writeText(text ?? '').then(() => setCopied(true));
+                }}
+              >
+                {copied ? copy.settings.copied : copy.settings.copyText}
+              </Action>
+            </>
           )}
           <Action onClick={onClose}>{copy.close}</Action>
         </ActionRow>

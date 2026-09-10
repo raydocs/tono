@@ -10,11 +10,12 @@ import { opsApi } from '@/lib/api';
 import { severityTone } from '@/lib/codes';
 import { formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { closeIncident, openCustomer } from '@/lib/hash-route';
-import { childrenOf, incidentSubject } from '@/lib/incidents';
+import { childrenOf, evidenceSentence, incidentSubject } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
 import { sourceWord } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
+import { IncidentPrimary } from './IncidentAction';
 
 /**
  * The incident drawer, addressable as `?incident=`.
@@ -67,10 +68,19 @@ export function IncidentDrawer({
   const actions = !incident ? null : (
     <Block title={copy.incidentDrawer.actions}>
       <ActionRow>
+        {/* The repair leads, and the three bookkeeping verbs follow it: a
+            drawer whose only coloured button marks the fault handled is a
+            drawer that rewards closing the tab. */}
+        <IncidentPrimary incident={incident} onChanged={() => { detail.reload(); onChanged(); }} />
+        {incident.status === 'open' ? (
+          <Action pending={pending} onClick={() => run(() => opsApi.ackIncident(incident.id))}>
+            {copy.incidentPrimary.ack}
+          </Action>
+        ) : null}
         <Action pending={pending} onClick={() => run(() => opsApi.snoozeIncident(incident.id))}>
           {copy.incidentPrimary.snooze}
         </Action>
-        <Action primary pending={pending} onClick={() => run(() => opsApi.resolveIncident(incident.id))}>
+        <Action pending={pending} onClick={() => run(() => opsApi.resolveIncident(incident.id))}>
           {copy.incidentPrimary.resolve}
         </Action>
       </ActionRow>
@@ -117,19 +127,18 @@ export function IncidentDrawer({
           </div>
           {incident.summary ? <p className="text-body">{incident.summary}</p> : null}
 
+          {/* One measurement per line, said rather than dumped: the engine
+              writes these as an object and the names in it are its own. */}
           <Block title={copy.incidentDrawer.evidence}>
             {incident.evidence.length === 0 ? (
               <Value value={null} source={sourceWord('engine')} />
             ) : incident.evidence.map((row) => (
-              <div key={row.label} className="flex items-baseline justify-between gap-3 py-1">
-                <span className="text-micro text-[var(--muted-foreground)]">{row.label}</span>
-                <span className="text-right">
-                  <span className="font-mono text-body">{row.value}</span>
-                  <span className="ml-2 text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
-                    {formatWhenAgo(row.asOfSec)} · {sourceWord(row.source)}
-                  </span>
+              <p key={row.label} className="flex flex-wrap items-baseline gap-x-2 py-1">
+                <span className="text-body">{evidenceSentence(row)}</span>
+                <span className="text-micro normal-case tracking-normal text-[var(--muted-foreground)]">
+                  {formatWhenAgo(row.asOfSec)} · {sourceWord(row.source)}
                 </span>
-              </div>
+              </p>
             ))}
           </Block>
 

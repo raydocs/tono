@@ -7,16 +7,21 @@ test.describe('customers page', () => {
 
     // The sentence the whole page is built around.
     await expect(page.getByRole('button', { name: '20 位客户' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '4 位在线' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '4 位正常' })).toBeVisible();
     await expect(page.getByRole('button', { name: '1 位连不上' })).toBeVisible();
 
-    // R4 in the browser: the fragment and the rows it filters to must agree.
-    const online = page.getByRole('button', { name: /位在线$/ });
-    await online.click();
+    // R4 in the browser: the fragment, the rows it filters to, and the word
+    // each of those rows carries all have to be the same answer. The count used
+    // to read a connected flag the health word did not, and said 位在线 over a
+    // table where not one row agreed.
+    const well = page.getByRole('button', { name: /位正常$/ });
+    await well.click();
     await settle(page);
-    const claimed = Number((await online.textContent())?.match(/\d+/)?.[0]);
-    expect(await page.locator('tbody tr').count()).toBe(claimed);
-    await online.click();
+    const claimed = Number((await well.textContent())?.match(/\d+/)?.[0]);
+    const rows = page.locator('tbody tr');
+    expect(await rows.count()).toBe(claimed);
+    expect(await rows.filter({ hasText: '正常' }).count()).toBe(claimed);
+    await well.click();
     await settle(page);
 
     // Three platforms have shipped nothing; they are shown, greyed, and say so.
@@ -61,6 +66,32 @@ test.describe('customers page', () => {
     // Nothing but failures survives, and the successes are gone.
     await expect(page.getByText('连上', { exact: true })).toHaveCount(0);
     expect(await page.getByText('没连上').count()).toBe(before);
+  });
+
+  /**
+   * The address is the row's name and the column that carries it is the one
+   * with room to spare, so nothing is cut off at the width the console is read
+   * at — and the whole address is on the element either way, for the hover.
+   */
+  test('the addresses are not clipped, and the whole one is there to read', async ({ page }) => {
+    await open(page, '/customers');
+    await expect(page.locator('tbody tr').first().locator('td').nth(1).locator('div'))
+      .toHaveAttribute('title', /@/);
+
+    const table = await page.evaluate(() => {
+      const heads = [...document.querySelectorAll('thead th')]
+        .map((th) => ({ head: th.textContent ?? '', width: th.getBoundingClientRect().width }));
+      const clipped = [...document.querySelectorAll('tbody tr')]
+        .map((tr) => {
+          const span = tr.querySelectorAll('td')[1].querySelector('span');
+          return span ? span.scrollWidth - span.clientWidth : 0;
+        })
+        .reduce((worst, over) => Math.max(worst, over), 0);
+      return { heads, clipped };
+    });
+    const widest = table.heads.reduce((a, b) => (b.width > a.width ? b : a));
+    expect(widest.head).toBe('客户');
+    expect(table.clipped).toBeLessThanOrEqual(0);
   });
 
   test('a row opens its own page, not a drawer', async ({ page }) => {

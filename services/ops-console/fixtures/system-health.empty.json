@@ -1,0 +1,64 @@
+{
+  "clock": 1725000000,
+  "health": {
+    "ok": true,
+    "buildSha": "a1b2c3d",
+    "contractVersion": 1,
+    "sources": [
+      {
+        "source": "collector",
+        "state": "ready",
+        "asOfSec": 1724999955,
+        "message": null
+      },
+      {
+        "source": "komari",
+        "state": "ready",
+        "asOfSec": 1724999940,
+        "message": null
+      },
+      {
+        "source": "telemetry",
+        "state": "ready",
+        "asOfSec": 1724999970,
+        "message": null
+      },
+      {
+        "source": "catalog",
+        "state": "ready",
+        "asOfSec": 1724999880,
+        "message": null
+      },
+      {
+        "source": "profile",
+        "state": "ready",
+        "asOfSec": 1724996400,
+        "message": null
+      },
+      {
+        "source": "engine",
+        "state": "ready",
+        "asOfSec": 1724999910,
+        "message": null
+      },
+      {
+        "source": "jobs",
+        "state": "ready",
+        "asOfSec": 1724999940,
+        "message": null
+      },
+      {
+        "source": "manual",
+        "state": "ready",
+        "asOfSec": 1724913600,
+        "message": null
+      }
+    ],
+    "cronLastRunAt": 1724999880,
+    "cronLastDurationMs": 2810,
+    "cronLastError": null,
+    "cronSteps": null,
+    "backfill": null,
+    "updatedAt": 1724999970
+  }
+}

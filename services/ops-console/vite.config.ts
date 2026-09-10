@@ -14,6 +14,12 @@ import fleetDenseRaw from './fixtures/fleet-nodes.dense.json';
 import fleetEmptyRaw from './fixtures/fleet-nodes.empty.json';
 import liveRaw from './fixtures/live.json';
 import liveDenseRaw from './fixtures/live.dense.json';
+import nodesRaw from './fixtures/nodes.json';
+import nodesDenseRaw from './fixtures/nodes.dense.json';
+import nodesEmptyRaw from './fixtures/nodes.empty.json';
+import healthRaw from './fixtures/system-health.json';
+import healthDenseRaw from './fixtures/system-health.dense.json';
+import healthEmptyRaw from './fixtures/system-health.empty.json';
 
 /**
  * Fixture sets, chosen per request by `?fixtures=`. The screenshot suite needs
@@ -22,9 +28,9 @@ import liveDenseRaw from './fixtures/live.dense.json';
  * ask for one.
  */
 const FIXTURE_SETS = {
-  default: { fleet: fleetRaw, live: liveRaw },
-  dense: { fleet: fleetDenseRaw, live: liveDenseRaw },
-  empty: { fleet: fleetEmptyRaw, live: liveRaw },
+  default: { fleet: fleetRaw, live: liveRaw, nodes: nodesRaw, health: healthRaw },
+  dense: { fleet: fleetDenseRaw, live: liveDenseRaw, nodes: nodesDenseRaw, health: healthDenseRaw },
+  empty: { fleet: fleetEmptyRaw, live: liveRaw, nodes: nodesEmptyRaw, health: healthEmptyRaw },
 } as const;
 
 type FixtureSetName = keyof typeof FIXTURE_SETS;
@@ -277,6 +283,16 @@ function fixturesPlugin(): Plugin {
           return;
         }
         const chosen = FIXTURE_SETS[set];
+        // The engine's fleet: what 节点 lists, and what ⌘K searches.
+        if (route === 'nodes') {
+          sendJson(res, materializeOps(chosen.nodes.list, chosen.nodes.clock));
+          return;
+        }
+        // Which source is behind, and how far the backfill has left to go.
+        if (route === 'system/health') {
+          sendJson(res, materializeOps(chosen.health.health, chosen.health.clock));
+          return;
+        }
         if (route === 'fleet-nodes') {
           sendJson(res, materializeFleet(chosen.fleet as unknown as FleetFixtureFile));
           return;
@@ -349,7 +365,10 @@ export default defineConfig(({ mode }) => ({
     },
   },
   server: {
-    port: 5174,
+    // One port per checkout: several worktrees of this repository are open at
+    // once, and the screenshot suite reuses whatever is already listening.
+    port: Number(process.env.OPS_CONSOLE_PORT ?? 5174),
+    strictPort: true,
     fs: {
       /**
        * `node_modules` is a symlink into the primary checkout in every git

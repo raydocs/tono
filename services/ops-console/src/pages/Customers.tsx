@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto } from '@contract';
+import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto, SystemHealthDto } from '@contract';
 import { ADOPTION_BUCKETS } from '@contract';
 import { Chip } from '@/components/ops/Chip';
 import { CountText } from '@/components/ops/CountText';
+import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { StatusWord } from '@/components/ops/StatusWord';
@@ -13,6 +14,7 @@ import {
   bucketCounts,
   CUSTOMER_FILTERS,
   customerCounts,
+  planWired,
   PLATFORM_CHIPS,
   platformCounts,
   releasedPlatforms,
@@ -28,25 +30,27 @@ import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { shown } from '@/lib/sources';
 import { cn } from '@/lib/utils';
-import type { Resource } from '@/lib/use-resource';
+import { newestFetch, type Resource } from '@/lib/use-resource';
 import type { Tone } from '@/components/ops/StatusWord';
 
 type Mask = (email: string) => string;
 
-/** Only the online fragment carries a tone; the other two are prose. */
+/** Only the two health words carry a tone; the total is prose. */
 const FRAGMENT_TONE: Record<CustomerFilterId, Tone | 'none'> = {
   all: 'none',
-  online: 'ok',
+  ok: 'ok',
   unreachable: 'sev',
 };
 
 export default function CustomersPage({
   customers,
   releases,
+  health,
   platform,
   bucket,
 }: {
   customers: Resource<CustomerSummaryDto[]>;
+  health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   /** Both come from the URL: a clients-matrix cell is a link into this page. */
   platform: Platform | null;
@@ -77,7 +81,8 @@ export default function CustomersPage({
     () => selectByBucket(onPlatform, published, bucket),
     [onPlatform, published, bucket],
   );
-  const columns = useMemo(() => customerColumns(privacy.email), [privacy.email]);
+  const wired = useMemo(() => planWired(all), [all]);
+  const columns = useMemo(() => customerColumns(privacy.email, wired), [privacy.email, wired]);
 
   const state: TableState = customers.status === 'loading'
     ? 'loading'
@@ -111,6 +116,17 @@ export default function CustomersPage({
             {customers.status === 'loading' ? copy.loading : copy.loadError}
           </p>
         )}
+
+        <PageNote
+          fetchedAt={newestFetch(customers, health)}
+          backfill={health.status === 'ready' ? health.data.backfill : null}
+        />
+
+        {/* The fleet page's rule for a column nobody has filled in yet: drop
+            it, and say once, quietly, what is missing. */}
+        {customers.status === 'ready' && all.length > 0 && !wired ? (
+          <p className="text-body text-[var(--muted-foreground)]">{copy.customerPlanNotWired}</p>
+        ) : null}
 
         {/* All five platforms, always. The ones nothing has shipped for say so. */}
         <div className="toolbar-row">
@@ -162,7 +178,16 @@ export default function CustomersPage({
   );
 }
 
-function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
+/**
+ * The address is the row's name, so it gets the width nothing else claims.
+ *
+ * Every other column here is fixed, which makes this one the one that takes
+ * what is left — and while the last three are hiding, that is most of the
+ * table rather than the 200 px that was clipping people's domains. The title
+ * carries the whole address for the widths where even that is not enough, and
+ * it is the masked one: the privacy toggle must not be undone by a hover.
+ */
+function customerColumns(mask: Mask, wired: boolean): DataColumn<CustomerSummaryDto>[] {
   return [
     {
       id: 'status',
@@ -176,7 +201,7 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
       header: copy.customerColumns.customer,
       sortValue: (row) => row.email,
       cell: (row) => (
-        <div className="flex items-baseline gap-2">
+        <div className="flex items-baseline gap-2" title={mask(row.email)}>
           <span className="min-w-0 truncate text-row">{mask(row.email)}</span>
           {row.lifecycle === 'active' ? null : (
             <span className="ops-tag shrink-0">{copy.lifecycle[row.lifecycle]}</span>
@@ -187,7 +212,7 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'devices',
       header: copy.customerColumns.devices,
-      width: '56px',
+      width: '52px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.deviceCount,
@@ -196,59 +221,63 @@ function customerColumns(mask: Mask): DataColumn<CustomerSummaryDto>[] {
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '156px',
+      width: '132px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '150px',
+      width: '130px',
       sortValue: (row) => row.lastFailure?.at ?? 0,
       cell: (row) => <FailureCell row={row} />,
     },
     {
       id: 'usage',
       header: copy.customerColumns.usage,
-      width: '136px',
+      width: '120px',
       align: 'right',
       mono: true,
       sortValue: (row) => row.usageBytes.value,
       cell: (row) => <UsageCell row={row} />,
     },
-    {
-      id: 'services',
-      header: copy.customerColumns.services,
-      width: '150px',
-      cell: (row) => (
-        row.services.length === 0
-          ? <Value value={null} source={copy.sourceWord.telemetry} />
-          : <ServicesCell families={row.services} />
-      ),
-    },
-    {
-      id: 'version',
-      header: copy.customerColumns.minVersion,
-      width: '76px',
-      mono: true,
-      sortValue: (row) => row.minAppVersion ?? '',
-      cell: (row) => <Value value={row.minAppVersion} source={copy.sourceWord.telemetry} mono />,
-    },
-    {
-      id: 'expires',
-      header: copy.customerColumns.expires,
-      width: '104px',
-      align: 'right',
-      mono: true,
-      sortValue: (row) => row.expiresAt ?? 0,
-      cell: (row) => (
-        <Value
-          value={row.expiresAt === null ? null : formatDate(row.expiresAt)}
-          source={copy.sourceWord.profile}
-          mono
-        />
-      ),
-    },
+    ...(wired ? [
+      {
+        id: 'services',
+        header: copy.customerColumns.services,
+        width: '112px',
+        cell: (row: CustomerSummaryDto) => (
+          row.services.length === 0
+            ? <Value value={null} source={copy.sourceWord.telemetry} />
+            : <ServicesCell families={row.services} />
+        ),
+      },
+      {
+        id: 'version',
+        header: copy.customerColumns.minVersion,
+        width: '68px',
+        mono: true,
+        sortValue: (row: CustomerSummaryDto) => row.minAppVersion ?? '',
+        cell: (row: CustomerSummaryDto) => (
+          <Value value={row.minAppVersion} source={copy.sourceWord.telemetry} mono />
+        ),
+      },
+      {
+        id: 'expires',
+        header: copy.customerColumns.expires,
+        width: '92px',
+        align: 'right' as const,
+        mono: true,
+        sortValue: (row: CustomerSummaryDto) => row.expiresAt ?? 0,
+        cell: (row: CustomerSummaryDto) => (
+          <Value
+            value={row.expiresAt === null ? null : formatDate(row.expiresAt)}
+            source={copy.sourceWord.profile}
+            mono
+          />
+        ),
+      },
+    ] : []),
   ];
 }
 
@@ -282,7 +311,7 @@ function FailureCell({ row }: { row: CustomerSummaryDto }) {
  * Bytes on the line, the share on the bar, the arithmetic in the tooltip.
  *
  * Spelling out the used figure and the remaining share together needs about
- * 180 px and this column has 136; right-aligned, the overflow is clipped from
+ * 180 px and this column has 120; right-aligned, the overflow is clipped from
  * the left, which turns "55.0 GB" into ".0 GB" — a number that is not wrong so
  * much as unreadable. The bar already carries the ratio, and its tone carries
  * the 70 / 90 / 100 steps.

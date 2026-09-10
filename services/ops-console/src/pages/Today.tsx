@@ -1,20 +1,29 @@
 import { useMemo, useState } from 'react';
-import type { CustomerSummaryDto, IncidentDto, ReleaseDto } from '@contract';
+import type { CustomerSummaryDto, IncidentDto, ReleaseDto, SystemHealthDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
+import { PageNote } from '@/components/ops/PageNote';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { customerChores, fleetChores, sortChores, type Chore } from '@/lib/chores';
 import { severityTone } from '@/lib/codes';
 import { formatDate, formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { openIncident } from '@/lib/hash-route';
-import { impactedCustomers, incidentSubject, lastResolvedAt, openIncidents, resolvedIncidents } from '@/lib/incidents';
+import {
+  impactedCustomers,
+  incidentAction,
+  incidentSubject,
+  lastResolvedAt,
+  openIncidents,
+  resolvedIncidents,
+} from '@/lib/incidents';
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
-import type { Resource } from '@/lib/use-resource';
+import { newestFetch, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
+import { IncidentPrimary } from './today/IncidentAction';
 import { IncidentDrawer } from './today/IncidentDrawer';
 
 const TABS = ['open', 'resolved', 'chores'] as const;
@@ -23,6 +32,7 @@ type TabId = (typeof TABS)[number];
 export default function TodayPage({
   incidents,
   customers,
+  health,
   releases,
   nodes,
   selected,
@@ -30,6 +40,7 @@ export default function TodayPage({
 }: {
   incidents: Resource<IncidentDto[]>;
   customers: Resource<CustomerSummaryDto[]>;
+  health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   nodes: FleetNodeDto[];
   selected: string | null;
@@ -79,6 +90,11 @@ export default function TodayPage({
           {incidents.status === 'loading' ? copy.loading : copy.loadError}
         </p>
       )}
+
+      <PageNote
+        fetchedAt={newestFetch(incidents, customers, health)}
+        backfill={health.status === 'ready' ? health.data.backfill : null}
+      />
 
       <div className="flex items-center gap-5 border-b border-[var(--hairline)] text-body">
         {TABS.map((id) => (
@@ -155,12 +171,16 @@ function IncidentList({
 }
 
 /**
- * One incident, one sentence, one action.
+ * One incident, one sentence, and the thing worth doing about it.
  *
  * The row is a button so the whole line opens the drawer from a keyboard, and
- * the action inside it stops the click from bubbling — on a phone the two
- * targets are a thumb apart, and opening a drawer when someone meant to
- * acknowledge is the kind of misfire that ends with the alert being ignored.
+ * the actions inside it stop the click from bubbling — on a phone the targets
+ * are a thumb apart, and opening a drawer when someone meant to acknowledge is
+ * the kind of misfire that ends with the alert being ignored.
+ *
+ * Claiming is the second button now. It changes nothing about the fault, and
+ * while it was the only one on every row the page could report a blocked node
+ * and offer no way to do anything about it.
  */
 function IncidentRow({
   row,
@@ -174,7 +194,8 @@ function IncidentRow({
   onChanged: () => void;
 }) {
   const [pending, setPending] = useState(false);
-  const primary = row.status === 'open' ? copy.incidentPrimary.ack : copy.incidentPrimary.resolve;
+  const claim = row.status === 'open' ? copy.incidentPrimary.ack : copy.incidentPrimary.resolve;
+  const led = incidentAction(row) !== null;
 
   async function act() {
     setPending(true);
@@ -227,12 +248,13 @@ function IncidentRow({
       </div>
       {resolvedTab ? null : (
         <div
-          className="flex shrink-0 items-start"
+          className="flex shrink-0 flex-wrap items-start justify-end gap-2"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           role="presentation"
         >
-          <Action primary pending={pending} onClick={act}>{primary}</Action>
+          <IncidentPrimary incident={row} onChanged={onChanged} />
+          <Action primary={!led} pending={pending} onClick={act}>{claim}</Action>
         </div>
       )}
     </div>

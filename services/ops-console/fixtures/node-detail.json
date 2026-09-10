@@ -1176,6 +1176,15 @@
         "reason": "三网都连得上",
         "source": "engine",
         "rulesVersion": 2
+      },
+      {
+        "at": 1722556800,
+        "verdict": "degraded",
+        "health": "劣化",
+        "tone": "warn",
+        "reason": "carrier_loss",
+        "source": "engine",
+        "rulesVersion": 2
       }
     ],
     "nextCursor": null,

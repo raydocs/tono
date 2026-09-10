@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Measured, NodeErrorRowDto, RangeKey } from '@contract';
 import { Chip } from '@/components/ops/Chip';
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { nodeApi } from '@/lib/api-node';
@@ -63,9 +63,9 @@ export function NodeErrors({
       }
     >
       {shown === null ? (
-        <Empty message={month.status === 'error' ? month.message : copy.loading} />
+        <EmptyLine message={month.status === 'error' ? month.message : copy.loading} />
       ) : groups.length === 0 ? (
-        <Empty message={copy.nodeNoErrors} />
+        <EmptyLine message={copy.nodeNoErrors} />
       ) : (
         <div className="flex flex-col">
           {groups.map((group) => (

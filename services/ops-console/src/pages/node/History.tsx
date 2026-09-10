@@ -1,9 +1,10 @@
 import type { NodeHistoryEntryDto } from '@contract';
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
 import { formatWhen, formatWhenAgo } from '@/lib/display';
+import { reasonSentence } from '@/lib/node-detail';
 
 /**
  * Only the moments the health word changed, so the row count is the number
@@ -25,9 +26,9 @@ export function NodeHistory({
   return (
     <FoldedSection title={copy.nodeSections.history} count={state === 'ready' ? sorted.length : null}>
       {state !== 'ready' ? (
-        <Empty message={state === 'loading' ? copy.loading : message || copy.loadError} />
+        <EmptyLine message={state === 'loading' ? copy.loading : message || copy.loadError} />
       ) : sorted.length === 0 ? (
-        <Empty message={copy.nodeNoHistory} />
+        <EmptyLine message={copy.nodeNoHistory} />
       ) : (
         <ul className="flex flex-col">
           {sorted.map((row) => (
@@ -43,7 +44,7 @@ export function NodeHistory({
               </span>
               <StatusWord word={row.health} className="shrink-0" />
               <span className="min-w-0 truncate text-body text-[var(--muted-foreground)]">
-                {row.reason ?? copy.nodeHistoryNoReason}
+                {whyOf(row)}
               </span>
             </li>
           ))}
@@ -51,4 +52,14 @@ export function NodeHistory({
       )}
     </FoldedSection>
   );
+}
+
+/**
+ * The line beside the word. A row that recovered gets none: the word is the
+ * whole story, and the engine's reason for it is the token `ok`.
+ */
+function whyOf(row: NodeHistoryEntryDto): string | null {
+  const why = reasonSentence(row.verdict, row.reason);
+  if (why) return why;
+  return row.verdict === 'ok' ? null : copy.nodeHistoryNoReason;
 }

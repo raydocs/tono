@@ -14,20 +14,24 @@ export const settingsCopy = {
   /** The rail, in the order an operator walks it. */
   sections: {
     alerts: '告警',
-    providers: '商家账号',
+    catalog: '目录',
+    policy: '分流规则',
+    homeinventory: '家宽库存',
     homelines: '家宽资产',
+    providers: '商家账号',
     candidates: '直连候选',
     audit: '操作记录',
-    catalog: '目录与规则',
   } as const,
   /** One line under the heading: why you would be on this section at all. */
   sectionLead: {
     alerts: '什么事值得半夜叫醒你，往哪儿发。',
-    providers: '节点和域名挂在谁家名下，账单去哪儿交。',
+    catalog: '客户端下次拉到的节点单子，就是这一份。',
+    policy: '哪些站点不走隧道，客户端照这一份走。',
+    homeinventory: '手上有哪些家宽线路，能不能分给客户。',
     homelines: '家宽线路的到期、计费和这一期用了多少。',
+    providers: '节点和域名挂在谁家名下，账单去哪儿交。',
     candidates: '这些站点看着不必走隧道，接受还是拒绝由你定。',
     audit: '谁在什么时候动了什么。',
-    catalog: '节点目录和分流规则还在老控制台。',
   } as const,
 
   /* ------------------------------------------------------------ 通用动作 */
@@ -274,7 +278,7 @@ export const settingsCopy = {
     countryUnknown: '还没查',
     draft: '生成分流草案',
     draftTitle: '分流草案',
-    draftLead: '这里只出草案，不改线上的分流规则。复制出去，自己贴到该贴的地方。',
+    draftLead: '这里只出草案，不改线上的分流规则。装进编辑器之后还得自己按发布。',
     draftEmpty: '还没有接受过任何域名，草案是空的',
     userUnit: (n: number) => `${n} 人`,
   },
@@ -304,13 +308,5 @@ export const settingsCopy = {
     clearFilter: '不筛了',
     more: '加载更多',
     loadingMore: '正在取',
-  },
-
-  /* ---------------------------------------------------------- 目录与规则 */
-
-  catalog: {
-    title: '目录与规则',
-    body: '节点目录和分流规则的编辑器还在老控制台，这边只读不改，免得两处各存一份。',
-    link: '去老控制台',
   },
 } as const;

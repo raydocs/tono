@@ -57,6 +57,11 @@ test.describe('node detail page', () => {
 
     await expect(page.getByRole('heading', { name: DENSE, level: 1 })).toBeVisible();
     await expect(page.getByText('被墙').first()).toBeVisible();
+
+    // The engine writes one word where 凭什么 goes; the page says the sentence
+    // and never the word.
+    await expect(page.getByText('大陆三网都握不上手，像是被墙了')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('likely_blocked');
     expect(await page.locator('tbody tr').count()).toBeGreaterThan(15);
     await expect(page.locator('tbody tr').first()).toHaveCSS('height', '36px');
 
@@ -73,7 +78,7 @@ test.describe('node detail page', () => {
 
     // R2: nothing measured is never a zero, and never a green word.
     await expect(page.getByText('未测').first()).toBeVisible();
-    await expect(page.getByText('最近没有客户往这台机器上报过')).toBeVisible();
+    await expect(page.getByText('还没有客户从大陆连过这台机器')).toBeVisible();
     await expect(page.getByText('现在没人用这台机器')).toBeVisible();
     await expect(page.getByText('还没有给这台机器派过活')).toBeVisible();
 
@@ -136,6 +141,48 @@ test.describe('node detail page', () => {
 
     await dialog.getByRole('textbox').fill(NODE);
     await expect(go).toBeEnabled();
+  });
+
+  test('a rule name in the history is read out as a sentence', async ({ page }) => {
+    await open(page, page1(NODE));
+    await page.getByRole('button', { name: /变更记录/ }).click();
+    await expect(page.getByText('回程丢包偏高')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('carrier_loss');
+  });
+
+  /**
+   * The block that was nine dashes on production, and the form that fills it.
+   * The write has to survive the read that follows it: the page refetches, so
+   * anything that only changed in the browser would vanish here.
+   */
+  test('the hand-kept facts can be typed in, and come back from the next read', async ({ page }) => {
+    await open(page, page1(NODE), 'default', 'node-profile');
+
+    await page.getByRole('button', { name: '编辑' }).click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText('这一页的价格、续费和额度');
+
+    await drawer.getByLabel('价格').fill('7.5');
+    await drawer.getByLabel('账期').fill('90');
+    await drawer.getByLabel('备注').fill('换过一次机房');
+    await drawer.getByRole('button', { name: '保存' }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('$7.5 / 90 天')).toBeVisible();
+    await expect(page.getByText('换过一次机房')).toBeVisible();
+  });
+
+  test('an allowance can be taken off again, and the gauge stops claiming one', async ({ page }) => {
+    await open(page, page1(NODE), 'default', 'node-quota');
+
+    await page.getByRole('button', { name: '编辑' }).click();
+    const drawer = page.getByRole('dialog');
+    await drawer.getByLabel('本周期流量').selectOption({ label: '不登记额度' });
+    await drawer.getByRole('button', { name: '保存' }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('未设额度').first()).toBeVisible();
   });
 });
 

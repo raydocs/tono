@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { ConnectionEventDto, CustomerDeviceDto } from '@contract';
 import { Chip } from '@/components/ops/Chip';
-import { Empty } from '@/components/ops/Empty';
+import { EmptyLine } from '@/components/ops/Empty';
 import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
@@ -87,9 +87,9 @@ export function Timeline({
         </div>
       }
     >
-      {state === 'loading' ? <Empty message={copy.loading} />
-        : state === 'error' ? <Empty message={message || copy.loadError} />
-          : days.length === 0 ? <Empty message={emptyMessage} />
+      {state === 'loading' ? <EmptyLine message={copy.loading} />
+        : state === 'error' ? <EmptyLine message={message || copy.loadError} />
+          : days.length === 0 ? <EmptyLine message={emptyMessage} />
             : (
               <div className="overflow-x-auto">
                 <div className="min-w-[860px]">

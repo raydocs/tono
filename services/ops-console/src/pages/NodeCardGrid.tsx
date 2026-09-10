@@ -20,12 +20,15 @@ export function NodeCardGrid({
   selected,
   showPath,
   onOpen,
+  onOpenPage,
 }: {
   views: NodeView[];
   selected: string | null;
-  /** False until one node has a measured client-side leg; see NodesPage. */
+  /** False until one node in the fleet has a measured client-side leg. */
   showPath: boolean;
   onOpen: (name: string) => void;
+  /** The detail page, where the things a card can only report are edited. */
+  onOpenPage: (name: string) => void;
 }) {
   const reduce = useReducedMotion();
   return (
@@ -71,7 +74,24 @@ export function NodeCardGrid({
             <span className="min-w-0 shrink truncate text-micro text-[var(--muted-foreground)]">
               {view.region}
             </span>
-            <StatusWord word={view.health} size="row" className="ml-auto shrink-0 self-center" />
+            {/* An inventory fact, never coloured, and only when it is not the
+                ordinary case: every card wearing the same tag is noise. */}
+            {view.lifecycle === 'listed' ? null : (
+              <span className="ops-tag ml-auto shrink-0 self-center">
+                {copy.nodeLifecycle[view.lifecycle]}
+              </span>
+            )}
+            <StatusWord
+              word={view.word}
+              tone={view.tone}
+              reason={view.reason}
+              size="row"
+              className={cn(
+                'shrink-0 self-center',
+                view.lifecycle === 'listed' && 'ml-auto',
+                view.retired && 'text-[var(--muted-foreground)]',
+              )}
+            />
           </header>
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-3">
@@ -84,19 +104,46 @@ export function NodeCardGrid({
             />
             {showPath ? (
               <Cell label={copy.customerPath}>
-                <Value value={view.path.value} source={view.path.source} tier="body" />
+                <Value value={view.forward.value} source={view.forward.source} tier="body" mono />
               </Cell>
             ) : null}
 
             <div className="col-span-2 min-w-0">
               <div className="text-micro text-[var(--muted-foreground)]">{copy.periodTraffic}</div>
-              <QuotaGauge
-                used={view.used}
-                quota={view.quota}
-                cycleStartSec={view.cycleStart}
-                series={view.trafficSeries}
-                className="mt-0.5"
-              />
+              {view.quota === null ? (
+                /**
+                 * One line, and it goes somewhere.
+                 *
+                 * The gauge's own empty state left the unset word hanging over two
+                 * blank rows where the bar and the forecast would be, which
+                 * read as a broken card rather than an unset field. A machine
+                 * with no cap is not missing a measurement — nobody has told
+                 * the console what the cap is — so the cell says so and offers
+                 * the page where it is filled in.
+                 */
+                <button
+                  type="button"
+                  // `text-[color:…]` rather than `text-[var(…)]`: a bare custom
+                  // property is ambiguous to Tailwind, which reads it as a font
+                  // size and drops the colour on the floor.
+                  className="mt-0.5 text-body text-[color:var(--accent)] hover:underline"
+                  title={copy.nodeOpenPage}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenPage(view.node.name);
+                  }}
+                >
+                  {copy.noQuota}
+                </button>
+              ) : (
+                <QuotaGauge
+                  used={view.used}
+                  quota={view.quota}
+                  cycleStartSec={view.cycleStart}
+                  exhaustAtSec={view.exhaustAt}
+                  className="mt-0.5"
+                />
+              )}
             </div>
 
             <Cell label={copy.mainlandReturn}>
@@ -104,7 +151,7 @@ export function NodeCardGrid({
             </Cell>
             <Cell label={copy.renew}>
               <Value
-                value={view.renew.value == null ? null : formatDate(view.renew.value)}
+                value={view.renew.value === null ? null : formatDate(view.renew.value)}
                 source={view.renew.source}
                 tier="fine"
                 mono
@@ -115,7 +162,7 @@ export function NodeCardGrid({
               {copy.lastMeasured}
               {' '}
               <span className="font-mono normal-case tracking-normal">
-                {view.last.value == null
+                {view.last.value === null
                   ? `${copy.missing} ${view.last.source}`
                   : `${formatWhenAgo(view.last.value)} · ${formatWhen(view.last.value)}`}
               </span>
