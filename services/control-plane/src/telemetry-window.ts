@@ -31,6 +31,9 @@ const telemetryEventNumberKeys = [
   'ts', 'elapsedMs', 'delayMs', 'counter', 'restartCount', 'oldPid', 'newPid',
   'revision', 'domains', 'media', 'webDomains', 'wechatTcp', 'webTcp', 'udp',
   'endpoints', 'eventCount', 'bytes', 'generation',
+  // Phase 3.5: a `disconnectOk` event carries the session's bytes in each
+  // direction beside `elapsedMs`; `bytes` stays for the older single total.
+  'bytesUp', 'bytesDown',
 ];
 const telemetryEventBoolKeys = ['wanted', 'live', 'updateResume'];
 const telemetryEventKeys = [
