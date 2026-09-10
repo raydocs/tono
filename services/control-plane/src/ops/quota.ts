@@ -244,6 +244,13 @@ async function openCycleRow(db: D1Database, nodeName: string): Promise<Row | nul
   ).bind(nodeName).first<Row>();
 }
 
+export async function closeOpenCycle(db: D1Database, nodeName: string, nowSec: number): Promise<void> {
+  const open = await openCycleRow(db, nodeName);
+  if (!open) return;
+  await db.prepare("UPDATE node_traffic_cycles SET status = 'closed', updated_at = ? WHERE id = ?")
+    .bind(nowSec, open.id).run();
+}
+
 async function insertOpenCycle(
   db: D1Database,
   nodeName: string,

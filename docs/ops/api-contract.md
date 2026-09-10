@@ -33,6 +33,7 @@
 | `GET nodes/{name}/errors?range` | `Measured<NodeErrorRowDto[]>` |
 | `GET nodes/{name}/bindings` | `NodeBindingsDto` |
 | `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
+| `PATCH nodes/{name}/profile` | `NodeDetailDto` |
 | `GET customers?cursor&limit&focus&since` | `ListDto<CustomerSummaryDto>` |
 | `GET customers/{id}` | `CustomerDetailDto` |
 | `GET customers/{id}/connections` | `ListDto<ConnectionEventDto>` |
@@ -54,7 +55,9 @@
 | `alert-rules`（CRUD）、`POST alert-rules/{id}/test` | `ListDto<AlertRuleDto>` / `AlertRuleDto` |
 | `GET alert-deliveries` | `ListDto<AlertDeliveryDto>` |
 | `GET audit?before&beforeId&limit&targetId&actorEmail` | `AuditListDto` (`{ entries, hasMore, nextBefore, nextBeforeId }`) |
-| `GET system/health` | `SystemHealthDto` |
+| `GET system/health` | `SystemHealthDto`（`backfill` 为 `BackfillHealthDto`，flatten/project 游标都追上后为 `null`） |
+
+`PATCH nodes/{name}/profile` 字段全可选（未知键 400）：`provider` ≤80、`providerAccountId`（须存在于 `provider_accounts` 或 null）、`region` ≤80、`lineTags` 最多 8×32、`port` 1..65535、`price` ≥0、`currency` 三字母、`billingCycle` 1..3660 天、`renewsAt`/`expiresAt` unix 秒、`notes` ≤2000、`quota` 为 `{ quotaBytes, cycleKind, cycleAnchorDay, counts }` 或 `null`（null 清周期）。无 profile 行时，节点只要在 catalog/status 里就会补一行。写 `ops_audit` `node.profile.update`。
 
 采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。
 现有 `/ops/dashboard|fleet-nodes|activity|live|users|metrics|usage-hours` 在切换前保持不动。
