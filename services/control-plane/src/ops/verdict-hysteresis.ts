@@ -22,13 +22,14 @@ export const HYSTERESIS: readonly HysteresisRule[] = [
   { verdict: 'blocked', enterStreak: 2, enterSeconds: 0, enterGate: 'handshake_or_two', exitStreak: 2, exitSeconds: 0, exitGate: 'connect_ok_or_two_clean' },
   { verdict: 'no_probe', enterStreak: 1, enterSeconds: 0, exitStreak: 1, exitSeconds: 0 },
   { verdict: 'degraded', enterStreak: 2, enterSeconds: 600, exitStreak: 1, exitSeconds: 900 },
+  { verdict: 'probe_unreachable', enterStreak: 2, enterSeconds: 600, exitStreak: 1, exitSeconds: 0 },
   { verdict: 'pressure', enterStreak: 3, enterSeconds: 900, exitStreak: 1, exitSeconds: 900 },
   { verdict: 'unknown', enterStreak: 1, enterSeconds: 0, exitStreak: 1, exitSeconds: 0 },
   { verdict: 'ok', enterStreak: 1, enterSeconds: 0, exitStreak: 1, exitSeconds: 0 },
 ];
 
 const RANK: Record<NodeVerdict, number> = {
-  down: 6, blocked: 5, no_probe: 4, degraded: 3, pressure: 2, unknown: 1, ok: 0,
+  down: 7, blocked: 6, no_probe: 5, degraded: 4, probe_unreachable: 3, pressure: 2, unknown: 1, ok: 0,
 };
 
 const HYSTERESIS_BY = Object.fromEntries(HYSTERESIS.map((rule) => [rule.verdict, rule])) as Record<NodeVerdict, HysteresisRule>;
@@ -76,7 +77,7 @@ function canEnter(
     if (streak >= spec.enterStreak) return true;
     return streak >= 1 && node.fails30m.handshakeDistinctUsers >= HANDSHAKE_USERS;
   }
-  return age >= spec.enterSeconds;
+  return streak >= spec.enterStreak && age >= spec.enterSeconds;
 }
 
 function canExit(
@@ -110,7 +111,15 @@ export function applyHysteresis(
   }
   const sameCandidate = prior?.candidateVerdict === observed;
   const streak = sameCandidate ? prior.candidateStreak + 1 : 1;
-  const candidateSince = sameCandidate && prior.candidateSince != null ? prior.candidateSince : ctx.nowSec;
+  const exiting = RANK[observed] < RANK[committed];
+  const priorExiting = prior != null
+    && RANK[prior.candidateVerdict] < RANK[committed]
+    && prior.candidateSince != null;
+  // Exit age is time spent observing anything cleaner than the committed
+  // verdict. Candidate identity (ok vs unknown) must not reset that clock.
+  const candidateSince = exiting && priorExiting
+    ? prior.candidateSince ?? ctx.nowSec
+    : (sameCandidate && prior.candidateSince != null ? prior.candidateSince : ctx.nowSec);
   const age = ctx.nowSec - candidateSince;
   if (RANK[observed] > RANK[committed]) {
     if (canEnter(observed, streak, age, node, ctx)) {

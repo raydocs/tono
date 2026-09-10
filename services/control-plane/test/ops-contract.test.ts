@@ -720,6 +720,7 @@ describe('vocabulary mapping', () => {
     ['blocked', '被墙', 'sev'],
     ['no_probe', '未测', 'unk'],
     ['degraded', '劣化', 'warn'],
+    ['probe_unreachable', '劣化', 'warn'],
     ['pressure', '劣化', 'warn'],
     ['unknown', '未测', 'unk'],
     ['ok', '正常', 'ok'],

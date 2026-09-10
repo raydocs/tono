@@ -53,7 +53,7 @@ function customer(over: Partial<CustomerVerdictInput> = {}): CustomerVerdictInpu
     tcpDelayMs: 40,
     exitDelayAtMs: (NOW - 10) * 1000,
     tcpDelayAtMs: (NOW - 10) * 1000,
-    fails30m: { attempts: 0, failures: 0 },
+    fails30m: { failures: 0 },
     lastFailAt: null,
     lastOkAt: NOW - 10,
     switches24h: 0,
@@ -130,9 +130,29 @@ describe('verdict precedence', () => {
       expected: 'down',
     },
     {
-      name: 'unreachable in the sweep but agent fresh is unknown, never ok',
+      name: 'unreachable in the sweep but agent fresh is probe_unreachable, never ok or unknown',
       over: { ok: false, agentObservedAt: NOW - 60 },
-      expected: 'unknown',
+      expected: 'probe_unreachable',
+    },
+    {
+      name: 'DOWN with a live agent is probe_unreachable',
+      over: { ok: false, blockStatus: 'DOWN', agentObservedAt: NOW - 60 },
+      expected: 'probe_unreachable',
+    },
+    {
+      name: 'unreachable with a live agent still yields degraded on customer failures',
+      over: {
+        ok: false,
+        blockStatus: 'DOWN',
+        agentObservedAt: NOW - 60,
+        fails30m: fails({ attempts: 40, failures: 40, distinctUsers: 6, handshakeDistinctUsers: 6 }),
+      },
+      expected: 'degraded',
+    },
+    {
+      name: 'unreachable with a live agent still yields degraded on an error spike',
+      over: { ok: false, agentObservedAt: NOW - 60, errorSpike: true },
+      expected: 'degraded',
     },
     { name: 'listed without an agent is no_probe', over: { agentObservedAt: null }, expected: 'no_probe' },
     {
@@ -180,11 +200,26 @@ describe('verdict precedence', () => {
       expected: 'unknown',
       ctxOver: { agentsSnapshotAt: NOW - 15 * 60 - 1 },
     },
+    {
+      name: 'listed node absent from a fresh sweep is no_probe, never ok',
+      over: { ok: null, blockStatus: null, catalogListed: true, agentObservedAt: NOW - 60 },
+      expected: 'no_probe',
+    },
+    {
+      name: 'unlisted node absent from a fresh sweep is unknown, never ok',
+      over: { ok: null, blockStatus: null, catalogListed: false, agentObservedAt: NOW - 60 },
+      expected: 'unknown',
+    },
+    {
+      name: 'listing-unknown node absent from a fresh sweep is unknown, never ok',
+      over: { ok: null, blockStatus: null, catalogListed: null, agentObservedAt: NOW - 60 },
+      expected: 'unknown',
+    },
   ];
 
   it('matches the first-hit table', () => {
     expect(VERDICT_PRECEDENCE).toEqual([
-      'down', 'blocked', 'no_probe', 'degraded', 'pressure', 'unknown', 'ok',
+      'down', 'blocked', 'no_probe', 'degraded', 'probe_unreachable', 'pressure', 'unknown', 'ok',
     ]);
     for (const row of rows) {
       expect(observedVerdict(node(row.over), ctx(row.ctxOver)), row.name).toBe(row.expected);
@@ -195,6 +230,14 @@ describe('verdict precedence', () => {
     expect(observedVerdict(node({
       carriers: { unicom: { lossPct: 50, latencyMs: 10, samples: 0 } },
     }), ctx())).toBe('ok');
+  });
+
+  it('records that a fresh sweep never covered the machine', () => {
+    const out = evaluate(world({
+      nodes: [node({ ok: null, blockStatus: null, catalogListed: true, agentObservedAt: NOW - 60 })],
+    }));
+    expect(out.nodes[0].verdict).not.toBe('ok');
+    expect(JSON.stringify(out.nodes[0].evidence)).toContain('大陆探测没有覆盖这台机器');
   });
 });
 
@@ -209,6 +252,7 @@ describe('hysteresis table', () => {
       blocked: { enterSeconds: 0, exitSeconds: 0, enterStreak: 2 },
       no_probe: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
       degraded: { enterSeconds: 600, exitSeconds: 900, enterStreak: 2 },
+      probe_unreachable: { enterSeconds: 600, exitSeconds: 0, enterStreak: 2 },
       pressure: { enterSeconds: 900, exitSeconds: 900, enterStreak: 3 },
       unknown: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
       ok: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
@@ -302,6 +346,78 @@ describe('hysteresis table', () => {
     const t900 = tick(NOW + 900, { machine: hot, prior: priorFrom(t600) });
     expect(t900.verdict).toBe('pressure');
   });
+
+  it('does not enter degraded at 600s with only one observation in the streak', () => {
+    const loss = { unicom: { lossPct: 12, latencyMs: 80, samples: 4 } };
+    const out = tick(NOW, {
+      carriers: loss,
+      prior: {
+        verdict: 'ok',
+        candidateVerdict: 'degraded',
+        candidateStreak: 0,
+        candidateSince: NOW - 600,
+        changedAt: NOW - 600,
+      },
+    });
+    expect(out.verdict).toBe('ok');
+    expect(out.candidateVerdict).toBe('degraded');
+    expect(out.candidateStreak).toBe(1);
+  });
+
+  const flapRows: Array<{
+    name: NodeVerdict;
+    over: Partial<NodeVerdictInput>;
+    enterAt: number;
+  }> = [
+    { name: 'pressure', over: { machine: { cpu: 91, memRatio: 0.2, diskRatio: 0.2, load1: 4 } }, enterAt: 900 },
+    { name: 'degraded', over: { carriers: { unicom: { lossPct: 12, latencyMs: 80, samples: 4 } } }, enterAt: 600 },
+  ];
+
+  it.each(flapRows)('lets $name exit after exitSeconds while ok/unknown flap', ({ name, over, enterAt }) => {
+    const t0 = tick(NOW, { ...over, prior: okPrior() });
+    const mid = tick(NOW + Math.floor(enterAt / 2), { ...over, prior: priorFrom(t0) });
+    const entered = tick(NOW + enterAt, { ...over, prior: priorFrom(mid) });
+    expect(entered.verdict).toBe(name);
+
+    const exit0 = NOW + enterAt + 100;
+    function step(t: number, observed: 'ok' | 'unknown', prior: NodePrior) {
+      return evaluate(world({
+        nowSec: t,
+        qualitySweepAt: t - 60,
+        agentsSnapshotAt: observed === 'unknown' ? t - 16 * 60 : t - 60,
+        nodes: [node({ agentObservedAt: t - 30, prior })],
+      })).nodes[0];
+    }
+
+    const a = step(exit0, 'ok', priorFrom(entered));
+    expect(a.verdict).toBe(name);
+    expect(a.candidateVerdict).toBe('ok');
+    expect(a.candidateSince).toBe(exit0);
+
+    const b = step(exit0 + 60, 'unknown', priorFrom(a));
+    expect(b.verdict).toBe(name);
+    expect(b.candidateVerdict).toBe('unknown');
+    expect(b.candidateSince).toBe(exit0);
+
+    const c = step(exit0 + 120, 'ok', priorFrom(b));
+    expect(c.candidateSince).toBe(exit0);
+
+    const done = step(exit0 + 900, 'ok', priorFrom(c));
+    expect(done.verdict).toBe('ok');
+  });
+
+  it('enters probe_unreachable after 600s and leaves on one clean sweep', () => {
+    const deadInbound = { ok: false as const, blockStatus: 'DOWN' };
+    const t0 = tick(NOW, { ...deadInbound, prior: okPrior() });
+    expect(t0.verdict).toBe('ok');
+    expect(t0.candidateVerdict).toBe('probe_unreachable');
+    const t600 = tick(NOW + 600, { ...deadInbound, prior: priorFrom(t0) });
+    expect(t600.verdict).toBe('probe_unreachable');
+    expect(t600.label).toBe('探测不通（机器在线）');
+    expect(t600.reason).toBe('大陆探测不通，但机器在线；可能是入站挂了');
+    const clean = tick(NOW + 601, { prior: priorFrom(t600) });
+    expect(clean.verdict).toBe('ok');
+  });
 });
 
 describe('customer path hysteresis sequences', () => {
@@ -347,12 +463,45 @@ describe('customer desires', () => {
   it('opens repeat-fail at 3 connectFail with no later connectOk', () => {
     const out = evaluate(world({
       customers: [customer({
-        fails30m: { attempts: 3, failures: 3 },
+        fails30m: { failures: 3 },
         lastFailAt: NOW - 60,
         lastOkAt: NOW - 600,
       })],
     }));
     expect(out.desires.some((d) => d.kind === 'customer-repeat-fail')).toBe(true);
+  });
+
+  it('opens node-probe-unreachable as warn with a node_probe job and does not demote customers', () => {
+    const deadInbound = { ok: false as const, blockStatus: 'DOWN' as const, occupancy: 6 };
+    const t0 = tick(NOW, { ...deadInbound, prior: okPrior() });
+    const committed = tick(NOW + 600, { ...deadInbound, prior: priorFrom(t0) });
+    const out = evaluate(world({
+      nowSec: NOW + 600,
+      qualitySweepAt: NOW + 540,
+      agentsSnapshotAt: NOW + 540,
+      nodes: [node({
+        ...deadInbound,
+        agentObservedAt: NOW + 570,
+        occupancy: 6,
+        prior: priorFrom(committed),
+      })],
+      customers: [customer({
+        fails30m: { failures: 40 },
+        lastFailAt: NOW + 540,
+        lastOkAt: NOW,
+      })],
+    }));
+    const parent = out.desires.find((d) => d.kind === 'node-probe-unreachable');
+    const child = out.desires.find((d) => d.kind === 'customer-repeat-fail');
+    expect(parent).toMatchObject({
+      kind: 'node-probe-unreachable',
+      severity: 'warn',
+      suggestedJob: 'node_probe',
+      subjectId: 'Tokyo · Test',
+    });
+    expect(parent?.title).toContain('探测不通（机器在线）');
+    expect(child?.severity).toBe('warn');
+    expect(child?.parentDedupeKey).toBeUndefined();
   });
 
   it('demotes customer severity to notice when the selected node is a severe parent', () => {
@@ -363,7 +512,7 @@ describe('customer desires', () => {
         fails30m: fails({ handshakeDistinctUsers: 2 }),
       })],
       customers: [customer({
-        fails30m: { attempts: 4, failures: 4 },
+        fails30m: { failures: 4 },
         lastFailAt: NOW - 20,
         lastOkAt: NOW - 400,
         exitDelayMs: PATH_SEVERE_MS,
@@ -391,7 +540,7 @@ describe('maintenance and fleet collector', () => {
         occupancy: 3,
       })],
       customers: [customer({
-        fails30m: { attempts: 5, failures: 5 },
+        fails30m: { failures: 5 },
         lastFailAt: NOW - 10,
         lastOkAt: null,
       })],
@@ -399,6 +548,24 @@ describe('maintenance and fleet collector', () => {
     }));
     expect(out.nodes[0].verdict).toBe('down');
     expect(out.desires.filter((d) => d.kind !== 'fleet-collector-stale')).toEqual([]);
+  });
+
+  it('opens fleet-catalog-unavailable when the catalog cannot be read, and does not treat nodes as unlisted', () => {
+    const out = evaluate(world({
+      catalogAvailable: false,
+      catalogErrorClass: 'decrypt',
+      nodes: [node({ catalogListed: null })],
+    }));
+    const desire = out.desires.find((d) => d.kind === 'fleet-catalog-unavailable');
+    expect(desire).toMatchObject({
+      kind: 'fleet-catalog-unavailable',
+      subjectType: 'fleet',
+      subjectId: 'catalog',
+      severity: 'severe',
+    });
+    expect(desire?.evidence).toMatchObject({ catalogAvailable: false, errorClass: 'decrypt' });
+    expect(out.nodes[0].catalogListed).toBeNull();
+    expect(out.desires.some((d) => d.kind === 'node-no-probe' && d.suggestedJob === 'catalog_retire')).toBe(false);
   });
 
   it('raises fleet-collector-stale on a silent agent copy (20 min) or a missed sweep cycle (26 h)', () => {

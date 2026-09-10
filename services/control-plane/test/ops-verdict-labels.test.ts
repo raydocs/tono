@@ -14,6 +14,7 @@ describe('ops verdict labels', () => {
   it('keeps down/blocked/ok copy identical to today\'s server labels', () => {
     expect(VERDICT_LABELS.down).toBe('整机失联');
     expect(VERDICT_LABELS.blocked).toBe('疑似被墙');
+    expect(VERDICT_LABELS.probe_unreachable).toBe('探测不通（机器在线）');
     expect(VERDICT_LABELS.ok).toBe('大陆正常');
   });
 });

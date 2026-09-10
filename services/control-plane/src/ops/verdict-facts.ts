@@ -57,17 +57,37 @@ function utcDay(sec: number): number {
   return Math.floor(sec / DAY) * DAY;
 }
 
-async function catalogNameSet(e: Env): Promise<Set<string> | null> {
+type CatalogFact = {
+  names: Set<string> | null;
+  available: boolean;
+  errorClass: string | null;
+};
+
+function catalogErrorClass(error: unknown): string {
+  if (error && typeof error === 'object' && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+  const text = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+  if (/nonce|decrypt|OperationError|AES|catalog key/i.test(text)) return 'decrypt';
+  if (/yaml|parse|INVALID_CATALOG/i.test(text)) return 'parse';
+  return error instanceof Error && error.name ? error.name : 'unknown';
+}
+
+async function catalogNameSet(e: Env): Promise<CatalogFact> {
   // Same decrypt + splitManagedCatalogProxies path operationsFleetNodes uses.
   try {
     const row = await e.DB.prepare(
       'SELECT ciphertext, nonce FROM managed_exit_catalog WHERE singleton_id = 1',
     ).first<{ ciphertext: string; nonce: string }>();
-    if (!row) return new Set();
+    if (!row) return { names: new Set(), available: true, errorClass: null };
     const yaml = await decryptCatalog(String(row.ciphertext), String(row.nonce), requiredCatalogKey(e));
-    return new Set(splitManagedCatalogProxies(yaml).items.map((item) => item.name));
-  } catch {
-    return null;
+    return {
+      names: new Set(splitManagedCatalogProxies(yaml).items.map((item) => item.name)),
+      available: true,
+      errorClass: null,
+    };
+  } catch (error) {
+    return { names: null, available: false, errorClass: catalogErrorClass(error) };
   }
 }
 
@@ -291,7 +311,6 @@ async function loadCustomerFacts(
         online: row.connected == null ? null : Number(row.connected) === 1,
         ...delaysFromPayload(payload, lastSeenAt ?? nowSec),
         fails30m: {
-          attempts: Number(row.fails_30m) || 0,
           failures: Number(row.fails_30m) || 0,
         },
         lastFailAt: finite(row.last_fail_at),
@@ -387,6 +406,8 @@ export async function buildVerdictInput(
       qualitySweepAt: null,
       agentsSnapshotAt: null,
       maintenance: new Set(),
+      catalogAvailable: true,
+      catalogErrorClass: null,
     };
   }
   const live = await loadOperationsLive(e);
@@ -415,7 +436,7 @@ export async function buildVerdictInput(
   const names = new Set<string>([
     ...quality.keys(),
     ...agents.keys(),
-    ...(catalog ?? []),
+    ...(catalog.names ?? []),
     ...profiles.keys(),
   ]);
   const nodes: NodeVerdictInput[] = [...names].sort().map((name) => {
@@ -425,7 +446,7 @@ export async function buildVerdictInput(
     const okAt = lastOk.get(name) ?? stored?.lastCustomerOkAt ?? null;
     return {
       name,
-      catalogListed: catalog ? catalog.has(name) : null,
+      catalogListed: catalog.names ? catalog.names.has(name) : null,
       ok: q ? q.ok === true : null,
       blockStatus: blockStatusOf(q),
       agentObservedAt: finite(agent?.observedAt),
@@ -454,6 +475,8 @@ export async function buildVerdictInput(
     qualitySweepAt: live.qualityReceivedAt,
     agentsSnapshotAt: live.agentsReceivedAt,
     maintenance: new Set(),
+    catalogAvailable: catalog.available,
+    catalogErrorClass: catalog.errorClass,
   };
 }
 

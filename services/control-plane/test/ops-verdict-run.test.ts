@@ -71,6 +71,51 @@ describe('buildVerdictInput', () => {
     expect(fuji?.occupancy).toBe(1);
   });
 
+  it('does not copy customer failure counts into attempts', async () => {
+    await db().prepare(
+      `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
+       VALUES('u-fail', 'fail@example.com', 'x', 'y', 'active', 0, ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, fails_30m, updated_at)
+       VALUES('u-fail', 1, 'Tokyo · Fuji', ?, 3, ?)`,
+    ).bind(NOW - 10, NOW).run();
+    for (const [id, kind] of [
+      ['ev-b1', 'connectBegin'],
+      ['ev-b2', 'connectBegin'],
+      ['ev-ok', 'connectOk'],
+      ['ev-f1', 'connectFail'],
+      ['ev-f2', 'connectFail'],
+      ['ev-f3', 'connectFail'],
+    ] as const) {
+      await db().prepare(
+        `INSERT INTO connection_events(
+           id, at_ms, received_at, source, user_id, platform, kind, node
+         ) VALUES(?, ?, ?, 'failure', 'u-fail', 'macos', ?, 'Tokyo · Fuji')`,
+      ).bind(id, (NOW - 60) * 1000, NOW - 60, kind).run();
+    }
+    const input = await buildVerdictInput(env as unknown as Env, NOW, 'all');
+    const row = input.customers.find((c) => c.userId === 'u-fail');
+    expect(row?.fails30m).toEqual({ failures: 3 });
+    expect(row?.fails30m).not.toHaveProperty('attempts');
+  });
+
+  it('marks the catalog unavailable on decrypt failure and does not treat nodes as unlisted', async () => {
+    await db().prepare(
+      `INSERT INTO managed_exit_catalog(singleton_id, revision, ciphertext, nonce, content_sha256, updated_at)
+       VALUES(1, 1, 'not-ciphertext', 'not-nonce', 'deadbeef', ?)`,
+    ).bind(NOW).run();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       VALUES('p-ghost', 'Ghost · Box', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const input = await buildVerdictInput(env as unknown as Env, NOW, 'all');
+    expect(input.catalogAvailable).toBe(false);
+    expect(input.catalogErrorClass).toBeTruthy();
+    const ghost = input.nodes.find((n) => n.name === 'Ghost · Box');
+    expect(ghost?.catalogListed).toBeNull();
+  });
+
   it('does not conjure a node out of a client event that names an exit by its id', async () => {
     await db().prepare(
       `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
