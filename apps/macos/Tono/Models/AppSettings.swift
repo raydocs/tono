@@ -30,14 +30,59 @@ enum SettingsKey {
         "networkLogUploadEnabled"
     nonisolated static let networkLogDefaultV2Applied =
         "networkLogDefaultV2Applied"
+    nonisolated static let networkLogDefaultV3Applied =
+        "networkLogDefaultV3Applied"
+    /// Set the first time a person moves the Settings switch themselves. From
+    /// then on no default migration may touch the stored value: it is the one
+    /// piece of evidence that separates "never had an opinion" from "said no".
+    nonisolated static let networkLogUploadUserChosen =
+        "networkLogUploadUserChosen"
 
-    nonisolated static func isNetworkLogUploadEnabled() -> Bool {
-        if !AppProfile.defaults.bool(forKey: networkLogDefaultV2Applied) {
-            AppProfile.defaults.set(false, forKey: networkLogUploadEnabled)
-            AppProfile.defaults.set(true, forKey: networkLogDefaultV2Applied)
-            return false
+    /// What the network-log upload switch starts at while the test programme
+    /// runs. The single revert point: setting this to `false` makes the v3
+    /// migration write `false` once for everyone who has not chosen, which is
+    /// the same one-shot shape v2 already had and is safe to re-run.
+    nonisolated static let networkLogUploadDefault = true
+
+    /// Whether the raw audit log may be uploaded.
+    ///
+    /// Two one-shot migrations, both skipped once the user has chosen:
+    /// v2 reset the former default-on value to `false`, and v3 sets
+    /// `networkLogUploadDefault`. Because v2 wrote an explicit `false` for
+    /// every install, a stored `false` cannot be told apart from an opt-out —
+    /// so v3 keys off `networkLogUploadUserChosen` instead of the value, and
+    /// flips exactly the people who never touched the switch.
+    ///
+    /// `defaults` is injectable so a test can exercise the migrations without
+    /// writing into the running user's real preferences.
+    nonisolated static func isNetworkLogUploadEnabled(
+        defaults: UserDefaults = AppProfile.defaults
+    ) -> Bool {
+        let chosen = defaults.bool(forKey: networkLogUploadUserChosen)
+        if !defaults.bool(forKey: networkLogDefaultV2Applied) {
+            if !chosen { defaults.set(false, forKey: networkLogUploadEnabled) }
+            defaults.set(true, forKey: networkLogDefaultV2Applied)
         }
-        return AppProfile.defaults.bool(forKey: networkLogUploadEnabled)
+        if !defaults.bool(forKey: networkLogDefaultV3Applied) {
+            if !chosen {
+                defaults.set(networkLogUploadDefault, forKey: networkLogUploadEnabled)
+            }
+            defaults.set(true, forKey: networkLogDefaultV3Applied)
+        }
+        return defaults.bool(forKey: networkLogUploadEnabled)
+    }
+
+    /// The only write the Settings switch may make.
+    ///
+    /// Deliberately not reachable from an `onChange` on the stored value: the
+    /// v3 migration writes that key while Settings can be on screen, AppStorage
+    /// republishes it, and the flip would be recorded as the user's own choice.
+    nonisolated static func setNetworkLogUploadEnabled(
+        _ enabled: Bool,
+        defaults: UserDefaults = AppProfile.defaults
+    ) {
+        defaults.set(enabled, forKey: networkLogUploadEnabled)
+        defaults.set(true, forKey: networkLogUploadUserChosen)
     }
     /// Whether a crash from the previous run may be named in the diagnostic
     /// snapshot this client already sends every twenty minutes.

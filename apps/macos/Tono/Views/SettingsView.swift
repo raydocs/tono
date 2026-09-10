@@ -30,7 +30,7 @@ struct SettingsView: View {
     @AppStorage(
         SettingsKey.networkLogUploadEnabled,
         store: AppProfile.defaults
-    ) private var networkLogUploadEnabled = false
+    ) private var networkLogUploadEnabled = SettingsKey.networkLogUploadDefault
     @AppStorage(
         SettingsKey.periodicTelemetryEnabled,
         store: AppProfile.defaults
@@ -198,7 +198,7 @@ struct SettingsView: View {
 
             SettingToggleRow(
                 label: "Protection snapshot",
-                subtitle: "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support, and report a failed connection the moment it happens",
+                subtitle: "Off by default. When enabled, about every 20 minutes share protection status, the selected server, per-route byte totals and recent connection events (including the bytes moved when a connection ends) with Tono support, and report a failed connection the moment it happens",
                 isOn: $periodicTelemetryEnabled
             )
             .onChange(of: periodicTelemetryEnabled) { _, _ in
@@ -226,10 +226,17 @@ struct SettingsView: View {
 
             settingDivider
 
+            // The switch writes through the setter rather than the AppStorage
+            // binding: the setter is what marks the choice as the user's, and
+            // a marker set from an onChange would also fire when the default
+            // migration writes the key underneath an open Settings window.
             SettingToggleRow(
                 label: "Network log upload",
-                subtitle: "Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route",
-                isOn: $networkLogUploadEnabled
+                subtitle: "On by default. Uploads hostnames you connected to, the process that opened each connection, the matched rule and route, per-route byte totals, and the bytes sent and received when a connection ends. Never page content, passwords or node secrets. Turn it off here.",
+                isOn: Binding(
+                    get: { networkLogUploadEnabled },
+                    set: { SettingsKey.setNetworkLogUploadEnabled($0) }
+                )
             )
             .onChange(of: networkLogUploadEnabled) { _, _ in
                 accountSession.networkLogUploadSettingChanged()

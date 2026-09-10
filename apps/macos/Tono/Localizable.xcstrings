@@ -252,12 +252,12 @@
         }
       }
     },
-    "Uploads hostnames you connected to, the process that opened each connection, and the matched rule and route": {
+    "On by default. Uploads hostnames you connected to, the process that opened each connection, the matched rule and route, per-route byte totals, and the bytes sent and received when a connection ends. Never page content, passwords or node secrets. Turn it off here.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "会上传你连过的主机名、发起连接的进程，以及匹配的规则和线路"
+            "value": "默认开启。会上传你连过的主机名、发起连接的进程、匹配的规则和线路、各线路的流量小计，以及每次断开连接时的上下行字节数。不含网页内容、密码或节点密钥。可在这里关闭。"
           }
         }
       }
@@ -6987,12 +6987,12 @@
         }
       }
     },
-    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support, and report a failed connection the moment it happens": {
+    "Off by default. When enabled, about every 20 minutes share protection status, the selected server, per-route byte totals and recent connection events (including the bytes moved when a connection ends) with Tono support, and report a failed connection the moment it happens": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件，并在连接失败时立即上报一次"
+            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点、各线路的流量小计和最近的连接事件（包含每次断开连接时的字节数），并在连接失败时立即上报一次"
           }
         }
       }

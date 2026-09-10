@@ -68,6 +68,9 @@ final class AccountSession {
     let killSwitchDisarmConsumer: @MainActor () async -> Void
     let diagnosticSnapshotConsumer: @MainActor () -> TonoDiagnosticSnapshot
     let pathLatencyConsumer: @MainActor () -> TonoPathLatency
+    /// The traffic ledger's monotonic per-route counter. Injected the way every
+    /// other AppState reading is, so the session never holds the app state.
+    let routeSplitConsumer: @MainActor () -> AppTrafficLedger.RouteSplit
     let claudeTrafficResearchConsumer:
         @MainActor () async -> TonoClaudeTrafficResearchSnapshot
     let protectionBlockedConsumer: @MainActor () -> Bool
@@ -88,6 +91,11 @@ final class AccountSession {
     var appRoutingResearchTask: Task<Void, Never>?
     var periodicTelemetryTask: Task<Void, Never>?
     var lastPeriodicTelemetryAt: Date?
+    /// The route counter as of the last window the Worker accepted. Everything
+    /// past it is what the next window owes. Advanced only on success, so a
+    /// refused or failed upload carries its bytes into the following window
+    /// exactly once instead of losing them.
+    var lastReportedRouteSplit = AppTrafficLedger.RouteSplit()
     /// When a connect failure was last reported. For a quarter of an hour after
     /// it the next window may come at five minutes instead of eighteen, so
     /// whether the retry worked is visible before the regular cadence shows it.
@@ -206,11 +214,18 @@ final class AccountSession {
             @MainActor () -> Void = {},
          pathLatencyConsumer: @escaping @MainActor () -> TonoPathLatency = {
              TonoPathLatency()
+         },
+         routeSplitConsumer: @escaping @MainActor () -> AppTrafficLedger.RouteSplit = {
+             AppTrafficLedger.RouteSplit()
          }) {
         // Apply the one-shot default-off migration before Settings can present
         // or change the AppStorage value. A later user opt-in then sees the v2
         // marker and is never reset on a subsequent callback or launch.
         _ = Self.isPeriodicTelemetryEnabled
+        // Same reason, for the network-log switch: its default is applied here
+        // rather than at first sign-in so Settings and Support never render a
+        // switch that disagrees with what the uploader will do.
+        _ = SettingsKey.isNetworkLogUploadEnabled()
         self.api = api; self.keychain = keychain; self.sidecar = sidecar
         self.exitNode = exitNode
         self.descriptorConsumer = descriptorConsumer
@@ -226,6 +241,7 @@ final class AccountSession {
         self.appRoutingResearchActivationConsumer =
             appRoutingResearchActivationConsumer
         self.pathLatencyConsumer = pathLatencyConsumer
+        self.routeSplitConsumer = routeSplitConsumer
         installConnectFailureReporting()
     }
 }
