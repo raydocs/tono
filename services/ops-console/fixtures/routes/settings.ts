@@ -41,9 +41,22 @@ type Store = {
   usage: HomeLineUsageDayDto[];
   candidates: DirectCandidateDto[];
   audit: AuditEntryDto[];
+  /** 注册白名单: who may open an account without being onboarded. */
+  allowlist: AllowedEmail[];
   /** The catalogue, the routing rules and the home inventory; see the sibling file. */
   publish: PublishStore;
 };
+
+/** The shape `GET signup-allowlist` returns one of per entry. */
+type AllowedEmail = { email: string; createdAt: number };
+
+/** Two addresses somebody added by hand before a launch; the rest come from 开通. */
+function seedAllowlist(clock: number): AllowedEmail[] {
+  return [
+    { email: 'carol@example.test', createdAt: clock - 6 * 86_400 },
+    { email: 'dave@example.test', createdAt: clock - 2 * 86_400 },
+  ];
+}
 
 type Request = {
   req: IncomingMessage;
@@ -119,7 +132,7 @@ export function createSettingsFixtures(rootDir: string) {
     const made: Store = empty
       ? {
         alertRules: [], deliveries: [], providers: [],
-        homeLines: [], usage: [], candidates: [], audit: [],
+        homeLines: [], usage: [], candidates: [], audit: [], allowlist: [],
         publish: createPublishStore(true),
       }
       : {
@@ -133,6 +146,7 @@ export function createSettingsFixtures(rootDir: string) {
           // where it was captured; without this the inbox says 两年前.
           .map((row) => ({ ...row, firstSeen: row.firstSeen + (nowSec() - clock) })),
         audit: shift(read<{ entries: AuditEntryDto[] }>('audit.json')).entries,
+        allowlist: seedAllowlist(nowSec()),
         publish: createPublishStore(false),
       };
     stores.set(key, made);
@@ -423,6 +437,53 @@ export function createSettingsFixtures(rootDir: string) {
     return true;
   }
 
+  /**
+   * 注册白名单, all three verbs.
+   *
+   * The POST inserts or ignores exactly as the hub does — 201 for a new
+   * address, 200 for one that was already there — because that difference is
+   * the whole reason the section says which of the two happened rather than
+   * showing one confirmation for both. The DELETE takes its address in the
+   * body, not in the path, which is why the console cannot reach it through
+   * the shared `deleteJson`.
+   */
+  function allowlist({ req, res, store }: Request & { store: Store }): boolean {
+    if (req.method === 'GET') {
+      const rows = [...store.allowlist]
+        .sort((a, b) => (b.createdAt - a.createdAt) || a.email.localeCompare(b.email));
+      sendJson(res, { entries: rows });
+      return true;
+    }
+    if (req.method !== 'POST' && req.method !== 'DELETE') return false;
+    const method = req.method;
+    void readBody(req).then((body) => {
+      const address = String(body.email ?? '').trim().toLowerCase();
+      if (address === '' || !address.includes('@')) {
+        sendJson(res, { error: { code: 'VALIDATION_ERROR', message: address } }, 400);
+        return;
+      }
+      if (method === 'DELETE') {
+        const at = store.allowlist.findIndex((row) => row.email === address);
+        if (at >= 0) {
+          store.allowlist.splice(at, 1);
+          note(store, 'allowlist.remove', 'signup_allowlist', address, address);
+        }
+        sendEmpty(res, 204);
+        return;
+      }
+      const found = store.allowlist.find((row) => row.email === address);
+      if (found) {
+        sendJson(res, { ...found, created: false });
+        return;
+      }
+      const row = { email: address, createdAt: nowSec() };
+      store.allowlist.push(row);
+      note(store, 'allowlist.add', 'signup_allowlist', address, address);
+      sendJson(res, { ...row, created: true }, 201);
+    });
+    return true;
+  }
+
   function deliveries({ req, res, store }: Request & { store: Store }): boolean {
     if (req.method !== 'GET') return false;
     sendJson(res, listOf(store.deliveries, (row) => row.at));
@@ -468,6 +529,7 @@ export function createSettingsFixtures(rootDir: string) {
     'provider-accounts': providers,
     'home-lines': homeLines,
     'direct-candidates': candidates,
+    'signup-allowlist': allowlist,
     'traffic-policy': draft,
     audit,
   };
