@@ -578,6 +578,8 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     }],
     nodes: [{ name: '洛杉矶 CN2 GIA', costCnyMinor: 15000, bytes: 4_000_000_000, cnyPerGbMinor: 3750, pending: false }],
     unreconciled: 0,
+    frozen: false,
+    frozenAt: null,
     updatedAt: 1_757_000_000,
   })],
   ['fxRate', assertFxRate, () => ({

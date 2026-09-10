@@ -100,13 +100,19 @@ describe('ops alert matching', () => {
 
 describe('ops alert pure helpers', () => {
   it('builds a stable delivery dedupe key that changes on reopen', () => {
-    const a = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'open', 100);
-    const b = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'open', 100);
-    const reopen = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'open', 200);
-    const resolve = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'resolve', 100);
+    const a = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'open', 100, 'warn');
+    const b = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'open', 100, 'warn');
+    const reopen = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'open', 200, 'warn');
+    const resolve = deliveryDedupeKey('rule-1', 'node:exit-a:down', 'resolve', 100, 'warn');
     expect(a).toBe(b);
     expect(a).not.toBe(reopen);
     expect(a).not.toBe(resolve);
+  });
+
+  it('includes severity so a second escalation is not dropped', () => {
+    const warn = deliveryDedupeKey('rule-1', 'customer-path-slow:u-1', 'escalate', 100, 'warn');
+    const severe = deliveryDedupeKey('rule-1', 'customer-path-slow:u-1', 'escalate', 100, 'severe');
+    expect(warn).not.toBe(severe);
   });
 
   it('caps exponential backoff at one hour', () => {
@@ -354,6 +360,16 @@ describe('ops alert deliveries (d1)', () => {
     expect(await countDeliveries()).toBe(1);
   });
 
+  it('plans a second escalation when severity rises', async () => {
+    const rule = baseRule({ cooldownSeconds: 0 });
+    const warn = baseTransition({ transition: 'escalate', severity: 'warn' });
+    const severe = baseTransition({ transition: 'escalate', severity: 'severe' });
+    await insertRule(rule);
+    expect((await planDeliveries(db(), [warn], [rule], NOW)).pending).toBe(1);
+    expect((await planDeliveries(db(), [severe], [rule], NOW)).pending).toBe(1);
+    expect(await countDeliveries()).toBe(2);
+  });
+
   it('marks a pending row sent when fetch returns 200', async () => {
     const rule = baseRule();
     const t = baseTransition();
@@ -482,7 +498,7 @@ describe('ops alert deliveries (d1)', () => {
       "SELECT status, dedupe_key FROM ops_alert_deliveries WHERE status = 'suppressed'",
     ).first<{ status: string; dedupe_key: string }>();
     expect(suppressed?.status).toBe('suppressed');
-    const realKey = deliveryDedupeKey(rule.id, escalate.dedupeKey, 'escalate', escalate.openedAt);
+    const realKey = deliveryDedupeKey(rule.id, escalate.dedupeKey, 'escalate', escalate.openedAt, escalate.severity);
     expect(suppressed?.dedupe_key).not.toBe(realKey);
 
     const after = await planDeliveries(db(), [escalate], [rule], NOW + 4000);
