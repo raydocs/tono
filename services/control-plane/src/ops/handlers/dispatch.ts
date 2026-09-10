@@ -19,7 +19,7 @@ import {
   patchFollowup, getFollowups, getDigest,
 } from './followups';
 import { getJobs, postJobCancel } from './jobs';
-import { getReleases, postRelease, patchRelease, getReleaseAdoption } from './releases';
+import { getReleases, postRelease, patchRelease, getReleaseAdoption, getReleaseChannels } from './releases';
 import {
   getDirectCandidates, postCandidateAccept, postCandidateReject, postDraftFromCandidates,
 } from './candidates';
@@ -120,6 +120,7 @@ export const OPS_V1_ROUTES = [
 
   // dept:d
   // append your entries inside your block
+  'GET /api/v1/ops/releases/channels',
 
   // dept:e
   // append your entries inside your block
@@ -208,6 +209,7 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
 
   // dept:d
   // append your entries inside your block
+  { method: 'GET', re: /^\/api\/v1\/ops\/releases\/channels$/, handle: (req, e) => getReleaseChannels(req, e) },
 
   // dept:e
   // append your entries inside your block

@@ -13,7 +13,12 @@
       "publishedAt": 1724913548,
       "withdrawnAt": null,
       "createdAt": 1724913548,
-      "updatedAt": 1724999918
+      "updatedAt": 1724999918,
+      "sizeBytes": null,
+      "verifiedAt": null,
+      "signed": false,
+      "downloadUrl": null,
+      "minOsVersion": null
     }
   ],
   "nextCursor": null,

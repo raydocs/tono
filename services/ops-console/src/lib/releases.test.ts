@@ -23,6 +23,11 @@ function release(over: Partial<ReleaseDto>): ReleaseDto {
     withdrawnAt: null,
     createdAt: 1_700_000_000,
     updatedAt: 1_700_000_000,
+    sizeBytes: null,
+    verifiedAt: null,
+    signed: false,
+    downloadUrl: null,
+    minOsVersion: null,
     ...over,
   };
 }

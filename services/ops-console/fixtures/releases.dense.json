@@ -15,7 +15,12 @@
         "publishedAt": null,
         "withdrawnAt": null,
         "createdAt": 1724913600,
-        "updatedAt": 1725000000
+        "updatedAt": 1725000000,
+        "sizeBytes": null,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": null,
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-204",
@@ -30,7 +35,12 @@
         "publishedAt": 1724222400,
         "withdrawnAt": null,
         "createdAt": 1724136000,
-        "updatedAt": 1724222400
+        "updatedAt": 1724222400,
+        "sizeBytes": 51885778,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.4.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-203",
@@ -45,7 +55,12 @@
         "publishedAt": 1723444800,
         "withdrawnAt": null,
         "createdAt": 1723358400,
-        "updatedAt": 1723444800
+        "updatedAt": 1723444800,
+        "sizeBytes": 51647719,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.3.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-202",
@@ -60,7 +75,12 @@
         "publishedAt": 1722667200,
         "withdrawnAt": null,
         "createdAt": 1722580800,
-        "updatedAt": 1722667200
+        "updatedAt": 1722667200,
+        "sizeBytes": 46361160,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.2.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-201",
@@ -75,7 +95,12 @@
         "publishedAt": 1721889600,
         "withdrawnAt": null,
         "createdAt": 1721803200,
-        "updatedAt": 1721889600
+        "updatedAt": 1721889600,
+        "sizeBytes": 47595997,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.1.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-200",
@@ -90,7 +115,12 @@
         "publishedAt": 1721112000,
         "withdrawnAt": null,
         "createdAt": 1721025600,
-        "updatedAt": 1721112000
+        "updatedAt": 1721112000,
+        "sizeBytes": 54943238,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/2.0.0.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-macos-197",
@@ -105,7 +135,12 @@
         "publishedAt": 1720334400,
         "withdrawnAt": null,
         "createdAt": 1720248000,
-        "updatedAt": 1720334400
+        "updatedAt": 1720334400,
+        "sizeBytes": 53270463,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/macos/1.9.7.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-windows-210",
@@ -120,7 +155,12 @@
         "publishedAt": null,
         "withdrawnAt": null,
         "createdAt": 1724913600,
-        "updatedAt": 1725000000
+        "updatedAt": 1725000000,
+        "sizeBytes": null,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": null,
+        "minOsVersion": null
       },
       {
         "id": "rel-windows-204",
@@ -135,7 +175,12 @@
         "publishedAt": 1724222400,
         "withdrawnAt": null,
         "createdAt": 1724136000,
-        "updatedAt": 1724222400
+        "updatedAt": 1724222400,
+        "sizeBytes": 73738890,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/2.0.4.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-windows-202",
@@ -150,7 +195,12 @@
         "publishedAt": 1723444800,
         "withdrawnAt": null,
         "createdAt": 1723358400,
-        "updatedAt": 1723444800
+        "updatedAt": 1723444800,
+        "sizeBytes": 68819768,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/2.0.2.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-windows-200",
@@ -165,7 +215,12 @@
         "publishedAt": 1722667200,
         "withdrawnAt": null,
         "createdAt": 1722580800,
-        "updatedAt": 1722667200
+        "updatedAt": 1722667200,
+        "sizeBytes": 66262006,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/2.0.0.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-windows-197",
@@ -180,7 +235,12 @@
         "publishedAt": 1721889600,
         "withdrawnAt": null,
         "createdAt": 1721803200,
-        "updatedAt": 1721889600
+        "updatedAt": 1721889600,
+        "sizeBytes": 72713311,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.9.7.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-windows-196",
@@ -195,7 +255,12 @@
         "publishedAt": 1721112000,
         "withdrawnAt": null,
         "createdAt": 1721025600,
-        "updatedAt": 1721112000
+        "updatedAt": 1721112000,
+        "sizeBytes": 66439712,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/windows/1.9.6.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-linux-042",
@@ -210,7 +275,12 @@
         "publishedAt": null,
         "withdrawnAt": null,
         "createdAt": 1724913600,
-        "updatedAt": 1725000000
+        "updatedAt": 1725000000,
+        "sizeBytes": null,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": null,
+        "minOsVersion": null
       },
       {
         "id": "rel-linux-041",
@@ -225,7 +295,12 @@
         "publishedAt": 1724222400,
         "withdrawnAt": null,
         "createdAt": 1724136000,
-        "updatedAt": 1724222400
+        "updatedAt": 1724222400,
+        "sizeBytes": 40847179,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/linux/0.4.1.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-linux-040",
@@ -240,7 +315,12 @@
         "publishedAt": 1723444800,
         "withdrawnAt": null,
         "createdAt": 1723358400,
-        "updatedAt": 1723444800
+        "updatedAt": 1723444800,
+        "sizeBytes": 46235888,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/linux/0.4.0.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-android-020",
@@ -255,7 +335,12 @@
         "publishedAt": null,
         "withdrawnAt": null,
         "createdAt": 1724913600,
-        "updatedAt": 1725000000
+        "updatedAt": 1725000000,
+        "sizeBytes": null,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": null,
+        "minOsVersion": null
       },
       {
         "id": "rel-android-019",
@@ -270,7 +355,12 @@
         "publishedAt": 1724222400,
         "withdrawnAt": null,
         "createdAt": 1724136000,
-        "updatedAt": 1724222400
+        "updatedAt": 1724222400,
+        "sizeBytes": 43735958,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": "https://releases.afk.ccwu.cc/download/clients/android/0.1.9.zip",
+        "minOsVersion": null
       },
       {
         "id": "rel-ios-011",
@@ -285,7 +375,12 @@
         "publishedAt": null,
         "withdrawnAt": null,
         "createdAt": 1724913600,
-        "updatedAt": 1725000000
+        "updatedAt": 1725000000,
+        "sizeBytes": null,
+        "verifiedAt": null,
+        "signed": false,
+        "downloadUrl": null,
+        "minOsVersion": null
       }
     ],
     "nextCursor": null,

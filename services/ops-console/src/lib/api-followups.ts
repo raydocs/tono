@@ -1,4 +1,4 @@
-import type { IncidentDto, ListDto, Severity } from '@contract';
+import type { IncidentDto, ListDto, Severity, WorthwhileDto } from '@contract';
 import { getJson, patchJson, postJson } from './api';
 
 /**
@@ -85,6 +85,8 @@ export type DigestDto = {
     followups: FollowupDto[];
     checks: IncidentDto[];
   };
+  /** 本周最值得做的 ≤3 件事，D5 填内容；现在恒为空。 */
+  worthwhile?: WorthwhileDto;
   updatedAt: number;
 };
 

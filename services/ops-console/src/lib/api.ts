@@ -15,6 +15,7 @@ import type {
   ReleaseDto,
   ServiceUsageDto,
   SystemHealthDto,
+  UpdateChannelDto,
 } from '@contract';
 import { copy } from '@/copy/copy';
 import type { FleetDto, LiveDto } from './types';
@@ -262,6 +263,7 @@ export const opsApi = {
 
   releases: (signal?: AbortSignal) => getAllJson<ReleaseDto>('releases', signal),
   releaseAdoption: (signal?: AbortSignal) => getJson<AdoptionMatrixDto>('releases/adoption', signal),
+  releaseChannels: (signal?: AbortSignal) => getAllJson<UpdateChannelDto>('releases/channels', signal),
   /**
    * All three of the 客户端 page's actions are edits to a release that already
    * exists, so all three are the PATCH. `POST releases` creates a new row from

@@ -137,6 +137,16 @@ function overnightFrom(at: number): number {
   return startOfDay(at) - 6 * HOUR;
 }
 
+/**
+ * Monday of the Asia/Shanghai week `at` falls in, `YYYY-MM-DD`. 1970-01-01 was
+ * a Thursday, so an epoch day sits `(day + 3) % 7` days past its Monday.
+ */
+function weekOf(at: number): string {
+  const dayIndex = Math.floor((at + 8 * HOUR) / (24 * HOUR));
+  const sinceMonday = ((dayIndex + 3) % 7 + 7) % 7;
+  return new Date((dayIndex - sinceMonday) * 24 * HOUR * 1_000).toISOString().slice(0, 10);
+}
+
 function listOf(rows: readonly Followup[]): unknown {
   return { items: [...rows], nextCursor: null, total: rows.length, updatedAt: nowSec() };
 }
@@ -288,6 +298,7 @@ function digestOf(file: OpsFile | null, store: Store): unknown {
         (row) => typeof row.nextCheckAt === 'number' && row.nextCheckAt <= end,
       ),
     },
+    worthwhile: { weekOf: weekOf(at), computedAt: at, picks: [], considered: 0 },
     updatedAt: at,
   };
 }

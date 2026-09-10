@@ -5,6 +5,8 @@ import type { FollowupKind, FollowupSubjectType } from './vocabulary';
 import { FOLLOWUP_KINDS, FOLLOWUP_SUBJECT_TYPES } from './vocabulary';
 import type { IncidentDto } from './incidents';
 import { assertIncident } from './incidents';
+import type { WorthwhileDto } from './worthwhile';
+import { assertWorthwhile } from './worthwhile';
 import {
   arrayOf,
   assertList,
@@ -40,6 +42,8 @@ export interface DigestDto {
     followups: FollowupDto[];
     checks: IncidentDto[];
   };
+  /** Optional on the wire (org plan v2 §0.3); the Worker always sends it. */
+  worthwhile?: WorthwhileDto;
   updatedAt: number;
 }
 
@@ -66,7 +70,7 @@ export function assertFollowup(value: unknown, path = 'followup'): FollowupDto {
 
 export const assertFollowupList = (value: unknown) => assertList(value, assertFollowup);
 
-const DIGEST_KEYS = ['day', 'overnight', 'open', 'due', 'updatedAt'];
+const DIGEST_KEYS = ['day', 'overnight', 'open', 'due', 'worthwhile', 'updatedAt'];
 const OVERNIGHT_KEYS = ['resolved', 'opened'];
 const DUE_KEYS = ['followups', 'checks'];
 
@@ -85,6 +89,7 @@ export function assertDigest(value: unknown, path = 'digest'): DigestDto {
       followups: arrayOf(due, `${path}.due`, 'followups', assertFollowup),
       checks: arrayOf(due, `${path}.due`, 'checks', assertIncident),
     },
+    ...(row.worthwhile === undefined ? {} : { worthwhile: assertWorthwhile(row.worthwhile, `${path}.worthwhile`) }),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }

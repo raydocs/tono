@@ -4,6 +4,7 @@ import {
   PLATFORMS,
   assertAdoptionMatrix,
   assertRelease,
+  assertUpdateChannel,
   type AdoptionBucket,
   type AdoptionMatrixDto,
   type Platform,
@@ -16,6 +17,7 @@ import {
   updateRelease,
   type ClientRelease,
 } from '../releases';
+import { listUpdateChannels } from '../releases-channels';
 import {
   Actor,
   Env,
@@ -30,6 +32,9 @@ import {
   rangeSeconds,
   weakEtag,
 } from './common';
+
+/** Where a published build is fetched from; D3 puts the object behind it. */
+const DOWNLOAD_BASE = 'https://releases.afk.ccwu.cc/download/';
 
 function releaseDto(row: ClientRelease): ReleaseDto {
   return {
@@ -46,6 +51,11 @@ function releaseDto(row: ClientRelease): ReleaseDto {
     withdrawnAt: row.yankedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    sizeBytes: row.sizeBytes ?? null,
+    verifiedAt: null,
+    signed: false,
+    downloadUrl: row.r2Key ? `${DOWNLOAD_BASE}${row.r2Key}` : null,
+    minOsVersion: null,
   };
 }
 
@@ -133,4 +143,18 @@ export async function getReleaseAdoption(req: Request, e: Env): Promise<Response
     updatedAt: now(),
   };
   return entityJson(e, req, dto, weakEtag([range, dto.updatedAt, dto.cells.length]), assertAdoptionMatrix);
+}
+
+/**
+ * 更新源. Five rows, always — a platform with no updater is a row that says so,
+ * not a row that is missing.
+ */
+export async function getReleaseChannels(req: Request, e: Env): Promise<Response> {
+  const t = now();
+  const items = await listUpdateChannels(e.DB, t);
+  return listJson(
+    e, req, items, null, t,
+    weakEtag(items.map((row) => `${row.platform}:${row.current?.version ?? ''}`)),
+    assertUpdateChannel, items.length,
+  );
 }
