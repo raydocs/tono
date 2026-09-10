@@ -3178,16 +3178,6 @@
         }
       }
     },
-    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件"
-          }
-        }
-      }
-    },
     "On": {
       "localizations": {
         "zh-Hans": {
@@ -6993,6 +6983,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "VS Code 工作区设置"
+          }
+        }
+      }
+    },
+    "Off by default. When enabled, about every 20 minutes share protection status, the selected server and recent connection events with Tono support, and report a failed connection the moment it happens": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认关闭。主动开启后，大约每 20 分钟向 Tono 支持团队分享保护状态、所选节点和最近的连接事件，并在连接失败时立即上报一次"
           }
         }
       }

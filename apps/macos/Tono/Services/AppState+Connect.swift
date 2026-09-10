@@ -507,7 +507,11 @@ extension AppState {
                     code: self.lastClassifiedFailure?.code ?? .unknownClassifiedFailure,
                     elapsedMs: totalDuration,
                     node: selectedExit?.id,
-                    generation: Int(self.connectionCoordinator.protectionOperationGeneration)
+                    generation: Int(self.connectionCoordinator.protectionOperationGeneration),
+                    error: error.localizedDescription,
+                    // The core's own last words are what turn "handshake failed"
+                    // into a dial error an operator can act on.
+                    coreErrors: [status.lastError].compactMap { $0 }
                 )
                 await MainActor.run {
                     // An explicit Disconnect/Quit can cancel while the status
@@ -898,9 +902,16 @@ extension AppState {
         isRecoveringProtectedConnection = false
         isProxyDegraded = proxyFailed
         healthCounters = ProtectedHealthCounters()
+        // The exit delay measured on the way in, so the customer timeline can
+        // say how far away this node was at the moment it connected.
+        let activeName = proxyService.activeNodeName ?? activeNode?.name
+        let exitDelayMs = proxyService.lastExitSample.flatMap { sample in
+            sample.node == activeName && sample.ms > 0 ? sample.ms : nil
+        }
         ConnectionTelemetryBuffer.shared.record(
             "connectOk",
             stage: ConnectionStage.verifyingTraffic.rawValue,
+            delayMs: exitDelayMs,
             node: selectedExitNode()?.id,
             generation: Int(self.connectionCoordinator.protectionOperationGeneration)
         )

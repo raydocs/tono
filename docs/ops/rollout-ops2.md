@@ -71,9 +71,11 @@ ssh tono-199.30.91.172 'cd /opt/tono-ops && python3 collect.py --jobs --max 1; s
 
 先只在后台对一台节点入队 `xray_dial_errors`（只读类型），看结果回传与 `ops_audit`；一周后再放开 `xray_restart` / `identity_sync`。
 
-## 6. 客户端（阶段 1.5，尚未开始）
+## 6. 客户端（阶段 1.5）
 
-失败即报、失败后 3 分钟节奏、`platform`、连接时的 `delayMs`、日志段上传默认开——等 pteropod 那棵树的 0.0.72 客户端改动提交后再做，避免和它冲突。服务端已经准备好接收（`POST /api/v1/telemetry/failures`）。
+- **macOS 已做**（`apps/macos`）：窗口带 `platform: macos`；`connectOk` 带连接时的出口延迟 `delayMs`；连接失败时立即 `POST /api/v1/telemetry/failures`（阶段、代码、错误、核心最后一条报错、路径延迟），与"保护状态快照"同一开关，没选中节点时不发；失败后 5 分钟补发一个窗口。没有改成 3 分钟节奏：账号每小时 6 次的心跳预算装不下，Worker 给失败上报单开了限额（`RATE_LIMIT_FAILURE_*`，默认 60/12/60）。
+- **Windows 待做**：同样四项，等 pteropod 那棵树的 0.0.72 客户端改动提交后再做，避免和它冲突。
+- 日志段上传默认开与 `bytesByRoute` 属于阶段 3.5，Worker 已能接收 `bytesByRoute`。
 
 ## 7. 回滚
 

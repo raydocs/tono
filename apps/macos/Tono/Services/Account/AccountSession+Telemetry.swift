@@ -23,6 +23,7 @@ extension AccountSession {
         deviceActionTask?.cancel(); deviceActionTask = nil
         appRoutingResearchTask?.cancel(); appRoutingResearchTask = nil
         periodicTelemetryTask?.cancel(); periodicTelemetryTask = nil
+        earlyTelemetryTask?.cancel(); earlyTelemetryTask = nil
         if let uploader = diagnosticsLogUploader {
             Task { await uploader.stop() }
         }
@@ -139,8 +140,13 @@ extension AccountSession {
         // being new is not evidence that a window is due. Hold the cadence
         // across restarts rather than spending the hourly budget on them.
         let now = Date()
-        if let last = lastPeriodicTelemetryAt,
-           now.timeIntervalSince(last) < Self.periodicTelemetryMinimumSpacing {
+        let afterFailure = lastConnectFailureAt.map {
+            now.timeIntervalSince($0) < Self.telemetryFailureFollowUpWindow
+        } ?? false
+        let spacing = afterFailure
+            ? Self.telemetrySpacingAfterFailure
+            : Self.periodicTelemetryMinimumSpacing
+        if let last = lastPeriodicTelemetryAt, now.timeIntervalSince(last) < spacing {
             return
         }
         lastPeriodicTelemetryAt = now
@@ -159,13 +165,7 @@ extension AccountSession {
         } else {
             uiState = "notConnected"
         }
-        #if arch(arm64)
-        let osArch = "arm64"
-        #elseif arch(x86_64)
-        let osArch = "x86_64"
-        #else
-        let osArch = "unknown"
-        #endif
+        let osArch = Self.osArch
         let path = pathLatencyConsumer()
         let window = TonoTelemetryWindowReport(
             schemaVersion: 1,
@@ -202,6 +202,75 @@ extension AccountSession {
             )
         } catch {
             // The next cadence retries. This path must not drop protection.
+        }
+    }
+
+    nonisolated static var osArch: String {
+        #if arch(arm64)
+        return "arm64"
+        #elseif arch(x86_64)
+        return "x86_64"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    /// Wires the buffer's failure notices to the immediate report. Installed
+    /// once at construction; consent and state are re-checked on every notice.
+    func installConnectFailureReporting() {
+        ConnectionTelemetryBuffer.shared.setFailureSink { [weak self] notice in
+            Task { @MainActor in await self?.reportConnectFailure(notice) }
+        }
+    }
+
+    /// The failure travels on its own, the moment it happens. It rides the same
+    /// consent as the protection snapshot — it is a slice of the same event
+    /// ring — and the Worker keeps a separate budget for it, so a bad evening
+    /// of retries cannot starve the heartbeat that would show the recovery.
+    func reportConnectFailure(_ notice: ConnectFailureNotice) async {
+        guard state == .ready, !systemSleeping, user != nil,
+              Self.isPeriodicTelemetryEnabled else { return }
+        let snapshot = diagnosticSnapshotConsumer()
+        // A failure before any node was chosen has nothing to pin to a machine;
+        // the window still carries it, so nothing is lost by not sending now.
+        let selected = snapshot.selectedExit == "unknown" ? nil : snapshot.selectedExit
+        guard let node = notice.node ?? selected, !node.isEmpty else { return }
+        let path = pathLatencyConsumer()
+        let report = TonoConnectFailureReport(
+            ts: notice.ts,
+            stage: notice.stage,
+            code: notice.code,
+            error: notice.error,
+            node: String(node.prefix(120)),
+            appVersion: String(snapshot.appVersion.prefix(40)),
+            osVersion: String(
+                DiagnosticsLogUploader.compactOperatingSystemVersion().prefix(80)
+            ),
+            osArch: Self.osArch,
+            coreErrors: notice.coreErrors.isEmpty ? nil : notice.coreErrors,
+            tcpDelayMs: path.tcpDelayMs,
+            exitDelayMs: path.exitDelayMs
+        )
+        lastConnectFailureAt = Date()
+        do {
+            _ = try await api.reportConnectFailure(report)
+        } catch {
+            // Best effort: the window still carries the event, and a report
+            // that did not land must never touch protection or the sign-in.
+        }
+        scheduleEarlyTelemetryWindow()
+    }
+
+    /// One window five minutes after a failure, so the operator sees whether
+    /// the retry worked before the regular cadence would say so.
+    func scheduleEarlyTelemetryWindow() {
+        earlyTelemetryTask?.cancel()
+        earlyTelemetryTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(Self.telemetrySpacingAfterFailure))
+            } catch { return }
+            guard let self, state == .ready, !systemSleeping else { return }
+            await uploadPeriodicTelemetryWindow()
         }
     }
 
@@ -408,6 +477,8 @@ extension AccountSession {
         appRoutingResearchTask = nil
         periodicTelemetryTask?.cancel()
         periodicTelemetryTask = nil
+        earlyTelemetryTask?.cancel()
+        earlyTelemetryTask = nil
         await descriptorConsumer(nil)
         // Health / runtime failures keep kill switch; only auth sign-out disarms.
         if accountLost {

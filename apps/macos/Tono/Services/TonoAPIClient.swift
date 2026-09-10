@@ -207,6 +207,12 @@ actor TonoAPIClient {
         )
     }
 
+    func reportConnectFailure(
+        _ report: TonoConnectFailureReport
+    ) async throws -> TonoConnectFailureReceipt {
+        try await authorizedRequest("telemetry/failures", method: "POST", body: report)
+    }
+
     func submitDeviceActionResult(id: String, result: TonoDeviceActionResult) async throws {
         let validID = try validatedDeviceID(id)
         let _: TonoDeviceActionResultResponse = try await authorizedRequest(
