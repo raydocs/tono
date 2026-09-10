@@ -1,6 +1,6 @@
+import { useCallback } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import type { CustomerBillingDto, CustomerNowDto } from '@contract';
-import { Action, ActionRow } from '@/components/ops/Action';
 import { Fact } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
 import { HeatStrip } from '@/components/ops/HeatStrip';
@@ -10,6 +10,7 @@ import { StatusWord } from '@/components/ops/StatusWord';
 import { Value } from '@/components/ops/Value';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
+import { customerApi } from '@/lib/api-customer-actions';
 import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
 import { closeCustomer } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
@@ -17,20 +18,18 @@ import { shown } from '@/lib/sources';
 import { useResource } from '@/lib/use-resource';
 import { measured, type Measured } from '@/components/ops/measured';
 import type { Tier } from '@/components/ops/Value';
+import { Billing } from './customer/Billing';
 import { CarrierMatrix } from './customer/CarrierMatrix';
+import { ClaudeAccount } from './customer/ClaudeAccount';
 import { Destinations } from './customer/Destinations';
 import { Devices } from './customer/Devices';
+import { CustomerHeader } from './customer/Header';
+import { HomeLine } from './customer/HomeLine';
+import { Proof } from './customer/Proof';
 import { ServiceUsage } from './customer/Services';
 import { Timeline } from './customer/Timeline';
 
 const RANGE = '7d' as const;
-/** Every action on this header needs a write endpoint the console has not been given yet. */
-const HEADER_ACTIONS = [
-  copy.customerActions.diagnose,
-  copy.customerActions.resend,
-  copy.customerActions.changeExpiry,
-  copy.customerActions.suspend,
-];
 
 export default function CustomerDetailPage({ userId }: { userId: string }) {
   const privacy = usePrivacy();
@@ -39,6 +38,24 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
   const activity = useResource(userId, (signal) => opsApi.customerActivity(userId, RANGE, signal));
   const destinations = useResource(userId, (signal) => opsApi.customerDestinations(userId, RANGE, signal));
   const services = useResource(userId, (signal) => opsApi.customerServices(userId, RANGE, signal));
+  /**
+   * The two reads the typed contract does not cover: the account side of this
+   * customer — their Claude account, the reports they have sent, the proof that
+   * their traffic leaves where it should — and which residential line they are
+   * bound to. Both are separate requests rather than fields on the customer
+   * because they are separate endpoints, and both are written to by the
+   * sections below, which is why `refresh` pulls all three back together: a
+   * suspension unbinds the line and retires the account, so refetching only
+   * the one section that was pressed would leave two of them lying.
+   */
+  const account = useResource(userId, (signal) => customerApi.accountDetail(userId, signal));
+  const binding = useResource(userId, (signal) => customerApi.homeBinding(userId, signal));
+
+  const refresh = useCallback(() => {
+    detail.reload();
+    account.reload();
+    binding.reload();
+  }, [detail, account, binding]);
 
   if (detail.status !== 'ready') {
     return (
@@ -76,11 +93,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           />
           <Quota billing={row.billing} />
         </div>
-        <ActionRow>
-          {HEADER_ACTIONS.map((label) => (
-            <Action key={label} reason={copy.customerActions.blocked}>{label}</Action>
-          ))}
-        </ActionRow>
+        <CustomerHeader row={row} onChanged={refresh} />
       </header>
 
       <Section title={copy.customerSections.now}>
@@ -123,11 +136,30 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
 
       <CarrierMatrix events={events} />
 
-      <Devices devices={row.devices} />
+      <Devices userId={userId} devices={row.devices} onChanged={refresh} />
 
-      <FoldedSection title={copy.customerSections.diagnostics}>
-        <Empty message={copy.noDiagnostics} />
-      </FoldedSection>
+      <HomeLine
+        userId={userId}
+        email={privacy.email(row.email)}
+        binding={binding.status === 'ready' ? binding.data : null}
+        loading={binding.status === 'loading'}
+        message={binding.status === 'error' ? binding.message : null}
+        onChanged={refresh}
+      />
+
+      <ClaudeAccount
+        userId={userId}
+        detail={account.status === 'ready' ? account.data : null}
+        loading={account.status === 'loading'}
+        message={account.status === 'error' ? account.message : null}
+        onChanged={refresh}
+      />
+
+      <Proof
+        detail={account.status === 'ready' ? account.data : null}
+        loading={account.status === 'loading'}
+        message={account.status === 'error' ? account.message : null}
+      />
 
       <FoldedSection title={copy.customerSections.chores} count={row.chores.length}>
         {row.chores.length === 0 ? (
@@ -150,34 +182,12 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
         )}
       </FoldedSection>
 
-      <FoldedSection title={copy.customerSections.billing}>
-        <div className="grid gap-x-8 sm:grid-cols-2">
-          <Fact
-            label={copy.billingFacts.plan}
-            measured={measured(row.billing.plan, row.updatedAt, copy.sourceWord.profile)}
-          />
-          <Fact
-            label={copy.billingFacts.deviceLimit}
-            measured={measured(String(row.billing.deviceLimit), row.updatedAt, copy.sourceWord.profile)}
-          />
-          <Fact
-            label={copy.billingFacts.since}
-            measured={measured(
-              row.billing.firstEntitledAt === null ? null : formatDate(row.billing.firstEntitledAt),
-              row.billing.firstEntitledAt,
-              copy.sourceWord.profile,
-            )}
-          />
-          <Fact
-            label={copy.billingFacts.expires}
-            measured={measured(
-              row.billing.expiresAt === null ? null : formatDate(row.billing.expiresAt),
-              row.billing.expiresAt,
-              copy.sourceWord.profile,
-            )}
-          />
-        </div>
-      </FoldedSection>
+      <Billing
+        userId={userId}
+        billing={row.billing}
+        updatedAt={row.updatedAt}
+        onChanged={refresh}
+      />
     </div>
   );
 }
