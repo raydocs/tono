@@ -12,6 +12,7 @@ import {
   type MonthSummaryDto,
 } from './contract';
 import { monthBounds } from './fx';
+import { reconcileMonth } from './ledger-recon';
 
 const ACCOUNT_CATEGORIES = new Set<LedgerCategory>(['claude_account', 'chatgpt_account']);
 
@@ -246,6 +247,7 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
 
   const unreconciled = customers.filter((row) => row.pending).length + nodes.filter((row) => row.pending).length;
   if (closed) updatedAt = Math.max(updatedAt, Number(closed.closed_at ?? 0));
+  const reconciliation = await reconcileMonth(db, month, nowSec, { entries, closed });
 
   // A closed month answers with the halves it was closed with. A month closed
   // before the snapshot column existed — or one whose snapshot did not fit —
@@ -267,10 +269,8 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     frozen: Boolean(closed),
     frozenAt: closed ? Number(closed.closed_at) : null,
     ...(frozenPartial ? { frozenPartial: true } : {}),
-    // 月结对账 is D2's; the keys ship now so the console can compile against
-    // the finished shape rather than a growing one.
-    reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec },
-    unreconciledBills: 0,
+    reconciliation,
+    unreconciledBills: reconciliation.billsWithoutLedger.length + reconciliation.ledgerWithoutBill.length,
     updatedAt,
   };
 }
