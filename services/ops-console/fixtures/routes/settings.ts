@@ -1,0 +1,500 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type {
+  AlertDeliveryDto,
+  AlertRuleDto,
+  AuditEntryDto,
+  DirectCandidateDto,
+  HomeLineDto,
+  HomeLineUsageDayDto,
+  ListDto,
+  ProviderAccountDto,
+} from '@contract';
+import { nowSec } from '../../src/lib/clock';
+import { materializeOps } from '../../src/lib/ops-fixtures';
+
+/**
+ * The 设置 half of the fixture dev server.
+ *
+ * Six resources, all of them writable, all of them served out of the captured
+ * preview responses in `fixtures/captured/normal/`. It is a mutable store per
+ * `?session=` for the same reason the incident store is one: a drawer that
+ * saves a rule and then refetches is only a test of anything if the refetch
+ * can come back changed, and one shared copy would let the screenshot suite
+ * and the write tests edit each other's data.
+ *
+ * The seed is the captured JSON rather than hand-written rows so the shapes
+ * here cannot drift from what the Worker actually sends — the same files the
+ * contract checkers run over in `test/captured-fixtures.test.ts`.
+ */
+
+/** The clock the captured set was frozen at; `index.json` is the record of it. */
+type CapturedIndex = { freezeNow: number };
+
+type Store = {
+  alertRules: AlertRuleDto[];
+  deliveries: AlertDeliveryDto[];
+  providers: ProviderAccountDto[];
+  homeLines: HomeLineDto[];
+  usage: HomeLineUsageDayDto[];
+  candidates: DirectCandidateDto[];
+  audit: AuditEntryDto[];
+};
+
+type Request = {
+  req: IncomingMessage;
+  res: ServerResponse;
+  /** The path after `/api/v1/ops/`, already split and decoded. */
+  parts: string[];
+  query: URLSearchParams;
+  session: string;
+  empty: boolean;
+};
+
+const AUDIT_PAGE = 50;
+
+function sendJson(res: ServerResponse, body: unknown, status = 200): void {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.setHeader('cache-control', 'no-store');
+  res.end(JSON.stringify(body));
+}
+
+function sendEmpty(res: ServerResponse, status: number): void {
+  res.statusCode = status;
+  res.setHeader('cache-control', 'no-store');
+  res.end();
+}
+
+function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((done) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += String(chunk); });
+    req.on('end', () => {
+      try {
+        done(JSON.parse(raw || '{}') as Record<string, unknown>);
+      } catch {
+        done({});
+      }
+    });
+  });
+}
+
+/** The list envelope every collection endpoint returns, stamped with the newest row. */
+function listOf<T>(items: T[], stamp: (row: T) => number): ListDto<T> {
+  const stamps = items.map(stamp);
+  return {
+    items,
+    nextCursor: null,
+    total: items.length,
+    updatedAt: stamps.length === 0 ? nowSec() : Math.max(...stamps),
+  };
+}
+
+let counter = 0;
+
+/** Ids look like the Worker's so a fixture row and a real one read the same. */
+function newId(): string {
+  counter += 1;
+  return `id_fixture${String(counter).padStart(10, '0')}`;
+}
+
+export function createSettingsFixtures(rootDir: string) {
+  const dir = path.resolve(rootDir, 'fixtures/captured/normal');
+  const read = <T>(name: string): T => JSON.parse(readFileSync(path.join(dir, name), 'utf8')) as T;
+  const clock = read<CapturedIndex>('index.json').freezeNow;
+  /** Captured epochs move to the frozen clock, so "3 分钟前" stays true. */
+  const shift = <T>(body: T): T => materializeOps(body, clock);
+
+  const stores = new Map<string, Store>();
+
+  function storeFor(session: string, empty: boolean): Store {
+    const key = `${session}/${empty ? 'empty' : 'normal'}`;
+    const found = stores.get(key);
+    if (found) return found;
+    const made: Store = empty
+      ? {
+        alertRules: [], deliveries: [], providers: [],
+        homeLines: [], usage: [], candidates: [], audit: [],
+      }
+      : {
+        alertRules: shift(read<ListDto<AlertRuleDto>>('alert-rules.json')).items,
+        deliveries: shift(read<ListDto<AlertDeliveryDto>>('alert-deliveries.json')).items,
+        providers: shift(read<ListDto<ProviderAccountDto>>('provider-accounts.json')).items,
+        homeLines: shift(read<ListDto<HomeLineDto>>('home-lines.json')).items,
+        usage: shift(read<ListDto<HomeLineUsageDayDto>>('home-lines-id-usage.json')).items,
+        candidates: shift(read<{ items: DirectCandidateDto[] }>('direct-candidates.json')).items
+          // `firstSeen` does not end in `At`, so the shared shifter leaves it
+          // where it was captured; without this the inbox says 两年前.
+          .map((row) => ({ ...row, firstSeen: row.firstSeen + (nowSec() - clock) })),
+        audit: shift(read<{ entries: AuditEntryDto[] }>('audit.json')).entries,
+      };
+    stores.set(key, made);
+    return made;
+  }
+
+  /**
+   * Every write leaves a line behind, exactly as the Worker's `auditWrite`
+   * does. Without it 操作记录 would be a page that never changes no matter what
+   * the operator did on the other five.
+   */
+  function note(store: Store, action: string, targetType: string, targetId: string | null, summary: string): void {
+    store.audit.unshift({
+      id: newId(),
+      at: nowSec(),
+      actorEmail: 'owner@example.test',
+      actorType: 'access_admin',
+      actorRole: null,
+      action,
+      targetType,
+      targetId,
+      summary,
+      requestId: null,
+    });
+  }
+
+  function alertRules({ req, res, parts, store }: Request & { store: Store }): boolean {
+    const [, id, action] = parts;
+    if (id === undefined) {
+      if (req.method === 'GET') {
+        sendJson(res, listOf(store.alertRules, (row) => row.updatedAt));
+        return true;
+      }
+      if (req.method !== 'POST') return false;
+      void readBody(req).then((body) => {
+        const at = nowSec();
+        const rule: AlertRuleDto = {
+          id: newId(),
+          name: String(body.name ?? ''),
+          enabled: body.enabled !== false,
+          matchKind: (body.matchKind as string | null) ?? null,
+          matchSubjectType: (body.matchSubjectType as string | null) ?? null,
+          matchSubjectId: (body.matchSubjectId as string | null) ?? null,
+          minSeverity: (body.minSeverity as AlertRuleDto['minSeverity']) ?? 'warn',
+          minImpact: Number(body.minImpact ?? 0),
+          fireOn: (body.fireOn as AlertRuleDto['fireOn']) ?? 'open',
+          delaySeconds: Number(body.delaySeconds ?? 0),
+          cooldownSeconds: Number(body.cooldownSeconds ?? 3_600),
+          channel: (body.channel as AlertRuleDto['channel']) ?? 'webhook',
+          target: String(body.target ?? ''),
+          template: (body.template as AlertRuleDto['template']) ?? 'generic',
+          secretRef: (body.secretRef as string | null) ?? null,
+          lastFiredAt: null,
+          createdAt: at,
+          updatedAt: at,
+        };
+        store.alertRules.push(rule);
+        note(store, 'alert-rule.create', 'alert_rule', rule.id, rule.name);
+        sendJson(res, rule, 201);
+      });
+      return true;
+    }
+
+    const index = store.alertRules.findIndex((row) => row.id === id);
+    if (index < 0) {
+      sendEmpty(res, 404);
+      return true;
+    }
+    const rule = store.alertRules[index];
+
+    if (action === 'test' && req.method === 'POST') {
+      const at = nowSec();
+      rule.lastFiredAt = at;
+      rule.updatedAt = at;
+      store.deliveries.unshift({
+        id: newId(),
+        ruleId: rule.id,
+        incidentId: null,
+        dedupeKey: `${rule.id}:test`,
+        transition: 'test',
+        status: 'pending',
+        channel: rule.channel,
+        target: rule.target,
+        attempts: 0,
+        error: null,
+        at,
+        deliveredAt: null,
+      });
+      note(store, 'alert-rule.test', 'alert_rule', rule.id, rule.name);
+      sendJson(res, rule);
+      return true;
+    }
+    if (action !== undefined) return false;
+
+    if (req.method === 'GET') {
+      sendJson(res, rule);
+      return true;
+    }
+    if (req.method === 'DELETE') {
+      store.alertRules.splice(index, 1);
+      note(store, 'alert-rule.delete', 'alert_rule', rule.id, rule.name);
+      sendEmpty(res, 204);
+      return true;
+    }
+    if (req.method !== 'PATCH') return false;
+    void readBody(req).then((body) => {
+      Object.assign(rule, body, { id: rule.id, updatedAt: nowSec() });
+      note(store, 'alert-rule.update', 'alert_rule', rule.id, rule.name);
+      sendJson(res, rule);
+    });
+    return true;
+  }
+
+  function providers({ req, res, parts, store }: Request & { store: Store }): boolean {
+    const [, id] = parts;
+    if (id === undefined) {
+      if (req.method === 'GET') {
+        sendJson(res, listOf(store.providers, (row) => row.updatedAt));
+        return true;
+      }
+      if (req.method !== 'POST') return false;
+      void readBody(req).then((body) => {
+        const at = nowSec();
+        const row: ProviderAccountDto = {
+          id: newId(),
+          provider: String(body.provider ?? ''),
+          label: String(body.label ?? ''),
+          cloudKind: (body.cloudKind as ProviderAccountDto['cloudKind']) ?? 'vps',
+          loginEmailMasked: maskEmail(body.loginEmail),
+          billingUrl: (body.billingUrl as string | null) ?? null,
+          balanceHint: (body.balanceHint as string | null) ?? null,
+          renewNotes: (body.renewNotes as string | null) ?? null,
+          secretRef: (body.secretRef as string | null) ?? null,
+          nodeCount: 0,
+          createdAt: at,
+          updatedAt: at,
+        };
+        store.providers.push(row);
+        note(store, 'provider-account.create', 'provider_account', row.id, row.label);
+        sendJson(res, row, 201);
+      });
+      return true;
+    }
+
+    const index = store.providers.findIndex((row) => row.id === id);
+    if (index < 0) {
+      sendEmpty(res, 404);
+      return true;
+    }
+    const row = store.providers[index];
+
+    if (req.method === 'GET') {
+      sendJson(res, row);
+      return true;
+    }
+    if (req.method === 'DELETE') {
+      store.providers.splice(index, 1);
+      note(store, 'provider-account.close', 'provider_account', row.id, row.label);
+      sendJson(res, row);
+      return true;
+    }
+    if (req.method !== 'PATCH') return false;
+    void readBody(req).then((body) => {
+      const { loginEmail, ...rest } = body;
+      Object.assign(row, rest, { id: row.id, updatedAt: nowSec() });
+      if (loginEmail !== undefined) row.loginEmailMasked = maskEmail(loginEmail);
+      note(store, 'provider-account.update', 'provider_account', row.id, row.label);
+      sendJson(res, row);
+    });
+    return true;
+  }
+
+  function homeLines({ req, res, parts, store }: Request & { store: Store }): boolean {
+    const [, id, section] = parts;
+    if (id === undefined) {
+      if (req.method === 'GET') {
+        sendJson(res, listOf(store.homeLines, (row) => row.updatedAt));
+        return true;
+      }
+      if (req.method !== 'POST') return false;
+      void readBody(req).then((body) => {
+        const at = nowSec();
+        const row: HomeLineDto = {
+          id: newId(),
+          proxyName: String(body.proxyName ?? ''),
+          displayName: String(body.displayName ?? ''),
+          status: 'active',
+          isp: (body.isp as string | null) ?? null,
+          region: (body.region as string | null) ?? null,
+          providerAccountId: (body.providerAccountId as string | null) ?? null,
+          price: (body.price as number | null) ?? null,
+          currency: (body.currency as string | null) ?? null,
+          billingKind: (body.billingKind as HomeLineDto['billingKind']) ?? null,
+          bundleBytes: (body.bundleBytes as number | null) ?? null,
+          cycleStart: (body.cycleStart as number | null) ?? null,
+          cycleEnd: (body.cycleEnd as number | null) ?? null,
+          expiresAt: (body.expiresAt as number | null) ?? null,
+          meterSource: (body.meterSource as HomeLineDto['meterSource']) ?? null,
+          usage: { value: null, asOfSec: null, source: 'manual' },
+          probe: { value: null, asOfSec: null, source: 'collector' },
+          boundUsers: { value: 0, asOfSec: at, source: 'manual' },
+          notes: (body.notes as string | null) ?? null,
+          createdAt: at,
+          updatedAt: at,
+        };
+        store.homeLines.push(row);
+        note(store, 'home-line.create', 'home_exit', row.id, row.displayName);
+        sendJson(res, row, 201);
+      });
+      return true;
+    }
+
+    const index = store.homeLines.findIndex((row) => row.id === id);
+    if (index < 0) {
+      sendEmpty(res, 404);
+      return true;
+    }
+    const row = store.homeLines[index];
+
+    if (section === 'usage') {
+      if (req.method !== 'GET') return false;
+      sendJson(res, listOf(store.usage, (row) => row.dayAt));
+      return true;
+    }
+    if (section !== undefined) return false;
+
+    if (req.method === 'GET') {
+      sendJson(res, row);
+      return true;
+    }
+    if (req.method === 'DELETE') {
+      row.status = 'retired';
+      row.updatedAt = nowSec();
+      note(store, 'home-line.retire', 'home_exit', row.id, row.displayName);
+      sendJson(res, row);
+      return true;
+    }
+    if (req.method !== 'PATCH') return false;
+    void readBody(req).then((body) => {
+      Object.assign(row, body, { id: row.id, proxyName: row.proxyName, updatedAt: nowSec() });
+      note(store, 'home-line.update', 'home_exit', row.id, row.displayName);
+      sendJson(res, row);
+    });
+    return true;
+  }
+
+  function candidates({ req, res, parts, query, store }: Request & { store: Store }): boolean {
+    const [, host, action] = parts;
+    if (host === undefined) {
+      if (req.method !== 'GET') return false;
+      const status = query.get('status');
+      const rows = status ? store.candidates.filter((row) => row.status === status) : store.candidates;
+      sendJson(res, listOf(rows, (row) => row.decidedAt ?? row.firstSeen));
+      return true;
+    }
+    if (req.method !== 'POST' || (action !== 'accept' && action !== 'reject')) return false;
+    const row = store.candidates.find((entry) => entry.etld1 === host);
+    if (!row) {
+      sendEmpty(res, 404);
+      return true;
+    }
+    row.status = action === 'accept' ? 'accepted' : 'rejected';
+    row.decidedBy = 'owner@example.test';
+    row.decidedAt = nowSec();
+    note(store, `direct-candidate.${action}`, 'direct_candidate', row.etld1, row.status);
+    sendJson(res, row);
+    return true;
+  }
+
+  /** The draft the Worker would canonicalise, minus the publish it never does. */
+  function draft({ req, res, parts, store }: Request & { store: Store }): boolean {
+    if (req.method !== 'POST' || parts[1] !== 'draft-from-candidates') return false;
+    const accepted = store.candidates.filter((row) => row.status === 'accepted');
+    note(store, 'traffic-policy.draft-from-candidates', 'traffic_policy', null, `${accepted.length} accepted`);
+    sendJson(res, {
+      draft: {
+        version: 4,
+        domains: [],
+        mediaEndpoints: [],
+        webDomains: [],
+        directSuffixes: accepted
+          .map((row) => ({ host: row.etld1.toLowerCase(), ports: [443] }))
+          .sort((a, b) => a.host.localeCompare(b.host)),
+        tcpEndpoints: [],
+      },
+      note: 'draft only; not published',
+    });
+    return true;
+  }
+
+  function deliveries({ req, res, store }: Request & { store: Store }): boolean {
+    if (req.method !== 'GET') return false;
+    sendJson(res, listOf(store.deliveries, (row) => row.at));
+    return true;
+  }
+
+  function audit({ req, res, query, store }: Request & { store: Store }): boolean {
+    if (req.method !== 'GET') return false;
+    const targetId = query.get('targetId');
+    const actorEmail = query.get('actorEmail');
+    const before = query.get('before') === null ? null : Number(query.get('before'));
+    const beforeId = query.get('beforeId');
+    const limit = query.get('limit') === null ? AUDIT_PAGE : Number(query.get('limit'));
+    const rows = [...store.audit]
+      .sort((a, b) => (b.at - a.at) || b.id.localeCompare(a.id))
+      .filter((row) => (targetId === null || row.targetId === targetId))
+      .filter((row) => (actorEmail === null || row.actorEmail === actorEmail))
+      .filter((row) => {
+        if (before === null) return true;
+        if (row.at < before) return true;
+        return beforeId !== null && row.at === before && row.id < beforeId;
+      });
+    const page = rows.slice(0, limit);
+    const hasMore = rows.length > limit;
+    const last = page.length === 0 ? null : page[page.length - 1];
+    sendJson(res, {
+      entries: page,
+      hasMore,
+      nextBefore: hasMore && last ? last.at : null,
+      nextBeforeId: hasMore && last ? last.id : null,
+    });
+    return true;
+  }
+
+  const HANDLERS: Record<string, (request: Request & { store: Store }) => boolean> = {
+    'alert-rules': alertRules,
+    'alert-deliveries': deliveries,
+    'provider-accounts': providers,
+    'home-lines': homeLines,
+    'direct-candidates': candidates,
+    'traffic-policy': draft,
+    audit,
+  };
+
+  /**
+   * Claim the request, or hand it back. Returning `false` leaves the response
+   * untouched so the caller's own 404 still describes the route.
+   */
+  return function settingsFixtures(options: {
+    req: IncomingMessage;
+    res: ServerResponse;
+    route: string;
+    url: string;
+    session: string;
+    empty: boolean;
+  }): boolean {
+    const parts = options.route.split('/').map(decodeURIComponent);
+    const handler = HANDLERS[parts[0]];
+    if (!handler) return false;
+    const store = storeFor(options.session, options.empty);
+    return handler({
+      req: options.req,
+      res: options.res,
+      parts,
+      query: new URLSearchParams(options.url.split('?')[1] ?? ''),
+      session: options.session,
+      empty: options.empty,
+      store,
+    });
+  };
+}
+
+/** The Worker masks on the way in; the fixture has to, or the drawer lies. */
+function maskEmail(value: unknown): string | null {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (text === '') return null;
+  const at = text.indexOf('@');
+  if (at <= 0) return `${text.slice(0, 1)}***`;
+  return `${text.slice(0, 1)}***${text.slice(at)}`;
+}

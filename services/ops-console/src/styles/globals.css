@@ -1,0 +1,291 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./tokens.css";
+
+
+.hairline { border-color: var(--hairline); }
+.hairline-b { border-bottom: 1px solid var(--hairline); }
+.hairline-r { border-right: 1px solid var(--hairline); }
+.hairline-t { border-top: 1px solid var(--hairline); }
+
+.page-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+@media (min-width: 960px) {
+  .page-wrap { padding: 32px; gap: 40px; }
+}
+
+/* The count sentence and the controls that filter it are one block: 40 px of
+   page rhythm between them left a void the eye read as a section break, and
+   the toggle drifted to the right margin where nothing else on the page is. */
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Radix's sheet ships its own slide keyframes. The drawer animates on a
+   Motion spring instead, so the shell it positions must not move at all —
+   `!important` because both are utilities and neither wins on source order. */
+.drawer-shell, .drawer-shell[data-state] { animation: none !important; transition: none !important; }
+
+/* The rail. The active entry had a filled background and nothing else, which
+   at the icon-only width below 960 px is a grey square that could as easily be
+   a hover state. A 2 px accent bar on the rail's own edge says "you are here"
+   at both widths, and is the only place the accent appears outside a primary
+   action. */
+.nav-item { position: relative; }
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* A surface that is meant to sit above the page.
+   In the light theme the page is warm white and the card is white, so a 8%
+   hairline is enough to separate them. In the dark theme both are near-black
+   and a darker line only digs a groove: the edge has to come from light. A 6%
+   white hairline plus a one-pixel highlight along the top is what makes the
+   surface read as lifted rather than as a rectangle somebody drew. */
+.raised { border: 1px solid var(--hairline); }
+.dark .raised {
+  border-color: rgb(255 255 255 / 0.06);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+/* The header band of a table is the same idea one level in: it lifts off the
+   rows below it rather than being ruled off from them. */
+.dark .data-head { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06); }
+
+.card-pad { padding: 20px; }
+
+/* Named `data-row` rather than `table-row`, which Tailwind already owns as a
+   `display` utility — the old class was silently losing to it. */
+.data-row { height: 36px; }
+.data-row:hover { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+
+/* Neutral tile behind a metric icon. Colour on these pages belongs to the
+   status word, the quota bar and the primary action; a tinted tile behind a
+   plain fact only competes with them. */
+.metric-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  color: var(--muted-foreground);
+}
+
+/* Panels that carry a severity of their own live here so that no component
+   outside StatusWord and QuotaGauge has to name a severity token. */
+.panel-error {
+  border: 1px solid hsl(var(--sev-line) / 0.4);
+  background: hsl(var(--sev-bg));
+  color: hsl(var(--sev-fg));
+}
+.banner-alert {
+  border-bottom: 1px solid hsl(var(--sev-line) / 0.35);
+  background: hsl(var(--sev-bg));
+  color: hsl(var(--sev-fg));
+}
+.row-selected { background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+
+/* A fragment of the page's count sentence: prose that is also a control. */
+.count-bit {
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
+  color: var(--muted-foreground);
+  transition: border-color 150ms ease, color 150ms ease;
+}
+.count-bit:hover { color: var(--foreground); text-decoration: underline; text-underline-offset: 8px; text-decoration-thickness: 1px; }
+.count-bit[aria-pressed="true"] { color: var(--foreground); border-bottom-color: var(--tone-ink); }
+.count-bit:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.tone-none { --tone-ink: var(--foreground); --tone-wash: var(--muted-foreground); }
+
+/* A neutral label that is sometimes a filter: platform chips, route tags. */
+.ops-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+button.ops-chip:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.ops-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.ops-chip[aria-pressed="true"] .font-mono { color: var(--accent); }
+/* 未发布: shown, greyed, with the reason in words — never dropped, never a 0. */
+.ops-chip-muted { color: var(--muted-foreground); background: transparent; border-style: dashed; cursor: default; }
+
+.ops-tag.tone-rem, .ops-tag.tone-sev, .ops-tag.tone-warn, .ops-tag.tone-info {
+  color: hsl(var(--tone-fg));
+  background: hsl(var(--tone-bg));
+}
+.ops-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Actions. Exactly one per view gets the accent; the rest are outlines, and a
+   disabled one keeps its reason in the title attribute. */
+.ops-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+.ops-action:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.ops-action:disabled { color: var(--muted-foreground); background: transparent; cursor: not-allowed; }
+.ops-action-primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+.ops-action-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.ops-action-primary:disabled { background: transparent; border-color: var(--hairline); color: var(--muted-foreground); }
+
+/* The severity rail on a 今天 row: the only colour an incident line carries. */
+.sev-rail {
+  flex: none;
+  width: 3px;
+  align-self: stretch;
+  border-radius: 999px;
+  background: hsl(var(--tone-line));
+}
+
+/* Seven days of daily bytes. A bar above the week's mean carries whatever tone
+   the surrounding block is in (the quota tone, on a node card); the rest stay
+   grey, so the shape says which days were heavy rather than colouring the
+   whole week. An unmeasured day is hatched, never drawn at zero. */
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+}
+.spark-bar {
+  flex: 1 1 0;
+  min-width: 1px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--foreground) 11%, transparent);
+}
+.spark-bar[data-high="true"] { background: hsl(var(--tone-line)); }
+.spark-bar[data-gap="true"] {
+  background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hairline) 3px 4px);
+}
+
+/* 使用时段. Greys for 在线, the one accent for 已连接; `--heat` is the share of
+   the hour, so an empty cell is genuinely empty rather than pale green. */
+.heat-cell {
+  height: 14px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--foreground) calc(var(--heat, 0) * 30%), transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.heat-cell[data-connected="true"] {
+  background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 58% + 12%), transparent);
+}
+/* An hour nobody measured: hatched, not blank, so it cannot read as idle. */
+.heat-gap { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--hairline) 3px 4px); }
+
+/* Tabs on 今天. A rule under the live one, nothing else. */
+.ops-tab {
+  padding: 0 2px 8px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.ops-tab:hover { color: var(--foreground); }
+.ops-tab[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--foreground); }
+.ops-tab-rem[aria-selected="true"] { border-bottom-color: hsl(var(--rem-line)); }
+
+/* One incident row. The rail, the sentence, the facts, one action. */
+.incident-row {
+  display: flex;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--hairline);
+  width: 100%;
+  text-align: left;
+  transition: background 150ms ease;
+}
+.incident-row:last-child { border-bottom: 0; }
+.incident-row:hover { background: color-mix(in srgb, var(--foreground) 3%, transparent); }
+
+/* At 390 px a row with a rail down its left edge, a paragraph in the middle
+   and a button on the right is three columns in 350 px: the sentence wraps to
+   five lines and the action ends up level with the fourth of them. Each row
+   becomes its own card instead — the rail across the top, the sentence, the
+   facts, and the action full width at the bottom where the thumb is. */
+@media (max-width: 640px) {
+  .incident-row {
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .incident-row:last-child { margin-bottom: 0; border-bottom: 1px solid var(--hairline); }
+  .incident-row .sev-rail { width: 100%; height: 3px; align-self: stretch; }
+  .incident-row .ops-action { width: 100%; justify-content: center; }
+  .incident-row > [role="presentation"] { width: 100%; }
+}
+
+/* The connection timeline: a day heading that sticks while its rows scroll. */
+.day-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  background: var(--background);
+  border-bottom: 1px solid var(--hairline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

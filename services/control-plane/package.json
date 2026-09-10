@@ -6,6 +6,7 @@
   "scripts": {
     "admin:dev": "vite admin --base /ops/",
     "admin:build": "vite build admin --base /ops/ --outDir ../public/ops --emptyOutDir",
+    "console:build": "npm --prefix ../ops-console ci && npm --prefix ../ops-console run build",
     "admin:worker:deploy": "npm run deploy",
     "preview:render-config": "node preview/render-config.mjs",
     "preview:seed": "node preview/write-seed.mjs",
@@ -13,7 +14,9 @@
     "dev": "wrangler dev",
     "deploy": "../../tooling/scripts/deploy-control-plane-main.sh",
     "typecheck": "tsc --noEmit && tsc -p admin/tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:contract": "node ../../tooling/scripts/check-ops-contract-purity.mjs",
+    "check:budgets": "node ../../tooling/scripts/check-ops-budgets.mjs"
   },
   "dependencies": {
     "react": "19.2.8",

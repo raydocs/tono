@@ -1,0 +1,1277 @@
+{
+  "clock": 1725000000,
+  "detail": {
+    "name": "Tokyo · Fuji",
+    "verdict": "degraded",
+    "health": "劣化",
+    "tone": "warn",
+    "reason": "联通去程成功率掉到 76%，电信移动正常",
+    "lifecycle": "listed",
+    "catalogListed": true,
+    "facts": {
+      "publicIp": "203.0.113.10",
+      "os": "Debian 12",
+      "region": "东京",
+      "provider": "Bandwagon",
+      "providerAccountId": "bwh-主账号",
+      "lineTags": [
+        "CN2 GIA",
+        "晚高峰限速"
+      ],
+      "port": 443,
+      "price": 5.5,
+      "currency": "$",
+      "billingCycle": 30,
+      "renewsAt": 1725691200,
+      "expiresAt": 1728283200,
+      "notes": "东京主力出口，二月换过一次地址",
+      "createdAt": 1690440000,
+      "updatedAt": 1724992800
+    },
+    "bindings": {
+      "catalog": true,
+      "exitToken": true,
+      "komari": true,
+      "identitySync": false,
+      "metering": true,
+      "asOfSec": 1724999340
+    },
+    "forwardPath": {
+      "value": [
+        {
+          "carrier": "unicom",
+          "successRate": 0.76,
+          "medianTcpMs": 243,
+          "topFailure": "握手超时",
+          "attempts": 148,
+          "users": 9
+        },
+        {
+          "carrier": "telecom",
+          "successRate": 0.97,
+          "medianTcpMs": 96,
+          "topFailure": "对方端口没人应答",
+          "attempts": 260,
+          "users": 14
+        },
+        {
+          "carrier": "mobile",
+          "successRate": 0.93,
+          "medianTcpMs": 132,
+          "topFailure": "握手超时",
+          "attempts": 181,
+          "users": 11
+        },
+        {
+          "carrier": "other",
+          "successRate": null,
+          "medianTcpMs": null,
+          "topFailure": null,
+          "attempts": 0,
+          "users": 0
+        }
+      ],
+      "asOfSec": 1724999580,
+      "source": "telemetry"
+    },
+    "returnPath": {
+      "value": [
+        {
+          "carrier": "unicom",
+          "latencyMs": 182,
+          "lossPct": 4.2,
+          "samples": 60
+        },
+        {
+          "carrier": "telecom",
+          "latencyMs": 88,
+          "lossPct": 0,
+          "samples": 60
+        },
+        {
+          "carrier": "mobile",
+          "latencyMs": 121,
+          "lossPct": 0.8,
+          "samples": 60
+        },
+        {
+          "carrier": "other",
+          "latencyMs": null,
+          "lossPct": null,
+          "samples": 0
+        }
+      ],
+      "asOfSec": 1724999700,
+      "source": "komari"
+    },
+    "occupancy": {
+      "value": [
+        {
+          "userId": "u-01",
+          "email": "chen.jie@example.com",
+          "deviceId": "dev-u-01-1",
+          "platform": "windows",
+          "appVersion": "1.8.0",
+          "online": true,
+          "lastSeenAt": 1724999850
+        },
+        {
+          "userId": "u-02",
+          "email": "zhang.min@example.com",
+          "deviceId": "dev-u-02-1",
+          "platform": "macos",
+          "appVersion": "1.8.1",
+          "online": true,
+          "lastSeenAt": 1724999850
+        },
+        {
+          "userId": "u-04",
+          "email": "wang.tao@example.com",
+          "deviceId": "dev-u-04-1",
+          "platform": "windows",
+          "appVersion": "1.7.9",
+          "online": false,
+          "lastSeenAt": 1724988300
+        },
+        {
+          "userId": "u-06",
+          "email": "sun.qi@example.com",
+          "deviceId": "dev-u-06-1",
+          "platform": "macos",
+          "appVersion": "1.8.1",
+          "online": true,
+          "lastSeenAt": 1724999850
+        }
+      ],
+      "asOfSec": 1724999880,
+      "source": "telemetry"
+    },
+    "quota": {
+      "value": {
+        "quota": 1099511627776,
+        "used": 862017116160,
+        "pct": 0.784,
+        "projectedExhaustAt": 1725950400,
+        "level": "chore",
+        "cycleKind": "anniversary",
+        "cycleStart": 1723617600,
+        "cycleEnd": 1726209600,
+        "counts": "in_out"
+      },
+      "asOfSec": 1724999100,
+      "source": "profile"
+    },
+    "recentErrors": {
+      "value": [
+        {
+          "dayAt": 1724481600,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724568000,
+          "category": "握手超时",
+          "count": 4,
+          "sample": null
+        },
+        {
+          "dayAt": 1724654400,
+          "category": "握手超时",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1724740800,
+          "category": "握手超时",
+          "count": 9,
+          "sample": null
+        },
+        {
+          "dayAt": 1724827200,
+          "category": "握手超时",
+          "count": 14,
+          "sample": null
+        },
+        {
+          "dayAt": 1724913600,
+          "category": "握手超时",
+          "count": 22,
+          "sample": null
+        },
+        {
+          "dayAt": 1725000000,
+          "category": "握手超时",
+          "count": 31,
+          "sample": "proxy/vless: failed to handshake with 联通 edge, timeout after 10s"
+        },
+        {
+          "dayAt": 1724481600,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724568000,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724654400,
+          "category": "对方端口没人应答",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724740800,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724827200,
+          "category": "对方端口没人应答",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1724913600,
+          "category": "对方端口没人应答",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1725000000,
+          "category": "对方端口没人应答",
+          "count": 4,
+          "sample": "transport/tcp: dial tcp 198.51.100.7:443 connection refused"
+        },
+        {
+          "dayAt": 1724481600,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724568000,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724654400,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724740800,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724827200,
+          "category": "域名解析失败",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724913600,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1725000000,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": "dns: lookup api.example.com no such host"
+        }
+      ],
+      "asOfSec": 1724998440,
+      "source": "jobs"
+    },
+    "jobs": [],
+    "history": [],
+    "updatedAt": 1724999580
+  },
+  "connections": {
+    "items": [
+      {
+        "id": "ev-01",
+        "atMs": 1724998500000,
+        "receivedAt": 1724998500000,
+        "source": "window",
+        "userId": "u-01",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.8.0",
+        "osVersion": "15.6",
+        "kind": "connectFail",
+        "node": null,
+        "stage": "handshake",
+        "outcome": "fail",
+        "code": "TLS_HANDSHAKE_TIMEOUT",
+        "error": "timeout after 10s",
+        "elapsedMs": 10021,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国联通",
+        "edgeCountry": "CN",
+        "edgeRegion": "江苏",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-02",
+        "atMs": 1724998620000,
+        "receivedAt": 1724998620000,
+        "source": "window",
+        "userId": "u-01",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.8.0",
+        "osVersion": "15.6",
+        "kind": "connectOk",
+        "node": null,
+        "stage": null,
+        "outcome": "ok",
+        "code": null,
+        "error": null,
+        "elapsedMs": 660,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国联通",
+        "edgeCountry": "CN",
+        "edgeRegion": "江苏",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-03",
+        "atMs": 1724997600000,
+        "receivedAt": 1724997600000,
+        "source": "window",
+        "userId": "u-02",
+        "deviceId": "dev-01",
+        "platform": "macos",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "connectOk",
+        "node": null,
+        "stage": null,
+        "outcome": "ok",
+        "code": null,
+        "error": null,
+        "elapsedMs": 310,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国电信",
+        "edgeCountry": "CN",
+        "edgeRegion": "广东",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-04",
+        "atMs": 1724996700000,
+        "receivedAt": 1724996700000,
+        "source": "window",
+        "userId": "u-04",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.7.9",
+        "osVersion": "15.6",
+        "kind": "nodeSwitch",
+        "node": null,
+        "stage": null,
+        "outcome": null,
+        "code": null,
+        "error": null,
+        "elapsedMs": null,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国联通",
+        "edgeCountry": "CN",
+        "edgeRegion": "北京",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-05",
+        "atMs": 1724996520000,
+        "receivedAt": 1724996520000,
+        "source": "window",
+        "userId": "u-04",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.7.9",
+        "osVersion": "15.6",
+        "kind": "connectFail",
+        "node": null,
+        "stage": "dial",
+        "outcome": "fail",
+        "code": "ETIMEDOUT",
+        "error": "dial tcp timeout",
+        "elapsedMs": 8100,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国联通",
+        "edgeCountry": "CN",
+        "edgeRegion": "北京",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-06",
+        "atMs": 1724992800000,
+        "receivedAt": 1724992800000,
+        "source": "window",
+        "userId": "u-06",
+        "deviceId": "dev-01",
+        "platform": "macos",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "connectOk",
+        "node": null,
+        "stage": null,
+        "outcome": "ok",
+        "code": null,
+        "error": null,
+        "elapsedMs": 520,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国移动",
+        "edgeCountry": "CN",
+        "edgeRegion": "湖北",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-07",
+        "atMs": 1724982000000,
+        "receivedAt": 1724982000000,
+        "source": "window",
+        "userId": "u-03",
+        "deviceId": "dev-01",
+        "platform": "macos",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "healthProbeFail",
+        "node": null,
+        "stage": "probe",
+        "outcome": "fail",
+        "code": "EHOSTUNREACH",
+        "error": null,
+        "elapsedMs": 3200,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国移动",
+        "edgeCountry": "CN",
+        "edgeRegion": "浙江",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-08",
+        "atMs": 1724981400000,
+        "receivedAt": 1724981400000,
+        "source": "window",
+        "userId": "u-03",
+        "deviceId": "dev-01",
+        "platform": "macos",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "connectOk",
+        "node": null,
+        "stage": null,
+        "outcome": "ok",
+        "code": null,
+        "error": null,
+        "elapsedMs": 480,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国移动",
+        "edgeCountry": "CN",
+        "edgeRegion": "浙江",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-09",
+        "atMs": 1724906400000,
+        "receivedAt": 1724906400000,
+        "source": "window",
+        "userId": "u-02",
+        "deviceId": "dev-01",
+        "platform": "macos",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "disconnectOk",
+        "node": null,
+        "stage": null,
+        "outcome": null,
+        "code": null,
+        "error": null,
+        "elapsedMs": null,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国电信",
+        "edgeCountry": "CN",
+        "edgeRegion": "广东",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-10",
+        "atMs": 1724892000000,
+        "receivedAt": 1724892000000,
+        "source": "window",
+        "userId": "u-01",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.8.0",
+        "osVersion": "15.6",
+        "kind": "connectFail",
+        "node": null,
+        "stage": "handshake",
+        "outcome": "fail",
+        "code": "REALITY_AUTH_FAIL",
+        "error": "reality auth rejected",
+        "elapsedMs": 1400,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国联通",
+        "edgeCountry": "CN",
+        "edgeRegion": "江苏",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-11",
+        "atMs": 1724812800000,
+        "receivedAt": 1724812800000,
+        "source": "window",
+        "userId": "u-05",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "connectOk",
+        "node": null,
+        "stage": null,
+        "outcome": "ok",
+        "code": null,
+        "error": null,
+        "elapsedMs": 350,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国电信",
+        "edgeCountry": "CN",
+        "edgeRegion": "四川",
+        "edgeViaExit": false
+      },
+      {
+        "id": "ev-12",
+        "atMs": 1724812560000,
+        "receivedAt": 1724812560000,
+        "source": "window",
+        "userId": "u-05",
+        "deviceId": "dev-01",
+        "platform": "windows",
+        "appVersion": "1.8.1",
+        "osVersion": "15.6",
+        "kind": "connectCatalogFailover",
+        "node": null,
+        "stage": null,
+        "outcome": null,
+        "code": "CATALOG_STALE",
+        "error": null,
+        "elapsedMs": null,
+        "delayMs": null,
+        "tcpDelayMs": null,
+        "exitDelayMs": null,
+        "catalogRevision": 41,
+        "edgeAsn": 4837,
+        "edgeAsOrg": "中国电信",
+        "edgeCountry": "CN",
+        "edgeRegion": "四川",
+        "edgeViaExit": false
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1724998620
+  },
+  "errors": {
+    "30d": {
+      "value": [
+        {
+          "dayAt": 1722667200,
+          "category": "握手超时",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1722753600,
+          "category": "握手超时",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1722840000,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1722926400,
+          "category": "握手超时",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723012800,
+          "category": "握手超时",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1723099200,
+          "category": "握手超时",
+          "count": 5,
+          "sample": null
+        },
+        {
+          "dayAt": 1723185600,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1723272000,
+          "category": "握手超时",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723358400,
+          "category": "握手超时",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723444800,
+          "category": "握手超时",
+          "count": 4,
+          "sample": null
+        },
+        {
+          "dayAt": 1723531200,
+          "category": "握手超时",
+          "count": 6,
+          "sample": null
+        },
+        {
+          "dayAt": 1723617600,
+          "category": "握手超时",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1723704000,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1723790400,
+          "category": "握手超时",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723876800,
+          "category": "握手超时",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723963200,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724049600,
+          "category": "握手超时",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1724136000,
+          "category": "握手超时",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724222400,
+          "category": "握手超时",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724308800,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724395200,
+          "category": "握手超时",
+          "count": 4,
+          "sample": null
+        },
+        {
+          "dayAt": 1724481600,
+          "category": "握手超时",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724568000,
+          "category": "握手超时",
+          "count": 4,
+          "sample": null
+        },
+        {
+          "dayAt": 1724654400,
+          "category": "握手超时",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1724740800,
+          "category": "握手超时",
+          "count": 9,
+          "sample": null
+        },
+        {
+          "dayAt": 1724827200,
+          "category": "握手超时",
+          "count": 14,
+          "sample": null
+        },
+        {
+          "dayAt": 1724913600,
+          "category": "握手超时",
+          "count": 22,
+          "sample": null
+        },
+        {
+          "dayAt": 1725000000,
+          "category": "握手超时",
+          "count": 31,
+          "sample": "proxy/vless: failed to handshake with 联通 edge, timeout after 10s"
+        },
+        {
+          "dayAt": 1722667200,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1722753600,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1722840000,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1722926400,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723012800,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723099200,
+          "category": "对方端口没人应答",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1723185600,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723272000,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723358400,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723444800,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723531200,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723617600,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723704000,
+          "category": "对方端口没人应答",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1723790400,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723876800,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723963200,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724049600,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724136000,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724222400,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724308800,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724395200,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724481600,
+          "category": "对方端口没人应答",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724568000,
+          "category": "对方端口没人应答",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724654400,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724740800,
+          "category": "对方端口没人应答",
+          "count": 3,
+          "sample": null
+        },
+        {
+          "dayAt": 1724827200,
+          "category": "对方端口没人应答",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724913600,
+          "category": "对方端口没人应答",
+          "count": 4,
+          "sample": null
+        },
+        {
+          "dayAt": 1725000000,
+          "category": "对方端口没人应答",
+          "count": 1,
+          "sample": "transport/tcp: dial tcp 198.51.100.7:443 connection refused"
+        },
+        {
+          "dayAt": 1722667200,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1722753600,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1722840000,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1722926400,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723012800,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723099200,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723185600,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723272000,
+          "category": "域名解析失败",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1723358400,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723444800,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723531200,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723617600,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723704000,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723790400,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1723876800,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1723963200,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724049600,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724136000,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724222400,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724308800,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724395200,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724481600,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724568000,
+          "category": "域名解析失败",
+          "count": 2,
+          "sample": null
+        },
+        {
+          "dayAt": 1724654400,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1724740800,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724827200,
+          "category": "域名解析失败",
+          "count": 0,
+          "sample": null
+        },
+        {
+          "dayAt": 1724913600,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": null
+        },
+        {
+          "dayAt": 1725000000,
+          "category": "域名解析失败",
+          "count": 1,
+          "sample": "dns: lookup api.example.com no such host"
+        }
+      ],
+      "asOfSec": 1724998440,
+      "source": "jobs"
+    }
+  },
+  "history": {
+    "items": [
+      {
+        "at": 1724999580,
+        "verdict": "degraded",
+        "health": "劣化",
+        "tone": "warn",
+        "reason": "联通去程成功率掉到 76%，电信移动正常",
+        "source": "engine",
+        "rulesVersion": 3
+      },
+      {
+        "at": 1724481600,
+        "verdict": "ok",
+        "health": "正常",
+        "tone": "ok",
+        "reason": "三网都连得上",
+        "source": "engine",
+        "rulesVersion": 3
+      },
+      {
+        "at": 1723358400,
+        "verdict": "blocked",
+        "health": "被墙",
+        "tone": "sev",
+        "reason": "大陆三网都测不通，换过一次地址",
+        "source": "engine",
+        "rulesVersion": 2
+      },
+      {
+        "at": 1723185600,
+        "verdict": "ok",
+        "health": "正常",
+        "tone": "ok",
+        "reason": "三网都连得上",
+        "source": "engine",
+        "rulesVersion": 2
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1724999580
+  },
+  "jobs": {
+    "items": [
+      {
+        "id": "job-01",
+        "type": "xray_error_digest",
+        "executor": "hub",
+        "status": "succeeded",
+        "subjectType": "node",
+        "subjectId": "Tokyo · Fuji",
+        "params": {},
+        "attempts": 1,
+        "maxAttempts": 3,
+        "idempotencyKey": "idem-job-01",
+        "requestedBy": "owner@tono.example",
+        "incidentId": null,
+        "notBefore": 1724996400,
+        "expiresAt": 1725000900,
+        "leasedUntil": null,
+        "resultSummary": "取回 7 天报错，握手超时最多",
+        "createdAt": 1724998440,
+        "updatedAt": 1724998560,
+        "finishedAt": 1724998560
+      },
+      {
+        "id": "job-02",
+        "type": "node_probe",
+        "executor": "hub",
+        "status": "succeeded",
+        "subjectType": "node",
+        "subjectId": "Tokyo · Fuji",
+        "params": {},
+        "attempts": 1,
+        "maxAttempts": 3,
+        "idempotencyKey": "idem-job-02",
+        "requestedBy": "owner@tono.example",
+        "incidentId": null,
+        "notBefore": 1724996400,
+        "expiresAt": 1725000900,
+        "leasedUntil": null,
+        "resultSummary": "联通丢包 4.2%，电信移动正常",
+        "createdAt": 1724982000,
+        "updatedAt": 1724982240,
+        "finishedAt": 1724982240
+      },
+      {
+        "id": "job-03",
+        "type": "identity_sync",
+        "executor": "hub",
+        "status": "failed",
+        "subjectType": "node",
+        "subjectId": "Tokyo · Fuji",
+        "params": {},
+        "attempts": 1,
+        "maxAttempts": 3,
+        "idempotencyKey": "idem-job-03",
+        "requestedBy": "owner@tono.example",
+        "incidentId": null,
+        "notBefore": 1724996400,
+        "expiresAt": 1725000900,
+        "leasedUntil": null,
+        "resultSummary": "这台机器没应答，账号没写进去",
+        "createdAt": 1724892000,
+        "updatedAt": 1724892120,
+        "finishedAt": 1724892120
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1724998560
+  },
+  "retirePreview": {
+    "expectedRevision": 41,
+    "currentRevision": 41,
+    "affectedUsers": [
+      {
+        "userId": "u-01",
+        "lastSeenAt": 1724999850
+      },
+      {
+        "userId": "u-02",
+        "lastSeenAt": 1724999850
+      },
+      {
+        "userId": "u-04",
+        "lastSeenAt": 1724988300
+      },
+      {
+        "userId": "u-06",
+        "lastSeenAt": 1724999850
+      }
+    ],
+    "warnings": [],
+    "canRetire": true
+  }
+}

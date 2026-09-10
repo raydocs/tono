@@ -1,0 +1,145 @@
+{
+  "items": [
+    {
+      "name": "Preview Catalog-only",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "retired",
+      "catalogListed": false,
+      "region": null,
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 0,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": null,
+          "used": null,
+          "pct": null,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": null,
+          "cycleEnd": null,
+          "counts": "in_out"
+        },
+        "asOfSec": null,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "komari"
+      },
+      "renewsAt": null,
+      "expiresAt": null,
+      "choreCount": 5,
+      "incidentCount": 0,
+      "updatedAt": 1724999918
+    },
+    {
+      "name": "Preview Seoul",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": null,
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 0,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": 536870912000,
+          "used": 0,
+          "pct": 0,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": 1723790348,
+          "cycleEnd": 1726382348,
+          "counts": "in_out"
+        },
+        "asOfSec": 1725000000,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": 1724999948,
+        "source": "komari"
+      },
+      "renewsAt": 1725172748,
+      "expiresAt": null,
+      "choreCount": 4,
+      "incidentCount": 1,
+      "updatedAt": 1724999918
+    },
+    {
+      "name": "Preview Tokyo",
+      "verdict": "unknown",
+      "health": "未测",
+      "tone": "unk",
+      "reason": null,
+      "lifecycle": "unlisted",
+      "catalogListed": false,
+      "region": null,
+      "provider": "synthetic",
+      "occupancy": {
+        "value": 1,
+        "asOfSec": 1724999918,
+        "source": "telemetry"
+      },
+      "quota": {
+        "value": {
+          "quota": 1099511627776,
+          "used": 0,
+          "pct": 0,
+          "projectedExhaustAt": null,
+          "level": "ok",
+          "cycleKind": "manual",
+          "cycleStart": 1723790348,
+          "cycleEnd": 1726382348,
+          "counts": "in_out"
+        },
+        "asOfSec": 1725000000,
+        "source": "profile"
+      },
+      "forwardWorst": {
+        "value": null,
+        "asOfSec": null,
+        "source": "telemetry"
+      },
+      "returnWorst": {
+        "value": null,
+        "asOfSec": 1724999948,
+        "source": "komari"
+      },
+      "renewsAt": 1725863948,
+      "expiresAt": null,
+      "choreCount": 4,
+      "incidentCount": 0,
+      "updatedAt": 1724999918
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000000,
+  "total": 3
+}

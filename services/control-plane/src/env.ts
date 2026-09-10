@@ -53,6 +53,9 @@ export interface Env {
   RATE_LIMIT_TELEMETRY_IP_HOUR?: string;
   RATE_LIMIT_TELEMETRY_USER_HOUR?: string;
   RATE_LIMIT_TELEMETRY_USER_DAY?: string;
+  RATE_LIMIT_FAILURE_IP_HOUR?: string;
+  RATE_LIMIT_FAILURE_USER_HOUR?: string;
+  RATE_LIMIT_FAILURE_USER_DAY?: string;
   TELEMETRY_RETENTION_SECONDS?: string;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
@@ -61,6 +64,12 @@ export interface Env {
   // inventory here. Optional: unset means ingest returns 503 and /ops/live
   // still falls back to the legacy Access-protected hostnames.
   OPS_COLLECTOR_TOKEN?: string;
+  // Comma-separated hostnames sendPending may POST to. Unset uses the
+  // telegram / feishu / slack defaults in runOpsCron.
+  ALERT_WEBHOOK_ALLOWED_HOSTS?: string;
+  ALERT_TELEGRAM_BOT_TOKEN?: string;
+  // '0' skips audit-log traffic parse on ingest. Unset / any other value parses.
+  OPS_TRAFFIC_PARSE?: string;
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_REQUEST_DAY?: string;
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY?: string;
   ROUTING_RESEARCH_RETENTION_SECONDS?: string;

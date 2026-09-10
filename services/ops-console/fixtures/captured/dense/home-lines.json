@@ -1,0 +1,52 @@
+{
+  "items": [
+    {
+      "id": "id_91319de650a8077a",
+      "proxyName": "Preview Home Alpha",
+      "displayName": "Preview Home Alpha",
+      "status": "active",
+      "isp": null,
+      "region": null,
+      "providerAccountId": null,
+      "price": null,
+      "currency": null,
+      "billingKind": null,
+      "bundleBytes": null,
+      "cycleStart": null,
+      "cycleEnd": null,
+      "expiresAt": null,
+      "meterSource": null,
+      "usage": {
+        "value": {
+          "bytesUp": 1048576,
+          "bytesDown": 8388608,
+          "users": 1,
+          "source": "manual"
+        },
+        "asOfSec": 1724999877,
+        "source": "manual"
+      },
+      "probe": {
+        "value": {
+          "alive": 1,
+          "total": 1,
+          "uptimeRatio": 1,
+          "status": "alive"
+        },
+        "asOfSec": 1724999700,
+        "source": "collector"
+      },
+      "boundUsers": {
+        "value": 1,
+        "asOfSec": 1725000001,
+        "source": "manual"
+      },
+      "notes": "Synthetic documentation address only",
+      "createdAt": 1722407937,
+      "updatedAt": 1724999970
+    }
+  ],
+  "nextCursor": null,
+  "updatedAt": 1725000001,
+  "total": 1
+}

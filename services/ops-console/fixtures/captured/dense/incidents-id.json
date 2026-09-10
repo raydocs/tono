@@ -1,0 +1,65 @@
+{
+  "incident": {
+    "id": "id_0d63732b05911258",
+    "dedupeKey": "id_ac21edfc20677ad4",
+    "kind": "node_blocked",
+    "subjectType": "node",
+    "subjectId": "Preview Seoul",
+    "severity": "warn",
+    "status": "open",
+    "tone": "warn",
+    "title": "Preview Seoul 被墙",
+    "summary": null,
+    "parentIncidentId": null,
+    "rulesVersion": 1,
+    "impactCount": 2,
+    "evidence": [],
+    "openedAt": 1724996337,
+    "lastSeenAt": 1724999940,
+    "ackedAt": null,
+    "snoozedUntil": null,
+    "resolvedAt": null
+  },
+  "events": {
+    "items": [
+      {
+        "id": "id_500ab635e7f93a1b",
+        "incidentId": "id_0d63732b05911258",
+        "at": 1724996337,
+        "type": "opened",
+        "actor": null,
+        "note": "Synthetic open"
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1725000001,
+    "total": 1
+  },
+  "jobs": {
+    "items": [],
+    "nextCursor": null,
+    "updatedAt": 1725000001,
+    "total": 0
+  },
+  "deliveries": {
+    "items": [
+      {
+        "id": "id_5e5e0325e046cccb",
+        "ruleId": "id_90751b11e6c6844a",
+        "incidentId": "id_0d63732b05911258",
+        "dedupeKey": "id_2be2ec870589a9d5",
+        "transition": "open",
+        "status": "sent",
+        "channel": "webhook",
+        "target": "https://hooks.example.test/preview",
+        "attempts": 1,
+        "error": null,
+        "at": 1724996937,
+        "deliveredAt": 1724996947
+      }
+    ],
+    "nextCursor": null,
+    "updatedAt": 1725000001,
+    "total": 1
+  }
+}
