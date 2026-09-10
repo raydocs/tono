@@ -33,4 +33,5 @@ export * from './contract/customers';
 export * from './contract/operations';
 export * from './contract/followups';
 export * from './contract/assets';
+export * from './contract/ledger';
 export * from './contract/route-table';

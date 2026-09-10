@@ -18,6 +18,7 @@ function stepMs(report: OpsCronReport) {
     jobs: report.jobs.ms,
     quota: report.quota.ms,
     daily: report.daily.ms,
+    fx: report.fx.ms,
     retention: report.retention.ms,
   };
 }
@@ -66,7 +67,14 @@ async function seedAlertRule() {
 
 describe('runOpsCron', () => {
   beforeEach(async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('ok', { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('api.frankfurter.app')) {
+        const base = new URL(url).searchParams.get('from') ?? 'USD';
+        return Response.json({ amount: 1, base, date: '2026-09-10', rates: { CNY: 7.2 } });
+      }
+      return new Response('ok', { status: 200 });
+    }));
   });
 
   afterEach(() => {
@@ -98,6 +106,7 @@ describe('runOpsCron', () => {
     expect(report.jobs.expired).toBe(1);
     expect(report.quota.ok).toBe(true);
     expect(report.daily.ok).toBe(true);
+    expect(report.fx.ok).toBe(true);
     expect(report.retention.ok).toBe(true);
     for (const ms of Object.values(stepMs(report))) {
       expect(ms).toBeGreaterThanOrEqual(0);
@@ -172,6 +181,7 @@ describe('runOpsCron', () => {
     expect(report.jobs.expired).toBe(1);
     expect(report.quota.ok).toBe(true);
     expect(report.daily.ok).toBe(true);
+    expect(report.fx.ok).toBe(true);
     expect(report.retention.ok).toBe(true);
     const expired = await db().prepare(
       'SELECT status FROM ops_node_jobs WHERE id = ?',

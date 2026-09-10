@@ -53,6 +53,9 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM ops_customer_status').run();
   await env.DB.prepare('DELETE FROM ops_customer_projection_cursor').run();
   await env.DB.prepare('DELETE FROM ops_cron_state').run();
+  await env.DB.prepare('DELETE FROM ops_ledger_entries').run();
+  await env.DB.prepare('DELETE FROM ops_month_close').run();
+  await env.DB.prepare('DELETE FROM ops_fx_rates').run();
   await env.DB.prepare('DELETE FROM ops_audit').run();
   await env.DB.prepare('DELETE FROM provider_accounts').run();
 

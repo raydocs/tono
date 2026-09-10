@@ -62,6 +62,14 @@
 | `GET alert-deliveries` | `ListDto<AlertDeliveryDto>` |
 | `GET audit?before&beforeId&limit&targetId&actorEmail` | `AuditListDto` (`{ entries, hasMore, nextBefore, nextBeforeId }`) |
 | `GET system/health` | `SystemHealthDto`（`backfill` 为 `BackfillHealthDto`，flatten/project 游标都追上后为 `null`） |
+| `GET ledger?month=` | `ListDto<LedgerEntryDto>`，最新在前。`month` 为 `YYYY-MM`，缺省当月 |
+| `POST ledger` | 201 `LedgerEntryDto`。body `{ kind, category, subjectType, subjectId?, amountMinor, currency, month, paidAt?, note?, fxDate? }`。`cnyMinor` 按 `fxDate`（缺省当天）已存汇率换算；非 CNY 且无汇率时 409 `FX_RATE_MISSING`。目标月已锁定则 409 `MONTH_CLOSED` |
+| `PATCH ledger/{id}` | `LedgerEntryDto`。只接受 `{ note?, paidAt?, subjectType?, subjectId? }`；月已锁定 409 `MONTH_CLOSED` |
+| `POST ledger/{id}/reverse` | 201 `LedgerEntryDto`。在当前月写入一笔相反效果（`cnyMinor` 取反），`reverses` / 原行 `reversedBy` 互指。锁定月也允许——这就是冲正的意义 |
+| `GET months/{month}` | `MonthSummaryDto`。收入 = Σ(revenue+credit)−Σ(refund)；成本 = Σ cost；客户成本 = 名下 Claude/ChatGPT 账号成本 + 该月该节点/线路字节占比摊到的 server/home_line 成本。用量缺测或有字节无成本时 `pending: true` 且客户 `marginCnyMinor` 为 null |
+| `POST months/{month}/close` | `MonthSummaryDto`。body `{ notes? }`。已锁定 409 `MONTH_CLOSED`，写入当时的汇总数字 |
+| `GET months/{month}/export.csv` | `text/csv; charset=utf-8`，UTF-8 BOM，一行一笔 + 合计行。不是 JSON，不进 GET 检查器表 |
+| `GET fx?day=&base=` | `FxRateDto`。返回该日或更早最近一条（自带 `day`）。`base=CNY` 时汇率 1、不查表。没有更早记录 409 `FX_RATE_MISSING` |
 
 `PATCH nodes/{name}/profile` 字段全可选（未知键 400）：`provider` ≤80、`providerAccountId`（须存在于 `provider_accounts` 或 null）、`region` ≤80、`lineTags` 最多 8×32、`port` 1..65535、`price` ≥0、`currency` 三字母、`billingCycle` 1..3660 天、`renewsAt`/`expiresAt` unix 秒、`notes` ≤2000、`quota` 为 `{ quotaBytes, cycleKind, cycleAnchorDay, counts }` 或 `null`（null 清周期）。无 profile 行时，节点只要在 catalog/status 里就会补一行。写 `ops_audit` `node.profile.update`。
 
@@ -69,6 +77,8 @@
 
 采集侧（`/api/v1/ops-ingest/*`）与客户端侧（`/api/v1/telemetry/failures`）不归这份合同管，它们有各自的入站校验。`POST /api/v1/telemetry/failures` 与周期窗口事件（`telemetryEventStringKeys`）接受可选 `attemptId`（≤64 字），写入 `connection_events.attempt_id`；失败即报与随后窗口里的同一次尝试 `(user_id, attempt_id)` 只留一行（两边都是 `INSERT OR IGNORE`）。客户投影先写 `ops_device_status`，再按规则合成 `ops_customer_status`：`connected`＝任一台有新鲜心跳的已连接设备，`selected_server`＝最近见到的已连接设备的节点，`last_seen_at`＝max，`app_version`＝近 30 天各设备的最低版本，`last_fail_*`＝各设备最近一次，`fails_30m`＝求和。
 现有 `/ops/dashboard|fleet-nodes|activity|live|users|metrics|usage-hours` 在切换前保持不动。
+
+账目写入都记 `ops_audit`（`ledger.create` / `ledger.update` / `ledger.reverse` / `month.close`）。汇率由 cron 的 `fx` 步每天向 `https://api.frankfurter.app/latest?from=<BASE>&to=CNY` 拉 USD/EUR/GBP/JPY/HKD；失败则该步 `ok: false`，已存汇率不动。告警 webhook 主机白名单不管这条：那是防 SSRF 的，这条是 Worker 自己对写死主机的空 GET，不带客户或账本数据。
 
 `GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；事故 `closure` 为 `verified|false_positive|manual`（可空）；跟进 `kind` 为 `reply|await_customer|callback|verified|note`，主体 `user|incident|node`；版本档 `current|behind_one|behind_more|unreported`。
 
