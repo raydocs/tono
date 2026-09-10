@@ -1,5 +1,9 @@
 // 客户 and 客户 360.
+import { customerActionCopy } from './customers-actions';
+
 export const customerCopy = {
+  // 读出来的名词在这一份，按下去的动作在另一份：一页的词表长到要翻页就分家。
+  ...customerActionCopy,
   customerHealth: {
     unreachable: '连不上',
     unstable: '不稳',
@@ -47,13 +51,6 @@ export const customerCopy = {
   usageNoQuota: (used: string) => `已用 ${used} · 未设额度`,
   emptyCustomers: '没有客户',
 
-  customerActions: {
-    diagnose: '发起远程诊断',
-    resend: '重发凭证',
-    changeExpiry: '改到期',
-    suspend: '停用',
-    blocked: '接口未接入',
-  } as const,
   customerSections: {
     now: '现在',
     timeline: '连接时间线',

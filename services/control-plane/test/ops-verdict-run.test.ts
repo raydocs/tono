@@ -70,4 +70,20 @@ describe('buildVerdictInput', () => {
     const fuji = input.nodes.find((n) => n.name === 'Tokyo · Fuji');
     expect(fuji?.occupancy).toBe(1);
   });
+
+  it('does not conjure a node out of a client event that names an exit by its id', async () => {
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, status, created_at, updated_at)
+       VALUES('p-kite', 'Tokyo · Kite', 'active', ?, ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      `INSERT INTO connection_events(
+         id, at_ms, received_at, source, user_id, platform, kind, node, stage, code
+       ) VALUES(?, ?, ?, 'failure', 'u-x', 'macos', 'connectFail', ?, 'handshake', 'ETIMEDOUT')`,
+    ).bind('ev-uuid', (NOW - 60) * 1000, NOW - 60, '9B20CAD5-AB18-4175-8A4C-447E8237B58D').run();
+    const input = await buildVerdictInput(env as unknown as Env, NOW, 'all');
+    const names = input.nodes.map((n) => n.name);
+    expect(names).toContain('Tokyo · Kite');
+    expect(names.some((n) => /^[0-9A-F]{8}-/.test(n))).toBe(false);
+  });
 });

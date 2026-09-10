@@ -7,6 +7,7 @@ import { defineConfig, type Plugin, type ViteDevServer } from 'vite';
 import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
+import { createCustomerFixtures } from './fixtures/routes/customers';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
@@ -204,6 +205,8 @@ function opsBody(file: OpsFile, parts: string[]): unknown {
 function fixturesPlugin(): Plugin {
   /** The six 设置 resources, mutable, with their own store per session. */
   const settingsFixtures = createSettingsFixtures(rootDir);
+  /** The 客户 writes: onboarding, expiry, the home binding, devices, Claude. */
+  const customerFixtures = createCustomerFixtures();
   return {
     name: 'ops-fixtures',
     configureServer(server: ViteDevServer) {
@@ -219,6 +222,17 @@ function fixturesPlugin(): Plugin {
         // 节点详情 owns its own reads, its two writes and the mutable store
         // behind them; everything else falls through to the branches below.
         if (serveNodeRoutes({ req, res, url, route, set, session: pickSession(url, set === 'error' ? 'default' : set) })) return;
+        // 客户 goes before 设置: `home-exits/assign` starts with a resource the
+        // settings routes claim, and only this side knows what a binding is.
+        if (set !== 'error' && customerFixtures({
+          req,
+          res,
+          route,
+          url,
+          session: pickSession(url, set),
+          empty: set === 'empty',
+          file: () => opsFile(fileNames(set).customers, pickSession(url, set)),
+        })) return;
         if (set !== 'error' && settingsFixtures({
           req, res, route, url, session: pickSession(url, set), empty: set === 'empty',
         })) return;

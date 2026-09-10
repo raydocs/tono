@@ -407,13 +407,16 @@ export async function buildVerdictInput(
   ]);
   const quality = new Map((live.quality?.nodes ?? []).map((node) => [String(node.name), node]));
   const agents = new Map((live.agents ?? []).map((node) => [String(node.name), node]));
+  // A machine is judged only if something that knows machines names it: the
+  // sweep, the agent copy, the catalog or a profile. Client events and old
+  // status rows contribute facts about known names, never membership — a
+  // client that reports an exit by its device-scoped id would otherwise
+  // conjure a healthy-looking node called 9B20CAD5-… out of nothing.
   const names = new Set<string>([
     ...quality.keys(),
     ...agents.keys(),
     ...(catalog ?? []),
     ...profiles.keys(),
-    ...prior.keys(),
-    ...fails.keys(),
   ]);
   const nodes: NodeVerdictInput[] = [...names].sort().map((name) => {
     const q = quality.get(name);

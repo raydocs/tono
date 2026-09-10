@@ -45,12 +45,12 @@ test.describe('customers page', () => {
     await open(page, '/customers/u-04');
 
     await expect(page.getByRole('heading', { name: 'wang.tao@example.com' })).toBeVisible();
-    // The health word, and the four header actions that have no endpoint yet.
+    // The health word, and the four header actions, all of them now wired.
     await expect(page.getByText('连不上').first()).toBeVisible();
-    await expect(page.getByRole('button', { name: '发起远程诊断' }).first()).toBeDisabled();
+    await expect(page.getByRole('button', { name: '发起远程诊断' }).first()).toBeEnabled();
 
     // Every block the plan asks for, in the plan's order.
-    for (const heading of ['现在', '连接时间线', '使用时段', '流量去向', '服务使用', '按运营商的路径', '设备']) {
+    for (const heading of ['现在', '连接时间线', '使用时段', '流量去向', '服务使用', '按运营商的路径', '设备', '家宽', 'Claude 号']) {
       await expect(page.getByRole('heading', { name: heading })).toBeVisible();
     }
     await settle(page);
@@ -75,7 +75,8 @@ test.describe('customers page', () => {
    */
   test('the addresses are not clipped, and the whole one is there to read', async ({ page }) => {
     await open(page, '/customers');
-    await expect(page.locator('tbody tr').first().locator('td').nth(1).locator('div'))
+    // The first cell is the selection box; the address is the one after it.
+    await expect(page.locator('tbody tr').first().locator('td').nth(2).locator('div'))
       .toHaveAttribute('title', /@/);
 
     const table = await page.evaluate(() => {
@@ -83,7 +84,7 @@ test.describe('customers page', () => {
         .map((th) => ({ head: th.textContent ?? '', width: th.getBoundingClientRect().width }));
       const clipped = [...document.querySelectorAll('tbody tr')]
         .map((tr) => {
-          const span = tr.querySelectorAll('td')[1].querySelector('span');
+          const span = tr.querySelectorAll('td')[2].querySelector('span');
           return span ? span.scrollWidth - span.clientWidth : 0;
         })
         .reduce((worst, over) => Math.max(worst, over), 0);
