@@ -210,7 +210,7 @@
 - 文件：`tooling/scripts/provision-reality-node.rb`（现技能明确「不要为 Reality 开 UDP」——hy2 是**另一次**、显式的 `--hy2` 路径，默认不加）；systemd 单元、证书 10 年自签带 SAN，指纹写回私有 YAML。UFW 仍不擅自改。
 - 密码派生：目录块仍用 `{{TONO_CLIENT_UUID}}`。节点 hy2 走 **`auth.type: http`**（`127.0.0.1:18765`），allowlist 是全部 VLESS UUID 的 SHA-256，外加本机遗留共享口令的 hash（ops 探测仍能用）。禁止 `auth.type: password` 只吃第一个 UUID；禁止 `command`（口令进 `ps`）。已有手工 hy2 用 `--hy2-sync-identities`（默认 dry-run；`--apply` 只写 hy2 鉴权并重启 `tono-hy2` / `tono-hy2-auth`）。**不要**对 Dedirock / 东京再跑 `--hy2 --apply`。
 - 唯一测试：provisioner dry-run 在「未传 `--hy2`」时仍然不开放 UDP；hy2 远程脚本不含 `clients[0]["id"]` / `password: $password`，含 `type: http` 与 `sync-identities`。
-- 本分支已落地 opt-in 补装路径与身份同步。Dedirock 要 `--apply` 之后，客户 UUID 才能登 hy2；东京 UDP 仍被商家拦，不要在那台上 apply。
+- 本分支已落地 opt-in 补装路径与身份同步。**Dedirock 已 `--hy2-sync-identities --apply`（2026-09-11）：** allowlist 43，xray PID 658 未换；本机 UUID hy2 ping 通、随机口令拒；杭州只出站 5/5 且经 hy2 到 Google 通。东京 UDP 仍被商家拦，不要在那台上 apply。生产目录仍不 PUT hy2。家宽移动未测。
 
 **G2.6 Windows 准入 hy2** — Grok · M
 

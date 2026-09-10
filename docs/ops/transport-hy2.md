@@ -108,4 +108,22 @@
 - `--hy2-sync-identities` 默认 dry-run；`--apply` 等 18765 listen 再重启 `tono-hy2`，**不 stop / 不改 `tono-xray`，不覆盖已有 `tono-hy2.service` 单元**。
 - 口令与 UUID 不准拷出盒子、不准进仓库。机上用 UUID 打 HTTP 鉴权；随机口令必须拒。
 
-东京不要跑 `--apply`：入站 UDP 仍被商家拦，改鉴权也测不出客户路径。生产目录仍不 PUT hy2 块。
+### Dedirock 已 apply（2026-09-10 / 11）
+
+dry-run：`{"xrayClients":43,"xrayPid":658,"xrayUntouched":true,"dryRun":true}`（42 个 VLESS UUID + 1 个遗留 ops 口令）。
+
+`--apply`：allowlist 43；`tono-xray` PID **658 未换**；`tono-hy2.service` ExecStart 仍是 `/opt/tono-hy2/bin/hysteria server -c /opt/tono-hy2/config.yaml`；`tono-hy2-auth` 听 `127.0.0.1:18765`。
+
+本机（口令不离盒）：
+
+| 探测 | 结果 |
+|---|---|
+| HTTP：已知 VLESS UUID | 接受 |
+| HTTP：随机口令 | 拒绝 |
+| `hysteria ping` 127.0.0.1 + UUID | 通，到 `1.1.1.1:443` |
+| 同上 + 遗留 ops 口令 | 通 |
+| 同上 + 随机口令 | 拒 |
+
+杭州 `47.110.84.71` 只出站、`ss-server` 仍占 TCP 443 / UDP 20000：hy2 握手 **5/5**，经 hy2 ping `1.1.1.1:443` 约 150ms，`google.com:443` 通。探测文件用完已删。
+
+东京不要跑 `--apply`：入站 UDP 仍被商家拦，改鉴权也测不出客户路径。生产目录仍不 PUT hy2 块。家宽移动还没走 Dedirock hy2。

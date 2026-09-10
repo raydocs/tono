@@ -330,7 +330,7 @@ sync_identities() {
   local count
   count=$(write_allowlist)
   systemctl daemon-reload
-  systemctl enable --now "$AUTH_SERVICE_NAME" >/dev/null
+  systemctl enable --now "$AUTH_SERVICE_NAME" >/dev/null 2>&1
   wait_localhost_tcp 18765 "hy2 auth checker"
   if ! patch_hy2_config_http_auth "$conf"; then
     mv -f "$backup" "$conf"
@@ -541,9 +541,9 @@ EOF
   ln -s "$release" "$INSTALL_ROOT/current.new"
   mv -T "$INSTALL_ROOT/current.new" "$INSTALL_ROOT/current"
   systemctl daemon-reload
-  systemctl enable --now "$AUTH_SERVICE_NAME" >/dev/null
+  systemctl enable --now "$AUTH_SERVICE_NAME" >/dev/null 2>&1
   wait_localhost_tcp 18765 "hy2 auth checker"
-  systemctl enable --now "$SERVICE_NAME" >/dev/null
+  systemctl enable --now "$SERVICE_NAME" >/dev/null 2>&1
 
   local ready=false
   for _ in $(seq 1 50); do
