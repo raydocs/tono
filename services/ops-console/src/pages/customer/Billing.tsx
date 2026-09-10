@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react';
 import type { CustomerBillingDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
+import { EmptyLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { CLAUDE_PLAN, customerApi, type UserPatch } from '@/lib/api-customer-actions';
+import { ledgerApi } from '@/lib/api-ledger';
+import { nowSec } from '@/lib/clock';
 import { formatDate, splitBytes } from '@/lib/display';
+import { customerRow, formatCny, monthOf } from '@/lib/ledger';
 import { fromDateInput, toDateInput } from '@/lib/settings';
 import { shown } from '@/lib/sources';
+import { useResource } from '@/lib/use-resource';
 import { measured } from '@/components/ops/measured';
 import { useAsk, WriteError } from './ask';
 import { FieldGrid, FormFooter, SelectField, TextField } from '../settings/form';
@@ -79,6 +84,8 @@ export function Billing({
         />
       </div>
 
+      <LedgerFacts userId={userId} />
+
       <WriteError message={ask.error} />
 
       <ActionRow>
@@ -107,6 +114,43 @@ export function Billing({
         onChanged={onChanged}
       />
     </FoldedSection>
+  );
+}
+
+/**
+ * This month's money for this one customer: what they paid, what they cost,
+ * and the difference — or the word for a difference nobody can compute.
+ *
+ * The cost side is an allocation, not an invoice: it is this customer's share
+ * of the machines they sat on. When one of those machines has not been
+ * reconciled for the month, the share is a guess, so the margin says so in
+ * words and no number is printed. It reads off the same month summary the
+ * ledger page shows, so the two surfaces cannot disagree, and a customer with
+ * nothing on the month's ledger says exactly that rather than three zeroes.
+ */
+function LedgerFacts({ userId }: { userId: string }) {
+  const month = monthOf(nowSec());
+  const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
+  if (summary.status !== 'ready') {
+    return (
+      <EmptyLine message={summary.status === 'error' ? summary.message : copy.loading} />
+    );
+  }
+  const row = customerRow(summary.data, userId);
+  if (row === null) return <EmptyLine message={copy.ledger.customerNone} />;
+  const at = summary.data.updatedAt;
+  const say = (value: string | null) => measured(value, at, copy.ledger.source);
+  return (
+    <div className="grid gap-x-8 sm:grid-cols-3">
+      <Fact label={copy.ledger.customerRevenue} measured={say(formatCny(row.revenueCnyMinor))} />
+      <Fact label={copy.ledger.customerCost} measured={say(formatCny(row.costCnyMinor))} />
+      <Fact
+        label={copy.ledger.customerMargin}
+        measured={say(row.marginCnyMinor === null
+          ? copy.ledger.pending
+          : formatCny(row.marginCnyMinor))}
+      />
+    </div>
   );
 }
 

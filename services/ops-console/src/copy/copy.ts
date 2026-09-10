@@ -10,6 +10,7 @@
  * the directory itself.
  */
 import { clientCopy } from './clients';
+import { ledgerCopy } from './ledger';
 import { nodeDetailCopy } from './node-detail';
 import { settingsCopy } from './settings';
 import { settingsPublishCopy } from './settings-publish';
@@ -23,6 +24,7 @@ export const copy = {
   ...todayCopy,
   ...clientCopy,
   settings: { ...settingsCopy, ...settingsPublishCopy },
+  ...ledgerCopy,
   ...nodeDetailCopy,
 } as const;
 

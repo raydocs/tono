@@ -7,10 +7,14 @@ import { Section } from '@/components/ops/Section';
 import { Value } from '@/components/ops/Value';
 import { absent, measured, type Measured } from '@/components/ops/measured';
 import { copy } from '@/copy/copy';
+import { ledgerApi } from '@/lib/api-ledger';
+import { nowSec } from '@/lib/clock';
 import { formatDate, formatWhenAgo } from '@/lib/display';
+import { formatPerGb, monthOf, nodeRow } from '@/lib/ledger';
 import { formatBillingCycle, formatDeadline, formatMoney } from '@/lib/node-detail';
 import { usePrivacy } from '@/lib/privacy';
 import { sourceWord } from '@/lib/sources';
+import { useResource } from '@/lib/use-resource';
 
 /**
  * The flat facts about the machine, all of them hand-kept.
@@ -135,7 +139,13 @@ export function NodeBindings({ bindings }: { bindings: NodeBindingsDto }) {
  * one drawn here: two exhaustion dates for one machine is how a console starts
  * arguing with itself.
  */
-export function NodeQuota({ quota }: { quota: ContractMeasured<NodeQuotaDto> }) {
+export function NodeQuota({
+  quota,
+  name,
+}: {
+  quota: ContractMeasured<NodeQuotaDto>;
+  name: string;
+}) {
   const row = quota.value;
   const used: Measured<number | null> = measured(row.used, quota.asOfSec, sourceWord(quota.source));
   const cycle = row.cycleStart === null || row.cycleEnd === null
@@ -154,6 +164,36 @@ export function NodeQuota({ quota }: { quota: ContractMeasured<NodeQuotaDto> }) 
         exhaustAtSec={row.projectedExhaustAt}
         className="max-w-[520px]"
       />
+      <div className="max-w-[520px]">
+        <PerGbFact name={name} />
+      </div>
     </Section>
+  );
+}
+
+/**
+ * What a gigabyte off this machine cost this month.
+ *
+ * It is the month's cost for the box divided by what the meter says went
+ * through it, so it is only a number when both halves are agreed. A machine
+ * whose metering is still being reconciled says so in words rather than
+ * dividing by a figure nobody has signed off — a per-GB cost is exactly the
+ * number an operator would use to decide whether to keep renting the box.
+ */
+function PerGbFact({ name }: { name: string }) {
+  const privacy = usePrivacy();
+  const month = monthOf(nowSec());
+  const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
+  const row = summary.status === 'ready' ? nodeRow(summary.data, name) : null;
+  const at = summary.status === 'ready' ? summary.data.updatedAt : null;
+  const value = row === null
+    ? null
+    : row.pending ? copy.ledger.pending : formatPerGb(row.cnyPerGb);
+  return (
+    <Fact
+      label={copy.ledger.perGb}
+      measured={value === null ? absent(copy.ledger.source) : measured(value, at, copy.ledger.source)}
+      render={privacy.money}
+    />
   );
 }
