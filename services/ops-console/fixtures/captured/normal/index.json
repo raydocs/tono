@@ -156,6 +156,16 @@
       "route": "GET /api/v1/ops/system/health",
       "file": "system-health.json",
       "checker": "assertSystemHealth"
+    },
+    {
+      "route": "GET /api/v1/ops/digest",
+      "file": "digest.json",
+      "checker": "assertDigest"
+    },
+    {
+      "route": "GET /api/v1/ops/months/{month}",
+      "file": "months-month.json",
+      "checker": "assertMonthSummary"
     }
   ]
 }

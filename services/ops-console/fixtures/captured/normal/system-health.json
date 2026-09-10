@@ -55,5 +55,19 @@
   "cronLastRunAt": null,
   "cronLastDurationMs": null,
   "cronLastError": null,
+  "cronSteps": null,
+  "backfill": {
+    "windowsTotal": 2,
+    "windowsFlattened": 0,
+    "windowsProjected": 0
+  },
+  "coverage": {
+    "nodesListed": 0,
+    "nodesSweptFresh": 0,
+    "nodesWithAgent": 0,
+    "customersActive": 1,
+    "customersReportedFresh": 1,
+    "asOfSec": 1725000000
+  },
   "updatedAt": 1725000001
 }
