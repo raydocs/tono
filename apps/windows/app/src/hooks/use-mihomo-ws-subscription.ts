@@ -11,7 +11,7 @@ import {
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000]
 const RECONNECT_JITTER = 0.2
-const CONNECT_TIMEOUT_MS = 10_000
+export const CONNECT_TIMEOUT_MS = 10_000
 
 interface SharedSubscriptionOwner {
   handleMessage: (data: string) => void
@@ -24,6 +24,7 @@ interface SharedSubscriptionEntry {
   refs: number
   ws: MihomoWebSocket | null
   reconnectTimer: ReturnType<typeof setTimeout> | null
+  connectWatchdog: ReturnType<typeof setTimeout> | null
   connecting: boolean
   refHolders: Set<MutableRefObject<MihomoWebSocket | null>>
   owners: Set<SharedSubscriptionOwner>
@@ -72,6 +73,7 @@ export const createSharedSubscriptionEntry = (
     refs: 0,
     ws: null,
     reconnectTimer: null,
+    connectWatchdog: null,
     connecting: false,
     refHolders: new Set(),
     owners: new Set(),
@@ -106,6 +108,13 @@ export const createSharedSubscriptionEntry = (
     }
   }
 
+  const clearConnectWatchdog = () => {
+    if (entry.connectWatchdog) {
+      clearTimeout(entry.connectWatchdog)
+      entry.connectWatchdog = null
+    }
+  }
+
   entry.connectWs = async () => {
     if (entry.closed || entry.ws) return
     if (
@@ -124,6 +133,20 @@ export const createSharedSubscriptionEntry = (
     entry.connecting = true
     connectStartedAt = Date.now()
     const attempt = ++connectEpoch
+    clearConnectWatchdog()
+    // connect() can hang forever on a half-open handshake. The tray flyout
+    // has no other caller that re-enters connectWs, so this watchdog is the
+    // only automatic recovery.
+    entry.connectWatchdog = setTimeout(() => {
+      if (attempt !== connectEpoch || entry.closed || entry.ws) return
+      connectEpoch += 1
+      entry.connecting = false
+      entry.connectWatchdog = null
+      clearReconnectTimer()
+      if (!entry.closed) {
+        entry.reconnectTimer = setTimeout(entry.connectWs, nextReconnectDelay())
+      }
+    }, CONNECT_TIMEOUT_MS)
     try {
       const ws = await connect()
       if (attempt !== connectEpoch || entry.closed) {
@@ -179,6 +202,7 @@ export const createSharedSubscriptionEntry = (
       }
     } finally {
       if (attempt === connectEpoch) {
+        clearConnectWatchdog()
         entry.connecting = false
       }
     }
@@ -407,6 +431,10 @@ export const useMihomoWsSubscription = <T>(
         if (entry.reconnectTimer) {
           clearTimeout(entry.reconnectTimer)
           entry.reconnectTimer = null
+        }
+        if (entry.connectWatchdog) {
+          clearTimeout(entry.connectWatchdog)
+          entry.connectWatchdog = null
         }
         sharedSubscriptions.delete(subscriptionCacheKey)
         void closeSharedSocket(entry)
