@@ -21,7 +21,7 @@ const DIST = resolve(ROOT, '../control-plane/public/ops2');
 const SRC = join(ROOT, 'src');
 
 const KB = 1024;
-const BUDGET = {
+export const BUDGET = {
   initialJsGzip: 400 * KB,
   totalJsGzip: 600 * KB,
   srcFileLines: 400,
@@ -40,7 +40,7 @@ function gzipBytes(path) {
   return gzipSync(readFileSync(path), { level: 9 }).length;
 }
 
-function kb(bytes) {
+export function kb(bytes) {
   return `${(bytes / KB).toFixed(1)} KB`;
 }
 
@@ -61,53 +61,88 @@ function initialScripts(html) {
   return [...out];
 }
 
-function distPath(href) {
-  return join(DIST, href.replace(/^\/ops2\//, '').replace(/^\//, ''));
+function distPath(dist, href) {
+  return join(dist, href.replace(/^\/ops2\//, '').replace(/^\//, ''));
 }
 
-const failures = [];
-const lines = [];
+/**
+ * Measure the console against BUDGET. Throws with `code: 'NO_BUILD'` when
+ * dist/index.html is missing — the same message the CLI has always printed.
+ */
+export function measureBudgets({ dist = DIST, src = SRC, root = ROOT } = {}) {
+  const failures = [];
+  const lines = [];
 
-let indexHtml;
-try {
-  indexHtml = readFileSync(join(DIST, 'index.html'), 'utf8');
-} catch {
-  console.error(`check-budgets: no build at ${DIST} — run vite build first.`);
-  process.exit(1);
+  let indexHtml;
+  try {
+    indexHtml = readFileSync(join(dist, 'index.html'), 'utf8');
+  } catch {
+    const error = new Error(`check-budgets: no build at ${dist} — run vite build first.`);
+    error.code = 'NO_BUILD';
+    throw error;
+  }
+
+  const initial = initialScripts(indexHtml)
+    .filter((href) => href.endsWith('.js'))
+    .map((href) => distPath(dist, href));
+  if (initial.length === 0) failures.push('index.html references no module scripts');
+
+  const initialGzip = initial.reduce((sum, path) => sum + gzipBytes(path), 0);
+  lines.push(`initial JS  ${kb(initialGzip).padStart(9)} gzip  / ${kb(BUDGET.initialJsGzip)}  (${initial.length} chunks)`);
+  if (initialGzip > BUDGET.initialJsGzip) {
+    failures.push(`initial JS ${kb(initialGzip)} gzip is over the ${kb(BUDGET.initialJsGzip)} budget`);
+  }
+
+  const allJs = walk(dist).filter((path) => extname(path) === '.js');
+  const totalGzip = allJs.reduce((sum, path) => sum + gzipBytes(path), 0);
+  lines.push(`total JS    ${kb(totalGzip).padStart(9)} gzip  / ${kb(BUDGET.totalJsGzip)}  (${allJs.length} chunks)`);
+  if (totalGzip > BUDGET.totalJsGzip) {
+    failures.push(`total JS ${kb(totalGzip)} gzip is over the ${kb(BUDGET.totalJsGzip)} budget`);
+  }
+
+  const longFiles = walk(src)
+    .filter((path) => ['.ts', '.tsx', '.css'].includes(extname(path)))
+    .filter((path) => !path.includes(`${src}/components/ui/`))
+    .map((path) => ({ path, count: readFileSync(path, 'utf8').split('\n').length }))
+    .filter((row) => row.count > BUDGET.srcFileLines);
+  lines.push(`src files   ${String(longFiles.length).padStart(9)} over ${BUDGET.srcFileLines} lines`);
+  for (const row of longFiles) {
+    failures.push(`${relative(root, row.path)} is ${row.count} lines, over the ${BUDGET.srcFileLines}-line budget`);
+  }
+
+  return {
+    initialGzip,
+    initialChunks: initial.length,
+    totalGzip,
+    totalChunks: allJs.length,
+    longFiles: longFiles.map((row) => ({ path: relative(root, row.path), count: row.count })),
+    BUDGET,
+    lines,
+    failures,
+  };
 }
 
-const initial = initialScripts(indexHtml)
-  .filter((href) => href.endsWith('.js'))
-  .map(distPath);
-if (initial.length === 0) failures.push('index.html references no module scripts');
+function main() {
+  let measured;
+  try {
+    measured = measureBudgets();
+  } catch (error) {
+    if (error && error.code === 'NO_BUILD') {
+      console.error(error.message);
+      process.exit(1);
+    }
+    throw error;
+  }
 
-const initialGzip = initial.reduce((sum, path) => sum + gzipBytes(path), 0);
-lines.push(`initial JS  ${kb(initialGzip).padStart(9)} gzip  / ${kb(BUDGET.initialJsGzip)}  (${initial.length} chunks)`);
-if (initialGzip > BUDGET.initialJsGzip) {
-  failures.push(`initial JS ${kb(initialGzip)} gzip is over the ${kb(BUDGET.initialJsGzip)} budget`);
+  console.log(measured.lines.join('\n'));
+  if (measured.failures.length > 0) {
+    console.error(`\ncheck-budgets: ${measured.failures.length} budget violation(s)`);
+    for (const failure of measured.failures) console.error(`  - ${failure}`);
+    process.exit(1);
+  }
+  console.log('check-budgets: all budgets green');
 }
 
-const allJs = walk(DIST).filter((path) => extname(path) === '.js');
-const totalGzip = allJs.reduce((sum, path) => sum + gzipBytes(path), 0);
-lines.push(`total JS    ${kb(totalGzip).padStart(9)} gzip  / ${kb(BUDGET.totalJsGzip)}  (${allJs.length} chunks)`);
-if (totalGzip > BUDGET.totalJsGzip) {
-  failures.push(`total JS ${kb(totalGzip)} gzip is over the ${kb(BUDGET.totalJsGzip)} budget`);
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  main();
 }
-
-const long = walk(SRC)
-  .filter((path) => ['.ts', '.tsx', '.css'].includes(extname(path)))
-  .filter((path) => !path.includes(`${SRC}/components/ui/`))
-  .map((path) => ({ path, count: readFileSync(path, 'utf8').split('\n').length }))
-  .filter((row) => row.count > BUDGET.srcFileLines);
-lines.push(`src files   ${String(long.length).padStart(9)} over ${BUDGET.srcFileLines} lines`);
-for (const row of long) {
-  failures.push(`${relative(ROOT, row.path)} is ${row.count} lines, over the ${BUDGET.srcFileLines}-line budget`);
-}
-
-console.log(lines.join('\n'));
-if (failures.length > 0) {
-  console.error(`\ncheck-budgets: ${failures.length} budget violation(s)`);
-  for (const failure of failures) console.error(`  - ${failure}`);
-  process.exit(1);
-}
-console.log('check-budgets: all budgets green');
