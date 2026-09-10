@@ -4,6 +4,7 @@ import { Action, ActionRow } from '@/components/ops/Action';
 import { ConfirmDialog } from '@/components/ops/ConfirmDialog';
 import { copy } from '@/copy/copy';
 import { customerApi } from '@/lib/api-customer-actions';
+import { followupApi } from '@/lib/api-followups';
 import { actionsFor, refreshable } from '@/lib/customers';
 import { usePrivacy } from '@/lib/privacy';
 import { useAsk } from './ask';
@@ -65,9 +66,18 @@ export function CustomerHeader({
             title: copy.resendTitle,
             consequence: copy.resendBody(catalogue.length),
             confirm: words.resend,
-            run: () => Promise.all(catalogue.map(
-              (device) => customerApi.queueDeviceAction(device.id, 'refresh_catalog'),
-            )),
+            /* The record writes itself. An operator who re-sends credentials
+               and then has to remember to note it is an operator whose notes
+               are missing exactly the actions that mattered. */
+            run: async () => {
+              await Promise.all(catalogue.map(
+                (device) => customerApi.queueDeviceAction(device.id, 'refresh_catalog'),
+              ));
+              await followupApi.addForCustomer(row.userId, {
+                kind: 'reply',
+                body: copy.followupAuto.resend,
+              });
+            },
           })}
         >
           {words.resend}
@@ -94,6 +104,7 @@ export function CustomerHeader({
 
       <PickDialog
         open={diagnosing}
+        userId={row.userId}
         devices={diagnosable}
         onClose={() => setDiagnosing(false)}
         onChanged={onChanged}
@@ -129,11 +140,13 @@ export function CustomerHeader({
  */
 function PickDialog({
   open,
+  userId,
   devices,
   onClose,
   onChanged,
 }: {
   open: boolean;
+  userId: string;
   devices: readonly CustomerDeviceDto[];
   onClose: () => void;
   onChanged: () => void;
@@ -152,9 +165,13 @@ function PickDialog({
       pending={ask.pending}
       failure={ask.error}
       onConfirm={() => {
-        void ask.run(
-          () => customerApi.queueDeviceAction(chosen.id, 'diagnostic_snapshot'),
-        ).then((done) => {
+        void ask.run(async () => {
+          await customerApi.queueDeviceAction(chosen.id, 'diagnostic_snapshot');
+          await followupApi.addForCustomer(userId, {
+            kind: 'reply',
+            body: copy.followupAuto.diagnose,
+          });
+        }).then((done) => {
           if (done) onClose();
         });
       }}

@@ -18,7 +18,6 @@ export const todayCopy = {
   incidentImpactNode: (n: number) => `影响 ${n} 台节点`,
   incidentOpenFor: '已持续',
   incidentLastSeen: '最后测量',
-  incidentResolvedAt: '已恢复',
   incidentPrimary: {
     ack: '认领',
     snooze: '静默 4 小时',
@@ -43,15 +42,113 @@ export const todayCopy = {
     noSourcesPage: '数据源还没有自己的页面',
   } as const,
   incidentRetirePreview: '带你去这台机器的详情页，下架和退役都在那儿，按之前会先算清楚影响谁。',
+  /**
+   * 处置卡: the drawer is no longer a report on an incident, it is the sheet
+   * an operator works through — what is known, who might be hurt and is not
+   * counted yet, what to do next, how to measure it again, when to come back,
+   * and what has already been done about it.
+   */
   incidentDrawer: {
     timeline: '时间线',
     affected: '受影响客户',
-    evidence: '证据',
+    evidence: '已知事实',
+    unconfirmed: '尚未确认的影响',
+    nextSteps: '推荐下一步',
+    recheck: '复测',
+    nextCheck: '下次检查',
+    log: '处理记录',
     actions: '动作',
     deliveries: '推送记录',
     notePrompt: '写一句备注',
     noteSend: '记下',
   } as const,
+  /** 最后测量 against 事故开始 — the pair 已验证恢复 is judged on. */
+  incidentMeasuredAgainst: (measured: string, opened: string) => `最后测量 ${measured}，事故开始 ${opened}`,
+  incidentImpactSplit: (sure: number, maybe: number) => `${sure} 位确认受影响，${maybe} 位可能`,
+  incidentMaybeWhy: '这些客户挂在同一台机器上，最后一次连接比事故还早，之后没有再上报过。',
+  incidentMaybeNone: '这台机器上没有别的客户还挂着。',
+  incidentMaybeNotNode: '这条事故不是针对一台机器，算不出还有谁可能受影响。',
+  /**
+   * 劣化 is the one kind where the obvious action is the wrong one.
+   *
+   * A single carrier's return-path loss is a number, not a verdict: the review
+   * asked for the measurement to be checked before anybody is moved, and for
+   * nobody to be moved until a real customer failure lines up with it.
+   */
+  incidentDegradedSteps: [
+    '先核对这条回程丢包的测量时间、样本量和连不连续。',
+    '再看同一时段这家运营商的客户有没有真的连接失败。',
+    '确实有客户受影响才迁走他们，并验证替代节点连得上。',
+  ] as const,
+  incidentNoSteps: '这类事故还没有写好的处置顺序，先按上面的事实判断。',
+  incidentRecheckGo: '复测一次',
+  incidentRecheckNote: '已复测',
+  incidentRecheckBlocked: '这类事故没有可以直接复测的测量',
+  incidentRecheckConsequence: (node: string) => `会给 ${node} 再下发一次测量，并在处理记录里记一笔已复测。`,
+  incidentNextCheckNone: '还没定下次什么时候回来看',
+  incidentNextCheckAt: (when: string) => `下次检查 ${when}`,
+  incidentNextCheckPreset: {
+    quarter: '15 分钟后',
+    hour: '1 小时后',
+    morning: '明早',
+  } as const,
+
+  /* ----------------------------------------------------------- 怎么收尾 */
+
+  /**
+   * 标记已处理 used to write 已恢复 into the record whatever had happened.
+   *
+   * Three different things end an incident and only one of them means the
+   * customer can use it again, so closing asks which — and 误报 never counts
+   * towards a recovery.
+   */
+  incidentCloseTitle: '这条事故怎么收尾',
+  incidentCloseConsequence: '三种收尾写进记录的话不一样，只有已验证恢复算进恢复成绩。',
+  incidentClosureChoice: {
+    verified: '已验证恢复',
+    false_positive: '误报',
+    manual: '人工结束跟进',
+  } as const,
+  incidentClosureWord: {
+    verified: '已恢复',
+    false_positive: '误报',
+    manual: '已结束',
+  } as const,
+  incidentClosureHint: {
+    verified: '有比事故更新的测量，而且已经不再报警。',
+    false_positive: '当时判错了。要写清楚为什么，而且不算恢复。',
+    manual: '不再跟进，但不代表客户已经能用了。',
+  } as const,
+  incidentClosureBlocked: {
+    stale: (when: string) => `最后一次测量是 ${when}，还不比事故开始新`,
+    alarming: (word: string) => `最近一次测量还是${word}`,
+    unmeasured: '这条事故没有留下可以复核的测量',
+  } as const,
+  incidentClosureReason: {
+    false_positive: '当时为什么判错了',
+    manual: '为什么不再跟进',
+  } as const,
+  incidentClosureNeedReason: '这种收尾要写一句原因',
+
+  /* -------------------------------------------------------------- 早报 */
+
+  /**
+   * The morning read, in the review's order: 昨夜发生并恢复了什么 → 现在需要
+   * 处理什么 → 今天必须续费/回访什么. A quiet night still gets a sentence —
+   * "nothing happened" is an answer, a blank block is not.
+   */
+  digestTitle: '早报',
+  digestNight: '昨夜',
+  digestNow: '现在要处理',
+  digestToday: '今天必须做',
+  digestQuiet: '昨夜无事，今天没有到期的事',
+  digestNightNone: '昨夜没有新事故，也没有恢复',
+  digestOpenCount: (n: number) => `${n} 个事故进行中`,
+  digestNoOpen: '没有进行中的事故',
+  digestDueFollowups: (n: number) => `客户跟进 ${n} 条`,
+  digestDueChecks: (n: number) => `到期复测 ${n} 个`,
+  digestDueChores: (n: number) => `到期待办 ${n} 件`,
+  digestNoDue: '今天没有到期的事',
   incidentEvent: {
     opened: '开始',
     escalated: '升级',

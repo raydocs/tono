@@ -228,9 +228,13 @@ export const opsApi = {
   ackIncident: (id: string) => postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/ack`, {}),
   snoozeIncident: (id: string) =>
     postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/snooze`, { seconds: SNOOZE_SECONDS }),
-  resolveIncident: (id: string) => postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/resolve`, {}),
-  noteIncident: (id: string, note: string) =>
-    postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/notes`, { note }),
+  /**
+   * Closing an incident and writing a line about it both moved to
+   * `api-followups.ts`. A resolve now has to carry how it ended, and a note
+   * now goes into 处理记录 where the next person will actually look for it, so
+   * the two bodiless verbs that used to live here would only be a way to close
+   * an incident without saying anything about it.
+   */
 
   releases: (signal?: AbortSignal) => getAllJson<ReleaseDto>('releases', signal),
   releaseAdoption: (signal?: AbortSignal) => getJson<AdoptionMatrixDto>('releases/adoption', signal),

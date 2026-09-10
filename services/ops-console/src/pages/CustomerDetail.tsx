@@ -23,9 +23,11 @@ import { CarrierMatrix } from './customer/CarrierMatrix';
 import { ClaudeAccount } from './customer/ClaudeAccount';
 import { Destinations } from './customer/Destinations';
 import { Devices } from './customer/Devices';
+import { Followups } from './customer/Followups';
 import { CustomerHeader } from './customer/Header';
 import { HomeLine } from './customer/HomeLine';
 import { Proof } from './customer/Proof';
+import { ReplyDraft } from './customer/ReplyDraft';
 import { ServiceUsage } from './customer/Services';
 import { Timeline } from './customer/Timeline';
 
@@ -89,10 +91,18 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
   const account = useResource(userId, (signal) => customerApi.accountDetail(userId, signal));
   const binding = useResource(userId, (signal) => customerApi.homeBinding(userId, signal));
 
+  /**
+   * `beat` is what tells the followup record to read itself again. The
+   * header's actions write their own record — a diagnostic nobody wrote down
+   * is a diagnostic nobody can prove was run — and the section that shows
+   * those records is not one of the three reads below.
+   */
+  const [beat, setBeat] = useState(0);
   const refresh = useCallback(() => {
     detail.reload();
     account.reload();
     binding.reload();
+    setBeat((n) => n + 1);
   }, [detail, account, binding]);
 
   const customer = useSticky(userId, detail);
@@ -145,6 +155,13 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           ))}
         </div>
       </Section>
+
+      {/* The answer, then the record of having given it. Both sit above the
+          timeline because both are what the operator came here to do; the
+          timeline is what they read to check the draft. */}
+      <ReplyDraft who={privacy.email(row.email)} events={events} />
+
+      <Followups userId={userId} beat={beat} />
 
       <Timeline
         events={events}
