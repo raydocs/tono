@@ -7,6 +7,21 @@ name: Services CI
 #
 # The two service-side agents decide what accounts exist on an exit and what they
 # are billed, so their arithmetic runs here too.
+#
+# The ops-contract job also holds the fixture generator to a byte-for-byte copy of
+# the committed JSON, and runs every tooling/scripts/tests/*.test.mjs so a new
+# script test is not a change that CI never sees.
+#
+# Migrations are applied to an empty local D1 and then applied again: a file that
+# cannot run from scratch, or that is not idempotent, is a restore that will not
+# boot. Prefixes from 0039 must be unique because 0016/0017/0018 already taught
+# us what a colliding number costs.
+#
+# Playwright shards run the ops-console specs for behaviour, not pixels: the
+# screenshot baselines were captured on macOS and Linux fonts would fail them.
+#
+# After a green console build, a markdown size table is posted on the PR so a
+# ratchet that is still under budget is visible before it is not.
 
 on:
   # Manual re-run, so a flake or an infrastructure hiccup does not need a
@@ -20,6 +35,11 @@ on:
       # generator could be changed without ever running the job that guards it.
       - tooling/scripts/generate-release-center.mjs
       - tooling/scripts/tests/generate-release-center.test.mjs
+      # The migration-number checker and the *.test.mjs glob live outside
+      # services/**; without these the new steps could be edited without running.
+      - tooling/scripts/check-migration-numbers.mjs
+      - tooling/scripts/check-ops-budgets.mjs
+      - tooling/scripts/tests/*.test.mjs
       - .github/workflows/services-ci.yml
   # Every branch, not just the default one. This repository is a fork, and no
   # `pull_request` event has ever produced a run here — PR #1 merged without one.
@@ -35,6 +55,11 @@ on:
       # generator could be changed without ever running the job that guards it.
       - tooling/scripts/generate-release-center.mjs
       - tooling/scripts/tests/generate-release-center.test.mjs
+      # The migration-number checker and the *.test.mjs glob live outside
+      # services/**; without these the new steps could be edited without running.
+      - tooling/scripts/check-migration-numbers.mjs
+      - tooling/scripts/check-ops-budgets.mjs
+      - tooling/scripts/tests/*.test.mjs
       - .github/workflows/services-ci.yml
 
 permissions:
@@ -120,6 +145,11 @@ jobs:
 
   ops-contract:
     runs-on: ubuntu-24.04
+    # Job-level permissions replace the workflow-level block entirely, so
+    # contents: read has to be restated or checkout loses the tree.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -146,3 +176,179 @@ jobs:
       - name: Captured fixtures
         working-directory: services/ops-console
         run: npx vitest run test/captured-fixtures.test.ts
+
+      - name: Fixture generator is byte-for-byte
+        # The committed JSON is what the pages and Playwright specs render.
+        # Regenerating it must not rewrite a byte, or the suite keeps passing
+        # against files nobody can reproduce.
+        working-directory: services/ops-console
+        run: npx vitest run test/fixtures-generator.test.ts
+
+      - name: Tooling script tests
+        # windows-ci-paths.test.cjs needs js-yaml from apps/windows/app (pnpm
+        # install, never done in this job) and runs in windows-ci.yml instead.
+        # The glob is every *.test.mjs so a future script test is covered
+        # without editing this step.
+        run: node --test "tooling/scripts/tests/*.test.mjs"
+
+      - name: Build the console
+        # npm run build ends in check-budgets.mjs, so a bundle that blows the
+        # gzip or line budget fails here, before the report is written.
+        working-directory: services/ops-console
+        run: npm run build
+
+      - name: Size ratchet report
+        working-directory: services/ops-console
+        run: node scripts/budget-report.mjs | tee "$RUNNER_TEMP/size-ratchet.md"
+
+      - name: Post the size ratchet as a sticky PR comment
+        # Fork PRs get a read-only GITHUB_TOKEN; posting would go red. Push
+        # events have no PR to comment on. A red build with no comment is
+        # intentional — default success() is clearer than a stale table.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- tono-size-ratchet -->';
+            const table = fs.readFileSync(`${process.env.RUNNER_TEMP}/size-ratchet.md`, 'utf8');
+            const body = `${marker}\n${table}`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  migrations:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/control-plane
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci
+
+      - name: Prefixes from 0039 are unique
+        # 0016/0017/0018 were reused before the sequence became unique; they
+        # sit below the 0039 floor this check starts at, so they are exempt.
+        # See services/control-plane/migrations/README.md. Uniqueness is a
+        # hard failure; gaps emit a warning because departments are allocated
+        # ranges with unused numbers on purpose.
+        working-directory: ${{ github.workspace }}
+        run: node tooling/scripts/check-migration-numbers.mjs
+
+      - name: Apply every migration to an empty local D1
+        # --persist-to makes the empty-local-D1 state explicit. Assertions
+        # read d1_migrations via execute --json rather than grepping the
+        # spinner: wrangler's pretty output repeats lines and is unreliable.
+        # A second apply must be a no-op, or a restore would not be
+        # idempotent. Never talks to Cloudflare: --local only, no CLOUDFLARE_*
+        # secrets.
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -euo pipefail
+          PERSIST="$RUNNER_TEMP/d1"
+          npx wrangler d1 migrations apply DB --local --persist-to "$PERSIST" > "$RUNNER_TEMP/apply1.txt" 2>&1
+          cat "$RUNNER_TEMP/apply1.txt"
+          npx wrangler d1 execute DB --local --persist-to "$PERSIST" --json --command "select name from d1_migrations order by id" > "$RUNNER_TEMP/applied.json"
+          node --input-type=module <<'NODE'
+          import { readFileSync, readdirSync } from 'node:fs';
+          const raw = readFileSync(`${process.env.RUNNER_TEMP}/applied.json`, 'utf8');
+          const parsed = JSON.parse(raw);
+          const rows = Array.isArray(parsed) ? parsed[0]?.results : parsed.results;
+          if (!Array.isArray(rows)) {
+            console.error('d1 execute --json did not return a results array');
+            console.error(raw);
+            process.exit(1);
+          }
+          const names = rows.map((row) => row.name).sort();
+          const files = readdirSync('migrations').filter((name) => name.endsWith('.sql')).sort();
+          const missing = files.filter((name) => !names.includes(name));
+          const extra = names.filter((name) => !files.includes(name));
+          if (missing.length || extra.length || names.length !== files.length) {
+            console.error('applied d1_migrations do not match migrations/*.sql');
+            if (missing.length) console.error(`missing from d1: ${missing.join(', ')}`);
+            if (extra.length) console.error(`extra in d1: ${extra.join(', ')}`);
+            process.exit(1);
+          }
+          console.log(`applied ${names.length} migrations match migrations/*.sql`);
+          NODE
+          npx wrangler d1 migrations apply DB --local --persist-to "$PERSIST" > "$RUNNER_TEMP/apply2.txt" 2>&1
+          cat "$RUNNER_TEMP/apply2.txt"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const out = readFileSync(`${process.env.RUNNER_TEMP}/apply2.txt`, 'utf8');
+          if (!/no migrations to apply/i.test(out)) {
+            console.error('second apply was not a no-op:');
+            console.error(out);
+            process.exit(1);
+          }
+          NODE
+          npx wrangler d1 migrations list DB --local --persist-to "$PERSIST" > "$RUNNER_TEMP/list.txt" 2>&1
+          cat "$RUNNER_TEMP/list.txt"
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const out = readFileSync(`${process.env.RUNNER_TEMP}/list.txt`, 'utf8');
+          if (!/no migrations to apply/i.test(out)) {
+            console.error('migrations list still reports unapplied files:');
+            console.error(out);
+            process.exit(1);
+          }
+          NODE
+
+  ops-console-e2e:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: services/ops-console
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci
+
+      - name: Install Playwright's Chromium and its OS deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Functional assertions only
+        # Screenshot baselines were captured on macOS at DPR 2; Linux fonts
+        # would fail every visual comparison. --ignore-snapshots keeps the
+        # functional assertions and skips the pixel checks. playwright.config.ts
+        # starts the fixtures dev server itself; CI makes it non-reusing, one
+        # worker per shard. No dorny/paths-filter: the workflow is already
+        # path-filtered to services/**, and the fixture server reads control-plane
+        # contract source through Vite aliases, so a control-plane-only change
+        # still needs these specs.
+        run: npx playwright test --shard=${{ matrix.shard }}/4 --ignore-snapshots
+

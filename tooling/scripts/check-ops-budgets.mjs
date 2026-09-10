@@ -14,6 +14,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(HERE, '..', '..');
 const OPS_MAX = 500;
 const CONTROL_PLANE = 'services/control-plane';
+const INDEX_REL = `${CONTROL_PLANE}/src/index.ts`;
+const LIMIT_REL = `${CONTROL_PLANE}/test/index-size.txt`;
 
 function lineCount(source) {
   if (source.length === 0) return 0;
@@ -34,6 +36,12 @@ function walkTs(dir, acc) {
   return acc;
 }
 
+export function indexSize(root) {
+  const lines = lineCount(readFileSync(path.join(root, INDEX_REL), 'utf8'));
+  const limit = Number(readFileSync(path.join(root, LIMIT_REL), 'utf8').trim());
+  return { lines, limit };
+}
+
 export function checkBudgets(root) {
   const findings = [];
   const opsDir = path.join(root, CONTROL_PLANE, 'src', 'ops');
@@ -47,14 +55,11 @@ export function checkBudgets(root) {
     }
   }
 
-  const indexRel = `${CONTROL_PLANE}/src/index.ts`;
-  const limitRel = `${CONTROL_PLANE}/test/index-size.txt`;
-  const indexLines = lineCount(readFileSync(path.join(root, indexRel), 'utf8'));
-  const indexLimit = Number(readFileSync(path.join(root, limitRel), 'utf8').trim());
+  const { lines: indexLines, limit: indexLimit } = indexSize(root);
   if (!Number.isSafeInteger(indexLimit) || indexLimit < 0) {
-    findings.push({ file: limitRel, lines: indexLimit, limit: 'a non-negative integer' });
+    findings.push({ file: LIMIT_REL, lines: indexLimit, limit: 'a non-negative integer' });
   } else if (indexLines > indexLimit) {
-    findings.push({ file: indexRel, lines: indexLines, limit: indexLimit });
+    findings.push({ file: INDEX_REL, lines: indexLines, limit: indexLimit });
   }
   return findings;
 }

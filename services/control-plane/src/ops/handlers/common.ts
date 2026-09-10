@@ -18,6 +18,7 @@ import {
   type SourceId,
   PLATFORMS,
   type Measured,
+  type OpsRole,
 } from '../contract';
 import { assertList } from '../contract';
 
@@ -25,7 +26,7 @@ export const PAGE = { default: 50, max: 200 };
 export const TOKEN_FRESH_SEC = 15 * 60;
 export const HEARTBEAT_FRESH_SEC = 40 * 60;
 
-export type Actor = { email: string };
+export type Actor = { email: string; role?: OpsRole };
 
 export function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
