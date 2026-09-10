@@ -695,6 +695,7 @@ describe('ops v1 api', () => {
     const tested = [
       'GET /api/v1/ops/nodes',
       'GET /api/v1/ops/nodes/{name}',
+      'GET /api/v1/ops/nodes/{name}/acceptance',
       'GET /api/v1/ops/nodes/{name}/history',
       'GET /api/v1/ops/nodes/{name}/connections',
       'GET /api/v1/ops/nodes/{name}/errors',

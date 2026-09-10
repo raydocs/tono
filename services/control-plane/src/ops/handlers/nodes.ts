@@ -46,6 +46,7 @@ import {
   rangeSeconds,
   weakEtag,
 } from './common';
+import { auditRelistOverride, relistGate } from './nodes-acceptance';
 import {
   bindingsOf,
   catalogNames,
@@ -280,7 +281,7 @@ export async function postNodeJob(req: Request, e: Env, rawName: string, actor: 
   const name = decodeName(rawName);
   await requireNode(e, name);
   const b = await body(req, 8 * 1024);
-  rejectUnexpectedKeys(b, ['type', 'params', 'confirmName', 'incidentId', 'idempotencyKey']);
+  rejectUnexpectedKeys(b, ['type', 'params', 'confirmName', 'incidentId', 'idempotencyKey', 'override']);
   const type = String(b.type ?? '');
   if (!Object.prototype.hasOwnProperty.call(JOB_TYPES, type)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown job type');
@@ -288,12 +289,18 @@ export async function postNodeJob(req: Request, e: Env, rawName: string, actor: 
   if (JOB_TYPES[type as JobTypeName].destructive && b.confirmName !== name) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'confirmName must match the node name');
   }
+  // 上架 is the one type that reads the 可售验收单 first: a node that is not
+  // sellable is refused with the blockers, and `override: true` is the second
+  // path — it goes through, and it is written down with what it went past.
+  const gate = await relistGate(e, name, type, b.override);
+  if (gate.refusal) return gate.refusal;
   const result = await enqueueJob(e.DB, {
     nodeName: name, type, params: b.params, requestedBy: actor.email,
     incidentId: b.incidentId == null ? null : String(b.incidentId),
     idempotencyKey: b.idempotencyKey == null ? undefined : String(b.idempotencyKey),
   }, now());
   await auditWrite(e, actor.email, 'node.job.enqueue', 'node', name, `queued ${type} for ${name}`);
+  await auditRelistOverride(e, actor.email, name, gate.overridden);
   const dto = jobDto(result.job);
   check(e, () => { assertJob(dto); });
   return jsonNoStore(dto, result.created ? 201 : 200);

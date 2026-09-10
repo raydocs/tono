@@ -17,6 +17,7 @@ import {
   violation,
 } from './checkers';
 import {
+  assertNodeAcceptance,
   assertNodeBindings,
   assertNodeDetail,
   assertNodeErrorRow,
@@ -86,6 +87,7 @@ export function assertNodeErrorsMeasured(value: unknown) {
 export const NAMED_CHECKERS = {
   assertNodeSummaryList,
   assertNodeDetail,
+  assertNodeAcceptance,
   assertNodeHistoryList,
   assertNodeConnectionsList,
   assertNodeErrorsMeasured,
@@ -139,6 +141,7 @@ export interface GetRouteBinding {
 export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/nodes', checker: 'assertNodeSummaryList' },
   { route: 'GET /api/v1/ops/nodes/{name}', checker: 'assertNodeDetail' },
+  { route: 'GET /api/v1/ops/nodes/{name}/acceptance', checker: 'assertNodeAcceptance' },
   { route: 'GET /api/v1/ops/nodes/{name}/history', checker: 'assertNodeHistoryList' },
   { route: 'GET /api/v1/ops/nodes/{name}/connections', checker: 'assertNodeConnectionsList' },
   { route: 'GET /api/v1/ops/nodes/{name}/errors', checker: 'assertNodeErrorsMeasured' },

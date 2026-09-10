@@ -28,11 +28,12 @@
 |---|---|
 | `GET nodes?cursor&limit&verdict&listed&since` | `ListDto<NodeSummaryDto>` |
 | `GET nodes/{name}` | `NodeDetailDto` |
+| `GET nodes/{name}/acceptance` | `NodeAcceptanceDto`（可售验收单：`items[]` + `sellable` + `blockers`） |
 | `GET nodes/{name}/history` | `ListDto<NodeHistoryEntryDto>` |
 | `GET nodes/{name}/connections` | `ListDto<ConnectionEventDto>` |
 | `GET nodes/{name}/errors?range` | `Measured<NodeErrorRowDto[]>` |
 | `GET nodes/{name}/bindings` | `NodeBindingsDto` |
-| `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto` |
+| `GET nodes/{name}/jobs`、`POST nodes/{name}/jobs` | `ListDto<JobDto>` / `JobDto`。`type=catalog_relist` 先读验收单：不可售返 409 `NOT_SELLABLE`（body 带 `blockers`），除非 body 里带 `override: true` |
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
 | `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同） |
 | `GET customers/{id}` | `CustomerDetailDto`（`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`） |
@@ -73,6 +74,14 @@
 | `GET fx?day=&base=` | `FxRateDto`。返回该日或更早最近一条（自带 `day`）。`base=CNY` 时汇率 1、不查表。没有更早记录 409 `FX_RATE_MISSING` |
 
 `PATCH nodes/{name}/profile` 字段全可选（未知键 400）：`provider` ≤80、`providerAccountId`（须存在于 `provider_accounts` 或 null）、`region` ≤80、`lineTags` 最多 8×32、`port` 1..65535、`price` ≥0、`currency` 三字母、`billingCycle` 1..3660 天、`renewsAt`/`expiresAt` unix 秒、`notes` ≤2000、`quota` 为 `{ quotaBytes, cycleKind, cycleAnchorDay, counts }` 或 `null`（null 清周期）。无 profile 行时，节点只要在 catalog/status 里就会补一行。写 `ops_audit` `node.profile.update`。
+
+`GET nodes/{name}/acceptance` 是"新机器能不能卖"的一张单子，十二条，每条只由 Worker 已有的事实算出来：
+资料齐全（profile 的商家/价格/续费或到期/线路标签）、五处登记各算一条、大陆三网探测（中控机最近一轮，≤26 小时，且没有被墙判定）、
+客户去程（最近 7 天大陆运营商的 `connectOk`）、后台无报错（最近一天低于 10 条，且这台机器汇总过报错）、
+流量配额已设（额度与周期都在）、容量（在用人数；没有登记上限，所以永远是 `unknown`）、替代机器（同地区还有别的在售机器）。
+`state` 四态：`pass`／`fail`（测过、结果不行）／`unknown`（没测过）／`pending`（已经排队在测）。
+`sellable` 要求每条 `pass`，只有 `forward`（客户去程）与 `capacity`（容量）允许 `unknown` —— 这两条要真有客户才答得出。
+`blockers` 就是挡住上架的那几条的 `key`，`sellable === (blockers.length === 0)` 由检查器强制。
 
 公开（无 Access、无登录）`GET /api/v1/system/pulse` 返回 `{ ok, cronAgeSec, buildSha }`：`ok` 表示 cron 在 15 分钟内跑过；`cache-control: no-store`；按 IP 每小时 60 次。不含源名或其它内部细节。
 

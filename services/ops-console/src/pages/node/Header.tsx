@@ -1,7 +1,8 @@
-import type { NodeDetailDto } from '@contract';
+import type { NodeAcceptanceDto, NodeDetailDto } from '@contract';
 import { StatusWord } from '@/components/ops/StatusWord';
 import { copy } from '@/copy/copy';
 import { reasonSentence } from '@/lib/node-detail';
+import type { Resource } from '@/lib/use-resource';
 import { ActionRail } from './ActionRail';
 
 /**
@@ -16,7 +17,12 @@ import { ActionRail } from './ActionRail';
  * the rule it matched — and on production that line read a bare `ok` under the
  * word that already said the machine was fine.
  */
-export function NodeHeader({ node, onChanged }: { node: NodeDetailDto; onChanged: () => void }) {
+export function NodeHeader({ node, sheet, onChanged }: {
+  node: NodeDetailDto;
+  /** Passed straight through to the rail, which gates relisting on it. */
+  sheet: Resource<NodeAcceptanceDto>;
+  onChanged: () => void;
+}) {
   const why = reasonSentence(node.verdict, node.reason);
   const listing = node.catalogListed === null
     ? copy.nodeCatalog.unknown
@@ -41,7 +47,7 @@ export function NodeHeader({ node, onChanged }: { node: NodeDetailDto; onChanged
             ) : null}
           </div>
         </div>
-        <ActionRail node={node} onChanged={onChanged} className="ml-auto" />
+        <ActionRail node={node} sheet={sheet} onChanged={onChanged} className="ml-auto" />
       </div>
       {why ? <p className="text-body text-[var(--muted-foreground)]">{why}</p> : null}
     </header>
