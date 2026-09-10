@@ -83,13 +83,39 @@ function ctx(over: Partial<{ nowSec: number; qualitySweepAt: number | null; agen
   };
 }
 
-function priorFrom(result: { verdict: NodeVerdict; candidateVerdict: NodeVerdict; candidateStreak: number; changedAt: number }): NodePrior {
+function priorFrom(result: {
+  verdict: NodeVerdict;
+  candidateVerdict: NodeVerdict;
+  candidateStreak: number;
+  candidateSince: number | null;
+  changedAt: number;
+}): NodePrior {
   return {
     verdict: result.verdict,
     candidateVerdict: result.candidateVerdict,
     candidateStreak: result.candidateStreak,
+    candidateSince: result.candidateSince,
     changedAt: result.changedAt,
   };
+}
+
+function okPrior(): NodePrior {
+  return {
+    verdict: 'ok',
+    candidateVerdict: 'ok',
+    candidateStreak: 0,
+    candidateSince: null,
+    changedAt: NOW,
+  };
+}
+
+function tick(t: number, over: Partial<NodeVerdictInput> = {}) {
+  return evaluate(world({
+    nowSec: t,
+    qualitySweepAt: t - 60,
+    agentsSnapshotAt: t - 60,
+    nodes: [node({ agentObservedAt: t - 30, ...over })],
+  })).nodes[0];
 }
 
 describe('verdict precedence', () => {
@@ -173,15 +199,19 @@ describe('verdict precedence', () => {
 });
 
 describe('hysteresis table', () => {
-  it('enumerates enter streaks so tests can pin the promotion rules', () => {
-    expect(Object.fromEntries(HYSTERESIS.map((rule) => [rule.verdict, rule.enterStreak]))).toEqual({
-      down: 1,
-      blocked: 2,
-      no_probe: 1,
-      degraded: 2,
-      pressure: 3,
-      unknown: 1,
-      ok: 1,
+  it('enumerates enter/exit seconds so tests can pin the promotion rules', () => {
+    expect(Object.fromEntries(HYSTERESIS.map((rule) => [rule.verdict, {
+      enterSeconds: rule.enterSeconds,
+      exitSeconds: rule.exitSeconds,
+      enterStreak: rule.enterStreak,
+    }]))).toEqual({
+      down: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
+      blocked: { enterSeconds: 0, exitSeconds: 0, enterStreak: 2 },
+      no_probe: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
+      degraded: { enterSeconds: 600, exitSeconds: 900, enterStreak: 2 },
+      pressure: { enterSeconds: 900, exitSeconds: 900, enterStreak: 3 },
+      unknown: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
+      ok: { enterSeconds: 0, exitSeconds: 0, enterStreak: 1 },
     });
   });
 
@@ -234,23 +264,43 @@ describe('hysteresis table', () => {
     expect(recovered.verdict).toBe('ok');
   });
 
-  it('needs two evaluations to commit degraded and three to commit pressure', () => {
+  it('holds a degraded candidate for 600s and a clean candidate for 900s', () => {
     const loss = { unicom: { lossPct: 12, latencyMs: 80, samples: 4 } };
-    const d1 = evaluate(world({ nodes: [node({ carriers: loss })] })).nodes[0];
-    expect(d1.verdict).toBe('unknown');
-    const d2 = evaluate(world({ nodes: [node({ carriers: loss, prior: priorFrom(d1) })] })).nodes[0];
-    expect(d2.verdict).toBe('degraded');
-    expect(d2.label).toBe('回程丢包');
+    const t0 = tick(NOW, { carriers: loss, prior: okPrior() });
+    expect(t0.verdict).toBe('ok');
+    expect(t0.candidateVerdict).toBe('degraded');
+    expect(t0.candidateSince).toBe(NOW);
 
+    const t60 = tick(NOW + 60, { carriers: loss, prior: priorFrom(t0) });
+    expect(t60.verdict).toBe('ok');
+    const t300 = tick(NOW + 300, { carriers: loss, prior: priorFrom(t60) });
+    expect(t300.verdict).toBe('ok');
+
+    const t600 = tick(NOW + 600, { carriers: loss, prior: priorFrom(t300) });
+    expect(t600.verdict).toBe('degraded');
+    expect(t600.label).toBe('回程丢包');
+    expect(t600.candidateSince).toBeNull();
+
+    const t700 = tick(NOW + 700, { prior: priorFrom(t600) });
+    expect(t700.verdict).toBe('degraded');
+    expect(t700.candidateVerdict).toBe('ok');
+    expect(t700.candidateSince).toBe(NOW + 700);
+
+    const t1500 = tick(NOW + 1500, { prior: priorFrom(t700) });
+    expect(t1500.verdict).toBe('degraded');
+
+    const t1600 = tick(NOW + 1600, { prior: priorFrom(t1500) });
+    expect(t1600.verdict).toBe('ok');
+  });
+
+  it('holds a pressure candidate until 900s have elapsed', () => {
     const hot = { cpu: 91, memRatio: 0.2, diskRatio: 0.2, load1: 4 };
-    let prior: NodePrior | null = null;
-    const verdicts: NodeVerdict[] = [];
-    for (let i = 0; i < 3; i++) {
-      const result = evaluate(world({ nodes: [node({ machine: hot, prior })] })).nodes[0];
-      verdicts.push(result.verdict);
-      prior = priorFrom(result);
-    }
-    expect(verdicts).toEqual(['unknown', 'unknown', 'pressure']);
+    const t0 = tick(NOW, { machine: hot, prior: okPrior() });
+    expect(t0.verdict).toBe('ok');
+    const t600 = tick(NOW + 600, { machine: hot, prior: priorFrom(t0) });
+    expect(t600.verdict).toBe('ok');
+    const t900 = tick(NOW + 900, { machine: hot, prior: priorFrom(t600) });
+    expect(t900.verdict).toBe('pressure');
   });
 });
 
@@ -275,21 +325,21 @@ describe('customer path hysteresis sequences', () => {
 
   it('ok ok warn warn severe severe severe opens once and is still open at tick 7', () => {
     const ticks = play(['ok', 'ok', 'warn', 'warn', 'severe', 'severe', 'severe']);
-    const opened = ticks.filter((tick) => tick.open).map((tick) => tick.tick);
-    expect(opened[0]).toBe(4);
-    expect(opened).toEqual([4, 5, 6, 7]);
+    const opened = ticks.filter((row) => row.open).map((row) => row.tick);
+    expect(opened[0]).toBe(5);
+    expect(opened).toEqual([5, 6, 7]);
     expect(ticks[6]?.open).toBe(true);
     expect(ticks[6]?.severity).toBe('severe');
-    expect(new Set(opened).size).toBe(4);
+    expect(new Set(opened).size).toBe(3);
   });
 
   it('severe warn ok warn ok ok ok ok ok closes only after the clean streak', () => {
-    const ticks = play(['severe', 'warn', 'ok', 'warn', 'ok', 'ok', 'ok', 'ok', 'ok'], 2);
-    expect(ticks.map((tick) => tick.open)).toEqual([
-      true, true, true, true, true, false, false, false, false,
+    const ticks = play(['severe', 'warn', 'ok', 'warn', 'ok', 'ok', 'ok', 'ok', 'ok'], 3);
+    expect(ticks.map((row) => row.open)).toEqual([
+      true, true, true, true, true, true, false, false, false,
     ]);
-    expect(pathStreakOpen(nextPathStreak(2, false))).toBe(true);
-    expect(pathStreakOpen(nextPathStreak(-1, false))).toBe(false);
+    expect(pathStreakOpen(nextPathStreak(3, false))).toBe(true);
+    expect(pathStreakOpen(nextPathStreak(-2, false))).toBe(false);
   });
 });
 

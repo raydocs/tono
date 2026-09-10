@@ -17,10 +17,10 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0050` at the
+schema changes continue from the highest existing number (`0051` at the
 time this note was written).
 
-## 0039–0050
+## 0039–0051
 
 Ops tables after the sequence was unique. Applied in numeric order:
 
@@ -36,3 +36,4 @@ Ops tables after the sequence was unique. Applied in numeric order:
 - `0048_ops_cron_state.sql` — cron watermarks and customer path-slow hysteresis
 - `0049_ops_cron_report.sql` — last cron report payload on `ops_cron_state`
 - `0050_ops_followups.sql` — follow-ups, incident `next_check_at` / `closure`
+- `0051_ops_candidate_since.sql` — `ops_node_status.candidate_since` for time-based hysteresis

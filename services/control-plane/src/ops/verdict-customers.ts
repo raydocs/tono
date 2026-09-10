@@ -12,8 +12,8 @@ export const PATH_SEVERE_MS = 800;
 
 export const HEARTBEAT_FRESH_SECONDS = 40 * 60;
 const FUTURE_SKEW_SECONDS = 5 * 60;
-const PATH_OPEN_STREAK = 2;
-const PATH_CLOSE_STREAK = 2;
+const PATH_OPEN_STREAK = 3;
+const PATH_CLOSE_STREAK = 3;
 const REPEAT_FAIL = 3;
 const SWITCH_CHURN = 4;
 
@@ -61,8 +61,8 @@ function worstFreshDelay(customer: CustomerVerdictInput, nowSec: number): number
 }
 
 /**
- * Path streak: n>=2 open (consecutive slow), n=1 candidate, n=0 closed,
- * n=-1 open with one clean evaluation (need PATH_CLOSE_STREAK cleans to close).
+ * Path streak: n>=3 open (consecutive slow), n=1..2 candidate, n=0 closed,
+ * n<0 open with clean evaluations (need PATH_CLOSE_STREAK cleans to close).
  */
 export function nextPathStreak(prior: number, slow: boolean): number {
   if (slow) {

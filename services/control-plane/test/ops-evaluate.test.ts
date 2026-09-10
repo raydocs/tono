@@ -29,6 +29,7 @@ function nodeResult(over: Partial<NodeVerdictResult> = {}): NodeVerdictResult {
     occupancy: 0,
     candidateVerdict: 'ok',
     candidateStreak: 0,
+    candidateSince: null,
     changed: true,
     previousVerdict: null,
     changedAt: NOW,
@@ -97,6 +98,7 @@ describe('persistNodeStates', () => {
           verdict: prior.get('Tokyo · Test')!.verdict,
           candidateVerdict: prior.get('Tokyo · Test')!.candidateVerdict,
           candidateStreak: prior.get('Tokyo · Test')!.candidateStreak,
+          candidateSince: prior.get('Tokyo · Test')!.candidateSince,
           changedAt: prior.get('Tokyo · Test')!.changedAt,
         },
         fails30m: { attempts: 0, failures: 0, distinctUsers: 0, handshakeDistinctUsers: 0 },
@@ -130,6 +132,89 @@ describe('persistNodeStates', () => {
     ).bind('Tokyo · Test').first<{ n: number }>();
     expect(Number(after?.n)).toBe(2);
     expect((await loadPriorNodeStates(db())).get('Tokyo · Test')?.verdict).toBe('pressure');
+  });
+
+  it('round-trips candidate_since through persist and load, and treats pre-0051 NULL as unset', async () => {
+    const loss = { unicom: { lossPct: 12, latencyMs: 80, samples: 4 } };
+    const pending = evaluate({
+      nodes: [{
+        name: 'Tokyo · Test',
+        catalogListed: true,
+        ok: true,
+        blockStatus: 'OK',
+        agentObservedAt: NOW - 30,
+        carriers: loss,
+        machine: null,
+        occupancy: 1,
+        profileStatus: 'active',
+        prior: {
+          verdict: 'ok',
+          candidateVerdict: 'ok',
+          candidateStreak: 0,
+          candidateSince: null,
+          changedAt: NOW - 120,
+        },
+        fails30m: { attempts: 0, failures: 0, distinctUsers: 0, handshakeDistinctUsers: 0 },
+        lastCustomerOkAt: NOW - 5,
+        errorSpike: false,
+      }],
+      customers: [],
+      nowSec: NOW,
+      qualitySweepAt: NOW - 60,
+      agentsSnapshotAt: NOW - 60,
+      maintenance: new Set(),
+    });
+    expect(pending.nodes[0]?.verdict).toBe('ok');
+    expect(pending.nodes[0]?.candidateVerdict).toBe('degraded');
+    expect(pending.nodes[0]?.candidateSince).toBe(NOW);
+    await persistNodeStates(db(), pending, NOW);
+    const loaded = await loadPriorNodeStates(db());
+    expect(loaded.get('Tokyo · Test')?.candidateSince).toBe(NOW);
+    expect(loaded.get('Tokyo · Test')?.candidateVerdict).toBe('degraded');
+
+    const cleared = evaluate({
+      nodes: [{
+        name: 'Tokyo · Test',
+        catalogListed: true,
+        ok: true,
+        blockStatus: 'OK',
+        agentObservedAt: NOW - 20,
+        carriers: null,
+        machine: null,
+        occupancy: 1,
+        profileStatus: 'active',
+        prior: {
+          verdict: loaded.get('Tokyo · Test')!.verdict,
+          candidateVerdict: loaded.get('Tokyo · Test')!.candidateVerdict,
+          candidateStreak: loaded.get('Tokyo · Test')!.candidateStreak,
+          candidateSince: loaded.get('Tokyo · Test')!.candidateSince,
+          changedAt: loaded.get('Tokyo · Test')!.changedAt,
+        },
+        fails30m: { attempts: 0, failures: 0, distinctUsers: 0, handshakeDistinctUsers: 0 },
+        lastCustomerOkAt: NOW - 5,
+        errorSpike: false,
+      }],
+      customers: [],
+      nowSec: NOW + 60,
+      qualitySweepAt: NOW,
+      agentsSnapshotAt: NOW,
+      maintenance: new Set(),
+    });
+    expect(cleared.nodes[0]?.verdict).toBe('ok');
+    expect(cleared.nodes[0]?.candidateVerdict).toBe('ok');
+    expect(cleared.nodes[0]?.candidateSince).toBeNull();
+    await persistNodeStates(db(), cleared, NOW + 60);
+    expect((await loadPriorNodeStates(db())).get('Tokyo · Test')?.candidateSince).toBeNull();
+
+    await db().prepare('DELETE FROM ops_node_status').run();
+    await db().prepare(
+      `INSERT INTO ops_node_status(
+         node_name, verdict, label, reason, candidate_streak, catalog_listed,
+         rules_version, evaluated_at, changed_at
+       ) VALUES('Old · Row', 'ok', '大陆正常', 'ok', 0, 1, 1, ?, ?)`,
+    ).bind(NOW, NOW).run();
+    const legacy = await loadPriorNodeStates(db());
+    expect(legacy.get('Old · Row')?.candidateSince).toBeNull();
   });
 });
 
