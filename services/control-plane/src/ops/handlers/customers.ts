@@ -125,6 +125,9 @@ async function openCustomerIncidents(e: Env): Promise<Map<string, OpenCustomerIn
 export async function getCustomers(req: Request, e: Env): Promise<Response> {
   const url = new URL(req.url);
   const { cursor, limit, since } = pageParams(url);
+  const qRaw = url.searchParams.get('q');
+  const q = qRaw == null || qRaw.trim() === '' ? null : qRaw.trim().toLowerCase();
+  if (q != null && q.length > 200) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid q');
   let users: Row[] = [];
   try {
     users = (await e.DB.prepare(
@@ -139,6 +142,9 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
   for (const user of users) {
     const email = String(user.email);
     const userId = String(user.id);
+    if (q && !email.toLowerCase().includes(q) && !(nullText(user.wechat_id) ?? '').toLowerCase().includes(q)) {
+      continue;
+    }
     if (!afterCursor(cursor, email, userId, 'asc')) continue;
     const updatedAt = Number(user.updated_at) || t;
     if (since != null && updatedAt < since) continue;
@@ -149,7 +155,8 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
     const p = asPlatform(status?.platform);
     if (p) platforms.push(p);
     items.push({
-      userId, email, verdict, health: word.word, tone: word.tone, reason,
+      userId, email, wechatId: nullText(user.wechat_id),
+      verdict, health: word.word, tone: word.tone, reason,
       lifecycle, deviceCount: 0, platforms,
       selectedServer: status?.selectedServer ?? null,
       connected: measured(status?.connected === true, status?.lastSeenAt ?? null, 'telemetry'),
@@ -258,7 +265,9 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
     region: status?.edgeRegion ?? null,
   };
   const dto: CustomerDetailDto = {
-    userId, email: String(user.email), verdict, health: word.word, tone: word.tone,
+    userId, email: String(user.email),
+    wechatId: nullText(user.wechat_id), contact: nullText(user.contact), notes: nullText(user.notes),
+    verdict, health: word.word, tone: word.tone,
     reason, lifecycle, now: nowBlock,
     devices: devices.map((row) => deviceDto(row, liveById.get(String(row.id)), status)),
     chores: choresFor(user, status, t),

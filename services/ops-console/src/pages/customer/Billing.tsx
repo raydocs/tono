@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react';
 import type { CustomerBillingDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { DetailDrawer, Fact } from '@/components/ops/DetailDrawer';
+import { EmptyLine } from '@/components/ops/Empty';
 import { FoldedSection } from '@/components/ops/Section';
 import { copy } from '@/copy/copy';
 import { CLAUDE_PLAN, customerApi, type UserPatch } from '@/lib/api-customer-actions';
+import { ledgerApi } from '@/lib/api-ledger';
+import { nowSec } from '@/lib/clock';
 import { formatDate, splitBytes } from '@/lib/display';
+import { customerRow, formatCny, monthOf } from '@/lib/ledger';
 import { fromDateInput, toDateInput } from '@/lib/settings';
 import { shown } from '@/lib/sources';
+import { useResource } from '@/lib/use-resource';
 import { measured } from '@/components/ops/measured';
 import { useAsk, WriteError } from './ask';
 import { FieldGrid, FormFooter, SelectField, TextField } from '../settings/form';
@@ -15,6 +20,18 @@ import { FieldGrid, FormFooter, SelectField, TextField } from '../settings/form'
 type Plan = '' | typeof CLAUDE_PLAN;
 
 const PLANS: readonly Plan[] = ['', CLAUDE_PLAN];
+
+/** The three fields only an operator ever sees, as the hub stores them. */
+export type Profile = {
+  wechatId: string | null;
+  contact: string | null;
+  notes: string | null;
+};
+
+/** A stored value in a text box: absent and empty are the same empty box. */
+function boxed(value: string | null): string {
+  return value ?? '';
+}
 
 /**
  * What the customer is on, until when, and the one number that can be ended.
@@ -29,19 +46,22 @@ const PLANS: readonly Plan[] = ['', CLAUDE_PLAN];
  * move the baseline up to the reported figure. The sentence in front of the
  * button says so, because "clear" reads like an undo and this is not one.
  *
- * Contact and notes are write-only here, and the form says so. No read this
- * console is allowed to make returns them — the customer contract carries the
- * facts about connectivity, not the operator's own notes — so a field
- * pre-filled with nothing would be claiming the stored value is empty.
+ * The handle, the contact and the notes come back on the customer now, so the
+ * form is filled in with what is stored rather than warning that a blank means
+ * "leave it alone". That warning was true while nothing read them back; with
+ * the stored value in the box, a box the operator empties means the field is
+ * empty, and saving it clears what was there.
  */
 export function Billing({
   userId,
   billing,
+  profile,
   updatedAt,
   onChanged,
 }: {
   userId: string;
   billing: CustomerBillingDto;
+  profile: Profile;
   updatedAt: number;
   onChanged: () => void;
 }) {
@@ -79,6 +99,8 @@ export function Billing({
         />
       </div>
 
+      <LedgerFacts userId={userId} />
+
       <WriteError message={ask.error} />
 
       <ActionRow>
@@ -103,6 +125,7 @@ export function Billing({
         open={editing}
         userId={userId}
         billing={billing}
+        profile={profile}
         onClose={() => setEditing(false)}
         onChanged={onChanged}
       />
@@ -110,16 +133,55 @@ export function Billing({
   );
 }
 
+/**
+ * This month's money for this one customer: what they paid, what they cost,
+ * and the difference — or the word for a difference nobody can compute.
+ *
+ * The cost side is an allocation, not an invoice: it is this customer's share
+ * of the machines they sat on. When one of those machines has not been
+ * reconciled for the month, the share is a guess, so the margin says so in
+ * words and no number is printed. It reads off the same month summary the
+ * ledger page shows, so the two surfaces cannot disagree, and a customer with
+ * nothing on the month's ledger says exactly that rather than three zeroes.
+ */
+function LedgerFacts({ userId }: { userId: string }) {
+  const month = monthOf(nowSec());
+  const summary = useResource(`ledger-month-${month}`, (signal) => ledgerApi.month(month, signal));
+  if (summary.status !== 'ready') {
+    return (
+      <EmptyLine message={summary.status === 'error' ? summary.message : copy.loading} />
+    );
+  }
+  const row = customerRow(summary.data, userId);
+  if (row === null) return <EmptyLine message={copy.ledger.customerNone} />;
+  const at = summary.data.updatedAt;
+  const say = (value: string | null) => measured(value, at, copy.ledger.source);
+  return (
+    <div className="grid gap-x-8 sm:grid-cols-3">
+      <Fact label={copy.ledger.customerRevenue} measured={say(formatCny(row.revenueCnyMinor))} />
+      <Fact label={copy.ledger.customerCost} measured={say(formatCny(row.costCnyMinor))} />
+      <Fact
+        label={copy.ledger.customerMargin}
+        measured={say(row.marginCnyMinor === null
+          ? copy.ledger.pending
+          : formatCny(row.marginCnyMinor))}
+      />
+    </div>
+  );
+}
+
 function BillingDrawer({
   open,
   userId,
   billing,
+  profile,
   onClose,
   onChanged,
 }: {
   open: boolean;
   userId: string;
   billing: CustomerBillingDto;
+  profile: Profile;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -129,6 +191,7 @@ function BillingDrawer({
   });
   const [plan, setPlan] = useState<Plan>('');
   const [date, setDate] = useState('');
+  const [wechat, setWechat] = useState('');
   const [contact, setContact] = useState('');
   const [notes, setNotes] = useState('');
   const [fault, setFault] = useState<string | null>(null);
@@ -137,10 +200,11 @@ function BillingDrawer({
     if (!open) return;
     setPlan(billing.plan === CLAUDE_PLAN ? CLAUDE_PLAN : '');
     setDate(toDateInput(billing.expiresAt));
-    setContact('');
-    setNotes('');
+    setWechat(boxed(profile.wechatId));
+    setContact(boxed(profile.contact));
+    setNotes(boxed(profile.notes));
     setFault(null);
-  }, [open, billing.plan, billing.expiresAt]);
+  }, [open, billing.plan, billing.expiresAt, profile.wechatId, profile.contact, profile.notes]);
 
   function save() {
     const patch: UserPatch = {};
@@ -160,8 +224,17 @@ function BillingDrawer({
         patch.expiresAt = seconds;
       }
     }
-    if (contact.trim() !== '') patch.contact = contact.trim();
-    if (notes.trim() !== '') patch.notes = notes.trim();
+    // Each of the three is sent only when it moved, and an emptied box clears
+    // the stored value rather than being read as "no opinion".
+    if (wechat.trim() !== boxed(profile.wechatId)) {
+      patch.wechatId = wechat.trim() === '' ? null : wechat.trim();
+    }
+    if (contact.trim() !== boxed(profile.contact)) {
+      patch.contact = contact.trim() === '' ? null : contact.trim();
+    }
+    if (notes.trim() !== boxed(profile.notes)) {
+      patch.notes = notes.trim() === '' ? null : notes.trim();
+    }
     const changing = Object.keys(patch) as Array<keyof UserPatch>;
     if (changing.length === 0) {
       setFault(copy.settings.savedNothing);
@@ -201,6 +274,12 @@ function BillingDrawer({
             onChange={setDate}
             type="date"
             mono
+          />
+          <TextField
+            label={copy.wechatField}
+            hint={copy.wechatNudge}
+            value={wechat}
+            onChange={setWechat}
           />
           <TextField
             label={copy.billingFieldContact}

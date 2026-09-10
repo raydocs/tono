@@ -131,6 +131,43 @@ export function CustomerHeader({
 }
 
 /**
+ * The handle the operator actually reaches this customer on, beside the
+ * address they log in with.
+ *
+ * It is masked by the same switch that masks the address — a screen-share of
+ * the 360 should not hand out somebody's WeChat id — but the copy button puts
+ * the real one on the clipboard, because the reason to press it is to paste it
+ * into WeChat, and a masked id pasted there finds nobody.
+ *
+ * A customer with none gets the sentence rather than an em dash: this is a
+ * field the operator can go and fill in, and the em dash is for measurements
+ * that failed to arrive.
+ */
+export function CustomerWechat({ wechatId }: { wechatId: string | null }) {
+  const privacy = usePrivacy();
+  const [copied, setCopied] = useState(false);
+
+  if (wechatId === null || wechatId.trim() === '') {
+    return (
+      <span className="text-body text-[var(--muted-foreground)]">{copy.wechatNudge}</span>
+    );
+  }
+  return (
+    <span className="flex min-w-0 items-baseline gap-2">
+      <span className="text-micro text-[var(--muted-foreground)]">{copy.wechatField}</span>
+      <span className="min-w-0 truncate text-row">{privacy.wechat(wechatId)}</span>
+      <Action
+        onClick={() => {
+          void navigator.clipboard?.writeText(wechatId).then(() => setCopied(true));
+        }}
+      >
+        {copied ? copy.wechatCopied : copy.wechatCopy}
+      </Action>
+    </span>
+  );
+}
+
+/**
  * Which device, and then the sentence naming it.
  *
  * The picker is inside the confirmation rather than before it because the

@@ -98,8 +98,15 @@ function onboard({ req, res, store, file }: Context): boolean {
     const userId = String(existing.userId);
     const { detail } = rowsFor(file, userId);
     const at = nowSec();
-    if (typeof body.notes === 'string') existing.notes = body.notes;
-    if (typeof body.contact === 'string') existing.contact = body.contact;
+    // The handle rides on both halves: the list is where a customer is found
+    // by it, the 360 is where it is read back and copied out. The contact and
+    // the note are the operator's own and live only on the 360.
+    if (typeof body.wechatId === 'string') {
+      existing.wechatId = body.wechatId;
+      if (detail) detail.wechatId = body.wechatId;
+    }
+    if (detail && typeof body.notes === 'string') detail.notes = body.notes;
+    if (detail && typeof body.contact === 'string') detail.contact = body.contact;
     const incomplete: string[] = [];
     let binding = store.bindings.find((entry) => entry.userId === userId) ?? null;
     const line = typeof body.line === 'string' ? body.line.trim() : '';
@@ -235,8 +242,12 @@ function userRoutes(context: Context): boolean {
         billing.expiresAt = value;
       }
       if (typeof body.plan === 'string' || body.plan === null) billing.plan = body.plan;
-      if (typeof body.notes === 'string' || body.notes === null) row.notes = body.notes;
-      if (typeof body.contact === 'string' || body.contact === null) row.contact = body.contact;
+      if (typeof body.wechatId === 'string' || body.wechatId === null) {
+        row.wechatId = body.wechatId;
+        detail.wechatId = body.wechatId;
+      }
+      if (typeof body.notes === 'string' || body.notes === null) detail.notes = body.notes;
+      if (typeof body.contact === 'string' || body.contact === null) detail.contact = body.contact;
       if (body.resetUsage === true) {
         const usage = { value: 0, asOfSec: clock, source: 'telemetry' };
         row.usageBytes = usage;

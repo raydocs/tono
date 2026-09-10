@@ -155,12 +155,17 @@ async function seedReads() {
     `INSERT INTO service_usage_daily(user_id, day_at, family, route, bytes, sessions, last_seen_at)
      VALUES('u-1', ?, 'claude', 'cloud', 4, 1, ?)`,
   ).bind(t - (t % 86400), t).run();
+  await db().prepare(
+    `INSERT INTO ops_fx_rates(day, base, quote, rate, fetched_at, source)
+     VALUES('2026-09-01', 'USD', 'CNY', 7.2, ?, 'frankfurter')`,
+  ).bind(t).run();
 }
 
 function pathFor(route: string): string {
   const suffix = route.replace(/^GET \/api\/v1\/ops\//, '');
   return suffix
     .replaceAll('{name}', encodeURIComponent(NODE))
+    .replaceAll('{month}', '2026-09')
     .replaceAll('{id}', (segment) => {
       if (route.includes('/customers/')) return 'u-1';
       if (route.includes('/incidents/')) return 'inc-1';
@@ -196,7 +201,7 @@ describe('ops GET route ↔ checker table', () => {
   });
 
   it('maps every GET route to a checker and every checker to a route', () => {
-    const getRoutes = OPS_V1_ROUTES.filter((route) => route.startsWith('GET '));
+    const getRoutes = OPS_V1_ROUTES.filter((route) => route.startsWith('GET ') && !route.endsWith('.csv'));
     expect(GET_ROUTE_TABLE.map((row) => row.route).sort()).toEqual([...getRoutes].sort());
     const used = new Set(GET_ROUTE_TABLE.map((row) => row.checker));
     expect([...used].sort()).toEqual(Object.keys(NAMED_CHECKERS).sort());
@@ -217,6 +222,8 @@ describe('ops GET route ↔ checker table', () => {
       if (row.route.endsWith('/destinations') || row.route.endsWith('/services')) path += '?range=7d';
       if (row.route.endsWith('/usage')) path += '?range=30d';
       if (row.route.endsWith('/adoption')) path += '?range=30d';
+      if (row.route.endsWith('/ledger')) path += '?month=2026-09';
+      if (row.route.endsWith('/fx')) path += '?day=2026-09-10&base=USD';
       const response = await ops(path);
       expect(response.status, row.route).toBe(200);
       const body = await response.json() as unknown;

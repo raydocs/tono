@@ -155,6 +155,18 @@ export function planWired(rows: readonly CustomerSummaryDto[]): boolean {
 }
 
 /**
+ * Whether anybody in the fleet has a WeChat id yet.
+ *
+ * The same rule the last three columns follow, for the same reason: a fleet
+ * where nobody has filled one in gets a column of dashes across the width the
+ * addresses need. It is one column rather than three, and it comes back the
+ * moment the first customer has a handle.
+ */
+export function wechatKnown(rows: readonly CustomerSummaryDto[]): boolean {
+  return rows.some((row) => row.wechatId !== null && row.wechatId !== '');
+}
+
+/**
  * The five platforms, always all five, in the order the chips render.
  *
  * A platform nobody has shipped a client for shows 未发布 rather than 0 —

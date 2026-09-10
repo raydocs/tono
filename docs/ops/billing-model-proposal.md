@@ -31,7 +31,21 @@
 
 设置 → **账目**：本月一页（收入/支出/差异三块 + 待核对清单 + "锁定本月"），录入抽屉（收入/支出各一，套餐续费从客户页的"改到期"顺手写一笔），对账表（每台机器一行：商家字节 vs 计量字节 vs 差异）。客户 360 的"账务与用量"加"本期收入 / 分摊成本 / 毛利（或待核对）"三个事实。节点详情"本周期流量"下加"每 GB 成本"。
 
-## 5. 需要你决定的三件事
+## 5. 已拍板（2026-09-10）
+
+1. **收入按月归期**：所有套餐都是月付，一笔收入记在它对应的月份，不做跨月分摊。
+2. **汇率实时取**：Worker 每天从 frankfurter（欧洲央行数据，免密钥）拉一次 USD→CNY 等汇率并落表；入账时按入账日汇率换算，记录汇率与来源，不回溯。
+3. **商家账单指 Claude / ChatGPT 账号**：成本按账号逐条记（`claude_account` / `chatgpt_account`），归到持有它的客户；服务器、家宽、域名、控制面各自成类。字节对账保留但不是主要路径。
+4. **收款只收人民币、付款默认美元**：`revenue` / `refund` / `credit` 只记 CNY；`cost` 缺省 USD。
+
+## 6. 冻结的接口形状（Worker 与控制台同时按这个做）
+
+- `LedgerEntryDto { id, kind: revenue|refund|credit|cost, category: plan|server|home_line|domain|control_plane|claude_account|chatgpt_account|other, subjectType: user|node|home_exit|account|fleet, subjectId, amountMinor, currency, fxRateToCny, fxDate, cnyMinor, month: 'YYYY-MM', paidAt, note, reverses, reversedBy, createdBy, createdAt }`
+- `MonthSummaryDto { month, closedAt, closedBy, revenueCnyMinor, costCnyMinor, marginCnyMinor, byCategory: Record<category, cnyMinor>, customers: [{ userId, email, revenueCnyMinor, costCnyMinor, marginCnyMinor|null, pending: boolean }], nodes: [{ name, costCnyMinor, bytes, cnyPerGbMinor|null, pending: boolean }], unreconciled: number, updatedAt }`
+- `FxRateDto { day: 'YYYY-MM-DD', base, quote: 'CNY', rate, fetchedAt, source: 'frankfurter' }`
+- 路由：`GET ledger?month=`、`POST ledger`、`PATCH ledger/{id}`（未锁定月）、`POST ledger/{id}/reverse`、`GET months/{month}`、`POST months/{month}/close`、`GET months/{month}/export.csv`、`GET fx?day=&base=`。
+
+## 原 5. 需要你决定的三件事（已决定，留作记录）
 
 1. **口径**：客户收入按服务周期摊（提案）还是按收款月？
 2. **汇率**：入账日汇率（提案）还是月末统一汇率？

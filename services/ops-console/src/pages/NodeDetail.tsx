@@ -72,7 +72,7 @@ export default function NodeDetailPage({ name, customers }: {
 
       <NodeFacts facts={node.facts} onEdit={() => setEditing(true)} />
       <NodeBindings bindings={node.bindings} />
-      <NodeQuota quota={node.quota} />
+      <NodeQuota quota={node.quota} name={name} />
       <NodeLoad name={name} />
       <NodePaths forward={node.forwardPath} back={node.returnPath} />
       <NodeQualityText name={name} />

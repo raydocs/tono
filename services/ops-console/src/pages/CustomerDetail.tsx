@@ -24,7 +24,7 @@ import { ClaudeAccount } from './customer/ClaudeAccount';
 import { Destinations } from './customer/Destinations';
 import { Devices } from './customer/Devices';
 import { Followups } from './customer/Followups';
-import { CustomerHeader } from './customer/Header';
+import { CustomerHeader, CustomerWechat } from './customer/Header';
 import { HomeLine } from './customer/HomeLine';
 import { Proof } from './customer/Proof';
 import { ReplyDraft } from './customer/ReplyDraft';
@@ -130,6 +130,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
           <h1 className="text-verdict">{privacy.email(row.email)}</h1>
           <StatusWord word={row.health} reason={row.reason} />
           <span className="ops-tag">{copy.lifecycle[row.lifecycle]}</span>
+          <CustomerWechat wechatId={row.wechatId} />
         </div>
         {row.reason ? (
           <p className="text-body text-[var(--muted-foreground)]">{row.reason}</p>
@@ -244,6 +245,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
       <Billing
         userId={userId}
         billing={row.billing}
+        profile={{ wechatId: row.wechatId, contact: row.contact, notes: row.notes }}
         updatedAt={row.updatedAt}
         onChanged={refresh}
       />

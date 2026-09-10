@@ -11,7 +11,21 @@ type PrivacyApi = {
   ip: (value: string | null | undefined) => string;
   money: (value: string) => string;
   secret: (value: string | null | undefined) => string;
+  wechat: (value: string | null | undefined) => string;
 };
+
+/**
+ * A WeChat id with its middle taken out.
+ *
+ * The two ends are what an operator matches against the person they are
+ * already talking to; the middle is the part that would let someone reading
+ * over their shoulder go and find that person afterwards. An id too short to
+ * have a middle keeps one character and nothing else.
+ */
+function maskWechat(value: string): string {
+  if (value.length <= 4) return `${value.slice(0, 1)}***`;
+  return `${value.slice(0, 2)}***${value.slice(-2)}`;
+}
 
 const PrivacyContext = createContext<PrivacyApi>({
   privacy: false,
@@ -20,6 +34,7 @@ const PrivacyContext = createContext<PrivacyApi>({
   ip: (value) => value || copy.missing,
   money: (value) => value,
   secret: (value) => value || copy.missing,
+  wechat: (value) => value || copy.missing,
 });
 
 export function PrivacyProvider({ children }: { children: ReactNode }) {
@@ -44,6 +59,10 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
         if (!value) return copy.missing;
         if (!privacy) return value;
         return `${value.slice(0, Math.min(2, value.length))}***`;
+      },
+      wechat: (value) => {
+        if (!value) return copy.missing;
+        return privacy ? maskWechat(value) : value;
       },
     }}
     >

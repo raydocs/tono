@@ -15,6 +15,15 @@ type Mask = (email: string) => string;
 export type FollowupIndex = Map<string, FollowupDto> | null;
 
 /**
+ * How to print a WeChat id, or null while nobody in the fleet has one.
+ *
+ * A masker rather than a boolean beside one, so the column cannot be asked for
+ * without a way to mask what it prints: this is the one column carrying a
+ * handle a stranger could go and find somebody by.
+ */
+export type WechatMask = Mask | null;
+
+/**
  * The address is the row's name, so it gets the width nothing else claims.
  *
  * Every other column here is fixed, which makes this one the one that takes
@@ -29,11 +38,22 @@ export type FollowupIndex = Map<string, FollowupDto> | null;
  * would have clipped every address on the page. Each one below was measured
  * against the widest thing it actually renders and given the slack that leaves
  * — which hands the address column more room than it had before, not less.
+ *
+ * The handle column arrived into the same nothing-to-spare, and was paid for
+ * out of the three columns that were already truncating and already carrying
+ * the whole value on the hover: the current node, the last failure and the
+ * service list. Every column holding a number or a date — the quota, the
+ * version, the expiry, the followup date and the device count — kept its
+ * width, because a clipped date is a wrong date while a clipped node name is
+ * still recognisable and one hover from complete. The address column comes out
+ * of it with the same six pixels over its longest entry that it had before,
+ * which is the constraint the whole cut was solved against.
  */
 export function customerColumns(
   mask: Mask,
   wired: boolean,
   followups: FollowupIndex,
+  wechat: WechatMask,
 ): DataColumn<CustomerSummaryDto>[] {
   return [
     {
@@ -56,6 +76,18 @@ export function customerColumns(
         </div>
       ),
     },
+    /* Beside the address, because the two are the same question — which
+       person is this row — and an operator scanning for somebody they only
+       know by their handle should not have to cross the table to find it. */
+    ...(wechat === null ? [] : [
+      {
+        id: 'wechat',
+        header: copy.customerColumns.wechat,
+        width: '76px',
+        sortValue: (row: CustomerSummaryDto) => row.wechatId ?? '',
+        cell: (row: CustomerSummaryDto) => <WechatCell id={row.wechatId} mask={wechat} />,
+      },
+    ]),
     {
       id: 'devices',
       header: copy.customerColumns.devices,
@@ -68,14 +100,14 @@ export function customerColumns(
     {
       id: 'node',
       header: copy.customerColumns.node,
-      width: '100px',
+      width: '80px',
       sortValue: (row) => row.selectedServer ?? '',
       cell: (row) => <Value value={row.selectedServer} source={copy.sourceWord.catalog} />,
     },
     {
       id: 'failure',
       header: copy.customerColumns.failure,
-      width: '118px',
+      width: '80px',
       sortValue: (row) => row.lastFailure?.at ?? 0,
       cell: (row) => <FailureCell row={row} />,
     },
@@ -104,7 +136,7 @@ export function customerColumns(
       {
         id: 'services',
         header: copy.customerColumns.services,
-        width: '100px',
+        width: '80px',
         cell: (row: CustomerSummaryDto) => (
           row.services.length === 0
             ? <Value value={null} source={copy.sourceWord.telemetry} />
@@ -138,6 +170,20 @@ export function customerColumns(
       },
     ] : []),
   ];
+}
+
+/**
+ * The handle, masked, and nothing else on the hover.
+ *
+ * The title is the masked id too, for the same reason the address column's is:
+ * a privacy switch that a mouse pointer undoes was never on. A customer with
+ * no handle gets the em dash and the word for where one would have come from,
+ * like every other absent fact on the page.
+ */
+function WechatCell({ id, mask }: { id: string | null; mask: Mask }) {
+  if (id === null || id === '') return <Value value={null} source={copy.sourceWord.profile} />;
+  const shownId = mask(id);
+  return <span className="block min-w-0 truncate" title={shownId}>{shownId}</span>;
 }
 
 /**

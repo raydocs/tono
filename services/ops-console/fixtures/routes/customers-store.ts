@@ -318,6 +318,7 @@ export function newCustomerRow(userId: string, email: string, clock: number): Re
   return {
     userId,
     email,
+    wechatId: null,
     verdict: 'unreported',
     health: '未上报',
     tone: 'unk',
@@ -343,6 +344,9 @@ export function newCustomerDetail(row: Record<string, unknown>, clock: number): 
     detail: {
       userId: row.userId,
       email: row.email,
+      wechatId: row.wechatId ?? null,
+      contact: null,
+      notes: null,
       verdict: row.verdict,
       health: row.health,
       tone: row.tone,

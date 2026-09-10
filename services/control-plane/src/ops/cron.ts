@@ -14,6 +14,7 @@ import { retainHomeLineUsage } from './home-lines';
 import { retainTrafficDaily } from './traffic-parse';
 import { planAndSendAlerts, runVerdictPass } from './verdict-run';
 import { retainFollowups } from './handlers/followups';
+import { fetchAndStoreFxRates } from './fx';
 
 const DAY = 86_400;
 const HOUR = 3_600;
@@ -35,11 +36,12 @@ export type OpsCronReport = {
   jobs: OpsCronStep<{ expired: number; ran: number }>;
   quota: OpsCronStep<{ ran: boolean; rolled: number; skipped: number }>;
   daily: OpsCronStep<{ ran: boolean }>;
+  fx: OpsCronStep<{ fetched: number; failed: number }>;
   retention: OpsCronStep;
 };
 
 export const OPS_CRON_STEPS = [
-  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'retention',
+  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'fx', 'retention',
 ] as const;
 export type OpsCronStepName = (typeof OPS_CRON_STEPS)[number];
 
@@ -227,12 +229,25 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
     return { ran: true };
   });
 
+  const fx = await step('fx', { fetched: 0, failed: 0 }, async () => {
+    const previous = await lastRun(e.DB, 'fx');
+    if (previous != null && utcDay(previous) >= utcDay(nowSec)) {
+      return { fetched: 0, failed: 0 };
+    }
+    const result = await fetchAndStoreFxRates(e.DB, nowSec);
+    if (result.failed === 0) await markRun(e.DB, 'fx', nowSec);
+    if (result.failed > 0) {
+      throw new Error(result.error ?? `fx fetch failed (${result.failed})`);
+    }
+    return result;
+  });
+
   const retention = await step('retention', {}, async () => {
     await runRetention(e.DB, nowSec);
     return {};
   });
 
-  const report = { flatten, project, verdicts, alerts, jobs, quota, daily, retention };
+  const report = { flatten, project, verdicts, alerts, jobs, quota, daily, fx, retention };
   await persistLastReport(e.DB, nowSec, report);
   return report;
 }

@@ -20,6 +20,7 @@ import {
   selectByBucket,
   selectByPlatform,
   selectCustomers,
+  wechatKnown,
   type CustomerFilter,
   type CustomerFilterId,
 } from '@/lib/customers';
@@ -86,6 +87,11 @@ export default function CustomersPage({
     [onPlatform, published, bucket],
   );
   const wired = useMemo(() => planWired(all), [all]);
+  /** The handle column, once anybody in the fleet has one to put in it. */
+  const wechat = useMemo(
+    () => (wechatKnown(all) ? privacy.wechat : null),
+    [all, privacy],
+  );
   /**
    * Every followup still owed, in one read.
    *
@@ -101,8 +107,8 @@ export default function CustomersPage({
   }, [owed]);
   const cohort = useCohort(rows, customers.reload);
   const columns = useMemo(
-    () => [cohort.column, ...customerColumns(privacy.email, wired, followups)],
-    [cohort.column, privacy.email, wired, followups],
+    () => [cohort.column, ...customerColumns(privacy.email, wired, followups, wechat)],
+    [cohort.column, privacy.email, wired, followups, wechat],
   );
 
   const state: TableState = customers.status === 'loading'

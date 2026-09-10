@@ -49,6 +49,7 @@ import {
   assertProviderAccount,
   assertSystemHealth,
 } from './assets';
+import { assertFxRate, assertLedgerEntryList, assertMonthSummary } from './ledger';
 
 export const assertNodeSummaryList = (value: unknown) => assertList(value, assertNodeSummary);
 export const assertNodeHistoryList = (value: unknown) => assertList(value, assertNodeHistoryEntry);
@@ -114,6 +115,9 @@ export const NAMED_CHECKERS = {
   assertAlertDeliveryList,
   assertAuditList,
   assertSystemHealth,
+  assertLedgerEntryList,
+  assertMonthSummary,
+  assertFxRate,
 } as const;
 
 export const CHECKER_BY_NAME = NAMED_CHECKERS;
@@ -126,9 +130,11 @@ export interface GetRouteBinding {
 }
 
 /**
- * One row per GET in `OPS_V1_ROUTES`. The coverage test compares this list
- * to the dispatch table so a new read cannot ship without a checker, and a
- * leftover checker cannot sit on a route that no longer exists.
+ * One row per JSON GET in `OPS_V1_ROUTES`. CSV downloads are listed on the
+ * dispatch table but not here — they are not a DTO. The coverage test
+ * compares this list to the JSON GET routes so a new read cannot ship
+ * without a checker, and a leftover checker cannot sit on a route that
+ * no longer exists.
  */
 export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/nodes', checker: 'assertNodeSummaryList' },
@@ -163,6 +169,9 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/system/health', checker: 'assertSystemHealth' },
   { route: 'GET /api/v1/ops/followups', checker: 'assertFollowupList' },
   { route: 'GET /api/v1/ops/digest', checker: 'assertDigest' },
+  { route: 'GET /api/v1/ops/ledger', checker: 'assertLedgerEntryList' },
+  { route: 'GET /api/v1/ops/months/{month}', checker: 'assertMonthSummary' },
+  { route: 'GET /api/v1/ops/fx', checker: 'assertFxRate' },
 ];
 
 /** `<out>/<route-with-slashes-as-dashes>.json`, braces stripped so `{name}` is `name`. */
