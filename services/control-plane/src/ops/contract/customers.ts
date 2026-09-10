@@ -136,6 +136,11 @@ export interface CustomerDeviceDto {
   selectedServer: string | null;
   lastSeenAt: number | null;
   createdAt: number;
+  /** Live telemetry from ops_device_status; false when that row does not exist. */
+  connected: boolean;
+  lastFailAt: number | null;
+  lastFailCode: string | null;
+  lastFailNode: string | null;
 }
 
 /** 待办 rows. Always the `rem` tone, never an incident, never a colour decision. */
@@ -313,6 +318,7 @@ export function assertCustomerNow(value: unknown, path = 'now'): CustomerNowDto 
 
 const DEVICE_KEYS = [
   'id', 'name', 'platform', 'appVersion', 'osVersion', 'status', 'selectedServer', 'lastSeenAt', 'createdAt',
+  'connected', 'lastFailAt', 'lastFailCode', 'lastFailNode',
 ];
 
 export function assertCustomerDevice(value: unknown, path = 'device'): CustomerDeviceDto {
@@ -327,6 +333,10 @@ export function assertCustomerDevice(value: unknown, path = 'device'): CustomerD
     selectedServer: optText(row, path, 'selectedServer'),
     lastSeenAt: optInt(row, path, 'lastSeenAt'),
     createdAt: int(row, path, 'createdAt'),
+    connected: bool(row, path, 'connected'),
+    lastFailAt: optInt(row, path, 'lastFailAt'),
+    lastFailCode: optText(row, path, 'lastFailCode'),
+    lastFailNode: optText(row, path, 'lastFailNode'),
   };
 }
 

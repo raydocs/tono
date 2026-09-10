@@ -13,7 +13,7 @@ import {
   type EdgeCf,
   type FlattenWindowRow,
 } from './flatten';
-import { accrueActivityHours, applyWindowToStatus } from './customers';
+import { accrueActivityHours, applyFailureToStatus, applyWindowToStatus } from './customers';
 import { parseAuditSegment, writeParsedSegment } from './traffic-parse';
 import { planAndSendAlerts, runCustomerVerdictPass, runNodeVerdictPass } from './verdict-run';
 
@@ -172,9 +172,9 @@ export async function ingestConnectFailure(
   const cores = coreErrorsOf(b.coreErrors);
   const tcpDelayMs = optionalInt(b.tcpDelayMs, 'tcpDelayMs');
   const exitDelayMs = optionalInt(b.exitDelayMs, 'exitDelayMs');
-  // attemptId is accepted (≤64) but not stored: connection_events has no column.
+  let attemptId: string | null = null;
   if (b.attemptId !== undefined && b.attemptId !== null) {
-    str(b.attemptId, 'attemptId', 1, 64);
+    attemptId = str(b.attemptId, 'attemptId', 1, 64);
   }
   const errorText = failureError(b, cores);
   const t = now();
@@ -182,43 +182,36 @@ export async function ingestConnectFailure(
   // "recent" window counts for a month: like flatten, cap at receipt time.
   const atMs = Math.min(b.ts >= 1_000_000_000_000 ? b.ts : b.ts * 1000, t * 1000);
   const edge = edgeAttribution(requestCf(req), new Set());
-  await e.DB.prepare(
-    `INSERT INTO connection_events(
+  const inserted = await e.DB.prepare(
+    `INSERT OR IGNORE INTO connection_events(
        id, at_ms, received_at, source, window_id, user_id, device_id,
        platform, app_version, os_version, os_arch,
        kind, node, stage, outcome, code, error,
        elapsed_ms, delay_ms, exit_delay_ms, tcp_delay_ms, catalog_revision,
-       edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit
+       edge_asn, edge_as_org, edge_country, edge_region, edge_via_exit, attempt_id
      ) VALUES(?, ?, ?, 'failure', NULL, ?, ?, ?, ?, ?, ?, 'connectFail', ?, ?, NULL, ?, ?,
-              NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?)`,
+              NULL, NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
   ).bind(
     id(), atMs, t, a.userId, a.deviceId,
     platform, appVersion, osVersion, osArch,
     node, stage, code, errorText,
     exitDelayMs, tcpDelayMs,
     edge.edge_asn, edge.edge_as_org, edge.edge_country, edge.edge_region, edge.edge_via_exit,
+    attemptId,
   ).run();
-  try {
-    await e.DB.prepare(
-      `INSERT INTO ops_customer_status (
-         user_id, last_fail_at, last_fail_code, last_fail_node, fails_30m, updated_at, connected
-       ) VALUES (?, ?, ?, ?, 1, ?, 0)
-       ON CONFLICT(user_id) DO UPDATE SET
-         last_fail_at = excluded.last_fail_at,
-         last_fail_code = excluded.last_fail_code,
-         last_fail_node = excluded.last_fail_node,
-         fails_30m = CASE
-           WHEN ops_customer_status.last_fail_at IS NOT NULL
-            AND excluded.last_fail_at - ops_customer_status.last_fail_at < 1800
-           THEN ops_customer_status.fails_30m + 1
-           ELSE 1
-         END,
-         updated_at = excluded.updated_at`,
-    ).bind(a.userId, t, code, node, t).run();
-  } catch (error) {
-    if (!String(error).includes('no such table')) {
-      console.error('ops failure status failed', clip(error));
-    }
+  if (Number(inserted.meta.changes ?? 0) > 0) {
+    await swallow('ops failure status failed', () => applyFailureToStatus(e.DB, {
+      userId: a.userId,
+      deviceId: a.deviceId,
+      code,
+      node,
+      nowSec: t,
+      platform,
+      appVersion,
+      osVersion,
+      tcpDelayMs,
+      exitDelayMs,
+    }));
   }
   await alertAfterCustomerPass(e, a.userId, t, 'ops failure');
   return Response.json({ accepted: true }, { status: 202 });

@@ -32,7 +32,11 @@
       "status": "active",
       "selectedServer": "Preview Tokyo",
       "lastSeenAt": 1724999970,
-      "createdAt": 1722407937
+      "createdAt": 1722407937,
+      "connected": false,
+      "lastFailAt": null,
+      "lastFailCode": null,
+      "lastFailNode": null
     }
   ],
   "chores": [

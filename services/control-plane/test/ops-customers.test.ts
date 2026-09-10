@@ -136,7 +136,7 @@ describe('ops_customer_status upsert', () => {
     expect(dropped?.connectedSince).toBe(t0 + 1);
   });
 
-  it('resets connected_since when the connected device changes', async () => {
+  it('keeps the earlier connected_since when a second device also connects', async () => {
     await seedUser();
     await applyWindowToStatus(db(), windowInput({
       id: 'w-a',
@@ -152,7 +152,8 @@ describe('ops_customer_status upsert', () => {
     }), null, HOUR + 25);
     const status = await customerStatus(db(), USER);
     expect(status?.deviceId).toBe('d-b');
-    expect(status?.connectedSince).toBe(HOUR + 25);
+    expect(status?.connected).toBe(true);
+    expect(status?.connectedSince).toBe(HOUR + 5);
   });
 
   it('counts connectFail events inside 30m and decays the previous fails_30m', async () => {
@@ -199,6 +200,75 @@ describe('ops_customer_status upsert', () => {
     expect(later?.fails30m).toBe(1);
     expect(later?.lastFailCode).toBe('dns');
     expect(later?.lastFailNode).toBe('Tokyo · Kite');
+  });
+
+  it('aggregates a fresh Mac and a failing Windows instead of last-window-wins', async () => {
+    await seedUser();
+    await applyWindowToStatus(db(), windowInput({
+      id: 'w-mac',
+      device_id: 'd-mac',
+      received_at: HOUR,
+      client_version: '0.0.20',
+      os_version: 'macOS 15.1',
+      payload: payload({ uiState: 'connected', selectedServer: 'Tokyo · Fuji' }),
+    }), null, HOUR + 1);
+    await applyWindowToStatus(db(), windowInput({
+      id: 'w-win',
+      device_id: 'd-win',
+      received_at: HOUR + 30,
+      client_version: '0.0.18',
+      os_version: 'Windows 11 Pro 23H2',
+      payload: payload({
+        uiState: 'notConnected',
+        selectedServer: 'Los Angeles · Mesa',
+        events: [{
+          ts: (HOUR + 30) * 1000,
+          kind: 'connectFail',
+          code: 'ETIMEDOUT',
+          node: 'Los Angeles · Mesa',
+        }],
+      }),
+    }), null, HOUR + 31);
+
+    const status = await customerStatus(db(), USER);
+    expect(status?.connected).toBe(true);
+    expect(status?.selectedServer).toBe('Tokyo · Fuji');
+    expect(status?.lastSeenAt).toBe(HOUR + 30);
+    expect(status?.appVersion).toBe('0.0.18');
+    expect(status?.lastFailCode).toBe('ETIMEDOUT');
+    expect(status?.lastFailNode).toBe('Los Angeles · Mesa');
+    expect(status?.fails30m).toBe(1);
+
+    const devices = await db().prepare(
+      'SELECT device_id, connected, app_version, last_fail_code FROM ops_device_status WHERE user_id = ? ORDER BY device_id',
+    ).bind(USER).all<{ device_id: string; connected: number; app_version: string; last_fail_code: string | null }>();
+    expect(devices.results).toEqual([
+      { device_id: 'd-mac', connected: 1, app_version: '0.0.20', last_fail_code: null },
+      { device_id: 'd-win', connected: 0, app_version: '0.0.18', last_fail_code: 'ETIMEDOUT' },
+    ]);
+  });
+
+  it('still updates the customer row when a window has no device_id and no device rows exist', async () => {
+    await seedUser();
+    await applyWindowToStatus(db(), windowInput({
+      id: 'w-legacy',
+      device_id: null,
+      received_at: HOUR + 10,
+      client_version: '0.0.19',
+      payload: payload({ uiState: 'connected', selectedServer: 'Tokyo · Fuji' }),
+    }), null, HOUR + 11);
+    const deviceCount = await db().prepare(
+      'SELECT COUNT(*) AS c FROM ops_device_status WHERE user_id = ?',
+    ).bind(USER).first<{ c: number }>();
+    expect(Number(deviceCount?.c)).toBe(0);
+    const status = await customerStatus(db(), USER);
+    expect(status).toMatchObject({
+      connected: true,
+      selectedServer: 'Tokyo · Fuji',
+      appVersion: '0.0.19',
+      lastSeenAt: HOUR + 10,
+      lastWindowId: 'w-legacy',
+    });
   });
 });
 
