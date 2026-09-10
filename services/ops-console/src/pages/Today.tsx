@@ -12,6 +12,7 @@ import { severityTone } from '@/lib/codes';
 import { formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
 import { invitesOf } from '@/lib/funnel';
 import { choresDueToday, closureWord, recoveredCount } from '@/lib/handling';
+import { coverageLine } from '@/lib/health';
 import { openIncident } from '@/lib/hash-route';
 import {
   impactedCustomers,
@@ -104,9 +105,19 @@ export default function TodayPage({
   };
 
   const digest = useResource('digest', (signal) => followupApi.digest(signal));
+  const coverage = useMemo(
+    () => coverageLine(health.status === 'ready' ? health.data : null),
+    [health],
+  );
 
   return (
     <div className="page-wrap">
+      {coverage ? (
+        <p className={cn('text-fine -mb-3', coverage.tone && `tone-${coverage.tone} tone-fg`)}>
+          {coverage.text}
+        </p>
+      ) : null}
+
       {incidents.status === 'ready' ? (
         <p className="text-verdict">
           {open.length > 0 ? (
