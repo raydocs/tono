@@ -92,7 +92,7 @@ describe('money', () => {
 
   it('shows a rate to four places and a per-GB cost to the cent', () => {
     expect(formatRate(7.1)).toBe('7.1000');
-    expect(formatPerGb(0.428)).toBe('¥0.43');
+    expect(formatPerGb(43)).toBe('¥0.43');
     expect(formatPerGb(null)).toBeNull();
   });
 });
@@ -128,8 +128,8 @@ const SUMMARY: MonthSummaryDto = {
     { userId: 'u-02', email: 'd@e.f', revenueCnyMinor: 12_800, costCnyMinor: 0, marginCnyMinor: null, pending: true },
   ],
   nodes: [
-    { name: 'Tokyo · Fuji', costCnyMinor: 4_000, bytes: 1_000, cnyPerGb: 0.42, pending: false },
-    { name: 'Seoul · Han', costCnyMinor: 4_000, bytes: null, cnyPerGb: null, pending: true },
+    { name: 'Tokyo · Fuji', costCnyMinor: 4_000, bytes: 1_000, cnyPerGbMinor: 0.42, pending: false },
+    { name: 'Seoul · Han', costCnyMinor: 4_000, bytes: null, cnyPerGbMinor: null, pending: true },
   ],
   unreconciled: 2,
   updatedAt: NOW,
@@ -144,7 +144,7 @@ describe('the month summary', () => {
     expect(customerRow(SUMMARY, 'u-02')?.pending).toBe(true);
     expect(customerRow(SUMMARY, 'u-99')).toBeNull();
     expect(customerRow(null, 'u-01')).toBeNull();
-    expect(nodeRow(SUMMARY, 'Tokyo · Fuji')?.cnyPerGb).toBe(0.42);
+    expect(nodeRow(SUMMARY, 'Tokyo · Fuji')?.cnyPerGbMinor).toBe(0.42);
   });
 
   it('keeps a pending margin null rather than calling it zero', () => {

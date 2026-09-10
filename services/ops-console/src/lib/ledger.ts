@@ -207,7 +207,8 @@ export function pendingNodes(summary: MonthSummaryDto): MonthNodeRow[] {
 /** Yuan per GB, to the cent. Null stays null: 待核对 is not a rounding of zero. */
 export function formatPerGb(value: number | null | undefined): string | null {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
-  return `¥${minorText(Math.round(value * 100), 2)}`;
+  // Minor units per GB, like every other money field on the summary.
+  return `¥${minorText(Math.round(value), 2)}`;
 }
 
 /* ---------------------------------------------------------------- entries */

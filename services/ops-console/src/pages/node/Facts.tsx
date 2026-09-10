@@ -188,7 +188,7 @@ function PerGbFact({ name }: { name: string }) {
   const at = summary.status === 'ready' ? summary.data.updatedAt : null;
   const value = row === null
     ? null
-    : row.pending ? copy.ledger.pending : formatPerGb(row.cnyPerGb);
+    : row.pending ? copy.ledger.pending : formatPerGb(row.cnyPerGbMinor);
   return (
     <Fact
       label={copy.ledger.perGb}

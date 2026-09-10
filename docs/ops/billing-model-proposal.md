@@ -40,7 +40,7 @@
 ## 6. 冻结的接口形状（Worker 与控制台同时按这个做）
 
 - `LedgerEntryDto { id, kind: revenue|refund|credit|cost, category: plan|server|home_line|domain|control_plane|claude_account|chatgpt_account|other, subjectType: user|node|home_exit|account|fleet, subjectId, amountMinor, currency, fxRateToCny, fxDate, cnyMinor, month: 'YYYY-MM', paidAt, note, reverses, reversedBy, createdBy, createdAt }`
-- `MonthSummaryDto { month, closedAt, closedBy, revenueCnyMinor, costCnyMinor, marginCnyMinor, byCategory: Record<category, cnyMinor>, customers: [{ userId, email, revenueCnyMinor, costCnyMinor, marginCnyMinor|null, pending: boolean }], nodes: [{ name, costCnyMinor, bytes, cnyPerGb|null, pending: boolean }], unreconciled: number, updatedAt }`
+- `MonthSummaryDto { month, closedAt, closedBy, revenueCnyMinor, costCnyMinor, marginCnyMinor, byCategory: Record<category, cnyMinor>, customers: [{ userId, email, revenueCnyMinor, costCnyMinor, marginCnyMinor|null, pending: boolean }], nodes: [{ name, costCnyMinor, bytes, cnyPerGbMinor|null, pending: boolean }], unreconciled: number, updatedAt }`
 - `FxRateDto { day: 'YYYY-MM-DD', base, quote: 'CNY', rate, fetchedAt, source: 'frankfurter' }`
 - 路由：`GET ledger?month=`、`POST ledger`、`PATCH ledger/{id}`（未锁定月）、`POST ledger/{id}/reverse`、`GET months/{month}`、`POST months/{month}/close`、`GET months/{month}/export.csv`、`GET fx?day=&base=`。
 

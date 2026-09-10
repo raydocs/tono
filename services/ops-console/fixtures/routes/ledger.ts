@@ -251,7 +251,7 @@ export function createLedgerFixtures(rootDir: string) {
         name: row.name,
         costCnyMinor: spent,
         bytes: row.bytes,
-        cnyPerGb: usable ? (spent / 100) / ((row.bytes ?? 0) / GB) : null,
+        cnyPerGbMinor: usable ? Math.round(spent / ((row.bytes ?? 0) / GB)) : null,
         pending: row.pending,
       };
     }).filter((row) => row.costCnyMinor !== 0 || row.pending);

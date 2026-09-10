@@ -238,7 +238,7 @@ describe('ops ledger, month close, live FX', () => {
     expect(a).toMatchObject({ revenueCnyMinor: 20000, costCnyMinor: 10500, marginCnyMinor: 9500, pending: false });
     expect(b).toMatchObject({ revenueCnyMinor: 10000, costCnyMinor: 2500, marginCnyMinor: 7500, pending: false });
     expect(summary.nodes[0]).toMatchObject({
-      name: NODE, costCnyMinor: 10000, bytes: 4_000_000_000, cnyPerGb: 2500, pending: false,
+      name: NODE, costCnyMinor: 10000, bytes: 4_000_000_000, cnyPerGbMinor: 2500, pending: false,
     });
     expect(summary.unreconciled).toBe(0);
   });
@@ -255,7 +255,7 @@ describe('ops ledger, month close, live FX', () => {
     expect(summary.customers[0].pending).toBe(true);
     expect(summary.customers[0].marginCnyMinor).toBeNull();
     expect(summary.nodes[0].pending).toBe(true);
-    expect(summary.nodes[0].cnyPerGb).toBeNull();
+    expect(summary.nodes[0].cnyPerGbMinor).toBeNull();
     expect(summary.unreconciled).toBe(2);
   });
 

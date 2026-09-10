@@ -208,8 +208,8 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     const bytes = nodeBytes.get(name) ?? 0;
     const meteringOk = covering.has(name);
     const pending = bytes === 0 || !meteringOk;
-    const cnyPerGb = pending ? null : Math.round(cost / (bytes / 1e9));
-    nodes.push({ name, costCnyMinor: cost, bytes, cnyPerGb, pending });
+    const cnyPerGbMinor = pending ? null : Math.round(cost / (bytes / 1e9));
+    nodes.push({ name, costCnyMinor: cost, bytes, cnyPerGbMinor, pending });
   }
   nodes.sort((a, b) => a.name.localeCompare(b.name));
 

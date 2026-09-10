@@ -62,7 +62,7 @@ export interface MonthNodeDto {
   name: string;
   costCnyMinor: number;
   bytes: number;
-  cnyPerGb: number | null;
+  cnyPerGbMinor: number | null;
   pending: boolean;
 }
 
@@ -138,7 +138,7 @@ export function assertMonthCustomer(value: unknown, path = 'monthCustomer'): Mon
   };
 }
 
-const NODE_KEYS = ['name', 'costCnyMinor', 'bytes', 'cnyPerGb', 'pending'];
+const NODE_KEYS = ['name', 'costCnyMinor', 'bytes', 'cnyPerGbMinor', 'pending'];
 
 export function assertMonthNode(value: unknown, path = 'monthNode'): MonthNodeDto {
   const row = fields(value, path, NODE_KEYS);
@@ -146,7 +146,7 @@ export function assertMonthNode(value: unknown, path = 'monthNode'): MonthNodeDt
     name: text(row, path, 'name'),
     costCnyMinor: int(row, path, 'costCnyMinor'),
     bytes: int(row, path, 'bytes'),
-    cnyPerGb: optInt(row, path, 'cnyPerGb'),
+    cnyPerGbMinor: optInt(row, path, 'cnyPerGbMinor'),
     pending: bool(row, path, 'pending'),
   };
 }

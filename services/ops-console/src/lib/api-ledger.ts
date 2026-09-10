@@ -71,7 +71,7 @@ export type MonthNodeRow = {
   costCnyMinor: number;
   bytes: number | null;
   /** Yuan per GB, not minor units — the contract spells `Minor` where it means it. */
-  cnyPerGb: number | null;
+  cnyPerGbMinor: number | null;
   pending: boolean;
 };
 

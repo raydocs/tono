@@ -572,7 +572,7 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
       userId: 'u-1', email: 'a@example.com',
       revenueCnyMinor: 71280, costCnyMinor: 8750, marginCnyMinor: 62530, pending: false,
     }],
-    nodes: [{ name: '洛杉矶 CN2 GIA', costCnyMinor: 15000, bytes: 4_000_000_000, cnyPerGb: 3750, pending: false }],
+    nodes: [{ name: '洛杉矶 CN2 GIA', costCnyMinor: 15000, bytes: 4_000_000_000, cnyPerGbMinor: 3750, pending: false }],
     unreconciled: 0,
     updatedAt: 1_757_000_000,
   })],
