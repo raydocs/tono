@@ -16,8 +16,12 @@ import {
 import { accrueActivityHours, applyFailureToStatus, applyWindowToStatus } from './customers';
 import { parseAuditSegment, writeParsedSegment } from './traffic-parse';
 import { planAndSendAlerts, runCustomerVerdictPass, runNodeVerdictPass } from './verdict-run';
+import { loadKnownExitAsns, upsertExitAsn } from './exit-asns';
 
 const LOG_PARSE_MAX = 2 * 1024 * 1024;
+// 20k realistic JSONL lines inflate to ~5-6 MiB. 16 MiB is a generous
+// backstop so a 2 MiB gzip cannot expand ~1000x before the line cap runs.
+export const LOG_INFLATED_MAX_BYTES = 16 * 1024 * 1024;
 const CORE_ERRORS_MAX = 20;
 const CORE_ERROR_CHARS = 200;
 const FAILURE_KEYS = [
@@ -43,6 +47,56 @@ async function swallow(label: string, run: () => Promise<unknown>): Promise<void
   }
 }
 
+async function knownExitAsnsOrEmpty(db: D1Database): Promise<Set<number>> {
+  try {
+    return await loadKnownExitAsns(db);
+  } catch (error) {
+    console.error('ops known exit asns failed', clip(error));
+    return new Set();
+  }
+}
+
+export async function recordExitAgentAsn(
+  e: Env,
+  req: Request,
+  nodeHint: string | null,
+): Promise<void> {
+  await swallow('ops exit asn failed', () =>
+    upsertExitAsn(e.DB, requestCf(req), nodeHint, now()),
+  );
+}
+
+async function inflateGzipBounded(bytes: Uint8Array, maxBytes: number): Promise<string | null> {
+  const stream = new Blob([bytes as BlobPart])
+    .stream()
+    .pipeThrough(new DecompressionStream('gzip'));
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(out);
+}
+
 export type StoredTelemetryWindow = FlattenWindowRow & {
   window_start_ms?: number | null;
   window_end_ms?: number | null;
@@ -53,9 +107,7 @@ export async function afterTelemetryWindow(
   req: Request,
   row: StoredTelemetryWindow,
 ): Promise<void> {
-  // ops_node_profiles stores public_ip, not ASN, so edge_via_exit stays 0
-  // until exit ASNs are recorded.
-  const knownExitAsns = new Set<number>();
+  const knownExitAsns = await knownExitAsnsOrEmpty(e.DB);
   const edge = edgeAttribution(requestCf(req), knownExitAsns);
   const customerEdge = {
     asn: edge.edge_asn,
@@ -104,11 +156,16 @@ export async function afterLogSegment(
     return;
   }
   await swallow('ops traffic parse failed', async () => {
-    const parsed = await parseAuditSegment(input.bytes, {
+    const inflated = await inflateGzipBounded(input.bytes, LOG_INFLATED_MAX_BYTES);
+    if (inflated == null) {
+      console.error('ops traffic parse: inflated segment exceeds 16 MiB, skipping');
+      return;
+    }
+    const parsed = await parseAuditSegment(inflated, {
       userId: input.userId,
       deviceId: input.deviceId,
       receivedAt: input.receivedAt,
-      gunzip: true,
+      gunzip: false,
     });
     await writeParsedSegment(e.DB, parsed, now());
   });
@@ -181,7 +238,7 @@ export async function ingestConnectFailure(
   // A client clock ahead of ours must not plant a failure that every
   // "recent" window counts for a month: like flatten, cap at receipt time.
   const atMs = Math.min(b.ts >= 1_000_000_000_000 ? b.ts : b.ts * 1000, t * 1000);
-  const edge = edgeAttribution(requestCf(req), new Set());
+  const edge = edgeAttribution(requestCf(req), await knownExitAsnsOrEmpty(e.DB));
   const inserted = await e.DB.prepare(
     `INSERT OR IGNORE INTO connection_events(
        id, at_ms, received_at, source, window_id, user_id, device_id,
