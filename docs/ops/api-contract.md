@@ -111,3 +111,19 @@
 2. 处理器返回前跑检查器；列表用 `listEnvelope()`，游标用 `encodeCursor()`，响应用 `jsonWithEtag()` 并在查询前调 `notModified()`。
 3. 上表加一行。**未来的路由表覆盖测试**会对没有检查器、或没出现在这张表里的端点报错——所以这两步不是文档工作，是让 CI 通过的条件。
 4. 字段只增不改语义；确实要改语义或删字段，`CONTRACT_VERSION` 加一。
+
+## 角色（roles）
+
+三个角色：`viewer`、`operator`、`owner`。动作共 19 个：
+
+`system.read`、`audit.read`、`incidents.read`、`incidents.handle`、`nodes.read`、`nodes.write`、`nodes.publish`、`nodes.retire`、`nodes.jobs`、`customers.read`、`customers.write`、`customers.raw-logs`、`ledger.read`、`ledger.write`、`releases.read`、`releases.write`、`settings.read`、`settings.publish`、`alerts.manage`。
+
+授权表（`can(action, role)`，唯一源在 `src/ops/contract/roles.ts`）：
+
+- `viewer`：`system.read`、`incidents.read`、`nodes.read`、`customers.read`、`releases.read`。没有 `settings.read`（设置页承载发布、钱与告警规则）、`ledger.read`、`audit.read`，没有写动作，也没有 `customers.raw-logs`。
+- `operator`：viewer 的全部，加上 `settings.read`、`incidents.handle`、`nodes.write`、`nodes.jobs`、`customers.write`、`releases.write`、`audit.read`。没有 `customers.raw-logs`、`ledger.*`、`nodes.publish`、`nodes.retire`、`settings.publish`、`alerts.manage`。
+- `owner`：全部动作。
+
+环境变量 `OPS_ROLES` 是 JSON 对象（email → 角色）；解析时 email 一律小写。非法 JSON、非对象、非字符串值、未知角色：忽略并 `console.warn` 一次，不抛错。未列出的 Access 邮箱默认为 `owner`（今天的行为不变）。邮箱写错时也会静默得到 `owner`。
+
+闸门：匹配到的 v1 路由在 `dispatchOpsV1` 里检查；另外四条 legacy 写（`POST fleet-nodes/{n}/retire` → `nodes.retire`；`DELETE signup-allowlist`、`POST users/onboard`、`PATCH users/{id}` → `customers.write`）在 `opsRoutes` 里检查。不通过则 `403` `{ error: { code: "ROLE_FORBIDDEN" } }`。shared-admin 的资源尚未按角色拦截（exit-catalog PUT、signup-allowlist POST、users/{id}/close、exit-nodes POST/DELETE/token、exit-credential-rollout POST、users/{id}/devices/{d}/diagnostics-logs、traffic-policy PUT、home-exits POST/assign/import、device-actions POST、product-accounts POST/ban/replace、node-profiles POST、usage-metering-rollout POST，以及由 shared-admin 先于 v1 dispatch 承接的 `GET audit`）。`ops_audit` 行上的 `actor_role` 仍记为 `owner`，本版不改。

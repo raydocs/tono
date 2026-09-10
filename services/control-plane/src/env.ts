@@ -74,6 +74,7 @@ export interface Env {
   RATE_LIMIT_ROUTING_RESEARCH_DEVICE_DAY?: string;
   ROUTING_RESEARCH_RETENTION_SECONDS?: string;
   BUILD_SHA?: string;
+  OPS_ROLES?: string;
 }
 
 export type Row = Record<string, any>;

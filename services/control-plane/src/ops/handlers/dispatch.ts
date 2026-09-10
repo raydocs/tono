@@ -37,6 +37,8 @@ import {
   getFx, getLedger, getMonth, getMonthExport, patchLedger, postLedger, postLedgerReverse, postMonthClose,
 } from './ledger';
 import type { Actor } from './common';
+// dept:E
+import { actionForRequest, requireCan, resolveOpsRole } from '../roles';
 
 export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/nodes',
@@ -224,6 +226,10 @@ export async function dispatchOpsV1(
     if (route.method !== m) continue;
     const match = p.match(route.re);
     if (!match) continue;
+    // dept:E
+    const role = actor.role ?? resolveOpsRole(actor.email, e);
+    const action = actionForRequest(m, p);
+    requireCan(action, role);
     return route.handle(req, e, actor, match.slice(1));
   }
   return null;

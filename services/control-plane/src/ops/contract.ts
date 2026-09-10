@@ -57,3 +57,4 @@ export * from './contract/route-table';
 
 // dept:e
 // append your entries inside your block
+export * from './contract/roles';

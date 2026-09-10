@@ -25,15 +25,16 @@ import type {
   NodeSummaryDto,
   SystemHealthDto,
 } from '@contract';
+import { can, currentRole, PAGE_REQUIRES, type OpsAction } from '@/lib/roles';
 import { CommandPalette } from './CommandPalette';
 import { Enter } from './Enter';
 
-const NAV: Array<{ id: PageId; icon: typeof Server }> = [
-  { id: 'today', icon: SunMoon },
-  { id: 'nodes', icon: Server },
-  { id: 'customers', icon: Users },
-  { id: 'clients', icon: Monitor },
-  { id: 'settings', icon: Settings },
+const NAV: Array<{ id: PageId; icon: typeof Server; requires: OpsAction }> = [
+  { id: 'today', icon: SunMoon, requires: PAGE_REQUIRES.today },
+  { id: 'nodes', icon: Server, requires: PAGE_REQUIRES.nodes },
+  { id: 'customers', icon: Users, requires: PAGE_REQUIRES.customers },
+  { id: 'clients', icon: Monitor, requires: PAGE_REQUIRES.clients },
+  { id: 'settings', icon: Settings, requires: PAGE_REQUIRES.settings },
 ];
 
 const THEMES: ThemeChoice[] = ['system', 'light', 'dark'];
@@ -64,6 +65,7 @@ export function Shell({
   ));
   const privacy = usePrivacy();
   const theme = useTheme();
+  const role = currentRole();
 
   useEffect(() => {
     const sync = () => setRoute(readRoute());
@@ -93,7 +95,7 @@ export function Shell({
           </div>
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 p-2" aria-label={copy.brand}>
-          {NAV.map((item) => {
+          {NAV.filter((item) => can(item.requires, role)).map((item) => {
             const Icon = item.icon;
             const active = route.page === item.id;
             return (
