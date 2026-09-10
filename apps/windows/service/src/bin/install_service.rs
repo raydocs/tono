@@ -1269,19 +1269,22 @@ fn record_install_started_on_journal(path: &Path) -> std::io::Result<bool> {
 
 fn update_handoff_journal_paths(app_target: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    let mut push_home = |home: PathBuf| {
+    fn push_home(paths: &mut Vec<PathBuf>, home: PathBuf) {
         for id in TONO_APP_IDS {
             let path = home.join(id).join(UPDATE_HANDOFF_FILE);
             if !paths.contains(&path) {
                 paths.push(path);
             }
         }
-    };
+    }
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        push_home(PathBuf::from(appdata));
+        push_home(&mut paths, PathBuf::from(appdata));
     }
     if let Some(profile) = std::env::var_os("USERPROFILE") {
-        push_home(PathBuf::from(profile).join("AppData").join("Roaming"));
+        push_home(
+            &mut paths,
+            PathBuf::from(profile).join("AppData").join("Roaming"),
+        );
     }
     if let Some(app_target) = app_target {
         if let Some(dir) = app_target.parent() {
@@ -1297,7 +1300,7 @@ fn update_handoff_journal_paths(app_target: Option<&Path>) -> Vec<PathBuf> {
     if let Ok(drive) = std::env::var("SystemDrive") {
         if let Ok(entries) = std::fs::read_dir(PathBuf::from(drive).join("Users")) {
             for entry in entries.flatten() {
-                push_home(entry.path().join("AppData").join("Roaming"));
+                push_home(&mut paths, entry.path().join("AppData").join("Roaming"));
             }
         }
     }
