@@ -133,6 +133,8 @@ export const CLAUDE_PLAN = 'claude_20x';
 /** What `POST users/onboard` accepts. Keys the hub rejects are absent. */
 export type OnboardInput = {
   email: string;
+  /** Optional, and asked for anyway: a customer with no handle is unreachable. */
+  wechatId?: string;
   line?: string;
   homeExitId?: string;
   accountRef?: string;
@@ -155,6 +157,8 @@ export type OnboardInput = {
 export type UserPatch = {
   status?: 'active' | 'disabled';
   expiresAt?: number | null;
+  /** All three read back now, so `null` is how a value is actually cleared. */
+  wechatId?: string | null;
   notes?: string | null;
   contact?: string | null;
   plan?: string | null;

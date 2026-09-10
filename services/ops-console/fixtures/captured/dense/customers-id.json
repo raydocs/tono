@@ -1,6 +1,9 @@
 {
   "userId": "id_5b6bdccf68a113fe",
   "email": "user2@example.test",
+  "wechatId": null,
+  "contact": null,
+  "notes": null,
   "verdict": "ok",
   "health": "正常",
   "tone": "ok",

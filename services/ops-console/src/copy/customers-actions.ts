@@ -3,6 +3,19 @@
 // 每一句"会发生什么"都写成结果，不写成问句：操作员按下去之前要读的是客户
 // 那一头会变成什么样，不是"确定吗"。
 export const customerActionCopy = {
+  /* ---------------------------------------------------------- 微信号 */
+
+  /**
+   * One word for the handle, written once, because it is asked for on the
+   * onboarding form, shown at the top of the 360 and edited in 改账务 — three
+   * surfaces that have to call the same thing the same thing.
+   */
+  wechatField: '微信号',
+  /** Why the optional field is worth filling in, said where it is left blank. */
+  wechatNudge: '没有微信号以后找不到人',
+  wechatCopy: '复制',
+  wechatCopied: '已复制',
+
   /* ------------------------------------------------------------ 开通 */
 
   onboard: '开通',
@@ -108,13 +121,19 @@ export const customerActionCopy = {
   billingFieldExpires: '到期',
   billingFieldContact: '联系方式',
   billingFieldNotes: '备注',
-  billingContactHint: '微信或者别的联系方式',
-  billingWriteOnly: '联系方式和备注读不回来：留空就是不改，填了就整条换掉。',
+  billingContactHint: '除了微信之外，还能怎么找到人',
+  /**
+   * The three operator-only fields now read back, so the sentence over the
+   * form says who can see them rather than warning that a blank means "leave
+   * it alone" — a blank box beside a value that is on screen means empty.
+   */
+  billingWriteOnly: '微信号、联系方式和备注只有运维看得到，改一栏就是整条换掉。',
   billingPlanHint: '只有 Claude 这一种套餐，或者不填',
-  billingSaveBody: (what: string) => `会改这位客户的${what}。到期只挡登录和取目录，联系方式和备注只有运维看得到。`,
+  billingSaveBody: (what: string) => `会改这位客户的${what}。到期只挡登录和取目录，微信号、联系方式和备注只有运维看得到。`,
   billingChangeWord: {
     plan: '套餐',
     expiresAt: '到期',
+    wechatId: '微信号',
     contact: '联系方式',
     notes: '备注',
   } as const,

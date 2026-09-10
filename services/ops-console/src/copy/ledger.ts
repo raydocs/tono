@@ -75,6 +75,12 @@ export const ledgerCopy = {
     subjectPick: '先选一个',
     amountHint: '原币金额，小数点后两位。',
     amountInvalid: '金额得是个数',
+    /**
+     * The one line under a locked 币种, and the one a refused entry gets back.
+     * Money coming in is only ever taken in yuan, so the field says so rather
+     * than offering five currencies the hub will turn down.
+     */
+    currencyCny: '收款只收人民币',
     monthHint: '这笔算在哪个月的账上，跟付钱那天可以不是同一个月。',
     paidHint: '真正付钱或收钱的那一天，汇率按这一天取。',
 
