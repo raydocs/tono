@@ -7,10 +7,12 @@ import { CountText } from '@/components/ops/CountText';
 import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type TableState } from '@/components/ops/DataTable';
 import { copy } from '@/copy/copy';
+import { followupApi } from '@/lib/api-followups';
 import {
   bucketCounts,
   CUSTOMER_FILTERS,
   customerCounts,
+  newestOpenFollowups,
   planWired,
   PLATFORM_CHIPS,
   platformCounts,
@@ -25,7 +27,7 @@ import { openCustomer, setCustomerFilter } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
-import { newestFetch, type Resource } from '@/lib/use-resource';
+import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
 import { customerColumns } from './customer/columns';
@@ -84,10 +86,23 @@ export default function CustomersPage({
     [onPlatform, published, bucket],
   );
   const wired = useMemo(() => planWired(all), [all]);
+  /**
+   * Every followup still owed, in one read.
+   *
+   * The list is the place an operator decides who to open, and "this one is
+   * waiting on the customer" is the fact that decides it. The column hides
+   * itself while the fleet has none, the way the last three do.
+   */
+  const owed = useResource('followups', (signal) => followupApi.due('open', signal));
+  const followups = useMemo(() => {
+    if (owed.status !== 'ready') return null;
+    const index = newestOpenFollowups(owed.data.items);
+    return index.size === 0 ? null : index;
+  }, [owed]);
   const cohort = useCohort(rows, customers.reload);
   const columns = useMemo(
-    () => [cohort.column, ...customerColumns(privacy.email, wired)],
-    [cohort.column, privacy.email, wired],
+    () => [cohort.column, ...customerColumns(privacy.email, wired, followups)],
+    [cohort.column, privacy.email, wired, followups],
   );
 
   const state: TableState = customers.status === 'loading'

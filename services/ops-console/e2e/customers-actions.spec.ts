@@ -180,3 +180,73 @@ test.describe('客户写动作', () => {
     await expect(page.getByText('DR-4471-0912')).toBeVisible();
   });
 });
+
+/**
+ * 跟进 and the draft: the two halves of answering a customer without starting
+ * from nothing — the record of what was already said, and an answer assembled
+ * from the fields rather than from memory.
+ */
+test.describe('客户回访与草稿', () => {
+  test('记一条跟进之后客户列表那一列就写着它', async ({ page }, testInfo) => {
+    const session = fresh('followup', testInfo);
+    await open(page, '/customers/u-02', 'default', session);
+
+    await page.getByLabel('这一条算什么').selectOption('callback');
+    await page.getByLabel('写这次跟进').fill('周五回访，确认换线之后稳不稳');
+    await page.getByLabel('什么时候回来看').fill('2026-09-11');
+    await page.getByRole('button', { name: '记一条' }).click();
+    await settle(page);
+    await expect(page.getByText('周五回访，确认换线之后稳不稳')).toBeVisible();
+
+    // The list is where the operator decides who to open next, so what is
+    // still owed on somebody has to be visible without opening them.
+    await open(page, '/customers', 'default', session);
+    const row = page.locator('tbody tr').filter({ hasText: 'zhang.min@example.com' });
+    await expect(row).toContainText('约定回访');
+    await expect(row).toContainText('2026-09-11');
+  });
+
+  test('办结之后这一条不再挂在客户名下', async ({ page }, testInfo) => {
+    const session = fresh('followup-done', testInfo);
+    await open(page, '/customers/u-04', 'default', session);
+    const owed = page.locator('div').filter({ hasText: /^等客户验证/ }).first();
+    await expect(owed).toBeVisible();
+    await page.getByRole('button', { name: '办结' }).first().click();
+    await settle(page);
+    await expect(page.getByRole('button', { name: '办结' })).toHaveCount(0);
+  });
+
+  test('重发凭证自己会在跟进里留一行', async ({ page }, testInfo) => {
+    const session = fresh('auto-followup', testInfo);
+    await open(page, '/customers/u-04', 'default', session);
+    await head(page).getByRole('button', { name: '重发凭证' }).click();
+    await gate(page, /台设备/).getByRole('button', { name: '重发凭证' }).click();
+    await settle(page);
+    await expect(page.getByText('已重发凭证')).toBeVisible();
+  });
+
+  /**
+   * Every line of the draft is a field off this page: the attempt, the stage,
+   * the code, the incident on that machine, a machine the engine still calls
+   * healthy. Nothing in it is a cause the console decided on its own.
+   */
+  test('回复草稿逐句都能指回页面上的字段', async ({ page }) => {
+    await open(page, '/customers/u-04');
+    await page.getByRole('button', { name: '写一封回信' }).click();
+    await settle(page);
+    const draft = page.locator('textarea');
+    await expect(draft).toHaveValue(/Los Angeles · Mesa/);
+    await expect(draft).toHaveValue(/ECONNREFUSED/);
+    await expect(draft).toHaveValue(/对方端口没人应答/);
+    await expect(draft).toHaveValue(/这台机器现在有一条已登记的事故/);
+    await expect(draft).toHaveValue(/建议先在客户端里换到 Tokyo · Fuji/);
+    await expect(draft).toHaveValue(/想请您确认一件事/);
+  });
+
+  test('没有失败记录的客户不给草稿，只说为什么', async ({ page }) => {
+    await open(page, '/customers/u-07');
+    const button = page.getByRole('button', { name: '写一封回信' });
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('title', /没有失败的连接记录/);
+  });
+});

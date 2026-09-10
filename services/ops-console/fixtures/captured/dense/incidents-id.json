@@ -18,7 +18,9 @@
     "lastSeenAt": 1724999940,
     "ackedAt": null,
     "snoozedUntil": null,
-    "resolvedAt": null
+    "resolvedAt": null,
+    "nextCheckAt": null,
+    "closure": null
   },
   "events": {
     "items": [

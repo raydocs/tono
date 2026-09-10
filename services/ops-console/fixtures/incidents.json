@@ -58,7 +58,9 @@
         "lastSeenAt": 1724999820,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": null
+        "resolvedAt": null,
+        "nextCheckAt": null,
+        "closure": null
       },
       {
         "id": "inc-user-jiangsu",
@@ -92,7 +94,9 @@
         "lastSeenAt": 1724999820,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": null
+        "resolvedAt": null,
+        "nextCheckAt": null,
+        "closure": null
       },
       {
         "id": "inc-r1",
@@ -126,7 +130,9 @@
         "lastSeenAt": 1724974000,
         "ackedAt": 1724972200,
         "snoozedUntil": null,
-        "resolvedAt": 1724974000
+        "resolvedAt": 1724974000,
+        "nextCheckAt": null,
+        "closure": null
       },
       {
         "id": "inc-r2",
@@ -160,7 +166,9 @@
         "lastSeenAt": 1724913600,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": 1724913600
+        "resolvedAt": 1724913600,
+        "nextCheckAt": null,
+        "closure": null
       },
       {
         "id": "inc-r3",
@@ -194,7 +202,9 @@
         "lastSeenAt": 1724827200,
         "ackedAt": 1724824400,
         "snoozedUntil": null,
-        "resolvedAt": 1724827200
+        "resolvedAt": 1724827200,
+        "nextCheckAt": null,
+        "closure": null
       },
       {
         "id": "inc-r4",
@@ -228,7 +238,9 @@
         "lastSeenAt": 1724654400,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": 1724654400
+        "resolvedAt": 1724654400,
+        "nextCheckAt": null,
+        "closure": null
       },
       {
         "id": "inc-r5",
@@ -262,7 +274,9 @@
         "lastSeenAt": 1724481600,
         "ackedAt": 1724480400,
         "snoozedUntil": null,
-        "resolvedAt": 1724481600
+        "resolvedAt": 1724481600,
+        "nextCheckAt": null,
+        "closure": null
       }
     ],
     "nextCursor": null,
@@ -327,7 +341,9 @@
         "lastSeenAt": 1724999820,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": null
+        "resolvedAt": null,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [
@@ -476,7 +492,9 @@
         "lastSeenAt": 1724999820,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": null
+        "resolvedAt": null,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [
@@ -635,7 +653,9 @@
         "lastSeenAt": 1724974000,
         "ackedAt": 1724972200,
         "snoozedUntil": null,
-        "resolvedAt": 1724974000
+        "resolvedAt": 1724974000,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [
@@ -800,7 +820,9 @@
         "lastSeenAt": 1724913600,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": 1724913600
+        "resolvedAt": 1724913600,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [
@@ -967,7 +989,9 @@
         "lastSeenAt": 1724827200,
         "ackedAt": 1724824400,
         "snoozedUntil": null,
-        "resolvedAt": 1724827200
+        "resolvedAt": 1724827200,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [
@@ -1135,7 +1159,9 @@
         "lastSeenAt": 1724654400,
         "ackedAt": null,
         "snoozedUntil": null,
-        "resolvedAt": 1724654400
+        "resolvedAt": 1724654400,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [
@@ -1300,7 +1326,9 @@
         "lastSeenAt": 1724481600,
         "ackedAt": 1724480400,
         "snoozedUntil": null,
-        "resolvedAt": 1724481600
+        "resolvedAt": 1724481600,
+        "nextCheckAt": null,
+        "closure": null
       },
       "events": {
         "items": [

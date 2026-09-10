@@ -6,9 +6,11 @@ import { Empty } from '@/components/ops/Empty';
 import { PageNote } from '@/components/ops/PageNote';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
+import { followupApi } from '@/lib/api-followups';
 import { customerChores, fleetChores, sortChores, type Chore } from '@/lib/chores';
 import { severityTone } from '@/lib/codes';
 import { formatDate, formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
+import { choresDueToday, closureWord, recoveredCount } from '@/lib/handling';
 import { openIncident } from '@/lib/hash-route';
 import {
   impactedCustomers,
@@ -21,8 +23,10 @@ import {
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
-import { newestFetch, type Resource } from '@/lib/use-resource';
+import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
+import { CloseDialog } from './today/CloseDialog';
+import { Digest } from './today/Digest';
 import { IncidentPrimary } from './today/IncidentAction';
 import { IncidentDrawer } from './today/IncidentDrawer';
 
@@ -68,11 +72,18 @@ export default function TodayPage({
     [nodes, people, privacy, floors],
   );
 
+  /**
+   * The recovered tab counts recoveries, and a rule that fired wrongly is not
+   * one. The mistaken rows stay in the list — losing them would lose the
+   * evidence that the rule needs changing — but they are out of the number.
+   */
   const counts: Record<TabId, number> = {
     open: open.length,
-    resolved: resolved.length,
+    resolved: recoveredCount(resolved),
     chores: chores.length,
   };
+
+  const digest = useResource('digest', (signal) => followupApi.digest(signal));
 
   return (
     <div className="page-wrap">
@@ -94,6 +105,17 @@ export default function TodayPage({
       <PageNote
         fetchedAt={newestFetch(incidents, customers, health)}
         backfill={health.status === 'ready' ? health.data.backfill : null}
+      />
+
+      {/* The morning read sits under the sentence and above the lists, in the
+          review's order: what the night did, what is waiting, what falls due
+          today. Every line lands somewhere the reader can act. */}
+      <Digest
+        digest={digest}
+        openCount={open.length}
+        choresToday={choresDueToday(chores).length}
+        onShowOpen={() => setTab('open')}
+        onShowChores={() => setTab('chores')}
       />
 
       <div className="flex items-center gap-5 border-b border-[var(--hairline)] text-body">
@@ -194,14 +216,19 @@ function IncidentRow({
   onChanged: () => void;
 }) {
   const [pending, setPending] = useState(false);
-  const claim = row.status === 'open' ? copy.incidentPrimary.ack : copy.incidentPrimary.resolve;
+  const [closing, setClosing] = useState(false);
+  const open = row.status === 'open';
   const led = incidentAction(row) !== null;
 
+  /**
+   * Claiming still fires on the click — it changes nothing about the fault.
+   * Closing does not: it now has to say whether the thing was measured working
+   * again, was never broken, or is simply no longer being chased.
+   */
   async function act() {
     setPending(true);
     try {
-      if (row.status === 'open') await opsApi.ackIncident(row.id);
-      else await opsApi.resolveIncident(row.id);
+      await opsApi.ackIncident(row.id);
       onChanged();
     } finally {
       setPending(false);
@@ -232,8 +259,11 @@ function IncidentRow({
         <p className="text-row">{row.title}</p>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-micro text-[var(--muted-foreground)]">
           <span>{copy.incidentImpact(row.impactCount)}</span>
+          {/* Recovered, mistaken, or merely dropped: the row says which of
+              the three ended it, because only the first means a customer can
+              use the thing again. */}
           <span>
-            {resolvedTab ? copy.incidentResolvedAt : copy.incidentOpenFor}{' '}
+            {resolvedTab ? closureWord(row) : copy.incidentOpenFor}{' '}
             <span className="font-mono normal-case tracking-normal">
               {resolvedTab
                 ? formatWhenAgo(row.resolvedAt)
@@ -254,7 +284,21 @@ function IncidentRow({
           role="presentation"
         >
           <IncidentPrimary incident={row} onChanged={onChanged} />
-          <Action primary={!led} pending={pending} onClick={act}>{claim}</Action>
+          {open ? (
+            <Action primary={!led} pending={pending} onClick={act}>
+              {copy.incidentPrimary.ack}
+            </Action>
+          ) : (
+            <Action primary={!led} onClick={() => setClosing(true)}>
+              {copy.incidentPrimary.resolve}
+            </Action>
+          )}
+          <CloseDialog
+            incident={row}
+            open={closing}
+            onClose={() => setClosing(false)}
+            onChanged={onChanged}
+          />
         </div>
       )}
     </div>

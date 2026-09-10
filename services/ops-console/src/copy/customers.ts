@@ -1,9 +1,12 @@
 // 客户 and 客户 360.
 import { customerActionCopy } from './customers-actions';
+import { followupCopy } from './followups';
 
 export const customerCopy = {
   // 读出来的名词在这一份，按下去的动作在另一份：一页的词表长到要翻页就分家。
   ...customerActionCopy,
+  // 跟进和回复草稿自成一份：今天页的处置卡读的是同一批词。
+  ...followupCopy,
   customerHealth: {
     unreachable: '连不上',
     unstable: '不稳',
@@ -44,6 +47,7 @@ export const customerCopy = {
     services: '服务使用',
     minVersion: '最低版本',
     expires: '到期',
+    followup: '跟进',
   } as const,
   deviceUnit: '台',
   overQuota: '超额',

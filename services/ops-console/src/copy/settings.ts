@@ -20,6 +20,7 @@ export const settingsCopy = {
     homelines: '家宽资产',
     providers: '商家账号',
     candidates: '直连候选',
+    allowlist: '注册白名单',
     audit: '操作记录',
   } as const,
   /** One line under the heading: why you would be on this section at all. */
@@ -31,6 +32,7 @@ export const settingsCopy = {
     homelines: '家宽线路的到期、计费和这一期用了多少。',
     providers: '节点和域名挂在谁家名下，账单去哪儿交。',
     candidates: '这些站点看着不必走隧道，接受还是拒绝由你定。',
+    allowlist: '哪些邮箱能自己注册账号。',
     audit: '谁在什么时候动了什么。',
   } as const,
 
@@ -281,6 +283,29 @@ export const settingsCopy = {
     draftLead: '这里只出草案，不改线上的分流规则。装进编辑器之后还得自己按发布。',
     draftEmpty: '还没有接受过任何域名，草案是空的',
     userUnit: (n: number) => `${n} 人`,
+  },
+
+  /* ---------------------------------------------------------- 注册白名单 */
+
+  allowlist: {
+    title: '注册白名单',
+    count: (n: number) => `${n} 个邮箱`,
+    empty: '名单是空的，现在没人能自己注册',
+    /** The line that stops an operator adding every customer by hand. */
+    note: '开通客户时会自动加入，这里管的是手工加的那些。',
+    add: '添加',
+    field: '邮箱',
+    fieldHint: '客户注册时用的那个地址，大小写不算数。',
+    invalid: '这不像一个邮箱',
+    already: (email: string) => `${email} 本来就在名单里`,
+    added: (email: string) => `${email} 加进来了`,
+    columns: {
+      email: '邮箱',
+      createdAt: '加进来的时间',
+      action: '',
+    } as const,
+    deleteTitle: '从名单里去掉？',
+    deleteBody: (email: string) => `去掉之后，${email} 再注册会被挡回去。已经开通的账号不受影响。`,
   },
 
   /* ------------------------------------------------------------ 操作记录 */

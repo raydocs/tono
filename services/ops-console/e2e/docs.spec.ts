@@ -44,14 +44,14 @@ test('capture the 客户 360 page for docs', async ({ page }, testInfo) => {
 });
 
 /**
- * 设置 is eight pages behind one rail, so the docs get eight shots rather than
+ * 设置 is nine pages behind one rail, so the docs get nine shots rather than
  * one.
  * Light only: the plan's figures are printed, and a dark copy of each would
  * double the bytes in every clone for a picture nobody puts in a document.
  */
 for (const section of [
   'alerts', 'catalog', 'policy', 'homeinventory',
-  'homelines', 'providers', 'candidates', 'audit',
+  'homelines', 'providers', 'candidates', 'allowlist', 'audit',
 ]) {
   test(`capture the 设置 ${section} section for docs`, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'light', '设置 figures are light-only');

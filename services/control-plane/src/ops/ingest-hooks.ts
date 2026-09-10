@@ -23,6 +23,7 @@ const CORE_ERROR_CHARS = 200;
 const FAILURE_KEYS = [
   'ts', 'stage', 'code', 'error', 'node', 'appVersion', 'osVersion', 'osArch',
   'platform', 'coreErrors', 'tcpDelayMs', 'exitDelayMs',
+  'attemptId',
 ];
 const PLATFORMS = new Set(['windows', 'macos', 'linux', 'android', 'ios']);
 
@@ -171,6 +172,10 @@ export async function ingestConnectFailure(
   const cores = coreErrorsOf(b.coreErrors);
   const tcpDelayMs = optionalInt(b.tcpDelayMs, 'tcpDelayMs');
   const exitDelayMs = optionalInt(b.exitDelayMs, 'exitDelayMs');
+  // attemptId is accepted (≤64) but not stored: connection_events has no column.
+  if (b.attemptId !== undefined && b.attemptId !== null) {
+    str(b.attemptId, 'attemptId', 1, 64);
+  }
   const errorText = failureError(b, cores);
   const t = now();
   // A client clock ahead of ours must not plant a failure that every

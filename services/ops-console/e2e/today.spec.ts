@@ -59,7 +59,12 @@ test.describe('today page', () => {
     await expect(page).toHaveURL(/incident=inc-node-la/);
     const drawer = page.getByRole('dialog');
     await expect(drawer).toBeVisible();
-    for (const block of ['证据', '受影响客户', '时间线', '推送记录', '动作']) {
+    // The handling card, in the order the operator works through it.
+    const blocks = [
+      '已知事实', '尚未确认的影响', '受影响客户', '推荐下一步',
+      '复测', '下次检查', '处理记录', '时间线', '推送记录', '动作',
+    ];
+    for (const block of blocks) {
       await expect(drawer.getByRole('heading', { name: block })).toBeVisible();
     }
     await settle(page);
@@ -115,4 +120,117 @@ test.describe('today page', () => {
     await expect(page.locator('.incident-row')).toHaveCount(0);
     await expect(page).toHaveScreenshot('quiet.png');
   });
+});
+
+/**
+ * 处置卡: the three things the drawer has to be able to do before it deserves
+ * the name — separate a repair from a mistake, say when to come back, and keep
+ * the record of what was already tried.
+ */
+test.describe('事故处置卡', () => {
+  test('误报收尾之后这一行写的是误报，恢复数不跟着涨', async ({ page }, testInfo) => {
+    const session = `closure-${testInfo.project.name}-${String(Date.now())}`;
+    await open(page, '/today', 'default', session);
+    const recovered = page.getByRole('tab', { name: /最近恢复/ });
+    await expect(recovered).toContainText('5');
+
+    await open(page, '/today?incident=inc-user-jiangsu', 'default', session);
+    await page.getByRole('dialog').getByRole('button', { name: '标记已处理' }).click();
+
+    const ask = page.getByRole('dialog').filter({ hasText: '三种收尾' });
+    await expect(ask).toBeVisible();
+    // 已验证恢复 is refused while the newest measurement still reads as an
+    // alarm, and the refusal says which reading it is refusing on.
+    await expect(ask.locator('input[value="verified"]')).toBeDisabled();
+    await ask.locator('input[value="false_positive"]').check();
+    await ask.locator('input[type="text"]').fill('客户自己换了网络，不是节点的问题');
+    await ask.getByRole('button', { name: '标记已处理' }).click();
+    await settle(page);
+
+    // A rule that fired wrongly is not a repair: the row says so, and the
+    // count of recoveries is exactly where it was.
+    await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await recovered.click();
+    await settle(page);
+    await expect(recovered).toContainText('5');
+    await expect(page.locator('.incident-row').filter({ hasText: '误报' })).toHaveCount(1);
+  });
+
+  test('定下次检查之后抽屉里写着什么时候回来看', async ({ page }, testInfo) => {
+    const session = `check-${testInfo.project.name}-${String(Date.now())}`;
+    await open(page, '/today?incident=inc-node-la', 'default', session);
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByText('还没定下次什么时候回来看')).toBeVisible();
+    await drawer.getByRole('button', { name: '1 小时后' }).click();
+    await settle(page);
+    await expect(drawer.getByText(/^下次检查 /)).toBeVisible();
+  });
+
+  test('处理记录留得住上一个人做过的事', async ({ page }, testInfo) => {
+    const session = `log-${testInfo.project.name}-${String(Date.now())}`;
+    await open(page, '/today?incident=inc-node-la', 'default', session);
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByText('已经从大陆重测过一轮，还是不通')).toBeVisible();
+
+    await drawer.getByPlaceholder('写一句备注').fill('已经联系机房，等回复');
+    await drawer.getByRole('button', { name: '记下' }).click();
+    await settle(page);
+    await expect(drawer.getByText('已经联系机房，等回复')).toBeVisible();
+  });
+
+  /**
+   * The engine counts who it measured failing. The people on the same machine
+   * whose clients have said nothing since are the ones the old page left out
+   * of the story entirely.
+   */
+  test('尚未确认的影响把没测到的人也算进来', async ({ page }) => {
+    await open(page, '/today?incident=inc-node-la');
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByText(/位确认受影响，\d+ 位可能/)).toBeVisible();
+  });
+});
+
+/**
+ * 早报: the morning read. The review's demand is that a quiet night still
+ * produces something you can act on — or, failing that, one honest sentence
+ * rather than three empty headings.
+ */
+test.describe('早报', () => {
+  test('昨夜有事就把恢复的和新开的分开说，每一行都点得动', async ({ page }) => {
+    await open(page, '/today');
+    const digest = page.locator('section').filter({ hasText: '早报' }).first();
+    await expect(digest.getByText('昨夜')).toBeVisible();
+    await expect(digest.getByText('2 个事故进行中')).toBeVisible();
+    await expect(digest.getByText(/客户跟进 \d+ 条/)).toBeVisible();
+
+    await digest.getByRole('button', { name: /Tokyo · Sakura/ }).click();
+    await expect(page).toHaveURL(/incident=inc-r1/);
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('平安的一夜也有一句话，不是三个空标题', async ({ page }) => {
+    await open(page, '/today', 'empty');
+    await expect(page.getByText('昨夜无事，今天没有到期的事')).toBeVisible();
+    await expect(page.getByText('昨夜', { exact: true })).toHaveCount(0);
+  });
+});
+
+/**
+ * 复测 is the half of a repair the console never had: the operator measures
+ * the thing again, and the record says they did — so four hours later there is
+ * a way to tell a fault that was re-checked from one nobody has touched.
+ */
+test('复测把测量和记录一起做掉', async ({ page }, testInfo) => {
+  const session = `recheck-${testInfo.project.name}-${String(Date.now())}`;
+  await open(page, '/today?incident=inc-node-la', 'default', session);
+  const drawer = page.getByRole('dialog');
+  await drawer.getByRole('button', { name: '复测一次' }).click();
+
+  const ask = page.getByRole('dialog').filter({ hasText: '再下发一次测量' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole('button', { name: '就复测一次' }).click();
+  await settle(page);
+
+  await expect(drawer.getByText('已复测')).toBeVisible();
 });

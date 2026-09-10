@@ -3,11 +3,11 @@ import { open, settle } from './ops';
 
 const SECTIONS = [
   'alerts', 'catalog', 'policy', 'homeinventory',
-  'homelines', 'providers', 'candidates', 'audit',
+  'homelines', 'providers', 'candidates', 'allowlist', 'audit',
 ] as const;
 
 /**
- * 设置 is eight surfaces behind one rail, so every one of them gets a baseline
+ * 设置 is nine surfaces behind one rail, so every one of them gets a baseline
  * in both the ready and the empty case. The empty half is the half that
  * matters: a settings page that renders a zero-row table where it should say
  * "还没有告警规则" is the one that lets an operator believe alerting is
@@ -222,6 +222,45 @@ test.describe('设置', () => {
     const row = page.locator('tbody tr').filter({ hasText: 'Preview Catalog Line' });
     await row.getByRole('button', { name: '停用' }).click();
     await expect(row.getByRole('button', { name: '启用' })).toBeVisible();
+  });
+
+  /**
+   * The signup gate: the address has to survive the read that follows the
+   * write, and taking one off has to say what stops working before it does.
+   */
+  test('加进白名单的邮箱下一次读还在，删之前先说清楚', async ({ page }, testInfo) => {
+    await open(page, '/settings/allowlist', 'default', `allow-${testInfo.project.name}`);
+    await expect(page.getByText('2 个邮箱')).toBeVisible();
+
+    await page.getByLabel(/^邮箱/).fill('erin@example.test');
+    await page.getByRole('button', { name: '添加' }).click();
+    await expect(page.getByText('erin@example.test 加进来了')).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'erin@example.test' })).toBeVisible();
+    await expect(page.getByText('3 个邮箱')).toBeVisible();
+
+    const row = page.locator('tbody tr').filter({ hasText: 'erin@example.test' });
+    await row.getByRole('button', { name: '删除' }).click();
+    await expect(page.getByText(/erin@example\.test 再注册会被挡回去/)).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: '删除' }).click();
+
+    await expect(page.getByRole('cell', { name: 'erin@example.test' })).toHaveCount(0);
+    await expect(page.getByText('2 个邮箱')).toBeVisible();
+  });
+
+  test('一个已经在名单里的邮箱说的是本来就在，不是加好了', async ({ page }, testInfo) => {
+    await open(page, '/settings/allowlist', 'default', `dupe-${testInfo.project.name}`);
+    await page.getByLabel(/^邮箱/).fill('CAROL@example.test');
+    await page.getByRole('button', { name: '添加' }).click();
+    await expect(page.getByText('carol@example.test 本来就在名单里')).toBeVisible();
+    await expect(page.getByText('2 个邮箱')).toBeVisible();
+  });
+
+  test('不像邮箱的东西根本发不出去', async ({ page }, testInfo) => {
+    await open(page, '/settings/allowlist', 'default', `bad-${testInfo.project.name}`);
+    await page.getByLabel(/^邮箱/).fill('not-an-address');
+    await page.getByRole('button', { name: '添加' }).click();
+    await expect(page.getByText('这不像一个邮箱')).toBeVisible();
+    await expect(page.getByText('2 个邮箱')).toBeVisible();
   });
 
   test('绑着客户的线路删不掉，并且说清楚为什么', async ({ page }) => {

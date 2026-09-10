@@ -1,16 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { assertList, assertCustomerSummary, type CustomerSummaryDto } from '@contract';
+import {
+  assertConnectionEvent,
+  assertCustomerSummary,
+  assertIncident,
+  assertList,
+  assertNodeSummary,
+  type ConnectionEventDto,
+  type CustomerSummaryDto,
+  type IncidentDto,
+  type NodeSummaryDto,
+} from '@contract';
 import { copy } from '@/copy/copy';
 import raw from '../../fixtures/customers.json';
+import rawIncidents from '../../fixtures/incidents.json';
+import rawNodes from '../../fixtures/nodes.json';
+import { explainCode } from './codes';
 import {
   CUSTOMER_FILTERS,
   customerCounts,
+  lastFailedAttempt,
+  newestOpenFollowups,
   planWired,
   PLATFORM_CHIPS,
   platformCounts,
+  publicIncidentOn,
   releasedPlatforms,
+  replyDraft,
   selectByPlatform,
   selectCustomers,
+  spareNode,
 } from './customers';
 
 const rows: CustomerSummaryDto[] = assertList(
@@ -115,5 +133,102 @@ describe('customer selectors', () => {
       for (const row of selectByPlatform(rows, platform)) covered.add(row.userId);
     }
     expect(covered.size).toBe(withPlatform.length);
+  });
+});
+
+describe('the reply draft', () => {
+  const events: ConnectionEventDto[] = assertList(
+    (raw as { details: Record<string, { connections: unknown }> }).details['u-04'].connections,
+    assertConnectionEvent,
+  ).items;
+  const incidents: IncidentDto[] = assertList(
+    (rawIncidents as { list: unknown }).list,
+    assertIncident,
+  ).items;
+  const nodes: NodeSummaryDto[] = assertList(
+    (rawNodes as { list: unknown }).list,
+    assertNodeSummary,
+  ).items;
+
+  const failure = lastFailedAttempt(events)!;
+
+  it('quotes the newest attempt that actually failed', () => {
+    expect(failure.kind).toBe('connectFail');
+    for (const row of events) {
+      if (row.kind === 'connectFail') expect(row.atMs).toBeLessThanOrEqual(failure.atMs);
+    }
+  });
+
+  /**
+   * The whole point of the draft: an operator can hand any line of it back to
+   * the page it came from. So every sentence has to be one of the copy
+   * functions, fed a field — never prose the console made up.
+   */
+  it('says only what the fields say', () => {
+    const incident = publicIncidentOn(incidents, failure.node);
+    const spare = spareNode(nodes, failure.node);
+    const text = replyDraft({ who: 'wang.tao@example.com', failure, incident, spare });
+    expect(text).toContain(copy.replyLine.greeting('wang.tao@example.com'));
+    expect(text).toContain(failure.node!);
+    expect(text).toContain(failure.code!);
+    expect(text).toContain(explainCode(failure.code)!);
+    expect(text).toContain(incident!.title);
+    expect(text).toContain(spare!);
+    expect(text).toContain(copy.replyQuestion.other);
+  });
+
+  /**
+   * The one word the draft may never reach for on its own.
+   *
+   * 被墙 does appear above — inside the incident's own title, which is a field
+   * an operator can open and check. What must never happen is the console
+   * reaching that conclusion itself, so with no incident quoted the draft has
+   * no cause in it at all.
+   */
+  it('names no cause the fields did not name', () => {
+    const text = replyDraft({ who: 'a@b.c', failure, incident: null, spare: null });
+    for (const invented of ['被墙', '限速', '一定', '马上就好']) {
+      expect(text, invented).not.toContain(invented);
+    }
+  });
+
+  it('never recommends the machine that just failed', () => {
+    expect(spareNode(nodes, failure.node)).not.toBe(failure.node);
+  });
+
+  it('says there is no incident rather than implying one', () => {
+    const text = replyDraft({ who: 'a@b.c', failure, incident: null, spare: null });
+    expect(text).toContain(copy.replyLine.incidentNo);
+    expect(text).toContain(copy.replyLine.alternativeNone);
+  });
+
+  it('asks the question the reported code calls for', () => {
+    const stale = { ...failure, code: 'CATALOG_STALE' };
+    const text = replyDraft({ who: 'a@b.c', failure: stale, incident: null, spare: null });
+    expect(text).toContain(copy.replyQuestion.CATALOG_STALE);
+  });
+});
+
+describe('the followup column', () => {
+  const at = 1_788_895_426;
+  const base = {
+    subjectType: 'user' as const,
+    body: 'x',
+    dueAt: null,
+    doneAt: null,
+    createdBy: null,
+    updatedAt: at,
+  };
+
+  it('shows the newest thing still owed, and nothing that is finished', () => {
+    const index = newestOpenFollowups([
+      { ...base, id: '1', subjectId: 'u-01', kind: 'reply', createdAt: at - 100 },
+      { ...base, id: '2', subjectId: 'u-01', kind: 'callback', createdAt: at - 10 },
+      { ...base, id: '3', subjectId: 'u-02', kind: 'note', createdAt: at, doneAt: at },
+      { ...base, id: '4', subjectType: 'incident', subjectId: 'inc-1', kind: 'note', createdAt: at },
+    ]);
+    expect(index.get('u-01')?.id).toBe('2');
+    expect(index.has('u-02')).toBe(false);
+    expect(index.has('inc-1')).toBe(false);
   });
 });

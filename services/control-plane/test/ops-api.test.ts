@@ -355,7 +355,7 @@ describe('ops v1 api', () => {
     expect(snoozedBody.snoozedUntil).toBeGreaterThanOrEqual(secondsAt + 14400);
     expect(snoozedBody.snoozedUntil).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 14400);
     assertIncident(await (await ops('incidents/inc-1/notes', json({ note: 'watching' }))).json());
-    assertIncident(await (await ops('incidents/inc-1/resolve', json({ note: 'recovered' }))).json());
+    assertIncident(await (await ops('incidents/inc-1/resolve', json({ closure: 'verified', note: 'recovered' }))).json());
   });
 
   it('GET jobs and POST cancel', async () => {
@@ -614,12 +614,19 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/customers/{id}/activity',
       'GET /api/v1/ops/customers/{id}/destinations',
       'GET /api/v1/ops/customers/{id}/services',
+      'GET /api/v1/ops/customers/{id}/followups',
+      'POST /api/v1/ops/customers/{id}/followups',
       'GET /api/v1/ops/incidents',
       'GET /api/v1/ops/incidents/{id}',
       'POST /api/v1/ops/incidents/{id}/ack',
       'POST /api/v1/ops/incidents/{id}/snooze',
       'POST /api/v1/ops/incidents/{id}/resolve',
       'POST /api/v1/ops/incidents/{id}/notes',
+      'POST /api/v1/ops/incidents/{id}/followups',
+      'PATCH /api/v1/ops/incidents/{id}',
+      'GET /api/v1/ops/followups',
+      'PATCH /api/v1/ops/followups/{id}',
+      'GET /api/v1/ops/digest',
       'GET /api/v1/ops/jobs',
       'POST /api/v1/ops/jobs/{id}/cancel',
       'GET /api/v1/ops/releases',

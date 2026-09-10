@@ -8,6 +8,7 @@ import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
 import { createCustomerFixtures } from './fixtures/routes/customers';
+import { createFollowupFixtures } from './fixtures/routes/followups';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
@@ -207,6 +208,13 @@ function fixturesPlugin(): Plugin {
   const settingsFixtures = createSettingsFixtures(rootDir);
   /** The 客户 writes: onboarding, expiry, the home binding, devices, Claude. */
   const customerFixtures = createCustomerFixtures();
+  /**
+   * 跟进, 下次检查, 收尾 and 早报. It goes before the incident branches below
+   * because it owns the two fields those rows are grown by: an incident read
+   * that skipped it would come back without the closure the operator just
+   * wrote, and the row would say 已恢复 over a false alarm.
+   */
+  const followupFixtures = createFollowupFixtures();
   return {
     name: 'ops-fixtures',
     configureServer(server: ViteDevServer) {
@@ -224,6 +232,15 @@ function fixturesPlugin(): Plugin {
         if (serveNodeRoutes({ req, res, url, route, set, session: pickSession(url, set === 'error' ? 'default' : set) })) return;
         // 客户 goes before 设置: `home-exits/assign` starts with a resource the
         // settings routes claim, and only this side knows what a binding is.
+        if (set !== 'error' && followupFixtures({
+          req,
+          res,
+          route,
+          url,
+          session: pickSession(url, set),
+          empty: set === 'empty',
+          incidents: () => opsFile(fileNames(set).incidents, pickSession(url, set)),
+        })) return;
         if (set !== 'error' && customerFixtures({
           req,
           res,

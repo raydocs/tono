@@ -81,7 +81,7 @@ function requestSignal(external: AbortSignal | undefined): AbortSignal | undefin
   return typeof AbortSignal.any === 'function' ? AbortSignal.any([external, timeout]) : external;
 }
 
-async function send<T>(
+export async function send<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   body: unknown,
@@ -114,19 +114,19 @@ async function send<T>(
 
 /* --------------------------------------------------------------- guards */
 
-function record(value: unknown): Record<string, unknown> {
+export function record(value: unknown): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(copy.loadError);
   }
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown): string {
+export function text(value: unknown): string {
   if (typeof value !== 'string') throw new Error(copy.loadError);
   return value;
 }
 
-function count(value: unknown): number {
+export function count(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(copy.loadError);
   return value;
 }
@@ -139,7 +139,7 @@ function maybeCount(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function list(value: unknown): unknown[] {
+export function list(value: unknown): unknown[] {
   if (!Array.isArray(value)) throw new Error(copy.loadError);
   return value;
 }
