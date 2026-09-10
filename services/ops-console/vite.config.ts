@@ -9,6 +9,7 @@ import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
 import { createCustomerFixtures } from './fixtures/routes/customers';
 import { createFollowupFixtures } from './fixtures/routes/followups';
+import { createLedgerFixtures } from './fixtures/routes/ledger';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
@@ -215,6 +216,12 @@ function fixturesPlugin(): Plugin {
    * wrote, and the row would say 已恢复 over a false alarm.
    */
   const followupFixtures = createFollowupFixtures();
+  /**
+   * 账目: the month summary, the entries behind it and the rate table. It
+   * reads the customer list through the same store the 客户 pages do, so a
+   * customer named on the ledger is named the same way on their own page.
+   */
+  const ledgerFixtures = createLedgerFixtures(rootDir);
   return {
     name: 'ops-fixtures',
     configureServer(server: ViteDevServer) {
@@ -249,6 +256,21 @@ function fixturesPlugin(): Plugin {
           session: pickSession(url, set),
           empty: set === 'empty',
           file: () => opsFile(fileNames(set).customers, pickSession(url, set)),
+        })) return;
+        if (set !== 'error' && ledgerFixtures({
+          req,
+          res,
+          route,
+          url,
+          session: pickSession(url, set),
+          empty: set === 'empty',
+          customers: () => {
+            const file = opsFile(fileNames(set).customers, pickSession(url, set));
+            return (file?.list.items ?? []).map((row) => ({
+              userId: String(row.userId ?? ''),
+              email: String(row.email ?? ''),
+            }));
+          },
         })) return;
         if (set !== 'error' && settingsFixtures({
           req, res, route, url, session: pickSession(url, set), empty: set === 'empty',

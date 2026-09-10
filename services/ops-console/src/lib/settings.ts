@@ -12,18 +12,19 @@ import { nowSec } from './clock';
 import { formatDate } from './display';
 
 /**
- * The nine sections, in rail order. `alerts` is where an unnamed hash lands.
+ * The ten sections, in rail order. `alerts` is where an unnamed hash lands.
  *
  * The order is the order of consequence rather than of frequency: the three
  * that change what a client fetches next — the node catalogue, the routing
  * rules, and the home inventory both of those draw from — come first, and the
- * bookkeeping an operator does around them follows. 注册白名单 goes last of
- * the things you change and 操作记录 stays at the bottom, because the log is
- * the only one of the nine that is read rather than edited.
+ * bookkeeping an operator does around them follows. 账目 sits directly after
+ * the assets it is the bill for, 注册白名单 goes last of the things you change,
+ * and 操作记录 stays at the bottom, because the log is the only one of the ten
+ * that is read rather than edited.
  */
 export const SETTINGS_SECTIONS = [
   'alerts', 'catalog', 'policy', 'homeinventory',
-  'homelines', 'providers', 'candidates', 'allowlist', 'audit',
+  'homelines', 'ledger', 'providers', 'candidates', 'allowlist', 'audit',
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];

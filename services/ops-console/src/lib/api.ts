@@ -48,8 +48,12 @@ interface ErrorEnvelope {
  * dropped from the production bundle. It goes through `URLSearchParams`
  * rather than string concatenation because half these endpoints carry a
  * `range` of their own, and two `?` in one URL is a 404 nobody reads twice.
+ *
+ * Exported because 账目's CSV export is a link the browser follows rather than
+ * a body this file reads: the download needs the same URL, fixture query and
+ * all, without going through `fetch`.
  */
-function urlFor(path: string, query?: Record<string, string>): string {
+export function urlFor(path: string, query?: Record<string, string>): string {
   const params = new URLSearchParams(query);
   if (import.meta.env.MODE === 'fixtures') {
     const asked = new URLSearchParams(window.location.search);
