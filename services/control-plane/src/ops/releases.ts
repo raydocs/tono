@@ -1,5 +1,11 @@
 import { ApiError } from '../errors';
 import { sniffPlatform } from './platform';
+import {
+  UPDATE_CHANNELS,
+  assertSignatureShape,
+  isSha256Hex,
+  verifyReleaseObject,
+} from './releases-verify';
 export { sniffPlatform };
 // Adoption counting lives in ./adoption; re-exported so importers of this
 // module keep their import path.
@@ -39,6 +45,14 @@ export type ClientRelease = {
   yankReason: string | null;
   createdAt: number;
   updatedAt: number;
+  /** The Sparkle / minisign signature the platform's updater checks. */
+  signature: string | null;
+  /** Lowest OS the build installs on, when the build declares one. */
+  minOsVersion: string | null;
+  /** When the object behind this row was last confirmed; null = never. */
+  verifiedAt: number | null;
+  /** The object's etag at that moment, so a replaced object is detectable. */
+  objectEtag: string | null;
 };
 
 export type CreateReleaseInput = {
@@ -46,9 +60,11 @@ export type CreateReleaseInput = {
   channel: string;
   version: string;
   build?: string | null;
-  r2Key?: string | null;
-  sizeBytes?: number | null;
-  sha256?: string | null;
+  r2Key: string;
+  sizeBytes: number;
+  sha256: string;
+  signature?: string | null;
+  minOsVersion?: string | null;
   notes?: string | null;
   minSupportedVersion?: string | null;
   publishedAt?: number | null;
@@ -102,6 +118,30 @@ function optionalCount(value: unknown, name: string): number | null {
   return value as number;
 }
 
+function requiredCount(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${name}`);
+  }
+  return value as number;
+}
+
+/**
+ * A build for a platform whose updater checks a signature must carry one; a
+ * platform with no updater may, and it is still shape-checked if it does.
+ * Storing an unsigned build for macOS or Windows would be registering an update
+ * that every client refuses, which the operator would only learn from silence.
+ */
+function releaseSignature(platform: Platform, value: unknown): string | null {
+  const signature = optionalText(value, 'signature', 4000);
+  if (signature === null) {
+    if (UPDATE_CHANNELS[platform].wired) {
+      throw new ApiError(400, 'VALIDATION_ERROR', `A ${platform} build must carry a signature`);
+    }
+    return null;
+  }
+  return assertSignatureShape(platform, signature);
+}
+
 function platformField(value: unknown): Platform {
   const platform = field(value, 'platform', 1, 20);
   if (!isPlatform(platform)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid platform');
@@ -145,11 +185,26 @@ export function publicRelease(row: Row): ClientRelease {
     yankReason: nullable(row.yank_reason),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    signature: nullable(row.signature),
+    minOsVersion: nullable(row.min_os_version),
+    verifiedAt: nullableInt(row.verified_at),
+    objectEtag: nullable(row.object_etag),
   };
 }
 
+/**
+ * Register a build — against the object an updater would actually download.
+ *
+ * `r2Key`, `sizeBytes` and `sha256` are required here rather than in the
+ * column definitions because the rows already in the table predate all three;
+ * making the columns NOT NULL would have meant either deleting that history or
+ * inventing digests for it. The check that matters is on the way in, and it is
+ * the bucket that answers it: a row is only written once the object is there,
+ * is that many bytes, and hashes to that digest.
+ */
 export async function createRelease(
   db: D1Database,
+  bucket: R2Bucket,
   input: CreateReleaseInput,
   nowSec: number,
 ): Promise<ClientRelease> {
@@ -157,25 +212,30 @@ export async function createRelease(
   const channel = channelField(input.channel);
   const version = versionField(input.version);
   const build = optionalText(input.build, 'build', 80);
-  const r2Key = optionalText(input.r2Key, 'r2Key', 500);
-  const sizeBytes = optionalCount(input.sizeBytes, 'sizeBytes');
-  const sha256 = optionalText(input.sha256, 'sha256', 64);
+  const r2Key = field(input.r2Key, 'r2Key', 1, 500);
+  const sizeBytes = requiredCount(input.sizeBytes, 'sizeBytes');
+  const sha256 = field(input.sha256, 'sha256', 64, 64);
+  if (!isSha256Hex(sha256)) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid sha256');
+  const signature = releaseSignature(platform, input.signature);
+  const minOsVersion = optionalText(input.minOsVersion, 'minOsVersion', 32);
   const notes = optionalText(input.notes, 'notes', 4000);
   const minSupportedVersion = input.minSupportedVersion == null || input.minSupportedVersion === ''
     ? null
     : versionField(input.minSupportedVersion, 'minSupportedVersion');
   const publishedAt = optionalUnix(input.publishedAt, 'publishedAt');
+  const verified = await verifyReleaseObject(bucket, r2Key, sha256, sizeBytes);
   const id = crypto.randomUUID();
   try {
     await db.prepare(
       `INSERT INTO client_releases(
          id, platform, channel, version, build, r2_key, size_bytes, sha256,
          notes, min_supported_version, published_at, yanked_at, yank_reason,
-         created_at, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+         created_at, updated_at, signature, min_os_version, verified_at, object_etag
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       id, platform, channel, version, build, r2Key, sizeBytes, sha256,
       notes, minSupportedVersion, publishedAt, nowSec, nowSec,
+      signature, minOsVersion, nowSec, verified.etag,
     ).run();
   } catch (error) {
     if (uniqueConflict(error)) {
@@ -204,7 +264,10 @@ export async function updateRelease(
       : versionField(patch.minSupportedVersion, 'minSupportedVersion'))
     : current.minSupportedVersion;
   let publishedAt = current.publishedAt;
-  if (patch.publish === true) publishedAt = current.publishedAt ?? nowSec;
+  if (patch.publish === true) {
+    assertPublishable(current);
+    publishedAt = current.publishedAt ?? nowSec;
+  }
   let yankedAt = current.yankedAt;
   let yankReason = current.yankReason;
   if (patch.yank === true) {
@@ -225,6 +288,34 @@ export async function updateRelease(
   const row = await db.prepare('SELECT * FROM client_releases WHERE id = ?').bind(id).first<Row>();
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Release not found');
   return publicRelease(row);
+}
+
+/**
+ * The two ways publishing a build would be a lie, refused before it is one.
+ *
+ * A row that was never checked against its object is a feed entry that 404s or
+ * fails its signature check on every client at once; a platform with no updater
+ * has nowhere for the row to be published *to*, so calling it published would
+ * put a version in the adoption matrix that nothing will ever upgrade towards.
+ * Both are 409 rather than 400: the request is well formed, the release simply
+ * is not in a state that can be published yet.
+ */
+function assertPublishable(release: ClientRelease): void {
+  if (release.publishedAt !== null) return;
+  if (release.verifiedAt === null) {
+    throw new ApiError(
+      409,
+      'RELEASE_UNVERIFIED',
+      'This release has not been checked against the object it points at',
+    );
+  }
+  if (!UPDATE_CHANNELS[release.platform].wired) {
+    throw new ApiError(
+      409,
+      'RELEASE_CHANNEL_UNWIRED',
+      `${release.platform} has no update feed to publish to`,
+    );
+  }
 }
 
 export async function listReleases(
@@ -249,6 +340,12 @@ export async function listReleases(
   return (rows.results ?? []).map(publicRelease);
 }
 
+/**
+ * What the platform's feed would serve right now: newest published, still
+ * verified, not withdrawn. The verified condition is the same one the feed
+ * renderer applies, so 更新源 in the console and the XML a client fetches can
+ * never disagree about which build is current.
+ */
 export async function currentRelease(
   db: D1Database,
   platform: string,
@@ -258,6 +355,7 @@ export async function currentRelease(
     `SELECT * FROM client_releases
      WHERE platform = ? AND channel = ?
        AND published_at IS NOT NULL AND yanked_at IS NULL
+       AND verified_at IS NOT NULL
      ORDER BY published_at DESC
      LIMIT 1`,
   ).bind(platformField(platform), channelField(channel)).first<Row>();

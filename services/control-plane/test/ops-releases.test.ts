@@ -2,6 +2,10 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../src/errors';
 import {
+  isMinisignSignature,
+  isSparkleSignature,
+} from '../src/ops/releases-verify';
+import {
   adoptionMatrix,
   backfillDeviceDaily,
   compareVersions,
@@ -15,11 +19,91 @@ import {
   utcDay,
   versionBucket,
 } from '../src/ops/releases';
+import { listUpdateChannels } from '../src/ops/releases-channels';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
+const bucket = () => (env as unknown as { RELEASES: R2Bucket }).RELEASES;
 const DAY = 86400;
 const NOW = 1_800_000_000;
 const DAY_AT = utcDay(NOW);
+
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function pattern(length: number, step: number): Uint8Array {
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) out[i] = (i * step + 7) % 256;
+  return out;
+}
+
+/** 64 Ed25519 bytes, base64, no whitespace — the shape Sparkle emits. */
+const SPARKLE_SIGNATURE = base64(pattern(64, 7));
+
+/** The minisign box tauri's updater carries, base64'd whole as `latest.json` does. */
+const MINISIGN_SIGNATURE = btoa([
+  'untrusted comment: signature from tono test key',
+  base64(pattern(74, 11)),
+  'trusted comment: timestamp:1800000000\tfile:Tono_setup.exe',
+  base64(pattern(64, 13)),
+  '',
+].join('\n'));
+
+const SIGNATURE: Record<string, string> = {
+  macos: SPARKLE_SIGNATURE,
+  windows: MINISIGN_SIGNATURE,
+};
+
+async function sha256Hex(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * A build that is really in the bucket, and the fields that describe it.
+ * `checksum` puts the digest on the object so R2 answers it from `head()`;
+ * without it the Worker has to stream the body, and both paths are exercised.
+ */
+async function seedObject(
+  key: string,
+  body: string,
+  options: { checksum?: boolean } = {},
+): Promise<{ r2Key: string; sizeBytes: number; sha256: string }> {
+  const sha256 = await sha256Hex(body);
+  const bytes = new TextEncoder().encode(body);
+  await bucket().put(key, bytes, options.checksum === false ? undefined : { sha256 });
+  return { r2Key: key, sizeBytes: bytes.byteLength, sha256 };
+}
+
+async function seedRelease(input: {
+  platform: string;
+  channel: string;
+  version: string;
+  build?: string | null;
+  notes?: string | null;
+  publishedAt?: number | null;
+  nowSec?: number;
+  body?: string;
+  checksum?: boolean;
+}) {
+  const object = await seedObject(
+    `clients/${input.platform}/${input.version}.bin`,
+    input.body ?? `${input.platform} ${input.version} bytes`,
+    { checksum: input.checksum },
+  );
+  return createRelease(db(), bucket(), {
+    platform: input.platform,
+    channel: input.channel,
+    version: input.version,
+    build: input.build,
+    notes: input.notes,
+    publishedAt: input.publishedAt,
+    signature: SIGNATURE[input.platform] ?? null,
+    ...object,
+  }, input.nowSec ?? NOW);
+}
 
 async function seedUser(id: string, email: string) {
   await db().prepare(
@@ -67,12 +151,14 @@ async function seedDeviceDay(input: {
 }
 
 async function seedWindowsStable() {
-  await createRelease(db(), {
-    platform: 'windows', channel: 'stable', version: '0.0.34', publishedAt: NOW - 20,
-  }, NOW - 20);
-  await createRelease(db(), {
-    platform: 'windows', channel: 'stable', version: '0.0.33', publishedAt: NOW - 40,
-  }, NOW - 40);
+  await seedRelease({
+    platform: 'windows', channel: 'stable', version: '0.0.34',
+    publishedAt: NOW - 20, nowSec: NOW - 20,
+  });
+  await seedRelease({
+    platform: 'windows', channel: 'stable', version: '0.0.33',
+    publishedAt: NOW - 40, nowSec: NOW - 40,
+  });
 }
 
 function cellOf(
@@ -142,31 +228,31 @@ describe('versionBucket', () => {
 
 describe('client release CRUD', () => {
   it('creates, lists, publishes, yanks and enforces the unique key', async () => {
-    const windows = await createRelease(db(), {
+    const windows = await seedRelease({
       platform: 'windows',
       channel: 'stable',
       version: '0.0.34',
       build: '34',
       notes: 'polish',
-    }, NOW);
+    });
     expect(windows).toMatchObject({
       platform: 'windows', channel: 'stable', version: '0.0.34',
       build: '34', notes: 'polish', publishedAt: null, yankedAt: null,
+      verifiedAt: NOW,
     });
-    await createRelease(db(), {
-      platform: 'windows', channel: 'candidate', version: '0.0.34',
-    }, NOW);
-    await createRelease(db(), {
-      platform: 'macos', channel: 'stable', version: '0.0.34',
-    }, NOW);
+    expect(windows.objectEtag).not.toBeNull();
+    await seedRelease({ platform: 'windows', channel: 'candidate', version: '0.0.34' });
+    await seedRelease({ platform: 'macos', channel: 'stable', version: '0.0.34' });
 
-    await expect(createRelease(db(), {
+    const duplicate = await seedObject('clients/windows/again.bin', 'again');
+    await expect(createRelease(db(), bucket(), {
       platform: 'windows', channel: 'stable', version: '0.0.34',
+      signature: MINISIGN_SIGNATURE, ...duplicate,
     }, NOW + 1)).rejects.toMatchObject({
       status: 409, code: 'RELEASE_CONFLICT',
     });
-    await expect(createRelease(db(), {
-      platform: 'amiga', channel: 'stable', version: '1',
+    await expect(createRelease(db(), bucket(), {
+      platform: 'amiga', channel: 'stable', version: '1', ...duplicate,
     }, NOW)).rejects.toBeInstanceOf(ApiError);
 
     const listed = await listReleases(db(), { platform: 'windows' });
@@ -197,6 +283,147 @@ describe('client release CRUD', () => {
 
     await expect(updateRelease(db(), 'missing', { publish: true }, NOW))
       .rejects.toMatchObject({ status: 404, code: 'NOT_FOUND' });
+  });
+});
+
+describe('a release is backed by the object an updater would download', () => {
+  const fields = (over: Record<string, unknown> = {}) => ({
+    platform: 'macos', channel: 'stable', version: '1.0.0',
+    signature: SPARKLE_SIGNATURE,
+    r2Key: 'clients/macos/1.0.0.bin', sizeBytes: 5, sha256: 'a'.repeat(64),
+    ...over,
+  });
+
+  it('refuses a row whose object is not in the bucket', async () => {
+    await expect(createRelease(db(), bucket(), fields(), NOW)).rejects.toMatchObject({
+      status: 422, code: 'RELEASE_OBJECT_MISSING',
+    });
+  });
+
+  it('refuses a row that disagrees with the object about its size', async () => {
+    const object = await seedObject('clients/macos/1.0.0.bin', 'twelve bytes');
+    await expect(createRelease(db(), bucket(), fields({
+      ...object, sizeBytes: object.sizeBytes + 1,
+    }), NOW)).rejects.toMatchObject({ status: 422, code: 'RELEASE_SIZE_MISMATCH' });
+  });
+
+  it('refuses a row that disagrees with the object about its digest', async () => {
+    const object = await seedObject('clients/macos/1.0.0.bin', 'twelve bytes');
+    await expect(createRelease(db(), bucket(), fields({
+      ...object, sha256: 'b'.repeat(64),
+    }), NOW)).rejects.toMatchObject({ status: 422, code: 'RELEASE_SHA256_MISMATCH' });
+  });
+
+  it('refuses a digest that is not 64 lowercase hex characters', async () => {
+    await seedObject('clients/macos/1.0.0.bin', 'twelve bytes');
+    for (const sha256 of ['A'.repeat(64), 'z'.repeat(64), 'abc']) {
+      await expect(createRelease(db(), bucket(), fields({ sha256 }), NOW))
+        .rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    }
+  });
+
+  it('refuses a build for a wired platform with no signature, or the wrong shape', async () => {
+    const object = await seedObject('clients/macos/1.0.0.bin', 'twelve bytes');
+    await expect(createRelease(db(), bucket(), fields({ ...object, signature: null }), NOW))
+      .rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    // A Windows minisign box is a real signature, and still the wrong one here.
+    await expect(createRelease(db(), bucket(), fields({
+      ...object, signature: MINISIGN_SIGNATURE,
+    }), NOW)).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    await expect(createRelease(db(), bucket(), fields({
+      ...object, platform: 'windows', signature: SPARKLE_SIGNATURE,
+    }), NOW)).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+  });
+
+  it('takes the digest R2 recorded when the upload declared one', async () => {
+    const object = await seedObject('clients/macos/1.0.0.bin', 'recorded checksum');
+    const head = await bucket().head(object.r2Key);
+    expect(head?.checksums.sha256).toBeDefined();
+    const created = await createRelease(db(), bucket(), fields(object), NOW);
+    expect(created.verifiedAt).toBe(NOW);
+    expect(created.objectEtag).toBe(head?.etag);
+    expect(created.sha256).toBe(object.sha256);
+  });
+
+  it('streams the body when the upload declared no checksum', async () => {
+    const object = await seedObject('clients/macos/1.0.0.bin', 'streamed body', { checksum: false });
+    expect((await bucket().head(object.r2Key))?.checksums.sha256).toBeUndefined();
+    const created = await createRelease(db(), bucket(), fields(object), NOW);
+    expect(created.verifiedAt).toBe(NOW);
+    expect(created.objectEtag).not.toBeNull();
+    await expect(createRelease(db(), bucket(), fields({
+      ...object, version: '1.0.1', sha256: 'c'.repeat(64),
+    }), NOW)).rejects.toMatchObject({ status: 422, code: 'RELEASE_SHA256_MISMATCH' });
+  });
+
+  it('stores the lowest OS the build installs on', async () => {
+    const object = await seedObject('clients/macos/1.0.0.bin', 'twelve bytes');
+    const created = await createRelease(db(), bucket(), fields({ ...object, minOsVersion: '26.3' }), NOW);
+    expect(created.minOsVersion).toBe('26.3');
+    expect(created.signature).toBe(SPARKLE_SIGNATURE);
+  });
+});
+
+describe('signature shapes', () => {
+  it('accepts what Sparkle and minisign actually emit, and nothing else', () => {
+    expect(isSparkleSignature(SPARKLE_SIGNATURE)).toBe(true);
+    expect(isSparkleSignature(base64(pattern(63, 7)))).toBe(false);
+    expect(isSparkleSignature('not base64!')).toBe(false);
+    expect(isSparkleSignature('')).toBe(false);
+
+    expect(isMinisignSignature(MINISIGN_SIGNATURE)).toBe(true);
+    // The same box unencoded, which is how minisign writes it to disk.
+    expect(isMinisignSignature(atob(MINISIGN_SIGNATURE))).toBe(true);
+    expect(isMinisignSignature(SPARKLE_SIGNATURE)).toBe(false);
+    expect(isMinisignSignature(btoa(['untrusted comment: x', base64(pattern(64, 11)), ''].join('\n'))))
+      .toBe(false);
+  });
+});
+
+describe('publishing is gated on the update source', () => {
+  it('refuses a row that was never checked against its object', async () => {
+    await db().prepare(
+      `INSERT INTO client_releases(id, platform, channel, version, r2_key, size_bytes,
+         sha256, signature, created_at, updated_at)
+       VALUES('rel-historic', 'macos', 'stable', '0.9.0', 'clients/macos/0.9.0.bin', 5,
+         ?, ?, ?, ?)`,
+    ).bind('a'.repeat(64), SPARKLE_SIGNATURE, NOW - 100, NOW - 100).run();
+
+    await expect(updateRelease(db(), 'rel-historic', { publish: true }, NOW))
+      .rejects.toMatchObject({ status: 409, code: 'RELEASE_UNVERIFIED' });
+    // Withdrawing one is still allowed: a row nobody checked is exactly the
+    // row an operator most wants out of the way.
+    const withdrawn = await updateRelease(db(), 'rel-historic', { yank: true }, NOW);
+    expect(withdrawn.yankedAt).toBe(NOW);
+  });
+
+  it('refuses a platform with no updater to publish to', async () => {
+    const linux = await seedRelease({ platform: 'linux', channel: 'stable', version: '0.4.1' });
+    expect(linux.signature).toBeNull();
+    await expect(updateRelease(db(), linux.id, { publish: true }, NOW))
+      .rejects.toMatchObject({ status: 409, code: 'RELEASE_CHANNEL_UNWIRED' });
+  });
+
+  it('publishes a verified build on a wired platform, and 更新源 then names it', async () => {
+    const macos = await seedRelease({ platform: 'macos', channel: 'stable', version: '1.9.0' });
+    const published = await updateRelease(db(), macos.id, { publish: true }, NOW + 5);
+    expect(published.publishedAt).toBe(NOW + 5);
+
+    const channels = await listUpdateChannels(db(), NOW + 5);
+    expect(channels.find((row) => row.platform === 'macos')?.current)
+      .toEqual({ releaseId: macos.id, version: '1.9.0' });
+    expect(channels.find((row) => row.platform === 'linux')?.current).toBeNull();
+  });
+
+  it('keeps an unverified published row out of 更新源', async () => {
+    await db().prepare(
+      `INSERT INTO client_releases(id, platform, channel, version, published_at,
+         created_at, updated_at)
+       VALUES('rel-legacy', 'macos', 'stable', '0.8.0', ?, ?, ?)`,
+    ).bind(NOW - 50, NOW - 50, NOW - 50).run();
+    expect(await currentRelease(db(), 'macos', 'stable')).toBeNull();
+    const channels = await listUpdateChannels(db(), NOW);
+    expect(channels.find((row) => row.platform === 'macos')?.current).toBeNull();
   });
 });
 

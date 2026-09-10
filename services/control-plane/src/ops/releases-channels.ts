@@ -1,31 +1,17 @@
 // 每个平台的更新源：有没有更新器，喂哪条 feed，Worker 是不是真的在渲染它。
 //
-// The table below is deliberately a constant rather than a query: which
-// updater a platform ships with is a property of the client, not of the
-// database, and pretending otherwise would let a missing row read as "no
-// updater" when the truth is "we forgot to seed it".
-//
-// `wired` is the field that keeps this honest. macOS and Windows are the two
-// feeds the Worker renders from `client_releases`; the rest have no updater at
-// all, and the console must say 未接 rather than showing a path that answers
-// nothing.
+// The table itself lives in `./releases-verify`, beside the signature shapes it
+// decides — `kind` is what says whether a build needs a Sparkle or a minisign
+// signature — and is re-exported here so this stays the module you look in for
+// 更新源. Keeping it there is also what keeps `releases.ts` (which refuses an
+// unsigned build for a wired platform) and this file (which needs the release
+// lookup) from importing each other.
 
-import { PLATFORMS, type Platform, type UpdateChannelDto, type UpdateChannelKind } from './contract';
+import { PLATFORMS, type UpdateChannelDto } from './contract';
 import { currentRelease } from './releases';
+import { UPDATE_CHANNELS } from './releases-verify';
 
-type ChannelShape = {
-  kind: UpdateChannelKind | null;
-  feedPath: string | null;
-  wired: boolean;
-};
-
-export const UPDATE_CHANNELS: Record<Platform, ChannelShape> = {
-  macos: { kind: 'sparkle', feedPath: '/appcast.xml', wired: true },
-  windows: { kind: 'tauri', feedPath: '/windows/latest.json', wired: true },
-  linux: { kind: null, feedPath: null, wired: false },
-  android: { kind: null, feedPath: null, wired: false },
-  ios: { kind: null, feedPath: null, wired: false },
-};
+export { UPDATE_CHANNELS };
 
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
@@ -34,8 +20,11 @@ function missingTable(error: unknown): boolean {
 /**
  * One row per platform, in `PLATFORMS` order, so the console renders the same
  * five lines whether or not anything has ever been published. `current` is the
- * newest published, non-withdrawn stable release; null means the feed would
- * serve nothing today.
+ * newest published, verified, non-withdrawn stable release; null means the feed
+ * would serve nothing today — which is now the same question the feed itself
+ * answers, because `currentRelease` and `/appcast.xml` read the same rows. A
+ * published row that was never checked against its object is deliberately not
+ * `current`: it is exactly the row that would 404 every updater at once.
  */
 export async function listUpdateChannels(
   db: D1Database,

@@ -22,6 +22,7 @@ import { afterLogSegment, afterSnapshot, afterTelemetryWindow, ingestConnectFail
 import { opsIngestRoutes } from './ops/ingest';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
+import { releaseHostAsset, releasePublicRoute } from './releases-public';
 import {
   type Env,
   type Row,
@@ -105,10 +106,6 @@ const ROUTING_RESEARCH_WINDOW_SECONDS = 6 * 60 * 60;
 const ROUTING_RESEARCH_DAY_SECONDS = 24 * 60 * 60;
 const ROUTING_RESEARCH_RETENTION_MAX_SECONDS = 90 * ROUTING_RESEARCH_DAY_SECONDS;
 const ROUTING_RESEARCH_MIN_SUMMARY_PARTICIPANTS = 3;
-// Release-host aliases rewrite to the same static asset path. Include an
-// explicit revision in the inner asset request so a previously cached alias
-// cannot keep serving an older Sparkle feed after an asset-only deployment.
-const RELEASE_ASSET_REVISION = 'site-public-pages-20260819';
 
 /** Failure vocabulary for device-action snapshots. (Diagnostics uploads carry
  *  the client's own free-text `error`/`failedStage` instead; see
@@ -4639,39 +4636,10 @@ export default {
         return secure(new Response(req.method === 'HEAD' ? null : object.body, { headers }), false);
       }
 
-      const assetPath = new Map([
-        ['/', '/releases/'],
-        ['/index.html', '/releases/'],
-        ['/releases', '/releases/'],
-        ['/releases/', '/releases/'],
-        ['/style.css', '/releases/style.css'],
-        ['/manifest.json', '/releases/manifest.json'],
-        ['/appcast.xml', '/appcast.xml'],
-        ['/macos/appcast.xml', '/appcast.xml'],
-        // Windows updaters used to ask raw.githubusercontent.com, which is
-        // blocked in mainland China — so the customers most in need of a fix
-        // were the ones who could not be told one existed, unless they were
-        // already connected through the product being fixed.
-        ['/windows/latest.json', '/windows/latest.json'],
-        ['/favicon.svg', '/releases/favicon.svg'],
-        ['/favicon.ico', '/releases/favicon.svg'],
-        ['/robots.txt', '/releases/robots.txt'],
-        ['/sitemap.xml', '/releases/sitemap.xml'],
-        ['/.well-known/security.txt', '/releases/security.txt'],
-        ['/help', '/releases/help.html'],
-        ['/help/', '/releases/help.html'],
-        ['/status', '/releases/status.html'],
-        ['/status/', '/releases/status.html'],
-        ['/archive', '/releases/archive.html'],
-        ['/archive/', '/releases/archive.html'],
-      ]).get(path);
-      if (!assetPath) {
-        return secure(new Response('Not found', { status: 404 }), false);
-      }
-      const assetURL = new URL(req.url);
-      assetURL.pathname = assetPath;
-      assetURL.searchParams.set('tono-release-revision', RELEASE_ASSET_REVISION);
-      return secure(await e.ASSETS.fetch(new Request(assetURL, req)), false);
+      const feed = await releasePublicRoute(req, e, path);
+      if (feed) return secure(feed, false);
+      const asset = await releaseHostAsset(req, e, path);
+      return secure(asset ?? new Response('Not found', { status: 404 }), false);
     }
     if (origin && origin !== e.ALLOWED_ORIGIN) {
       return secure(error(new ApiError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed')), false);
@@ -4709,6 +4677,8 @@ export default {
           { status: 404 },
         ), false);
       }
+      const feed = await releasePublicRoute(req, e, path);
+      if (feed) return secure(feed);
       return secure(
         path.startsWith('/api/')
           ? await route(req, e, ctx)

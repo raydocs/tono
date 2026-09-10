@@ -31,6 +31,11 @@ import {
 /** Where a published build is fetched from; D3 puts the object behind it. */
 const DOWNLOAD_BASE = 'https://releases.afk.ccwu.cc/download/';
 
+/**
+ * The row as the console reads it. `signed` rather than the signature itself:
+ * the operator needs to know a signature is there, and the bytes of it are not
+ * something any screen has a use for.
+ */
 function releaseDto(row: ClientRelease): ReleaseDto {
   return {
     id: row.id,
@@ -47,10 +52,10 @@ function releaseDto(row: ClientRelease): ReleaseDto {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     sizeBytes: row.sizeBytes ?? null,
-    verifiedAt: null,
-    signed: false,
+    verifiedAt: row.verifiedAt,
+    signed: row.signature !== null,
     downloadUrl: row.r2Key ? `${DOWNLOAD_BASE}${row.r2Key}` : null,
-    minOsVersion: null,
+    minOsVersion: row.minOsVersion,
   };
 }
 
@@ -70,21 +75,25 @@ export async function getReleases(req: Request, e: Env): Promise<Response> {
 
 export async function postRelease(req: Request, e: Env, actor: Actor): Promise<Response> {
   const b = await body(req, 16 * 1024);
+  // `publishedAt` is deliberately not accepted any more: a build became
+  // published by being handed a timestamp, which skipped every check that
+  // publishing now has to pass. Registering and publishing are two requests.
   rejectUnexpectedKeys(b, [
     'platform', 'channel', 'version', 'build', 'r2Key', 'sizeBytes', 'sha256',
-    'notes', 'minSupportedVersion', 'publishedAt',
+    'signature', 'minOsVersion', 'notes', 'minSupportedVersion',
   ]);
-  const created = await createRelease(e.DB, {
+  const created = await createRelease(e.DB, e.RELEASES, {
     platform: String(b.platform),
     channel: String(b.channel),
     version: String(b.version),
     build: b.build as string | null | undefined,
-    r2Key: b.r2Key as string | null | undefined,
-    sizeBytes: b.sizeBytes as number | null | undefined,
-    sha256: b.sha256 as string | null | undefined,
+    r2Key: b.r2Key as string,
+    sizeBytes: b.sizeBytes as number,
+    sha256: b.sha256 as string,
+    signature: b.signature as string | null | undefined,
+    minOsVersion: b.minOsVersion as string | null | undefined,
     notes: b.notes as string | null | undefined,
     minSupportedVersion: b.minSupportedVersion as string | null | undefined,
-    publishedAt: b.publishedAt as number | null | undefined,
   }, now());
   await auditWrite(e, actor.email, 'release.create', 'release', created.id, `${created.platform} ${created.version}`);
   const dto = releaseDto(created);
