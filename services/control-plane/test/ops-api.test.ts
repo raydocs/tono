@@ -85,6 +85,7 @@ const json = (value: unknown, method = 'POST'): RequestInit => ({
 });
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
+const webhookCalls: string[] = [];
 
 async function seedNode(name = NODE) {
   const t = NOW;
@@ -120,15 +121,25 @@ describe('ops v1 api', () => {
       if (request.url === `https://${ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`) {
         return Response.json({ keys: [oidcPublicKey] }, { headers: { 'cache-control': 'public, max-age=300' } });
       }
-      if (request.url.startsWith('https://hooks.example.com/')) return new Response('ok', { status: 200 });
+      if (request.url.startsWith('https://hooks.example.com/')) {
+        webhookCalls.push(request.url);
+        return new Response('ok', { status: 200 });
+      }
+      if (request.url.includes('not-allowlisted.example')) {
+        webhookCalls.push(request.url);
+        return new Response('ok', { status: 200 });
+      }
       return new Response(null, { status: 404 });
     });
   });
 
   beforeEach(() => {
+    webhookCalls.length = 0;
     (env as unknown as Env).ACCESS_TEAM_DOMAIN = ACCESS_TEAM_DOMAIN;
     (env as unknown as Env).ACCESS_AUD = ACCESS_AUDIENCE;
     (env as unknown as Env).ACCESS_ADMIN_EMAILS = ACCESS_ADMIN_EMAIL;
+    (env as unknown as Env).ALERT_WEBHOOK_ALLOWED_HOSTS =
+      'hooks.example.com,api.telegram.org,open.feishu.cn,hooks.slack.com';
     (env as unknown as Env & { OPS_CONTRACT_STRICT?: string }).OPS_CONTRACT_STRICT = '1';
   });
 
@@ -576,6 +587,97 @@ describe('ops v1 api', () => {
     ).first<{ status: string; attempts: number }>();
     expect(real?.status).toBe('pending');
     expect(Number(real?.attempts)).toBe(0);
+  });
+
+  it('rejects an alert rule whose webhook host is not allowlisted', async () => {
+    (env as unknown as Env).ALERT_WEBHOOK_ALLOWED_HOSTS =
+      'api.telegram.org,open.feishu.cn,hooks.slack.com';
+    const created = await ops('alert-rules', json({
+      name: 'evil', channel: 'webhook', target: 'https://not-allowlisted.example/hook',
+      template: 'generic',
+    }));
+    expect(created.status).toBe(400);
+    const body = await created.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message).toMatch(/not allowlisted/i);
+  });
+
+  it('does not POST a test delivery to a host outside ALERT_WEBHOOK_ALLOWED_HOSTS', async () => {
+    (env as unknown as Env).ALERT_WEBHOOK_ALLOWED_HOSTS =
+      'api.telegram.org,open.feishu.cn,hooks.slack.com';
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO ops_alert_rules(
+         id, name, enabled, match_kind, match_subject_type, match_subject_id,
+         min_severity, min_impact, fire_on, delay_seconds, cooldown_seconds,
+         channel, target, template, secret_ref, created_at, updated_at
+       ) VALUES('rule-ssrf', 'ssrf', 1, NULL, NULL, NULL, 'warn', 0, 'open', 0, 3600,
+         'webhook', 'https://not-allowlisted.example/hook', 'generic', NULL, ?, ?)`,
+    ).bind(t, t).run();
+    const tested = await ops('alert-rules/rule-ssrf/test', json({}));
+    expect(tested.status).toBe(200);
+    expect(webhookCalls.some((url) => url.includes('not-allowlisted.example'))).toBe(false);
+    const delivery = await db().prepare(
+      "SELECT status, error FROM ops_alert_deliveries WHERE rule_id = 'rule-ssrf'",
+    ).first<{ status: string; error: string | null }>();
+    expect(['failed', 'suppressed']).toContain(delivery?.status);
+    expect(String(delivery?.error ?? '')).toMatch(/not allowlisted/i);
+  });
+
+  it('tests a rule using the bound ALERT_ secret', async () => {
+    (env as unknown as Env & { ALERT_TEST_HOOK?: string }).ALERT_TEST_HOOK = 'hook-secret-value';
+    const created = await ops('alert-rules', json({
+      name: 'signed', channel: 'webhook', target: 'https://hooks.example.com/in',
+      template: 'generic', secretRef: 'ALERT_TEST_HOOK',
+    }));
+    expect(created.status).toBe(201);
+    const rule = assertAlertRule(await created.json());
+    webhookCalls.length = 0;
+    const tested = await ops(`alert-rules/${rule.id}/test`, json({}));
+    expect(tested.status).toBe(200);
+    expect(webhookCalls).toContain('https://hooks.example.com/in');
+    const delivery = await db().prepare(
+      'SELECT status, error FROM ops_alert_deliveries WHERE rule_id = ? ORDER BY created_at DESC LIMIT 1',
+    ).bind(rule.id).first<{ status: string; error: string | null }>();
+    expect(delivery?.status).toBe('sent');
+  });
+
+  it('rejects empty secretRef and out-of-range numeric rule fields', async () => {
+    const base = {
+      name: 'nums', channel: 'webhook', target: 'https://hooks.example.com/in', template: 'generic',
+    };
+    const emptySecret = await ops('alert-rules', json({ ...base, secretRef: '' }));
+    expect(emptySecret.status).toBe(400);
+    const cooldown = await ops('alert-rules', json({ ...base, cooldownSeconds: -1 }));
+    expect(cooldown.status).toBe(400);
+    const delay = await ops('alert-rules', json({ ...base, delaySeconds: 1e12 }));
+    expect(delay.status).toBe(400);
+    const impact = await ops('alert-rules', json({ ...base, minImpact: 'abc' }));
+    expect(impact.status).toBe(400);
+  });
+
+  it('lets the same rule be tested twice in one second', async () => {
+    const created = await ops('alert-rules', json({
+      name: 'twice', channel: 'webhook', target: 'https://hooks.example.com/in', template: 'generic',
+    }));
+    expect(created.status).toBe(201);
+    const rule = assertAlertRule(await created.json());
+    const [a, b] = await Promise.all([
+      ops(`alert-rules/${rule.id}/test`, json({})),
+      ops(`alert-rules/${rule.id}/test`, json({})),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 200]);
+  });
+
+  it('does not count a test send as lastFired', async () => {
+    const created = await ops('alert-rules', json({
+      name: 'quiet', channel: 'webhook', target: 'https://hooks.example.com/in', template: 'generic',
+    }));
+    expect(created.status).toBe(201);
+    const rule = assertAlertRule(await created.json());
+    const tested = assertAlertRule(await (await ops(`alert-rules/${rule.id}/test`, json({}))).json());
+    expect(tested.lastFiredAt).toBeNull();
   });
 
   it('GET /api/v1/system/pulse is public, unauthenticated, and exact-shaped', async () => {

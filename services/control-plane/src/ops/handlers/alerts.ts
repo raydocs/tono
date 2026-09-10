@@ -15,7 +15,13 @@ import {
   type DeliveryTransition,
   type Severity,
 } from '../contract';
-import { sendPending, type AlertSendEnv } from '../alerts';
+import {
+  DEFAULT_ALERT_ALLOWED_HOSTS,
+  isAllowedWebhookHost,
+  sendPending,
+  type AlertSendEnv,
+} from '../alerts';
+import { envSecret } from '../verdict-run';
 import {
   Actor,
   Env,
@@ -32,6 +38,41 @@ import {
   nullText,
   weakEtag,
 } from './common';
+
+function allowedHostsOf(e: Env): string {
+  return e.ALERT_WEBHOOK_ALLOWED_HOSTS ?? DEFAULT_ALERT_ALLOWED_HOSTS;
+}
+
+function secretsFromEnv(e: Env, secretRef: string | null): Record<string, string> {
+  const secrets: Record<string, string> = {};
+  if (!secretRef) return secrets;
+  const value = envSecret(e, secretRef);
+  if (value) secrets[secretRef] = value;
+  return secrets;
+}
+
+function parseRuleInt(value: unknown, label: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Invalid ${label}`);
+  }
+  return value;
+}
+
+function parseSecretRef(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || value === '' || !/^ALERT_[A-Z0-9_]+$/.test(value)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid secretRef');
+  }
+  return value;
+}
+
+function assertWebhookTarget(channel: string, template: string, target: string, allowedHosts: string): void {
+  if (channel === 'email') return;
+  const url = template === 'telegram' ? 'https://api.telegram.org/' : target;
+  if (!isAllowedWebhookHost(url, allowedHosts)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'webhook host is not allowlisted');
+  }
+}
 
 function asFireOn(value: unknown): AlertFireOn {
   const text = String(value ?? 'open');
@@ -71,7 +112,8 @@ function ruleDto(row: Row, lastFiredAt: number | null): AlertRuleDto {
 async function lastFired(e: Env, ruleId: string): Promise<number | null> {
   try {
     const row = await e.DB.prepare(
-      'SELECT MAX(last_sent_at) AS at FROM ops_alert_rule_state WHERE rule_id = ?',
+      `SELECT MAX(last_sent_at) AS at FROM ops_alert_rule_state
+       WHERE rule_id = ? AND dedupe_key NOT LIKE 'test:%'`,
     ).bind(ruleId).first<Row>();
     return nullInt(row?.at);
   } catch (error) {
@@ -128,10 +170,15 @@ function validateRuleBody(b: Record<string, unknown>, partial: boolean): void {
       throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid fireOn');
     }
   }
-  if (!partial || b.secretRef !== undefined) {
-    if (b.secretRef != null && b.secretRef !== '' && !/^ALERT_[A-Z0-9_]+$/.test(String(b.secretRef))) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid secretRef');
-    }
+  if (!partial || b.secretRef !== undefined) parseSecretRef(b.secretRef);
+  if (!partial || b.minImpact !== undefined) {
+    if (b.minImpact !== undefined) parseRuleInt(b.minImpact, 'minImpact', 0, Number.MAX_SAFE_INTEGER);
+  }
+  if (!partial || b.delaySeconds !== undefined) {
+    if (b.delaySeconds !== undefined) parseRuleInt(b.delaySeconds, 'delaySeconds', 0, 86_400);
+  }
+  if (!partial || b.cooldownSeconds !== undefined) {
+    if (b.cooldownSeconds !== undefined) parseRuleInt(b.cooldownSeconds, 'cooldownSeconds', 0, 604_800);
   }
 }
 
@@ -143,6 +190,10 @@ export async function postAlertRule(req: Request, e: Env, actor: Actor): Promise
     'delaySeconds', 'cooldownSeconds', 'channel', 'target', 'template', 'secretRef',
   ]);
   validateRuleBody(b, false);
+  const channel = String(b.channel ?? 'webhook');
+  const template = String(b.template ?? 'generic');
+  const target = String(b.target);
+  assertWebhookTarget(channel, template, target, allowedHostsOf(e));
   const t = now();
   const ruleId = id();
   await e.DB.prepare(
@@ -154,10 +205,12 @@ export async function postAlertRule(req: Request, e: Env, actor: Actor): Promise
   ).bind(
     ruleId, String(b.name), b.enabled === false ? 0 : 1,
     b.matchKind ?? null, b.matchSubjectType ?? null, b.matchSubjectId ?? null,
-    b.minSeverity ?? 'warn', Number(b.minImpact ?? 0),
-    asFireOn(b.fireOn), Number(b.delaySeconds ?? 0), Number(b.cooldownSeconds ?? 3600),
-    b.channel ?? 'webhook', String(b.target), b.template ?? 'generic',
-    b.secretRef ?? null, t, t,
+    b.minSeverity ?? 'warn', b.minImpact === undefined ? 0 : parseRuleInt(b.minImpact, 'minImpact', 0, Number.MAX_SAFE_INTEGER),
+    asFireOn(b.fireOn),
+    b.delaySeconds === undefined ? 0 : parseRuleInt(b.delaySeconds, 'delaySeconds', 0, 86_400),
+    b.cooldownSeconds === undefined ? 3600 : parseRuleInt(b.cooldownSeconds, 'cooldownSeconds', 0, 604_800),
+    channel, target, template,
+    b.secretRef === undefined ? null : parseSecretRef(b.secretRef), t, t,
   ).run();
   await auditWrite(e, actor.email, 'alert-rule.create', 'alert_rule', ruleId, String(b.name));
   const dto = ruleDto(await loadRule(e, ruleId), null);
@@ -175,6 +228,10 @@ export async function patchAlertRule(req: Request, e: Env, rawId: string, actor:
     'delaySeconds', 'cooldownSeconds', 'channel', 'target', 'template', 'secretRef',
   ]);
   validateRuleBody(b, true);
+  const channel = String(b.channel === undefined ? existing.channel : b.channel);
+  const template = String(b.template === undefined ? existing.template : b.template);
+  const target = String(b.target === undefined ? existing.target : b.target);
+  assertWebhookTarget(channel, template, target, allowedHostsOf(e));
   await e.DB.prepare(
     `UPDATE ops_alert_rules SET
        name = ?, enabled = ?, match_kind = ?, match_subject_type = ?, match_subject_id = ?,
@@ -188,14 +245,12 @@ export async function patchAlertRule(req: Request, e: Env, rawId: string, actor:
     b.matchSubjectType === undefined ? existing.match_subject_type : b.matchSubjectType,
     b.matchSubjectId === undefined ? existing.match_subject_id : b.matchSubjectId,
     b.minSeverity === undefined ? String(existing.min_severity) : String(b.minSeverity),
-    b.minImpact === undefined ? Number(existing.min_impact) : Number(b.minImpact),
+    b.minImpact === undefined ? Number(existing.min_impact) : parseRuleInt(b.minImpact, 'minImpact', 0, Number.MAX_SAFE_INTEGER),
     b.fireOn === undefined ? String(existing.fire_on) : asFireOn(b.fireOn),
-    b.delaySeconds === undefined ? Number(existing.delay_seconds) : Number(b.delaySeconds),
-    b.cooldownSeconds === undefined ? Number(existing.cooldown_seconds) : Number(b.cooldownSeconds),
-    b.channel === undefined ? String(existing.channel) : String(b.channel),
-    b.target === undefined ? String(existing.target) : String(b.target),
-    b.template === undefined ? String(existing.template) : String(b.template),
-    b.secretRef === undefined ? existing.secret_ref : b.secretRef,
+    b.delaySeconds === undefined ? Number(existing.delay_seconds) : parseRuleInt(b.delaySeconds, 'delaySeconds', 0, 86_400),
+    b.cooldownSeconds === undefined ? Number(existing.cooldown_seconds) : parseRuleInt(b.cooldownSeconds, 'cooldownSeconds', 0, 604_800),
+    channel, target, template,
+    b.secretRef === undefined ? existing.secret_ref : parseSecretRef(b.secretRef),
     now(), ruleId,
   ).run();
   await auditWrite(e, actor.email, 'alert-rule.update', 'alert_rule', ruleId, String(b.name ?? existing.name));
@@ -224,14 +279,13 @@ export async function postAlertRuleTest(req: Request, e: Env, rawId: string, act
     `INSERT INTO ops_alert_deliveries(
        id, rule_id, incident_id, dedupe_key, transition, status, attempts, created_at, next_attempt_at
      ) VALUES(?, ?, ?, ?, 'test', 'pending', 0, ?, ?)`,
-  ).bind(deliveryId, ruleId, incidentId, `${ruleId}:test:${t}`, t, t).run();
+  ).bind(deliveryId, ruleId, incidentId, `${ruleId}:test:${deliveryId}`, t, t).run();
   const sendEnv: AlertSendEnv = {
-    secrets: {},
-    allowedHosts: (e as Env & { OPS_ALERT_ALLOWED_HOSTS?: string }).OPS_ALERT_ALLOWED_HOSTS
-      ?? (() => { try { return new URL(String(rule.target)).hostname; } catch { return ''; } })(),
+    secrets: secretsFromEnv(e, nullText(rule.secret_ref)),
+    allowedHosts: allowedHostsOf(e),
     consoleUrl: 'https://ops.local',
-    resendApiKey: (e as Env & { RESEND_API_KEY?: string }).RESEND_API_KEY,
-    emailFrom: (e as Env & { EMAIL_FROM?: string }).EMAIL_FROM,
+    resendApiKey: e.RESEND_API_KEY,
+    emailFrom: e.EMAIL_FROM,
     incidents: [{
       incidentId, dedupeKey: `test:${ruleId}`, transition: 'open',
       severity: String(rule.min_severity) as 'severe' | 'warn' | 'notice',

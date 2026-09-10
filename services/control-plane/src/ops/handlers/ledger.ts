@@ -24,7 +24,6 @@ import {
   Actor,
   Env,
   Row,
-  afterCursor,
   auditWrite,
   check,
   decodeName,
@@ -41,6 +40,10 @@ import {
   weakEtag,
 } from './common';
 
+function uniqueConflict(error: unknown): boolean {
+  return String(error).includes('UNIQUE constraint failed');
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
   const text = String(value ?? '');
   if (!(allowed as readonly string[]).includes(text)) {
@@ -50,7 +53,7 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], label: s
 }
 
 function parseAmount(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 1e12) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid amountMinor');
   }
   return value;
@@ -120,15 +123,26 @@ export async function getLedger(req: Request, e: Env): Promise<Response> {
   const month = parseMonth(url.searchParams.get('month'), utcMonthString(t));
   const { cursor, limit } = pageParams(url);
   let rows: Row[] = [];
+  let total = 0;
   try {
-    rows = (await e.DB.prepare(
-      `SELECT * FROM ops_ledger_entries WHERE month = ?
-       ORDER BY created_at DESC, id DESC LIMIT 500`,
-    ).bind(month).all<Row>()).results ?? [];
+    const count = await e.DB.prepare(
+      'SELECT COUNT(*) AS c FROM ops_ledger_entries WHERE month = ?',
+    ).bind(month).first<{ c: number }>();
+    total = Number(count?.c ?? 0);
+    const binds: (string | number)[] = [month];
+    let sql = 'SELECT * FROM ops_ledger_entries WHERE month = ?';
+    if (cursor) {
+      sql += ' AND (created_at < ? OR (created_at = ? AND id < ?))';
+      const sortAt = Number(cursor.sortKey);
+      binds.push(sortAt, sortAt, cursor.id);
+    }
+    sql += ' ORDER BY created_at DESC, id DESC LIMIT ?';
+    binds.push(limit + 1);
+    rows = (await e.DB.prepare(sql).bind(...binds).all<Row>()).results ?? [];
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  const items = rows.map(ledgerDto).filter((row) => afterCursor(cursor, String(row.createdAt), row.id, 'desc'));
+  const items = rows.map(ledgerDto);
   const page = items.slice(0, limit + 1);
   const sliced = page.length > limit ? page.slice(0, limit) : page;
   const last = sliced[sliced.length - 1];
@@ -136,8 +150,8 @@ export async function getLedger(req: Request, e: Env): Promise<Response> {
   const updatedAt = sliced[0]?.createdAt ?? t;
   return listJson(
     e, req, sliced, nextCursor, updatedAt,
-    weakEtag([month, updatedAt, items.length]),
-    assertLedgerEntry, items.length,
+    weakEtag([month, updatedAt, total]),
+    assertLedgerEntry, total,
   );
 }
 
@@ -162,16 +176,22 @@ export async function postLedger(req: Request, e: Env, actor: Actor): Promise<Re
   const entryId = id();
   const paidAt = parsePaidAt(b.paidAt);
   const note = parseNote(b.note);
-  await e.DB.prepare(
+  const inserted = await e.DB.prepare(
     `INSERT INTO ops_ledger_entries(
        id, kind, category, subject_type, subject_id, amount_minor, currency,
        fx_rate_to_cny, fx_date, cny_minor, month, paid_at, note,
        reverses, reversed_by, created_by, created_at, updated_at
-     ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+     )
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?
+     WHERE NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ?)`,
   ).bind(
     entryId, kind, category, subjectType, subjectId, amountMinor, currency,
-    rate, day, cnyMinor, month, paidAt, note, actor.email, t, t,
+    rate, day, cnyMinor, month, paidAt, note, actor.email, t, t, month,
   ).run();
+  if (Number(inserted.meta.changes ?? 0) !== 1) {
+    await requireOpenMonth(e.DB, month);
+    throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is closed`);
+  }
   await auditWrite(e, actor.email, 'ledger.create', 'ledger_entry', entryId, `${kind} ${currency} ${amountMinor}`);
   const dto = ledgerDto(await loadEntry(e, entryId));
   check(e, () => { assertLedgerEntry(dto); });
@@ -215,24 +235,41 @@ export async function postLedgerReverse(req: Request, e: Env, rawId: string, act
   rejectUnexpectedKeys(b, ['note']);
   const t = now();
   const month = utcMonthString(t);
-  const reverseId = id();
+  await requireOpenMonth(e.DB, month);
+  const reverseId = `reverse:${entryId}`;
   const note = parseNote(b.note) ?? `reverses ${entryId}`;
-  await e.DB.batch([
-    e.DB.prepare(
-      'UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ? WHERE id = ? AND reversed_by IS NULL',
-    ).bind(reverseId, t, entryId),
-    e.DB.prepare(
-      `INSERT INTO ops_ledger_entries(
-         id, kind, category, subject_type, subject_id, amount_minor, currency,
-         fx_rate_to_cny, fx_date, cny_minor, month, paid_at, note,
-         reverses, reversed_by, created_by, created_at, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)`,
-    ).bind(
-      reverseId, original.kind, original.category, original.subject_type, original.subject_id,
-      original.amount_minor, original.currency, original.fx_rate_to_cny, original.fx_date,
-      -Number(original.cny_minor), month, note, entryId, actor.email, t, t,
-    ),
-  ]);
+  try {
+    const results = await e.DB.batch([
+      e.DB.prepare(
+        `INSERT INTO ops_ledger_entries(
+           id, kind, category, subject_type, subject_id, amount_minor, currency,
+           fx_rate_to_cny, fx_date, cny_minor, month, paid_at, note,
+           reverses, reversed_by, created_by, created_at, updated_at
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?
+         WHERE (SELECT reversed_by FROM ops_ledger_entries WHERE id = ?) IS NULL
+           AND NOT EXISTS (SELECT 1 FROM ops_month_close WHERE month = ?)`,
+      ).bind(
+        reverseId, original.kind, original.category, original.subject_type, original.subject_id,
+        original.amount_minor, original.currency, original.fx_rate_to_cny, original.fx_date,
+        -Number(original.cny_minor), month, note, entryId, actor.email, t, t,
+        entryId, month,
+      ),
+      e.DB.prepare(
+        'UPDATE ops_ledger_entries SET reversed_by = ?, updated_at = ? WHERE id = ? AND reversed_by IS NULL',
+      ).bind(reverseId, t, entryId),
+    ]);
+    if (Number(results[0]?.meta.changes ?? 0) !== 1) {
+      await requireOpenMonth(e.DB, month);
+      throw new ApiError(409, 'ALREADY_REVERSED', 'Ledger entry is already reversed');
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (uniqueConflict(error)) {
+      throw new ApiError(409, 'ALREADY_REVERSED', 'Ledger entry is already reversed');
+    }
+    throw error;
+  }
   await auditWrite(e, actor.email, 'ledger.reverse', 'ledger_entry', reverseId, `reverses ${entryId}`);
   const dto = ledgerDto(await loadEntry(e, reverseId));
   check(e, () => { assertLedgerEntry(dto); });
@@ -259,7 +296,7 @@ async function loadMonthSummaryFallback(month: string, nowSec: number) {
       plan: 0, server: 0, home_line: 0, domain: 0, control_plane: 0,
       claude_account: 0, chatgpt_account: 0, other: 0,
     },
-    customers: [], nodes: [], unreconciled: 0, updatedAt: nowSec,
+    customers: [], nodes: [], unreconciled: 0, frozen: false, frozenAt: null, updatedAt: nowSec,
   };
 }
 
@@ -272,8 +309,8 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
   if (existing) throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
   const t = now();
   const summary = await loadMonthSummary(e.DB, month, t);
-  await e.DB.prepare(
-    `INSERT INTO ops_month_close(
+  const inserted = await e.DB.prepare(
+    `INSERT OR IGNORE INTO ops_month_close(
        month, closed_at, closed_by, revenue_cny_minor, cost_cny_minor,
        margin_cny_minor, unreconciled, notes
      ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -281,6 +318,9 @@ export async function postMonthClose(req: Request, e: Env, rawMonth: string, act
     month, t, actor.email, summary.revenueCnyMinor, summary.costCnyMinor,
     summary.marginCnyMinor, summary.unreconciled, notes,
   ).run();
+  if (Number(inserted.meta.changes ?? 0) !== 1) {
+    throw new ApiError(409, 'MONTH_CLOSED', `Month ${month} is already closed`);
+  }
   await auditWrite(e, actor.email, 'month.close', 'month', month, `closed ${month}`);
   const dto = await loadMonthSummary(e.DB, month, t);
   check(e, () => { assertMonthSummary(dto); });
