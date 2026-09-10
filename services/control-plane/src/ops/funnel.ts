@@ -83,11 +83,13 @@ export function resolveFirstConnectedAt(input: {
   currentlyConnected: boolean;
   connectedSince: number | null;
   lastSeenAt: number | null;
+  meteringFirst?: number | null;
 }): number | null {
   if (input.statusFirst != null) return input.statusFirst;
   if (input.connectedHourAt != null) return input.connectedHourAt;
   if (input.connectOkSec != null) return input.connectOkSec;
   if (input.currentlyConnected) return input.connectedSince ?? input.lastSeenAt;
+  if (input.meteringFirst != null) return input.meteringFirst;
   return null;
 }
 
@@ -100,7 +102,7 @@ export type FunnelIndex = {
 
 export async function loadFunnelFacts(db: D1Database, nowSec: number): Promise<FunnelIndex> {
   const allowlist = await allRows(db, 'SELECT email, created_at, wechat_id, contact, notes FROM signup_allowlist');
-  const users = await allRows(db, 'SELECT id, email, wechat_id, contact, notes, created_at FROM users');
+  const users = await allRows(db, 'SELECT id, email, wechat_id, contact, notes, created_at, usage_bytes, usage_reported_bytes, first_entitled_at FROM users');
   const devices = await allRows(db, 'SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_device_at FROM devices GROUP BY user_id');
   const statuses = await allRows(db, 'SELECT * FROM ops_customer_status');
   const hours = await allRows(db, `SELECT user_id,
@@ -130,6 +132,11 @@ export async function loadFunnelFacts(db: D1Database, nowSec: number): Promise<F
     const status = statusByUser.get(userId);
     const hour = hoursByUser.get(userId);
     const okMs = okByUser.get(userId) ?? null;
+    const usageBytes = Number(user.usage_bytes) || 0;
+    const usageReportedBytes = Number(user.usage_reported_bytes) || 0;
+    const meteringFirst = (usageBytes > 0 || usageReportedBytes > 0)
+      ? (finite(user.first_entitled_at) ?? finite(user.created_at))
+      : null;
     const firstConnectedAt = resolveFirstConnectedAt({
       statusFirst: finite(status?.first_connected_at),
       connectedHourAt: finite(hour?.first_connected_hour_at),
@@ -137,6 +144,7 @@ export async function loadFunnelFacts(db: D1Database, nowSec: number): Promise<F
       currentlyConnected: Number(status?.connected) === 1,
       connectedSince: finite(status?.connected_since),
       lastSeenAt: finite(status?.last_seen_at),
+      meteringFirst,
     });
     const { stage, stageSinceAt } = classifyStage({
       hasUser: true,

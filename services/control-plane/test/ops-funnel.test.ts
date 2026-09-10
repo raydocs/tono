@@ -10,7 +10,7 @@ import {
 } from '../src/ops/contract';
 import { applyWindowToStatus } from '../src/ops/customers';
 import { neverUsedOverride } from '../src/ops/verdict-customers';
-import { classifyStage, funnelDays, stageSentence } from '../src/ops/funnel';
+import { classifyStage, funnelDays, resolveFirstConnectedAt, stageSentence } from '../src/ops/funnel';
 
 const ACCESS_TEAM_DOMAIN = 'test-team.cloudflareaccess.com';
 const ACCESS_AUDIENCE = 'test-access-audience-0001';
@@ -66,11 +66,24 @@ const json = (value: unknown, method = 'POST'): RequestInit => ({
 const db = () => (env as unknown as { DB: D1Database }).DB;
 const tNow = () => Math.floor(Date.now() / 1000);
 
-async function seedUser(id: string, email: string, createdAt: number) {
+async function seedUser(
+  id: string,
+  email: string,
+  createdAt: number,
+  extra: { usageBytes?: number; usageReportedBytes?: number; firstEntitledAt?: number | null } = {},
+) {
   await db().prepare(
-    `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, created_at, updated_at)
-     VALUES(?, ?, 'x', 'y', 'active', 0, ?, ?)`,
-  ).bind(id, email, createdAt, createdAt).run();
+    `INSERT INTO users(id, email, password_hash, password_salt, status, usage_bytes, usage_reported_bytes, first_entitled_at, created_at, updated_at)
+     VALUES(?, ?, 'x', 'y', 'active', ?, ?, ?, ?, ?)`,
+  ).bind(
+    id,
+    email,
+    extra.usageBytes ?? 0,
+    extra.usageReportedBytes ?? 0,
+    extra.firstEntitledAt ?? null,
+    createdAt,
+    createdAt,
+  ).run();
 }
 
 async function seedDevice(id: string, userId: string, createdAt: number) {
@@ -218,6 +231,176 @@ describe('ops onboarding funnel', () => {
     const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
     expect(list.items.find((item) => item.userId === 'u-reg')?.stage).toBe('registered');
     expect(list.items.find((item) => item.userId === 'u-dev')?.stage).toBe('device_added');
+  });
+
+  const MB_1_1 = Math.round(1.1 * 1024 * 1024);
+
+  it.each([
+    {
+      name: 'status first wins over hour, connectOk, live session and metering',
+      input: {
+        statusFirst: 10, connectedHourAt: 20, connectOkSec: 30,
+        currentlyConnected: true, connectedSince: 40, lastSeenAt: 50, meteringFirst: 5,
+      },
+      expected: 10,
+    },
+    {
+      name: 'activity hour wins over connectOk and metering',
+      input: {
+        statusFirst: null, connectedHourAt: 20, connectOkSec: 30,
+        currentlyConnected: false, connectedSince: null, lastSeenAt: null, meteringFirst: 5,
+      },
+      expected: 20,
+    },
+    {
+      name: 'connectOk wins over metering',
+      input: {
+        statusFirst: null, connectedHourAt: null, connectOkSec: 30,
+        currentlyConnected: false, connectedSince: null, lastSeenAt: null, meteringFirst: 5,
+      },
+      expected: 30,
+    },
+    {
+      name: 'live session wins over metering',
+      input: {
+        statusFirst: null, connectedHourAt: null, connectOkSec: null,
+        currentlyConnected: true, connectedSince: 40, lastSeenAt: 50, meteringFirst: 5,
+      },
+      expected: 40,
+    },
+    {
+      name: 'metering is the last fallback when no telemetry exists',
+      input: {
+        statusFirst: null, connectedHourAt: null, connectOkSec: null,
+        currentlyConnected: false, connectedSince: null, lastSeenAt: null, meteringFirst: 5,
+      },
+      expected: 5,
+    },
+    {
+      name: 'no telemetry and no metering stays null',
+      input: {
+        statusFirst: null, connectedHourAt: null, connectOkSec: null,
+        currentlyConnected: false, connectedSince: null, lastSeenAt: null, meteringFirst: null,
+      },
+      expected: null,
+    },
+  ])('resolveFirstConnectedAt: $name', ({ input, expected }) => {
+    expect(resolveFirstConnectedAt(input)).toBe(expected);
+  });
+
+  it.each([
+    {
+      name: 'old client with 1.1 MB usage and no telemetry → connected at first_entitled_at',
+      usageBytes: MB_1_1,
+      usageReportedBytes: 0,
+      firstEntitledOffsetDays: 18 as number | null,
+      device: true,
+      telemetryHourOffsetDays: null as number | null,
+      expectStage: 'connected' as const,
+      expectFirstConnected: 'first_entitled_at' as const,
+      expectVerdict: 'unreported' as const,
+    },
+    {
+      name: 'usage_reported_bytes only and no telemetry → connected at first_entitled_at',
+      usageBytes: 0,
+      usageReportedBytes: MB_1_1,
+      firstEntitledOffsetDays: 18 as number | null,
+      device: true,
+      telemetryHourOffsetDays: null as number | null,
+      expectStage: 'connected' as const,
+      expectFirstConnected: 'first_entitled_at' as const,
+      expectVerdict: 'unreported' as const,
+    },
+    {
+      name: 'usage 0 with devices stays device_added',
+      usageBytes: 0,
+      usageReportedBytes: 0,
+      firstEntitledOffsetDays: 18 as number | null,
+      device: true,
+      telemetryHourOffsetDays: null as number | null,
+      expectStage: 'device_added' as const,
+      expectFirstConnected: null,
+      expectVerdict: 'never_used' as const,
+    },
+    {
+      name: 'usage > 0 and later telemetry first connect → telemetry timestamp wins',
+      usageBytes: MB_1_1,
+      usageReportedBytes: 0,
+      firstEntitledOffsetDays: 18 as number | null,
+      device: true,
+      telemetryHourOffsetDays: 5 as number | null,
+      expectStage: 'connected' as const,
+      expectFirstConnected: 'telemetry' as const,
+      expectVerdict: 'unreported' as const,
+    },
+    {
+      name: 'metered usage without first_entitled_at falls back to created_at',
+      usageBytes: MB_1_1,
+      usageReportedBytes: 0,
+      firstEntitledOffsetDays: null,
+      device: true,
+      telemetryHourOffsetDays: null as number | null,
+      expectStage: 'connected' as const,
+      expectFirstConnected: 'created_at' as const,
+      expectVerdict: 'unreported' as const,
+    },
+  ])('$name', async (row) => {
+    const t = tNow();
+    const createdAt = t - 20 * 86_400;
+    const firstEntitledAt = row.firstEntitledOffsetDays == null ? null : t - row.firstEntitledOffsetDays * 86_400;
+    const deviceAt = t - 15 * 86_400;
+    const hourAt = row.telemetryHourOffsetDays == null ? null : t - row.telemetryHourOffsetDays * 86_400;
+    await seedUser('u-meter', 'meter@example.com', createdAt, {
+      usageBytes: row.usageBytes,
+      usageReportedBytes: row.usageReportedBytes,
+      firstEntitledAt,
+    });
+    if (row.device) await seedDevice('d-meter', 'u-meter', deviceAt);
+    if (hourAt != null) {
+      await db().prepare(
+        `INSERT INTO customer_activity_hours(
+           user_id, device_id, hour_at, online_minutes, connected_minutes, bytes_up, bytes_down
+         ) VALUES('u-meter', 'd-meter', ?, 10, 8, 1, 2)`,
+      ).bind(hourAt).run();
+    }
+
+    const detail = assertCustomerDetail(await (await ops('customers/u-meter')).json());
+    expect(detail.stage).toBe(row.expectStage);
+    expect(detail.verdict).toBe(row.expectVerdict);
+    const expectedFirst =
+      row.expectFirstConnected === 'first_entitled_at' ? firstEntitledAt
+        : row.expectFirstConnected === 'created_at' ? createdAt
+          : row.expectFirstConnected === 'telemetry' ? hourAt
+            : null;
+    expect(detail.firstConnectedAt).toBe(expectedFirst);
+
+    const funnel = assertFunnel(await (await ops('customers/funnel')).json());
+    const counts = Object.fromEntries(funnel.stages.map((item) => [item.stage, item.count]));
+    if (row.expectStage === 'connected') {
+      expect(counts.connected).toBe(1);
+      expect(counts.device_added ?? 0).toBe(0);
+      expect(funnel.items.some((item) => item.key === 'u-meter')).toBe(false);
+    } else {
+      expect(counts.connected ?? 0).toBe(0);
+      expect(counts.device_added).toBe(1);
+      expect(funnel.items.some((item) => item.key === 'u-meter')).toBe(true);
+    }
+  });
+
+  it('funnel counts move a metered silent client from device_added into connected', async () => {
+    const t = tNow();
+    await seedUser('u-old', 'old@example.com', t - 20 * 86_400, {
+      usageBytes: MB_1_1, firstEntitledAt: t - 18 * 86_400,
+    });
+    await seedDevice('d-old', 'u-old', t - 15 * 86_400);
+    await seedUser('u-dev', 'dev@example.com', t - 6 * 86_400);
+    await seedDevice('d-dev', 'u-dev', t - 3 * 86_400);
+
+    const funnel = assertFunnel(await (await ops('customers/funnel')).json());
+    const counts = Object.fromEntries(funnel.stages.map((row) => [row.stage, row.count]));
+    expect(counts).toMatchObject({ connected: 1, device_added: 1 });
+    expect(funnel.items.some((row) => row.key === 'u-old')).toBe(false);
+    expect(funnel.items.find((row) => row.key === 'u-dev')?.stage).toBe('device_added');
   });
 
   it('connected firstConnectedAt prefers status, else activity hour', async () => {
