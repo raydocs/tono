@@ -17,14 +17,13 @@ import {
   violation,
 } from './checkers';
 import {
-  assertNodeAcceptance,
   assertNodeBindings,
   assertNodeDetail,
   assertNodeErrorRow,
   assertNodeHistoryEntry,
   assertNodeSummary,
-  assertRetireDependencies,
 } from './nodes';
+import { assertNodeAcceptance, assertRetireDependencies } from './node-acceptance';
 import {
   assertActivityHour,
   assertConnectionEvent,
@@ -34,24 +33,19 @@ import {
   assertServiceUsage,
 } from './customers';
 import { assertFunnel } from './funnel';
-import {
-  assertAdoptionMatrix,
-  assertAlertDelivery,
-  assertAlertRule,
-  assertIncident,
-  assertIncidentDetail,
-  assertJob,
-  assertRelease,
-} from './operations';
+import { assertIncident, assertIncidentDetail } from './incidents';
+import { assertJob } from './jobs';
+import { assertAdoptionMatrix, assertRelease } from './releases';
+import { assertAlertDelivery, assertAlertRule } from './alerts';
 import { assertDigest, assertFollowupList } from './followups';
 import {
-  assertAuditList,
   assertDirectCandidate,
   assertHomeLine,
   assertHomeLineUsageDay,
   assertProviderAccount,
-  assertSystemHealth,
 } from './assets';
+import { assertAuditList } from './audit';
+import { assertSystemHealth } from './system';
 import { assertFxRate, assertLedgerEntryList, assertMonthSummary } from './ledger';
 
 export const assertNodeSummaryList = (value: unknown) => assertList(value, assertNodeSummary);
@@ -182,6 +176,21 @@ export const GET_ROUTE_TABLE: readonly GetRouteBinding[] = [
   { route: 'GET /api/v1/ops/ledger', checker: 'assertLedgerEntryList' },
   { route: 'GET /api/v1/ops/months/{month}', checker: 'assertMonthSummary' },
   { route: 'GET /api/v1/ops/fx', checker: 'assertFxRate' },
+
+  // dept:a
+  // append your entries inside your block
+
+  // dept:b
+  // append your entries inside your block
+
+  // dept:c
+  // append your entries inside your block
+
+  // dept:d
+  // append your entries inside your block
+
+  // dept:e
+  // append your entries inside your block
 ];
 
 /** `<out>/<route-with-slashes-as-dashes>.json`, braces stripped so `{name}` is `name`. */

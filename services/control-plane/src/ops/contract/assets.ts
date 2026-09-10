@@ -1,10 +1,7 @@
-// 设置页与状态页：资产、账号、分流候选、操作记录、数据源新鲜度。
+// 设置页：资产、账号、分流候选。
 
-import type { Measured, SourceId } from './vocabulary';
-import { SOURCE_IDS } from './vocabulary';
+import type { Measured } from './vocabulary';
 import {
-  arrayOf,
-  bool,
   fields,
   int,
   measured,
@@ -12,98 +9,9 @@ import {
   oneOf,
   optInt,
   optNum,
-  optOneOf,
   optText,
   text,
 } from './checkers';
-
-export const ACTOR_TYPES = ['access_admin', 'token_admin', 'collector', 'exit_node', 'system'] as const;
-export type ActorType = (typeof ACTOR_TYPES)[number];
-
-/**
- * One line of 操作记录.
- *
- * `actorType`/`actorRole` exist today with a single administrator so that
- * adding roles later is a data change, not a migration of every audit row.
- */
-export interface AuditEntryDto {
-  id: string;
-  at: number;
-  actorEmail: string | null;
-  actorType: ActorType | null;
-  actorRole: string | null;
-  action: string;
-  targetType: string;
-  targetId: string | null;
-  summary: string | null;
-  requestId: string | null;
-}
-
-/**
- * Shared-admin's audit page, not the standard list envelope: it pages on
- * `(at, id)` with `before`/`beforeId` rather than a cursor string.
- */
-export interface AuditListDto {
-  entries: AuditEntryDto[];
-  hasMore: boolean;
-  nextBefore: number | null;
-  nextBeforeId: string | null;
-}
-
-export const SOURCE_STATES = ['ready', 'stale', 'error', 'missing'] as const;
-export type SourceState = (typeof SOURCE_STATES)[number];
-
-export interface SourceHealthDto {
-  source: SourceId;
-  state: SourceState;
-  asOfSec: number | null;
-  message: string | null;
-}
-
-/**
- * The header's 数据源 dot, collapsed to one word.
- *
- * The old console explained each data source on every page; this replaces all
- * of it. `ok` is false as soon as any source is not ready, because a green dot
- * over a dead collector is the failure mode the 死人开关 exists to catch.
- */
-export const CRON_STEP_NAMES = [
-  'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'fx', 'retention',
-] as const;
-export type CronStepName = (typeof CRON_STEP_NAMES)[number];
-
-export interface CronStepHealthDto {
-  ok: boolean;
-  ms: number;
-  error: string | null;
-}
-
-export type CronStepsHealthDto = Record<CronStepName, CronStepHealthDto>;
-
-/**
- * How far the projections have caught up with the telemetry that already
- * exists. Right after a deploy the customer pages read as silent for hours
- * while the cron drains 30 days of windows; this is what lets a page say
- * "正在回填" instead of looking broken. Null once nothing is behind.
- */
-export interface BackfillHealthDto {
-  windowsTotal: number;
-  windowsFlattened: number;
-  windowsProjected: number;
-}
-
-export interface SystemHealthDto {
-  ok: boolean;
-  buildSha: string | null;
-  contractVersion: number;
-  sources: SourceHealthDto[];
-  cronLastRunAt: number | null;
-  cronLastDurationMs: number | null;
-  cronLastError: string | null;
-  cronSteps: CronStepsHealthDto | null;
-  backfill: BackfillHealthDto | null;
-  updatedAt: number;
-}
 
 export const CANDIDATE_STATUSES = ['new', 'accepted', 'rejected', 'already_direct'] as const;
 export type CandidateStatus = (typeof CANDIDATE_STATUSES)[number];
@@ -195,108 +103,6 @@ export interface HomeLineDto {
   notes: string | null;
   createdAt: number;
   updatedAt: number;
-}
-
-const AUDIT_KEYS = [
-  'id', 'at', 'actorEmail', 'actorType', 'actorRole', 'action',
-  'targetType', 'targetId', 'summary', 'requestId',
-];
-
-export function assertAuditEntry(value: unknown, path = 'auditEntry'): AuditEntryDto {
-  const row = fields(value, path, AUDIT_KEYS);
-  return {
-    id: text(row, path, 'id'),
-    at: int(row, path, 'at'),
-    actorEmail: optText(row, path, 'actorEmail'),
-    actorType: optOneOf<ActorType>(row, path, 'actorType', ACTOR_TYPES),
-    actorRole: optText(row, path, 'actorRole'),
-    action: text(row, path, 'action'),
-    targetType: text(row, path, 'targetType'),
-    targetId: optText(row, path, 'targetId'),
-    summary: optText(row, path, 'summary'),
-    requestId: optText(row, path, 'requestId'),
-  };
-}
-
-const AUDIT_LIST_KEYS = ['entries', 'hasMore', 'nextBefore', 'nextBeforeId'];
-
-export function assertAuditList(value: unknown, path = 'audit'): AuditListDto {
-  const row = fields(value, path, AUDIT_LIST_KEYS);
-  return {
-    entries: arrayOf(row, path, 'entries', assertAuditEntry),
-    hasMore: bool(row, path, 'hasMore'),
-    nextBefore: optInt(row, path, 'nextBefore'),
-    nextBeforeId: optText(row, path, 'nextBeforeId'),
-  };
-}
-
-const SOURCE_HEALTH_KEYS = ['source', 'state', 'asOfSec', 'message'];
-
-export function assertSourceHealth(value: unknown, path = 'sourceHealth'): SourceHealthDto {
-  const row = fields(value, path, SOURCE_HEALTH_KEYS);
-  return {
-    source: oneOf<SourceId>(row, path, 'source', SOURCE_IDS),
-    state: oneOf<SourceState>(row, path, 'state', SOURCE_STATES),
-    asOfSec: optInt(row, path, 'asOfSec'),
-    message: optText(row, path, 'message'),
-  };
-}
-
-const SYSTEM_HEALTH_KEYS = [
-  'ok', 'buildSha', 'contractVersion', 'sources',
-  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'cronSteps', 'backfill', 'updatedAt',
-];
-
-const CRON_STEP_HEALTH_KEYS = ['ok', 'ms', 'error'];
-
-export function assertCronStepHealth(value: unknown, path = 'cronStep'): CronStepHealthDto {
-  const row = fields(value, path, CRON_STEP_HEALTH_KEYS);
-  return {
-    ok: bool(row, path, 'ok'),
-    ms: int(row, path, 'ms'),
-    error: optText(row, path, 'error'),
-  };
-}
-
-export function assertCronStepsHealth(value: unknown, path = 'cronSteps'): CronStepsHealthDto {
-  const row = fields(value, path, CRON_STEP_NAMES);
-  const steps = {} as CronStepsHealthDto;
-  for (const name of CRON_STEP_NAMES) {
-    steps[name] = assertCronStepHealth(row[name], `${path}.${name}`);
-  }
-  return steps;
-}
-
-export function assertSystemHealth(value: unknown, path = 'systemHealth'): SystemHealthDto {
-  const row = fields(value, path, SYSTEM_HEALTH_KEYS);
-  const cronSteps = row.cronSteps === undefined || row.cronSteps === null
-    ? null
-    : assertCronStepsHealth(row.cronSteps, `${path}.cronSteps`);
-  return {
-    ok: bool(row, path, 'ok'),
-    buildSha: optText(row, path, 'buildSha'),
-    contractVersion: int(row, path, 'contractVersion'),
-    sources: arrayOf(row, path, 'sources', assertSourceHealth),
-    cronLastRunAt: optInt(row, path, 'cronLastRunAt'),
-    cronLastDurationMs: optInt(row, path, 'cronLastDurationMs'),
-    cronLastError: optText(row, path, 'cronLastError'),
-    cronSteps,
-    backfill: row.backfill === undefined || row.backfill === null
-      ? null
-      : assertBackfillHealth(row.backfill, `${path}.backfill`),
-    updatedAt: int(row, path, 'updatedAt'),
-  };
-}
-
-const BACKFILL_KEYS = ['windowsTotal', 'windowsFlattened', 'windowsProjected'];
-
-export function assertBackfillHealth(value: unknown, path = 'backfill'): BackfillHealthDto {
-  const row = fields(value, path, BACKFILL_KEYS);
-  return {
-    windowsTotal: int(row, path, 'windowsTotal'),
-    windowsFlattened: int(row, path, 'windowsFlattened'),
-    windowsProjected: int(row, path, 'windowsProjected'),
-  };
 }
 
 const CANDIDATE_KEYS = [

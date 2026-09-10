@@ -108,6 +108,21 @@ export const OPS_V1_ROUTES = [
   'POST /api/v1/ops/months/{month}/close',
   'GET /api/v1/ops/months/{month}/export.csv',
   'GET /api/v1/ops/fx',
+
+  // dept:a
+  // append your entries inside your block
+
+  // dept:b
+  // append your entries inside your block
+
+  // dept:c
+  // append your entries inside your block
+
+  // dept:d
+  // append your entries inside your block
+
+  // dept:e
+  // append your entries inside your block
 ] as const;
 
 type Handler = (req: Request, e: Env, actor: Actor, params: string[]) => Promise<Response>;
@@ -181,6 +196,21 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'POST', re: /^\/api\/v1\/ops\/months\/([^/]+)\/close$/, handle: (req, e, a, p) => postMonthClose(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/months\/([^/]+)$/, handle: (req, e, _a, p) => getMonth(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/fx$/, handle: (req, e) => getFx(req, e) },
+
+  // dept:a
+  // append your entries inside your block
+
+  // dept:b
+  // append your entries inside your block
+
+  // dept:c
+  // append your entries inside your block
+
+  // dept:d
+  // append your entries inside your block
+
+  // dept:e
+  // append your entries inside your block
 ];
 
 export async function dispatchOpsV1(

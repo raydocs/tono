@@ -38,7 +38,7 @@
 | `PATCH nodes/{name}/profile` | `NodeDetailDto` |
 | `GET customers?cursor&limit&focus&q&since` | `ListDto<CustomerSummaryDto>`（`wechatId`、`stage`、`stageSinceAt`、`firstConnectedAt`。`q` 按 email 或 wechat_id 子串过滤，大小写不敏感；缺省/空 `q` 行为与原来相同。从未连上过且原判定会是 `unreported`/`offline` 的人是 `never_used` / 还没用起来，不覆盖 `unreachable`/`unstable`/`ok`） |
 | `GET customers/{id}` | `CustomerDetailDto`（同上三字段；`wechatId`、`contact`、`notes` 来自 `users`；`devices[]` 带每台设备的 live 字段：`connected`、`selectedServer`、`lastSeenAt`、`lastFailAt/Code/Node`，来自 `ops_device_status`。卡住开通 ≥3 天时 `chores` 含 `onboarding:<userId>`） |
-| `GET customers/funnel` | `FunnelDto`：`stages[]` 含全部阶段（含 `connected`）的人数；`items[]` 是尚未 `connected` 的人，最近阶段变化在前。白名单未注册的人 `key` 为 `invite:<email>`。每请求 ≤20 条 D1 语句 |
+| `GET customers/funnel` | `FunnelDto`：`stages[]` 含全部阶段（含 `connected`）的人数；`items[]` 是尚未 `connected` 的人，最近阶段变化在前。白名单未注册的人 `key` 为 `invite:<email>`。没有遥测时 `users.usage_bytes` 或 `usage_reported_bytes` > 0 也算连上过，`firstConnectedAt` 回落到 `first_entitled_at` 或 `created_at`。每请求 ≤20 条 D1 语句 |
 | `PATCH signup-allowlist/{email}` | `FunnelRowDto`。body `{ wechatId?, contact?, notes? }`，校验与 onboard 相同，`''`/null 清空。没有白名单行 404；已有 `users` 行 409 `ALREADY_REGISTERED`（改用 `PATCH users/{id}`）。审计 `allowlist.profile` |
 | `POST users/onboard` | 已注册写 `users.wechat_id/contact/notes`，`pendingProfile: false`；未注册把这三项写在 `signup_allowlist` 上，`pendingProfile: true`，首次注册带到 `users`。其余 legacy 响应字段不变 |
 | `GET customers/{id}/connections?deviceId=` | `ListDto<ConnectionEventDto>`（`deviceId` 可选，按设备过滤） |
@@ -94,6 +94,16 @@
 账目写入都记 `ops_audit`（`ledger.create` / `ledger.update` / `ledger.reverse` / `month.close`）。汇率由 cron 的 `fx` 步每天向 `https://api.frankfurter.app/latest?from=<BASE>&to=CNY` 拉 USD/EUR/GBP/JPY/HKD；失败则该步 `ok: false`，已存汇率不动。告警 webhook 主机白名单不管这条：那是防 SSRF 的，这条是 Worker 自己对写死主机的空 GET，不带客户或账本数据。
 
 `GET audit` 由 shared-admin 先于 v1 dispatch 承接，信封是 `{ entries, hasMore, nextBefore, nextBeforeId }`，条目上 `actorType` / `actorRole` / `requestId` 可空。词表与库一致：`actor_type` 为 `access_admin|token_admin|collector|exit_node|system`，`actor_role` 为 `owner`；配额 `counts` 为 `in|out|in_out`、`level` 为 `ok|chore|warn|severe`（无配额时 `level: ok` 且 `quota: null`）；路由 `cloud|residential|direct|reject|unknown`；连接来源 `window|direct|diagnostics|failure`；告警 `fireOn` 为 `open|open_resolve`，投递 `transition` 另加 `test`；事故事件 `type` 为 `opened|escalated|deescalated|acked|snoozed|note|job|alert|resolved`；事故 `closure` 为 `verified|false_positive|manual`（可空）；跟进 `kind` 为 `reply|await_customer|callback|verified|note`，主体 `user|incident|node`；版本档 `current|behind_one|behind_more|unreported`。
+
+### 部门 A
+
+### 部门 B
+
+### 部门 C
+
+### 部门 D
+
+### 部门 E
 
 ## 加端点的规矩
 

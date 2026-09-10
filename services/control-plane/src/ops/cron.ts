@@ -42,6 +42,21 @@ export type OpsCronReport = {
 
 export const OPS_CRON_STEPS = [
   'flatten', 'project', 'verdicts', 'alerts', 'jobs', 'quota', 'daily', 'fx', 'retention',
+
+  // dept:a
+  // append your entries inside your block
+
+  // dept:b
+  // append your entries inside your block
+
+  // dept:c
+  // append your entries inside your block
+
+  // dept:d
+  // append your entries inside your block
+
+  // dept:e
+  // append your entries inside your block
 ] as const;
 export type OpsCronStepName = (typeof OPS_CRON_STEPS)[number];
 
