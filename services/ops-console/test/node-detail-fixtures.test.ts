@@ -1,10 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   assertConnectionEvent,
   assertJob,
   assertList,
+  assertNodeAcceptance,
   assertNodeDetail,
   assertNodeErrorsMeasured,
   assertNodeHistoryEntry,
@@ -115,5 +118,91 @@ describe('the dense set is the one that has to survive its own length', () => {
 
   it('is over its quota, so the gauge has its severe case on screen', () => {
     expect(detail.quota.value.level).toBe('severe');
+  });
+});
+
+/* ------------------------------------------------------- 可售验收单 */
+
+type AcceptanceFile = {
+  clock: number;
+  sheets: Record<string, unknown>;
+  nodes: Record<string, { sheet: string; lifecycle?: string; catalogListed?: boolean }>;
+  bySet: Record<string, string>;
+};
+
+const acceptanceFile = JSON.parse(
+  readFileSync(join(FIXTURES, 'node-acceptance.json'), 'utf8'),
+) as AcceptanceFile;
+
+/**
+ * The sheet is a table with one rule the console leans on — `sellable` is true
+ * exactly when nothing blocks it, and only 客户去程 and 容量 may be unknown and
+ * still count. `assertNodeAcceptance` enforces the pair, which is why these
+ * fixtures are generated rather than typed: a hand-edited one that broke it
+ * would put 可以上架 above a list of blockers.
+ */
+describe('每张可售验收单都过合同', () => {
+  for (const name of Object.keys(acceptanceFile.sheets)) {
+    it(name, () => {
+      const sheet = assertNodeAcceptance(acceptanceFile.sheets[name]);
+      expect(sheet.items.length).toBe(12);
+      assertNodeAcceptance(materializeOps(acceptanceFile.sheets[name], acceptanceFile.clock));
+    });
+  }
+
+  it('covers the three shapes the section has to survive', () => {
+    const sellable = assertNodeAcceptance(acceptanceFile.sheets.sellable);
+    expect(sellable.sellable).toBe(true);
+    expect(sellable.blockers).toEqual([]);
+    // 容量 has no ceiling written down anywhere, so it stays unknown and
+    // still lets the machine be sold — the one case the rule exists for.
+    expect(sellable.items.find((row) => row.key === 'capacity')?.state).toBe('unknown');
+
+    const blocked = assertNodeAcceptance(acceptanceFile.sheets.blocked);
+    expect(blocked.sellable).toBe(false);
+    expect(blocked.blockers).toContain('carriers');
+    expect(blocked.blockers.length).toBeGreaterThan(3);
+
+    const unknown = assertNodeAcceptance(acceptanceFile.sheets.unknown);
+    expect(unknown.items.filter((row) => row.state === 'unknown').length).toBeGreaterThan(2);
+    // All four states appear across the set, so no tone ships unlooked at.
+    const states = new Set(Object.values(acceptanceFile.sheets)
+      .flatMap((sheet) => assertNodeAcceptance(sheet).items.map((row) => row.state)));
+    expect([...states].sort()).toEqual(['fail', 'pass', 'pending', 'unknown']);
+  });
+
+  it('names an unlisted machine for each of the two 上架 paths', () => {
+    const named = Object.values(acceptanceFile.nodes);
+    expect(named.length).toBeGreaterThan(1);
+    for (const row of named) {
+      expect(row.lifecycle).toBe('unlisted');
+      expect(row.catalogListed).toBe(false);
+      expect(Object.keys(acceptanceFile.sheets)).toContain(row.sheet);
+    }
+    expect(named.map((row) => row.sheet).sort()).toEqual(['blocked', 'sellable']);
+  });
+});
+
+/**
+ * The committed file is the generator's output and nothing else.
+ *
+ * It regenerates into a scratch directory rather than in place: running the
+ * generator over `fixtures/` would rewrite every other set as a side effect of
+ * checking this one.
+ */
+describe('the generator emits exactly the committed 可售验收 fixture', () => {
+  it('byte for byte', () => {
+    const out = mkdtempSync(join(tmpdir(), 'ops-fixtures-'));
+    try {
+      execFileSync(
+        process.execPath,
+        [join(import.meta.dirname, '..', 'scripts', 'generate-ops-fixtures.mjs'), '--out', out],
+        { stdio: 'ignore' },
+      );
+      expect(readFileSync(join(out, 'node-acceptance.json'), 'utf8'))
+        .toBe(readFileSync(join(FIXTURES, 'node-acceptance.json'), 'utf8'));
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
   });
 });

@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react';
-import type { NodeDetailDto } from '@contract';
+import type { NodeAcceptanceDto, NodeDetailDto } from '@contract';
 import { Action, ActionRow } from '@/components/ops/Action';
 import { copy } from '@/copy/copy';
 import { nodeApi } from '@/lib/api-node';
-import { actionBlockReason, NODE_ACTIONS, type NodeActionSpec } from '@/lib/node-detail';
-import { useResource } from '@/lib/use-resource';
+import {
+  actionBlockReason,
+  NODE_ACTIONS,
+  overrideRelistAction,
+  type NodeActionSpec,
+} from '@/lib/node-detail';
+import { useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -18,13 +23,22 @@ const TOAST_MS = 5_000;
  * work it knows will not run — a hub that is not talking to this machine
  * cannot restart anything on it — and says so on the button rather than
  * queueing something that would quietly expire.
+ *
+ * Relisting is the one button that reads a second document: the Worker refuses
+ * a relist whose sale-readiness sheet says the machine is not sellable, so the
+ * button says so first, with what is missing. The override stands beside it —
+ * a real second path rather than a way round the check, and the only one that
+ * is audited under its own name.
  */
 export function ActionRail({
   node,
+  sheet,
   onChanged,
   className,
 }: {
   node: NodeDetailDto;
+  /** The sale-readiness sheet the page already fetched; relisting is gated on it. */
+  sheet: Resource<NodeAcceptanceDto>;
   onChanged: () => void;
   className?: string;
 }) {
@@ -80,6 +94,7 @@ export function ActionRail({
         await nodeApi.enqueueJob(node.name, {
           type: open.jobType,
           confirmName: open.destructive ? node.name : undefined,
+          override: open.override === true ? true : undefined,
         });
         setDone(copy.nodeActionQueued(open.label));
       }
@@ -92,6 +107,14 @@ export function ActionRail({
     }
   }
 
+  const acceptance = sheet.status === 'ready' ? sheet.data : null;
+  // Only offered where it can mean something: a machine that is not being sold
+  // yet, is not retired, and has a sheet that came back saying no.
+  const override = acceptance !== null && !acceptance.sellable
+    && node.lifecycle !== 'retired' && node.catalogListed === false
+    ? overrideRelistAction(acceptance)
+    : null;
+
   return (
     <>
       <ActionRow className={cn('justify-end', className)}>
@@ -99,12 +122,15 @@ export function ActionRail({
           <Action
             key={action.id}
             primary={action.id === 'pullErrors'}
-            reason={actionBlockReason(action, node)}
+            reason={actionBlockReason(action, node, acceptance)}
             onClick={() => start(action)}
           >
             {action.label}
           </Action>
         ))}
+        {override ? (
+          <Action key="relist-override" onClick={() => start(override)}>{override.label}</Action>
+        ) : null}
       </ActionRow>
 
       {open ? (

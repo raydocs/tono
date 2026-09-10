@@ -5,6 +5,7 @@ import type {
   JobType,
   ListDto,
   Measured,
+  NodeAcceptanceDto,
   NodeDetailDto,
   NodeErrorRowDto,
   NodeHistoryEntryDto,
@@ -40,6 +41,12 @@ export type NodeJobRequest = {
   confirmName?: string;
   incidentId?: string | null;
   idempotencyKey?: string;
+  /**
+   * 上架 only. Without it the Worker refuses a node its 可售验收单 says is not
+   * sellable, with 409 `NOT_SELLABLE` and the blockers; with it the relist goes
+   * through and the blockers it went past are written into the audit log.
+   */
+  override?: boolean;
 };
 
 /** What 退役 costs, read before it is paid. `nextYaml` is not sent to the console. */
@@ -103,6 +110,8 @@ export const nodeApi = {
     getJson<ListDto<ConnectionEventDto>>(nodePath(name, '/connections'), signal),
   errors: (name: string, range: RangeKey, signal?: AbortSignal) =>
     getJson<Measured<NodeErrorRowDto[]>>(nodePath(name, '/errors'), signal, { range }),
+  acceptance: (name: string, signal?: AbortSignal) =>
+    getJson<NodeAcceptanceDto>(nodePath(name, '/acceptance'), signal),
   history: (name: string, signal?: AbortSignal) =>
     getJson<ListDto<NodeHistoryEntryDto>>(nodePath(name, '/history'), signal),
   jobs: (name: string, signal?: AbortSignal) =>

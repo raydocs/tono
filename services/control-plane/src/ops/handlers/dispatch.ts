@@ -4,6 +4,7 @@ import {
   getNodeErrors, getNodeJobs, postNodeJob, patchNodeProfile,
 } from './nodes';
 import { getNodeRetirePreview } from '../retire-dependencies';
+import { getNodeAcceptance } from './nodes-acceptance';
 import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
   getCustomerDestinations, getCustomerServices,
@@ -39,6 +40,7 @@ import type { Actor } from './common';
 export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/nodes',
   'GET /api/v1/ops/nodes/{name}',
+  'GET /api/v1/ops/nodes/{name}/acceptance',
   'GET /api/v1/ops/nodes/{name}/history',
   'GET /api/v1/ops/nodes/{name}/connections',
   'GET /api/v1/ops/nodes/{name}/errors',
@@ -110,6 +112,7 @@ type Handler = (req: Request, e: Env, actor: Actor, params: string[]) => Promise
 
 const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes$/, handle: (req, e) => getNodes(req, e) },
+  { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/acceptance$/, handle: (req, e, _a, p) => getNodeAcceptance(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/history$/, handle: (req, e, _a, p) => getNodeHistory(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/connections$/, handle: (req, e, _a, p) => getNodeConnections(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/errors$/, handle: (req, e, _a, p) => getNodeErrors(req, e, p[0]) },

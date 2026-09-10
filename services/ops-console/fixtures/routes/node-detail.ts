@@ -29,6 +29,28 @@ type ListFile<T> = { items: T[]; nextCursor: string | null; updatedAt: number };
 type Measured<T> = { value: T; asOfSec: number | null; source: string };
 type Job = Record<string, unknown> & { id: string; status: string };
 
+type AcceptanceSheet = {
+  items: Array<{ key: string; label: string; state: string }>;
+  sellable: boolean;
+  blockers: string[];
+  asOfSec: number | null;
+};
+
+/**
+ * 可售验收单, generated rather than hand-written, and keyed two ways.
+ *
+ * `nodes` names the two unlisted machines the 上架 path is reviewed against —
+ * the committed 节点详情 file has only listed ones — and carries how each is
+ * listed, because a sheet on a machine that is already being sold is a
+ * re-check rather than a decision. Anything else falls back to `bySet`.
+ */
+type AcceptanceFile = {
+  clock: number;
+  sheets: Record<string, AcceptanceSheet>;
+  nodes: Record<string, { sheet: string; lifecycle?: string; catalogListed?: boolean }>;
+  bySet: Record<string, string>;
+};
+
 type NodeFile = {
   clock: number;
   detail: Record<string, unknown>;
@@ -45,6 +67,8 @@ const FILES: Record<'default' | 'dense', string> = {
 };
 
 const CAPTURED_EMPTY = 'fixtures/captured/normal';
+
+const ACCEPTANCE_FILE = 'fixtures/node-acceptance.json';
 
 const FIXTURE_ERROR = '节点没拿到';
 
@@ -87,6 +111,31 @@ function emptyFile(): NodeFile {
       canRetire: false,
     },
   };
+}
+
+let acceptanceFile: AcceptanceFile | null = null;
+
+function acceptance(): AcceptanceFile {
+  acceptanceFile ??= readJson<AcceptanceFile>(ACCEPTANCE_FILE);
+  return acceptanceFile;
+}
+
+/** Which sheet this machine gets: its own if it has one, else the set's. */
+function sheetFor(name: string, set: FixtureSetName): AcceptanceSheet {
+  const file = acceptance();
+  const named = file.nodes[name];
+  const key = named?.sheet ?? file.bySet[set] ?? file.bySet.default;
+  return file.sheets[key] ?? file.sheets[file.bySet.default];
+}
+
+/** How the machine is listed, when the acceptance fixture says so. */
+function listingFor(name: string): Record<string, unknown> {
+  const named = acceptance().nodes[name];
+  if (!named) return {};
+  const out: Record<string, unknown> = {};
+  if (named.lifecycle !== undefined) out.lifecycle = named.lifecycle;
+  if (named.catalogListed !== undefined) out.catalogListed = named.catalogListed;
+  return out;
 }
 
 /** One mutable copy per `?session=`, thrown away when the dev server restarts. */
@@ -209,7 +258,7 @@ export function serveNodeRoutes(options: {
   const name = parts[0] === 'jobs' ? String(file.detail.name) : parts[1];
 
   if (method === 'POST') {
-    void handleWrite(req, res, file, parts, name);
+    void handleWrite(req, res, file, parts, name, set);
     return true;
   }
   if (method === 'PATCH') {
@@ -223,7 +272,7 @@ export function serveNodeRoutes(options: {
   }
 
   const range = query.get('range') ?? '7d';
-  const body = readFor(file, parts, name, range);
+  const body = readFor(file, parts, name, range, set);
   if (body === null) {
     fail(res, 404, 'NOT_FOUND', route);
     return true;
@@ -232,7 +281,7 @@ export function serveNodeRoutes(options: {
   return true;
 }
 
-function readFor(file: NodeFile, parts: string[], name: string, range: string): unknown {
+function readFor(file: NodeFile, parts: string[], name: string, range: string, set: FixtureSetName): unknown {
   if (parts[0] === 'fleet-nodes') {
     return parts[2] === 'retire-preview' ? file.retirePreview : null;
   }
@@ -241,8 +290,9 @@ function readFor(file: NodeFile, parts: string[], name: string, range: string): 
     // The name in the URL wins: one committed machine stands in for the whole
     // fleet here, and a page whose heading disagrees with its own address
     // would be the first thing anyone reported as a bug.
-    return { ...file.detail, name, jobs: file.jobs.items };
+    return { ...file.detail, name, jobs: file.jobs.items, ...listingFor(name) };
   }
+  if (section === 'acceptance') return sheetFor(name, set);
   if (section === 'connections') return file.connections;
   if (section === 'history') return file.history;
   if (section === 'jobs') return file.jobs;
@@ -329,7 +379,7 @@ async function handleProfile(
   facts.updatedAt = file.clock;
   file.detail.updatedAt = file.clock;
 
-  send(res, materializeOps({ ...file.detail, name, jobs: file.jobs.items }, file.clock));
+  send(res, materializeOps({ ...file.detail, name, jobs: file.jobs.items, ...listingFor(name) }, file.clock));
 }
 
 /** The allowance the 商家 sold, and the share of it the meter has already seen. */
@@ -358,6 +408,7 @@ async function handleWrite(
   file: NodeFile,
   parts: string[],
   name: string,
+  set: FixtureSetName,
 ) {
   const body = await readBody(req);
 
@@ -397,6 +448,18 @@ async function handleWrite(
   if (DESTRUCTIVE.has(type) && body.confirmName !== name) {
     fail(res, 400, 'JOB_CONFIRMATION_REQUIRED', FIXTURE_ERROR);
     return;
+  }
+  // The same refusal the Worker makes, for the same reason: 上架 reads the
+  // 可售验收单 first, and only `override: true` gets past it.
+  if (type === 'catalog_relist') {
+    const sheet = sheetFor(name, set);
+    if (!sheet.sellable && body.override !== true) {
+      send(res, {
+        error: { code: 'NOT_SELLABLE', message: `${name} 还差 ${sheet.blockers.length} 项验收，不能上架` },
+        blockers: sheet.blockers,
+      }, 409);
+      return;
+    }
   }
   const job = newJob(file, name, type);
   file.jobs.items.unshift(job);

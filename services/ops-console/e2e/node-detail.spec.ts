@@ -21,8 +21,13 @@ function section(page: Page, title: string) {
   return page.locator('section').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
 }
 
+/** The two unlisted machines the acceptance fixture names. */
+const BLOCKED = 'Osaka · Wave';
+const SELLABLE = 'Kyoto · Deer';
+
 /** Every block the plan asks for, in the order the page puts them. */
 const SECTIONS = [
+  '可售验收',
   '这台机器',
   '五处登记',
   '本周期流量',
@@ -261,5 +266,110 @@ test.describe('node detail on a phone', () => {
     await settle(page);
     await expect(page).toHaveScreenshot('phone.png');
     await keep(page, 'phone');
+  });
+});
+
+/**
+ * 可售验收单：新机器上架前的那张单子。
+ *
+ * The three cases are the three decisions it exists to make: a machine that
+ * cannot be sold and says exactly what is missing, the deliberate second path
+ * past that, and a machine that is ready — where the button is simply a
+ * button again.
+ */
+test.describe('the sale-readiness sheet on an unlisted machine', () => {
+  test('a blocked machine lists what is missing and will not let 上架 be pressed', async ({ page }) => {
+    await open(page, page1(BLOCKED));
+
+    await expect(page.getByRole('heading', { name: BLOCKED, level: 1 })).toBeVisible();
+    const block = page.locator('section').filter({
+      has: page.getByRole('heading', { name: '可售验收', exact: true }),
+    });
+
+    // The verdict is a count, and the blockers are named beside it.
+    await expect(block.getByText(/还差 \d+ 项/)).toBeVisible();
+    await expect(block.getByText(/挡着上架的：/)).toBeVisible();
+
+    // Each line carries the fact it was decided on, not a bare tick.
+    await expect(block.getByText('扫描说这台机器疑似被墙')).toBeVisible();
+    await expect(block.getByText('还没填：价格、线路标签')).toBeVisible();
+    // 没测 and 不行 are different answers and stay different words.
+    await expect(block.getByText('不行').first()).toBeVisible();
+    await expect(block.getByText('没测').first()).toBeVisible();
+
+    // Blockers first: the top row is one of them, not a tick.
+    await expect(block.locator('li').first()).toContainText('不行');
+
+    const relist = page.getByRole('button', { name: '上架', exact: true });
+    await expect(relist).toBeDisabled();
+    await expect(relist).toHaveAttribute('title', /验收还差 \d+ 项/);
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    await settle(page);
+    await expect(page).toHaveScreenshot('acceptance-blocked.png');
+    await keep(page, 'acceptance-blocked');
+  });
+
+  test('仍要上架 repeats the blockers, then queues the relist anyway', async ({ page }) => {
+    await open(page, page1(BLOCKED), 'default', 'node-relist-override');
+
+    await page.getByRole('button', { name: '仍要上架' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('上架会记在案上');
+    await expect(dialog).toContainText('大陆三网探测');
+    await expect(dialog).toContainText('这台机器会重新出现在客户端的节点单子里');
+
+    // It changes the machine, so it still wants the name typed back.
+    const go = dialog.getByRole('button', { name: '就仍要上架' });
+    await expect(go).toBeDisabled();
+    await dialog.getByRole('textbox').fill(BLOCKED);
+    await expect(go).toBeEnabled();
+    await go.click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const row = page.locator('tbody tr').filter({ hasText: '上架' }).first();
+    await expect(row).toBeVisible();
+    await expect(row).toContainText('排队中');
+  });
+
+  test('a machine that passed everything says so, and 上架 is just a button', async ({ page }) => {
+    await open(page, page1(SELLABLE), 'default', 'node-relist-ready');
+
+    const block = page.locator('section').filter({
+      has: page.getByRole('heading', { name: '可售验收', exact: true }),
+    });
+    await expect(block.getByText('可以上架')).toBeVisible();
+    await expect(block.getByText(/挡着上架的：/)).toHaveCount(0);
+    // 容量 has no ceiling written down, and stays unknown without blocking.
+    await expect(block.getByText(/还没登记这台机器坐得下多少人/)).toBeVisible();
+    await expect(page.getByRole('button', { name: '仍要上架' })).toHaveCount(0);
+
+    const relist = page.getByRole('button', { name: '上架', exact: true });
+    await expect(relist).toBeEnabled();
+    await relist.click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('textbox').fill(SELLABLE);
+    await dialog.getByRole('button', { name: '就上架' }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('tbody tr').filter({ hasText: '上架' }).first()).toContainText('排队中');
+
+    await settle(page);
+    await expect(block).toHaveScreenshot('acceptance-sellable.png');
+  });
+
+  test('a machine already being sold keeps the sheet folded shut', async ({ page }) => {
+    await open(page, page1(NODE));
+    const block = page.locator('section').filter({
+      has: page.getByRole('heading', { name: '可售验收', exact: true }),
+    });
+    await expect(block.locator('li')).toHaveCount(0);
+
+    await page.getByRole('button', { name: /可售验收/ }).click();
+    await expect(block.getByText('可以上架')).toBeVisible();
+    await expect(block.getByText('这台机器已经在售，这张单子留着复核')).toBeVisible();
+    await expect(block.locator('li')).toHaveCount(12);
   });
 });

@@ -1609,6 +1609,152 @@ function buildEmptyIncidents() {
   };
 }
 
+/* ------------------------------------------------------- 节点：可售验收单 */
+
+/**
+ * The 可售验收 sheets, in the three shapes the section has to survive.
+ *
+ * They are written here rather than by hand because the sheet is a table with
+ * one rule — `sellable === (blockers.length === 0)`, and only 客户去程 and 容量
+ * may be `unknown` and still count — and a hand-edited fixture that breaks that
+ * rule would put "可以上架" above a list of blockers. `acceptanceSheet` derives
+ * both fields from the items, exactly the way the Worker does, so the committed
+ * file cannot disagree with itself.
+ *
+ * `evidence` is copied from the Worker's own wording rather than invented: the
+ * fixtures are the only thing the page is reviewed against, and a screenshot
+ * of sentences the Worker never writes reviews nothing.
+ */
+const ACCEPTANCE_LABELS = {
+  profile: '资料齐全',
+  'binding.catalog': '目录登记',
+  'binding.exitToken': '出口令牌',
+  'binding.komari': '探针',
+  'binding.identitySync': '身份同步',
+  'binding.metering': '计量',
+  carriers: '大陆三网探测',
+  forward: '客户去程',
+  errors: '后台无报错',
+  quota: '流量配额已设',
+  capacity: '容量',
+  standby: '替代机器',
+};
+
+/** The order the Worker emits, which is the order an operator reads. */
+const ACCEPTANCE_ORDER = Object.keys(ACCEPTANCE_LABELS);
+
+/** The two that need a real customer; nothing else may stay unknown. */
+const ACCEPTANCE_SOFT = new Set(['forward', 'capacity']);
+
+const ACCEPTANCE_SOURCE = {
+  profile: 'profile',
+  'binding.catalog': 'catalog',
+  'binding.exitToken': 'telemetry',
+  'binding.komari': 'komari',
+  'binding.identitySync': 'telemetry',
+  'binding.metering': 'telemetry',
+  carriers: 'komari',
+  forward: 'telemetry',
+  errors: 'jobs',
+  quota: 'profile',
+  capacity: 'profile',
+  standby: 'catalog',
+};
+
+function acceptanceSheet(rows) {
+  const items = ACCEPTANCE_ORDER.map((key) => {
+    const row = rows[key];
+    return {
+      key,
+      label: ACCEPTANCE_LABELS[key],
+      state: row.state,
+      evidence: row.evidence ?? null,
+      asOfSec: row.asOfSec ?? null,
+      source: row.source ?? ACCEPTANCE_SOURCE[key],
+    };
+  });
+  const blockers = items
+    .filter((item) => item.state !== 'pass' && !(item.state === 'unknown' && ACCEPTANCE_SOFT.has(item.key)))
+    .map((item) => item.key);
+  const asOfSec = items.reduce(
+    (latest, item) => (item.asOfSec === null ? latest : Math.max(latest ?? 0, item.asOfSec)),
+    null,
+  );
+  return { items, sellable: blockers.length === 0, blockers, asOfSec };
+}
+
+const FRESH = CLOCK - 11 * 60;
+const SWEPT = CLOCK - 3 * HOUR;
+
+/** Every line green but 容量, which nothing writes a ceiling for. */
+const SELLABLE_SHEET = acceptanceSheet({
+  profile: { state: 'pass', evidence: 'Bandwagon，价格、续费和线路标签都填过了', asOfSec: CLOCK - DAY },
+  'binding.catalog': { state: 'pass', evidence: '在客户端的节点单子里', asOfSec: FRESH },
+  'binding.exitToken': { state: 'pass', evidence: '最近取过出口令牌', asOfSec: FRESH },
+  'binding.komari': { state: 'pass', evidence: '探针在报数', asOfSec: FRESH },
+  'binding.identitySync': { state: 'pass', evidence: '取过账号名单', asOfSec: FRESH },
+  'binding.metering': { state: 'pass', evidence: '计量最近上报过', asOfSec: FRESH },
+  carriers: { state: 'pass', evidence: '三网都测到了：联通丢包 1%，电信丢包 0%，移动丢包 2%', asOfSec: SWEPT },
+  forward: { state: 'pass', evidence: '最近 7 天大陆客户连上过 214 次', asOfSec: CLOCK - 40 * 60 },
+  errors: { state: 'pass', evidence: '最近一天 2 条后台报错', asOfSec: CLOCK - HOUR },
+  quota: { state: 'pass', evidence: '额度 2000 GB，周期已经在走', asOfSec: CLOCK - DAY },
+  capacity: { state: 'unknown', evidence: '现在 9 人在用，但还没登记这台机器坐得下多少人', asOfSec: CLOCK - 5 * 60 },
+  standby: { state: 'pass', evidence: '东京 还有 2 台在售：Tokyo · Fuji、Tokyo · Kite', asOfSec: CLOCK },
+});
+
+/** Walled, half-registered, and nothing to hand it over to. */
+const BLOCKED_SHEET = acceptanceSheet({
+  profile: { state: 'fail', evidence: '还没填：价格、线路标签', asOfSec: CLOCK - 6 * DAY },
+  'binding.catalog': { state: 'fail', evidence: '还不在客户端的节点单子里', asOfSec: CLOCK - 2 * HOUR },
+  'binding.exitToken': { state: 'pass', evidence: '最近取过出口令牌', asOfSec: CLOCK - 2 * HOUR },
+  'binding.komari': { state: 'pass', evidence: '探针在报数', asOfSec: CLOCK - 2 * HOUR },
+  'binding.identitySync': { state: 'fail', evidence: '还没取过账号名单', asOfSec: CLOCK - 2 * HOUR },
+  'binding.metering': { state: 'pass', evidence: '计量最近上报过', asOfSec: CLOCK - 2 * HOUR },
+  carriers: { state: 'fail', evidence: '扫描说这台机器疑似被墙', asOfSec: SWEPT, source: 'collector' },
+  forward: { state: 'fail', evidence: '大陆客户试了 26 次，一次都没连上', asOfSec: CLOCK - 25 * 60 },
+  errors: { state: 'fail', evidence: '最近一天有 41 条后台报错，最多的是 reality_auth', asOfSec: CLOCK - HOUR },
+  quota: { state: 'pass', evidence: '额度 1000 GB，周期已经在走', asOfSec: CLOCK - 3 * DAY },
+  capacity: { state: 'unknown', evidence: '现在 0 人在用，但还没登记这台机器坐得下多少人', asOfSec: CLOCK - 8 * 60 },
+  standby: { state: 'fail', evidence: '大阪 没有第二台在售的机器', asOfSec: CLOCK },
+});
+
+/** A machine nobody has measured: the answers are missing, not bad. */
+const UNKNOWN_SHEET = acceptanceSheet({
+  profile: { state: 'fail', evidence: '还没填：商家、价格、续费日或到期日、线路标签', asOfSec: CLOCK - 30 * DAY },
+  'binding.catalog': { state: 'fail', evidence: '还不在客户端的节点单子里', asOfSec: null },
+  'binding.exitToken': { state: 'fail', evidence: '最近没有取过出口令牌', asOfSec: null },
+  'binding.komari': { state: 'fail', evidence: '这台机器上没有探针在报数', asOfSec: null },
+  'binding.identitySync': { state: 'fail', evidence: '还没取过账号名单', asOfSec: null },
+  'binding.metering': { state: 'fail', evidence: '计量最近没有上报', asOfSec: null },
+  carriers: { state: 'pending', evidence: '重测大陆可达已经排队，等这一轮结果', asOfSec: null },
+  forward: { state: 'unknown', evidence: '还没有客户连过', asOfSec: null },
+  errors: { state: 'unknown', evidence: '还没拉过这台机器的后台报错', asOfSec: null },
+  quota: { state: 'fail', evidence: '还没登记流量额度和周期', asOfSec: null },
+  capacity: { state: 'unknown', evidence: '还没登记这台机器坐得下多少人，现在也没测到有人在用', asOfSec: null },
+  standby: { state: 'unknown', evidence: '目录读不出来，点不出替代机器', asOfSec: null },
+});
+
+/**
+ * Which sheet a given machine gets, and how it is listed.
+ *
+ * The listing travels with the sheet because a 可售验收单 only means anything on
+ * a machine that is not being sold yet: the two named here are the unlisted
+ * pair the 上架 path is reviewed against, and the committed 节点详情 file has no
+ * unlisted machine of its own.
+ */
+const ACCEPTANCE_NODES = {
+  'Osaka · Wave': { sheet: 'blocked', lifecycle: 'unlisted', catalogListed: false },
+  'Kyoto · Deer': { sheet: 'sellable', lifecycle: 'unlisted', catalogListed: false },
+};
+
+const nodeAcceptance = {
+  clock: CLOCK,
+  sheets: { sellable: SELLABLE_SHEET, blocked: BLOCKED_SHEET, unknown: UNKNOWN_SHEET },
+  nodes: ACCEPTANCE_NODES,
+  /** The fixture set's own default, for any machine not named above. */
+  bySet: { default: 'sellable', dense: 'blocked', empty: 'unknown' },
+};
+
 const thisFile = fileURLToPath(import.meta.url);
 const defaultDir = join(dirname(thisFile), '..', 'fixtures');
 
@@ -1623,6 +1769,7 @@ export const GENERATED_FIXTURE_FILES = [
   'incidents.json',
   'incidents.dense.json',
   'incidents.empty.json',
+  'node-acceptance.json',
 ];
 
 export function generateOpsFixtures(outDir = defaultDir) {
@@ -1654,6 +1801,7 @@ export function generateOpsFixtures(outDir = defaultDir) {
     'incidents.json': writeJson('incidents.json', incidents, true),
     'incidents.dense.json': writeJson('incidents.dense.json', incidentsDense, true),
     'incidents.empty.json': writeJson('incidents.empty.json', incidentsEmpty, true),
+    'node-acceptance.json': writeJson('node-acceptance.json', nodeAcceptance),
   };
 
   const verdictCounts = {};
@@ -1670,11 +1818,17 @@ export function generateOpsFixtures(outDir = defaultDir) {
 
   console.log(`customers ${customers.list.items.length} connectedTrue ${connectedTrue} verdicts ${JSON.stringify(verdictCounts)}`);
   console.log(`incidents open ${open.length} resolved ${resolved.length} rootImpact ${rootImpact}`);
+  console.log(`acceptance blockers ${JSON.stringify(
+    Object.fromEntries(Object.entries(nodeAcceptance.sheets).map(([name, sheet]) => [name, sheet.blockers.length])),
+  )}`);
   console.log(`sizes ${JSON.stringify(sizes)}`);
   console.log(`u-04 connections ${customers.details['u-04'].connections.total} activity ${customers.details['u-04'].activity.total} dest ${customers.details['u-04'].destinations.total}`);
   return sizes;
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === thisFile) {
-  generateOpsFixtures();
+  // `--out <dir>` writes somewhere else, which is how a parity test regenerates
+  // into a scratch directory instead of overwriting the files it is comparing.
+  const outFlag = process.argv.indexOf('--out');
+  generateOpsFixtures(outFlag === -1 ? undefined : resolve(process.argv[outFlag + 1]));
 }

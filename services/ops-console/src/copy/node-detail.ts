@@ -25,6 +25,7 @@ export const nodeDetailCopy = {
     unknown: '在不在单子里还不知道',
   } as const,
   nodeSections: {
+    acceptance: '可售验收',
     facts: '这台机器',
     bindings: '五处登记',
     quota: '本周期流量',
@@ -61,6 +62,31 @@ export const nodeDetailCopy = {
     hours: (count: string) => `${count} 小时后`,
     days: (count: string) => `${count} 天后`,
   },
+
+  /* --------------------------------------------------------- 可售验收 */
+
+  /** The verdict line, in the two answers the operator actually acts on. */
+  nodeAcceptanceReady: '可以上架',
+  nodeAcceptanceShort: (count: string) => `还差 ${count} 项`,
+  /**
+   * The state word beside each line. 没测 and 不行 are deliberately not the
+   * same word: a check nobody has run is a thing to go and do, and a check
+   * that came back bad is a thing to go and fix.
+   */
+  nodeAcceptanceState: {
+    pass: '已核',
+    fail: '不行',
+    unknown: '没测',
+    pending: '在测',
+  } as const,
+  nodeAcceptanceAsOf: '核对于',
+  nodeAcceptanceNever: '还没核对过',
+  nodeAcceptanceNoEvidence: '没有留下依据',
+  nodeAcceptanceBlockers: (what: readonly string[]) => `挡着上架的：${what.join('、')}`,
+  nodeAcceptanceListedNote: '这台机器已经在售，这张单子留着复核',
+  /** The second path: it exists, it is not the default, and it is recorded. */
+  nodeAcceptanceOverride: '仍要上架',
+  nodeAcceptanceOverrideLead: (what: readonly string[]) => `下面这几项还没过，上架会记在案上：${what.join('、')}。`,
 
   nodeBindingLabels: {
     catalog: '目录',
@@ -214,6 +240,8 @@ export const nodeDetailCopy = {
     notListed: '这台机器现在不在售',
     alreadyListed: '这台机器已经在售',
     unknownListing: '还不知道这台机器在不在售',
+    notSellable: (count: string, what: readonly string[]) => `验收还差 ${count} 项：${what.join('、')}`,
+    acceptanceUnread: '还没读到这台机器的验收单',
   } as const,
 
   /* ------------------------------------------------- 这台机器：手填的那部分 */
