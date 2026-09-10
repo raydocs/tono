@@ -31,15 +31,18 @@
 
 第十一次 `49796a50`（PR #130，无迁移）：漏斗把计量流量当最后一级连接证据（老客户端没有遥测不再显示 还没用起来）；部门地基（合同文件拆分、`dept:a…e` 标记块、`with-slot.sh` 计数锁、`test:e2e:locked`）。
 
+第十二次 `89d01d75`（PR #135，迁移 0067 三张新表）：采用率 / 直连候选 / 日志段的计数语义（部门 D）、`system/health.coverage`（部门 A）、手机版今天页（部门 A）、D 与 E 的合同（发布更新源、月结对账、每周三件事、角色、遥测关闭字节）。部署前备份 `2026-09-10T10:59:08Z.sql.gz`。preview 库已演练到 0071（含 0070 删四张孤儿表），部门 E 的 PR #136 合入 `ops/platform` 后下一次集成部署。
+
 ## 0.2 恢复演练结论（2026-09-10，详见 `docs/ops/restore-drill-2026-09-10.md`）
 
 今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。五条要记住的：
 
 1. 手工备份要按脚本命名（`%Y-%m-%dT%H:%M:%SZ.sql.gz`）并传 `.sha256` 旁文件，否则 `restore-control-plane-d1-preview.sh` 会拒绝；今天的旁文件已补传。
-2. **D1 不能关外键、不允许 `integrity_check`**：清空一个已有库要先删触发器、索引，再按依赖顺序（子表先）删表；完整性用 `PRAGMA quick_check` + `PRAGMA foreign_key_check`。仓库里还没有按依赖顺序的清库脚本——这是生产恢复的硬缺口（部门 E）。
+2. **D1 不能关外键、不允许 `integrity_check`**：清空一个已有库要先删触发器、索引，再按依赖顺序（子表先）删表；完整性用 `PRAGMA quick_check` + `PRAGMA foreign_key_check`。仓库里现在有 `tooling/scripts/wipe-d1-in-order.mjs`（部门 E），`restore-control-plane-d1-preview.sh` 导入前会先用它清空 preview。
 3. `d1 migrations apply` 需要 `--config`（本地 gitignored 的 `wrangler.preview.jsonc`），`d1 execute/export` 不带。
-4. 生产库的 `d1_migrations` 里有五条仓库里不存在的 0026–0030（早期编号被复用），对应的 `diagnostics_failure_index` 等四张表没有代码读写；从空库按 migrations 重建与从 dump 恢复会得到不同的库。要么补文件要么加一条迁移删表，让两条路径收敛。
+4. 生产库的 `d1_migrations` 里有五条仓库里不存在的 0026–0030（早期编号被复用），对应的 `diagnostics_failure_index` 等四张表没有代码读写；从空库按 migrations 重建与从 dump 恢复会得到不同的库。迁移 0070 删掉这四张表与八个索引，两条路径收敛（部门 E）。
 5. D1 之外没有备份：Worker 密钥（尤其 `CATALOG_ENCRYPTION_KEY` 与 `JWT_SECRET`）、R2 两个桶、DNS / 路由 / Access 应用、策略签名私钥都在恢复清单之外，且没有生产恢复流程。
+6. 生产恢复流程现在写在 `docs/ops/restore-production.md`（密钥清单、R2 两桶、DNS / 路由 / Access、两条恢复路径、验证清单）；R2 两桶的副本、密钥存放位置、Access 应用配置三项仍待老板补记。
 
 ## 0.3 告警链路演练（2026-09-10 晚，preview 库，已做一次）
 

@@ -13,6 +13,7 @@ import { invitesOf } from '@/lib/funnel';
 import { goPage, openCustomer, openIncident, openInvite, openNode } from '@/lib/hash-route';
 import { openIncidents } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
+import { can, currentRole, PAGE_REQUIRES } from '@/lib/roles';
 
 const PAGE_IDS = Object.keys(copy.pages) as PageId[];
 
@@ -36,6 +37,7 @@ export function CommandPalette({
 }) {
   const [open, setOpen] = useState(false);
   const privacy = usePrivacy();
+  const role = currentRole();
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -54,7 +56,7 @@ export function CommandPalette({
       <CommandList>
         <CommandEmpty>{copy.commandEmpty}</CommandEmpty>
         <CommandGroup heading={copy.commandPages}>
-          {PAGE_IDS.map((id) => (
+          {PAGE_IDS.filter((id) => can(PAGE_REQUIRES[id], role)).map((id) => (
             <CommandItem
               key={id}
               value={`${copy.pages[id]} ${id}`}

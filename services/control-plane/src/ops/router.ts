@@ -39,6 +39,7 @@ import { getOpsMetrics } from './legacy-handlers/metrics';
 import { getOpsUsageHours } from './legacy-handlers/usage-hours';
 import { getOpsActivity } from './legacy-handlers/activity';
 import { getOpsIncidentNode } from './legacy-handlers/incidents-node';
+import { requireCan, resolveOpsRole } from './roles';
 
 export { OPS_V1_ROUTES };
 
@@ -85,6 +86,10 @@ export async function opsRoutes(
   const opsCache: OpsRequestCache = {};
 
   let mt: RegExpMatchArray | null;
+
+  // dept:E
+  const role = resolveOpsRole(actor.email, e);
+  const gated = { ...actor, role };
 
   // --- Product ops reads (Cloudflare Access) ---
   if (m === 'GET') {
@@ -138,18 +143,22 @@ export async function opsRoutes(
     if (mt) {
       return getOpsIncidentNode(e, mt, opsCache);
     }
-    const v1Get = await dispatchOpsV1(req, e, p, m, actor);
+    const v1Get = await dispatchOpsV1(req, e, p, m, gated);
     if (v1Get) return v1Get;
     throw new ApiError(404, 'NOT_FOUND', 'Route not found');
   }
 
   mt = p.match(/^\/api\/v1\/ops\/fleet-nodes\/([^/]+)\/retire$/);
   if (mt && m === 'POST') {
+    // dept:E
+    requireCan('nodes.retire', role);
     return postOpsFleetNodeRetire(req, e, actor, mt, opsCache);
   }
 
   // --- Product ops writes (same Access boundary; no ADMIN_API_TOKEN in browser) ---
   if (p === '/api/v1/ops/signup-allowlist' && m === 'DELETE') {
+    // dept:E
+    requireCan('customers.write', role);
     return deleteOpsSignupAllowlist(req, e, actor);
   }
   mt = p.match(/^\/api\/v1\/ops\/signup-allowlist\/([^/]+)$/);
@@ -157,14 +166,18 @@ export async function opsRoutes(
     return patchOpsSignupAllowlist(req, e, actor, mt);
   }
   if (p === '/api/v1/ops/users/onboard' && m === 'POST') {
+    // dept:E
+    requireCan('customers.write', role);
     return postOpsUserOnboard(req, e, actor, deps);
   }
   mt = p.match(/^\/api\/v1\/ops\/users\/([^/]+)$/);
   if (mt && m === 'PATCH') {
+    // dept:E
+    requireCan('customers.write', role);
     return patchOpsUser(req, e, actor, mt, deps);
   }
 
-  const v1Write = await dispatchOpsV1(req, e, p, m, actor);
+  const v1Write = await dispatchOpsV1(req, e, p, m, gated);
   if (v1Write) return v1Write;
   return null;
 }

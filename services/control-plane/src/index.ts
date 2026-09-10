@@ -18,7 +18,8 @@ import {
 } from './ops-timeseries';
 import { snapshotUserUsageHours } from './ops-usage-hours';
 import { runOpsCron } from './ops/cron';
-import { afterLogSegment, afterSnapshot, afterTelemetryWindow, ingestConnectFailure } from './ops/ingest-hooks';
+import { afterLogSegment, afterSnapshot, afterTelemetryWindow, ingestConnectFailure, recordExitAgentAsn } from './ops/ingest-hooks';
+import { consumeRateLimit, rateLimitDiagnostics, rateLimitDiagnosticsLog, rateLimitTelemetry } from './ops/ingest-limits';
 import { opsIngestRoutes } from './ops/ingest';
 import { ApiError } from './errors';
 import { parseBytesRange } from './http';
@@ -732,22 +733,6 @@ function sameAddressSet(a: string[], b: string[]): boolean {
 
 // --- Rate limiting (D1) -------------------------------------------------------
 
-async function consumeRateLimit(e: Env, key: string, limit: number, windowSeconds: number) {
-  const t = now();
-  const cutoff = t - windowSeconds;
-  const row = await e.DB.prepare(
-    `INSERT INTO rate_limits(key, count, window_start)
-     VALUES(?, 1, ?)
-     ON CONFLICT(key) DO UPDATE SET
-       count = CASE WHEN rate_limits.window_start <= ? THEN 1 ELSE rate_limits.count + 1 END,
-       window_start = CASE WHEN rate_limits.window_start <= ? THEN excluded.window_start ELSE rate_limits.window_start END
-     RETURNING count`,
-  ).bind(key, t, cutoff, cutoff).first<Row>();
-  if (!row || Number(row.count) > limit) {
-    throw new ApiError(429, 'RATE_LIMITED', 'Too many attempts; try again later');
-  }
-}
-
 async function rateLimitEmailStart(e: Env, req: Request, emailAddr: string) {
   const windowSeconds = envInt(e, 'RATE_LIMIT_WINDOW_SECONDS', 900);
   const ipLimit = envInt(e, 'RATE_LIMIT_EMAIL_START_IP', 20);
@@ -816,7 +801,6 @@ const DIAGNOSTICS_BODY_MAX_BYTES = 32 * 1024;
 // fully-populated report under 8 KiB, so this only catches a schema change that
 // forgets to re-check the total.
 const DIAGNOSTICS_REPORT_MAX_BYTES = 16 * 1024;
-const DIAGNOSTICS_HOUR_SECONDS = 3_600;
 const DIAGNOSTICS_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
 // Gzip, not text. Matches the column CHECK; a client that wants to send more
 // splits into more segments rather than having one truncated.
@@ -981,25 +965,6 @@ function canonicalDiagnosticsReport(value: unknown) {
   };
 }
 
-async function rateLimitDiagnosticsLog(e: Env, uid: string) {
-  // Deliberately keyed on the account only. The IP bucket that guards reports
-  // would collapse a household or an office behind one NAT into a single
-  // budget, and unlike a report this upload is a background timer the user is
-  // not waiting on — the account caps are what bound the cost.
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`diagnostics-log:user-hour:${uid}`)}`,
-    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_LOG_USER_HOUR', 80),
-    DIAGNOSTICS_HOUR_SECONDS,
-  );
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`diagnostics-log:user-day:${uid}`)}`,
-    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_LOG_USER_DAY', 800),
-    DIAGNOSTICS_DAY_SECONDS,
-  );
-}
-
 /** Header-carried metadata for a log segment, validated as strictly as a body. */
 function diagnosticsLogMetadata(req: Request) {
   const header = (name: string, max: number) => {
@@ -1096,27 +1061,6 @@ async function storeDiagnosticsLogSegment(
   return { id, receivedAt: t, duplicate: false };
 }
 
-async function rateLimitDiagnostics(e: Env, req: Request, uid: string) {
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`diagnostics:ip:${clientIp(req)}`)}`,
-    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_IP_HOUR', 30),
-    DIAGNOSTICS_HOUR_SECONDS,
-  );
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`diagnostics:user-hour:${uid}`)}`,
-    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_USER_HOUR', 5),
-    DIAGNOSTICS_HOUR_SECONDS,
-  );
-  await consumeRateLimit(
-    e,
-    `rl:${await sha256(`diagnostics:user-day:${uid}`)}`,
-    envInt(e, 'RATE_LIMIT_DIAGNOSTICS_USER_DAY', 20),
-    DIAGNOSTICS_DAY_SECONDS,
-  );
-}
-
 async function storeDiagnosticsReport(
   e: Env,
   uid: string,
@@ -1158,21 +1102,6 @@ const publicDiagnosticsReport = (r: Row) => ({
 const TELEMETRY_BODY_MAX_BYTES = 72 * 1024;
 const TELEMETRY_RETENTION_DEFAULT_SECONDS = 30 * DIAGNOSTICS_DAY_SECONDS;
 const OPS_AUDIT_RETENTION_SECONDS = 180 * 86_400;
-
-
-// Failure reports keep their own bucket, or a burst of them starves the heartbeat.
-async function rateLimitTelemetry(e: Env, req: Request, uid: string, kind: 'TELEMETRY' | 'FAILURE' = 'TELEMETRY') {
-  const defaults = kind === 'FAILURE' ? [60, 12, 60] : [30, 6, 80];
-  const scopes = [
-    ['IP_HOUR', `ip:${clientIp(req)}`, DIAGNOSTICS_HOUR_SECONDS],
-    ['USER_HOUR', `user-hour:${uid}`, DIAGNOSTICS_HOUR_SECONDS],
-    ['USER_DAY', `user-day:${uid}`, DIAGNOSTICS_DAY_SECONDS],
-  ] as const;
-  for (const [i, [scope, subject, seconds]] of scopes.entries()) {
-    const key = `rl:${await sha256(`${kind.toLowerCase()}:${subject}`)}`;
-    await consumeRateLimit(e, key, envInt(e, `RATE_LIMIT_${kind}_${scope}`, defaults[i]), seconds);
-  }
-}
 
 async function storeTelemetryWindow(
   e: Env,
@@ -4068,6 +3997,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
   // not stop anything.
   if (p === '/api/v1/home/exit-identities' && m === 'GET') {
     const node = await authenticateExitNode(req, e, true);
+    await recordExitAgentAsn(e, req, node?.name ?? null);
     const t = now();
     const roster = await exitCredentialRoster(e, t);
     return Response.json({
@@ -4091,6 +4021,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/home/roster-ack' && m === 'POST') {
     const node = await authenticateExitNode(req, e);
+    await recordExitAgentAsn(e, req, node?.name ?? null);
     const b = await body(req, 4 * 1024);
     rejectUnexpectedKeys(b, ['observedAt', 'meteringProtocolVersion']);
     const t = now();
@@ -4111,6 +4042,7 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
 
   if (p === '/api/v1/home/metering-ack' && m === 'POST') {
     const node = await authenticateExitNode(req, e);
+    await recordExitAgentAsn(e, req, node?.name ?? null);
     const b = await body(req, 4 * 1024);
     rejectUnexpectedKeys(b, ['meteringProtocolVersion', 'observedAt']);
     const t = now();
@@ -4159,7 +4091,9 @@ async function route(req: Request, e: Env, ctx: ExecutionContext): Promise<Respo
         throw new ApiError(409, 'METERING_V2_REQUIRED', 'Legacy collector metering is disabled');
       }
     } else {
-      authenticatedSourceId = (await authenticateExitNode(req, e))!.id;
+      const node = await authenticateExitNode(req, e);
+      authenticatedSourceId = node!.id;
+      await recordExitAgentAsn(e, req, node!.name);
     }
     const b = await body(req, 512 * 1024);
     const reports = b.reports;

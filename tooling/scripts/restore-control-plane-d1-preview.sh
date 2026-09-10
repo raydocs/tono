@@ -9,10 +9,14 @@
 # importing a dump over live accounts.
 #
 # Usage:
-#   tooling/scripts/restore-control-plane-d1-preview.sh [--keep-local DIR] <object>
+#   tooling/scripts/restore-control-plane-d1-preview.sh [--keep-local DIR] [--no-wipe] <object>
 #
 #   object is an R2 key under tono-releases, a basename, or bucket/key:
 #     backups/control-plane-d1/2026-09-09T03:17:05Z.sql.gz
+#   After sha256 verification the preview database is emptied in place
+#   (tooling/scripts/wipe-d1-in-order.mjs) so a second restore does not collide
+#   on primary keys. --no-wipe skips that step. The dump is then imported, and
+#   pending migrations are applied when wrangler.preview.jsonc is present.
 set -eu
 
 PRODUCTION_D1_NAME=tono-control-plane
@@ -26,11 +30,20 @@ fail() {
 }
 
 usage() {
-  printf '%s\n' "usage: $0 [--keep-local DIR] <object-key>" >&2
+  printf '%s\n' "usage: $0 [--keep-local DIR] [--no-wipe] <object-key>" >&2
 }
 
 keep_local_dir=
+no_wipe=0
 object_arg=
+
+refuse_production_argv() {
+  for arg in "$@"; do
+    if [ "$arg" = "$PRODUCTION_D1_NAME" ] || [ "$arg" = "DB" ]; then
+      fail "refusing to run against production database $PRODUCTION_D1_NAME"
+    fi
+  done
+}
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -41,6 +54,10 @@ while [ $# -gt 0 ]; do
       ;;
     --keep-local=*)
       keep_local_dir=${1#--keep-local=}
+      shift
+      ;;
+    --no-wipe)
+      no_wipe=1
       shift
       ;;
     -h|--help)
@@ -159,17 +176,28 @@ actual=$(file_sha256 "$gz")
 gzip -dc "$gz" > "$sql" || fail "gunzip of $base failed"
 [ -s "$sql" ] || fail "gunzip produced an empty SQL file"
 
+if [ "$no_wipe" -eq 0 ]; then
+  set -- "$repo_root/tooling/scripts/wipe-d1-in-order.mjs" --apply --database "$PREVIEW_D1_NAME"
+  refuse_production_argv "$@"
+  node "$@" || fail "wipe of $PREVIEW_D1_NAME failed; the preview may be partially emptied, rerun once the cause is fixed"
+fi
+
 # Belt: scan every execute argument so a future edit that interpolates the
 # production name or the DB binding cannot actually run.
 set -- d1 execute "$PREVIEW_D1_NAME" --remote --file "$sql" -y
-for arg in "$@"; do
-  if [ "$arg" = "$PRODUCTION_D1_NAME" ] || [ "$arg" = "DB" ]; then
-    fail "refusing to run against production database $PRODUCTION_D1_NAME"
-  fi
-done
+refuse_production_argv "$@"
 
 run_wrangler "$@" \
   || fail "d1 execute into $PREVIEW_D1_NAME failed"
+
+if [ -f "$control_plane/wrangler.preview.jsonc" ]; then
+  set -- d1 migrations apply "$PREVIEW_D1_NAME" --remote --config wrangler.preview.jsonc
+  refuse_production_argv "$@"
+  run_wrangler "$@" \
+    || fail "migrations apply on $PREVIEW_D1_NAME failed"
+else
+  printf 'restore-control-plane-d1-preview: wrangler.preview.jsonc not found; migrations were not applied (see docs/ops/rollout-ops2.md §1)\n'
+fi
 
 printf 'restore-control-plane-d1-preview: imported %s into %s\n' \
   "$key" "$PREVIEW_D1_NAME"
