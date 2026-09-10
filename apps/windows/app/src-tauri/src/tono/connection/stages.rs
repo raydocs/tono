@@ -375,10 +375,12 @@ pub(super) async fn run_stages(
         inner.next_retry_at_ms = None;
         commands::emit_status(app, &commands::status_of(&inner));
     }
+    let exit_delay_ms = state.lock().await.selected_exit_delay_ms();
     state.audit().log(AuditEvent::ConnectOk {
         node: node.name.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
         outcome: "verified",
+        delay_ms: exit_delay_ms,
     });
     spawn_network_monitor(state, app).await;
     spawn_exit_identity_lookup(state, app, generation);

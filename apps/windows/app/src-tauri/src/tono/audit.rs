@@ -109,6 +109,9 @@ pub enum AuditEvent {
     ConnectFail {
         stage: Option<&'static str>,
         error: String,
+        /// The stable `TONO_*` marker, or `UNKNOWN`: what lets a failing machine be
+        /// counted by cause instead of parsed from prose.
+        code: String,
         action: &'static str,
         elapsed_ms: u64,
     },
@@ -116,6 +119,10 @@ pub enum AuditEvent {
         node: String,
         elapsed_ms: u64,
         outcome: &'static str,
+        /// Exit delay measured on the way in, so the timeline can say how far
+        /// away the node was at the moment it connected.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delay_ms: Option<u64>,
     },
     /// One destination the DIRECT overlay actually dialled, recorded once per distinct
     /// `(address, port, protocol)` per session.
@@ -286,16 +293,24 @@ impl AuditEvent {
             SyncFail { error } => SyncFail { error: redact(&error) },
             SelectionVanished { node } => SelectionVanished { node: redact(&node) },
             ConnectBegin { node } => ConnectBegin { node: redact(&node) },
-            ConnectFail { stage, error, action, elapsed_ms } => ConnectFail {
+            ConnectFail {
+                stage,
+                error,
+                code,
+                action,
+                elapsed_ms,
+            } => ConnectFail {
                 stage,
                 error: redact(&error),
+                code,
                 action,
                 elapsed_ms,
             },
-            ConnectOk { node, elapsed_ms, outcome } => ConnectOk {
+            ConnectOk { node, elapsed_ms, outcome, delay_ms } => ConnectOk {
                 node: redact(&node),
                 elapsed_ms,
                 outcome,
+                delay_ms,
             },
             ReleaseFail { error } => ReleaseFail { error: redact(&error) },
             NodeSwitch { from, to } => NodeSwitch {
@@ -920,6 +935,7 @@ mod tests {
             AuditEvent::ConnectFail {
                 stage: None,
                 error: "token=abc".to_string(),
+                code: "UNKNOWN".to_string(),
                 action: "fullRelease",
                 elapsed_ms: 12,
             },
@@ -927,6 +943,7 @@ mod tests {
                 node: "n token=abc".to_string(),
                 elapsed_ms: 1,
                 outcome: "verified",
+                delay_ms: None,
             },
             AuditEvent::ReleaseFail {
                 error: "token=abc".to_string(),

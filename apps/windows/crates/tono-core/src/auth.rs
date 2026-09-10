@@ -40,6 +40,7 @@ pub mod endpoints {
     pub const DIAGNOSTICS_REPORTS: &str = "diagnostics/reports";
     /// Periodic testing timeline windows (client default-on, user-disableable).
     pub const TELEMETRY_WINDOWS: &str = "telemetry/windows";
+    pub const TELEMETRY_FAILURES: &str = "telemetry/failures";
     /// Raw audit-log segments for the test programme. Unlike
     /// [`DIAGNOSTICS_REPORTS`] this carries hostnames, process paths and routes,
     /// so it is gated on its own product toggle and its own disclosure.
@@ -585,9 +586,46 @@ pub struct TelemetryWindowReport {
     pub tcp_delay_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tcp_delay_at_ms: Option<i64>,
+    /// Named rather than guessed from `os_version` on the Worker; the guess is
+    /// for clients that predate the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
     pub event_count: u32,
     pub events_dropped: u32,
     pub events: Vec<TelemetryEvent>,
+}
+
+/// One failed connect attempt, posted the moment it happens
+/// (`POST telemetry/failures`). The window carries the same event twenty
+/// minutes later; the operator asking "why can't this person connect" needs
+/// it now. Nothing here is typed by a person, and the Worker bounds every
+/// field (`error` 200, `node` 120, at most 20 core lines of 200).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectFailureReport {
+    pub ts: i64,
+    pub stage: String,
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub node: String,
+    pub app_version: String,
+    pub os_version: String,
+    pub os_arch: String,
+    pub platform: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_errors: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp_delay_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_delay_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectFailureReceipt {
+    #[serde(default)]
+    pub accepted: bool,
 }
 
 pub const TELEMETRY_SCHEMA_VERSION: u32 = 1;
@@ -944,6 +982,27 @@ impl<T: HttpTransport, S: CredentialStore> ApiClient<T, S> {
             return Err(ApiError::InvalidResponse);
         }
         Ok(receipt)
+    }
+
+    /// `POST telemetry/failures`: one classified connect failure, at once.
+    ///
+    /// Same consent as the periodic window (callers check it); the Worker
+    /// keeps a separate rate-limit bucket so a bad evening of retries cannot
+    /// starve the heartbeat that would show the recovery.
+    pub async fn upload_connect_failure(
+        &self,
+        report: &ConnectFailureReport,
+    ) -> Result<ConnectFailureReceipt, ApiError> {
+        if report.stage.is_empty() || report.code.is_empty() || report.node.is_empty() {
+            return Err(ApiError::InvalidInput(
+                "connect failure report needs stage, code and node".to_string(),
+            ));
+        }
+        let body = serde_json::to_string(report).map_err(|_| ApiError::InvalidResponse)?;
+        let response = self
+            .authorized(HttpMethod::Post, endpoints::TELEMETRY_FAILURES, Some(body))
+            .await?;
+        decode_json(&response)
     }
 
     /// `POST telemetry/windows`: upload one periodic diagnostic timeline window.
@@ -2501,5 +2560,77 @@ mod tests {
             "stale refresh must not overwrite the new session"
         );
         assert_eq!(mock.count_to("auth/refresh"), 1);
+    }
+}
+
+#[cfg(test)]
+mod connect_failure_report_tests {
+    use super::*;
+
+    /// The Worker rejects unknown keys outright, so the wire shape is pinned to
+    /// the exact set `telemetry/failures` accepts; unset optionals stay off the
+    /// wire rather than arriving as null.
+    #[test]
+    fn connect_failure_report_encodes_only_the_accepted_keys() {
+        let report = ConnectFailureReport {
+            ts: 1_725_000_000_000,
+            stage: "verifyingTraffic".to_string(),
+            code: "TONO_NODE_OR_CORE_UNREACHABLE".to_string(),
+            error: None,
+            node: "anon-3".to_string(),
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11 Pro 24H2".to_string(),
+            os_arch: "x86_64".to_string(),
+            platform: "windows".to_string(),
+            core_errors: None,
+            tcp_delay_ms: Some(41),
+            exit_delay_ms: None,
+        };
+        let value: serde_json::Value = serde_json::to_value(&report).unwrap();
+        let object = value.as_object().unwrap();
+        let accepted = [
+            "ts", "stage", "code", "error", "node", "appVersion", "osVersion", "osArch",
+            "platform", "coreErrors", "tcpDelayMs", "exitDelayMs",
+        ];
+        for key in object.keys() {
+            assert!(accepted.contains(&key.as_str()), "unexpected key {key}");
+        }
+        assert!(object.get("error").is_none());
+        assert!(object.get("coreErrors").is_none());
+        assert_eq!(object.get("tcpDelayMs").and_then(|v| v.as_i64()), Some(41));
+        assert_eq!(object.get("platform").and_then(|v| v.as_str()), Some("windows"));
+    }
+
+    #[test]
+    fn a_window_names_its_platform_only_when_set() {
+        let report = TelemetryWindowReport {
+            schema_version: TELEMETRY_SCHEMA_VERSION,
+            kind: TELEMETRY_KIND_PERIODIC_WINDOW.to_string(),
+            window_start_ms: 0,
+            window_end_ms: 1,
+            app_version: "0.0.73".to_string(),
+            os_version: "Windows 11".to_string(),
+            os_arch: "x86_64".to_string(),
+            ui_state: "connected".to_string(),
+            account_state: "ready".to_string(),
+            selected_server: None,
+            catalog_revision: None,
+            kill_switch_mode: None,
+            kill_switch_wanted: None,
+            kill_switch_live: None,
+            dns_enabled: None,
+            exit_delay_ms: None,
+            exit_delay_at_ms: None,
+            tcp_delay_ms: None,
+            tcp_delay_at_ms: None,
+            platform: Some("windows".to_string()),
+            event_count: 0,
+            events_dropped: 0,
+            events: Vec::new(),
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["platform"], "windows");
+        let unnamed = TelemetryWindowReport { platform: None, ..report };
+        assert!(serde_json::to_value(&unnamed).unwrap().get("platform").is_none());
     }
 }

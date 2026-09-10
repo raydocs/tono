@@ -485,12 +485,16 @@ async fn fail_connect(state: &Arc<TonoState>, app: &AppHandle, err: String) -> S
         }
         (plan, stage, action, armed, step_elapsed, err)
     };
+    let code = crate::tono::telemetry::failure_code(&err);
     state.audit().log(AuditEvent::ConnectFail {
         stage: stage.map(commands::stage_key),
         error: err.clone(),
+        code: code.clone(),
         action,
         elapsed_ms: step_elapsed,
     });
+    // The window would carry this in twenty minutes; the operator needs it now.
+    crate::tono::telemetry::spawn_connect_failure_report(state, stage.map(commands::stage_key), code, err.clone());
     if plan.mark_armed {
         state
             .audit()

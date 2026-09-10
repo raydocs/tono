@@ -10,7 +10,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 use serde_json::Value;
 use tauri::AppHandle;
 use tono_core::auth::{
-    ApiError, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent, TelemetryWindowReport,
+    ApiError, ConnectFailureReport, TELEMETRY_KIND_PERIODIC_WINDOW, TELEMETRY_SCHEMA_VERSION, TelemetryEvent,
+    TelemetryWindowReport,
 };
 
 use tono_logging::{Type, logging};
@@ -49,6 +50,12 @@ const MAX_PAYLOAD_BYTES: usize = 48 * 1024;
 /// may be a worker mid-deploy flap; two in a row (spaced by the interval)
 /// are not.
 const NOT_FOUND_PROBE_THRESHOLD: u32 = 2;
+/// After a failure one window follows early, so the retry's outcome is visible
+/// before the regular cadence would show it. Five minutes: three on-time
+/// windows plus this still fit the account's hourly heartbeat budget of six.
+const EARLY_WINDOW_AFTER_FAILURE: Duration = Duration::from_secs(5 * 60);
+/// What the window and the failure report both call this client.
+const PLATFORM: &str = "windows";
 
 /// What the periodic uploader does after a `NotFound` from the intake. The
 /// device (re)claim path exists only inside interactive sign-in
@@ -288,6 +295,7 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
             exit_delay_at_ms,
             tcp_delay_ms,
             tcp_delay_at_ms,
+            platform: Some(PLATFORM.to_string()),
             event_count: events.len() as u32,
             events_dropped: dropped,
             events: events.clone(),
@@ -319,10 +327,102 @@ async fn build_window_report(state: &Arc<TonoState>) -> Result<TelemetryWindowRe
         exit_delay_at_ms,
         tcp_delay_ms,
         tcp_delay_at_ms,
+        platform: Some(PLATFORM.to_string()),
         event_count: 0,
         events_dropped: dropped,
         events: Vec::new(),
     })
+}
+
+/// The stable `TONO_*` marker inside a connect error, or `UNKNOWN`. The Service
+/// nests some markers inside its own context string, so the scan is not
+/// anchored to the start.
+pub(crate) fn failure_code(error: &str) -> String {
+    let Some(start) = error.find("TONO_") else {
+        return "UNKNOWN".to_string();
+    };
+    let token: String = error[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+        .take(80)
+        .collect();
+    if token.len() > "TONO_".len() {
+        token
+    } else {
+        "UNKNOWN".to_string()
+    }
+}
+
+/// Report one classified connect failure at once, then let one window follow
+/// early. Detached: the connect path never waits on telemetry.
+pub(crate) fn spawn_connect_failure_report(
+    state: &Arc<TonoState>,
+    stage: Option<&'static str>,
+    code: String,
+    error: String,
+) {
+    let state = state.clone();
+    let _handle = AsyncHandler::spawn(move || async move {
+        if let Some(generation) = report_connect_failure(&state, stage, code, error).await {
+            tokio::time::sleep(EARLY_WINDOW_AFTER_FAILURE).await;
+            let _ = upload_once(&state, generation).await;
+        }
+    });
+}
+
+/// Same consent as the window; skipped when no node was selected, because a
+/// failure with nothing to pin to a machine is still carried by the window.
+/// Returns the sign-in generation the report went out under.
+async fn report_connect_failure(
+    state: &Arc<TonoState>,
+    stage: Option<&'static str>,
+    code: String,
+    error: String,
+) -> Option<u64> {
+    if !state.audit().periodic_telemetry_enabled() || !state.audit().enabled() {
+        return None;
+    }
+    let (client, generation, node, tcp_delay_ms, exit_delay_ms) = {
+        let inner = state.lock().await;
+        if matches!(
+            inner.account_state,
+            crate::tono::state::AccountState::SignedOut | crate::tono::state::AccountState::Restoring
+        ) {
+            return None;
+        }
+        (
+            inner.client.clone(),
+            inner.sign_in_generation,
+            inner.selected_node.clone(),
+            inner.selected_tcp_delay_ms().map(|ms| ms as i64),
+            inner.selected_exit_delay_ms().map(|ms| ms as i64),
+        )
+    };
+    let node = node.filter(|name| !name.is_empty())?;
+    let os_version = AsyncHandler::spawn_blocking(|| tauri_plugin_tono_sysinfo::os_long_version())
+        .await
+        .unwrap_or_else(|_| "Unknown".to_string());
+    let report = ConnectFailureReport {
+        ts: epoch_ms(),
+        stage: stage.unwrap_or("unknown").to_string(),
+        code,
+        error: Some(redact(&error).chars().take(200).collect()),
+        node: node.chars().take(120).collect(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        os_version: os_version.chars().take(80).collect(),
+        os_arch: std::env::consts::ARCH.to_string(),
+        platform: PLATFORM.to_string(),
+        core_errors: None,
+        tcp_delay_ms,
+        exit_delay_ms,
+    };
+    match client.upload_connect_failure(&report).await {
+        Ok(_) => Some(generation),
+        Err(err) => {
+            logging!(warn, Type::Service, "Tono: connect failure report not delivered: {err}");
+            None
+        }
+    }
 }
 
 fn epoch_ms() -> i64 {
@@ -680,5 +780,24 @@ mod tests {
         assert!(!json.contains("private-node"));
         assert!(!json.contains("private-error"));
         assert!(!json.contains("private-probe"));
+    }
+}
+
+#[cfg(test)]
+mod failure_code_tests {
+    use super::failure_code;
+
+    #[test]
+    fn the_marker_is_read_wherever_the_service_put_it() {
+        assert_eq!(
+            failure_code("TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof; suggest=Tokyo"),
+            "TONO_NODE_OR_CORE_UNREACHABLE"
+        );
+        assert_eq!(
+            failure_code("Tono Service is not ready: TONO_WFP_ENGINE_WEDGED: engine call timed out"),
+            "TONO_WFP_ENGINE_WEDGED"
+        );
+        assert_eq!(failure_code("connection transition already in flight"), "UNKNOWN");
+        assert_eq!(failure_code("TONO_"), "UNKNOWN");
     }
 }
