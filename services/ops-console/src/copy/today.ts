@@ -138,6 +138,12 @@ export const todayCopy = {
    * "nothing happened" is an answer, a blank block is not.
    */
   digestTitle: '早报',
+  /**
+   * The morning read folded shut, which is how a phone gets it: the two counts
+   * that decide whether it is worth the tap, and nothing else. A disclosure
+   * that says only 早报 is a door with no label on it.
+   */
+  digestFold: (night: number, owed: number) => `昨夜 ${night} 件 · 今天 ${owed} 件`,
   digestNight: '昨夜',
   digestNow: '现在要处理',
   digestToday: '今天必须做',
