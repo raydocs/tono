@@ -134,6 +134,17 @@ use direct::{
 };
 use platform::{detect_physical_interface, is_virtual_uplink_description, write_redacted_copy};
 
+/// Drop the ConnectOk session clock. A new connect attempt is not the session
+/// that last reached ConnectOk, so disconnectOk must not report `elapsedMs`
+/// from that earlier Instant.
+fn clear_connected_at(connected_at: &mut Option<std::time::Instant>) {
+    *connected_at = None;
+}
+
+/// Session duration for disconnectOk. `None` when there is no current ConnectOk.
+fn session_elapsed_ms(connected_at: Option<std::time::Instant>) -> Option<u64> {
+    connected_at.map(|at| at.elapsed().as_millis() as u64)
+}
 
 /// Stable frontend mapping for the strict browser-owned DNS proof required by a residential
 /// Claude route. Detail after the prefix is deliberately limited to controlled enum text.
@@ -253,6 +264,10 @@ async fn attempt_inner(state: &Arc<TonoState>, app: &AppHandle) -> Attempt {
         // failure details (retry bookkeeping persists across attempts).
         inner.connect_steps = crate::tono::steps::initial_steps();
         inner.step_started_at = Some(started);
+        // A new attempt has not reached ConnectOk. Drop the previous session
+        // clock so disconnect-while-Connecting cannot report elapsedMs from a
+        // dead session (connected → drop → failed reconnect → new connect).
+        clear_connected_at(&mut inner.connected_at);
         inner.failed_stage = None;
         inner.connect_error = None;
         inner.connect_error_at_ms = None;
@@ -1351,6 +1366,28 @@ mod tests {
             Some(&["a".to_string()][..]),
             &["a".to_string()]
         ));
+    }
+
+    /// disconnectOk elapsedMs is the duration of the current ConnectOk session.
+    /// A connecting attempt that has not reached ConnectOk must not inherit the
+    /// previous session's clock — otherwise a disconnect-while-connecting after
+    /// a failed reconnect reports hours from the dead session.
+    #[test]
+    fn disconnect_while_connecting_does_not_inherit_the_previous_session_clock() {
+        let mut connected_at = Some(std::time::Instant::now() - Duration::from_secs(3_600));
+        let stale = super::session_elapsed_ms(connected_at).expect("previous ConnectOk is still set");
+        assert!(
+            stale >= 3_600_000,
+            "the previous session really is hours old before the new attempt starts"
+        );
+
+        super::clear_connected_at(&mut connected_at);
+
+        assert_eq!(
+            super::session_elapsed_ms(connected_at),
+            None,
+            "a Connecting session has no ConnectOk, so elapsedMs must be absent"
+        );
     }
 
     fn node() -> ValidatedNode {

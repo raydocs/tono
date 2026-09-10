@@ -169,7 +169,7 @@ pub async fn disconnect(state: Arc<TonoState>, app: AppHandle) -> Result<(), Str
 
     // Sample before tearing the core down. A failed sample must not stall or
     // fail the user's disconnect: elapsed/bytes stay None and we continue.
-    let elapsed_ms = connected_at.map(|at| at.elapsed().as_millis() as u64);
+    let elapsed_ms = super::session_elapsed_ms(connected_at);
     let sample = match (controller_secret.as_deref(), controller_port) {
         (Some(secret), Some(port)) => fetch_connections(secret, port).await,
         _ => None,

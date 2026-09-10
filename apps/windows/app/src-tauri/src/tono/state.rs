@@ -267,7 +267,9 @@ pub struct TonoInner {
     pub step_started_at: Option<std::time::Instant>,
     /// When the current session last reached ConnectOk. Used for disconnect
     /// `elapsedMs` (time since that successful (re)connect, not the original
-    /// attempt). Cleared on a successful disconnect.
+    /// attempt). Cleared when a new connect attempt starts (so a disconnect
+    /// while Connecting cannot inherit hours from a previous session) and on
+    /// a successful disconnect.
     pub connected_at: Option<std::time::Instant>,
     /// F3: last connect failure details (stage key, sanitized error, when).
     pub failed_stage: Option<&'static str>,

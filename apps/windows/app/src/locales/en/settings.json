@@ -26,7 +26,7 @@
       },
       "networkLogUpload": {
         "label": "Upload the full traffic log",
-        "description": "On by default. Uploads the local diagnostic log: the hostnames you connected to, the process that opened each connection, the matched rule and route, per-route byte totals, and bytes at disconnect. You can turn this off here. No page content, passwords, or node secrets."
+        "description": "On by default. Uploads the local diagnostic log: the hostnames you connected to, the process that opened each connection, the matched rule and route, and bytes at disconnect. You can turn this off here. No page content, passwords, or node secrets."
       }
     },
     "system": {
