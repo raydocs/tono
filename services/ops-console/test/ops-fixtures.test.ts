@@ -8,6 +8,7 @@ import {
   assertCustomerDetail,
   assertCustomerSummary,
   assertDestinationRow,
+  assertFunnel,
   assertIncident,
   assertIncidentDetail,
   assertList,
@@ -44,6 +45,11 @@ type CustomerFile = {
   }>;
 };
 
+type FunnelFile = {
+  clock: number;
+  funnel: unknown;
+};
+
 type IncidentFile = {
   clock: number;
   list: unknown;
@@ -71,6 +77,7 @@ type HealthFile = {
 };
 
 const CUSTOMER_FILES = ['customers.json', 'customers.dense.json', 'customers.empty.json'];
+const FUNNEL_FILES = ['funnel.json', 'funnel.dense.json', 'funnel.empty.json'];
 const INCIDENT_FILES = ['incidents.json', 'incidents.dense.json', 'incidents.empty.json'];
 const RELEASE_FILES = ['releases.json', 'releases.dense.json', 'releases.empty.json'];
 const NODE_FILES = ['nodes.json', 'nodes.dense.json', 'nodes.empty.json'];
@@ -137,6 +144,15 @@ describe('every committed ops fixture satisfies the contract', () => {
       const file = read<CustomerFile>(name);
       total += checkCustomers(file);
       total += checkCustomers(materializeOps(file, file.clock));
+    });
+  }
+
+  for (const name of FUNNEL_FILES) {
+    it(name, () => {
+      const file = read<FunnelFile>(name);
+      assertFunnel(file.funnel, name);
+      assertFunnel(materializeOps(file, file.clock).funnel, name);
+      total += 2;
     });
   }
 
@@ -220,9 +236,37 @@ describe('the normal set is the one the pages were written against', () => {
     expect(online.length).toBe(4);
   });
 
-  it('spreads the health words across all five verdicts', () => {
+  it('spreads the health words across every verdict the engine can reach', () => {
     const seen = new Set(list.items.map((row) => row.verdict));
-    expect([...seen].sort()).toEqual(['offline', 'ok', 'unreachable', 'unreported', 'unstable']);
+    expect([...seen].sort()).toEqual([
+      'never_used', 'offline', 'ok', 'unreachable', 'unreported', 'unstable',
+    ]);
+  });
+
+  /**
+   * 还没用起来 and 未上报 are two different silences, and the fixtures have to
+   * hold both: one is a client that worked and stopped, the other a customer
+   * who never got there. A set where the new word had eaten the old one would
+   * make the customer page look right and the distinction untestable.
+   */
+  it('tells never-used apart from a client that has gone quiet', () => {
+    const never = list.items.filter((row) => row.verdict === 'never_used');
+    expect(never.length).toBeGreaterThan(0);
+    for (const row of never) {
+      expect(row.stage, row.userId).not.toBe('connected');
+      expect(row.firstConnectedAt, row.userId).toBeNull();
+    }
+    const quiet = list.items.filter((row) => row.verdict === 'unreported');
+    expect(quiet.length).toBeGreaterThan(0);
+    for (const row of quiet) expect(row.stage, row.userId).toBe('connected');
+  });
+
+  it('dates the first connection of everybody who has had one', () => {
+    for (const row of list.items) {
+      if (row.stage !== 'connected') continue;
+      expect(row.firstConnectedAt, row.userId).not.toBeNull();
+      expect(row.stageSinceAt, row.userId).toBe(row.firstConnectedAt);
+    }
   });
 
   it('never reports a platform the client has not shipped for', () => {
@@ -305,5 +349,50 @@ describe('the incident fixtures carry the story the page tells', () => {
     const rows = assertList(quiet.list, assertIncident);
     expect(rows.items.filter((row) => row.status !== 'resolved').length).toBe(0);
     expect(rows.items.filter((row) => row.resolvedAt !== null).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * R4 across two files, the funnel half.
+ *
+ * The bar is counted by the Worker over the whole fleet; the table under it is
+ * the customer list plus the invited rows the browser already holds. A segment
+ * that claims four and a filter that produces three is the same failure as a
+ * matrix cell disagreeing with the list it links to, one page further down.
+ */
+describe('the funnel and the customer list hold the same people', () => {
+  const funnel = read<{ clock: number; funnel: unknown }>('funnel.json');
+  const customers = read<CustomerFile>('customers.json');
+  const bar = assertFunnel(funnel.funnel);
+  const people = assertList(customers.list, assertCustomerSummary).items;
+
+  it('lists every customer who has not connected, and no one who has', () => {
+    const stuck = people.filter((row) => row.stage !== 'connected').map((row) => row.userId);
+    const named = bar.items.filter((row) => row.userId !== null).map((row) => row.userId);
+    expect([...named].sort()).toEqual([...stuck].sort());
+  });
+
+  it('counts each segment as the rows standing on it', () => {
+    for (const segment of bar.stages) {
+      const counted = segment.stage === 'connected'
+        ? people.filter((row) => row.stage === 'connected').length
+        : bar.items.filter((row) => row.stage === segment.stage).length;
+      expect(counted, segment.stage).toBe(segment.count);
+    }
+  });
+
+  it('gives the invited rows a key nothing else can collide with', () => {
+    const invited = bar.items.filter((row) => row.userId === null);
+    expect(invited.length).toBeGreaterThan(0);
+    for (const row of invited) expect(row.key).toBe(`invite:${row.email}`);
+    expect(new Set(bar.items.map((row) => row.key)).size).toBe(bar.items.length);
+  });
+
+  /** One invite freshly opened, so the three-day line has something to hold back. */
+  it('keeps somebody on each side of the three-day line', () => {
+    const day = 86_400;
+    const ages = bar.items.map((row) => (funnel.clock - row.stageSinceAt) / day);
+    expect(ages.some((days) => days >= 3)).toBe(true);
+    expect(ages.some((days) => days < 3)).toBe(true);
   });
 });

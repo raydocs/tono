@@ -64,11 +64,35 @@ export type NodeHealthWord = (typeof NODE_HEALTH_WORDS)[number];
  * evidence: silence is `unreported`, not health (R1 — missing data is never
  * green).
  */
-export const CUSTOMER_VERDICTS = ['unreachable', 'unstable', 'unreported', 'offline', 'ok'] as const;
+export const CUSTOMER_VERDICTS = [
+  'unreachable',
+  'unstable',
+  'never_used',
+  'unreported',
+  'offline',
+  'ok',
+] as const;
 export type CustomerVerdict = (typeof CUSTOMER_VERDICTS)[number];
 
-export const CUSTOMER_HEALTH_WORDS = ['连不上', '不稳', '未上报', '离线', '正常'] as const;
+export const CUSTOMER_HEALTH_WORDS = ['连不上', '不稳', '还没用起来', '未上报', '离线', '正常'] as const;
 export type CustomerHealthWord = (typeof CUSTOMER_HEALTH_WORDS)[number];
+
+/**
+ * The five steps between paying and using the thing, in the order they happen.
+ *
+ * A customer who has never connected is not broken and is not silent: they are
+ * somewhere on this ladder, and which rung they are stuck on is the whole of
+ * what an operator can do about it. `connected` is the end — once somebody has
+ * connected even once, the health words take over and this stops moving.
+ */
+export const FUNNEL_STAGES = [
+  'invited',
+  'registered',
+  'device_added',
+  'reported',
+  'connected',
+] as const;
+export type FunnelStage = (typeof FUNNEL_STAGES)[number];
 
 /** The six palette roles. Colour never carries meaning alone (R5). */
 export const TONES = ['sev', 'warn', 'rem', 'info', 'ok', 'unk'] as const;
@@ -209,6 +233,10 @@ export function healthWordForVerdict(verdict: NodeVerdict): { word: NodeHealthWo
 const CUSTOMER_WORD_BY_VERDICT: Record<CustomerVerdict, { word: CustomerHealthWord; tone: Tone }> = {
   unreachable: { word: '连不上', tone: 'sev' },
   unstable: { word: '不稳', tone: 'warn' },
+  // Never coloured as a fault: nothing is broken for somebody who has not
+  // started yet, and a red row would send an operator chasing an outage that
+  // does not exist. It is a thing to do, not a thing that failed.
+  never_used: { word: '还没用起来', tone: 'unk' },
   unreported: { word: '未上报', tone: 'unk' },
   offline: { word: '离线', tone: 'info' },
   ok: { word: '正常', tone: 'ok' },
@@ -234,6 +262,7 @@ const TONE_BY_WORD: Record<string, Tone> = {
   不稳: 'warn',
   未测: 'unk',
   未上报: 'unk',
+  还没用起来: 'unk',
   离线: 'info',
   正常: 'ok',
 };

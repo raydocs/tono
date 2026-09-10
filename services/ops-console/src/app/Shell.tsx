@@ -18,7 +18,13 @@ import { consoleBehind, worstSource } from '@/lib/sources';
 import { useTheme, type ThemeChoice } from '@/lib/theme';
 import type { FleetState } from '@/lib/use-fleet';
 import type { Resource } from '@/lib/use-resource';
-import type { CustomerSummaryDto, IncidentDto, NodeSummaryDto, SystemHealthDto } from '@contract';
+import type {
+  CustomerSummaryDto,
+  FunnelDto,
+  IncidentDto,
+  NodeSummaryDto,
+  SystemHealthDto,
+} from '@contract';
 import { CommandPalette } from './CommandPalette';
 import { Enter } from './Enter';
 
@@ -39,6 +45,7 @@ export function Shell({
   fetchedAt,
   nodes,
   customers,
+  funnel,
   incidents,
 }: {
   children: ReactNode;
@@ -48,6 +55,8 @@ export function Shell({
   fetchedAt: number | null;
   nodes: NodeSummaryDto[];
   customers: CustomerSummaryDto[];
+  /** ⌘K searches the people who have no customer row too; null until it lands. */
+  funnel: FunnelDto | null;
   incidents: IncidentDto[];
 }) {
   const [route, setRoute] = useState<OpsRoute>(() => (
@@ -137,7 +146,12 @@ export function Shell({
           </Enter>
         </main>
       </div>
-      <CommandPalette nodes={nodes} customers={customers} incidents={incidents} />
+      <CommandPalette
+        nodes={nodes}
+        customers={customers}
+        funnel={funnel}
+        incidents={incidents}
+      />
     </div>
   );
 }

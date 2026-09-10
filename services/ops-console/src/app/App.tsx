@@ -49,6 +49,13 @@ export function App() {
    * on load beats four requests every time someone changes page.
    */
   const customers = useResource('customers', async (signal) => (await opsApi.customers(signal)).items, beat);
+  /**
+   * Who is not using it yet, and where each of them stopped. It is the fourth
+   * shared read because three surfaces need the same answer: the customer
+   * table lists them, the daily page turns the stuck ones into chores, and
+   * Command-K has to find a person who has no customer row to be found by.
+   */
+  const funnel = useResource('customers/funnel', (signal) => opsApi.funnel(signal), beat);
   const incidents = useResource('incidents', async (signal) => (await opsApi.incidents(signal)).items, beat);
   /**
    * The release list is the third thing the whole console shares: the daily
@@ -84,6 +91,7 @@ export function App() {
   const machines = nodes.status === 'ready' ? nodes.data : [];
   const legacyNodes = fleet.status === 'ready' ? fleet.fleet.nodes : [];
   const people = customers.status === 'ready' ? customers.data : [];
+  const waiting = funnel.status === 'ready' ? funnel.data : null;
   const open = incidents.status === 'ready' ? incidents.data : [];
 
   return (
@@ -93,6 +101,7 @@ export function App() {
       fetchedAt={newestFetch(nodes, customers, incidents, health, fleet)}
       nodes={machines}
       customers={people}
+      funnel={waiting}
       incidents={open}
     >
       <Suspense fallback={<div className="page-wrap"><Empty message={copy.loading} /></div>}>
@@ -107,10 +116,12 @@ export function App() {
               : (
                 <CustomersPage
                   customers={customers}
+                  funnel={funnel}
                   releases={releases}
                   health={health}
                   platform={route.platform}
                   bucket={route.bucket}
+                  invite={route.invite}
                 />
               )
           )
@@ -121,6 +132,7 @@ export function App() {
                   <TodayPage
                     incidents={incidents}
                     customers={customers}
+                    funnel={funnel}
                     health={health}
                     releases={releases}
                     nodes={legacyNodes}

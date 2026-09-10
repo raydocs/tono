@@ -8,7 +8,7 @@ import { copy } from '@/copy/copy';
 import { CLAUDE_PLAN, customerApi, type UserPatch } from '@/lib/api-customer-actions';
 import { ledgerApi } from '@/lib/api-ledger';
 import { nowSec } from '@/lib/clock';
-import { formatDate, splitBytes } from '@/lib/display';
+import { formatDate, formatWhenAgo, splitBytes } from '@/lib/display';
 import { customerRow, formatCny, monthOf } from '@/lib/ledger';
 import { fromDateInput, toDateInput } from '@/lib/settings';
 import { shown } from '@/lib/sources';
@@ -55,12 +55,19 @@ function boxed(value: string | null): string {
 export function Billing({
   userId,
   billing,
+  firstConnectedAt,
   profile,
   updatedAt,
   onChanged,
 }: {
   userId: string;
   billing: CustomerBillingDto;
+  /**
+   * The day this customer first got it working, beside the day they were first
+   * entitled to. The pair is the whole of "did the money turn into use", and it
+   * is quiet on purpose: it never changes again after that first connection.
+   */
+  firstConnectedAt: number | null;
   profile: Profile;
   updatedAt: number;
   onChanged: () => void;
@@ -95,6 +102,16 @@ export function Billing({
             billing.expiresAt === null ? null : formatDate(billing.expiresAt),
             billing.expiresAt,
             copy.sourceWord.profile,
+          )}
+        />
+        <Fact
+          label={copy.billingFacts.firstConnected}
+          measured={measured(
+            firstConnectedAt === null
+              ? null
+              : copy.firstConnectedAt(formatWhenAgo(firstConnectedAt), formatDate(firstConnectedAt)),
+            firstConnectedAt,
+            copy.sourceWord.telemetry,
           )}
         />
       </div>

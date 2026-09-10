@@ -231,6 +231,67 @@ test.describe('客户写动作', () => {
     await expect(head(page)).toContainText('没有微信号以后找不到人');
   });
 
+  /**
+   * The invite drawer is the whole of what exists for somebody who never
+   * registered: three fields an operator fills in, and the two things that can
+   * be done about them. Both writes go through the sign-up list, and both have
+   * to survive the reload — a handle the next read does not carry is a handle
+   * that was never saved.
+   */
+  test('名单上那一位的微信号改完，列表那一行跟着变', async ({ page }, testInfo) => {
+    const session = fresh('invite', testInfo);
+    await open(page, '/customers', 'default', session);
+    const row = page.locator('tbody tr').filter({ hasText: 'tan.wei@example.com' });
+    await expect(row).toContainText('未注册');
+    await row.click();
+
+    const drawer = page.getByRole('dialog');
+    await expect(drawer).toContainText('开通 2 天还没注册');
+    await drawer.getByLabel('微信号').fill('wx_tan_wei');
+    await drawer.getByLabel('备注').fill('周三再催一次');
+    await drawer.getByRole('button', { name: '保存' }).click();
+    await settle(page);
+
+    await expect(row).toContainText('wx_tan_wei');
+    await page.reload({ waitUntil: 'networkidle' });
+    await settle(page);
+    await expect(page.locator('tbody tr').filter({ hasText: 'tan.wei@example.com' }))
+      .toContainText('wx_tan_wei');
+  });
+
+  test('撤销开通之后这一行就不在表里了', async ({ page }, testInfo) => {
+    const session = fresh('revoke', testInfo);
+    await open(page, '/customers', 'default', session);
+    await expect(page.getByRole('button', { name: '2 位开通了还没注册' })).toBeVisible();
+    await page.locator('tbody tr').filter({ hasText: 'shu.qing@example.com' }).click();
+
+    await page.getByRole('dialog').getByRole('button', { name: '撤销开通' }).click();
+    const ask = gate(page, /再注册会被挡回去/);
+    await ask.getByRole('button', { name: '撤销开通' }).click();
+    await settle(page);
+
+    await expect(page.locator('tbody tr').filter({ hasText: 'shu.qing@example.com' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '1 位开通了还没注册' })).toBeVisible();
+  });
+
+  /** The 360 leads with the step, not with 没连: this client never started. */
+  test('还没连上过的客户，现在那一块写的是卡在哪一步', async ({ page }) => {
+    await open(page, '/customers/u-06');
+    const now = page.locator('section').filter({ hasText: '现在' }).first();
+    await expect(now).toContainText('开通进度');
+    await expect(now).toContainText('注册 5 天还没装客户端');
+    await expect(now).not.toContainText('没连');
+    // The header still carries the word, because what to think and what to do
+    // are two different axes.
+    await expect(head(page)).toContainText('还没用起来');
+  });
+
+  test('连上过的客户，画像里记着第一次连上是哪天', async ({ page }) => {
+    await open(page, '/customers/u-04');
+    await page.getByRole('button', { name: /账务与用量/ }).click();
+    await expect(page.getByText('第一次连上')).toBeVisible();
+  });
+
   test('头上四个按钮不再说接口未接入', async ({ page }) => {
     await open(page, '/customers/u-04');
     for (const label of ['发起远程诊断', '重发凭证', '改到期', '停用']) {

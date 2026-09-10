@@ -9,6 +9,9 @@
   "tone": "ok",
   "reason": null,
   "lifecycle": "active",
+  "stage": "connected",
+  "stageSinceAt": 1724999918,
+  "firstConnectedAt": 1724999918,
   "now": {
     "connected": {
       "value": true,

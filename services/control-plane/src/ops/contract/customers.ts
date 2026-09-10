@@ -5,6 +5,7 @@ import type {
   CustomerHealthWord,
   CustomerLifecycle,
   CustomerVerdict,
+  FunnelStage,
   Measured,
   Platform,
   RouteKind,
@@ -16,6 +17,7 @@ import {
   CUSTOMER_HEALTH_WORDS,
   CUSTOMER_LIFECYCLES,
   CUSTOMER_VERDICTS,
+  FUNNEL_STAGES,
   PLATFORMS,
   ROUTE_KINDS,
   SERVICE_FAMILIES,
@@ -143,7 +145,13 @@ export interface CustomerDeviceDto {
   lastFailNode: string | null;
 }
 
-/** 待办 rows. Always the `rem` tone, never an incident, never a colour decision. */
+/**
+ * 待办 rows. Always the `rem` tone, never an incident, never a colour decision.
+ *
+ * `kind` is a free string on the wire so the hub can grow one without a
+ * contract bump; `onboarding` is the one the funnel writes, for a customer who
+ * registered and then stopped.
+ */
 export interface ChoreDto {
   id: string;
   kind: string;
@@ -189,6 +197,16 @@ export interface CustomerSummaryDto {
   services: ServiceFamily[];
   /** The oldest version any of their devices runs — what drives 版本过旧. */
   minAppVersion: string | null;
+  /**
+   * How far this customer has got between being opened and using the thing.
+   * `connected` from the first successful connection onwards, and it never
+   * goes back — the health words answer everything after that.
+   */
+  stage: FunnelStage;
+  /** When they arrived on that step, so the console can say how long ago. */
+  stageSinceAt: number;
+  /** The first connection ever, or null for somebody who has never had one. */
+  firstConnectedAt: number | null;
   expiresAt: number | null;
   lastSeenAt: number | null;
   updatedAt: number;
@@ -205,6 +223,9 @@ export interface CustomerDetailDto {
   tone: Tone;
   reason: string | null;
   lifecycle: CustomerLifecycle;
+  stage: FunnelStage;
+  stageSinceAt: number;
+  firstConnectedAt: number | null;
   now: CustomerNowDto;
   devices: CustomerDeviceDto[];
   chores: ChoreDto[];
@@ -389,7 +410,7 @@ export function assertCustomerFailure(value: unknown, path = 'lastFailure'): Cus
 const CUSTOMER_SUMMARY_KEYS = [
   'userId', 'email', 'wechatId', 'verdict', 'health', 'tone', 'reason', 'lifecycle', 'deviceCount',
   'platforms', 'selectedServer', 'connected', 'lastFailure', 'usageBytes', 'quotaBytes', 'services',
-  'minAppVersion', 'expiresAt', 'lastSeenAt', 'updatedAt',
+  'minAppVersion', 'stage', 'stageSinceAt', 'firstConnectedAt', 'expiresAt', 'lastSeenAt', 'updatedAt',
 ];
 
 export function assertCustomerSummary(value: unknown, path = 'customerSummary'): CustomerSummaryDto {
@@ -414,6 +435,9 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
     quotaBytes: optInt(row, path, 'quotaBytes'),
     services: enumList<ServiceFamily>(row, path, 'services', SERVICE_FAMILIES),
     minAppVersion: optText(row, path, 'minAppVersion'),
+    stage: oneOf<FunnelStage>(row, path, 'stage', FUNNEL_STAGES),
+    stageSinceAt: int(row, path, 'stageSinceAt'),
+    firstConnectedAt: optInt(row, path, 'firstConnectedAt'),
     expiresAt: optInt(row, path, 'expiresAt'),
     lastSeenAt: optInt(row, path, 'lastSeenAt'),
     updatedAt: int(row, path, 'updatedAt'),
@@ -422,7 +446,8 @@ export function assertCustomerSummary(value: unknown, path = 'customerSummary'):
 
 const CUSTOMER_DETAIL_KEYS = [
   'userId', 'email', 'wechatId', 'contact', 'notes', 'verdict', 'health', 'tone', 'reason',
-  'lifecycle', 'now', 'devices', 'chores', 'billing', 'updatedAt',
+  'lifecycle', 'stage', 'stageSinceAt', 'firstConnectedAt', 'now', 'devices', 'chores', 'billing',
+  'updatedAt',
 ];
 
 export function assertCustomerDetail(value: unknown, path = 'customerDetail'): CustomerDetailDto {
@@ -438,6 +463,9 @@ export function assertCustomerDetail(value: unknown, path = 'customerDetail'): C
     tone: oneOf<Tone>(row, path, 'tone', TONES),
     reason: optText(row, path, 'reason'),
     lifecycle: oneOf<CustomerLifecycle>(row, path, 'lifecycle', CUSTOMER_LIFECYCLES),
+    stage: oneOf<FunnelStage>(row, path, 'stage', FUNNEL_STAGES),
+    stageSinceAt: int(row, path, 'stageSinceAt'),
+    firstConnectedAt: optInt(row, path, 'firstConnectedAt'),
     now: assertCustomerNow(row.now, `${path}.now`),
     devices: arrayOf(row, path, 'devices', assertCustomerDevice),
     chores: arrayOf(row, path, 'chores', assertChore),

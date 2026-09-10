@@ -99,7 +99,7 @@ export function logWindowEnd(now: number): number {
  * R4 lives here: the sentence and the table call `selectCustomers` with the
  * same id, so "4 位正常" and the rows you get by clicking it cannot disagree.
  */
-export const CUSTOMER_FILTERS = ['all', 'ok', 'unreachable'] as const;
+export const CUSTOMER_FILTERS = ['all', 'ok', 'unreachable', 'never_used'] as const;
 
 export type CustomerFilterId = (typeof CUSTOMER_FILTERS)[number];
 export type CustomerFilter = CustomerFilterId | null;
@@ -125,6 +125,7 @@ export function selectCustomers(
 ): CustomerSummaryDto[] {
   if (filter === 'ok') return rows.filter(isWell);
   if (filter === 'unreachable') return rows.filter((row) => row.verdict === 'unreachable');
+  if (filter === 'never_used') return rows.filter((row) => row.verdict === 'never_used');
   return [...rows];
 }
 
@@ -135,6 +136,7 @@ export function customerCounts(
     all: selectCustomers(rows, 'all').length,
     ok: selectCustomers(rows, 'ok').length,
     unreachable: selectCustomers(rows, 'unreachable').length,
+    never_used: selectCustomers(rows, 'never_used').length,
   };
 }
 

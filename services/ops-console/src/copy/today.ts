@@ -206,6 +206,7 @@ export const todayCopy = {
   actionFailed: '动作没做成',
   choreKindOther: '待办',
   choreKind: {
+    onboarding: '开通跟进',
     renew: '续费',
     quota: '额度',
     expiry: '到期',
@@ -221,6 +222,8 @@ export const todayCopy = {
     customerVersion: (who: string, version: string) => `${who} 还在跑 ${version}`,
     customerProfile: (who: string) => `${who} 没上报过平台与版本`,
   },
+  /** 待办里没有微信号的那一行，按钮说得出为什么按不下去。 */
+  choreNoWechat: '这位还没留微信号',
   /* --------------------------------------------------------------- 证据 */
 
   /**
@@ -273,5 +276,6 @@ export const todayCopy = {
   },
 
   commandCustomers: '客户',
+  commandInvites: '还没注册',
   commandIncidents: '事故',
 } as const;
