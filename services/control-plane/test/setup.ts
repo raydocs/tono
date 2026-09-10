@@ -42,10 +42,13 @@ beforeEach(async () => {
   await env.DB.prepare('DELETE FROM ops_flatten_cursor').run();
   await env.DB.prepare('DELETE FROM ops_connection_daily').run();
   await env.DB.prepare('DELETE FROM traffic_destination_daily').run();
+  await env.DB.prepare('DELETE FROM ops_traffic_segments').run();
   await env.DB.prepare('DELETE FROM service_usage_daily').run();
+  await env.DB.prepare('DELETE FROM direct_candidate_daily').run();
   await env.DB.prepare('DELETE FROM direct_candidates').run();
   await env.DB.prepare('DELETE FROM home_line_usage_daily').run();
   await env.DB.prepare('DELETE FROM ops_client_version_daily').run();
+  await env.DB.prepare('DELETE FROM ops_client_version_device_daily').run();
   await env.DB.prepare('DELETE FROM client_releases').run();
   await env.DB.prepare('DELETE FROM customer_activity_hours').run();
   await env.DB.prepare('DELETE FROM customer_sessions').run();
