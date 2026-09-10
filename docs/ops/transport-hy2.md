@@ -27,6 +27,25 @@
 
 杭州直连 `google.com:443` 超时。主通道要从国内用，走东京 VLESS TCP，不是直连。
 
+## Reality 是不是坏了（2026-09-11，杭州只出站）
+
+有的客户能连、**移动用不了**，先分清是出口死了还是运营商路径把 Reality 拦了。杭州这台是 **AS37963 阿里云**，不是移动家宽，**不能代替移动实测**。探测未改该机 `ss-server`，东京/Dedirock `tono-xray` PID 未换（285119 / 658）。
+
+| 从杭州看 | 东京 `45.8.173.206` | Dedirock `198.12.84.154` |
+|---|---|---|
+| TCP 443 五次 | 41–44ms 全通 | 140–170ms 全通 |
+| SNI `www.bing.com`（与 Reality dest 一致） | TLS 1.3，证书 `CN=r.bing.com` Microsoft，校验 OK | 同上，`CN=r.bing.com`，校验 OK |
+| 错误 SNI | `tlsv1 alert internal error`（Reality 预期） | peer reset（仍是活着的 443，不是超时） |
+| 直连 `google.com:443` | 五次超时 | — |
+| 直连 `www.bing.com:443` | 28–40ms 通 | — |
+| hy2（UDP 443）经代理 ping `1.1.1.1:443` | 入站 UDP 仍被商家拦 | **5/5**，144–171ms；`google.com:443` 167ms |
+
+结论：
+
+1. **不是 Reality 服务挂了。** 两台出口都在用 `target/serverNames = www.bing.com`，从大陆云厂商把 dest SNI 打过去能拿到微软真证书。xray 日志这会儿只有本机 API 探活，当时没有已建立的客户 443 会话可按 ASN 分类。
+2. **「有人能用、移动不能用」更像移动 DPI / 路径对 XTLS-Reality 不友好**（SNI 是 bing、IP 却不是微软），不是这两台机的 dest 配错。阿里云浙江复现不了移动。
+3. 给移动的下一手是 **hy2**。东京 Panstar 入站 UDP 仍不通，移动即使用手选也选不到东京 hy2。大陆云厂商到 Dedirock hy2 通。家宽移动还要老板在移动网上走一遍 Dedirock hy2。自动切换仍默认关。生产目录仍不塞 hy2 块。
+
 ## UDP 结论：商家入站 UDP 被拦，自动切换不做
 
 探测点都能发 UDP DNS（所以不是「这台机器不会 UDP」）：
