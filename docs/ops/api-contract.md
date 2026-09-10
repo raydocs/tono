@@ -97,6 +97,10 @@
 
 ### 部门 A
 
+| 路由 | 返回 |
+|---|---|
+| `GET system/health` | 可选 `coverage`：`CoverageDto`（`nodesListed`；`nodesSweptFresh` = 目录节点大陆扫描行 ≤26h；`nodesWithAgent` = 目录节点 agent 样本 ≤15min；`customersActive`；`customersReportedFresh` = `ops_customer_status.last_seen_at` ≤40min；`asOfSec`）。不改变 `ok` |
+
 ### 部门 B
 
 ### 部门 C
