@@ -39,7 +39,8 @@ const HOUR = 3600;
 const HOUR_MS = HOUR * 1000;
 const FAIL_WINDOW_SECONDS = 30 * 60;
 const BATCH = 50;
-const DEFAULT_BACKLOG_LIMIT = 200;
+export const PROJECT_BACKLOG_LIMIT = 60;
+export const PROJECT_BACKLOG_BUDGET_MS = 25_000;
 
 export type TelemetryWindowInput = {
   id: string;
@@ -330,12 +331,20 @@ export async function accrueActivityHours(
 
 export type ProjectionCounts = { windows: number; hours: number };
 
+export type ProjectBacklogClock = {
+  nowMs?: () => number;
+  budgetMs?: number;
+};
+
 export async function projectBacklog(
   db: D1Database,
   nowSec: number,
-  limit = DEFAULT_BACKLOG_LIMIT,
+  limit = PROJECT_BACKLOG_LIMIT,
+  clock: ProjectBacklogClock = {},
 ): Promise<ProjectionCounts> {
   const cap = Math.min(Math.max(limit, 1), 1000);
+  const nowMs = clock.nowMs ?? Date.now;
+  const budgetMs = clock.budgetMs ?? PROJECT_BACKLOG_BUDGET_MS;
   try {
     const cursor = await db.prepare(
       'SELECT last_received_at, last_window_id FROM ops_customer_projection_cursor WHERE singleton_id = 1',
@@ -353,6 +362,8 @@ export async function projectBacklog(
     ).bind(lastReceivedAt, lastReceivedAt, lastWindowId, cap).all<Row>();
     const windows = rows.results ?? [];
     let hours = 0;
+    let processed = 0;
+    const started = nowMs();
     for (const row of windows) {
       const window: TelemetryWindowInput = {
         id: String(row.id),
@@ -367,8 +378,10 @@ export async function projectBacklog(
       };
       await applyWindowToStatus(db, window, null, nowSec);
       hours += await accrueActivityHours(db, window, nowSec);
+      processed += 1;
+      if (nowMs() - started >= budgetMs) break;
     }
-    const last = windows[windows.length - 1];
+    const last = windows[processed - 1];
     if (last) {
       await db.prepare(
         `INSERT INTO ops_customer_projection_cursor (
@@ -380,7 +393,7 @@ export async function projectBacklog(
            updated_at = excluded.updated_at`,
       ).bind(Number(last.received_at), String(last.id), nowSec).run();
     }
-    return { windows: windows.length, hours };
+    return { windows: processed, hours };
   } catch (error) {
     if (missingTable(error)) return { windows: 0, hours: 0 };
     throw error;

@@ -44,9 +44,9 @@ export const clientCopy = {
   /** Every confirm repeats the consequence; none of them says "are you sure". */
   releaseConfirm: {
     publish: (platform: string, version: string) =>
-      `发布后 ${platform} 客户端会自动更新到 ${version}。`,
+      `这只在后台登记 ${platform} ${version} 为已发布，用于采用率与"版本过旧"待办；客户端的更新源（appcast / latest.json）仍由发版流程单独发布，登记不会推送更新。`,
     withdraw: (version: string) =>
-      `撤回后自动更新不再提供 ${version}，已安装的客户端不受影响。`,
+      `这只在后台把 ${version} 标记为已撤回；要停止分发还得在发版流程里撤掉更新源。已安装的客户端不受影响。`,
     setMin: (version: string) =>
       `低于 ${version} 的客户端会被列进"版本过旧"待办，不会被停用。`,
     minPrompt: '最低支持版本',

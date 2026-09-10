@@ -4,9 +4,10 @@
 
 import { type Env } from '../env';
 import { flattenBacklog, retainConnectionDaily, retainConnectionEvents, rollupConnectionDaily } from './flatten';
-import { projectBacklog, retainActivityHours, retainSessions } from './customers';
+import { PROJECT_BACKLOG_LIMIT, projectBacklog, retainActivityHours, retainSessions } from './customers';
 import { retainDeliveries } from './alerts';
 import { expireStaleJobs } from './jobs';
+import { runWorkerJobs } from './jobs-worker';
 import { readAgentNetCounters, rollAllNodeCycles } from './quota';
 import { retainClientVersionDaily, rollupClientVersionsDaily } from './releases';
 import { retainHomeLineUsage } from './home-lines';
@@ -17,6 +18,7 @@ const DAY = 86_400;
 const HOUR = 3_600;
 const DAILY_SETTLE_SECONDS = 2 * HOUR;
 const RETAIN_LIMIT = 500;
+const FLATTEN_WINDOWS_PER_TICK = 200;
 
 export type OpsCronStep<T extends Record<string, unknown> = {}> = {
   ok: boolean;
@@ -29,7 +31,7 @@ export type OpsCronReport = {
   project: OpsCronStep<{ windows: number; hours: number }>;
   verdicts: OpsCronStep<{ nodes: number; transitions: number }>;
   alerts: OpsCronStep<{ planned: number; sent: number; failed: number }>;
-  jobs: OpsCronStep<{ expired: number }>;
+  jobs: OpsCronStep<{ expired: number; ran: number }>;
   quota: OpsCronStep<{ ran: boolean; rolled: number; skipped: number }>;
   daily: OpsCronStep<{ ran: boolean }>;
   retention: OpsCronStep;
@@ -178,8 +180,8 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
 }
 
 export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport> {
-  const flatten = await step('flatten', { windows: 0, rows: 0 }, () => flattenBacklog(e.DB, nowSec, 200));
-  const project = await step('project', { windows: 0, hours: 0 }, () => projectBacklog(e.DB, nowSec, 200));
+  const flatten = await step('flatten', { windows: 0, rows: 0 }, () => flattenBacklog(e.DB, nowSec, FLATTEN_WINDOWS_PER_TICK));
+  const project = await step('project', { windows: 0, hours: 0 }, () => projectBacklog(e.DB, nowSec, PROJECT_BACKLOG_LIMIT));
 
   let alertTransitions: Awaited<ReturnType<typeof runVerdictPass>>['transitions'] = [];
   const verdicts = await step('verdicts', { nodes: 0, transitions: 0 }, async () => {
@@ -191,8 +193,9 @@ export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport>
   const alerts = await step('alerts', { planned: 0, sent: 0, failed: 0 }, () =>
     planAndSendAlerts(e, alertTransitions, nowSec));
 
-  const jobs = await step('jobs', { expired: 0 }, async () => ({
+  const jobs = await step('jobs', { expired: 0, ran: 0 }, async () => ({
     expired: await expireStaleJobs(e.DB, nowSec),
+    ran: await runWorkerJobs(e, nowSec),
   }));
 
   const quota = await step('quota', { ran: false, rolled: 0, skipped: 0 }, async () => {

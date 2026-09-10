@@ -80,6 +80,18 @@ export interface CronStepHealthDto {
 
 export type CronStepsHealthDto = Record<CronStepName, CronStepHealthDto>;
 
+/**
+ * How far the projections have caught up with the telemetry that already
+ * exists. Right after a deploy the customer pages read as silent for hours
+ * while the cron drains 30 days of windows; this is what lets a page say
+ * "正在回填" instead of looking broken. Null once nothing is behind.
+ */
+export interface BackfillHealthDto {
+  windowsTotal: number;
+  windowsFlattened: number;
+  windowsProjected: number;
+}
+
 export interface SystemHealthDto {
   ok: boolean;
   buildSha: string | null;
@@ -89,6 +101,7 @@ export interface SystemHealthDto {
   cronLastDurationMs: number | null;
   cronLastError: string | null;
   cronSteps: CronStepsHealthDto | null;
+  backfill: BackfillHealthDto | null;
   updatedAt: number;
 }
 
@@ -231,7 +244,7 @@ export function assertSourceHealth(value: unknown, path = 'sourceHealth'): Sourc
 
 const SYSTEM_HEALTH_KEYS = [
   'ok', 'buildSha', 'contractVersion', 'sources',
-  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'cronSteps', 'updatedAt',
+  'cronLastRunAt', 'cronLastDurationMs', 'cronLastError', 'cronSteps', 'backfill', 'updatedAt',
 ];
 
 const CRON_STEP_HEALTH_KEYS = ['ok', 'ms', 'error'];
@@ -268,7 +281,21 @@ export function assertSystemHealth(value: unknown, path = 'systemHealth'): Syste
     cronLastDurationMs: optInt(row, path, 'cronLastDurationMs'),
     cronLastError: optText(row, path, 'cronLastError'),
     cronSteps,
+    backfill: row.backfill === undefined || row.backfill === null
+      ? null
+      : assertBackfillHealth(row.backfill, `${path}.backfill`),
     updatedAt: int(row, path, 'updatedAt'),
+  };
+}
+
+const BACKFILL_KEYS = ['windowsTotal', 'windowsFlattened', 'windowsProjected'];
+
+export function assertBackfillHealth(value: unknown, path = 'backfill'): BackfillHealthDto {
+  const row = fields(value, path, BACKFILL_KEYS);
+  return {
+    windowsTotal: int(row, path, 'windowsTotal'),
+    windowsFlattened: int(row, path, 'windowsFlattened'),
+    windowsProjected: int(row, path, 'windowsProjected'),
   };
 }
 

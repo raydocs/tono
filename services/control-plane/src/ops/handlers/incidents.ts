@@ -275,8 +275,17 @@ export async function postIncidentSnooze(req: Request, e: Env, rawId: string, ac
   await loadIncident(e, incidentId);
   const b = await body(req, 4 * 1024);
   const t = now();
-  const until = Number.isSafeInteger(b.until) ? Number(b.until)
-    : (Number.isSafeInteger(b.durationSec) ? t + Number(b.durationSec) : null);
+  const maxSnooze = 7 * 86_400;
+  let until: number | null = null;
+  if (Number.isSafeInteger(b.until)) {
+    until = Number(b.until);
+  } else if (Number.isSafeInteger(b.durationSec)) {
+    until = t + Number(b.durationSec);
+  } else if (Number.isSafeInteger(b.seconds)) {
+    const seconds = Number(b.seconds);
+    if (seconds < 1 || seconds > maxSnooze) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid seconds');
+    until = t + seconds;
+  }
   if (until == null || until <= t) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid until');
   await e.DB.prepare(
     'UPDATE ops_incidents SET snoozed_until = ?, updated_at = ? WHERE id = ?',

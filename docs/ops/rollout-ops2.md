@@ -60,6 +60,7 @@ curl -X POST https://admin.afk.ccwu.cc/api/v1/ops/alert-rules -H 'content-type: 
 ```
 
 - 死人开关：收集器快照超过 20 分钟未更新会生成 `fleet` 主体的严重事故；验证方法是临时把 `operations_live_snapshot.updated_at` 往前拨 3000 秒，再看今天页。
+- 延迟告警在延迟到期后仍会发送；上/下架任务由 Worker 自己执行。
 
 ## 5. hub 上的任务执行器
 

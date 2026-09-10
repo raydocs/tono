@@ -287,6 +287,43 @@ describe('projectBacklog cursor', () => {
     const third = await projectBacklog(db(), HOUR + 12, 2);
     expect(third).toEqual({ windows: 0, hours: 0 });
   });
+
+  it('stops early when the wall-clock budget elapses between windows', async () => {
+    await seedUser();
+    await insertTelemetry(windowInput({
+      id: 'w-a',
+      received_at: HOUR + 1,
+      window_start_ms: HOUR * 1000,
+      window_end_ms: (HOUR + 60) * 1000,
+    }));
+    await insertTelemetry(windowInput({
+      id: 'w-b',
+      received_at: HOUR + 2,
+      window_start_ms: (HOUR + 60) * 1000,
+      window_end_ms: (HOUR + 120) * 1000,
+    }));
+    await insertTelemetry(windowInput({
+      id: 'w-c',
+      received_at: HOUR + 3,
+      window_start_ms: (HOUR + 120) * 1000,
+      window_end_ms: (HOUR + 180) * 1000,
+    }));
+    let calls = 0;
+    const first = await projectBacklog(db(), HOUR + 10, 10, {
+      nowMs: () => {
+        const value = calls === 0 ? 0 : 25_000;
+        calls += 1;
+        return value;
+      },
+      budgetMs: 25_000,
+    });
+    expect(first.windows).toBe(1);
+    expect((await customerStatus(db(), USER))?.lastWindowId).toBe('w-a');
+    const cursor = await db().prepare(
+      'SELECT last_window_id FROM ops_customer_projection_cursor WHERE singleton_id = 1',
+    ).first<{ last_window_id: string }>();
+    expect(cursor?.last_window_id).toBe('w-a');
+  });
 });
 
 describe('customer_sessions backfill and readers', () => {

@@ -1,7 +1,9 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { type Row } from '../src/env';
+import { decryptCatalog, encryptCatalog, sha256 } from '../src/crypto';
+import { type Env, type Row } from '../src/env';
 import { ApiError } from '../src/errors';
+import { splitManagedCatalogProxies } from '../src/catalog-yaml';
 import {
   JOB_TYPES,
   cancelJob,
@@ -15,6 +17,7 @@ import {
   redactJobResult,
   validateJobRequest,
 } from '../src/ops/jobs';
+import { runWorkerJobs } from '../src/ops/jobs-worker';
 
 const db = () => (env as unknown as { DB: D1Database }).DB;
 
@@ -214,5 +217,77 @@ describe('ops node jobs', () => {
     expect(filtered.jobs.map((job) => job.id)).toEqual([b.job.id]);
     const cancelled = await cancelJob(db(), b.job.id, 'ops@example.com', t + 3);
     expect(cancelled.status).toBe('cancelled');
+  });
+
+  it('runWorkerJobs retires a listed node, fails unknown worker types, and leaves hub jobs queued', async () => {
+    const e = env as unknown as Env;
+    const t = 1_800_000_700;
+    const kite = 'Tokyo · Kite';
+    const fuji = 'Tokyo · Fuji';
+    const yaml = [
+      'proxies:',
+      `  - name: ${kite}`,
+      '    type: vless',
+      '    server: 203.0.113.9',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      `  - name: ${fuji}`,
+      '    type: vless',
+      '    server: 203.0.113.10',
+      '    port: 443',
+      '    uuid: {{TONO_CLIENT_UUID}}',
+      'proxy-groups:',
+      '  - name: Tono-Exit',
+      '    type: select',
+      '    proxies:',
+      `      - ${kite}`,
+      `      - ${fuji}`,
+      'rules:',
+      '  - MATCH,Tono-Exit',
+    ].join('\n') + '\n';
+    const encrypted = await encryptCatalog(yaml, e.CATALOG_ENCRYPTION_KEY!);
+    const digest = await sha256(yaml);
+    await db().prepare(
+      `INSERT INTO managed_exit_catalog(singleton_id, revision, ciphertext, nonce, content_sha256, updated_at)
+       VALUES(1, 1, ?, ?, ?, ?)`,
+    ).bind(encrypted.ciphertext, encrypted.nonce, digest, t).run();
+    await db().prepare(
+      `INSERT INTO ops_node_profiles(id, catalog_name, public_ip, status, created_at, updated_at)
+       VALUES('p-kite', ?, '203.0.113.9', 'active', ?, ?)`,
+    ).bind(kite, t, t).run();
+
+    const retired = await enqueue('catalog_retire', t, { nodeName: kite });
+    const hub = await enqueue('identity_sync', t, { nodeName: kite, idempotencyKey: 'hub-untouched' });
+    await db().prepare(
+      `INSERT INTO ops_node_jobs(
+         id, node_name, executor, type, params_json, status, attempts, max_attempts,
+         idempotency_key, requested_by, incident_id, created_at, not_before, expires_at, updated_at
+       ) VALUES('job-unknown', ?, 'worker', 'xray_restart', '{}', 'queued', 0, 3,
+                'unknown-worker', 'ops@example.com', NULL, ?, ?, ?, ?)`,
+    ).bind(kite, t, t, t + 900, t).run();
+
+    const ran = await runWorkerJobs(e, t, 5);
+    expect(ran).toBe(2);
+
+    const retireRow = await db().prepare('SELECT status, result_summary FROM ops_node_jobs WHERE id = ?')
+      .bind(retired.job.id).first<{ status: string; result_summary: string }>();
+    expect(retireRow?.status).toBe('succeeded');
+    const catalog = await db().prepare(
+      'SELECT ciphertext, nonce FROM managed_exit_catalog WHERE singleton_id = 1',
+    ).first<{ ciphertext: string; nonce: string }>();
+    const listed = splitManagedCatalogProxies(
+      await decryptCatalog(String(catalog?.ciphertext), String(catalog?.nonce), e.CATALOG_ENCRYPTION_KEY!),
+    ).items.map((item) => item.name);
+    expect(listed).not.toContain(kite);
+    expect(listed).toContain(fuji);
+
+    const unknown = await db().prepare('SELECT status, result_summary FROM ops_node_jobs WHERE id = ?')
+      .bind('job-unknown').first<{ status: string; result_summary: string }>();
+    expect(unknown?.status).toBe('failed');
+    expect(String(unknown?.result_summary)).toMatch(/unknown worker job type/);
+
+    const hubRow = await db().prepare('SELECT status FROM ops_node_jobs WHERE id = ?')
+      .bind(hub.job.id).first<{ status: string }>();
+    expect(hubRow?.status).toBe('queued');
   });
 });

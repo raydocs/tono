@@ -22,6 +22,7 @@ import {
   type ServiceFamily,
   type ServiceUsageDto,
 } from '../contract';
+import { customerFreshnessVerdict } from '../verdict-customers';
 import { eventDto } from './nodes-data';
 import {
   Env,
@@ -41,29 +42,40 @@ import {
   parseRange,
   rangeSeconds,
   weakEtag,
-  HEARTBEAT_FRESH_SEC,
 } from './common';
 
 const ROUTE_MAP: Record<string, RouteKind> = {
   cloud: 'cloud', residential: 'residential', direct: 'direct', reject: 'reject', unknown: 'unknown',
 };
 
-function customerVerdict(user: Row, status: Awaited<ReturnType<typeof customerStatus>>, t: number): {
-  verdict: CustomerVerdict; lifecycle: CustomerDetailDto['lifecycle'];
-} {
-  const lifecycle = user.status !== 'active'
+const INCIDENT_VERDICT: Record<string, CustomerVerdict> = {
+  'customer-repeat-fail': 'unreachable',
+  'customer-path-slow': 'unstable',
+  'customer-switch-churn': 'unstable',
+};
+
+type OpenCustomerIncident = { kind: string; title: string };
+
+function lifecycleOf(user: Row, t: number): CustomerDetailDto['lifecycle'] {
+  return user.status !== 'active'
     ? 'suspended'
     : (nullInt(user.expires_at) != null && Number(user.expires_at) < t ? 'expired' : 'active');
-  if (!status || status.lastSeenAt == null) return { verdict: 'unreported', lifecycle };
-  if (t - status.lastSeenAt > HEARTBEAT_FRESH_SEC) {
-    return { verdict: status.lastSeenAt > 0 ? 'offline' : 'unreported', lifecycle };
+}
+
+function verdictFrom(
+  user: Row,
+  status: Awaited<ReturnType<typeof customerStatus>>,
+  incident: OpenCustomerIncident | undefined,
+  t: number,
+): { verdict: CustomerVerdict; lifecycle: CustomerDetailDto['lifecycle']; reason: string | null } {
+  const lifecycle = lifecycleOf(user, t);
+  if (incident) {
+    const mapped = INCIDENT_VERDICT[incident.kind];
+    if (mapped) return { verdict: mapped, lifecycle, reason: incident.title };
   }
-  if (status.fails30m >= 3 && (status.lastFailAt ?? 0) >= (status.lastSeenAt ?? 0) - HEARTBEAT_FRESH_SEC) {
-    return { verdict: 'unreachable', lifecycle };
-  }
-  if (status.connected) return { verdict: 'ok', lifecycle };
-  if (status.lastFailAt != null && t - status.lastFailAt < 30 * 60) return { verdict: 'unstable', lifecycle };
-  return { verdict: 'offline', lifecycle };
+  const freshness = customerFreshnessVerdict(status?.lastSeenAt, t);
+  if (freshness !== 'fresh') return { verdict: freshness, lifecycle, reason: null };
+  return { verdict: status?.connected ? 'ok' : 'offline', lifecycle, reason: null };
 }
 
 function asFamily(value: string): ServiceFamily {
@@ -87,17 +99,26 @@ async function servicesFor(e: Env, userId: string, fromSec: number): Promise<Ser
   }
 }
 
-async function liveIncidents(e: Env, userId: string): Promise<number> {
+async function openCustomerIncidents(e: Env): Promise<Map<string, OpenCustomerIncident>> {
+  const byUser = new Map<string, OpenCustomerIncident>();
   try {
-    const row = await e.DB.prepare(
-      `SELECT COUNT(*) AS n FROM ops_incidents
-       WHERE subject_type = 'user' AND subject_id = ? AND status <> 'resolved'`,
-    ).bind(userId).first<Row>();
-    return Number(row?.n ?? 0);
+    const rows = await e.DB.prepare(
+      `SELECT subject_id, kind, title FROM ops_incidents
+       WHERE subject_type = 'user' AND status <> 'resolved'
+         AND kind IN ('customer-repeat-fail', 'customer-path-slow', 'customer-switch-churn')`,
+    ).all<Row>();
+    for (const row of rows.results ?? []) {
+      const userId = String(row.subject_id);
+      const kind = String(row.kind);
+      const current = byUser.get(userId);
+      if (!current || (kind === 'customer-repeat-fail' && current.kind !== 'customer-repeat-fail')) {
+        byUser.set(userId, { kind, title: String(row.title ?? '') });
+      }
+    }
   } catch (error) {
     if (!missingTable(error)) throw error;
-    return 0;
   }
+  return byUser;
 }
 
 export async function getCustomers(req: Request, e: Env): Promise<Response> {
@@ -112,6 +133,7 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
     if (!missingTable(error)) throw error;
   }
   const t = now();
+  const incidents = await openCustomerIncidents(e);
   const items: CustomerSummaryDto[] = [];
   for (const user of users) {
     const email = String(user.email);
@@ -120,13 +142,13 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
     const updatedAt = Number(user.updated_at) || t;
     if (since != null && updatedAt < since) continue;
     const status = await customerStatus(e.DB, userId);
-    const { verdict, lifecycle } = customerVerdict(user, status, t);
+    const { verdict, lifecycle, reason } = verdictFrom(user, status, incidents.get(userId), t);
     const word = customerHealthWord(verdict);
     const platforms: Platform[] = [];
     const p = asPlatform(status?.platform);
     if (p) platforms.push(p);
     items.push({
-      userId, email, verdict, health: word.word, tone: word.tone, reason: null,
+      userId, email, verdict, health: word.word, tone: word.tone, reason,
       lifecycle, deviceCount: 0, platforms,
       selectedServer: status?.selectedServer ?? null,
       connected: measured(status?.connected === true, status?.lastSeenAt ?? null, 'telemetry'),
@@ -152,7 +174,6 @@ export async function getCustomers(req: Request, e: Env): Promise<Response> {
   } catch (error) {
     if (!missingTable(error)) throw error;
   }
-  void liveIncidents;
   const page = items.slice(0, limit + 1);
   const sliced = page.length > limit ? page.slice(0, limit) : page;
   const last = sliced[sliced.length - 1];
@@ -203,7 +224,8 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
   const user = await loadUser(e, userId);
   const t = now();
   const status = await customerStatus(e.DB, userId);
-  const { verdict, lifecycle } = customerVerdict(user, status, t);
+  const incidents = await openCustomerIncidents(e);
+  const { verdict, lifecycle, reason } = verdictFrom(user, status, incidents.get(userId), t);
   const word = customerHealthWord(verdict);
   let devices: Row[] = [];
   try {
@@ -227,7 +249,7 @@ export async function getCustomer(req: Request, e: Env, rawId: string): Promise<
   };
   const dto: CustomerDetailDto = {
     userId, email: String(user.email), verdict, health: word.word, tone: word.tone,
-    reason: null, lifecycle, now: nowBlock,
+    reason, lifecycle, now: nowBlock,
     devices: devices.map((row) => ({
       id: String(row.id), name: String(row.name),
       platform: asPlatform(sniffPlatform(nullText(row.os_version) ?? status?.osVersion)),

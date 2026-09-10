@@ -183,6 +183,108 @@ describe('ops v1 api', () => {
     assertJob(await read.json());
   });
 
+  it('PATCH nodes/{name}/profile upserts and returns node detail', async () => {
+    await seedNode();
+    const account = assertProviderAccount(await (await ops('provider-accounts', json({
+      provider: 'bandwagon', label: 'main', cloudKind: 'vps',
+    }))).json());
+    const enc = encodeURIComponent(NODE);
+    const res = await ops(`nodes/${enc}/profile`, json({
+      provider: 'Bandwagon',
+      providerAccountId: account.id,
+      region: 'tyo',
+      lineTags: ['cmi', 'gia'],
+      port: 443,
+      price: 12.5,
+      currency: 'usd',
+      billingCycle: 30,
+      renewsAt: NOW + 86_400,
+      expiresAt: NOW + 30 * 86_400,
+      notes: 'primary tokyo',
+      quota: { quotaBytes: 1_000_000_000, cycleKind: 'calendar_day', cycleAnchorDay: 1, counts: 'in_out' },
+    }, 'PATCH'));
+    expect(res.status).toBe(200);
+    const detail = assertNodeDetail(await res.json());
+    expect(detail.name).toBe(NODE);
+    expect(detail.facts.provider).toBe('Bandwagon');
+    expect(detail.facts.providerAccountId).toBe(account.id);
+    expect(detail.facts.region).toBe('tyo');
+    expect(detail.facts.lineTags).toEqual(['cmi', 'gia']);
+    expect(detail.facts.price).toBe(12.5);
+    expect(detail.facts.currency).toBe('USD');
+    expect(detail.facts.billingCycle).toBe(30);
+    expect(detail.facts.notes).toBe('primary tokyo');
+    expect(detail.quota.value.quota).toBe(1_000_000_000);
+    const cycle = await db().prepare(
+      "SELECT quota_bytes, status FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
+    ).bind(NODE).first<{ quota_bytes: number; status: string }>();
+    expect(Number(cycle?.quota_bytes)).toBe(1_000_000_000);
+    const audit = await db().prepare(
+      "SELECT action FROM ops_audit WHERE action = 'node.profile.update' AND target_id = ?",
+    ).bind(NODE).first<{ action: string }>();
+    expect(audit?.action).toBe('node.profile.update');
+
+    const onlyStatus = 'Osaka · Wave';
+    await db().prepare(
+      `INSERT INTO ops_node_status(
+         node_name, verdict, label, reason, candidate_streak, catalog_listed,
+         rules_version, evaluated_at, changed_at
+       ) VALUES(?, 'ok', '大陆正常', '大陆正常', 0, 1, 1, ?, ?)`,
+    ).bind(onlyStatus, NOW, NOW).run();
+    const created = await ops(`nodes/${encodeURIComponent(onlyStatus)}/profile`, json({
+      region: 'osa', provider: 'dmit',
+    }, 'PATCH'));
+    expect(created.status).toBe(200);
+    expect(assertNodeDetail(await created.json()).facts.region).toBe('osa');
+    const row = await db().prepare(
+      'SELECT catalog_name FROM ops_node_profiles WHERE catalog_name = ?',
+    ).bind(onlyStatus).first<{ catalog_name: string }>();
+    expect(row?.catalog_name).toBe(onlyStatus);
+  });
+
+  it('PATCH nodes/{name}/profile rejects an unknown key', async () => {
+    await seedNode();
+    const res = await ops(`nodes/${encodeURIComponent(NODE)}/profile`, json({ extra: true }, 'PATCH'));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
+  it('PATCH nodes/{name}/profile rejects an unknown provider account', async () => {
+    await seedNode();
+    const res = await ops(`nodes/${encodeURIComponent(NODE)}/profile`, json({
+      providerAccountId: 'no-such-account',
+    }, 'PATCH'));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+  });
+
+  it('PATCH nodes/{name}/profile quota null clears the open cycle', async () => {
+    await seedNode();
+    const enc = encodeURIComponent(NODE);
+    const set = await ops(`nodes/${enc}/profile`, json({
+      quota: { quotaBytes: 500, cycleKind: 'rolling_30d', cycleAnchorDay: 15, counts: 'out' },
+    }, 'PATCH'));
+    expect(set.status).toBe(200);
+    const openBefore = await db().prepare(
+      "SELECT COUNT(*) AS c FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
+    ).bind(NODE).first<{ c: number }>();
+    expect(Number(openBefore?.c)).toBe(1);
+    const cleared = await ops(`nodes/${enc}/profile`, json({ quota: null }, 'PATCH'));
+    expect(cleared.status).toBe(200);
+    const detail = assertNodeDetail(await cleared.json());
+    expect(detail.quota.value.quota).toBeNull();
+    const openAfter = await db().prepare(
+      "SELECT COUNT(*) AS c FROM node_traffic_cycles WHERE node_name = ? AND status = 'open'",
+    ).bind(NODE).first<{ c: number }>();
+    expect(Number(openAfter?.c)).toBe(0);
+    const profile = await db().prepare(
+      'SELECT traffic_quota_bytes, cycle_kind, quota_counts FROM ops_node_profiles WHERE catalog_name = ?',
+    ).bind(NODE).first<{ traffic_quota_bytes: number | null; cycle_kind: string | null; quota_counts: string | null }>();
+    expect(profile?.traffic_quota_bytes).toBeNull();
+    expect(profile?.cycle_kind).toBeNull();
+    expect(profile?.quota_counts).toBeNull();
+  });
+
   it('GET customers list and detail plus subresources', async () => {
     await seedUser();
     await db().prepare(
@@ -198,6 +300,41 @@ describe('ops v1 api', () => {
     assertList(await (await ops('customers/u-1/services?range=7d')).json(), assertServiceUsage);
   });
 
+  it('customer list and detail take an open customer-repeat-fail as 连不上', async () => {
+    await seedUser('u-fail', 'fail@example.com');
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO ops_incidents(
+         id, dedupe_key, kind, subject_type, subject_id, severity, status, title,
+         rules_version, opened_at, last_seen_at, impact_count, updated_at
+       ) VALUES('inc-fail', 'customer-repeat-fail:u-fail', 'customer-repeat-fail', 'user', 'u-fail',
+                'warn', 'open', '连续失败', 1, ?, ?, 1, ?)`,
+    ).bind(t, t, t).run();
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    const row = list.items.find((item) => item.userId === 'u-fail');
+    expect(row?.verdict).toBe('unreachable');
+    expect(row?.health).toBe('连不上');
+    const detail = assertCustomerDetail(await (await ops('customers/u-fail')).json());
+    expect(detail.verdict).toBe('unreachable');
+    expect(detail.health).toBe('连不上');
+  });
+
+  it('customer list and detail treat a 50-minute-old heartbeat as 未上报', async () => {
+    await seedUser('u-stale', 'stale@example.com');
+    const seen = Math.floor(Date.now() / 1000) - 50 * 60;
+    await db().prepare(
+      `INSERT INTO ops_customer_status(user_id, connected, selected_server, last_seen_at, updated_at)
+       VALUES('u-stale', 1, ?, ?, ?)`,
+    ).bind(NODE, seen, seen).run();
+    const list = assertList(await (await ops('customers')).json(), assertCustomerSummary);
+    const row = list.items.find((item) => item.userId === 'u-stale');
+    expect(row?.verdict).toBe('unreported');
+    expect(row?.health).toBe('未上报');
+    const detail = assertCustomerDetail(await (await ops('customers/u-stale')).json());
+    expect(detail.verdict).toBe('unreported');
+    expect(detail.health).toBe('未上报');
+  });
+
   it('incidents list, detail, ack, snooze, resolve, notes', async () => {
     await db().prepare(
       `INSERT INTO ops_incidents(
@@ -211,6 +348,12 @@ describe('ops v1 api', () => {
     expect(detail.incident.id).toBe('inc-1');
     assertIncident(await (await ops('incidents/inc-1/ack', json({}))).json());
     assertIncident(await (await ops('incidents/inc-1/snooze', json({ until: NOW + 3600 }))).json());
+    const secondsAt = Math.floor(Date.now() / 1000);
+    const snoozedBySeconds = await ops('incidents/inc-1/snooze', json({ seconds: 14400 }));
+    expect(snoozedBySeconds.status).toBe(200);
+    const snoozedBody = assertIncident(await snoozedBySeconds.json());
+    expect(snoozedBody.snoozedUntil).toBeGreaterThanOrEqual(secondsAt + 14400);
+    expect(snoozedBody.snoozedUntil).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 14400);
     assertIncident(await (await ops('incidents/inc-1/notes', json({ note: 'watching' }))).json());
     assertIncident(await (await ops('incidents/inc-1/resolve', json({ note: 'recovered' }))).json());
   });
@@ -338,6 +481,38 @@ describe('ops v1 api', () => {
     expect(Number(real?.attempts)).toBe(0);
   });
 
+  it('GET /api/v1/system/pulse is public, unauthenticated, and exact-shaped', async () => {
+    const context = createExecutionContext();
+    const res = await worker.fetch(
+      new Request('https://test/api/v1/system/pulse'),
+      env as unknown as Env,
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ ok: false, cronAgeSec: null, buildSha: 'development' });
+
+    const ranAt = Math.floor(Date.now() / 1000) - 60;
+    await db().prepare(
+      `INSERT INTO ops_cron_state(key, ran_at) VALUES('last_report', ?)`,
+    ).bind(ranAt).run();
+    const live = createExecutionContext();
+    const again = await worker.fetch(
+      new Request('https://test/api/v1/system/pulse'),
+      env as unknown as Env,
+      live,
+    );
+    await waitOnExecutionContext(live);
+    const body = await again.json() as { ok: boolean; cronAgeSec: number | null; buildSha: string };
+    expect(Object.keys(body).sort()).toEqual(['buildSha', 'cronAgeSec', 'ok']);
+    expect(again.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.buildSha).toBe('development');
+    expect(body.cronAgeSec).toBeGreaterThanOrEqual(60);
+    expect(body.cronAgeSec).toBeLessThan(15 * 60);
+  });
+
   it('GET audit and system/health', async () => {
     await seedNode();
     await ops(`nodes/${encodeURIComponent(NODE)}/jobs`, json({ type: 'collect_quality' }));
@@ -354,6 +529,7 @@ describe('ops v1 api', () => {
     expect(health.cronLastDurationMs).toBeNull();
     expect(health.cronLastError).toBeNull();
     expect(health.cronSteps).toBeNull();
+    expect(health.backfill).toBeNull();
   });
 
   it('system/health surfaces persisted cron step durations', async () => {
@@ -377,6 +553,40 @@ describe('ops v1 api', () => {
     expect(health.cronSteps).toEqual(steps);
   });
 
+  it('system/health reports backfill until both cursors catch up', async () => {
+    await seedUser();
+    for (const [index, id] of ['w-a', 'w-b', 'w-c'].entries()) {
+      await db().prepare(
+        `INSERT INTO telemetry_windows(
+           id, user_id, device_id, received_at, window_start_ms, window_end_ms,
+           client_version, os_version, payload_json
+         ) VALUES(?, 'u-1', NULL, ?, ?, ?, '0.0.72', 'macOS 14.4', '{}')`,
+      ).bind(id, NOW + index, NOW * 1000, NOW * 1000 + 60_000).run();
+    }
+    await db().prepare(
+      `INSERT INTO ops_flatten_cursor(singleton_id, last_received_at, last_window_id, updated_at)
+       VALUES(1, ?, 'w-a', ?)`,
+    ).bind(NOW, NOW).run();
+    await db().prepare(
+      `INSERT INTO ops_customer_projection_cursor(singleton_id, last_received_at, last_window_id, updated_at)
+       VALUES(1, ?, 'w-b', ?)`,
+    ).bind(NOW + 1, NOW).run();
+    const behind = assertSystemHealth(await (await ops('system/health')).json());
+    expect(behind.backfill).toEqual({
+      windowsTotal: 3,
+      windowsFlattened: 1,
+      windowsProjected: 2,
+    });
+    await db().prepare(
+      'UPDATE ops_flatten_cursor SET last_received_at = ?, last_window_id = ? WHERE singleton_id = 1',
+    ).bind(NOW + 2, 'w-c').run();
+    await db().prepare(
+      'UPDATE ops_customer_projection_cursor SET last_received_at = ?, last_window_id = ? WHERE singleton_id = 1',
+    ).bind(NOW + 2, 'w-c').run();
+    const caught = assertSystemHealth(await (await ops('system/health')).json());
+    expect(caught.backfill).toBeNull();
+  });
+
   it('existing ops routes still respond', async () => {
     for (const path of [
       'dashboard', 'system/version', 'fleet-nodes', 'catalog-revisions', 'users',
@@ -397,6 +607,7 @@ describe('ops v1 api', () => {
       'GET /api/v1/ops/nodes/{name}/bindings',
       'GET /api/v1/ops/nodes/{name}/jobs',
       'POST /api/v1/ops/nodes/{name}/jobs',
+      'PATCH /api/v1/ops/nodes/{name}/profile',
       'GET /api/v1/ops/customers',
       'GET /api/v1/ops/customers/{id}',
       'GET /api/v1/ops/customers/{id}/connections',

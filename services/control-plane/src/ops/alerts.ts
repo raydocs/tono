@@ -2,6 +2,10 @@
 // Pure module: the Worker does not import this yet. fetch is injected so
 // tests can stub egress without touching the global.
 
+import { chineseAlertText, incidentConsoleUrl, shapePayload } from './alerts-shape';
+
+export { chineseAlertText, shapePayload } from './alerts-shape';
+
 type Row = Record<string, any>;
 
 export type AlertSeverity = 'severe' | 'warn' | 'notice';
@@ -66,10 +70,7 @@ const D1_BATCH_LIMIT = 50;
 const MAX_ATTEMPTS = 5;
 const FETCH_TIMEOUT_MS = 5_000;
 const ERROR_LIMIT = 300;
-const TELEGRAM_TEXT_LIMIT = 3_500;
 const SEVERITY_RANK: Record<AlertSeverity, number> = { notice: 0, warn: 1, severe: 2 };
-const SEVERITY_ZH: Record<AlertSeverity, string> = { severe: '严重', warn: '警告', notice: '提示' };
-const PHASE_ZH: Record<IncidentPhase, string> = { open: '触发', escalate: '升级', resolve: '恢复' };
 
 function missingTable(error: unknown): boolean {
   return String(error).includes('no such table');
@@ -87,17 +88,6 @@ async function sha256Hex(value: string): Promise<string> {
   return bytesToHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
 }
 
-async function hmacSha256Hex(message: string, secret: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  return bytesToHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message)));
-}
-
 async function batchAll(db: D1Database, statements: D1PreparedStatement[]): Promise<D1Result[]> {
   const out: D1Result[] = [];
   // D1 rejects a batch above 50 statements; a noisy fan-out would otherwise
@@ -106,10 +96,6 @@ async function batchAll(db: D1Database, statements: D1PreparedStatement[]): Prom
     out.push(...await db.batch(statements.slice(i, i + D1_BATCH_LIMIT)));
   }
   return out;
-}
-
-function incidentConsoleUrl(consoleUrl: string, incidentId: string): string {
-  return `${consoleUrl.replace(/\/+$/, '')}/incidents/${incidentId}`;
 }
 
 export function ruleMatches(rule: AlertRule, t: IncidentTransition): boolean {
@@ -153,74 +139,6 @@ export function isAllowedWebhookHost(url: string, allowedHostsCsv: string): bool
   return allowed.has(parsed.hostname.toLowerCase());
 }
 
-export function chineseAlertText(t: IncidentTransition, url: string): string {
-  return [
-    `【Tono】${SEVERITY_ZH[t.severity]} · ${PHASE_ZH[t.transition]}`,
-    t.title,
-    t.detail,
-    `对象: ${t.subjectType}/${t.subjectId}`,
-    `影响: ${t.impactCount}`,
-    url,
-  ].join('\n').slice(0, TELEGRAM_TEXT_LIMIT);
-}
-
-export async function shapePayload(
-  template: AlertTemplate,
-  t: IncidentTransition,
-  opts: { consoleUrl: string; target: string; secret?: string; sentAt?: number },
-): Promise<{ url: string; headers: Record<string, string>; body: string }> {
-  const sentAt = opts.sentAt ?? Math.floor(Date.now() / 1000);
-  const url = incidentConsoleUrl(opts.consoleUrl, t.incidentId);
-  const text = chineseAlertText(t, url);
-  const jsonHeaders = { 'content-type': 'application/json' };
-
-  if (template === 'telegram') {
-    return {
-      url: `https://api.telegram.org/bot${opts.secret ?? ''}/sendMessage`,
-      headers: jsonHeaders,
-      // parse_mode is omitted on purpose: Markdown in a title/detail
-      // (underscores, backticks) is an escaping bug waiting to happen.
-      body: JSON.stringify({ chat_id: opts.target, text }),
-    };
-  }
-  if (template === 'feishu') {
-    return {
-      url: opts.target,
-      headers: jsonHeaders,
-      body: JSON.stringify({ msg_type: 'text', content: { text } }),
-    };
-  }
-  if (template === 'slack') {
-    return {
-      url: opts.target,
-      headers: jsonHeaders,
-      body: JSON.stringify({ text }),
-    };
-  }
-
-  const body = JSON.stringify({
-    version: 1,
-    event: `incident.${t.transition}`,
-    incident: {
-      id: t.incidentId,
-      kind: t.kind,
-      severity: t.severity,
-      subject: { type: t.subjectType, id: t.subjectId },
-      title: t.title,
-      detail: t.detail,
-      openedAt: t.openedAt,
-      impactCount: t.impactCount,
-      url,
-    },
-    sentAt,
-  });
-  const headers: Record<string, string> = { ...jsonHeaders };
-  if (opts.secret) {
-    headers['X-Tono-Signature'] = `sha256=${await hmacSha256Hex(body, opts.secret)}`;
-  }
-  return { url: opts.target, headers, body };
-}
-
 export async function planDeliveries(
   db: D1Database,
   transitions: IncidentTransition[],
@@ -247,10 +165,6 @@ export async function planDeliveries(
     for (const t of transitions) {
       for (const rule of active) {
         if (!ruleMatches(rule, t)) continue;
-        if (nowSec - t.openedAt < rule.delaySeconds) {
-          result.deferred += 1;
-          continue;
-        }
         const key = deliveryDedupeKey(rule.id, t.dedupeKey, t.transition, t.openedAt);
         const lastSent = stateAt.get(`${rule.id}\0${t.dedupeKey}`);
         // Cooldown is per incident, not per transition, so a flapping
@@ -272,6 +186,11 @@ export async function planDeliveries(
           result.suppressed += 1;
           continue;
         }
+        // Persist immediately; sendPending waits until next_attempt_at.
+        // The engine only emits a transition on state change, so a delay
+        // that only incremented `deferred` never fired once the delay elapsed.
+        const nextAttempt = t.openedAt + rule.delaySeconds;
+        if (nextAttempt > nowSec) result.deferred += 1;
         pendingIdx.push(statements.length);
         statements.push(
           db.prepare(
@@ -279,7 +198,7 @@ export async function planDeliveries(
                id, rule_id, incident_id, dedupe_key, transition, status,
                attempts, created_at, next_attempt_at
              ) VALUES(?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-          ).bind(crypto.randomUUID(), rule.id, t.incidentId, key, t.transition, nowSec, nowSec),
+          ).bind(crypto.randomUUID(), rule.id, t.incidentId, key, t.transition, nowSec, nextAttempt),
         );
       }
     }
@@ -363,7 +282,7 @@ export async function sendPending(
   try {
     const pending = await db.prepare(
       `SELECT d.id, d.rule_id, d.incident_id, d.dedupe_key, d.transition, d.attempts,
-              r.channel, r.target, r.template, r.secret_ref
+              r.channel, r.target, r.template, r.secret_ref, r.enabled
        FROM ops_alert_deliveries d
        JOIN ops_alert_rules r ON r.id = d.rule_id
        WHERE d.status = 'pending' AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= ?)
@@ -384,6 +303,38 @@ export async function sendPending(
        WHERE id = ? AND status = 'pending' AND attempts = ?`,
     ).bind(nowSec + backoffSeconds(attemptsNow), row.id, attemptsNow).run();
     if (Number(claimed.meta.changes ?? 0) !== 1) continue;
+
+    const attempts = attemptsNow + 1;
+    if (Number(row.enabled) !== 1) {
+      await db.prepare(
+        `UPDATE ops_alert_deliveries SET status = 'suppressed', next_attempt_at = NULL, error = ?
+         WHERE id = ? AND attempts = ?`,
+      ).bind('rule disabled', row.id, attempts).run();
+      continue;
+    }
+    try {
+      const live = row.incident_id == null
+        ? null
+        : await db.prepare('SELECT status, snoozed_until FROM ops_incidents WHERE id = ?')
+          .bind(row.incident_id).first<Row>();
+      if (live && String(live.status) === 'resolved') {
+        await db.prepare(
+          `UPDATE ops_alert_deliveries SET status = 'suppressed', next_attempt_at = NULL, error = ?
+           WHERE id = ? AND attempts = ?`,
+        ).bind('resolved before delay', row.id, attempts).run();
+        continue;
+      }
+      const snoozedUntil = live?.snoozed_until == null ? null : Number(live.snoozed_until);
+      if (snoozedUntil != null && snoozedUntil > nowSec) {
+        await db.prepare(
+          `UPDATE ops_alert_deliveries SET attempts = ?, next_attempt_at = ?, error = ?
+           WHERE id = ? AND attempts = ?`,
+        ).bind(attemptsNow, snoozedUntil, 'snoozed', row.id, attempts).run();
+        continue;
+      }
+    } catch (error) {
+      if (!missingTable(error)) throw error;
+    }
 
     const incident = await lookupIncident(db, env, row);
     const secret = row.secret_ref ? env.secrets[String(row.secret_ref)] : undefined;
@@ -430,7 +381,6 @@ export async function sendPending(
       errorText = clipError(error);
     }
 
-    const attempts = attemptsNow + 1;
     const terminal = !ok && attempts >= MAX_ATTEMPTS;
     const status = ok ? 'sent' : terminal ? 'failed' : 'pending';
     const nextAttempt = ok || terminal ? null : nowSec + backoffSeconds(attempts - 1);
