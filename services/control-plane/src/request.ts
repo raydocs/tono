@@ -15,7 +15,10 @@ export const error = (e: unknown) => {
     console.error('Unhandled internal server error:', e);
   }
   const x = e instanceof ApiError ? e : new ApiError(500, 'INTERNAL_ERROR', 'Internal server error');
-  return Response.json({ error: { code: x.code, message: x.message } }, { status: x.status });
+  return Response.json({
+    error: { code: x.code, message: x.message },
+    ...(x.extra ?? {}),
+  }, { status: x.status });
 };
 
 export async function body(req: Request, maxBytes = 1024 * 1024) {

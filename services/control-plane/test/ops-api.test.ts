@@ -478,8 +478,15 @@ describe('ops v1 api', () => {
   });
 
   it('releases CRUD and adoption', async () => {
+    const build = new TextEncoder().encode('macos 0.0.72 bytes');
+    const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', build))]
+      .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    await (env as unknown as { RELEASES: R2Bucket }).RELEASES
+      .put('clients/macos/0.0.72.zip', build, { sha256 });
     const created = await ops('releases', json({
       platform: 'macos', channel: 'stable', version: '0.0.72', notes: 'ship',
+      r2Key: 'clients/macos/0.0.72.zip', sizeBytes: build.byteLength, sha256,
+      signature: btoa(String.fromCharCode(...new Uint8Array(64).map((_, i) => (i * 7 + 7) % 256))),
     }));
     expect(created.status).toBe(201);
     const release = assertRelease(await created.json());

@@ -1,5 +1,11 @@
 import { ApiError } from '../errors';
 import { sniffPlatform } from './platform';
+import {
+  UPDATE_CHANNELS,
+  assertSignatureShape,
+  isSha256Hex,
+  verifyReleaseObject,
+} from './releases-verify';
 export { sniffPlatform };
 // Adoption counting lives in ./adoption; re-exported so importers of this
 // module keep their import path.
@@ -39,6 +45,10 @@ export type ClientRelease = {
   yankReason: string | null;
   createdAt: number;
   updatedAt: number;
+  signature: string | null;
+  minOsVersion: string | null;
+  verifiedAt: number | null;
+  objectEtag: string | null;
 };
 
 export type CreateReleaseInput = {
@@ -49,6 +59,8 @@ export type CreateReleaseInput = {
   r2Key?: string | null;
   sizeBytes?: number | null;
   sha256?: string | null;
+  signature?: string | null;
+  minOsVersion?: string | null;
   notes?: string | null;
   minSupportedVersion?: string | null;
   publishedAt?: number | null;
@@ -60,6 +72,7 @@ export type ReleasePatch = {
   publish?: boolean;
   yank?: boolean;
   yankReason?: string | null;
+  withdraw?: boolean;
 };
 
 function uniqueConflict(error: unknown): boolean {
@@ -145,6 +158,10 @@ export function publicRelease(row: Row): ClientRelease {
     yankReason: nullable(row.yank_reason),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    signature: nullable(row.signature),
+    minOsVersion: nullable(row.min_os_version),
+    verifiedAt: nullableInt(row.verified_at),
+    objectEtag: nullable(row.object_etag),
   };
 }
 
@@ -152,6 +169,7 @@ export async function createRelease(
   db: D1Database,
   input: CreateReleaseInput,
   nowSec: number,
+  bucket?: R2Bucket,
 ): Promise<ClientRelease> {
   const platform = platformField(input.platform);
   const channel = channelField(input.channel);
@@ -160,22 +178,42 @@ export async function createRelease(
   const r2Key = optionalText(input.r2Key, 'r2Key', 500);
   const sizeBytes = optionalCount(input.sizeBytes, 'sizeBytes');
   const sha256 = optionalText(input.sha256, 'sha256', 64);
+  if (sha256 && !isSha256Hex(sha256)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid sha256');
+  }
+  const signatureRaw = optionalText(input.signature, 'signature', 4000);
+  const signature = signatureRaw ? assertSignatureShape(platform, signatureRaw) : null;
+  const minOsVersion = optionalText(input.minOsVersion, 'minOsVersion', 32);
   const notes = optionalText(input.notes, 'notes', 4000);
   const minSupportedVersion = input.minSupportedVersion == null || input.minSupportedVersion === ''
     ? null
     : versionField(input.minSupportedVersion, 'minSupportedVersion');
   const publishedAt = optionalUnix(input.publishedAt, 'publishedAt');
+
+  let verifiedAt: number | null = null;
+  let objectEtag: string | null = null;
+  if (bucket && r2Key && sha256 && sizeBytes != null) {
+    try {
+      const verified = await verifyReleaseObject(bucket, r2Key, sha256, sizeBytes);
+      verifiedAt = nowSec;
+      objectEtag = verified.etag;
+    } catch {
+      // If object verification fails on create, row remains unverified (publish gate enforces)
+    }
+  }
+
   const id = crypto.randomUUID();
   try {
     await db.prepare(
       `INSERT INTO client_releases(
          id, platform, channel, version, build, r2_key, size_bytes, sha256,
          notes, min_supported_version, published_at, yanked_at, yank_reason,
-         created_at, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
+         created_at, updated_at, signature, min_os_version, verified_at, object_etag
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       id, platform, channel, version, build, r2Key, sizeBytes, sha256,
       notes, minSupportedVersion, publishedAt, nowSec, nowSec,
+      signature, minOsVersion, verifiedAt, objectEtag,
     ).run();
   } catch (error) {
     if (uniqueConflict(error)) {
@@ -193,6 +231,7 @@ export async function updateRelease(
   id: string,
   patch: ReleasePatch,
   nowSec: number,
+  bucket?: R2Bucket,
 ): Promise<ClientRelease> {
   const existing = await db.prepare('SELECT * FROM client_releases WHERE id = ?').bind(id).first<Row>();
   if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Release not found');
@@ -204,10 +243,36 @@ export async function updateRelease(
       : versionField(patch.minSupportedVersion, 'minSupportedVersion'))
     : current.minSupportedVersion;
   let publishedAt = current.publishedAt;
-  if (patch.publish === true) publishedAt = current.publishedAt ?? nowSec;
+  let verifiedAt = current.verifiedAt;
+  let objectEtag = current.objectEtag;
+  if (patch.publish === true) {
+    if (current.publishedAt === null) {
+      if (bucket || current.r2Key !== null) {
+        if (!UPDATE_CHANNELS[current.platform].wired) {
+          throw new ApiError(
+            409,
+            'RELEASE_CHANNEL_UNWIRED',
+            `${current.platform} has no update feed to publish to`,
+          );
+        }
+        if (!bucket) {
+          throw new ApiError(
+            409,
+            'RELEASE_UNVERIFIED',
+            'This release has not been checked against the object it points at',
+            { reason: current.r2Key ? 'missing_object' : 'no_r2_key' },
+          );
+        }
+        const verified = await verifyReleaseObject(bucket, current.r2Key, current.sha256, current.sizeBytes);
+        verifiedAt = nowSec;
+        objectEtag = verified.etag;
+      }
+      publishedAt = nowSec;
+    }
+  }
   let yankedAt = current.yankedAt;
   let yankReason = current.yankReason;
-  if (patch.yank === true) {
+  if (patch.yank === true || patch.withdraw === true) {
     yankedAt = current.yankedAt ?? nowSec;
     if ('yankReason' in patch) yankReason = optionalText(patch.yankReason, 'yankReason', 400);
   } else if (patch.yank === false) {
@@ -219,9 +284,9 @@ export async function updateRelease(
   await db.prepare(
     `UPDATE client_releases
      SET notes = ?, min_supported_version = ?, published_at = ?, yanked_at = ?,
-         yank_reason = ?, updated_at = ?
+         yank_reason = ?, updated_at = ?, verified_at = ?, object_etag = ?
      WHERE id = ?`,
-  ).bind(notes, minSupportedVersion, publishedAt, yankedAt, yankReason, nowSec, id).run();
+  ).bind(notes, minSupportedVersion, publishedAt, yankedAt, yankReason, nowSec, verifiedAt, objectEtag, id).run();
   const row = await db.prepare('SELECT * FROM client_releases WHERE id = ?').bind(id).first<Row>();
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Release not found');
   return publicRelease(row);
@@ -258,6 +323,7 @@ export async function currentRelease(
     `SELECT * FROM client_releases
      WHERE platform = ? AND channel = ?
        AND published_at IS NOT NULL AND yanked_at IS NULL
+       AND verified_at IS NOT NULL
      ORDER BY published_at DESC
      LIMIT 1`,
   ).bind(platformField(platform), channelField(channel)).first<Row>();

@@ -1,5 +1,15 @@
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) {
+  reason?: string;
+
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+    public extra?: Record<string, unknown>,
+  ) {
     super(message);
+    if (extra && typeof extra.reason === 'string') {
+      this.reason = extra.reason;
+    }
   }
 }

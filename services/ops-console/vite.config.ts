@@ -150,20 +150,42 @@ function writeIncident(
   return row;
 }
 
-/**
- * A release edit, in the same shape the Worker's PATCH accepts. It writes the
- * store rather than answering from the file, because the 客户端 page's whole
- * claim is that it shows what the server now believes: a 撤回 that the next
- * GET does not agree with is a test of nothing.
- */
+type ReleaseWrite =
+  | { row: Record<string, unknown> }
+  | { refusal: { code: string; message: string } }
+  | null;
+
+/** Which platforms the Worker renders a feed for, by name. */
+const WIRED = new Set<string>(['macos', 'windows']);
+
 function writeRelease(
   file: OpsFile,
   id: string,
   body: Record<string, unknown>,
-): Record<string, unknown> | null {
+): ReleaseWrite {
   const row = file.list.items.find((item) => item.id === id);
   if (!row) return null;
   const at = file.clock;
+  if (body.publish === true && row.publishedAt === null) {
+    // The same two refusals the Worker makes, in the same order, so the console
+    // is developed against a server that says no where the real one does.
+    if (!WIRED.has(String(row.platform))) {
+      return {
+        refusal: {
+          code: 'RELEASE_CHANNEL_UNWIRED',
+          message: `${String(row.platform)} has no update feed to publish to`,
+        },
+      };
+    }
+    if (typeof row.verifiedAt !== 'number') {
+      return {
+        refusal: {
+          code: 'RELEASE_UNVERIFIED',
+          message: 'This release has not been checked against the object it points at',
+        },
+      };
+    }
+  }
   if (body.publish === true) row.publishedAt = row.publishedAt ?? at;
   if (body.withdraw === true || body.yank === true) row.withdrawnAt = at;
   if (typeof body.minSupportedVersion === 'string') {
@@ -171,7 +193,7 @@ function writeRelease(
   }
   if (typeof body.notes === 'string') row.notes = body.notes;
   row.updatedAt = at;
-  return row;
+  return { row };
 }
 
 function readBody(req: import('http').IncomingMessage): Promise<Record<string, unknown>> {
@@ -304,13 +326,19 @@ function fixturesPlugin(): Plugin {
             return;
           }
           void readBody(req).then((body) => {
-            const row = writeRelease(file, parts[1], body);
-            if (!row) {
+            const result = writeRelease(file, parts[1], body);
+            if (!result) {
               res.statusCode = 404;
               res.end();
               return;
             }
-            sendJson(res, materializeOps(row, file.clock));
+            if ('refusal' in result) {
+              res.statusCode = 409;
+              res.setHeader('content-type', 'application/json; charset=utf-8');
+              res.end(JSON.stringify({ error: result.refusal }));
+              return;
+            }
+            sendJson(res, materializeOps(result.row, file.clock));
           });
           return;
         }

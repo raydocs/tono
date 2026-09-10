@@ -1,4 +1,4 @@
-import type { AdoptionBucket, Platform, ReleaseDto } from '@contract';
+import type { AdoptionBucket, Platform, ReleaseDto, UpdateChannelDto } from '@contract';
 
 /**
  * Version arithmetic, on the console's side of the wire.
@@ -104,3 +104,45 @@ export function minSupportedVersions(
 export function releasedPlatformSet(releases: readonly ReleaseDto[]): Set<Platform> {
   return new Set(releases.map((row) => row.platform));
 }
+
+/** Has the Worker checked this build against the file an updater downloads? */
+export function isVerified(row: ReleaseDto): boolean {
+  return row.verifiedAt != null;
+}
+
+/** The words `publishBlockReason` needs; a slice of `copy`, passed in. */
+export type PublishWords = {
+  platform: Record<Platform, string>;
+  publishBlocked: {
+    unwired: (platform: string) => string;
+    unverified: string;
+    unsigned: string;
+  };
+};
+
+/**
+ * Why this build cannot be published, or null when it can.
+ *
+ * The Worker refuses all three of these, and it is the authority. The console
+ * asks the same three questions first so the operator reads the reason on the
+ * button instead of discovering it in a dialog that failed — and so the answer
+ * is the same answer, in the same order, on both sides of the wire.
+ *
+ * A channel that has not loaded yet blocks nothing: unknown is not 未接, and
+ * greying a button on a pending request is how a page teaches people to reload.
+ */
+export function publishBlockReason(
+  row: ReleaseDto,
+  channel: UpdateChannelDto | null,
+  words: PublishWords,
+): string | null {
+  if (channel !== null && !channel.wired) {
+    return words.publishBlocked.unwired(words.platform[row.platform]);
+  }
+  if (!isVerified(row)) return words.publishBlocked.unverified;
+  if (channel !== null && channel.wired && row.signed !== true) {
+    return words.publishBlocked.unsigned;
+  }
+  return null;
+}
+

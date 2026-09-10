@@ -1,5 +1,11 @@
 import { useMemo } from 'react';
-import type { AdoptionMatrixDto, Platform, ReleaseDto, SystemHealthDto } from '@contract';
+import type {
+  AdoptionMatrixDto,
+  Platform,
+  ReleaseDto,
+  SystemHealthDto,
+  UpdateChannelDto,
+} from '@contract';
 import { PLATFORMS } from '@contract';
 import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
@@ -32,6 +38,17 @@ export default function ClientsPage({
   onChanged: () => void;
 }) {
   const adoption = useResource('releases/adoption', (signal) => opsApi.releaseAdoption(signal));
+  // The update channels travel with the release tables rather than as a block
+  // of their own: what an operator needs from them is whether publishing on
+  // *this* platform does anything, and that belongs on the button.
+  const channels = useResource('releases/channels', (signal) => opsApi.releaseChannels(signal));
+  const channelFor = useMemo(() => {
+    const byPlatform = new Map<Platform, UpdateChannelDto>();
+    if (channels.status === 'ready') {
+      for (const row of channels.data.items) byPlatform.set(row.platform, row);
+    }
+    return (platform: Platform) => byPlatform.get(platform) ?? null;
+  }, [channels]);
   const rows = useMemo(
     () => (releases.status === 'ready' ? releases.data : []),
     [releases],
@@ -64,7 +81,7 @@ export default function ClientsPage({
           </p>
         )}
         <PageNote
-          fetchedAt={newestFetch(releases, adoption, health)}
+          fetchedAt={newestFetch(releases, adoption, channels, health)}
           backfill={health.status === 'ready' ? health.data.backfill : null}
         />
       </div>
@@ -100,11 +117,15 @@ export default function ClientsPage({
                     "MACOS" is not what the platform is called. */}
                 <h3 className="text-body font-medium text-[var(--muted-foreground)]">
                   {copy.platform[platform]}
+                  {channelFor(platform)?.wired === false ? (
+                    <span className="ml-2 text-fine">{copy.releaseUnwiredHint}</span>
+                  ) : null}
                 </h3>
                 <ReleaseTable
                   platform={platform}
                   releases={rows}
-                  onChanged={() => { onChanged(); adoption.reload(); }}
+                  channel={channelFor(platform)}
+                  onChanged={() => { onChanged(); adoption.reload(); channels.reload(); }}
                 />
               </div>
             ))}
