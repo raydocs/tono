@@ -108,18 +108,20 @@ export function App() {
                 <CustomersPage
                   customers={customers}
                   releases={releases}
+                  health={health}
                   platform={route.platform}
                   bucket={route.bucket}
                 />
               )
           )
             : route.page === 'clients'
-              ? <ClientsPage releases={releases} onChanged={releases.reload} />
+              ? <ClientsPage releases={releases} health={health} onChanged={releases.reload} />
               : route.page === 'settings' ? <SettingsPage section={route.section} />
                 : (
                   <TodayPage
                     incidents={incidents}
                     customers={customers}
+                    health={health}
                     releases={releases}
                     nodes={legacyNodes}
                     selected={route.incident}

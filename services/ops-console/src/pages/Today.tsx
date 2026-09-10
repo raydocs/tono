@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { CustomerSummaryDto, IncidentDto, ReleaseDto } from '@contract';
+import type { CustomerSummaryDto, IncidentDto, ReleaseDto, SystemHealthDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
+import { PageNote } from '@/components/ops/PageNote';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { customerChores, fleetChores, sortChores, type Chore } from '@/lib/chores';
@@ -20,7 +21,7 @@ import {
 import { minSupportedVersions } from '@/lib/releases';
 import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
-import type { Resource } from '@/lib/use-resource';
+import { newestFetch, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
 import { IncidentPrimary } from './today/IncidentAction';
 import { IncidentDrawer } from './today/IncidentDrawer';
@@ -31,6 +32,7 @@ type TabId = (typeof TABS)[number];
 export default function TodayPage({
   incidents,
   customers,
+  health,
   releases,
   nodes,
   selected,
@@ -38,6 +40,7 @@ export default function TodayPage({
 }: {
   incidents: Resource<IncidentDto[]>;
   customers: Resource<CustomerSummaryDto[]>;
+  health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   nodes: FleetNodeDto[];
   selected: string | null;
@@ -87,6 +90,11 @@ export default function TodayPage({
           {incidents.status === 'loading' ? copy.loading : copy.loadError}
         </p>
       )}
+
+      <PageNote
+        fetchedAt={newestFetch(incidents, customers, health)}
+        backfill={health.status === 'ready' ? health.data.backfill : null}
+      />
 
       <div className="flex items-center gap-5 border-b border-[var(--hairline)] text-body">
         {TABS.map((id) => (

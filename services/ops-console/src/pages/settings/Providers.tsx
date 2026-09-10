@@ -147,7 +147,7 @@ function providerColumns(): DataColumn<ProviderAccountDto>[] {
             className="underline-offset-4 hover:underline"
             onClick={(event) => event.stopPropagation()}
           >
-            <span className="text-[var(--accent)]">{copy.settings.openLink}</span>
+            <span className="text-[color:var(--accent)]">{copy.settings.openLink}</span>
           </a>
         )),
     },

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto } from '@contract';
+import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto, SystemHealthDto } from '@contract';
 import { ADOPTION_BUCKETS } from '@contract';
 import { Chip } from '@/components/ops/Chip';
 import { CountText } from '@/components/ops/CountText';
+import { PageNote } from '@/components/ops/PageNote';
 import { DataTable, type DataColumn, type TableState } from '@/components/ops/DataTable';
 import { QuotaBar } from '@/components/ops/QuotaGauge';
 import { StatusWord } from '@/components/ops/StatusWord';
@@ -29,7 +30,7 @@ import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { shown } from '@/lib/sources';
 import { cn } from '@/lib/utils';
-import type { Resource } from '@/lib/use-resource';
+import { newestFetch, type Resource } from '@/lib/use-resource';
 import type { Tone } from '@/components/ops/StatusWord';
 
 type Mask = (email: string) => string;
@@ -44,10 +45,12 @@ const FRAGMENT_TONE: Record<CustomerFilterId, Tone | 'none'> = {
 export default function CustomersPage({
   customers,
   releases,
+  health,
   platform,
   bucket,
 }: {
   customers: Resource<CustomerSummaryDto[]>;
+  health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   /** Both come from the URL: a clients-matrix cell is a link into this page. */
   platform: Platform | null;
@@ -113,6 +116,11 @@ export default function CustomersPage({
             {customers.status === 'loading' ? copy.loading : copy.loadError}
           </p>
         )}
+
+        <PageNote
+          fetchedAt={newestFetch(customers, health)}
+          backfill={health.status === 'ready' ? health.data.backfill : null}
+        />
 
         {/* The fleet page's rule for a column nobody has filled in yet: drop
             it, and say once, quietly, what is missing. */}
