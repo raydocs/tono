@@ -39,6 +39,12 @@ pub enum OwnerSample {
     Status {
         is_active: bool,
         desired_core_should_be_running: bool,
+        /// `true` when the Service could not read this owner's durable desired state for this
+        /// sample, so `desired_core_should_be_running` is a placeholder rather than an
+        /// observation. Such a sample must not be read as "the owner wants its core stopped":
+        /// the read can fail transiently while the tunnel is perfectly healthy, so the client
+        /// keeps what it already believes instead of tearing a healthy session down.
+        desired_state_unknown: bool,
         service_state: ServiceLifecycleState,
         core_pid: Option<u32>,
     },
@@ -104,6 +110,7 @@ impl OwnerWatch {
             // cloud policy passes through twice. The handoff now also cancels the monitor; this
             // is the belt to that braces.
             OwnerSample::NotActive => {
+                self.unreadable_samples = 0;
                 self.displaced_samples = self.displaced_samples.saturating_add(1);
                 if self.displaced_samples >= SUSTAINED_SAMPLES {
                     OwnerStep::Recover(OwnerRecoveryReason::Displaced)
@@ -114,6 +121,7 @@ impl OwnerWatch {
             OwnerSample::Status {
                 is_active,
                 desired_core_should_be_running,
+                desired_state_unknown,
                 service_state,
                 core_pid,
             } => {
@@ -132,6 +140,7 @@ impl OwnerWatch {
                 match recovery_reason(
                     is_active,
                     desired_core_should_be_running,
+                    desired_state_unknown,
                     service_state,
                     core_pid,
                     self.missing_core_samples,
@@ -168,6 +177,7 @@ const fn is_settling(service_state: ServiceLifecycleState) -> bool {
 const fn recovery_reason(
     is_active: bool,
     desired_running: bool,
+    desired_unknown: bool,
     service_state: ServiceLifecycleState,
     core_pid: Option<u32>,
     missing_core_samples: u8,
@@ -182,7 +192,12 @@ const fn recovery_reason(
         return None;
     }
     let core_is_gone = !is_settling(service_state) && core_pid.is_none() && missing_core_samples >= SUSTAINED_SAMPLES;
-    if !desired_running || matches!(service_state, ServiceLifecycleState::Fatal) || core_is_gone {
+    // A desired state the Service could not read is not a deliberate stop: the read fails
+    // transiently while the tunnel is healthy, and one such sample — out of a poll every two
+    // seconds — used to tear a healthy session down. Gate only the `!desired_running` arm;
+    // `Fatal` and a genuinely gone core still recover as before, so an unknown read cannot hide
+    // either one.
+    if (!desired_running && !desired_unknown) || matches!(service_state, ServiceLifecycleState::Fatal) || core_is_gone {
         return Some(OwnerRecoveryReason::SameOwnerFailure);
     }
     None
@@ -197,6 +212,7 @@ mod tests {
         OwnerSample::Status {
             is_active: true,
             desired_core_should_be_running: true,
+            desired_state_unknown: false,
             service_state: ServiceLifecycleState::Running,
             core_pid: Some(42),
         }
@@ -206,6 +222,7 @@ mod tests {
         OwnerSample::Status {
             is_active: true,
             desired_core_should_be_running: true,
+            desired_state_unknown: false,
             service_state,
             core_pid: None,
         }
@@ -287,10 +304,30 @@ mod tests {
         assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
     }
 
+    #[test]
+    fn a_not_active_sample_breaks_an_unreadable_run() {
+        // `NotActive` is a readable Service reply, so it must clear the unreadable run just as
+        // a `Status` reply does. Without the reset in the `NotActive` arm, the sequence
+        // Unreadable, Unreadable, NotActive, Unreadable, Unreadable would reach
+        // `unreadable_samples == 3` on a single consecutive unreadable sample and fire a
+        // spurious `VerifyTransport`.
+        let mut watch = OwnerWatch::new();
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::NotActive), OwnerStep::Continue);
+
+        // The run restarted at the NotActive sample: only a fresh stretch of three
+        // consecutive unreadable samples may ask about the transport again.
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::Continue);
+        assert_eq!(watch.observe(OwnerSample::Unreadable), OwnerStep::VerifyTransport);
+    }
+
     const fn not_the_owner() -> OwnerSample {
         OwnerSample::Status {
             is_active: false,
             desired_core_should_be_running: true,
+            desired_state_unknown: false,
             service_state: ServiceLifecycleState::Running,
             core_pid: Some(1),
         }
@@ -338,6 +375,7 @@ mod tests {
         let sample = OwnerSample::Status {
             is_active: true,
             desired_core_should_be_running: true,
+            desired_state_unknown: false,
             service_state: ServiceLifecycleState::Fatal,
             core_pid: Some(1),
         };
@@ -353,6 +391,7 @@ mod tests {
         let sample = OwnerSample::Status {
             is_active: true,
             desired_core_should_be_running: false,
+            desired_state_unknown: false,
             service_state: ServiceLifecycleState::Running,
             core_pid: Some(1),
         };
@@ -360,6 +399,131 @@ mod tests {
             watch.observe(sample),
             OwnerStep::Recover(OwnerRecoveryReason::SameOwnerFailure)
         );
+    }
+
+    // A failed desired-state read is the one `Status` sample the Service intentionally publishes
+    // with `desired_core_should_be_running = false` that is *not* a deliberate stop. The whole
+    // point of `desired_state_unknown` is that such a sample must never tear a healthy session
+    // down, and `recovery_reason` must only let the `!desired_running` arm fire when the read
+    // actually succeeded.
+
+    const fn transient_desired_read_failure(service_state: ServiceLifecycleState) -> OwnerSample {
+        OwnerSample::Status {
+            is_active: true,
+            desired_core_should_be_running: false,
+            desired_state_unknown: true,
+            service_state,
+            core_pid: Some(1),
+        }
+    }
+
+    #[test]
+    fn a_transient_desired_state_read_failure_preserves_a_healthy_session() {
+        // The Service could not read `desired-state.json` for one poll but the active owner and
+        // core are healthy — the very first such sample used to tear the session down.
+        let mut watch = OwnerWatch::new();
+        assert_eq!(
+            watch.observe(transient_desired_read_failure(ServiceLifecycleState::Running)),
+            OwnerStep::Continue
+        );
+    }
+
+    #[test]
+    fn a_sustained_transient_desired_state_read_failure_keeps_the_session_alive() {
+        // The desired read can stay unreadable for many polls while the core keeps running; it
+        // must never be promoted to a recovery.
+        let mut watch = OwnerWatch::new();
+        let sample = transient_desired_read_failure(ServiceLifecycleState::Running);
+        for _ in 0..10 {
+            assert_eq!(watch.observe(sample), OwnerStep::Continue);
+        }
+        // The watch stays clean: nothing accumulated toward any recovery.
+        assert_eq!(watch, OwnerWatch::new());
+    }
+
+    #[test]
+    fn an_unknown_desired_state_does_not_mask_a_fatal_core() {
+        // `effective_service_state` passes a Fatal core through even when the desired state is
+        // unknown; the App must recover immediately — the flag gates only the deliberate stop.
+        let mut watch = OwnerWatch::new();
+        assert_eq!(
+            watch.observe(transient_desired_read_failure(ServiceLifecycleState::Fatal)),
+            OwnerStep::Recover(OwnerRecoveryReason::SameOwnerFailure)
+        );
+    }
+
+    #[test]
+    fn an_unknown_desired_state_does_not_mask_a_gone_core() {
+        // If the core actually disappears while the desired read stays unreadable, the existing
+        // `core_is_gone` debounce must still fire after `SUSTAINED_SAMPLES`.
+        let mut watch = OwnerWatch::new();
+        let gone = OwnerSample::Status {
+            is_active: true,
+            desired_core_should_be_running: false,
+            desired_state_unknown: true,
+            service_state: ServiceLifecycleState::Running,
+            core_pid: None,
+        };
+        assert_eq!(watch.observe(gone), OwnerStep::Continue);
+        assert_eq!(watch.observe(gone), OwnerStep::Continue);
+        assert_eq!(
+            watch.observe(gone),
+            OwnerStep::Recover(OwnerRecoveryReason::SameOwnerFailure)
+        );
+    }
+
+    #[test]
+    fn a_settling_core_with_an_unknown_desired_state_is_tolerated() {
+        // While the core is still Starting/RecoveringCore a missing PID is expected, and an
+        // unknown desired state must not turn a healthy startup into a teardown.
+        for state in [ServiceLifecycleState::Starting, ServiceLifecycleState::RecoveringCore] {
+            let mut watch = OwnerWatch::new();
+            let settling = OwnerSample::Status {
+                is_active: true,
+                desired_core_should_be_running: false,
+                desired_state_unknown: true,
+                service_state: state,
+                core_pid: None,
+            };
+            for _ in 0..10 {
+                assert_eq!(watch.observe(settling), OwnerStep::Continue, "{state:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_deliberate_stop_after_an_unknown_run_recovers_immediately() {
+        // The owner really issued a stop: `desired_state_unknown = false` with
+        // `desired_core_should_be_running = false`. A preceding run of unknown samples must not
+        // keep the session alive past a genuine stop — the whole point is to preserve the session
+        // only while the desired intent is genuinely unknown.
+        let mut watch = OwnerWatch::new();
+        let unknown = transient_desired_read_failure(ServiceLifecycleState::Running);
+        let deliberate_stop = OwnerSample::Status {
+            is_active: true,
+            desired_core_should_be_running: false,
+            desired_state_unknown: false,
+            service_state: ServiceLifecycleState::Running,
+            core_pid: Some(1),
+        };
+        watch.observe(unknown);
+        watch.observe(unknown);
+        assert_eq!(
+            watch.observe(deliberate_stop),
+            OwnerStep::Recover(OwnerRecoveryReason::SameOwnerFailure)
+        );
+    }
+
+    #[test]
+    fn a_healthy_sample_after_an_unknown_run_returns_to_clean() {
+        // The desired read succeeds again and wants the core running: the watch must read it as
+        // an ordinary healthy sample, and a subsequent single blip is still tolerated.
+        let mut watch = OwnerWatch::new();
+        let unknown = transient_desired_read_failure(ServiceLifecycleState::Running);
+        watch.observe(unknown);
+        watch.observe(unknown);
+        assert_eq!(watch.observe(healthy()), OwnerStep::Continue);
+        assert_eq!(watch.observe(unknown), OwnerStep::Continue);
     }
 
     #[test]
@@ -417,6 +581,28 @@ mod tests {
         assert_eq!(
             watch.observe(core_gone(ServiceLifecycleState::Running)),
             OwnerStep::Continue
+        );
+    }
+
+    #[test]
+    fn a_not_active_sample_does_not_reset_a_missing_core_run() {
+        // `NotActive` carries no Core PID, so the fix that clears the unreadable run must NOT
+        // also clear the missing-core run. Here two missing-core samples are followed by a
+        // `NotActive`, then a third missing-core sample: the run must escalate exactly as it
+        // would without the `NotActive`.
+        let mut watch = OwnerWatch::new();
+        assert_eq!(
+            watch.observe(core_gone(ServiceLifecycleState::Running)),
+            OwnerStep::Continue
+        );
+        assert_eq!(
+            watch.observe(core_gone(ServiceLifecycleState::Running)),
+            OwnerStep::Continue
+        );
+        assert_eq!(watch.observe(OwnerSample::NotActive), OwnerStep::Continue);
+        assert_eq!(
+            watch.observe(core_gone(ServiceLifecycleState::Running)),
+            OwnerStep::Recover(OwnerRecoveryReason::SameOwnerFailure)
         );
     }
 }
