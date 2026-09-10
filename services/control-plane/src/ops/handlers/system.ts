@@ -1,4 +1,5 @@
-import { CONTRACT_VERSION, SOURCE_IDS, assertSystemHealth, type CronStepsHealthDto, type SourceHealthDto, type SourceId, type SourceState, type SystemHealthDto } from '../contract';
+import { envInt } from '../../env';
+import { CONTRACT_VERSION, SOURCE_IDS, assertSystemHealth, type BackfillHealthDto, type CronStepsHealthDto, type SourceHealthDto, type SourceId, type SourceState, type SystemHealthDto } from '../contract';
 import { storedLiveSnapshot } from '../live';
 import { OPS_CRON_STEPS, parseLastReport } from '../cron';
 import {
@@ -11,6 +12,8 @@ import {
   nullText,
   weakEtag,
 } from './common';
+
+const TELEMETRY_RETENTION_DEFAULT = 30 * 86_400;
 
 const STALE: Record<SourceId, number> = {
   collector: 20 * 60,
@@ -64,6 +67,36 @@ async function sourceAsOf(e: Env, source: SourceId, live: Awaited<ReturnType<typ
   }
 }
 
+async function backfillHealth(e: Env, t: number): Promise<BackfillHealthDto | null> {
+  try {
+    const cutoff = t - envInt(e, 'TELEMETRY_RETENTION_SECONDS', TELEMETRY_RETENTION_DEFAULT);
+    const row = await e.DB.prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM telemetry_windows WHERE received_at > ?) AS windowsTotal,
+         (SELECT COUNT(*) FROM telemetry_windows tw
+            JOIN ops_flatten_cursor c ON c.singleton_id = 1
+            WHERE tw.received_at > ?
+              AND (tw.received_at < c.last_received_at
+                OR (tw.received_at = c.last_received_at AND tw.id <= c.last_window_id))) AS windowsFlattened,
+         (SELECT COUNT(*) FROM telemetry_windows tw
+            JOIN ops_customer_projection_cursor c ON c.singleton_id = 1
+            WHERE tw.received_at > ?
+              AND (tw.received_at < c.last_received_at
+                OR (tw.received_at = c.last_received_at AND tw.id <= c.last_window_id))) AS windowsProjected`,
+    ).bind(cutoff, cutoff, cutoff).first<Row>();
+    const windowsTotal = Number(row?.windowsTotal ?? 0);
+    const windowsFlattened = Number(row?.windowsFlattened ?? 0);
+    const windowsProjected = Number(row?.windowsProjected ?? 0);
+    if (windowsTotal === 0 || (windowsFlattened >= windowsTotal && windowsProjected >= windowsTotal)) {
+      return null;
+    }
+    return { windowsTotal, windowsFlattened, windowsProjected };
+  } catch (error) {
+    if (missingTable(error)) return null;
+    throw error;
+  }
+}
+
 export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
   const t = now();
   const live = await storedLiveSnapshot(e);
@@ -110,7 +143,7 @@ export async function getSystemHealth(req: Request, e: Env): Promise<Response> {
     cronLastDurationMs,
     cronLastError,
     cronSteps,
-    backfill: null,
+    backfill: await backfillHealth(e, t),
     updatedAt: t,
   };
   // A missing source is not ok — the 死人开关.

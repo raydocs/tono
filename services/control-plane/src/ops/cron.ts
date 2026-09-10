@@ -4,7 +4,7 @@
 
 import { type Env } from '../env';
 import { flattenBacklog, retainConnectionDaily, retainConnectionEvents, rollupConnectionDaily } from './flatten';
-import { projectBacklog, retainActivityHours, retainSessions } from './customers';
+import { PROJECT_BACKLOG_LIMIT, projectBacklog, retainActivityHours, retainSessions } from './customers';
 import { retainDeliveries } from './alerts';
 import { expireStaleJobs } from './jobs';
 import { readAgentNetCounters, rollAllNodeCycles } from './quota';
@@ -17,6 +17,7 @@ const DAY = 86_400;
 const HOUR = 3_600;
 const DAILY_SETTLE_SECONDS = 2 * HOUR;
 const RETAIN_LIMIT = 500;
+const FLATTEN_WINDOWS_PER_TICK = 200;
 
 export type OpsCronStep<T extends Record<string, unknown> = {}> = {
   ok: boolean;
@@ -178,8 +179,8 @@ async function runRetention(db: D1Database, nowSec: number): Promise<void> {
 }
 
 export async function runOpsCron(e: Env, nowSec: number): Promise<OpsCronReport> {
-  const flatten = await step('flatten', { windows: 0, rows: 0 }, () => flattenBacklog(e.DB, nowSec, 200));
-  const project = await step('project', { windows: 0, hours: 0 }, () => projectBacklog(e.DB, nowSec, 200));
+  const flatten = await step('flatten', { windows: 0, rows: 0 }, () => flattenBacklog(e.DB, nowSec, FLATTEN_WINDOWS_PER_TICK));
+  const project = await step('project', { windows: 0, hours: 0 }, () => projectBacklog(e.DB, nowSec, PROJECT_BACKLOG_LIMIT));
 
   let alertTransitions: Awaited<ReturnType<typeof runVerdictPass>>['transitions'] = [];
   const verdicts = await step('verdicts', { nodes: 0, transitions: 0 }, async () => {

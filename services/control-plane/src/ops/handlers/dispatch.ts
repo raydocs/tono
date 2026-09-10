@@ -1,7 +1,7 @@
 import type { Env } from '../../env';
 import {
   getNodes, getNode, getNodeBindings, getNodeHistory, getNodeConnections,
-  getNodeErrors, getNodeJobs, postNodeJob,
+  getNodeErrors, getNodeJobs, postNodeJob, patchNodeProfile,
 } from './nodes';
 import {
   getCustomers, getCustomer, getCustomerConnections, getCustomerActivity,
@@ -37,6 +37,7 @@ export const OPS_V1_ROUTES = [
   'GET /api/v1/ops/nodes/{name}/bindings',
   'GET /api/v1/ops/nodes/{name}/jobs',
   'POST /api/v1/ops/nodes/{name}/jobs',
+  'PATCH /api/v1/ops/nodes/{name}/profile',
   'GET /api/v1/ops/customers',
   'GET /api/v1/ops/customers/{id}',
   'GET /api/v1/ops/customers/{id}/connections',
@@ -91,6 +92,7 @@ const ROUTES: Array<{ method: string; re: RegExp; handle: Handler }> = [
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/bindings$/, handle: (req, e, _a, p) => getNodeBindings(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/jobs$/, handle: (req, e, _a, p) => getNodeJobs(req, e, p[0]) },
   { method: 'POST', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/jobs$/, handle: (req, e, a, p) => postNodeJob(req, e, p[0], a) },
+  { method: 'PATCH', re: /^\/api\/v1\/ops\/nodes\/([^/]+)\/profile$/, handle: (req, e, a, p) => patchNodeProfile(req, e, p[0], a) },
   { method: 'GET', re: /^\/api\/v1\/ops\/nodes\/([^/]+)$/, handle: (req, e, _a, p) => getNode(req, e, p[0]) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers$/, handle: (req, e) => getCustomers(req, e) },
   { method: 'GET', re: /^\/api\/v1\/ops\/customers\/([^/]+)\/connections$/, handle: (req, e, _a, p) => getCustomerConnections(req, e, p[0]) },
