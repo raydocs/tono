@@ -7,21 +7,27 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import type { CustomerSummaryDto, IncidentDto } from '@contract';
+import type { CustomerSummaryDto, IncidentDto, NodeSummaryDto } from '@contract';
 import { copy, type PageId } from '@/copy/copy';
 import { goPage, openCustomer, openIncident, openNode } from '@/lib/hash-route';
 import { openIncidents } from '@/lib/incidents';
 import { usePrivacy } from '@/lib/privacy';
-import type { FleetNodeDto } from '@/lib/types';
 
 const PAGE_IDS = Object.keys(copy.pages) as PageId[];
 
+/**
+ * Four things to type at: a page, an open incident, a customer, a machine.
+ *
+ * The node list is the engine's, not the legacy fleet read's, so ⌘K and the
+ * nodes page hold the same fleet — a machine the console will not show you is a
+ * machine you cannot jump to either.
+ */
 export function CommandPalette({
   nodes,
   customers,
   incidents,
 }: {
-  nodes: FleetNodeDto[];
+  nodes: NodeSummaryDto[];
   customers: CustomerSummaryDto[];
   incidents: IncidentDto[];
 }) {

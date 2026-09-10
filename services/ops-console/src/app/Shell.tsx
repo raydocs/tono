@@ -12,13 +12,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { copy, type PageId } from '@/copy/copy';
 import { cn } from '@/lib/utils';
-import { formatWhen, formatWhenAgo } from '@/lib/display';
 import { BLANK_ROUTE, goPage, readRoute, type OpsRoute } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
+import { consoleBehind, worstSource } from '@/lib/sources';
 import { useTheme, type ThemeChoice } from '@/lib/theme';
-import { sourceStamp, type FleetState } from '@/lib/use-fleet';
-import type { CustomerSummaryDto, IncidentDto } from '@contract';
-import type { FleetNodeDto } from '@/lib/types';
+import type { FleetState } from '@/lib/use-fleet';
+import type { Resource } from '@/lib/use-resource';
+import type { CustomerSummaryDto, IncidentDto, NodeSummaryDto, SystemHealthDto } from '@contract';
 import { CommandPalette } from './CommandPalette';
 import { Enter } from './Enter';
 
@@ -35,13 +35,18 @@ const THEMES: ThemeChoice[] = ['system', 'light', 'dark'];
 export function Shell({
   children,
   fleet,
+  health,
+  fetchedAt,
   nodes,
   customers,
   incidents,
 }: {
   children: ReactNode;
   fleet: FleetState;
-  nodes: FleetNodeDto[];
+  health: Resource<SystemHealthDto>;
+  /** When the shell last heard back, across all of its reads. */
+  fetchedAt: number | null;
+  nodes: NodeSummaryDto[];
   customers: CustomerSummaryDto[];
   incidents: IncidentDto[];
 }) {
@@ -61,9 +66,9 @@ export function Shell({
     };
   }, []);
 
-  const stamp = useMemo(
-    () => sourceStamp(fleet.status === 'ready' ? fleet.fleet : null),
-    [fleet],
+  const sources = useMemo(
+    () => (health.status === 'ready' ? worstSource(health.data) : null),
+    [health],
   );
 
   return (
@@ -109,7 +114,7 @@ export function Shell({
         <header className="flex h-14 items-center gap-3 border-b border-[var(--hairline)] bg-[var(--surface)] px-4 min-[960px]:px-6">
           <h1 className="text-page mr-auto truncate">{copy.pages[route.page]}</h1>
           <SearchBox />
-          <SourcePill ok={stamp.ok} at={stamp.at} />
+          <SourcePill sources={sources} behind={consoleBehind(fetchedAt)} />
           <PreferencesMenu theme={theme} privacy={privacy} />
         </header>
 
@@ -216,26 +221,34 @@ function PreferencesMenu({
 }
 
 /**
- * How stale the fleet is, in words. "03:23" told the operator the clock time
- * of the last read but not whether that was a minute or a day ago, which is
- * the only thing this pill exists to answer; the exact stamp moves to the
- * tooltip. With no `sources` in the response there is nothing to be sure
- * about, so the pill goes grey and says so rather than implying freshness.
+ * Which source the page cannot be trusted about, in five words.
+ *
+ * It used to call the sources fine as soon as any one of them was ready, so a
+ * nineteen-hour-old mainland sweep and a fresh read looked identical, and the
+ * one thing the operator wanted to know — which feed is dead — was on no page
+ * at all. Now the weakest source names itself, the rest are one hover away, and
+ * the healthy word requires every source to be ready.
+ *
+ * `behind` outranks all of it: if the console itself has stopped hearing back,
+ * nothing it knows about the sources is current either.
  */
-function SourcePill({ ok, at }: { ok: boolean; at: number | null }) {
-  if (!ok || at == null) {
-    return (
-      <span className="raised rounded-[999px] bg-[var(--background)] px-2.5 py-1 text-micro text-[var(--muted-foreground)]">
-        {copy.sourceUnknown}
-      </span>
-    );
+function SourcePill({
+  sources,
+  behind,
+}: {
+  sources: ReturnType<typeof worstSource>;
+  behind: boolean;
+}) {
+  const shell = 'source-pill raised rounded-[999px] bg-[var(--background)] px-2.5 py-1 text-micro';
+  if (behind) {
+    return <span className={cn(shell, 'tone-warn')}>{copy.consoleStale}</span>;
+  }
+  if (sources === null) {
+    return <span className={cn(shell, 'tone-unk')}>{copy.sourceUnknown}</span>;
   }
   return (
-    <span
-      className="raised rounded-[999px] bg-[var(--background)] px-2.5 py-1 text-micro"
-      title={formatWhen(at)}
-    >
-      {copy.sourceOk} · <span className="font-mono normal-case tracking-normal">{formatWhenAgo(at)}</span>
+    <span className={cn(shell, `tone-${sources.tone}`)} title={sources.title}>
+      {sources.text}
     </span>
   );
 }

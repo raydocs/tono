@@ -1,5 +1,9 @@
 // The shell, the fleet, and the words every page borrows: sources, health
 // words, relative time, units.
+
+/** Named once so the pill's two forms cannot drift apart. */
+const SOURCE_OK = '数据源 正常';
+
 export const shellCopy = {
   brand: 'Tono',
   brandSub: '运维',
@@ -24,15 +28,47 @@ export const shellCopy = {
   /** The avatar menu: everything that is a preference rather than a fact. */
   preferences: '偏好',
   appearance: '外观',
-  sourceOk: '数据源 正常',
+  sourceOk: SOURCE_OK,
+  sourceFresh: (when: string) => `${SOURCE_OK} · ${when}`,
   sourceUnknown: '数据源 未知',
+  /**
+   * The header capsule names the weakest source, because that is the one that
+   * decides how much of the page can be trusted. 未接 is deliberately not an
+   * alarm: an executor nobody has installed yet is expected, and a red pill for
+   * it would teach the operator to ignore the pill.
+   */
+  sourceLate: (who: string, lasting: string) => `${who} 停了 ${lasting}`,
+  sourceGone: (who: string) => `${who} 未接`,
+  sourceBroken: (who: string) => `${who} 不通`,
+  /** The hover list: every source, how it is doing, and when it last spoke. */
+  sourceState: {
+    ready: '正常',
+    stale: '停了',
+    error: '不通',
+    missing: '未接',
+  } as const,
+  sourceLine: (who: string, state: string, when: string) => `${who} ${state} · ${when}`,
+  sourceLineNever: (who: string, state: string) => `${who} ${state}`,
+  /**
+   * How old the page in front of you is. It refreshes itself every minute, so
+   * a stamp that has stopped moving means the console stopped hearing back —
+   * which the reader has to be told, not left to infer from numbers that look
+   * as current as ever.
+   */
+  pageAsOf: (when: string) => `本页截至 ${when}`,
+  consoleStale: '后台没响应',
+  /**
+   * Right after a deploy the pages read as silent for hours while thirty days
+   * of telemetry are worked through. This says so, with how far along it is,
+   * instead of letting the page look broken.
+   */
+  backfilling: (done: string, total: string, minutes: string) =>
+    `正在回填 30 天遥测：已处理 ${done} / ${total}，约 ${minutes} 分钟后齐`,
   sessionExpired: '登录已过期',
   sessionExpiredBody: '登录已过期，页面上的数据不会再更新。重新登录后继续。',
   reload: '重新登录',
   viewCards: '卡片',
   viewTable: '表格',
-  listed: '在售',
-  unlisted: '未上架',
   occupancy: '在用人数',
   occupancyUnit: '人',
   periodTraffic: '本周期流量',
@@ -88,11 +124,21 @@ export const shellCopy = {
     ok: '正常',
     unmeasured: '未测',
   } as const,
+  /**
+   * The count sentence, one fragment per health word, in the order the engine
+   * ranks them. It reads as prose and behaves as a filter, so the words are the
+   * same ones the cards carry — 在售 belongs to the lifecycle chips and is
+   * deliberately not repeated here.
+   */
   count: {
-    listed: (n: number) => `${n} 台在售`,
+    lost: (n: number) => `${n} 台失联`,
     blocked: (n: number) => `${n} 台被墙`,
+    degraded: (n: number) => `${n} 台劣化`,
+    ok: (n: number) => `${n} 台正常`,
     unmeasured: (n: number) => `${n} 台未测`,
   },
+  /** The worst carrier on each leg, as the card prints it. */
+  worstCarrier: (who: string, first: string, second: string) => `${who} ${first} · ${second}`,
   /** A span, not a point: "已持续 2 小时" reads wrong as "2 小时前". */
   lasting: {
     now: '不到 1 分钟',

@@ -8,9 +8,11 @@ import type {
   IncidentDetailDto,
   IncidentDto,
   ListDto,
+  NodeSummaryDto,
   RangeKey,
   ReleaseDto,
   ServiceUsageDto,
+  SystemHealthDto,
 } from '@contract';
 import { copy } from '@/copy/copy';
 import type { FleetDto, LiveDto } from './types';
@@ -101,6 +103,47 @@ export async function getJson<T>(
 }
 
 /**
+ * A whole list, not its first page.
+ *
+ * The Worker answers fifty rows by default and two hundred at most, and the
+ * console asked for one page: customer fifty-one was missing from ⌘K, from the
+ * count sentence and from the chores, with nothing on screen to say a page had
+ * been cut off. This follows `nextCursor` to the end.
+ *
+ * Two guards. `MAX_ITEMS` stops a fleet that has grown by two orders of
+ * magnitude from hanging the shell, and a cursor that repeats itself ends the
+ * walk rather than looping for ever — a paging bug on the far side should cost
+ * the tail of a list, not the browser tab.
+ */
+const PAGE_LIMIT = 200;
+const MAX_ITEMS = 2_000;
+
+export async function getAllJson<T>(
+  path: string,
+  signal?: AbortSignal,
+  query?: Record<string, string>,
+): Promise<ListDto<T>> {
+  const items: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  let page: ListDto<T>;
+  do {
+    page = await getJson<ListDto<T>>(path, signal, {
+      ...query,
+      limit: String(PAGE_LIMIT),
+      ...(cursor === null ? {} : { cursor }),
+    });
+    items.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor !== null && seen.has(cursor)) cursor = null;
+    if (cursor !== null) seen.add(cursor);
+  } while (cursor !== null && items.length < MAX_ITEMS && page.items.length > 0);
+  // `total` travels with the envelope: an endpoint that counted cheaply said so,
+  // and paging is not a reason to lose the count.
+  return { ...page, items: items.slice(0, MAX_ITEMS), nextCursor: cursor };
+}
+
+/**
  * The write half. The console never patches its own copy of a row after one
  * of these: the Worker owns the state machine (an ack on an already resolved
  * incident is a no-op there, and so is publishing an already published
@@ -153,10 +196,21 @@ export const deleteJson = <T>(path: string, signal?: AbortSignal) =>
 const SNOOZE_SECONDS = 4 * 60 * 60;
 
 export const opsApi = {
+  /**
+   * The fleet as the engine judges it: one verdict, one word, one tone per
+   * machine. 节点 reads this and nothing else for its list, because the old
+   * `fleet-nodes` read made the console judge health a second time — and a
+   * retired box the engine had stopped counting was still shown as 被墙 here
+   * while 今天 said there was no incident.
+   */
+  nodes: (signal?: AbortSignal) => getAllJson<NodeSummaryDto>('nodes', signal),
+  /** Which source is behind, and how far the backfill has left to go. */
+  systemHealth: (signal?: AbortSignal) => getJson<SystemHealthDto>('system/health', signal),
+  /** Kept for the facts no summary carries: address, system, ports, line tags. */
   fleetNodes: (signal?: AbortSignal) => getJson<FleetDto>('fleet-nodes', signal),
   live: async (signal?: AbortSignal) => (await getJson<{ live: LiveDto }>('live', signal)).live,
 
-  customers: (signal?: AbortSignal) => getJson<ListDto<CustomerSummaryDto>>('customers', signal),
+  customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal),
   customer: (id: string, signal?: AbortSignal) =>
     getJson<CustomerDetailDto>(`customers/${encodeURIComponent(id)}`, signal),
   customerConnections: (id: string, signal?: AbortSignal) =>
@@ -168,7 +222,7 @@ export const opsApi = {
   customerServices: (id: string, range: RangeKey, signal?: AbortSignal) =>
     getJson<ListDto<ServiceUsageDto>>(`customers/${encodeURIComponent(id)}/services`, signal, { range }),
 
-  incidents: (signal?: AbortSignal) => getJson<ListDto<IncidentDto>>('incidents', signal),
+  incidents: (signal?: AbortSignal) => getAllJson<IncidentDto>('incidents', signal),
   incident: (id: string, signal?: AbortSignal) =>
     getJson<IncidentDetailDto>(`incidents/${encodeURIComponent(id)}`, signal),
   ackIncident: (id: string) => postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/ack`, {}),
@@ -178,7 +232,7 @@ export const opsApi = {
   noteIncident: (id: string, note: string) =>
     postJson<IncidentDto>(`incidents/${encodeURIComponent(id)}/notes`, { note }),
 
-  releases: (signal?: AbortSignal) => getJson<ListDto<ReleaseDto>>('releases', signal),
+  releases: (signal?: AbortSignal) => getAllJson<ReleaseDto>('releases', signal),
   releaseAdoption: (signal?: AbortSignal) => getJson<AdoptionMatrixDto>('releases/adoption', signal),
   /**
    * All three of the 客户端 page's actions are edits to a release that already
