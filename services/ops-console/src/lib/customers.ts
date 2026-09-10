@@ -1,6 +1,85 @@
-import type { AdoptionBucket, CustomerSummaryDto, Platform } from '@contract';
+import type { AdoptionBucket, CustomerDeviceDto, CustomerSummaryDto, Platform } from '@contract';
 import { ADOPTION_BUCKETS } from '@contract';
 import { bucketFor } from './releases';
+
+const DAY = 86_400;
+
+/** How far 续 30 天 moves a date, in the one place both callers read it from. */
+export const RENEW_DAYS = 30;
+
+/**
+ * Extending is measured from whichever is later: today, or the date already
+ * paid for.
+ *
+ * Anchoring at "now" reads as the kinder default and is the one that loses a
+ * customer money — a renewal pressed a fortnight early used to shorten a
+ * runway from six weeks to four. The old console fixed this the same way; the
+ * rule travels with the arithmetic so the list's batch renewal and the detail
+ * page's button cannot drift apart.
+ */
+export function extendedExpiry(current: number | null, now: number): number {
+  return Math.max(now, current ?? now) + RENEW_DAYS * DAY;
+}
+
+/** Whom 到期客户续 30 天 would actually move: a customer with no date is unlimited. */
+export function renewable(rows: readonly CustomerSummaryDto[]): CustomerSummaryDto[] {
+  return rows.filter((row) => row.expiresAt !== null);
+}
+
+/**
+ * The four remote actions, and which clients can carry out any of them.
+ *
+ * The capability is on the platform rather than on the button because that is
+ * where it actually lives: the queue accepts all four for any device, and a
+ * client that does not implement one leaves the row pending until it expires
+ * five minutes later — a button that looks like it worked and did nothing.
+ * macOS and Windows implement all four today. The rest ship no action handler
+ * at all, so their rows say which platform is missing it rather than greying
+ * out with no reason.
+ */
+export const DEVICE_ACTIONS = [
+  'diagnostic_snapshot',
+  'claude_traffic_snapshot',
+  'refresh_catalog',
+  'retry_protection',
+] as const;
+
+export type DeviceActionId = (typeof DEVICE_ACTIONS)[number];
+
+const PLATFORM_ACTIONS: Record<Platform, readonly DeviceActionId[]> = {
+  macos: DEVICE_ACTIONS,
+  windows: DEVICE_ACTIONS,
+  linux: [],
+  android: [],
+  ios: [],
+};
+
+export function actionsFor(platform: Platform | null): readonly DeviceActionId[] {
+  return platform === null ? [] : PLATFORM_ACTIONS[platform];
+}
+
+/** A revoked device is gone; nothing can be queued for it and it cannot be revoked twice. */
+export function deviceIsLive(device: CustomerDeviceDto): boolean {
+  return device.status !== 'revoked';
+}
+
+/** Which devices a fleet-wide catalogue refresh would actually reach. */
+export function refreshable(devices: readonly CustomerDeviceDto[]): CustomerDeviceDto[] {
+  return devices.filter((device) => (
+    deviceIsLive(device) && actionsFor(device.platform).includes('refresh_catalog')
+  ));
+}
+
+/**
+ * The end of a diagnostics-log window: a full day from now, less a minute.
+ *
+ * The hub refuses anything past 24 hours and compares against its own clock,
+ * so asking for exactly a day from the browser's is a request that fails
+ * whenever the two disagree by a second. The minute is the slack.
+ */
+export function logWindowEnd(now: number): number {
+  return now + DAY - 60;
+}
 
 /**
  * Every fragment of the 客户 count sentence, and the predicate behind it.
