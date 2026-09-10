@@ -450,6 +450,7 @@ describe('ConnectProgressCard', () => {
       'Protection: inactive (reported mode=blocked, wanted=false, live=false)',
     )
     expect(copied).toContain('Failed stage: startingTunnel')
+    expect(copied).toContain('Error code: (none)')
     expect(copied).toContain('Error: dns probe failed')
     expect(copied).toContain('Retry attempt: 2')
     expect(copied).toContain('startingTunnel: current (3.4s)')

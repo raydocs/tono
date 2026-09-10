@@ -518,20 +518,13 @@ extension AppState {
                     // request is in flight. Never let this stale failure path
                     // re-arm protection after the user released it.
                     guard !Task.isCancelled else { return }
-                    let failureMessage: String
-                    if let diagnostic = status.lastError, !diagnostic.isEmpty {
-                        failureMessage = String(
-                            localized: "Core startup failed: \(diagnostic)"
-                        )
-                    } else if !status.running {
-                        failureMessage = String(
-                            localized: "Protection startup failed: \(error.localizedDescription)"
-                        )
-                    } else {
-                        failureMessage = String(
-                            localized: "Connection check failed: \(error.localizedDescription)"
-                        )
-                    }
+                    // Keep Core lastError / localizedDescription on the audit
+                    // and the copyable classified detail. The dashboard must
+                    // not interpolate them — handshake eof used to land as
+                    // English debug on the main card.
+                    let failureMessage = ConnectionFailurePresentation.userFacingMessage(
+                        classified: self.lastClassifiedFailure
+                    )
                     // Deterministic failures repeat verbatim; a fourth try of
                     // three identical same-stage outcomes will not differ.
                     // Environmental failures (no network service while Wi-Fi

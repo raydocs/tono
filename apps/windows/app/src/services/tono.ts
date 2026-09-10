@@ -259,6 +259,9 @@ const mappedTonoActionErrorKey = (raw: string): string | null => {
   ) {
     return 'tono.dashboard.errors.protectedHttpsFailed'
   }
+  if (raw.includes('CORE_EXIT_UNREACHABLE')) {
+    return 'tono.dashboard.errors.nodeUnreachable'
+  }
   for (const { prefix, key } of STABLE_ERROR_KEYS) {
     if (raw.startsWith(prefix) || raw.includes(`${prefix}:`)) {
       return key
@@ -304,6 +307,14 @@ export const formatTonoActionError = (
   error: unknown,
   t?: (key: string) => string,
 ): string => describeTonoActionError(error, t).message
+
+/** First stable `TONO_*` / `CORE_*` token in a diagnostic string, for Copy details. */
+export const stableTonoErrorCode = (
+  raw: string | null | undefined,
+): string | null => {
+  if (!raw) return null
+  return raw.match(/\b((?:TONO|CORE)_[A-Z0-9_]+)\b/)?.[1] ?? null
+}
 
 /**
  * Whether a connect rejection means "no usable server is selected" — the
@@ -560,6 +571,7 @@ export const formatTonoDiagnostics = (
         : '(none)'
     }`,
     `Failed stage: ${report.failedStage ?? '(none)'}`,
+    `Error code: ${stableTonoErrorCode(report.error) ?? '(none)'}`,
     `Error: ${report.error ?? '(none)'}`,
     `Retry attempt: ${report.retryAttempt}`,
     `Total elapsed: ${

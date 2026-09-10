@@ -683,14 +683,19 @@ private struct ConnectionProgressCard: View {
         let server = appState.activeNode?.name
             ?? appState.proxyService.activeNodeName
             ?? "unknown"
-        let classified = appState.lastClassifiedFailure?.copyableDetail ?? "none"
+        let classified = appState.lastClassifiedFailure
+        let code = classified?.code.rawValue ?? "none"
+        let stage = classified?.stage ?? failure.stage.rawValue
+        let classifiedDetail = classified?.copyableDetail ?? "none"
         let summary = """
         Tono connection report
         Build: \(build)
         Server: \(server)
+        Code: \(code)
+        Stage: \(stage)
         Failed step: \(failure.stage.rawValue)
         Error: \(failure.message)
-        Classified: \(classified)
+        Classified: \(classifiedDetail)
         Retry attempt: \(appState.protectedReconnectAttempt)
         Kill Switch: \(KillSwitchService.isArmed ? "active" : "inactive")
         Recovery command (last resort, restores normal internet):

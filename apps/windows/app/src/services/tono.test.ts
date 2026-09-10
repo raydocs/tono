@@ -13,7 +13,9 @@ import {
   connectRejectionNeedsServerChoice,
   describeTonoActionError,
   formatTonoActionError,
+  formatTonoDiagnostics,
   isEncryptedDnsFailure,
+  stableTonoErrorCode,
   subscribeTonoStatus,
   tonoAuditEnabled,
   tonoAuditLogPath,
@@ -24,6 +26,7 @@ import {
   tonoRefreshCatalog,
   tonoSetAuditEnabled,
   tonoTestAvailableServers,
+  type TonoDiagnosticsReport,
   type TonoStatus,
 } from './tono'
 
@@ -208,6 +211,16 @@ describe('connectErrorSuggestsServerSwitch', () => {
     )
   })
 
+  it('maps a bare CORE_EXIT_UNREACHABLE token without leaking handshake debug', () => {
+    const error = new Error('CORE_EXIT_UNREACHABLE: dial timeout')
+    expect(
+      formatTonoActionError(error, (key) => `translated:${key}`),
+    ).toBe('translated:tono.dashboard.errors.nodeUnreachable')
+    expect(formatTonoActionError(error, (key) => `translated:${key}`)).not.toContain(
+      'dial timeout',
+    )
+  })
+
   it('maps kernel pin and DNS-port failures to user-facing keys', () => {
     expect(
       formatTonoActionError(
@@ -300,5 +313,60 @@ describe('describeTonoActionError', () => {
     const raw = 'os error 10061'
     expect(describeTonoActionError(raw)).toEqual({ message: raw })
     expect(formatTonoActionError(raw)).toBe(raw)
+  })
+})
+
+describe('stable diagnostic copy', () => {
+  const report = (
+    overrides: Partial<TonoDiagnosticsReport> = {},
+  ): TonoDiagnosticsReport => ({
+    schemaVersion: 1,
+    reportedAtMs: 0,
+    appVersion: '0.0.72',
+    osVersion: 'Windows 11',
+    osArch: 'x86_64',
+    serviceProtocol: '2.9',
+    serviceBuild: null,
+    uiState: 'notConnected',
+    accountState: 'ready',
+    selectedServer: 'Tokyo 1',
+    catalogRevision: 1,
+    killSwitchMode: 'blocked',
+    killSwitchWanted: true,
+    killSwitchLive: true,
+    killSwitchLastError: null,
+    dnsEnabled: true,
+    dnsLastError: null,
+    failedStage: 'checkingExit',
+    error:
+      'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]',
+    retryAttempt: 1,
+    totalElapsedMs: 1200,
+    steps: [],
+    virtualAdapters: [],
+    auditLogPath: 'audit.jsonl',
+    serviceLogPath: 'service.log',
+    ...overrides,
+  })
+
+  it('extracts the stable code for Copy details without using it as the UI sentence', () => {
+    const error =
+      'TONO_NODE_OR_CORE_UNREACHABLE: tls handshake eof [CORE_EXIT_UNREACHABLE]'
+    expect(stableTonoErrorCode(error)).toBe('TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(
+      formatTonoActionError(new Error(error), (key) => `translated:${key}`),
+    ).toBe('translated:tono.dashboard.errors.protectedHttpsFailed')
+
+    const copied = formatTonoDiagnostics(report())
+    expect(copied).toContain('Failed stage: checkingExit')
+    expect(copied).toContain('Error code: TONO_NODE_OR_CORE_UNREACHABLE')
+    expect(copied).toContain(`Error: ${error}`)
+  })
+
+  it('prints (none) when the report has no stable code', () => {
+    expect(stableTonoErrorCode('dns probe failed')).toBeNull()
+    expect(
+      formatTonoDiagnostics(report({ error: 'dns probe failed' })),
+    ).toContain('Error code: (none)')
   })
 })

@@ -123,6 +123,15 @@ nonisolated struct ProtectedFailure: Equatable, Sendable {
     }
 }
 
+/// What the customer-facing surfaces may show. Core/system diagnostics stay on
+/// the copyable report — interpolating them into the dashboard is G2.3's
+/// English-debug failure.
+nonisolated enum ConnectionFailurePresentation {
+    static func userFacingMessage(classified: ProtectedFailure?) -> String {
+        classified?.userMessage ?? ProtectedFailureCode.unknownClassifiedFailure.userMessage
+    }
+}
+
 nonisolated enum PostLockDecision: Equatable, Sendable {
     case connected(controllerAdvisory: String?)
     case retry(ProtectedFailure)

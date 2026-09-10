@@ -529,6 +529,27 @@ final class ProtectedConnectivityTests: XCTestCase {
         XCTAssertTrue(failure.userMessage.contains("DNS"))
     }
 
+    func testHandshakeDiagnosticDoesNotBecomeTheDashboardMessage() {
+        let classified = ProtectedConnectivity.failure(
+            .coreExitUnreachable,
+            stage: "checkingExit",
+            attempt: 1,
+            generation: 3,
+            detail: "tls handshake eof [CORE_EXIT_UNREACHABLE]"
+        )
+        let shown = ConnectionFailurePresentation.userFacingMessage(classified: classified)
+        XCTAssertEqual(shown, ProtectedFailureCode.coreExitUnreachable.userMessage)
+        XCTAssertFalse(shown.localizedCaseInsensitiveContains("tls"))
+        XCTAssertFalse(shown.localizedCaseInsensitiveContains("handshake"))
+        XCTAssertFalse(shown.localizedCaseInsensitiveContains("eof"))
+        XCTAssertTrue(classified.copyableDetail.contains("CORE_EXIT_UNREACHABLE"))
+        XCTAssertTrue(classified.copyableDetail.contains("checkingExit"))
+
+        let unknown = ConnectionFailurePresentation.userFacingMessage(classified: nil)
+        XCTAssertEqual(unknown, ProtectedFailureCode.unknownClassifiedFailure.userMessage)
+        XCTAssertFalse(unknown.contains("tls handshake eof"))
+    }
+
     func testClassifiedProtectionFailureIsNotPrefixedAsAPIRequest() {
         let error = CoreControllerError.protectionFailed(
             ProtectedFailureCode.coreExitUnreachable.userMessage

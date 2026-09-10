@@ -803,11 +803,18 @@ struct SupportView: View {
     /// Support asks for both whenever a route misbehaves, and the only copy of
     /// either was a stored value nothing rendered or copied.
     private var supplementalReportLines: [String] {
-        guard let accountSession else { return [] }
-        var lines = [
+        var lines: [String] = []
+        if let classified = appState.lastClassifiedFailure {
+            lines.append("connectionFailureCode: \(classified.code.rawValue)")
+            lines.append("connectionFailureStage: \(classified.stage)")
+        } else if let failure = appState.lastConnectionFailure {
+            lines.append("connectionFailureStage: \(failure.stage.rawValue)")
+        }
+        guard let accountSession else { return lines }
+        lines.append(
             "trafficPolicyRevision: "
-                + (accountSession.trafficPolicyRevision.map { "\($0)" } ?? "none"),
-        ]
+                + (accountSession.trafficPolicyRevision.map { "\($0)" } ?? "none")
+        )
         if let failure = accountSession.catalogFailureMessage {
             lines.append("catalogFailure: \(failure)")
         }
