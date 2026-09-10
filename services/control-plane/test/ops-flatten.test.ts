@@ -182,6 +182,17 @@ describe('telemetry flatten', () => {
     expect(await eventCount()).toBe(0);
   });
 
+  it('stores attemptId from window events onto connection_events', async () => {
+    const row = windowRow('win-att', [
+      { ts: RECEIVED * 1000, kind: 'connectFail', code: 'timeout', attemptId: 'att-flat-1' },
+    ]);
+    expect(await flattenWindow(db(), row, edgeAttribution(undefined, new Set()))).toBe(1);
+    const stored = await db().prepare(
+      'SELECT attempt_id FROM connection_events WHERE id = ?',
+    ).bind('win-att:0').first<{ attempt_id: string }>();
+    expect(stored?.attempt_id).toBe('att-flat-1');
+  });
+
   it('makes re-flatten a no-op via deterministic ids', async () => {
     const row = windowRow('win-dup', [
       { ts: RECEIVED * 1000, kind: 'connectBegin' },

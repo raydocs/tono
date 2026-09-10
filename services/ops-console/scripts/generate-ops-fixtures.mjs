@@ -759,6 +759,10 @@ function buildDevices(spec, rng) {
         selectedServer: 'Los Angeles · Mesa',
         lastSeenAt: CLOCK - 180,
         createdAt: CLOCK - 90 * DAY,
+        connected: true,
+        lastFailAt: null,
+        lastFailCode: null,
+        lastFailNode: null,
       },
       {
         id: 'dev-u04-air',
@@ -770,6 +774,10 @@ function buildDevices(spec, rng) {
         selectedServer: 'Tokyo · Fuji',
         lastSeenAt: CLOCK - 2 * DAY,
         createdAt: CLOCK - 200 * DAY,
+        connected: false,
+        lastFailAt: null,
+        lastFailCode: null,
+        lastFailNode: null,
       },
       {
         id: 'dev-u04-win',
@@ -781,6 +789,10 @@ function buildDevices(spec, rng) {
         selectedServer: '香港 · 中环',
         lastSeenAt: CLOCK - 5 * DAY,
         createdAt: CLOCK - 120 * DAY,
+        connected: false,
+        lastFailAt: CLOCK - 5 * DAY,
+        lastFailCode: 'ETIMEDOUT',
+        lastFailNode: '香港 · 中环',
       },
     ];
   }
@@ -801,6 +813,10 @@ function buildDevices(spec, rng) {
       selectedServer: spec.selectedServer,
       lastSeenAt: spec.lastSeenAt,
       createdAt: CLOCK - (60 + spec.index * 3 + i * 10) * DAY,
+      connected: spec.verdict === 'ok' && i === 0,
+      lastFailAt: i === 0 && spec.lastFailure ? spec.lastFailure.at : null,
+      lastFailCode: i === 0 && spec.lastFailure ? spec.lastFailure.code : null,
+      lastFailNode: i === 0 && spec.lastFailure ? spec.lastFailure.node : null,
     });
   });
   if (plats.length === 1 && rng() < 0.35) {
@@ -815,6 +831,10 @@ function buildDevices(spec, rng) {
       selectedServer: spec.selectedServer,
       lastSeenAt: spec.lastSeenAt === null ? null : spec.lastSeenAt - DAY,
       createdAt: CLOCK - (90 + spec.index) * DAY,
+      connected: false,
+      lastFailAt: null,
+      lastFailCode: null,
+      lastFailNode: null,
     });
   }
   return devices;
