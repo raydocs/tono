@@ -17,10 +17,10 @@ is the apply order:
 | `0018` | `0018_periodic_telemetry_windows.sql`, `0018_traffic_policy_signature.sql`, `0018_user_default_proxy.sql` |
 
 Do not collapse, renumber, or rewrite these to “fix” the prefixes. New
-schema changes continue from the highest existing number (`0057` at the
+schema changes continue from the highest existing number (`0071` at the
 time this note was written).
 
-## 0039–0057
+## 0039–0071
 
 Ops tables after the sequence was unique. Applied in numeric order:
 
