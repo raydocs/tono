@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const CLOCK = 1_725_000_000;
@@ -1286,12 +1286,12 @@ function makeIncident(partial) {
     impactCount: partial.impactCount,
     evidence: partial.evidence,
     openedAt: partial.openedAt,
-    nextCheckAt: null,
-    closure: null,
     lastSeenAt: partial.lastSeenAt,
     ackedAt: partial.ackedAt,
     snoozedUntil: partial.snoozedUntil,
     resolvedAt: partial.resolvedAt,
+    nextCheckAt: partial.nextCheckAt ?? null,
+    closure: partial.closure ?? null,
   };
 }
 
@@ -1311,8 +1311,11 @@ function buildCoreIncidents() {
     rulesVersion: 3,
     impactCount: 5,
     evidence: [
-      evidence('大陆三网探测', '三网连续失败', CLOCK - 180, 'collector'),
-      evidence('失败客户', '5', CLOCK - 180, 'telemetry'),
+      evidence('blockStatus', '"LIKELY_BLOCKED"', CLOCK - 180, 'engine'),
+      evidence('loss', '[{"key":"unicom","lossPct":10.4},{"key":"mobile","lossPct":12.1}]', CLOCK - 180, 'engine'),
+      evidence('fails30m', '{"attempts":38,"failures":31,"distinctUsers":5,"handshakeDistinctUsers":4}', CLOCK - 180, 'engine'),
+      evidence('machine', '{"cpu":4,"memRatio":0.12,"diskRatio":0.38,"load1":0.04}', CLOCK - 240, 'engine'),
+      evidence('occupancy', '5', CLOCK - 180, 'engine'),
       evidence('海外探测', '正常', CLOCK - 240, 'collector'),
     ],
     openedAt: CLOCK - 7200,
@@ -1606,49 +1609,72 @@ function buildEmptyIncidents() {
   };
 }
 
-const customers = buildCustomers(20);
-const customersDense = buildCustomers(60);
-const customersEmpty = {
-  clock: CLOCK,
-  list: listOf([]),
-  details: {},
-};
-const incidents = buildCoreIncidents();
-const incidentsDense = buildDenseIncidents();
-const incidentsEmpty = buildEmptyIncidents();
+const thisFile = fileURLToPath(import.meta.url);
+const defaultDir = join(dirname(thisFile), '..', 'fixtures');
 
-const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
-function writeJson(name, data) {
-  // Compact, not pretty: these files are generated and regenerated, never
-  // hand-edited, and the dense customer set is 60 people x 168 hours. Indenting
-  // that costs several megabytes of whitespace in every clone.
-  const body = `${JSON.stringify(data)}\n`;
-  writeFileSync(join(dir, name), body);
-  return Buffer.byteLength(body);
+/**
+ * Files this script is allowed to emit. The test asserts the set, so a new
+ * write has to be named here rather than appearing as a surprise on disk.
+ */
+export const GENERATED_FIXTURE_FILES = [
+  'customers.json',
+  'customers.dense.json',
+  'customers.empty.json',
+  'incidents.json',
+  'incidents.dense.json',
+  'incidents.empty.json',
+];
+
+export function generateOpsFixtures(outDir = defaultDir) {
+  const customers = buildCustomers(20);
+  const customersDense = buildCustomers(60);
+  const customersEmpty = {
+    clock: CLOCK,
+    list: listOf([]),
+    details: {},
+  };
+  const incidents = buildCoreIncidents();
+  const incidentsDense = buildDenseIncidents();
+  const incidentsEmpty = buildEmptyIncidents();
+
+  function writeJson(name, data, pretty = false) {
+    // Customers stay compact: 60 people × 168 hours of activity would grow by
+    // several megabytes if indented. Incidents were committed pretty-printed
+    // (they are small, and the pages read them as documents), so they stay
+    // indented — regenerating must not collapse them.
+    const body = `${pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data)}\n`;
+    writeFileSync(join(outDir, name), body);
+    return Buffer.byteLength(body);
+  }
+
+  const sizes = {
+    'customers.json': writeJson('customers.json', customers),
+    'customers.dense.json': writeJson('customers.dense.json', customersDense),
+    'customers.empty.json': writeJson('customers.empty.json', customersEmpty),
+    'incidents.json': writeJson('incidents.json', incidents, true),
+    'incidents.dense.json': writeJson('incidents.dense.json', incidentsDense, true),
+    'incidents.empty.json': writeJson('incidents.empty.json', incidentsEmpty, true),
+  };
+
+  const verdictCounts = {};
+  let connectedTrue = 0;
+  for (const row of customers.list.items) {
+    verdictCounts[row.verdict] = (verdictCounts[row.verdict] ?? 0) + 1;
+    if (row.connected.value === true) connectedTrue += 1;
+  }
+  const open = incidents.list.items.filter((row) => row.status === 'open');
+  const resolved = incidents.list.items.filter((row) => row.status === 'resolved');
+  const rootImpact = open
+    .filter((row) => row.parentIncidentId === null)
+    .reduce((sum, row) => sum + row.impactCount, 0);
+
+  console.log(`customers ${customers.list.items.length} connectedTrue ${connectedTrue} verdicts ${JSON.stringify(verdictCounts)}`);
+  console.log(`incidents open ${open.length} resolved ${resolved.length} rootImpact ${rootImpact}`);
+  console.log(`sizes ${JSON.stringify(sizes)}`);
+  console.log(`u-04 connections ${customers.details['u-04'].connections.total} activity ${customers.details['u-04'].activity.total} dest ${customers.details['u-04'].destinations.total}`);
+  return sizes;
 }
 
-const sizes = {
-  'customers.json': writeJson('customers.json', customers),
-  'customers.dense.json': writeJson('customers.dense.json', customersDense),
-  'customers.empty.json': writeJson('customers.empty.json', customersEmpty),
-  'incidents.json': writeJson('incidents.json', incidents),
-  'incidents.dense.json': writeJson('incidents.dense.json', incidentsDense),
-  'incidents.empty.json': writeJson('incidents.empty.json', incidentsEmpty),
-};
-
-const verdictCounts = {};
-let connectedTrue = 0;
-for (const row of customers.list.items) {
-  verdictCounts[row.verdict] = (verdictCounts[row.verdict] ?? 0) + 1;
-  if (row.connected.value === true) connectedTrue += 1;
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === thisFile) {
+  generateOpsFixtures();
 }
-const open = incidents.list.items.filter((row) => row.status === 'open');
-const resolved = incidents.list.items.filter((row) => row.status === 'resolved');
-const rootImpact = open
-  .filter((row) => row.parentIncidentId === null)
-  .reduce((sum, row) => sum + row.impactCount, 0);
-
-console.log(`customers ${customers.list.items.length} connectedTrue ${connectedTrue} verdicts ${JSON.stringify(verdictCounts)}`);
-console.log(`incidents open ${open.length} resolved ${resolved.length} rootImpact ${rootImpact}`);
-console.log(`sizes ${JSON.stringify(sizes)}`);
-console.log(`u-04 connections ${customers.details['u-04'].connections.total} activity ${customers.details['u-04'].activity.total} dest ${customers.details['u-04'].destinations.total}`);
