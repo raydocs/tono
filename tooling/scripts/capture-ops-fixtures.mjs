@@ -53,7 +53,7 @@ const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const IPV4_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
 const ID_KEYS = new Set([
   'id', 'userId', 'deviceId', 'providerAccountId', 'incidentId', 'parentIncidentId',
-  'ruleId', 'requestId', 'idempotencyKey', 'dedupeKey', 'targetId',
+  'ruleId', 'requestId', 'idempotencyKey', 'dedupeKey', 'targetId', 'ownerUserId',
 ]);
 const TIME_KEYS = new Set([
   'at', 'atMs', 'asOfSec', 'updatedAt', 'createdAt', 'openedAt', 'lastSeenAt',
@@ -62,6 +62,8 @@ const TIME_KEYS = new Set([
   'dayAt', 'hourAt', 'expiresAt', 'renewsAt', 'notBefore', 'leasedUntil',
   'finishedAt', 'connectedSince', 'firstEntitledAt', 'cycleStart', 'cycleEnd',
   'projectedExhaustAt', 'cronLastRunAt', 'cronLastDurationMs',
+  'stageSinceAt', 'firstConnectedAt', 'verifiedAt',
+  'computedAt', 'deadlineSec', 'evidenceAsOfSec',
 ]);
 
 const V1_GET = [
@@ -94,6 +96,8 @@ const V1_GET = [
   ['GET /api/v1/ops/alert-deliveries', 'assertAlertDeliveryList', ''],
   ['GET /api/v1/ops/audit', 'assertAuditList', ''],
   ['GET /api/v1/ops/system/health', 'assertSystemHealth', ''],
+  ['GET /api/v1/ops/digest', 'assertDigest', ''],
+  ['GET /api/v1/ops/months/{month}', 'assertMonthSummary', ''],
 ];
 
 const EXTRA_GET = [
@@ -259,6 +263,10 @@ function fillPath(route, ids) {
     if (!needed) return null;
     pathPart = pathPart.replaceAll('{id}', encodeURIComponent(needed));
   }
+  if (pathPart.includes('{month}')) {
+    if (!ids.month) return null;
+    pathPart = pathPart.replaceAll('{month}', encodeURIComponent(ids.month));
+  }
   return pathPart;
 }
 
@@ -295,7 +303,8 @@ async function applySeed(scenario, config) {
   await writeFile(tmp, sql);
   await run('npx', [
     'wrangler', 'd1', 'execute', 'tono-control-plane', '--local',
-    '--config', config, '--file', tmp, '--yes',
+    '--config', config, '--persist-to', '.wrangler/state',
+    '--file', tmp, '--yes',
   ], CONTROL);
 }
 
@@ -338,6 +347,7 @@ async function main(argv) {
   const ids = {
     nodeName: null, customerId: null, incidentId: null,
     providerId: null, homeLineId: null, alertRuleId: null,
+    month: new Date(capturedNowSec * 1000).toISOString().slice(0, 7),
   };
 
   const listsFirst = [
