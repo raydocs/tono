@@ -11,6 +11,7 @@ import { createCustomerFixtures } from './fixtures/routes/customers';
 import { createFunnelFixtures } from './fixtures/routes/funnel';
 import { createFollowupFixtures } from './fixtures/routes/followups';
 import { createLedgerFixtures } from './fixtures/routes/ledger';
+import { updateChannels } from './fixtures/routes/releases';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
 import type { FleetFixtureFile, LiveFixtureFile } from './src/lib/types';
 import fleetRaw from './fixtures/fleet-nodes.json';
@@ -372,6 +373,15 @@ function fixturesPlugin(): Plugin {
         }
         const parts = route.split('/').map(decodeURIComponent);
         const names = fileNames(set);
+        // dept:d 更新源. A missing file falls through to the releases branch
+        // below, which is already the 500 the failing fixture set wants.
+        if (route === 'releases/channels') {
+          const file = opsFile(names.releases, pickSession(url, set));
+          if (file) {
+            sendJson(res, materializeOps(updateChannels(file), file.clock));
+            return;
+          }
+        }
         if (parts[0] === 'releases') {
           const file = opsFile(names.releases, pickSession(url, set));
           const body = !file

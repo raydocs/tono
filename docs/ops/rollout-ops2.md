@@ -29,6 +29,8 @@
 
 第十次 `bed1fca5`（PR #129；迁移 0056 `first_connected_at`、0057 重建 `ops_node_status` 扩 verdict 枚举）：开通漏斗（客户页第二句话：开通了还没注册 / 注册了还没装 / 装了还没上报 / 上报过还没连上 / 连上过；未注册的人以邀请行出现，微信号可编辑）、新健康词 还没用起来、节点可售验收单与上架门控、退役先结束客户依赖、对抗审查 18 条修复（含告警规则测试路径绕过白名单的 P0）、新判定 探测不通（机器在线）。部署前备份 `backups/control-plane-d1/2026-09-10T10:14:10Z.sql.gz`（带 `.sha256`）。上线后客户页真实数字：2 位开通了还没注册、2 位注册了还没装、6 位装了还没上报、2 位上报过还没连上、10 位连上过——其中「装了还没上报」里有老版本客户端（0.0.39）已有计量流量却被判 还没用起来，漏斗要把计量字节当连接证据（已派修）。
 
+第十一次 `49796a50`（PR #130，无迁移）：漏斗把计量流量当最后一级连接证据（老客户端没有遥测不再显示 还没用起来）；部门地基（合同文件拆分、`dept:a…e` 标记块、`with-slot.sh` 计数锁、`test:e2e:locked`）。
+
 ## 0.2 恢复演练结论（2026-09-10，详见 `docs/ops/restore-drill-2026-09-10.md`）
 
 今天的备份 `backups/control-plane-d1/20260910T085207Z.sql.gz` 能恢复、恢复后能当数据用（20 用户 / 27 设备 / 7533 遥测窗口，`quick_check` ok，外键零违例），导入 28 秒，全流程 wrangler 时间约 1.5 分钟。五条要记住的：
@@ -38,6 +40,26 @@
 3. `d1 migrations apply` 需要 `--config`（本地 gitignored 的 `wrangler.preview.jsonc`），`d1 execute/export` 不带。
 4. 生产库的 `d1_migrations` 里有五条仓库里不存在的 0026–0030（早期编号被复用），对应的 `diagnostics_failure_index` 等四张表没有代码读写；从空库按 migrations 重建与从 dump 恢复会得到不同的库。要么补文件要么加一条迁移删表，让两条路径收敛。
 5. D1 之外没有备份：Worker 密钥（尤其 `CATALOG_ENCRYPTION_KEY` 与 `JWT_SECRET`）、R2 两个桶、DNS / 路由 / Access 应用、策略签名私钥都在恢复清单之外，且没有生产恢复流程。
+
+## 0.3 告警链路演练（2026-09-10 晚，preview 库，已做一次）
+
+结论：**采集器超过 20 分钟不上报 → 一个 cron tick 内事故打开 → 投递记录产生**，链路通到「发送」前一步；缺的只是老板的 `ALERT_TELEGRAM_BOT_TOKEN`。步骤（从 spookfish 目录跑，profile 绑定 `tono`）：
+
+```sh
+# 1. 一条规则：仅严重、私聊、Telegram（生产用 delay_seconds=900，演练用 0）
+npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-preview --remote --command \
+  "INSERT OR IGNORE INTO ops_alert_rules(id,name,enabled,min_severity,min_impact,fire_on,delay_seconds,cooldown_seconds,channel,target,template,secret_ref,created_at,updated_at) VALUES('drill-severe','演练：仅严重，私聊',1,'severe',0,'open_resolve',0,60,'webhook','<chat id>','telegram','ALERT_TELEGRAM_BOT_TOKEN',strftime('%s','now'),strftime('%s','now'))"
+# 2. 把采集器快照拨老（preview 里本来就旧于 20 分钟时可跳过）
+npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-preview --remote --command "UPDATE operations_live_snapshot SET updated_at = updated_at - 3000"
+# 3. 本地起远程 dev，暴露定时触发，打一个 tick
+npx --prefix services/control-plane wrangler dev --config services/control-plane/wrangler.preview.jsonc --remote --test-scheduled --port 8799 &
+curl "http://localhost:8799/__scheduled?cron=*/5+*+*+*+*"
+# 4. 看结果
+npx --prefix services/control-plane wrangler d1 execute tono-control-plane-ops-preview --remote --json --command \
+  "SELECT dedupe_key, severity, status FROM ops_incidents WHERE dedupe_key LIKE 'fleet%'; SELECT status, error FROM ops_alert_deliveries"
+```
+
+2026-09-10 实测：tick 后 `fleet-collector-stale`（severe，open）与 `fleet-catalog-unavailable`（severe，open——preview 没有 `CATALOG_ENCRYPTION_KEY`，正是 0057 那条新规则该报的）都打开，两条投递记录 `pending`、错误 `secret ALERT_TELEGRAM_BOT_TOKEN is not available`。放上密钥后同一流程应看到 `sent`；恢复演练把 `updated_at` 设回当前时间再打一个 tick，事故应 resolved 且 `open_resolve` 规则再投一条。
 
 ## 1. 在 preview D1 上演练迁移
 

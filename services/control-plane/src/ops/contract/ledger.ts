@@ -12,6 +12,7 @@ import {
   optNum,
   optText,
   text,
+  textList,
 } from './checkers';
 
 export const LEDGER_KINDS = ['revenue', 'refund', 'credit', 'cost'] as const;
@@ -66,6 +67,42 @@ export interface MonthNodeDto {
   pending: boolean;
 }
 
+/**
+ * Why a subject sits on one side of the month's reconciliation and not the
+ * other. A row without a reason is a row nobody can act on.
+ */
+export const RECON_REASONS = ['no_ledger', 'unknown_subject', 'retired_subject', 'no_price'] as const;
+export type ReconReason = (typeof RECON_REASONS)[number];
+
+/** `fleet` never reconciles: it is a bill with no single asset behind it. */
+export const RECON_SUBJECT_TYPES = ['node', 'home_exit', 'account'] as const;
+export type ReconSubjectType = (typeof RECON_SUBJECT_TYPES)[number];
+
+export interface MonthReconRowDto {
+  subjectType: ReconSubjectType;
+  subjectId: string;
+  /** catalog_name / home line display name / account_ref. */
+  label: string;
+  category: LedgerCategory;
+  /** `product_accounts.user_id` for accounts, else null. */
+  ownerUserId: string | null;
+  /** Asset price in its own currency; null when the asset carries no price. */
+  expectedMinor: number | null;
+  expectedCurrency: string | null;
+  /** Net cost entries for this subject in the month; null on the bill-only side. */
+  ledgerCnyMinor: number | null;
+  entryIds: string[];
+  reason: ReconReason;
+}
+
+export interface MonthReconciliationDto {
+  /** 账单有台账没有. */
+  billsWithoutLedger: MonthReconRowDto[];
+  /** 台账有账单没有. */
+  ledgerWithoutBill: MonthReconRowDto[];
+  asOfSec: number;
+}
+
 export type MonthByCategory = Record<LedgerCategory, number>;
 
 export interface MonthSummaryDto {
@@ -81,6 +118,10 @@ export interface MonthSummaryDto {
   unreconciled: number;
   frozen: boolean;
   frozenAt: number | null;
+  /** Optional on the wire (org plan v2 §0.3); the Worker always sends both. */
+  reconciliation?: MonthReconciliationDto;
+  /** How many bills and orphan ledger rows are still unpaired this month. */
+  unreconciledBills?: number;
   updatedAt: number;
 }
 
@@ -160,9 +201,45 @@ function assertByCategory(value: unknown, path: string): MonthByCategory {
   return out;
 }
 
+const RECON_ROW_KEYS = [
+  'subjectType', 'subjectId', 'label', 'category', 'ownerUserId',
+  'expectedMinor', 'expectedCurrency', 'ledgerCnyMinor', 'entryIds', 'reason',
+];
+
+export function assertMonthReconRow(value: unknown, path = 'monthReconRow'): MonthReconRowDto {
+  const row = fields(value, path, RECON_ROW_KEYS);
+  return {
+    subjectType: oneOf<ReconSubjectType>(row, path, 'subjectType', RECON_SUBJECT_TYPES),
+    subjectId: text(row, path, 'subjectId'),
+    label: text(row, path, 'label'),
+    category: oneOf<LedgerCategory>(row, path, 'category', LEDGER_CATEGORIES),
+    ownerUserId: optText(row, path, 'ownerUserId'),
+    expectedMinor: optInt(row, path, 'expectedMinor'),
+    expectedCurrency: optText(row, path, 'expectedCurrency'),
+    ledgerCnyMinor: optInt(row, path, 'ledgerCnyMinor'),
+    entryIds: textList(row, path, 'entryIds'),
+    reason: oneOf<ReconReason>(row, path, 'reason', RECON_REASONS),
+  };
+}
+
+const RECONCILIATION_KEYS = ['billsWithoutLedger', 'ledgerWithoutBill', 'asOfSec'];
+
+export function assertMonthReconciliation(
+  value: unknown,
+  path = 'monthReconciliation',
+): MonthReconciliationDto {
+  const row = fields(value, path, RECONCILIATION_KEYS);
+  return {
+    billsWithoutLedger: arrayOf(row, path, 'billsWithoutLedger', assertMonthReconRow),
+    ledgerWithoutBill: arrayOf(row, path, 'ledgerWithoutBill', assertMonthReconRow),
+    asOfSec: int(row, path, 'asOfSec'),
+  };
+}
+
 const SUMMARY_KEYS = [
   'month', 'closedAt', 'closedBy', 'revenueCnyMinor', 'costCnyMinor', 'marginCnyMinor',
-  'byCategory', 'customers', 'nodes', 'unreconciled', 'frozen', 'frozenAt', 'updatedAt',
+  'byCategory', 'customers', 'nodes', 'unreconciled', 'frozen', 'frozenAt',
+  'reconciliation', 'unreconciledBills', 'updatedAt',
 ];
 
 export function assertMonthSummary(value: unknown, path = 'monthSummary'): MonthSummaryDto {
@@ -180,6 +257,10 @@ export function assertMonthSummary(value: unknown, path = 'monthSummary'): Month
     unreconciled: int(row, path, 'unreconciled'),
     frozen: bool(row, path, 'frozen'),
     frozenAt: optInt(row, path, 'frozenAt'),
+    ...(row.reconciliation === undefined ? {} : {
+      reconciliation: assertMonthReconciliation(row.reconciliation, `${path}.reconciliation`),
+    }),
+    ...(row.unreconciledBills === undefined ? {} : { unreconciledBills: int(row, path, 'unreconciledBills') }),
     updatedAt: int(row, path, 'updatedAt'),
   };
 }

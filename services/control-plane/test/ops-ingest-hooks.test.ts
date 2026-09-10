@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { jwtSign } from '../src/crypto';
 import worker, { type Env } from '../src/index';
 import { enqueueJob } from '../src/ops/jobs';
+import { afterLogSegment } from '../src/ops/ingest-hooks';
 
 const JWT_SECRET = 'test-jwt-secret-with-at-least-32-characters';
 const COLLECTOR = 'collector-test-token-with-at-least-32-chars';
@@ -150,6 +151,28 @@ describe('ops ingest hooks', () => {
     const negative = telemetryWindow();
     (negative.window as Record<string, unknown>).bytesByRoute = { direct: -1 };
     expect((await api('telemetry/windows', json(negative, account.token))).status).toBe(400);
+  });
+
+  it('a disconnectOk event carries bytes in each direction, and nothing else is let through', async () => {
+    const account = await seedAccount('bytes');
+    const body = telemetryWindow();
+    const nowMs = Date.now();
+    body.window.events.push({ ts: nowMs - 1_000, kind: 'disconnectOk', elapsedMs: 29_000, bytesUp: 12_345, bytesDown: 987_654 } as never);
+    body.window.eventCount = 3;
+    const response = await api('telemetry/windows', json(body, account.token));
+    expect(response.status).toBe(201);
+    const stored = await db().prepare(
+      'SELECT payload_json FROM telemetry_windows WHERE user_id = ? ORDER BY received_at DESC LIMIT 1',
+    ).bind(account.userId).first<{ payload_json: string }>();
+    const close = JSON.parse(stored?.payload_json ?? '{}').events.find((e: { kind: string }) => e.kind === 'disconnectOk');
+    expect(close).toMatchObject({ elapsedMs: 29_000, bytesUp: 12_345, bytesDown: 987_654 });
+
+    const fractional = telemetryWindow();
+    fractional.window.events[1] = { ...fractional.window.events[1], bytesUp: 1.5 } as never;
+    expect((await api('telemetry/windows', json(fractional, account.token))).status).toBe(400);
+    const unknown = telemetryWindow();
+    unknown.window.events[1] = { ...unknown.window.events[1], bytesSideways: 1 } as never;
+    expect((await api('telemetry/windows', json(unknown, account.token))).status).toBe(400);
   });
 
   it('failure reports spend their own rate-limit bucket, not the heartbeat one', async () => {
@@ -367,6 +390,66 @@ describe('ops ingest hooks', () => {
     expect(Number(dest?.bytes_up)).toBe(11);
     expect(Number(dest?.bytes_down)).toBe(22);
   });
+
+  it('a replayed log segment is answered from the index and parsed exactly once', async () => {
+    const account = await seedAccount('replay');
+    const t = Math.floor(Date.now() / 1000);
+    await db().prepare(
+      `INSERT INTO diagnostics_log_access(device_id, user_id, expires_at, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?)`,
+    ).bind(account.deviceId, account.userId, t + 3600, t, t).run();
+    const session = crypto.randomUUID().toUpperCase();
+    const payload = await gzip(JSON.stringify({
+      kind: 'connection',
+      timestamp: new Date().toISOString(),
+      host: 'www.baidu.com',
+      process: 'Safari',
+      route: 'Tono-Exit',
+      bytes_up: 11,
+      bytes_down: 22,
+    }));
+    const upload = (sequence: number) => api('diagnostics/logs', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${account.token}`,
+        'content-type': 'application/gzip',
+        'X-Tono-Log-Session': session,
+        'X-Tono-Log-Sequence': String(sequence),
+        'X-Tono-Log-Lines': '1',
+        'X-Tono-Log-Client-Version': '0.0.72',
+        'X-Tono-Log-Os-Version': 'macOS 14.4',
+      },
+      body: new Blob([payload]),
+    });
+    const rows = async () => {
+      const row = await db().prepare(
+        `SELECT
+           (SELECT COALESCE(SUM(connections), 0) FROM traffic_destination_daily WHERE user_id = ?) AS conns,
+           (SELECT COALESCE(SUM(bytes), 0) FROM direct_candidate_daily WHERE user_id = ?) AS bytes,
+           (SELECT COUNT(*) FROM ops_traffic_segments WHERE user_id = ?) AS segments`,
+      ).bind(account.userId, account.userId, account.userId).first<Record<string, number>>();
+      return { conns: Number(row?.conns), bytes: Number(row?.bytes), segments: Number(row?.segments) };
+    };
+
+    const first = await upload(0);
+    expect(first.status).toBe(201);
+    const firstId = (await first.json() as { segment: { id: string } }).segment.id;
+    expect(await rows()).toEqual({ conns: 1, bytes: 33, segments: 1 });
+
+    const replay = await upload(0);
+    expect(replay.status).toBe(200);
+    expect((await replay.json() as { segment: { id: string } }).segment.id).toBe(firstId);
+    expect(await rows()).toEqual({ conns: 1, bytes: 33, segments: 1 });
+
+    const next = await upload(1);
+    expect(next.status).toBe(201);
+    expect(await rows()).toEqual({ conns: 2, bytes: 66, segments: 2 });
+    const stored = await db().prepare(
+      'SELECT COUNT(*) AS c FROM diagnostics_log_objects WHERE user_id = ?',
+    ).bind(account.userId).first<{ c: number }>();
+    expect(Number(stored?.c)).toBe(2);
+  });
+
 
   it('ops-ingest jobs lease, heartbeat, and complete behind the collector token', async () => {
     const missing = await api('ops-ingest/jobs?executor=hub&max=1');

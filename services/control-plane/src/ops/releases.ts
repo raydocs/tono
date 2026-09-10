@@ -1,15 +1,26 @@
 import { ApiError } from '../errors';
 import { sniffPlatform } from './platform';
 export { sniffPlatform };
+// Adoption counting lives in ./adoption; re-exported so importers of this
+// module keep their import path.
+export {
+  adoptionMatrix,
+  backfillDeviceDaily,
+  compareVersions,
+  retainClientVersionDaily,
+  rollupClientVersionsDaily,
+  utcDay,
+  versionBucket,
+  type AdoptionCell,
+  type AdoptionMatrix,
+  type VersionBucket,
+} from './adoption';
 
-const DAY = 86400;
 const PLATFORMS = ['windows', 'macos', 'linux', 'android', 'ios'] as const;
 const CHANNELS = ['stable', 'candidate', 'internal'] as const;
 
 export type Platform = (typeof PLATFORMS)[number];
 export type Channel = (typeof CHANNELS)[number];
-export type VersionBucket = 'current' | 'behind_one' | 'behind_more' | 'unreported';
-
 type Row = Record<string, any>;
 
 export type ClientRelease = {
@@ -51,32 +62,8 @@ export type ReleasePatch = {
   yankReason?: string | null;
 };
 
-export type AdoptionMatrix = {
-  days: Array<{
-    day: number;
-    platform: Platform;
-    versions: Array<{
-      version: string;
-      devices: number;
-      users: number;
-      bucket: VersionBucket;
-    }>;
-    unreleased?: true;
-  }>;
-  latest: Record<Platform, string | null>;
-  unreleased: Partial<Record<Platform, true>>;
-};
-
-function missingTable(error: unknown): boolean {
-  return String(error).includes('no such table');
-}
-
 function uniqueConflict(error: unknown): boolean {
   return String(error).includes('UNIQUE constraint failed');
-}
-
-export function utcDay(unix: number): number {
-  return Math.floor(unix / DAY) * DAY;
 }
 
 function isPlatform(value: string): value is Platform {
@@ -159,49 +146,6 @@ export function publicRelease(row: Row): ClientRelease {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
-}
-
-function parseVersion(value: string): { core: number[]; pre: string | null } {
-  const noBuild = value.split('+')[0] ?? '';
-  const dash = noBuild.indexOf('-');
-  const core = dash === -1 ? noBuild : noBuild.slice(0, dash);
-  const pre = dash === -1 ? null : noBuild.slice(dash + 1);
-  const segments = core.split('.').map((part) => {
-    const n = Number.parseInt(part, 10);
-    return Number.isFinite(n) ? n : 0;
-  });
-  return { core: segments.length === 0 ? [0] : segments, pre };
-}
-
-export function compareVersions(a: string, b: string): number {
-  const left = parseVersion(a);
-  const right = parseVersion(b);
-  const length = Math.max(left.core.length, right.core.length);
-  for (let i = 0; i < length; i++) {
-    const da = left.core[i] ?? 0;
-    const db = right.core[i] ?? 0;
-    if (da !== db) return da < db ? -1 : 1;
-  }
-  if (left.pre === right.pre) return 0;
-  if (left.pre === null) return 1;
-  if (right.pre === null) return -1;
-  if (left.pre < right.pre) return -1;
-  if (left.pre > right.pre) return 1;
-  return 0;
-}
-
-export function versionBucket(observed: string, latest: readonly string[]): VersionBucket {
-  if (typeof observed !== 'string' || observed.length === 0 || latest.length === 0) {
-    return 'unreported';
-  }
-  const published = [...new Set(latest.filter((value) => typeof value === 'string' && value.length > 0))];
-  if (published.length === 0) return 'unreported';
-  published.sort((a, b) => compareVersions(b, a));
-  const index = published.findIndex((value) => compareVersions(value, observed) === 0);
-  if (index === 0) return 'current';
-  if (index === 1) return 'behind_one';
-  if (index >= 2) return 'behind_more';
-  return 'unreported';
 }
 
 export async function createRelease(
@@ -318,158 +262,4 @@ export async function currentRelease(
      LIMIT 1`,
   ).bind(platformField(platform), channelField(channel)).first<Row>();
   return row ? publicRelease(row) : null;
-}
-
-async function publishedStableVersions(db: D1Database, platform: Platform): Promise<string[]> {
-  const rows = await db.prepare(
-    `SELECT version FROM client_releases
-     WHERE platform = ? AND channel = 'stable'
-       AND published_at IS NOT NULL AND yanked_at IS NULL`,
-  ).bind(platform).all<{ version: string }>();
-  return (rows.results ?? []).map((row) => String(row.version));
-}
-
-export async function rollupClientVersionsDaily(
-  db: D1Database,
-  dayAt: number,
-  force = false,
-): Promise<{ skipped: boolean; rows: number }> {
-  const day = utcDay(dayAt);
-  try {
-    if (!force) {
-      const existing = await db.prepare(
-        'SELECT 1 AS ok FROM ops_client_version_daily WHERE day_at = ? LIMIT 1',
-      ).bind(day).first();
-      if (existing) return { skipped: true, rows: 0 };
-    } else {
-      await db.prepare('DELETE FROM ops_client_version_daily WHERE day_at = ?').bind(day).run();
-    }
-    const windows = await db.prepare(
-      `SELECT os_version, client_version, device_id, user_id,
-              json_extract(payload_json, '$.platform') AS platform
-       FROM telemetry_windows
-       WHERE received_at >= ? AND received_at < ?`,
-    ).bind(day, day + DAY).all<Row>();
-    const groups = new Map<string, { platform: Platform; version: string; devices: Set<string>; users: Set<string> }>();
-    for (const row of windows.results ?? []) {
-      const platform = typeof row.platform === 'string' && isPlatform(row.platform)
-        ? row.platform
-        : sniffPlatform(String(row.os_version ?? ''));
-      if (!platform) continue;
-      const version = String(row.client_version ?? '');
-      if (!version) continue;
-      const key = `${platform}\0${version}`;
-      let group = groups.get(key);
-      if (!group) {
-        group = { platform, version, devices: new Set(), users: new Set() };
-        groups.set(key, group);
-      }
-      if (row.device_id) group.devices.add(String(row.device_id));
-      if (row.user_id) group.users.add(String(row.user_id));
-    }
-    const statements = [...groups.values()].map((group) => db.prepare(
-      `INSERT INTO ops_client_version_daily(day_at, platform, app_version, devices, users)
-       VALUES(?, ?, ?, ?, ?)
-       ON CONFLICT(day_at, platform, app_version) DO UPDATE SET
-         devices = excluded.devices,
-         users = excluded.users`,
-    ).bind(day, group.platform, group.version, group.devices.size, group.users.size));
-    if (statements.length > 0) await db.batch(statements);
-    return { skipped: false, rows: statements.length };
-  } catch (error) {
-    if (missingTable(error)) return { skipped: true, rows: 0 };
-    throw error;
-  }
-}
-
-export async function adoptionMatrix(
-  db: D1Database,
-  opts: { days?: number; nowSec?: number } = {},
-): Promise<AdoptionMatrix> {
-  const days = opts.days ?? 30;
-  if (!Number.isSafeInteger(days) || days <= 0 || days > 4000) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid days');
-  }
-  const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
-  const end = utcDay(nowSec);
-  const start = end - days * DAY;
-  const latest = {} as Record<Platform, string | null>;
-  const unreleased: Partial<Record<Platform, true>> = {};
-  const published: Record<Platform, string[]> = {} as Record<Platform, string[]>;
-  try {
-    for (const platform of PLATFORMS) {
-      const any = await db.prepare(
-        'SELECT 1 AS ok FROM client_releases WHERE platform = ? LIMIT 1',
-      ).bind(platform).first();
-      if (!any) unreleased[platform] = true;
-      const current = await currentRelease(db, platform, 'stable');
-      latest[platform] = current?.version ?? null;
-      published[platform] = await publishedStableVersions(db, platform);
-    }
-    const rows = await db.prepare(
-      `SELECT day_at, platform, app_version, devices, users
-       FROM ops_client_version_daily
-       WHERE day_at >= ? AND day_at <= ?
-       ORDER BY day_at ASC, platform ASC, app_version ASC`,
-    ).bind(start, end).all<Row>();
-    const grouped = new Map<string, AdoptionMatrix['days'][number]>();
-    for (const row of rows.results ?? []) {
-      const platform = String(row.platform);
-      if (!isPlatform(platform)) continue;
-      const day = Number(row.day_at);
-      const key = `${day}:${platform}`;
-      let entry = grouped.get(key);
-      if (!entry) {
-        entry = { day, platform, versions: [] };
-        if (unreleased[platform]) entry.unreleased = true;
-        grouped.set(key, entry);
-      }
-      entry.versions.push({
-        version: String(row.app_version),
-        devices: Number(row.devices),
-        users: Number(row.users),
-        bucket: versionBucket(String(row.app_version), published[platform] ?? []),
-      });
-    }
-    for (const entry of grouped.values()) {
-      entry.versions.sort((a, b) => compareVersions(b.version, a.version));
-    }
-    return { days: [...grouped.values()], latest, unreleased };
-  } catch (error) {
-    if (!missingTable(error)) throw error;
-    for (const platform of PLATFORMS) {
-      latest[platform] = null;
-      unreleased[platform] = true;
-    }
-    return { days: [], latest, unreleased };
-  }
-}
-
-export async function retainClientVersionDaily(
-  db: D1Database,
-  nowSec: number,
-  days = 400,
-  limit = 500,
-): Promise<number> {
-  if (!Number.isSafeInteger(days) || days <= 0) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid days');
-  }
-  if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid limit');
-  }
-  const cutoff = nowSec - days * DAY;
-  try {
-    const result = await db.prepare(
-      `DELETE FROM ops_client_version_daily WHERE rowid IN (
-         SELECT rowid FROM ops_client_version_daily
-         WHERE day_at < ?
-         ORDER BY day_at ASC
-         LIMIT ?
-       )`,
-    ).bind(cutoff, limit).run();
-    return Number(result.meta.changes ?? 0);
-  } catch (error) {
-    if (missingTable(error)) return 0;
-    throw error;
-  }
 }

@@ -38,6 +38,7 @@ import {
   assertRelease,
   assertServiceUsage,
   assertSystemHealth,
+  assertUpdateChannel,
   CONTRACT_VERSION,
   customerHealthWord,
   healthWordForVerdict,
@@ -296,11 +297,31 @@ const followup = () => ({
   updatedAt: 1_757_000_000,
 });
 
+const worthwhile = () => ({
+  weekOf: '2026-09-07',
+  computedAt: 1_757_000_100,
+  picks: [{
+    id: 'idle_node:node:洛杉矶 CN2 GIA:2026-09-07',
+    kind: 'idle_node' as const,
+    subjectType: 'node' as const,
+    subjectId: '洛杉矶 CN2 GIA',
+    subjectLabel: '洛杉矶 CN2 GIA',
+    metric: { kind: 'days' as const, value: 21 },
+    payoff: { kind: 'cny' as const, value: 4_500, isEstimate: true },
+    confidence: 'medium' as const,
+    deadlineSec: 1_759_276_800,
+    evidenceAsOfSec: 1_757_000_000,
+    action: { page: 'nodes' as const, section: 'retire', subjectId: '洛杉矶 CN2 GIA' },
+  }],
+  considered: 37,
+});
+
 const digest = () => ({
   day: '2026-09-10',
   overnight: { resolved: [incident()], opened: [] },
   open: [incident()],
   due: { followups: [followup()], checks: [] },
+  worthwhile: worthwhile(),
   updatedAt: 1_757_000_100,
 });
 
@@ -354,6 +375,19 @@ const homeLine = () => ({
   notes: null,
   createdAt: 1_700_000_000,
   updatedAt: 1_757_000_000,
+});
+
+const monthReconRow = () => ({
+  subjectType: 'node' as const,
+  subjectId: '洛杉矶 CN2 GIA',
+  label: '洛杉矶 CN2 GIA',
+  category: 'server' as const,
+  ownerUserId: null,
+  expectedMinor: 1_050,
+  expectedCurrency: 'USD',
+  ledgerCnyMinor: null,
+  entryIds: [],
+  reason: 'no_ledger' as const,
 });
 
 /** Every checker with a fixture it must accept unchanged. */
@@ -470,6 +504,18 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     withdrawnAt: null,
     createdAt: 1_756_800_000,
     updatedAt: 1_756_900_000,
+    sizeBytes: 41_943_040,
+    verifiedAt: null,
+    signed: false,
+    downloadUrl: 'https://releases.afk.ccwu.cc/download/releases/macos/0.0.72.dmg',
+    minOsVersion: null,
+  })],
+  ['updateChannel', assertUpdateChannel, () => ({
+    platform: 'macos' as const,
+    kind: 'sparkle' as const,
+    feedPath: '/appcast.xml',
+    wired: true,
+    current: { releaseId: 'r-1', version: '0.0.72' },
   })],
   ['adoption', assertAdoptionMatrix, () => ({
     range: '30d' as const,
@@ -615,6 +661,8 @@ const CASES: Array<[string, (value: unknown, path?: string) => unknown, () => Re
     unreconciled: 0,
     frozen: false,
     frozenAt: null,
+    reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [monthReconRow()], asOfSec: 1_757_000_000 },
+    unreconciledBills: 1,
     updatedAt: 1_757_000_000,
   })],
   ['fxRate', assertFxRate, () => ({

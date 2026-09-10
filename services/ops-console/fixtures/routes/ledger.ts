@@ -269,6 +269,8 @@ export function createLedgerFixtures(rootDir: string) {
       nodes,
       unreconciled: customers.filter((row) => row.pending).length
         + nodes.filter((row) => row.pending).length,
+      reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec() },
+      unreconciledBills: 0,
       updatedAt: rows.reduce((newest, row) => Math.max(newest, row.createdAt), nowSec()),
     };
   }

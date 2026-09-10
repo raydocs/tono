@@ -229,6 +229,10 @@ export async function loadMonthSummary(db: D1Database, month: string, nowSec: nu
     unreconciled: closed ? Number(closed.unreconciled) : unreconciled,
     frozen: Boolean(closed),
     frozenAt: closed ? Number(closed.closed_at) : null,
+    // 月结对账 is D2's; the keys ship now so the console can compile against
+    // the finished shape rather than a growing one.
+    reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec },
+    unreconciledBills: 0,
     updatedAt,
   };
 }

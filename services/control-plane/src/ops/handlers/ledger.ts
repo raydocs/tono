@@ -296,7 +296,10 @@ async function loadMonthSummaryFallback(month: string, nowSec: number) {
       plan: 0, server: 0, home_line: 0, domain: 0, control_plane: 0,
       claude_account: 0, chatgpt_account: 0, other: 0,
     },
-    customers: [], nodes: [], unreconciled: 0, frozen: false, frozenAt: null, updatedAt: nowSec,
+    customers: [], nodes: [], unreconciled: 0, frozen: false, frozenAt: null,
+    reconciliation: { billsWithoutLedger: [], ledgerWithoutBill: [], asOfSec: nowSec },
+    unreconciledBills: 0,
+    updatedAt: nowSec,
   };
 }
 

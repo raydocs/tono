@@ -1,12 +1,9 @@
 import { body, rejectUnexpectedKeys } from '../../request';
 import {
-  ADOPTION_BUCKETS,
-  PLATFORMS,
   assertAdoptionMatrix,
   assertRelease,
-  type AdoptionBucket,
+  assertUpdateChannel,
   type AdoptionMatrixDto,
-  type Platform,
   type ReleaseDto,
 } from '../contract';
 import {
@@ -16,6 +13,7 @@ import {
   updateRelease,
   type ClientRelease,
 } from '../releases';
+import { listUpdateChannels } from '../releases-channels';
 import {
   Actor,
   Env,
@@ -27,9 +25,11 @@ import {
   listJson,
   now,
   parseRange,
-  rangeSeconds,
   weakEtag,
 } from './common';
+
+/** Where a published build is fetched from; D3 puts the object behind it. */
+const DOWNLOAD_BASE = 'https://releases.afk.ccwu.cc/download/';
 
 function releaseDto(row: ClientRelease): ReleaseDto {
   return {
@@ -46,6 +46,11 @@ function releaseDto(row: ClientRelease): ReleaseDto {
     withdrawnAt: row.yankedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    sizeBytes: row.sizeBytes ?? null,
+    verifiedAt: null,
+    signed: false,
+    downloadUrl: row.r2Key ? `${DOWNLOAD_BASE}${row.r2Key}` : null,
+    minOsVersion: null,
   };
 }
 
@@ -106,31 +111,29 @@ export async function patchRelease(req: Request, e: Env, rawId: string, actor: A
 
 export async function getReleaseAdoption(req: Request, e: Env): Promise<Response> {
   const range = parseRange(new URL(req.url).searchParams.get('range'));
-  const days = Math.max(1, Math.round(rangeSeconds(range) / 86_400));
-  const matrix = await adoptionMatrix(e.DB, { days, nowSec: now() });
-  const cells = new Map<string, { platform: Platform; bucket: AdoptionBucket; users: number; devices: number }>();
-  const released: Platform[] = [];
-  for (const platform of PLATFORMS) {
-    if (!matrix.unreleased[platform]) released.push(platform);
-    for (const bucket of ADOPTION_BUCKETS) {
-      cells.set(`${platform}:${bucket}`, { platform, bucket, users: 0, devices: 0 });
-    }
-  }
-  for (const day of matrix.days) {
-    for (const version of day.versions) {
-      const bucket = version.bucket;
-      const key = `${day.platform}:${bucket}`;
-      const cell = cells.get(key);
-      if (!cell) continue;
-      cell.users += version.users;
-      cell.devices += version.devices;
-    }
-  }
+  // One cell per platform × bucket, each device counted once at the last
+  // version it reported inside the range. Summing the per-day rollup instead
+  // reported a device seen on thirty days as thirty devices.
+  const matrix = await adoptionMatrix(e.DB, { range, nowSec: now() });
   const dto: AdoptionMatrixDto = {
     range,
-    released,
-    cells: [...cells.values()],
+    released: matrix.released,
+    cells: matrix.cells,
     updatedAt: now(),
   };
   return entityJson(e, req, dto, weakEtag([range, dto.updatedAt, dto.cells.length]), assertAdoptionMatrix);
+}
+
+/**
+ * 更新源. Five rows, always — a platform with no updater is a row that says so,
+ * not a row that is missing.
+ */
+export async function getReleaseChannels(req: Request, e: Env): Promise<Response> {
+  const t = now();
+  const items = await listUpdateChannels(e.DB, t);
+  return listJson(
+    e, req, items, null, t,
+    weakEtag(items.map((row) => `${row.platform}:${row.current?.version ?? ''}`)),
+    assertUpdateChannel, items.length,
+  );
 }
