@@ -1,7 +1,8 @@
-import type { CustomerSummaryDto, Platform } from '@contract';
+import type { CustomerSummaryDto, FunnelRowDto, Platform } from '@contract';
 import { copy } from '@/copy/copy';
 import { nowSec } from './clock';
 import { formatDate, formatPercent } from './display';
+import { stageSentence, STUCK_DAYS, stuck } from './funnel';
 import { compareVersions } from './releases';
 import type { FleetNodeDto } from './types';
 
@@ -18,11 +19,23 @@ export type Chore = {
   kind: ChoreKind;
   summary: string;
   dueAt: number | null;
+  /**
+   * Who the chore is about, on the chores that are about reaching a person.
+   *
+   * 待办 used to be a sentence and a date, which is enough for a renewal and
+   * not enough for an onboarding: chasing somebody means having their handle
+   * on the row and a way into their page. `userId` is null for an address that
+   * was opened and never registered — there is no 360 to open, so the row goes
+   * to the invite instead.
+   */
+  who?: { userId: string | null; email: string; wechatId: string | null };
 };
 
 const DAY = 86_400;
 /** Two weeks: long enough to buy a renewal, short enough not to be wallpaper. */
 const SOON = 14 * DAY;
+/** When an onboarding fell due: the day the person had been stuck three days. */
+const STUCK = STUCK_DAYS * DAY;
 const NODE_QUOTA_CHORE = 0.7;
 const CUSTOMER_QUOTA_CHORE = 0.9;
 
@@ -111,6 +124,21 @@ export function customerChores(
         dueAt: null,
       });
     }
+    /**
+     * 还没用起来 is a thing to do, not a fault, so it arrives here rather than
+     * in the incident list — and it is dated at the day it became one, which
+     * puts the person who has been waiting longest at the top and gets the
+     * chore into 今天必须做 rather than leaving it undated at the bottom.
+     */
+    if (row.stage !== 'connected' && stuck(row.stageSinceAt)) {
+      out.push({
+        id: `onboarding:${row.userId}`,
+        kind: 'onboarding',
+        summary: copy.onboardChore(who, stageSentence(row.stage, row.stageSinceAt)),
+        dueAt: row.stageSinceAt + STUCK,
+        who: { userId: row.userId, email: row.email, wechatId: row.wechatId },
+      });
+    }
     if (row.platforms.length === 0 || row.minAppVersion === null) {
       out.push({
         id: `user-profile-${row.userId}`,
@@ -119,6 +147,32 @@ export function customerChores(
         dueAt: null,
       });
     }
+  }
+  return sortChores(out);
+}
+
+/**
+ * The people who were opened and never registered, as chores.
+ *
+ * They have no customer row for `customerChores` to walk, and they are the
+ * half of the funnel most likely to be forgotten: nobody has an account to
+ * stumble over, so the only place they can appear is here. Same three-day
+ * window as the registered half, same masked address, same id shape.
+ */
+export function inviteChores(
+  invites: readonly FunnelRowDto[],
+  mask: (email: string) => string,
+): Chore[] {
+  const out: Chore[] = [];
+  for (const row of invites) {
+    if (!stuck(row.stageSinceAt)) continue;
+    out.push({
+      id: `onboarding:${row.key}`,
+      kind: 'onboarding',
+      summary: copy.onboardChore(mask(row.email), stageSentence(row.stage, row.stageSinceAt)),
+      dueAt: row.stageSinceAt + STUCK,
+      who: { userId: null, email: row.email, wechatId: row.wechatId },
+    });
   }
   return sortChores(out);
 }

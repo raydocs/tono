@@ -1,5 +1,13 @@
 import { useMemo, useState } from 'react';
-import type { AdoptionBucket, CustomerSummaryDto, Platform, ReleaseDto, SystemHealthDto } from '@contract';
+import type {
+  AdoptionBucket,
+  CustomerSummaryDto,
+  FunnelDto,
+  FunnelStage,
+  Platform,
+  ReleaseDto,
+  SystemHealthDto,
+} from '@contract';
 import { ADOPTION_BUCKETS } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { Chip } from '@/components/ops/Chip';
@@ -24,7 +32,8 @@ import {
   type CustomerFilter,
   type CustomerFilterId,
 } from '@/lib/customers';
-import { openCustomer, setCustomerFilter } from '@/lib/hash-route';
+import { invitesOf, listRows, selectByStage, stageCounts } from '@/lib/funnel';
+import { closeInvite, openCustomer, openInvite, setCustomerFilter } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { publishedVersions } from '@/lib/releases';
 import { cn } from '@/lib/utils';
@@ -32,6 +41,9 @@ import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import type { Tone } from '@/components/ops/StatusWord';
 import { useCohort } from './customer/Cohort';
 import { customerColumns } from './customer/columns';
+import { FunnelBar } from './customer/Funnel';
+import { InviteDrawer } from './customer/InviteDrawer';
+import { withInvites } from './customer/invite-row';
 import { OnboardDrawer } from './customer/OnboardDrawer';
 
 /** Only the two health words carry a tone; the total is prose. */
@@ -39,14 +51,18 @@ const FRAGMENT_TONE: Record<CustomerFilterId, Tone | 'none'> = {
   all: 'none',
   ok: 'ok',
   unreachable: 'sev',
+  // Never a fault's colour: nobody who has not started yet is broken.
+  never_used: 'unk',
 };
 
 export default function CustomersPage({
   customers,
+  funnel,
   releases,
   health,
   platform,
   bucket,
+  invite,
 }: {
   /**
    * The shell owns this list, so onboarding a customer has to ask it to read
@@ -54,14 +70,24 @@ export default function CustomersPage({
    * cannot invent one that the hub has not confirmed.
    */
   customers: Resource<CustomerSummaryDto[]> & { reload: () => void };
+  /**
+   * Everyone who has not connected yet. The list is the shell's, like the
+   * customers themselves, because the daily page and Command-K read the same
+   * one — and it reloads after every write in the invite drawer, since the row
+   * that changed is the whole point of having opened it.
+   */
+  funnel: Resource<FunnelDto> & { reload: () => void };
   health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   /** Both come from the URL: a clients-matrix cell is a link into this page. */
   platform: Platform | null;
   bucket: AdoptionBucket | null;
+  /** The address whose drawer is open, from the URL: two other pages link here. */
+  invite: string | null;
 }) {
   const privacy = usePrivacy();
   const [filter, setFilter] = useState<CustomerFilter>(null);
+  const [stage, setStage] = useState<FunnelStage | null>(null);
   const [onboarding, setOnboarding] = useState(false);
 
   const all = useMemo(
@@ -86,11 +112,32 @@ export default function CustomersPage({
     () => selectByBucket(onPlatform, published, bucket),
     [onPlatform, published, bucket],
   );
+  const invites = useMemo(
+    () => invitesOf(funnel.status === 'ready' ? funnel.data : null),
+    [funnel],
+  );
+  /**
+   * The invites join the table only while nothing is filtering on something
+   * they do not have. A health word, a platform and a version band are all
+   * measurements of a client, and somebody who never registered has none — so
+   * under those filters they are not "no results", they are not applicable.
+   */
+  const table = useMemo(
+    () => listRows(rows, filter === null && platform === null && bucket === null ? invites : []),
+    [rows, invites, filter, platform, bucket],
+  );
+  /** The bar counts the whole fleet, the way the count sentence above it does. */
+  const perStage = useMemo(() => stageCounts(listRows(all, invites)), [all, invites]);
+  const shown = useMemo(() => selectByStage(table, stage), [table, stage]);
+  const picked = useMemo(
+    () => shown.map((row) => row.customer).filter((row): row is CustomerSummaryDto => row !== null),
+    [shown],
+  );
   const wired = useMemo(() => planWired(all), [all]);
-  /** The handle column, once anybody in the fleet has one to put in it. */
+  /** The handle column, once anybody on this page has one to put in it. */
   const wechat = useMemo(
-    () => (wechatKnown(all) ? privacy.wechat : null),
-    [all, privacy],
+    () => (wechatKnown(all) || invites.some((row) => row.wechatId) ? privacy.wechat : null),
+    [all, invites, privacy],
   );
   /**
    * Every followup still owed, in one read.
@@ -105,9 +152,13 @@ export default function CustomersPage({
     const index = newestOpenFollowups(owed.data.items);
     return index.size === 0 ? null : index;
   }, [owed]);
-  const cohort = useCohort(rows, customers.reload);
+  const cohort = useCohort(picked, customers.reload);
   const columns = useMemo(
-    () => [cohort.column, ...customerColumns(privacy.email, wired, followups, wechat)],
+    () => withInvites(
+      [cohort.column, ...customerColumns(privacy.email, wired, followups, wechat)],
+      privacy.email,
+      wechat,
+    ),
     [cohort.column, privacy.email, wired, followups, wechat],
   );
 
@@ -115,7 +166,7 @@ export default function CustomersPage({
     ? 'loading'
     : customers.status === 'error'
       ? 'error'
-      : rows.length === 0
+      : shown.length === 0
         ? 'empty'
         : 'ready';
 
@@ -200,14 +251,27 @@ export default function CustomersPage({
         )}
       </div>
 
+      {/* Between the filters and the table, because it is the second question
+          this page answers and the first one an operator asks in the morning:
+          of the people who are paying, who has not started using it. */}
+      {customers.status === 'ready' ? (
+        <FunnelBar counts={perStage} stage={stage} onPick={setStage} />
+      ) : null}
+
       {cohort.bar}
 
       <DataTable
-        rows={rows}
+        rows={shown}
         columns={columns}
-        getRowId={(row) => row.userId}
-        onRowClick={(row) => openCustomer(row.userId)}
+        getRowId={(row) => row.key}
+        onRowClick={(row) => (row.customer === null
+          ? openInvite(row.invite.email)
+          : openCustomer(row.customer.userId))}
         state={state}
+        /* A stage with nobody on it is an empty customer list, not an empty
+           fleet: the table's own default is worded for machines, which on this
+           page is an answer to a question nobody asked. */
+        emptyMessage={copy.emptyCustomers}
         errorMessage={customers.status === 'error' ? customers.message : undefined}
       />
 
@@ -216,7 +280,16 @@ export default function CustomersPage({
       <OnboardDrawer
         open={onboarding}
         onClose={() => setOnboarding(false)}
-        onSaved={customers.reload}
+        onSaved={() => {
+          customers.reload();
+          funnel.reload();
+        }}
+      />
+
+      <InviteDrawer
+        invite={invites.find((row) => row.email === invite) ?? null}
+        onClose={closeInvite}
+        onSaved={funnel.reload}
       />
     </div>
   );

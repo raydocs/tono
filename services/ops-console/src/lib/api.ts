@@ -5,6 +5,8 @@ import type {
   CustomerDetailDto,
   CustomerSummaryDto,
   DestinationRowDto,
+  FunnelDto,
+  FunnelRowDto,
   IncidentDetailDto,
   IncidentDto,
   ListDto,
@@ -215,6 +217,24 @@ export const opsApi = {
   live: async (signal?: AbortSignal) => (await getJson<{ live: LiveDto }>('live', signal)).live,
 
   customers: (signal?: AbortSignal) => getAllJson<CustomerSummaryDto>('customers', signal),
+  /**
+   * Everyone who has not connected yet, plus the five counts above them.
+   *
+   * Not a page of the customer list: half of these people have no `users` row,
+   * so they cannot come back on an endpoint that answers customer rows. It is
+   * one read for the whole shell — the 客户 table, 今天's chores and ⌘K all
+   * hold the same list of who is still stuck.
+   */
+  funnel: (signal?: AbortSignal) => getJson<FunnelDto>('customers/funnel', signal),
+  /**
+   * The three operator-owned fields on somebody who has no account yet.
+   *
+   * It patches the sign-up list rather than a customer, because that row is
+   * all there is: the address was allow-listed and nothing else about them
+   * exists. The answer is the funnel row as it now stands.
+   */
+  patchInvite: (email: string, body: { wechatId?: string | null; contact?: string | null; notes?: string | null }) =>
+    patchJson<FunnelRowDto>(`signup-allowlist/${encodeURIComponent(email)}`, body),
   customer: (id: string, signal?: AbortSignal) =>
     getJson<CustomerDetailDto>(`customers/${encodeURIComponent(id)}`, signal),
   customerConnections: (id: string, signal?: AbortSignal) =>

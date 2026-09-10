@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { CustomerSummaryDto, IncidentDto, ReleaseDto, SystemHealthDto } from '@contract';
+import type { CustomerSummaryDto, FunnelDto, IncidentDto, ReleaseDto, SystemHealthDto } from '@contract';
 import { Action } from '@/components/ops/Action';
 import { CountText } from '@/components/ops/CountText';
 import { Empty } from '@/components/ops/Empty';
@@ -7,9 +7,10 @@ import { PageNote } from '@/components/ops/PageNote';
 import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { followupApi } from '@/lib/api-followups';
-import { customerChores, fleetChores, sortChores, type Chore } from '@/lib/chores';
+import { customerChores, fleetChores, inviteChores, sortChores } from '@/lib/chores';
 import { severityTone } from '@/lib/codes';
-import { formatDate, formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
+import { formatDurationSince, formatWhen, formatWhenAgo } from '@/lib/display';
+import { invitesOf } from '@/lib/funnel';
 import { choresDueToday, closureWord, recoveredCount } from '@/lib/handling';
 import { openIncident } from '@/lib/hash-route';
 import {
@@ -25,6 +26,7 @@ import { usePrivacy } from '@/lib/privacy';
 import type { FleetNodeDto } from '@/lib/types';
 import { newestFetch, useResource, type Resource } from '@/lib/use-resource';
 import { cn } from '@/lib/utils';
+import { ChoreList } from './today/Chores';
 import { CloseDialog } from './today/CloseDialog';
 import { Digest } from './today/Digest';
 import { IncidentPrimary } from './today/IncidentAction';
@@ -36,6 +38,7 @@ type TabId = (typeof TABS)[number];
 export default function TodayPage({
   incidents,
   customers,
+  funnel,
   health,
   releases,
   nodes,
@@ -44,6 +47,8 @@ export default function TodayPage({
 }: {
   incidents: Resource<IncidentDto[]>;
   customers: Resource<CustomerSummaryDto[]>;
+  /** The people who have not started yet: the other half of the onboarding chores. */
+  funnel: Resource<FunnelDto>;
   health: Resource<SystemHealthDto>;
   releases: Resource<ReleaseDto[]>;
   nodes: FleetNodeDto[];
@@ -67,9 +72,24 @@ export default function TodayPage({
     () => (releases.status === 'ready' ? minSupportedVersions(releases.data) : {}),
     [releases],
   );
+  /**
+   * The chores are one list, and the onboarding half arrives from two places: the
+   * customers who registered and stopped, and the addresses that were opened
+   * and never registered at all. They are counted here rather than in either
+   * list, so the tab, the morning read and the rows below cannot disagree
+   * about how much is owed today (R4).
+   */
+  const invites = useMemo(
+    () => invitesOf(funnel.status === 'ready' ? funnel.data : null),
+    [funnel],
+  );
   const chores = useMemo(
-    () => sortChores([...fleetChores(nodes), ...customerChores(people, privacy.email, floors)]),
-    [nodes, people, privacy, floors],
+    () => sortChores([
+      ...fleetChores(nodes),
+      ...customerChores(people, privacy.email, floors),
+      ...inviteChores(invites, privacy.email),
+    ]),
+    [nodes, people, privacy, floors, invites],
   );
 
   /**
@@ -303,25 +323,5 @@ function IncidentRow({
         </div>
       )}
     </div>
-  );
-}
-
-function ChoreList({ rows }: { rows: readonly Chore[] }) {
-  if (rows.length === 0) return <Empty message={copy.noChores} />;
-  return (
-    <ul className="flex flex-col">
-      {rows.map((chore) => (
-        <li
-          key={chore.id}
-          className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-[var(--hairline)] py-2.5 last:border-b-0"
-        >
-          <span className="tone-rem ops-tag">{copy.choreKind[chore.kind]}</span>
-          <span className="min-w-0 flex-1 truncate text-body">{chore.summary}</span>
-          <span className="shrink-0 font-mono text-micro text-[var(--muted-foreground)]">
-            {chore.dueAt === null ? copy.missing : formatDate(chore.dueAt)}
-          </span>
-        </li>
-      ))}
-    </ul>
   );
 }

@@ -25,6 +25,12 @@ export type OpsRoute = {
   bucket: AdoptionBucket | null;
   /** `#/settings/alerts` — the six 设置 sections are pages, not tabs, so each has a link. */
   section: string | null;
+  /**
+   * `#/customers?invite=` — the address of somebody who was opened and never
+   * registered. They have no page of their own, so the drawer is the whole of
+   * what there is to link to, and ⌘K and 今天 both jump straight into it.
+   */
+  invite: string | null;
 };
 
 /** What the route is before a window exists, and the base every jump starts from. */
@@ -37,6 +43,7 @@ export const BLANK_ROUTE: OpsRoute = {
   platform: null,
   bucket: null,
   section: null,
+  invite: null,
 };
 const EMPTY = BLANK_ROUTE;
 
@@ -66,6 +73,7 @@ export function readRoute(): OpsRoute {
     platform: pair ? platform as Platform : null,
     bucket: pair && bucket !== null && BUCKETS.includes(bucket) ? bucket as AdoptionBucket : null,
     section: page === 'settings' && segments[1] ? decodeURIComponent(segments[1]) : null,
+    invite: page === 'customers' ? read('invite') : null,
   };
 }
 
@@ -88,6 +96,7 @@ export function writeRoute(next: OpsRoute, replace = false) {
     ['incident', next.incident],
     ['platform', next.platform],
     ['bucket', next.bucket],
+    ['invite', next.invite],
   ] as const;
   for (const [key, value] of params) {
     if (value) url.searchParams.set(key, value);
@@ -164,6 +173,16 @@ export function setCustomerFilter(platform: Platform | null, bucket: AdoptionBuc
     platform,
     bucket: platform === null ? null : bucket,
   }, true);
+}
+
+/** The one link an invite has: the list, with their drawer open on top of it. */
+export function openInvite(email: string) {
+  writeRoute({ ...EMPTY, page: 'customers', invite: email });
+}
+
+export function closeInvite() {
+  const current = readRoute();
+  writeRoute({ ...current, invite: null }, true);
 }
 
 export function closeCustomer() {

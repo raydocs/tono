@@ -8,6 +8,7 @@ import { materializeFleet, materializeLive } from './src/lib/fixture-load';
 import { materializeOps } from './src/lib/ops-fixtures';
 import { createSettingsFixtures } from './fixtures/routes/settings';
 import { createCustomerFixtures } from './fixtures/routes/customers';
+import { createFunnelFixtures } from './fixtures/routes/funnel';
 import { createFollowupFixtures } from './fixtures/routes/followups';
 import { createLedgerFixtures } from './fixtures/routes/ledger';
 import { serveNodeRoutes } from './fixtures/routes/node-detail';
@@ -210,6 +211,13 @@ function fixturesPlugin(): Plugin {
   /** The 客户 writes: onboarding, expiry, the home binding, devices, Claude. */
   const customerFixtures = createCustomerFixtures();
   /**
+   * 开通漏斗, and the two writes on somebody who has no account yet. It goes
+   * before 设置 because both of them are sent to `signup-allowlist`: the
+   * invited row lives here, and the sign-up list this delete also has to
+   * shorten lives there.
+   */
+  const funnelFixtures = createFunnelFixtures(rootDir, settingsFixtures.removeAllowlisted);
+  /**
    * 跟进, 下次检查, 收尾 and 早报. It goes before the incident branches below
    * because it owns the two fields those rows are grown by: an incident read
    * that skipped it would come back without the closure the operator just
@@ -256,6 +264,14 @@ function fixturesPlugin(): Plugin {
           session: pickSession(url, set),
           empty: set === 'empty',
           file: () => opsFile(fileNames(set).customers, pickSession(url, set)),
+        })) return;
+        if (set !== 'error' && funnelFixtures({
+          req,
+          res,
+          route,
+          session: pickSession(url, set),
+          empty: set === 'empty',
+          dense: set === 'dense',
         })) return;
         if (set !== 'error' && ledgerFixtures({
           req,

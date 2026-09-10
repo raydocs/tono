@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import type { CustomerBillingDto, CustomerNowDto } from '@contract';
+import type { CustomerDetailDto } from '@contract';
 import { Fact } from '@/components/ops/DetailDrawer';
 import { Empty } from '@/components/ops/Empty';
 import { HeatStrip } from '@/components/ops/HeatStrip';
@@ -12,6 +12,7 @@ import { copy } from '@/copy/copy';
 import { opsApi } from '@/lib/api';
 import { customerApi } from '@/lib/api-customer-actions';
 import { formatDate, formatPercent, formatWhenAgo, splitBytes } from '@/lib/display';
+import { stageSentence } from '@/lib/funnel';
 import { closeCustomer } from '@/lib/hash-route';
 import { usePrivacy } from '@/lib/privacy';
 import { shown } from '@/lib/sources';
@@ -151,7 +152,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
 
       <Section title={copy.customerSections.now}>
         <div className="grid gap-x-8 sm:grid-cols-2">
-          {nowFacts(row.now).map((fact) => (
+          {nowFacts(row).map((fact) => (
             <Fact key={fact.label} label={fact.label} measured={fact.measured} tier={fact.tier} />
           ))}
         </div>
@@ -245,6 +246,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
       <Billing
         userId={userId}
         billing={row.billing}
+        firstConnectedAt={row.firstConnectedAt}
         profile={{ wechatId: row.wechatId, contact: row.contact, notes: row.notes }}
         updatedAt={row.updatedAt}
         onChanged={refresh}
@@ -259,7 +261,7 @@ export default function CustomerDetailPage({ userId }: { userId: string }) {
  * feeding it the first-entitlement date produced a confident exhaustion date
  * two years out: a projection with nothing behind it is worse than none.
  */
-function Quota({ billing }: { billing: CustomerBillingDto }) {
+function Quota({ billing }: { billing: CustomerDetailDto['billing'] }) {
   const usage = shown(billing.usageBytes);
   const quota = billing.quotaBytes;
   const used = usage.value === null ? null : splitBytes(usage.value);
@@ -302,21 +304,38 @@ function Quota({ billing }: { billing: CustomerBillingDto }) {
  * The tiers are the answer's shape: whether they are on and where, then the
  * facts that qualify it, then the device id — an opaque token nobody reads
  * unless they are about to type it somewhere.
+ *
+ * For somebody who has never connected, the first line is not the connected
+ * word — that one says a client which works has stopped, and this client has
+ * never started.
+ * It is the step they are stuck on and how long they have been on it, which is
+ * the only thing on this page anybody can act on. The header keeps the health
+ * word: what to think is one axis, what to do is another.
  */
-function nowFacts(now: CustomerNowDto): Array<{
+function nowFacts(row: CustomerDetailDto): Array<{
   label: string;
   measured: Measured<string | null>;
   tier: Tier;
 }> {
+  const now = row.now;
   const at = now.connected.asOfSec;
   const stamp = (value: string | null): Measured<string | null> =>
     measured(at === null ? null : value, at, copy.sourceWord.telemetry);
   const version = [now.appVersion, now.osVersion].filter(Boolean).join(' · ');
   const carrier = [now.carrier, now.region].filter(Boolean).join(' · ');
+  const started = row.stage === 'connected';
   return [
-    {
+    started ? {
       label: copy.now.connected,
       measured: stamp(now.connected.value ? copy.now.yes : copy.now.no),
+      tier: 'row',
+    } : {
+      label: copy.now.stage,
+      measured: measured(
+        stageSentence(row.stage, row.stageSinceAt),
+        row.stageSinceAt,
+        copy.sourceWord.engine,
+      ),
       tier: 'row',
     },
     { label: copy.now.node, measured: stamp(now.node), tier: 'row' },

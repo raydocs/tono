@@ -35,9 +35,12 @@ const FAIL_ERRORS = [
   'dns: lookup ***: no such host',
 ];
 
+const FUNNEL_STAGES = ['invited', 'registered', 'device_added', 'reported', 'connected'];
+
 const HEALTH_BY_VERDICT = {
   unreachable: { health: '连不上', tone: 'sev' },
   unstable: { health: '不稳', tone: 'warn' },
+  never_used: { health: '还没用起来', tone: 'unk' },
   unreported: { health: '未上报', tone: 'unk' },
   offline: { health: '离线', tone: 'info' },
   ok: { health: '正常', tone: 'ok' },
@@ -90,20 +93,52 @@ const EMAILS_20 = [
 const VERDICT_20 = {
   'u-04': 'unreachable',
   'u-02': 'unstable', 'u-09': 'unstable', 'u-15': 'unstable',
-  'u-06': 'unreported', 'u-11': 'unreported', 'u-17': 'unreported', 'u-20': 'unreported',
+  'u-06': 'never_used', 'u-11': 'never_used', 'u-17': 'never_used',
+  'u-20': 'unreported',
   'u-01': 'offline', 'u-03': 'offline', 'u-05': 'offline', 'u-08': 'offline',
   'u-12': 'offline', 'u-14': 'offline', 'u-18': 'offline', 'u-19': 'offline',
   'u-07': 'ok', 'u-10': 'ok', 'u-13': 'ok', 'u-16': 'ok',
 };
+
+/**
+ * 开通了、从来没连上过的三位，一人卡在一步。
+ *
+ * 页面上四段漏斗里除了"连上过"的那三段，各要有人站着，不然点进去是一张空表，
+ * 而空表证明不了筛选是对的。日子也各不相同：两位卡了三天以上，会变成待办；
+ * 名单上那两位里也留了一位刚开通的，好证明三天这条线真的在拦。
+ */
+const STAGE_20 = {
+  'u-06': { stage: 'registered', days: 5 },
+  'u-11': { stage: 'device_added', days: 4 },
+  'u-17': { stage: 'reported', days: 9 },
+};
+
+/** 名单上的两位：开通了，从来没在客户端登录过，所以没有账号。 */
+const INVITED = [
+  {
+    email: 'shu.qing@example.com',
+    wechatId: 'wx_shu_qing',
+    contact: '+86 137 5521 8802',
+    notes: '朋友介绍的，开通后一直没动静。',
+    days: 6,
+  },
+  {
+    email: 'tan.wei@example.com',
+    wechatId: null,
+    contact: null,
+    notes: null,
+    days: 2,
+  },
+];
 
 const REASON_20 = {
   'u-04': '30 分钟内 3 次连接失败，之后没有成功',
   'u-02': '今天已经换了 4 个节点，延迟一直在抖',
   'u-09': '近一小时握手失败和成功交替出现',
   'u-15': '节点来回切了三次，每次都只撑了几分钟',
-  'u-06': '客户端超过 48 小时没有上报',
-  'u-11': '账号已停用，客户端一直没有心跳',
-  'u-17': '超过两天没有任何窗口上报',
+  'u-06': '注册之后一直没装客户端',
+  'u-11': '装了客户端，从来没有上报过',
+  'u-17': '上报过几次，但一次也没连上',
   'u-20': '套餐已到期，客户端不再上报',
   'u-01': '昨晚 23 点后一直离线',
   'u-03': '今早 8 点后没有再连上',
@@ -207,6 +242,22 @@ function hourOfDay(hourAt) {
   return Math.floor(((hourAt % DAY) + DAY) % DAY / HOUR);
 }
 
+/**
+ * 从来没连上过的人：不管是还没上报，还是上报了连不上，能测的都还没测过。
+ *
+ * 未上报和还没用起来在夹具里长得一样——没有设备、没有连接、没有用量——但含义
+ * 不同：一个是用过之后不说话了，一个是从头到尾没用起来。所以判定分开写，
+ * 而"这些字段还是空的"这件事共用一个判断。
+ */
+function quiet(verdict) {
+  return verdict === 'unreported' || verdict === 'never_used';
+}
+
+function stageOf(id, verdict) {
+  if (STAGE_20[id]) return STAGE_20[id].stage;
+  return verdict === 'never_used' ? 'registered' : 'connected';
+}
+
 function lifecycleFor(id) {
   if (id === 'u-11') return 'suspended';
   if (id === 'u-20') return 'expired';
@@ -214,14 +265,17 @@ function lifecycleFor(id) {
 }
 
 function platformsFor(id, index) {
-  if (VERDICT_20[id] === 'unreported') return [];
+  // 装了客户端的那两位有平台，注册了还没装的那位没有。
+  const stage = STAGE_20[id]?.stage;
+  if (stage === 'device_added' || stage === 'reported') return ['macos'];
+  if (quiet(VERDICT_20[id])) return [];
   if (id === 'u-04') return ['macos', 'windows'];
   const sets = [['macos'], ['windows'], ['macos', 'windows']];
   return sets[index % 3];
 }
 
 function servicesFor(id, index, rng) {
-  if (VERDICT_20[id] === 'unreported') return [];
+  if (quiet(VERDICT_20[id])) return [];
   const forced = {
     'u-07': ['claude', 'chatgpt'],
     'u-10': ['chatgpt', 'grok'],
@@ -286,7 +340,7 @@ function quotaFor(id) {
 }
 
 function usageFor(id, quota, rng) {
-  if (VERDICT_20[id] === 'unreported') return measured(0, null, 'telemetry');
+  if (quiet(VERDICT_20[id])) return measured(0, null, 'telemetry');
   const asOf = CLOCK - randInt(rng, 60, 1800);
   if (id === 'u-01') return measured(55 * GiB, asOf, 'telemetry');
   if (id === 'u-03') return measured(93 * GiB, asOf, 'telemetry');
@@ -322,7 +376,7 @@ function lastFailureFor(id, server, rng) {
 }
 
 function connectedFor(id, verdict, rng) {
-  if (verdict === 'unreported') return measured(false, null, 'telemetry');
+  if (quiet(verdict)) return measured(false, null, 'telemetry');
   if (verdict === 'ok') return measured(true, CLOCK - randInt(rng, 20, 240), 'telemetry');
   if (id === 'u-04') return measured(false, CLOCK - 180, 'telemetry');
   const age = verdict === 'offline' ? randInt(rng, 3600, 80_000) : randInt(rng, 90, 1800);
@@ -330,7 +384,9 @@ function connectedFor(id, verdict, rng) {
 }
 
 function lastSeenFor(id, verdict, connected) {
-  if (verdict === 'unreported') return null;
+  // 上报过的那位有最后一次上报的时间；其余从来没说过话。
+  if (STAGE_20[id]?.stage === 'reported') return CLOCK - STAGE_20[id].days * DAY;
+  if (quiet(verdict)) return null;
   if (id === 'u-04') return CLOCK - 180;
   return connected.asOfSec;
 }
@@ -577,7 +633,7 @@ function buildU04Connections(userIdValue, devices, rng) {
 
 function buildGenericConnections(spec, devices, rng) {
   const { id, verdict, selectedServer } = spec;
-  if (verdict === 'unreported') return [];
+  if (quiet(verdict)) return [];
   const count = randInt(rng, 12, 25);
   const device = devices[0] ?? null;
   const events = [];
@@ -634,21 +690,26 @@ function buildGenericConnections(spec, devices, rng) {
 
 function buildActivity(spec, rng) {
   const rows = [];
-  const unreported = spec.verdict === 'unreported';
+  const unreported = quiet(spec.verdict);
   const outageUser = spec.id === 'u-04';
   for (let n = 167; n >= 0; n -= 1) {
     const hourAt = HOUR_FLOOR - n * HOUR;
     const hod = hourOfDay(hourAt);
     const recent = n < 20;
     if (unreported) {
+      // 上报过的那位客户端确实在线过，只是一次也没连上：在线有分钟数，
+      // 已连接一格都不该有，热力条上就是浅的一片。
+      const online = spec.stage === 'reported' && n < 60 && hod >= 9
+        ? randInt(rng, 6, 40)
+        : 0;
       rows.push({
         hourAt,
-        onlineMinutes: 0,
+        onlineMinutes: online,
         connectedMinutes: 0,
         bytesUp: 0,
         bytesDown: 0,
         node: null,
-        platform: null,
+        platform: online > 0 ? 'macos' : null,
         appVersion: null,
       });
       continue;
@@ -689,6 +750,8 @@ function buildActivity(spec, rng) {
 }
 
 function buildDestinations(spec, rng, exactCount) {
+  // 一次都没连上过的人没有流量，所以没有去向可看。
+  if (spec.stage !== 'connected') return [];
   if (spec.verdict === 'unreported' && spec.id !== 'u-04') {
     const count = exactCount ?? randInt(rng, 8, 14);
     const pool = CLOUD_DESTINATIONS.concat(EXTRA_DESTINATIONS);
@@ -758,6 +821,7 @@ function buildDestinations(spec, rng, exactCount) {
 }
 
 function buildServices(spec, rng, exactRange) {
+  if (spec.stage !== 'connected') return [];
   const familiesNeeded = spec.id === 'u-04' ? SERVICE_FAMILIES.slice() : pickN(rng, SERVICE_FAMILIES, randInt(rng, 3, 6));
   const count = spec.id === 'u-04'
     ? Math.max(12, familiesNeeded.length * 2)
@@ -780,8 +844,35 @@ function buildServices(spec, rng, exactRange) {
   return rows;
 }
 
+/**
+ * 一台装了但还没连上的客户端。
+ *
+ * 装了还没上报的那位连版本都没有——版本是跟着上报走的——所以这两栏是空的，
+ * 页面上就该显示"—"。上报过的那位有最后一次上报的时间，但从来没连上，
+ * 所以 connected 是 false，也没有失败记录可写。
+ */
+function quietDevice(spec) {
+  const reported = spec.stage === 'reported';
+  return {
+    id: `dev-${spec.id}-01`,
+    name: reported ? 'MacBook Air' : 'MacBook Pro',
+    platform: 'macos',
+    appVersion: null,
+    osVersion: reported ? 'macOS 15.6.1' : null,
+    status: 'active',
+    selectedServer: null,
+    lastSeenAt: reported ? spec.stageSinceAt : null,
+    createdAt: spec.stageSinceAt,
+    connected: false,
+    lastFailAt: null,
+    lastFailCode: null,
+    lastFailNode: null,
+  };
+}
+
 function buildDevices(spec, rng) {
-  if (spec.verdict === 'unreported') return [];
+  if (spec.stage === 'device_added' || spec.stage === 'reported') return [quietDevice(spec)];
+  if (quiet(spec.verdict)) return [];
   if (spec.id === 'u-04') {
     return [
       {
@@ -901,7 +992,7 @@ function buildChores(spec) {
       },
     ];
   }
-  if (spec.verdict === 'unreported') return [];
+  if (quiet(spec.verdict)) return [];
   const chores = [];
   if (spec.expiresAt !== null && spec.expiresAt - CLOCK < 10 * DAY && spec.expiresAt > CLOCK) {
     chores.push({
@@ -940,9 +1031,9 @@ function buildNow(spec, devices) {
     platform: device ? device.platform : (spec.platforms[0] ?? null),
     appVersion: device ? device.appVersion : spec.minAppVersion,
     osVersion: device ? device.osVersion : null,
-    carrier: spec.verdict === 'unreported' ? null : '中国电信',
-    asn: spec.verdict === 'unreported' ? null : 4134,
-    region: spec.verdict === 'unreported' ? null : '上海',
+    carrier: quiet(spec.verdict) ? null : '中国电信',
+    asn: quiet(spec.verdict) ? null : 4134,
+    region: quiet(spec.verdict) ? null : '上海',
   };
 }
 
@@ -959,12 +1050,12 @@ function buildBilling(spec) {
     };
   }
   return {
-    plan: spec.verdict === 'unreported' ? null : (spec.index % 5 === 0 ? '高级' : '标准'),
+    plan: quiet(spec.verdict) ? null : (spec.index % 5 === 0 ? '高级' : '标准'),
     deviceLimit: spec.index % 4 === 0 ? 3 : 5,
     quotaBytes: spec.quotaBytes,
     usageBytes: spec.usageBytes,
     expiresAt: spec.expiresAt,
-    firstEntitledAt: spec.verdict === 'unreported' ? null : CLOCK - (100 + spec.index) * DAY,
+    firstEntitledAt: quiet(spec.verdict) ? null : CLOCK - (100 + spec.index) * DAY,
     createdAt: CLOCK - (120 + spec.index) * DAY,
   };
 }
@@ -975,13 +1066,25 @@ function buildCustomer(index, overrides = {}) {
   const verdict = overrides.verdict ?? VERDICT_20[id];
   if (!verdict) throw new Error(`missing verdict for ${id}`);
   const { health, tone } = HEALTH_BY_VERDICT[verdict];
+  const stage = overrides.stage ?? stageOf(id, verdict);
+  /**
+   * 卡在这一步多久了，以及第一次连上是什么时候。
+   *
+   * 连上过的人这两个数是同一个：漏斗到"连上过"就不再走了，所以停在这一步的
+   * 时间就是第一次连上的时间。没连上过的人第一次连上是空的——这一栏是事实，
+   * 不是还没测出来。
+   */
+  const firstConnectedAt = stage === 'connected' ? CLOCK - (95 + index) * DAY : null;
+  const stageSinceAt = overrides.stageSinceAt
+    ?? (stage === 'connected' ? firstConnectedAt : CLOCK - (STAGE_20[id]?.days ?? 4) * DAY);
   const platforms = overrides.platforms ?? platformsFor(id, index);
   const selectedServer = Object.prototype.hasOwnProperty.call(overrides, 'selectedServer')
     ? overrides.selectedServer
-    : (verdict === 'unreported' ? null : (SERVER_20[id] ?? pick(rng, FEATURED_NODES)));
+    : (quiet(verdict) ? null : (SERVER_20[id] ?? pick(rng, FEATURED_NODES)));
   const minAppVersion = Object.prototype.hasOwnProperty.call(overrides, 'minAppVersion')
     ? overrides.minAppVersion
-    : minVersionFor(platforms);
+    // 版本跟着上报走，一次都没上报过就没有版本可写。
+    : (stage === 'connected' ? minVersionFor(platforms) : null);
   const quotaBytes = Object.prototype.hasOwnProperty.call(overrides, 'quotaBytes')
     ? overrides.quotaBytes
     : quotaFor(id);
@@ -998,6 +1101,9 @@ function buildCustomer(index, overrides = {}) {
     index,
     email: overrides.email ?? EMAILS_20[index - 1],
     verdict,
+    stage,
+    stageSinceAt,
+    firstConnectedAt,
     health,
     tone,
     reason: Object.prototype.hasOwnProperty.call(overrides, 'reason')
@@ -1053,6 +1159,9 @@ function buildCustomer(index, overrides = {}) {
     quotaBytes: spec.quotaBytes,
     services: spec.services,
     minAppVersion: spec.minAppVersion,
+    stage: spec.stage,
+    stageSinceAt: spec.stageSinceAt,
+    firstConnectedAt: spec.firstConnectedAt,
     expiresAt: spec.expiresAt,
     lastSeenAt: spec.lastSeenAt,
     updatedAt: spec.updatedAt,
@@ -1069,6 +1178,9 @@ function buildCustomer(index, overrides = {}) {
     tone: spec.tone,
     reason: spec.reason,
     lifecycle: spec.lifecycle,
+    stage: spec.stage,
+    stageSinceAt: spec.stageSinceAt,
+    firstConnectedAt: spec.firstConnectedAt,
     now,
     devices,
     chores,
@@ -1093,12 +1205,20 @@ function denseEmail(n) {
 }
 
 function denseVerdict(n) {
+  // 压版式里也要有还没用起来的人，不然那个词只在二十位的那一份里出现过一次。
+  if (n % 9 === 0) return 'never_used';
   const cycle = ['ok', 'offline', 'unstable', 'unreported', 'unreachable'];
   return cycle[(n - 21) % cycle.length];
 }
 
+/** 压版式里没用起来的那几位，一人卡在一步，轮着来。 */
+function denseStage(n) {
+  return ['registered', 'device_added', 'reported'][Math.floor(n / 9) % 3];
+}
+
 function denseReason(verdict) {
   if (verdict === 'ok') return null;
+  if (verdict === 'never_used') return '开通之后一次也没有连上过';
   if (verdict === 'unreachable') return '最近一次拨号连续失败，之后没有成功';
   if (verdict === 'unstable') return '一天内多次切换节点，连接质量不稳';
   if (verdict === 'unreported') return '超过两天没有客户端上报';
@@ -1115,16 +1235,21 @@ function buildCustomers(count) {
     } else {
       const verdict = denseVerdict(n);
       const rng = rngFor(0x44454E ^ Math.imul(n, 1013904223));
-      const unreported = verdict === 'unreported';
-      const platforms = unreported ? [] : (n % 3 === 0 ? ['macos', 'windows'] : n % 3 === 1 ? ['macos'] : ['windows']);
+      const never = verdict === 'never_used';
+      const stage = never ? denseStage(n) : 'connected';
+      const platforms = quiet(verdict)
+        ? (stage === 'registered' ? [] : ['macos'])
+        : (n % 3 === 0 ? ['macos', 'windows'] : n % 3 === 1 ? ['macos'] : ['windows']);
       row = buildCustomer(n, {
         email: denseEmail(n),
         verdict,
+        stage,
+        stageSinceAt: never ? CLOCK - (3 + (n % 6)) * DAY : undefined,
         reason: denseReason(verdict),
         lifecycle: n % 17 === 0 ? 'expired' : n % 13 === 0 ? 'suspended' : 'active',
         platforms,
-        selectedServer: unreported ? null : LONG_NODES[(n - 21) % LONG_NODES.length],
-        minAppVersion: unreported ? null : minVersionFor(platforms),
+        selectedServer: quiet(verdict) ? null : LONG_NODES[(n - 21) % LONG_NODES.length],
+        minAppVersion: quiet(verdict) ? null : minVersionFor(platforms),
         quotaBytes: n % 11 === 0 ? null : (120 + (n % 9) * 10) * GiB,
         lastFailure: verdict === 'unreachable' || verdict === 'unstable'
           ? {
@@ -1609,6 +1734,70 @@ function buildEmptyIncidents() {
   };
 }
 
+/**
+ * 开通漏斗：名单上还没注册的人，加上有账号但一次都没连上的人。
+ *
+ * 两半合成一张表，因为运营早上问的是同一个问题——谁开通了还没用起来——而这两半
+ * 在库里根本不是一种东西：一半只有一个邮箱在允许登录的名单上，另一半有账号、
+ * 有设备，只是从来没连上过。所以 `key` 是这一行的名字：有账号的就是用户号,
+ * 没账号的是 `invite:` 加邮箱。
+ *
+ * "连上过"那一段的人不进 items：这张表是还没走完的人，走完的那些在客户列表里
+ * 各自带着自己的健康词。段上的数字仍然把他们算进去，不然漏斗的最后一格永远是零。
+ */
+function buildFunnel(file, invites) {
+  const items = invites.map((invite) => ({
+    key: `invite:${invite.email}`,
+    userId: null,
+    email: invite.email,
+    wechatId: invite.wechatId,
+    contact: invite.contact,
+    notes: invite.notes,
+    stage: 'invited',
+    stageSinceAt: CLOCK - invite.days * DAY,
+    lastSeenAt: null,
+  }));
+  for (const row of file.list.items) {
+    if (row.stage === 'connected') continue;
+    const detail = file.details[row.userId].detail;
+    items.push({
+      key: row.userId,
+      userId: row.userId,
+      email: row.email,
+      wechatId: row.wechatId,
+      contact: detail.contact,
+      notes: detail.notes,
+      stage: row.stage,
+      stageSinceAt: row.stageSinceAt,
+      lastSeenAt: row.lastSeenAt,
+    });
+  }
+  items.sort((a, b) => a.stageSinceAt - b.stageSinceAt);
+  const stages = FUNNEL_STAGES.map((stage) => ({
+    stage,
+    count: stage === 'connected'
+      ? file.list.items.filter((row) => row.stage === 'connected').length
+      : items.filter((row) => row.stage === stage).length,
+  }));
+  return { clock: CLOCK, funnel: { stages, items, updatedAt: CLOCK } };
+}
+
+/** 压版式里的名单：很长的邮箱、很长的微信号，一列都不许把地址挤出去。 */
+function denseInvites(count) {
+  const rows = [];
+  for (let n = 1; n <= count; n += 1) {
+    const email = `pending.activation.desk-${String(n).padStart(2, '0')}.east-china-backbone.very-long-name@example.com`;
+    rows.push({
+      email,
+      wechatId: n % 4 === 0 ? null : `wx_pending_activation_desk_${String(n).padStart(2, '0')}`,
+      contact: n % 3 === 0 ? `+86 139 ${String(2000 + n)} ${String(4000 + n)}` : null,
+      notes: n % 5 === 0 ? '销售那边说下周再催一次。' : null,
+      days: 1 + (n % 11),
+    });
+  }
+  return rows;
+}
+
 /* ------------------------------------------------------- 节点：可售验收单 */
 
 /**
@@ -1766,6 +1955,9 @@ export const GENERATED_FIXTURE_FILES = [
   'customers.json',
   'customers.dense.json',
   'customers.empty.json',
+  'funnel.json',
+  'funnel.dense.json',
+  'funnel.empty.json',
   'incidents.json',
   'incidents.dense.json',
   'incidents.empty.json',
@@ -1779,6 +1971,16 @@ export function generateOpsFixtures(outDir = defaultDir) {
     clock: CLOCK,
     list: listOf([]),
     details: {},
+  };
+  const funnel = buildFunnel(customers, INVITED);
+  const funnelDense = buildFunnel(customersDense, denseInvites(14));
+  const funnelEmpty = {
+    clock: CLOCK,
+    funnel: {
+      stages: FUNNEL_STAGES.map((stage) => ({ stage, count: 0 })),
+      items: [],
+      updatedAt: CLOCK,
+    },
   };
   const incidents = buildCoreIncidents();
   const incidentsDense = buildDenseIncidents();
@@ -1798,6 +2000,9 @@ export function generateOpsFixtures(outDir = defaultDir) {
     'customers.json': writeJson('customers.json', customers),
     'customers.dense.json': writeJson('customers.dense.json', customersDense),
     'customers.empty.json': writeJson('customers.empty.json', customersEmpty),
+    'funnel.json': writeJson('funnel.json', funnel),
+    'funnel.dense.json': writeJson('funnel.dense.json', funnelDense),
+    'funnel.empty.json': writeJson('funnel.empty.json', funnelEmpty),
     'incidents.json': writeJson('incidents.json', incidents, true),
     'incidents.dense.json': writeJson('incidents.dense.json', incidentsDense, true),
     'incidents.empty.json': writeJson('incidents.empty.json', incidentsEmpty, true),

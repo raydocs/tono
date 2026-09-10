@@ -8,7 +8,7 @@ Vite + React 19 + Tailwind v4 + shadcn/ui。构建产物写进 `../control-plane
 |---|---|---|
 | `#/today` | 现在有什么坏了？我要做什么？ | 已建：判定句、进行中 / 最近恢复 / 待办、事故抽屉（`?incident=`，可寻址） |
 | `#/nodes`、`#/nodes?node=` | 机器能不能卖、客户能不能连上？ | 已建：卡片 + 表格 + 抽屉 |
-| `#/customers` | 谁在用？用了多少？ | 已建：计数句 + 平台筛选 + 十列表格（微信号跟着邮箱走） |
+| `#/customers` | 谁在用？谁还没用起来？用了多少？ | 已建：计数句 + 开通漏斗 + 平台筛选 + 十列表格（微信号跟着邮箱走，名单上还没注册的人也是一行） |
 | `#/customers/:id` | 去了哪里？连不上为什么？ | 已建：整页 360，从"现在"到折叠的账务 |
 | `#/clients` | 各平台在跑什么版本？该发什么？ | 已建：平台 × 版本档矩阵（每格点进客户列表）+ 每平台发布表与三个写动作 |
 | `#/settings` | 目录、分流、资产、告警 | 未建 |
@@ -26,13 +26,13 @@ npm run dev            # 打真实 /api/v1/ops/*，需要已登录的 Cloudflare
 
 ## 夹具
 
-节点夹具由 `node scripts/generate-fixtures.mjs` 生成，客户与事故夹具由 `node scripts/generate-ops-fixtures.mjs` 生成。
+节点夹具由 `node scripts/generate-fixtures.mjs` 生成，客户、开通漏斗与事故夹具由 `node scripts/generate-ops-fixtures.mjs` 生成。
 两者都带 `clock` 字段，时间戳整体平移到"现在"（`hourAt` 平移后还会吸回整点，否则 7×24 热力条会横跨八天）。
 `dev:fixtures` 下用 `?fixtures=` 选数据集，页面会把这个参数转给夹具中间件：
 
 | 参数 | 看到什么 |
 |---|---|
-| 无 | 42 台节点、20 位客户、2 个进行中事故、macOS 与 Windows 各一条在跑的版本 |
+| 无 | 42 台节点、20 位客户（3 位开通了还没连上过）、名单上 2 位还没注册、2 个进行中事故、macOS 与 Windows 各一条在跑的版本 |
 | `?fixtures=dense` | 50 台节点、60 位客户、24 个事故、五个平台 21 条发布记录，超长中文名，压版式 |
 | `?fixtures=empty` | 一台都没有、一位客户都没有、没有进行中的事故（但留了两条恢复记录）、一个客户端都没发过 |
 | `?fixtures=error` | 接口返回 500 |
@@ -41,7 +41,7 @@ npm run dev            # 打真实 /api/v1/ops/*，需要已登录的 Cloudflare
 真的会改中间件里的那份数据，动作之后页面重新拉取。
 `?session=` 给出一份独立的可写副本，截图用例和写用例因此能共用一个 dev server。
 
-`test/ops-fixtures.test.ts` 拿 Worker 自己的 `assert*` 检查器把九个夹具文件逐条过一遍——平移前后各一次，
+`test/ops-fixtures.test.ts` 拿 Worker 自己的 `assert*` 检查器把十二个夹具文件逐条过一遍——平移前后各一次，
 因为平移是对时间戳做算术，把 `asOfSec` 算成小数或 0 的那种错，单看哪一半都发现不了。
 同一个文件还断言版本分布矩阵的每一格和客户页按同样规则筛出来的人数相等：一格说 5 位、点进去只有 4 行，
 就是"高丢包 2 / 高丢包 8"隔了一页又出现一次。

@@ -5,7 +5,9 @@ test.describe('clients page', () => {
   test('matrix and releases', async ({ page }) => {
     await open(page, '/clients');
 
-    await expect(page.getByText('11 位在最新版 · 10 位落后 · 0 位未上报')).toBeVisible();
+    // 未上报 stopped being zero when the funnel arrived: two customers have a
+    // macOS client that was installed and has never reported a version.
+    await expect(page.getByText('11 位在最新版 · 10 位落后 · 2 位未上报')).toBeVisible();
     // Three platforms have shipped nothing: every cell of those rows says so
     // in words rather than claiming nobody upgraded.
     await expect(page.getByText('未发布')).toHaveCount(12);
