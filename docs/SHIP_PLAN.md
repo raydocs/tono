@@ -79,7 +79,7 @@
 1. 拍板连接日志「默认开还是关」（B0）。不拍板，#137/#138 不准合。
 2. Windows 11 真机：编 #138、跑 `cargo test`、装候选包、走 G1 与 G3 清单。云端 Linux agent 不能代替 WFP。
 3. macOS 真机：Developer ID、公证、Sparkle EdDSA、`tooling/scripts/verify-release-gate.sh /path/to/Tono.app`、Helper 安装。
-4. hy2 三网证明（T0）：东京一台手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
+4. hy2 三网证明（T0）：在 **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）手工装 hysteria2，电信/联通/移动各 5 次握手 + 30 秒下载；同一套配置再在 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）各测一轮。结果写 `docs/ops/transport-hy2.md`。不通就执行 §2.6 的降级，不要让 agent 猜。
 5. 内部账号灰度：`filterCatalogYamlForUser` 已有按用户过滤机制；指定哪些邮箱能看见 hy2 块。
 6. 推 Sparkle / `windows-updates` / R2 `tono-releases`（G4）。
 7. 小范围朋友：从谁开始、看哪些失败率、何时扩大。
@@ -93,9 +93,13 @@
 ### B0 · 冻结口径（先做，否则 3.5 与 hy2 会打架）— 老板 · S
 
 - 目标：两个决定写进本文件本节，作为后续 PR 的前提。
-- 决定 A：连接日志默认开 / 关。开 → #137/#138 按现状合，发布说明写「可在设置关闭」。关 → 两 PR 把默认改成关再合，隐私文案跟着改。
-- 决定 B：hy2 目标节点。建议东京 + 洛杉矶各一，先内部账号。T0 不通的运营商不做自动切换。
-- 验收：本段出现「已拍：默认 ____；节点 ____」。没这句话，B2 与 T0 之后的客户端编排不准开工。
+- 决定 A：连接日志默认开 / 关。开 → #137/#138 按现状合，发布说明写「可在设置关闭」。关 → 两 PR 把默认改成关再合，隐私文案跟着改。**尚未拍。**
+- 决定 B：hy2 目标节点。**已拍（2026-09-10，Panstar 机队表）：**
+  1. **vm-Gk43AX** — 东京 JP Plus Nano，`45.8.173.206`，Debian 13，1C/512MB，流量几乎空（约 0.15%）。三网直连线路，用来证明大陆 UDP。
+  2. **vm-nvLHV3** — 洛杉矶 LAXPre Nano，`144.225.255.38`，Debian 12，1C/1024MB，流量几乎空（约 0.09%）。另一条大洲路径，同一商家，用来区分「GFW 拦 UDP」和「这一家机房不给 UDP」。
+- 不选：JP Lite（不是三网直连、5GB 盘、18 天到期）；Ubuntu 26.04 / Debian 11（provisioner 合同外）；洛杉矶用量最高的那台（约 54 GB，先别在忙机上做实验）。目录名以控制面 `catalog_name` 为准，机队表只有实例名。
+- T0 不通的运营商不做自动切换。SSH 口令只留在 Notion / 钥匙串，**不准进仓库、不准进本文件**。
+- 验收：决定 B 已写。决定 A 仍空时，#137/#138 仍不准合；T0 / G2.5 可以按上面两台开工。
 
 ---
 
@@ -178,7 +182,7 @@
 
 **T0 三网 UDP 证明** — 老板 · S（不通就停自动切换）
 
-- 东京一台：官方 hysteria2，`listen :443/udp`（若 443/udp 被 TCP 占用则另选端口，记下来），自签证书，记下 SHA-256 指纹。带宽先不限。
+- **vm-Gk43AX**（东京 JP Plus，`45.8.173.206`）先装：官方 hysteria2，`listen :443/udp`（若 443/udp 被 TCP 占用则另选端口，记下来），自签证书，记下 SHA-256 指纹。带宽先不限。同一套再装到 **vm-nvLHV3**（洛杉矶，`144.225.255.38`）。
 - 客户端用 mihomo 手工 `type: hysteria2` + `sni` + `skip-cert-verify: false` + `fingerprint`。
 - 电信 / 联通 / 移动各 5 次握手 + 30 秒下载。记成功率、是否 UDP 阻断、是否仅限速。
 - 写 `docs/ops/transport-hy2.md`：每运营商 `ok | throttled | blocked`。任一 `blocked` → 自动切换对该运营商不做，客户端开关默认关。
